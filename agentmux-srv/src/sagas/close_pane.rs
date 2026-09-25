@@ -42,6 +42,22 @@ use crate::server::AppState;
 /// longer exist are skipped; ids in different tabs are rejected. On success
 /// returns `{"tab_id": "...", "block_ids": [...closed...], "leaf_removed": bool}`.
 pub async fn run(state: &AppState, block_ids: Vec<String>) -> Result<Value, String> {
+    run_with(state, block_ids, CloseOpts::default()).await
+}
+
+/// How the caller's frontend handles the layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CloseOpts {
+    /// The frontend kept the pane on screen (showing the shutdown log,
+    /// SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5) instead of removing it first,
+    /// so srv must queue a frontend `delete` for EVERY closed member — the
+    /// frontend removes each as it arrives, the last one taking the pane.
+    /// `false` (the historical flow): the frontend already removed what it
+    /// closed, and one `delete` for the visible block covers a whole leaf.
+    pub frontend_waits: bool,
+}
+
+pub async fn run_with(state: &AppState, block_ids: Vec<String>, opts: CloseOpts) -> Result<Value, String> {
     let mut ids: Vec<String> = Vec::new();
     for id in block_ids {
         if !id.is_empty() && !ids.contains(&id) {
@@ -113,9 +129,14 @@ pub async fn run(state: &AppState, block_ids: Vec<String>) -> Result<Value, Stri
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga(
         "close_pane",
-        run_inner(ctx, tab_id, present.clone(), leaf_to_delete),
+        run_inner(ctx, tab_id, present.clone(), leaf_to_delete, opts),
     )
     .await;
+    if let Err(reason) = &result {
+        for id in &present {
+            publish_shutdown_error(state, id, reason);
+        }
+    }
     for id in &present {
         finish_close(state, id).await;
     }
@@ -128,6 +149,7 @@ async fn run_inner(
     tab_id: String,
     block_ids: Vec<String>,
     leaf_to_delete: Option<(String, String)>,
+    opts: CloseOpts,
 ) -> Result<Value, String> {
     let mut failures = Vec::new();
     shutdown_agents(ctx.state, &block_ids).await;
@@ -158,6 +180,21 @@ async fn run_inner(
     }
 
     let leaf_removed = leaf_to_delete.is_some();
+    if opts.frontend_waits {
+        // The frontend still shows every member (§5.5): one `delete` each, in
+        // one batch. Its handler removes just that member; the last one
+        // removes the leaf. Queued whether or not the leaf goes — closing one
+        // tab of a kept pane needs it just as much.
+        let actions = block_ids
+            .iter()
+            .map(|id| crate::server::service::layout_helpers::source_delete_action(id))
+            .collect();
+        if let Err(reason) =
+            crate::server::service::reducer_helpers::queue_layout_actions_via_reducer(ctx.state, &tab_id, actions).await
+        {
+            tracing::warn!(tab_id = %tab_id, "[saga] ClosePane: queueing frontend deletes failed (best-effort): {}", reason);
+        }
+    }
     if let Some((node_id, visible_block_id)) = leaf_to_delete {
         // Best-effort, as in `delete_block`: the blocks are already gone.
         if let Err(reason) = ctx
@@ -177,8 +214,11 @@ async fn run_inner(
         }
         // One frontend prune for the pane, keyed on its visible block — not
         // one per member, which is what produced the "could not find leaf
-        // node with blockId" errors when each member sent its own.
-        if let Err(reason) = crate::server::service::layout_helpers::queue_source_layout_delete(
+        // node with blockId" errors when each member sent its own. (Unless
+        // the frontend waited, above: then it still has every member.)
+        if opts.frontend_waits {
+            // already queued per member
+        } else if let Err(reason) = crate::server::service::layout_helpers::queue_source_layout_delete(
             ctx.state,
             &tab_id,
             &visible_block_id,
@@ -232,6 +272,15 @@ pub(crate) async fn shutdown_agents(state: &AppState, block_ids: &[String]) {
 
 async fn shutdown_one(state: &AppState, block_id: &str, deadline: std::time::Instant) {
     let started = std::time::Instant::now();
+    // Named while still registered; step 1 unregisters it.
+    let label = state
+        .reactive_handler
+        .get_agent_by_block(block_id)
+        .map(|a| a.agent_id)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "agent".to_string());
+    // The processes the agent itself started, before anything stops them.
+    let processes_before = state.process_tracker.list_block(block_id);
     // 1. Stop routing input: no respawn (resync_controller refuses), no
     //    jekt/muxbus delivery, and — once out of CONTROLLER_REGISTRY — no
     //    AgentInput either.
@@ -242,23 +291,130 @@ async fn shutdown_one(state: &AppState, block_id: &str, deadline: std::time::Ins
     //      resolves once it has actually exited.
     let (controller_type, outcome) = match ctrl {
         Some(ctrl) => {
+            if ctrl.get_runtime_status().turn_active {
+                publish_shutdown(state, block_id, "interrupt", "turn interrupted".into(), serde_json::json!({}));
+            }
             let outcome = ctrl.shutdown(deadline).await;
             (ctrl.controller_type().to_string(), outcome)
         }
         None => (String::new(), blockcontroller::StopOutcome::NotRunning),
     };
+    let (step, text, extra) = exit_line(&label, &outcome, started.elapsed());
+    publish_shutdown(state, block_id, step, text, extra);
     // 5. Only now drop the process tracker — anything the agent itself
-    //    started dies with it, but the agent got to exit first.
+    //    started dies with it, but the agent got to exit first. Whatever is
+    //    still alive at this point is what the release kills.
+    let alive: std::collections::HashSet<u32> =
+        state.process_tracker.list_block(block_id).into_iter().map(|p| p.pid).collect();
     blockcontroller::release_block_processes(block_id);
+    for p in &processes_before {
+        let killed = alive.contains(&p.pid);
+        publish_shutdown(
+            state,
+            block_id,
+            "process",
+            process_line(&p.command, p.pid, killed),
+            serde_json::json!({ "process": {
+                "pid": p.pid,
+                "name": short_command(&p.command),
+                "outcome": if killed { "killed" } else { "stopped" },
+            } }),
+        );
+    }
     blockcontroller::mark_closing_stopped(block_id);
     // 6. Save final state.
     save_final_state(state, block_id);
+    publish_shutdown(state, block_id, "saved", "conversation saved".into(), serde_json::json!({}));
+    publish_shutdown(state, block_id, "done", "closing".into(), serde_json::json!({}));
     tracing::info!(
         block_id = %block_id,
         controller_type = %controller_type,
         outcome = outcome.as_str(),
         elapsed_ms = started.elapsed().as_millis() as u64,
         "agent_shutdown"
+    );
+}
+
+/// `agent:shutdown` — the shutdown log a closing pane shows
+/// (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5, §12.1).
+pub(crate) const EVENT_AGENT_SHUTDOWN: &str = "agent:shutdown";
+
+/// Orders the lines: strictly increasing across the process, so per block too.
+static SHUTDOWN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Display lines stay one short line (spec §12.1).
+const SHUTDOWN_LINE_MAX: usize = 80;
+
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// The program and its first arguments — enough to recognise it.
+fn short_command(command: &str) -> String {
+    let command = command.trim();
+    if command.is_empty() {
+        return "process".to_string();
+    }
+    clip(command, 48)
+}
+
+fn process_line(command: &str, pid: u32, killed: bool) -> String {
+    clip(&format!("{} (pid {pid}) — {}", short_command(command), if killed { "killed" } else { "stopped" }), SHUTDOWN_LINE_MAX)
+}
+
+/// The agent-process line for a shutdown outcome: `(step, text, extra)`.
+fn exit_line(
+    label: &str,
+    outcome: &blockcontroller::StopOutcome,
+    elapsed: std::time::Duration,
+) -> (&'static str, String, serde_json::Value) {
+    use blockcontroller::StopOutcome::*;
+    match outcome {
+        Killed => (
+            "kill",
+            clip(&format!("{label} — killed after {} s", elapsed.as_secs().max(1)), SHUTDOWN_LINE_MAX),
+            serde_json::json!({ "forced_after_ms": elapsed.as_millis() as u64 }),
+        ),
+        Exited => ("exit", clip(&format!("{label} — exited"), SHUTDOWN_LINE_MAX), serde_json::json!({})),
+        Stopped => ("exit", clip(&format!("{label} — stopped"), SHUTDOWN_LINE_MAX), serde_json::json!({})),
+        NotRunning => ("exit", clip(&format!("{label} — was not running"), SHUTDOWN_LINE_MAX), serde_json::json!({})),
+    }
+}
+
+/// Publish one `agent:shutdown` line, scoped to the block. Display only: the
+/// saga's own result stays the source of truth.
+pub(crate) fn publish_shutdown(state: &AppState, block_id: &str, step: &str, text: String, extra: serde_json::Value) {
+    let mut data = serde_json::json!({
+        "block_id": block_id,
+        "seq": SHUTDOWN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        "step": step,
+        "text": text,
+    });
+    if let (Some(d), Some(e)) = (data.as_object_mut(), extra.as_object()) {
+        d.extend(e.clone());
+    }
+    state.broker.publish(crate::backend::mps::MuxEvent {
+        event: EVENT_AGENT_SHUTDOWN.to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 0,
+        data: Some(data),
+    });
+}
+
+/// A close that failed after its shutdown: the pane stays open showing why.
+pub(crate) fn publish_shutdown_error(state: &AppState, block_id: &str, reason: &str) {
+    publish_shutdown(
+        state,
+        block_id,
+        "error",
+        clip(&format!("couldn't close: {reason}"), SHUTDOWN_LINE_MAX),
+        serde_json::json!({ "error": reason }),
     );
 }
 
@@ -426,6 +582,75 @@ mod tests {
 
     /// The incident (spec §2): a pane holding [A, B, C] with A visible. Closing
     /// it must remove all three blocks, not just A, and prune the leaf once.
+    #[tokio::test]
+    async fn a_waiting_frontend_gets_one_delete_per_member_for_a_whole_pane() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        let b = seed_block(&state, &tab_id).await;
+        set_tree(&state, &tab_id, stack_leaf("leaf", &[&a, &b], &a)).await;
+
+        let out = run_with(&state, vec![a.clone(), b.clone()], CloseOpts { frontend_waits: true }).await.unwrap();
+        assert_eq!(out["leaf_removed"], true);
+        // The frontend still shows both tabs: one `delete` each, the last
+        // taking the pane — never only the visible one (§5.5).
+        assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone(), b.clone()]);
+    }
+
+    #[tokio::test]
+    async fn a_waiting_frontend_is_told_about_one_closed_tab_of_a_kept_pane() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        let b = seed_block(&state, &tab_id).await;
+        set_tree(&state, &tab_id, stack_leaf("leaf", &[&a, &b], &a)).await;
+
+        let out = run_with(&state, vec![a.clone()], CloseOpts { frontend_waits: true }).await.unwrap();
+        assert_eq!(out["leaf_removed"], false);
+        assert!(state.srv_state.lock().await.blocks.contains_key(&b), "sibling survives");
+        assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone()], "the kept pane drops just that tab");
+    }
+
+    /// The shutdown log (§5.5, §12.1): ordered lines scoped to the block,
+    /// ending in `done`. A block with no running controller still says so.
+    #[tokio::test]
+    async fn shutdown_publishes_an_ordered_log_scoped_to_the_block() {
+        let state = test_state();
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<(Vec<String>, serde_json::Value)>>> = Default::default();
+        let sink = seen.clone();
+        state.broker.add_observer(std::sync::Arc::new(move |ev: &crate::backend::mps::MuxEvent| {
+            if ev.event == EVENT_AGENT_SHUTDOWN {
+                sink.lock().unwrap().push((ev.scopes.clone(), ev.data.clone().unwrap_or_default()));
+            }
+        }));
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        set_tree(&state, &tab_id, stack_leaf("leaf", &[&a], &a)).await;
+
+        run(&state, vec![a.clone()]).await.unwrap();
+
+        let seen = seen.lock().unwrap();
+        let steps: Vec<&str> = seen.iter().map(|(_, d)| d["step"].as_str().unwrap()).collect();
+        assert_eq!(steps, vec!["exit", "saved", "done"]);
+        assert_eq!(seen[0].1["text"], "agent — was not running");
+        assert!(seen.iter().all(|(scopes, d)| scopes == &vec![format!("block:{a}")] && d["block_id"] == a.as_str()));
+        let seqs: Vec<u64> = seen.iter().map(|(_, d)| d["seq"].as_u64().unwrap()).collect();
+        assert!(seqs.windows(2).all(|w| w[0] < w[1]), "strictly increasing: {seqs:?}");
+    }
+
+    #[test]
+    fn shutdown_lines_stay_short_and_say_what_happened() {
+        let (step, text, extra) =
+            exit_line("Camper", &blockcontroller::StopOutcome::Killed, std::time::Duration::from_millis(5_200));
+        assert_eq!((step, text.as_str()), ("kill", "Camper — killed after 5 s"));
+        assert_eq!(extra["forced_after_ms"], 5_200);
+        assert_eq!(exit_line("Camper", &blockcontroller::StopOutcome::Exited, Default::default()).1, "Camper — exited");
+        assert_eq!(process_line("node dev-server.js", 4312, false), "node dev-server.js (pid 4312) — stopped");
+        let long = process_line(&"x".repeat(200), 1, true);
+        assert!(long.chars().count() <= SHUTDOWN_LINE_MAX && long.ends_with("— killed"), "{long}");
+        assert_eq!(short_command("   "), "process");
+    }
+
     #[tokio::test]
     async fn closing_a_stacked_pane_removes_every_member() {
         let state = test_state();

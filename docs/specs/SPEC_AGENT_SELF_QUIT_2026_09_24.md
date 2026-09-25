@@ -414,7 +414,7 @@ MPS event, scope `block:<block_id>`, published by `shutdown_one` (`sagas/close_p
 ```jsonc
 {
   "block_id": "…",
-  "seq": 3,                    // per block, from 1, strictly increasing: order by it, not arrival
+  "seq": 3,                    // strictly increasing (one process-wide counter, so per block too): order by it, not arrival
   "step": "interrupt" | "exit" | "kill" | "process" | "saved" | "done" | "error",
   "text": "claude — exited",   // one display line, ≤ 80 chars, already concise
   "process": { "pid": 4312, "name": "node dev-server.js", "outcome": "stopped" | "killed" },  // step == "process" only
