@@ -7,6 +7,7 @@ pub(crate) mod app_api;
 // `pub` so `bootstrap::install_agent_turn_delivery` can reach `run_agent_turn`
 // to start a turn outside the RPC path.
 pub mod agent_handlers;
+mod agent_takeover;
 mod editor_handlers;
 pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
@@ -403,6 +404,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
         .route("/agentmux/reactive/audit", get(reactive::handle_reactive_audit))
         .route("/agentmux/reactive/register", post(reactive::handle_reactive_register))
+        // Holder side of a takeover — full auth only, never LAN (spec §4.6).
+        .route("/agentmux/agent/release", post(agent_takeover::handle_agent_release))
         .route(
             "/agentmux/reactive/unregister",
             post(reactive::handle_reactive_unregister),
@@ -512,6 +515,8 @@ pub fn build_router(state: AppState) -> Router {
         // could not START one anywhere — see
         // REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
         .route("/api/v1/agent/open", post(handle_agent_open))
+        // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
+        .route("/api/v1/agent/takeover", post(agent_takeover::handle_agent_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one
         // silence-bounded utterance per request); we forward to a Whisper
         // backend and return the transcript. Key stays server-side.

@@ -1,8 +1,9 @@
 # SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN
 
 **Date:** 2026-09-24
-**Status:** active — Phase 1 (host tier: lease, admission, fencing) shipped in PR #3738; see §12 for what was built and what
-was left out. Phases 2–5 not started. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
+**Status:** active — Phase 1 (host tier: lease, admission, fencing) shipped in PR #3738; Phase 2 (Take over) in PR
+#3742; see §12 and §13 for what was built and what was left out. Phases 3–5 not
+started. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
 proceed to implementation without further sign-off). §11's open questions are all answered from logs and code.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-09-24: *"by mistake I opened up an instance of you in a 57.2 version running on the same
@@ -364,6 +365,7 @@ lesson, and the way that incident began).
    pid-probe reclaim; compat probe for lease-unaware holders; pre-turn verify and kill-on-loss; refusal message naming the
    holder. This alone closes today's incident. **Implemented — §12.**
 2. **Takeover UX.** Superseded state in the pane, fence request, the takeover dialog, observer panes; the §6 counters.
+   **Built: the refusal row and Take over — §13.** The badge, a separate observer mode and the counters are still open.
 3. **Record fencing.** Epoch on record appends; store rejects stale epochs; `fork` ledger event.
 4. **LAN — detect and yield.** Advertisement field, peer query, tie-break.
 5. **WAN — relay coordinator.** UID-keyed lease endpoints and fenced pending pulls in `agentmux-cloud`; the client side
@@ -470,3 +472,70 @@ irrelevant to the fix, which is I9.
   spec).
 - The subprocess controller keeps its per-turn claim on the same key. It now also sees persistent holders, which is
   intended.
+
+---
+
+## 13. Phase 2 as built — Take over
+
+**What the user sees.**
+- A pane refused because another instance runs its agent now shows **"Running in another AgentMux instance"**. The
+  refusal names the holder. Before this it was an unclassified failure offering a Retry that is refused identically.
+- The row's action is **Take over**. It takes two clicks: the first arms it ("Confirm take over", for 5 s), the second
+  confirms. This is the human confirmation D7 asks for, since the action stops the agent in the other instance.
+- On success the row clears, and the refused turn is re-run when there was one.
+- On failure the row stays, retitled "Could not take over", with the reason. For example: the holder is an older build
+  that cannot hand over, it is unreachable, or it did not let go within 25 s.
+- The instance that gave the agent up shows **"Taken over by another AgentMux instance"** in that pane, with the same
+  Take over action to bring it back.
+
+**Observer mode (D5)** needed no new code. A refused pane already renders the agent's history, which comes from the
+UID-keyed record. It just starts no turns. There is no separate read-only pane type.
+
+**Code.**
+- `agents::failure`: the new class `LiveElsewhere` (`live_elsewhere`), recognised by
+  `agent_admission::REFUSAL_MARKERS`. The title separates "running in" from "taken over by", and the detail is the refusal
+  line itself.
+- `run_agent_turn`:
+  - the gate's surfacing (output frame, `agent:last_failure`, `agentfailure` event) is now a shared closure;
+  - a single-live-instance refusal from inside the controller also goes through it — the spawn-time claim losing a race,
+    or the pre-turn fence. Before, those errors reached no row.
+- `server/agent_takeover.rs` (new; both routes need full auth, and neither is reachable from a jekt — I5):
+  - `POST /api/v1/agent/takeover {block_id}`, on the requester. It finds the holder with `agent_admission::locate_holder`:
+    the lease holder's channel mapped to its live srv through the shared registry, or the compat probe's hit. It asks
+    the holder to let go, then waits until the lease and the probe are both clear.
+  - `POST /agentmux/agent/release {uid}`, on the holder. Each of its panes holding that UID's lease stops its CLI process
+    gracefully (`release_to_other_instance`): stdin EOF, so a turn in flight finishes, then a kill after 10 s. That
+    pane's row then shows "taken over".
+- **Handover hold.** For 30 s after handing an agent over, the holder srv refuses to claim it again on its own
+  (`agent_admission::hold_after_handover`). Without the hold, a jekt arriving between the holder's exit and the
+  requester's claim would respawn the agent there and win it straight back. A Take over started from that srv clears the
+  hold.
+- Frontend:
+  - `failure/takeover.ts` (`requestAgentTakeover`);
+  - the `live_elsewhere` arm in `failure-accessory.ts`;
+  - the arm/confirm state in `useAgentFailure`;
+  - the `onTakeOver` wiring in `agent-view.tsx`;
+  - `live_elsewhere` in the hand-maintained `srv-types.d.ts`.
+
+**Tests.**
+- Rust:
+  - `a_single_live_instance_refusal_is_its_own_class`;
+  - the holder-side message classifies as taken over;
+  - every refusal text is recognised;
+  - the handover hold refuses until cleared;
+  - `HolderEndpoint`'s Debug never prints the auth key.
+- Vitest:
+  - the takeover request (route, auth, released / refused / non-JSON);
+  - the row: Take over and not Retry, the armed and busy states, no action without a handler;
+  - the hook: arm then confirm then clear, disarm after timeout, a failed takeover keeps the row with its reason.
+
+**Limits.**
+- **An older holder cannot hand over.** It has no release route, so Take over tells the user to close the agent there.
+  It is detected by the compat probe, but only an instance that takes the lease (this build or later) can be asked to
+  let go.
+- **Any caller with this srv's auth key can take over.** The takeover route is behind full auth, so the frontend and
+  anything else holding the key can call it — including an agent running in this srv, whose MCP carries that key. That
+  is the same exposure `/api/v1/agent/open` already has. The human confirmation lives in the pane's two-click action,
+  not in the server.
+- **No Superseded badge or counters yet.** A fenced or refused pane shows the failure row only, and there are still only
+  logs (§6).

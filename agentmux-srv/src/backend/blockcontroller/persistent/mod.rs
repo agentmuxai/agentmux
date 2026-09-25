@@ -1317,6 +1317,27 @@ impl PersistentSubprocessController {
         Ok(())
     }
 
+    /// Hand this pane's agent over to another AgentMux instance that asked
+    /// for it (spec §4.6, `POST /agentmux/agent/release`): if this pane's CLI
+    /// process holds the agent's single-live-instance lease, stop it
+    /// gracefully — stdin EOF, so a turn in flight finishes, then kill at
+    /// the deadline — and let its exit release the lease. `false` when this
+    /// pane holds nothing (no process, or no lease).
+    pub fn release_to_other_instance(&self, deadline: std::time::Instant) -> bool {
+        let kill = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.agent_lease.is_none() {
+                return false;
+            }
+            inner.kill_tx.take()
+        };
+        tracing::info!(block_id = %self.block_id, "agent_admission.takeover: handing this agent to another instance");
+        match kill {
+            Some(tx) => tx.send(KillRequest::Graceful(deadline)).is_ok(),
+            None => false,
+        }
+    }
+
     /// Kill the current CLI process after its lease was lost — the holder
     /// stops rather than racing the new one (spec §4.3).
     fn stop_after_lease_loss(inner: &Arc<Mutex<PersistentInner>>, block_id: &str, why: &str) {

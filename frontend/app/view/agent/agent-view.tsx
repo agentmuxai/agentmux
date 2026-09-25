@@ -123,6 +123,7 @@ import { useAgentFailure } from "./hooks/useAgentFailure";
 import { computeAccountBindCandidates } from "./failure/bind-account-candidates";
 import { retryRecheckAfterBind } from "./failure/recheck-after-bind";
 import { decideSyntheticRow } from "./failure/synthetic-row";
+import { requestAgentTakeover } from "./failure/takeover";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -2112,6 +2113,15 @@ const AgentPresentationView = ({
         isDormant: dormant,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
+        // live_elsewhere — take the agent over from the other AgentMux
+        // instance running it, then re-run the refused turn if there was one
+        // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).
+        onTakeOver: async (turnAttempted: boolean) => {
+            log("agent", "Take over — asking the other AgentMux instance to hand this agent over");
+            const r = await requestAgentTakeover(model.blockId);
+            log("agent", r.released ? `Take over — released by ${r.fromChannel ?? "the other instance"}` : "Take over — nobody else was running it");
+            if (turnAttempted) retryLastTurn();
+        },
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
         // context_exceeded recovery — archive the over-full session and return
         // to the picker for a clean relaunch (resuming would only re-fail).

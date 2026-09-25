@@ -101,7 +101,8 @@ declare global {
             | "no_output"
             | "spawn_failure"
             | "unknown_non_zero"
-            | "agent_deleted";
+            | "agent_deleted"
+            | "live_elsewhere";
         title: string;
         detail: string;
         exitCode?: number;
