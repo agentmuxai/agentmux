@@ -886,6 +886,15 @@ async fn sync_agent_reactive(
             }
             return shared_token_rejection_outcome(claim_resp.status(), agent_id);
         }
+        if claim_resp.status() == reqwest::StatusCode::CONFLICT {
+            // The relay's lease fence on acks (the lease changed hands between
+            // this pull and this claim): same handling as a 409 on the pull —
+            // claim nothing, and fence the local holder (ReAgent P1 on #3746).
+            let body = claim_resp.json::<serde_json::Value>().await.unwrap_or_default();
+            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
+            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            return AgentSyncOutcome::Ok;
+        }
         if !claim_resp.status().is_success() {
             tracing::warn!(
                 status = %claim_resp.status(),
