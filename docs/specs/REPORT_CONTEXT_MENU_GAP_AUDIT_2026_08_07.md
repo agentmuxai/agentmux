@@ -95,6 +95,13 @@ Found during the sweep, deliberately out of scope for this pass:
   no contextual "Copy id" the way the new Swarm menu has. `drone-view.tsx`
   node/workflow labels ARE `user-select: none` (same total-gap pattern as
   Swarm) and would need the same treatment Swarm just got.
+  **Update (Swarm sub-rows and Drone nodes/run rows fixed, follow-up PR
+  pending number):** every Swarm sub-row (shell, cron, subagent, workflow,
+  long-running, todo) and Drone's canvas nodes and run-panel rows now have a
+  "Copy ..." right-click menu via the shared `showCopyContextMenu` helper
+  (`frontend/app/store/contextmenu.ts`). Drone's node-type palette chips were
+  left alone (static kind names, nothing to copy). The warden and
+  skill/MCP/memory/brain-manager list rows above remain unfixed.
 - **Low-value single-line inputs**, same underlying bug but short/rarely-pasted
   values: `view/toolchain/toolchain-view.tsx`, `view/editor/editor-tab-strip.tsx`
   ("Save As" path), `view/editor/file-tree.tsx` (rename/new-file),
