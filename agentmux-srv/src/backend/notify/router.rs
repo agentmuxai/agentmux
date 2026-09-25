@@ -55,6 +55,8 @@ enum Internal {
 /// How long after a user Stop the turn-ended transition it causes is treated
 /// as "the user's own action", not "finished".
 const STOP_GRACE_MS: i64 = 15_000;
+/// Cap on tracked blocks' turn state (see `Internal::TurnStatus` handling).
+const TURN_MAP_MAX: usize = 1024;
 
 /// What the Router does with a `controllerstatus` turn transition.
 #[derive(Debug, PartialEq, Eq)]
@@ -228,11 +230,25 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                 }
                 Internal::Resolve { block_id, family } => r.resolve(&block_id, family),
                 Internal::TurnStopped { block_id } => {
-                    r.stopped_at.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.clone(), now_ms());
+                    {
+                        let mut stopped = r.stopped_at.lock().unwrap_or_else(|e| e.into_inner());
+                        // Bounded: entries past the grace window can't matter.
+                        let now = now_ms();
+                        stopped.retain(|_, t| now - *t < STOP_GRACE_MS);
+                        stopped.insert(block_id.clone(), now);
+                    }
                     r.resolve(&block_id, Family::Turn);
                 }
                 Internal::TurnStatus { block_id, active } => {
-                    let prev = r.turn_active.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.clone(), active);
+                    let prev = {
+                        let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
+                        // Bounded like `names`: forgetting an IDLE block is
+                        // harmless — its next `true` still reads as Started.
+                        if turns.len() > TURN_MAP_MAX {
+                            turns.retain(|_, active| *active);
+                        }
+                        turns.insert(block_id.clone(), active)
+                    };
                     let stopped_recently = r
                         .stopped_at
                         .lock()
