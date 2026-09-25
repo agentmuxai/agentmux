@@ -16,6 +16,12 @@ export type { Bundle } from "@/types/rpc/Bundle";
 // Global Memory version history (globalmemory:history/diff/revert) — see
 // docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
 export type { GlobalMemoryVersionMeta } from "@/types/rpc/GlobalMemoryVersionMeta";
+export type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSources";
+export type { GlobalMemoryImportSource } from "@/types/rpc/GlobalMemoryImportSource";
+export type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
+import type { GlobalMemoryImportSources as GlobalMemoryImportSourcesT } from "@/types/rpc/GlobalMemoryImportSources";
+import type { GlobalMemoryImportReport as GlobalMemoryImportReportT } from "@/types/rpc/GlobalMemoryImportReport";
+import type { CommandGlobalMemoryImportData } from "@/types/rpc/CommandGlobalMemoryImportData";
 
 // The validation report shapes are GENERATED too. The validate HANDLER stays
 // on `register_handler` on purpose (it normalizes its payload before
@@ -192,6 +198,24 @@ export const BundleApi = {
     // counterparts of the GlobalMemory{History,Diff,Revert} MCP tools
     // (#3448), system-tier entries included. Revert records a NEW version
     // (source "revert"); `version` is null only for a no-op system revert.
+    /**
+     * The other scopes an isolated channel can bring Global Memory from, and
+     * what each has that this channel lacks — SPEC_MEMORY_FOLLOWS_THE_AGENT
+     * §2.1.6. Empty unless this channel is isolated.
+     */
+    GlobalMemoryImportSourcesCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryImportSourcesT> {
+        return client.rpcCall("globalmemory:import_sources", {}, opts);
+    },
+
+    /** Import what source `index` of list `list_id` has that this channel lacks. */
+    GlobalMemoryImportCommand(
+        client: RpcClient,
+        data: CommandGlobalMemoryImportData,
+        opts?: RpcOpts,
+    ): Promise<GlobalMemoryImportReportT> {
+        return client.rpcCall("globalmemory:import", data, opts);
+    },
+
     GlobalMemoryHistoryCommand(
         client: RpcClient,
         data: CommandGlobalMemoryHistoryData,
