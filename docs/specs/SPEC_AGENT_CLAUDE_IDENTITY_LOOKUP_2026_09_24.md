@@ -1,4 +1,4 @@
-# SPEC: an agent's own current Claude identity, in one read — no tool call, no guessing
+# SPEC: an agent's own current Claude identity, in one read — no AgentMux RPC, no guessing
 
 **Date:** 2026-09-24
 **Status:** proposed
@@ -29,9 +29,9 @@ own running agent (`agentx-0623n`, identity `60a8fde6…`), not inferred:
 | **That email reaching an agent that asks for it** | **No** — this is the entire gap |
 
 The fix is not "build a lookup." It's "write down the four-line recipe an
-agent can run itself, with no tool call," plus one narrow MCP-schema
-addition for the case that genuinely needs a tool call (looking up
-*another* agent).
+agent can run itself, with no AgentMux round trip," plus one narrow backend
+fix for the case that genuinely needs one (looking up *another* agent) —
+see §3.1's precision note on what "no tool call" actually means here.
 
 ---
 
@@ -76,9 +76,20 @@ can responsibly commit to.
 
 ## 3. Design
 
-### 3.1 Self-lookup — zero tool call (the primary ask)
+### 3.1 Self-lookup — no AgentMux RPC (the primary ask)
 
-Four reads, no RPC, no guessing:
+**Precision, per Codex P1 review on this spec:** "no tool call" over-claimed.
+Environment variables and file contents are not already present in the
+model's context — reading them still costs a `Bash`/`Read` invocation, which
+is a tool call in Claude Code's own sense. What this recipe actually
+eliminates is the *AgentMux-specific* round trip: no `IdentityAccounts`, no
+`IdentityValidate`, no App API/MCP RPC to agentmux-srv at all — one local
+file read instead of two failed AgentMux tool calls plus a wrong guess
+(§2). That is the guarantee this spec makes for §3.1. §3.1b below describes
+the strictly stronger version — genuinely zero tool calls of any kind —
+as a documented alternative, not a requirement of P1.
+
+Four reads, no AgentMux RPC, no guessing:
 
 ```bash
 # 1. Login email, straight from Claude's own state
@@ -96,23 +107,48 @@ SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 TRANSCRIPT="$CLAUDE_CONFIG_DIR/projects/<slug>/$SESSION_ID.jsonl"
 ```
 
-None of this requires `IdentityAccounts`, `WhoAmI`, or any App API tool —
+None of this requires `IdentityAccounts`, `WhoAmI`, or any App API call —
 `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_SESSION_ID` are both already exported
 into every Claude Code agent's process at spawn (confirmed live this
-session; no code change needed to produce them).
+session; no code change needed to produce them). It still requires the
+agent to run one `Bash`/`Read` tool call to read them (§3.1's precision
+note above) — just not an AgentMux one.
 
 **Deliverable:** this recipe does not live in a tool — it lives in
 `AGENTMUX_MEMORY.md`'s Operator Config "Environment & Gotchas" entry (the
 one every agent already gets at launch, see `.claude/AGENTMUX_MEMORY.md`),
 as a new bullet: *"Your own current Claude login email and session
-transcript are a local read, not a tool call — `$CLAUDE_CONFIG_DIR/.claude.json`'s
-`oauthAccount.emailAddress`, and `$CLAUDE_CODE_SESSION_ID` for the current
-session id."* Zero code to ship; it just has to stop being tribal knowledge
-one session rediscovers at a time.
+transcript are one local file read, not an AgentMux tool call —
+`$CLAUDE_CONFIG_DIR/.claude.json`'s `oauthAccount.emailAddress`, and
+`$CLAUDE_CODE_SESSION_ID` for the current session id."* Zero code to ship;
+it just has to stop being tribal knowledge one session rediscovers at a
+time.
 
 Non-Claude providers: `email_from_oauth_dir` (§1) already documents that
 only Claude/`claude-code` write this today; an agent running under another
 provider has no equivalent local file and still needs the MCP path (§3.2).
+
+### 3.1b A stronger version: genuinely zero tool calls
+
+Codex's review is right that §3.1 is not the strongest possible answer to
+the repo owner's literal wording. `agentmux-srv/src/identity/resolver/inject.rs`'s
+`inject_identity_env` already runs at every spawn, already resolves the
+bound OAuth account, and already seeds a `CLAUDE.md` into the identity's
+config dir for isolation (its own doc comment: *"`inject_identity_env` now
+really seeds a `CLAUDE.md` into the bound dir"*). Since it already has the
+resolved account in hand at that exact moment, it could append one line —
+*"Your current Claude login is `<email>`."* — to that same seeded
+`CLAUDE.md`. Composed into context at launch the same way Global Memory and
+Personal Memory already are (see `.claude/AGENTMUX_MEMORY.md`'s own
+"App API" entry), this needs no read and no tool call of any kind: the
+agent already knows its own login email before its first turn starts.
+
+This is deliberately **not** folded into P1 below. It is a real code
+change (however small) inside a spawn-critical path that today only does
+credential/config isolation, not user-facing text generation, and it
+deserves its own review rather than riding in on a docs-only phase. Listed
+here as the correct long-term answer; P1 (§5) ships the cheap, immediately
+available version first.
 
 ### 3.2 Cross-agent lookup — necessarily a tool call
 
@@ -120,14 +156,27 @@ Looking up a *different* agent's current identity can't be a local file
 read (its `CLAUDE_CONFIG_DIR` isn't in this process's environment). Two
 independent, small fixes cover it:
 
-1. **Expose the email `IdentityAccounts` already computes.** Add
-   `context` (or a narrower `email: Option<String>`) to the MCP tool's
-   returned shape — the backend already puts it there
-   (`agent_handlers/identity.rs:174`, `account.context["email"]`); the MCP
-   layer (`agentmux-mcp/src/main.rs`, `tool_schemas.rs`) just never asked
-   for that field. This alone fixes the exact question this session's
-   `IdentityAccounts` call failed to answer, for the calling agent's *own*
-   accounts.
+1. **Expose the email in the handler `IdentityAccounts` actually calls —
+   not the MCP layer.** Corrected per Codex P2 review on this spec, which
+   traced the real path: `agentmux-mcp/src/main.rs`'s `IdentityAccounts`
+   case is a pure HTTP passthrough (`GET /api/v1/agent/identity/accounts`,
+   JSON returned verbatim, no field selection happens here at all). The
+   reduced object is actually built by
+   `identity_self_accounts_impl` (`agentmux-srv/src/server/app_api/mod.rs:801-821`),
+   which is a *separate* code path from the `ListIdentityAccounts` RPC
+   (`agent_handlers/identity.rs:157-181`) that the Armory frontend uses and
+   that alone calls `refresh_account_email`. `identity_self_accounts_impl`
+   never calls it, so two things are needed together, not either alone:
+   (a) make its `acct` binding mutable and call
+   `account_email::refresh_account_email(&mut acct)`, persisting through
+   `account_store` — the specific store `resolve_account` actually
+   returned it from, per the function's own existing global-mirror-vs-local
+   distinction a few lines above, not unconditionally `state.id_store` —
+   the same pattern `agent_handlers/identity.rs:174-179` already uses; and
+   (b) add the resulting email to the `json!({...})` it pushes. Skipping
+   (a) and only doing (b) would still return nothing for any account whose
+   `context.email` was never backfilled by an Armory-side list call — a
+   real, named failure mode Codex's review caught, not a hypothetical one.
 2. **A `GetAgentIdentity` (or `WhoAmI`-extension) App API call**, scoped to
    read-only, that given an `agent_id` resolves: its current
    `db_agents.session_id`, its bound `identity_id`/account (`db_agent_identity_links`,
@@ -177,11 +226,13 @@ neither `GetAgentTranscript` nor `SearchHistory` provide.
 | Phase | Scope | Cost |
 |---|---|---|
 | **P1** | Document §3.1's recipe in `AGENTMUX_MEMORY.md`'s Operator Config env/gotchas entry | Docs only, no code |
-| **P2** | Add `context`/`email` to `IdentityAccounts`'s MCP return shape (`agentmux-mcp/src/tool_schemas.rs`, `main.rs`) | Small, additive, no schema break — new optional field |
-| **P3** | `GetAgentIdentity` App API call: agent_id → session_id, identity/account, transcript path (checked in both identity roots) | New read-only RPC + MCP tool |
+| **P2** | `identity_self_accounts_impl` (`agentmux-srv/src/server/app_api/mod.rs:801-821`): call `account_email::refresh_account_email`, persist via the correct `account_store`, add `email` to its response | Small, additive, no schema break — one new optional field, backed by a real backfill call, not just a field name |
+| **P3** | `GetAgentIdentity` App API call: agent_id → session_id, identity/account, transcript path (`shared/identities/`, channel-scoped fallback) | New read-only RPC + MCP tool |
+| **P4 (optional, not required for P1-P3)** | §3.1b: append the resolved email to the `CLAUDE.md` `inject_identity_env` already seeds at spawn, for genuinely zero-tool-call delivery | Small change to a spawn-critical path; own review |
 
 P1 alone would have answered this session's actual question in one read
-instead of two failed tool calls plus a misleading circumstantial guess.
+instead of two failed AgentMux tool calls plus a misleading circumstantial
+guess.
 
 ---
 
@@ -190,16 +241,23 @@ instead of two failed tool calls plus a misleading circumstantial guess.
 - **P1**: no code, but the recipe itself is checked into this doc with the
   exact commands used live this session (§3.1) — a future agent can run
   them verbatim.
-- **P2**: unit test on the MCP handler asserting the returned JSON for an
-  account with a non-empty `context.email` includes it; existing
-  `agent_handlers::identity` tests already cover the backfill writing
-  `context.email` (`identity/account_email.rs` tests) — P2 only has to
-  assert the MCP layer stops dropping a field that's already there.
+- **P2**: unit test on `identity_self_accounts_impl` directly (not just the
+  MCP passthrough) covering the case Codex's review named — an account
+  whose stored `context` has never been backfilled (never listed via the
+  Armory `ListIdentityAccounts` RPC) — asserting the response still
+  includes the email, because P2 calls the refresh itself rather than
+  assuming it already ran. A second case covers an account resolved only
+  via the global mirror, asserting the email write persists through the
+  correct `account_store`, not `state.id_store` unconditionally.
 - **P3**: reads `shared/identities/<id>/claude/projects/` and returns its
   file; a fixture where `shared/` is missing the session (simulating a
   channel from before `ensure_history_link` first ran, or one #3460's
   backfill somehow missed) confirms the channel-scoped fallback fires
   instead of returning nothing.
+- **P4**: given a spawn whose resolved account carries a non-empty email,
+  assert the seeded `CLAUDE.md` contains it — the same style of test
+  `inject.rs`'s existing `inject_oauth_class_sets_config_dir_env_var` and
+  neighboring tests already use for what that file seeds.
 
 ---
 
