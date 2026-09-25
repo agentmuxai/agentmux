@@ -48,6 +48,8 @@ pub(crate) enum SharedReason {
     Vetoed { other_uid: String },
     /// Another live agent has claimed the directory.
     Claimed { other_uid: String },
+    /// The checks didn't finish before the deadline; unproven means shared.
+    Unproven,
 }
 
 /// A directory's canonical form: symlinks resolved as far as the path
@@ -88,35 +90,35 @@ struct Claims {
 }
 
 /// Whether `uid` still exists: a local row, or an active shared definition.
-fn uid_is_live(mstore: &Store, uid: &str) -> bool {
-    if matches!(mstore.agent_def_get(uid), Ok(Some(_))) {
-        return true;
-    }
-    crate::registry::resolve_shared_definitions_dir()
-        .and_then(|dir| crate::registry::DefinitionStore::open(dir).ok())
-        .is_some_and(|defs| defs.exists(uid))
+fn uid_is_live(mstore: &Store, defs: Option<&crate::registry::DefinitionStore>, uid: &str) -> bool {
+    matches!(mstore.agent_def_get(uid), Ok(Some(_))) || defs.is_some_and(|d| d.exists(uid))
 }
 
 /// Decide whether `dir` — the memory directory `uid`'s spawn uses, from
 /// working directory `cwd` — is exclusive to `uid`, recording `uid`'s claim.
+/// Checks that can't finish by `deadline` leave the directory `Unproven`,
+/// i.e. shared.
 pub(crate) fn check_and_claim(
     fs: &FileStore,
     mstore: &Store,
     uid: &str,
     dir: &Path,
     cwd: &str,
+    deadline: std::time::Instant,
 ) -> Result<Exclusivity, StoreError> {
     let id = dir_id(dir);
-    if let Some(reason) = known_shared_or_vetoed(mstore, uid, &id, cwd) {
+    if let Some(reason) = known_shared_or_vetoed(mstore, uid, &id, cwd, deadline) {
         return Ok(Exclusivity::Shared(reason));
     }
+    let defs = crate::registry::resolve_shared_definitions_dir()
+        .and_then(|dir| crate::registry::DefinitionStore::open(dir).ok());
     let other = fs.zone_txn(&claims_zone(&id), |z| {
         let mut claims: Claims = match z.read(CLAIMS_FILE)? {
             None => Claims::default(),
             Some(b) => serde_json::from_slice(&b)
                 .map_err(|e| StoreError::Other(format!("memory dir claims unreadable: {e}")))?,
         };
-        claims.uids.retain(|claimant, _| claimant == uid || uid_is_live(mstore, claimant));
+        claims.uids.retain(|claimant, _| claimant == uid || uid_is_live(mstore, defs.as_ref(), claimant));
         claims.uids.entry(uid.to_string()).or_insert_with(agentmux_common::time::now_ms);
         let other = claims.uids.keys().find(|c| c.as_str() != uid).cloned();
         z.put(CLAIMS_FILE, &serde_json::to_vec(&claims).map_err(|e| StoreError::Other(e.to_string()))?)?;
@@ -129,7 +131,13 @@ pub(crate) fn check_and_claim(
 }
 
 /// Rules 1 and 2: no store writes.
-fn known_shared_or_vetoed(mstore: &Store, uid: &str, dir_id: &str, cwd: &str) -> Option<SharedReason> {
+fn known_shared_or_vetoed(
+    mstore: &Store,
+    uid: &str,
+    dir_id: &str,
+    cwd: &str,
+    deadline: std::time::Instant,
+) -> Option<SharedReason> {
     let own = mstore.agent_def_get(uid).ok().flatten();
     if own.as_ref().is_none_or(|a| a.working_directory.trim().is_empty()) {
         return Some(SharedReason::KnownSharedLocation);
@@ -140,6 +148,9 @@ fn known_shared_or_vetoed(mstore: &Store, uid: &str, dir_id: &str, cwd: &str) ->
     }
     let agents = mstore.agent_def_list().unwrap_or_default();
     for other in agents.iter().filter(|a| a.id != uid) {
+        if std::time::Instant::now() > deadline {
+            return Some(SharedReason::Unproven);
+        }
         if !other.working_directory.trim().is_empty() {
             let other_cwd = crate::backend::base::expand_home_dir_safe(&other.working_directory);
             if other_cwd != cwd && other_cwd.starts_with(&cwd) {
@@ -167,6 +178,25 @@ mod tests {
         def
     }
 
+    fn check_and_claim_now(fs: &FileStore, store: &Store, uid: &str, dir: &Path, cwd: &str) -> Result<Exclusivity, StoreError> {
+        check_and_claim(fs, store, uid, dir, cwd, std::time::Instant::now() + std::time::Duration::from_secs(30))
+    }
+
+    #[test]
+    fn checks_past_the_deadline_leave_the_directory_unproven() {
+        let _g = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let fs = FileStore::open_in_memory().unwrap();
+        let store = Store::open_in_memory().unwrap();
+        agent(&store, "agent-a", "/work/a");
+        agent(&store, "agent-b", "/work/b");
+        let dir = tempfile::tempdir().unwrap();
+        let past = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        assert_eq!(
+            check_and_claim(&fs, &store, "agent-a", dir.path(), "/work/a", past).unwrap(),
+            Exclusivity::Shared(SharedReason::Unproven)
+        );
+    }
+
     fn memory_dir(store: &Store, def: &AgentDefinition) -> PathBuf {
         crate::server::native_memory_handlers::memory_dir_for_agent_by_id(store, def).unwrap()
     }
@@ -179,8 +209,8 @@ mod tests {
         let a = agent(&store, "agent-a", "/work/a");
         agent(&store, "agent-b", "/work/b");
         let dir = memory_dir(&store, &a);
-        assert_eq!(check_and_claim(&fs, &store, "agent-a", &dir, "/work/a").unwrap(), Exclusivity::Exclusive);
-        assert_eq!(check_and_claim(&fs, &store, "agent-a", &dir, "/work/a").unwrap(), Exclusivity::Exclusive, "re-claiming is idempotent");
+        assert_eq!(check_and_claim_now(&fs, &store, "agent-a", &dir, "/work/a").unwrap(), Exclusivity::Exclusive);
+        assert_eq!(check_and_claim_now(&fs, &store, "agent-a", &dir, "/work/a").unwrap(), Exclusivity::Exclusive, "re-claiming is idempotent");
     }
 
     #[test]
@@ -192,7 +222,7 @@ mod tests {
         agent(&store, "agent-b", "/work/shared");
         let dir = memory_dir(&store, &a);
         assert_eq!(
-            check_and_claim(&fs, &store, "agent-a", &dir, "/work/shared").unwrap(),
+            check_and_claim_now(&fs, &store, "agent-a", &dir, "/work/shared").unwrap(),
             Exclusivity::Shared(SharedReason::Vetoed { other_uid: "agent-b".into() })
         );
     }
@@ -207,11 +237,11 @@ mod tests {
         agent(&store, "child", "/work/repo/sub");
         let tmp = tempfile::tempdir().unwrap();
         let shared = Exclusivity::Shared(SharedReason::KnownSharedLocation);
-        assert_eq!(check_and_claim(&fs, &store, "blank", tmp.path(), "~/.agentmux/agents/blank").unwrap(), shared);
-        assert_eq!(check_and_claim(&fs, &store, "parent", tmp.path(), "/work/repo").unwrap(), shared);
+        assert_eq!(check_and_claim_now(&fs, &store, "blank", tmp.path(), "~/.agentmux/agents/blank").unwrap(), shared);
+        assert_eq!(check_and_claim_now(&fs, &store, "parent", tmp.path(), "/work/repo").unwrap(), shared);
         let home = dirs::home_dir().unwrap();
         agent(&store, "homey", &home.to_string_lossy());
-        assert_eq!(check_and_claim(&fs, &store, "homey", tmp.path(), &home.to_string_lossy()).unwrap(), shared);
+        assert_eq!(check_and_claim_now(&fs, &store, "homey", tmp.path(), &home.to_string_lossy()).unwrap(), shared);
     }
 
     /// Two agents claiming one directory — neither resolvable to it by the
@@ -224,13 +254,13 @@ mod tests {
         agent(&store, "agent-a", "/work/a");
         agent(&store, "agent-b", "/work/b");
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(check_and_claim(&fs, &store, "agent-a", dir.path(), "/work/a").unwrap(), Exclusivity::Exclusive);
+        assert_eq!(check_and_claim_now(&fs, &store, "agent-a", dir.path(), "/work/a").unwrap(), Exclusivity::Exclusive);
         assert_eq!(
-            check_and_claim(&fs, &store, "agent-b", dir.path(), "/work/b").unwrap(),
+            check_and_claim_now(&fs, &store, "agent-b", dir.path(), "/work/b").unwrap(),
             Exclusivity::Shared(SharedReason::Claimed { other_uid: "agent-a".into() })
         );
         assert_eq!(
-            check_and_claim(&fs, &store, "agent-a", dir.path(), "/work/a").unwrap(),
+            check_and_claim_now(&fs, &store, "agent-a", dir.path(), "/work/a").unwrap(),
             Exclusivity::Shared(SharedReason::Claimed { other_uid: "agent-b".into() })
         );
     }
@@ -248,9 +278,9 @@ mod tests {
         agent(&store, "old", "/work/old");
         agent(&store, "new", "/work/new");
         let dir = tempfile::tempdir().unwrap();
-        check_and_claim(&fs, &store, "old", dir.path(), "/work/old").unwrap();
+        check_and_claim_now(&fs, &store, "old", dir.path(), "/work/old").unwrap();
         store.agent_def_delete("old").unwrap();
-        let got = check_and_claim(&fs, &store, "new", dir.path(), "/work/new").unwrap();
+        let got = check_and_claim_now(&fs, &store, "new", dir.path(), "/work/new").unwrap();
         match prev {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
             None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
