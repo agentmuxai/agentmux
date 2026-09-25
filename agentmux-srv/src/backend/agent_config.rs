@@ -1135,6 +1135,232 @@ pub fn write_startup_instructions_respecting_existing(
     Ok(())
 }
 
+/// Names of the `mcpServers` entries AgentMux wrote into a working
+/// directory's `.mcp.json` on the last materialization — see
+/// [`write_mcp_json_respecting_user_servers`]. Lives beside
+/// [`MANAGED_SKILL_FILES_MANIFEST`] for the same reason: it lets the next
+/// launch tell entries it owns from entries the user put there.
+pub const MANAGED_MCP_SERVERS_MANIFEST: &str = ".claude/.agentmux-managed-mcp-servers.json";
+
+/// Held (exclusively) for the whole read-merge-write in
+/// [`write_mcp_json_respecting_user_servers`]. See its doc comment.
+pub const MCP_JSON_WRITE_LOCK: &str = ".claude/.agentmux-mcp-json.lock";
+
+/// Write `.mcp.json` into `base_path` without destroying a user's own MCP
+/// server entries (issue #3680). Shared by `agent.open` and the
+/// `WriteAgentConfig` "click Launch" path — the two config-materializing call
+/// sites this module keeps in sync.
+///
+/// An agent's `working_directory` may be the user's own project, where a
+/// `.mcp.json` often already exists (and is often committed). A plain
+/// `fs::write` replaced it, dropping every server entry the agent definition
+/// didn't duplicate. Instead:
+///
+/// - **Merge.** Every existing `mcpServers` entry is kept, except the ones a
+///   previous materialization wrote (per [`MANAGED_MCP_SERVERS_MANIFEST`]),
+///   which are replaced by this launch's set — so a server unbound in the
+///   Armory still disappears. Other top-level keys in the existing file are
+///   kept too. On a name clash this launch's entry wins (the `agentmux` entry
+///   must always be ours).
+/// - **No manifest yet** (first launch after this change, or a user's file):
+///   a file that already has an `agentmux` entry was written by AgentMux, so
+///   all its entries are treated as managed — the old regenerate-every-launch
+///   behavior, once. A file without one is the user's; all of it is kept.
+/// - **Unreadable or not a JSON object** → left untouched and logged, never
+///   overwritten — the same "never overwrite a stranger's file" rule
+///   [`write_claude_md_respecting_ownership`] follows. Claude Code couldn't
+///   parse such a file either.
+/// - **Owner-only.** The file carries the agent's jekt signing material
+///   (`inject_jekt_signing_keys_into_mcp_json`), so it is written `0600` on
+///   Unix, via a temp file renamed into place so it is never briefly visible
+///   with the default mode.
+/// - **One launch at a time per directory.** `.mcp.json` and its manifest
+///   must describe the same launch, or a server AgentMux wrote gets mistaken
+///   for the user's and is never removed. Neither call site serializes by
+///   directory (`agent_open`'s lock is per agent; `WriteAgentConfig` has
+///   none), so the whole read-merge-write holds an exclusive lock on
+///   [`MCP_JSON_WRITE_LOCK`]. A file lock rather than an in-process mutex, so
+///   two AgentMux instances pointed at one project are serialized too; it is
+///   released when the handle drops, including on error or panic.
+///
+/// Not addressed here: the signing material being in this file at all
+/// (the identity plan's M4d/M5 move it out — see
+/// `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5), and a
+/// user's project not git-ignoring `.mcp.json`.
+pub fn write_mcp_json_respecting_user_servers(
+    base_path: &std::path::Path,
+    generated_content: &str,
+) -> std::io::Result<()> {
+    use serde_json::{Map, Value};
+
+    let path = base_path.join(".mcp.json");
+    let generated: Value = serde_json::from_str(generated_content).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("generated .mcp.json is not JSON: {e}"))
+    })?;
+    let Some(generated_obj) = generated.as_object() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "generated .mcp.json is not a JSON object",
+        ));
+    };
+    // Serialize concurrent launches into this directory — see the doc comment.
+    let _dir_lock = lock_mcp_json_dir(base_path)?;
+
+    let ours: Map<String, Value> = generated_obj
+        .get("mcpServers")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+
+    let existing: Option<Map<String, Value>> = match std::fs::read_to_string(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "write_mcp_json_respecting_user_servers: existing .mcp.json is unreadable — \
+                 leaving it untouched; this agent's MCP servers are not written for this launch"
+            );
+            return Ok(());
+        }
+        Ok(raw) => match serde_json::from_str::<Value>(&raw) {
+            Ok(Value::Object(obj))
+                if obj.get("mcpServers").map_or(true, Value::is_object) =>
+            {
+                Some(obj)
+            }
+            _ => {
+                tracing::warn!(
+                    path = %path.display(),
+                    "write_mcp_json_respecting_user_servers: existing .mcp.json is not a JSON \
+                     object with an object `mcpServers` — leaving it untouched; this agent's MCP \
+                     servers are not written for this launch"
+                );
+                return Ok(());
+            }
+        },
+    };
+
+    let merged = match existing {
+        None => generated_obj.clone(),
+        Some(mut obj) => {
+            let existing_servers = obj
+                .get("mcpServers")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let previously_managed: std::collections::BTreeSet<String> =
+                match read_managed_mcp_server_names(base_path) {
+                    Some(names) => names,
+                    None if existing_servers.contains_key("agentmux") => {
+                        existing_servers.keys().cloned().collect()
+                    }
+                    None => Default::default(),
+                };
+            let mut servers: Map<String, Value> = existing_servers
+                .into_iter()
+                .filter(|(name, _)| !previously_managed.contains(name) && !ours.contains_key(name))
+                .collect();
+            servers.extend(ours.clone());
+            for (k, v) in generated_obj {
+                if k != "mcpServers" {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+            obj.insert("mcpServers".to_string(), Value::Object(servers));
+            obj
+        }
+    };
+
+    let body = serde_json::to_string_pretty(&Value::Object(merged))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    write_owner_only_atomically(&path, body.as_bytes())?;
+    write_managed_mcp_server_names(base_path, ours.keys());
+    Ok(())
+}
+
+/// Take the exclusive per-directory write lock; released on drop.
+fn lock_mcp_json_dir(base_path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    let lock_path = base_path.join(MCP_JSON_WRITE_LOCK);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    file.lock()?;
+    Ok(file)
+}
+
+fn read_managed_mcp_server_names(base_path: &std::path::Path) -> Option<std::collections::BTreeSet<String>> {
+    let raw = std::fs::read_to_string(base_path.join(MANAGED_MCP_SERVERS_MANIFEST)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Best-effort, like [`write_managed_skill_file_manifest`]: losing this write
+/// only means the next launch falls back to the no-manifest rule once.
+fn write_managed_mcp_server_names<'a>(base_path: &std::path::Path, names: impl Iterator<Item = &'a String>) {
+    let names: std::collections::BTreeSet<&String> = names.collect();
+    let manifest_path = base_path.join(MANAGED_MCP_SERVERS_MANIFEST);
+    // Atomic for the same reason as the .mcp.json write itself: concurrent
+    // launches into one directory must not interleave into one manifest.
+    let result = serde_json::to_string(&names)
+        .map_err(std::io::Error::other)
+        .and_then(|json| {
+            if let Some(parent) = manifest_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            write_owner_only_atomically(&manifest_path, json.as_bytes())
+        });
+    if let Err(e) = result {
+        tracing::warn!(
+            work_dir = %base_path.display(),
+            error = %e,
+            "write_managed_mcp_server_names: failed to write manifest; the next launch \
+             falls back to treating an agentmux-bearing .mcp.json as fully managed"
+        );
+    }
+}
+
+/// Write `bytes` to `path` via a sibling temp file renamed into place,
+/// created `0600` on Unix so the content is never readable by others, even
+/// for a moment. `rename` replaces an existing file (and its old mode) on
+/// every platform we ship.
+///
+/// The temp name is unique per call (a v4 UUID, as `bookmarks_store.rs`
+/// does), not per process: two launches into one shared project directory
+/// run concurrently in the same srv (`agent_open`'s dedupe lock is keyed by
+/// agent, not by directory), and a shared temp path would let their writes
+/// interleave into one file before either rename — publishing corrupt JSON.
+/// With unique temps the worst case is last-write-wins. `create_new` also
+/// refuses to open anything already sitting at the temp path (including a
+/// planted symlink).
+fn write_owner_only_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = path.with_file_name(format!(".{file_name}.{}.agentmux-tmp", uuid::Uuid::new_v4()));
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600);
+    }
+    let write_result = (|| {
+        let mut f = opts.open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    if let Err(e) = write_result.and_then(|_| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// Shared by `agent.open` (`server/app_api/agent_open.rs`) and the
 /// `WriteAgentConfig` "click Launch" path (`server/editor_handlers.rs`) —
 /// per this module's own doc comment, the two config-materializing call
@@ -2404,5 +2630,172 @@ mod is_agentmux_managed_instructions_tests {
         assert!(!is_agentmux_managed_instructions(&format!(
             "Someone pasted this below:\n{CLAUDE_MD_MANAGED_MARKER}\n"
         )));
+    }
+}
+
+#[cfg(test)]
+mod mcp_json_tests {
+    //! #3680: `.mcp.json` keeps a user's own servers and is owner-only.
+    use super::*;
+
+    fn mcp_servers_of(dir: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+        let raw = std::fs::read_to_string(dir.join(".mcp.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        v["mcpServers"].as_object().unwrap().clone()
+    }
+
+    const GENERATED_MCP: &str = r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp","env":{"AGENTMUX_AGENT_ID":"a1"}},"github":{"command":"gh-mcp"}}}"#;
+
+    #[test]
+    fn mcp_json_fresh_dir_is_written_as_generated() {
+        let dir = tempfile::tempdir().unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        let servers = mcp_servers_of(dir.path());
+        assert_eq!(servers.keys().collect::<Vec<_>>(), vec!["agentmux", "github"]);
+    }
+
+    #[test]
+    fn mcp_json_a_users_own_servers_and_keys_survive_the_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".mcp.json"),
+            r#"{"mcpServers":{"postgres":{"command":"pg-mcp"}},"someOtherKey":true}"#,
+        )
+        .unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        let servers = mcp_servers_of(dir.path());
+        assert!(servers.contains_key("postgres"), "the user's server must survive");
+        assert!(servers.contains_key("agentmux"));
+        assert!(servers.contains_key("github"));
+        let raw = std::fs::read_to_string(dir.path().join(".mcp.json")).unwrap();
+        assert!(raw.contains("someOtherKey"), "other top-level keys must survive");
+    }
+
+    #[test]
+    fn mcp_json_a_server_unbound_since_the_last_launch_is_removed_but_the_users_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".mcp.json"), r#"{"mcpServers":{"postgres":{"command":"pg-mcp"}}}"#).unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        // Next launch: `github` was unbound in the Armory.
+        write_mcp_json_respecting_user_servers(dir.path(), r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#)
+            .unwrap();
+        let servers = mcp_servers_of(dir.path());
+        assert!(!servers.contains_key("github"), "a server AgentMux wrote and no longer wants must go");
+        assert!(servers.contains_key("postgres"), "the user's server must still be there");
+        assert!(servers.contains_key("agentmux"));
+    }
+
+    #[test]
+    fn mcp_json_without_a_manifest_an_agentmux_written_file_is_regenerated_as_before() {
+        // A file an older AgentMux wrote: has our `agentmux` entry, no manifest.
+        // All of it is ours, so a stale server from an old definition goes.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".mcp.json"),
+            r#"{"mcpServers":{"agentmux":{"command":"old"},"stale":{"command":"x"}}}"#,
+        )
+        .unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        let servers = mcp_servers_of(dir.path());
+        assert!(!servers.contains_key("stale"));
+        assert_eq!(servers["agentmux"]["command"], "agentmux-mcp");
+    }
+
+    #[test]
+    fn mcp_json_our_entry_wins_a_name_clash() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".mcp.json"), r#"{"mcpServers":{"github":{"command":"users-own"}}}"#).unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        assert_eq!(mcp_servers_of(dir.path())["github"]["command"], "gh-mcp");
+    }
+
+    #[test]
+    fn mcp_json_a_file_that_is_not_a_json_object_is_left_untouched() {
+        for body in ["{ not json", "[1,2]", r#"{"mcpServers":[]}"#] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(".mcp.json"), body).unwrap();
+            write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+            assert_eq!(std::fs::read_to_string(dir.path().join(".mcp.json")).unwrap(), body);
+        }
+    }
+
+    #[test]
+    fn mcp_json_rejects_generated_content_that_is_not_json() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(write_mcp_json_respecting_user_servers(dir.path(), "nope").is_err());
+        assert!(!dir.path().join(".mcp.json").exists());
+    }
+
+    #[test]
+    fn mcp_json_leaves_no_temp_file_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains("agentmux-tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn mcp_json_concurrent_launches_into_one_dir_never_publish_corrupt_json() {
+        // ReAgent P1 on #3803: a per-process temp name let two same-srv writes
+        // interleave into one temp file before either rename. Many writers of
+        // differently sized content maximise the chance of interleaving.
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_path_buf();
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let base = base.clone();
+                std::thread::spawn(move || {
+                    // Each "agent" brings its own extra server, so a manifest from
+                    // one launch paired with the file from another is detectable.
+                    let padding = "x".repeat(i * 4096);
+                    let content = format!(
+                        r#"{{"mcpServers":{{"agentmux":{{"command":"agentmux-mcp","env":{{"AGENTMUX_AGENT_ID":"a{i}","PAD":"{padding}"}}}},"srv{i}":{{"command":"s{i}"}}}}}}"#
+                    );
+                    for _ in 0..10 {
+                        write_mcp_json_respecting_user_servers(&base, &content).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let raw = std::fs::read_to_string(base.join(".mcp.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("published .mcp.json must be valid JSON");
+        assert!(v["mcpServers"]["agentmux"].is_object());
+        let manifest = std::fs::read_to_string(base.join(MANAGED_MCP_SERVERS_MANIFEST)).unwrap();
+        let managed: std::collections::BTreeSet<String> =
+            serde_json::from_str(&manifest).expect("the manifest must not be interleaved either");
+        // ReAgent P1 (round 2) on #3803: the manifest must describe the SAME
+        // launch as the file. With no user servers here, that means exactly
+        // the file's server names — and exactly one agent's set.
+        let on_disk: std::collections::BTreeSet<String> =
+            v["mcpServers"].as_object().unwrap().keys().cloned().collect();
+        assert_eq!(managed, on_disk, "manifest and .mcp.json describe different launches");
+        assert_eq!(on_disk.len(), 2, "exactly one launch's servers (agentmux + its own), got {on_disk:?}");
+        for d in [base.clone(), base.join(".claude")] {
+            let leftovers = std::fs::read_dir(&d)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().contains("agentmux-tmp"))
+                .count();
+            assert_eq!(leftovers, 0, "temp files left in {}", d.display());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_json_is_owner_only_on_unix_even_when_replacing_a_0644_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".mcp.json");
+        std::fs::write(&path, r#"{"mcpServers":{}}"#).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 }
