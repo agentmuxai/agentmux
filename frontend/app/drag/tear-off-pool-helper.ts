@@ -59,6 +59,17 @@ const MIN_FLOATER_HEIGHT = 120;
  * pane from the layout and unmounts its DOM element. Platform-agnostic;
  * shared by win32 / darwin (/ linux) `CrossWindowDragMonitor` variants.
  */
+/** A floater size from a measured rect (CSS/DIP px), with the same minimums
+ *  `measureSourcePaneSize` applies. Used for a torn-off Pane Tab, whose size
+ *  comes from its pane's rect captured at drag start rather than a
+ *  `[data-blockid]` lookup (which finds nothing visible for a background tab). */
+export function floaterSizeFromRect(rect: { width: number; height: number }): { width: number; height: number } {
+    return {
+        width: Math.max(MIN_FLOATER_WIDTH, Math.round(rect.width)),
+        height: Math.max(MIN_FLOATER_HEIGHT, Math.round(rect.height)),
+    };
+}
+
 export function measureSourcePaneSize(blockId: string): { width: number; height: number } {
     const el = document.querySelector(`[data-blockid="${blockId}"]`) as HTMLElement | null;
     if (!el) {

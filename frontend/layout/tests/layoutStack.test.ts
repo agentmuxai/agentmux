@@ -12,7 +12,7 @@ import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
 import { activeKeyFor, getNodeByBlockId } from "@/layout/lib/layoutNodeModels";
-import { closeNode } from "@/layout/lib/layoutMagnify";
+import { closeNode, removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import {
     addWidgetAsPaneTab,
     closeBlockInStack,
@@ -497,6 +497,60 @@ describe("layoutStack", () => {
 
             expect(effectiveStack(getNodeByBlockId(model, "a2")!.data!)).toEqual(["a2"]);
             expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1", "a1"]);
+        });
+    });
+
+    // A block that MOVED elsewhere (torn off into a floating pane) leaves its
+    // pane stack-safe. The tear-off paths used to DeleteNode the whole leaf
+    // found by getNodeByBlockId, which also matches background tabs, so
+    // tearing off one tab took its siblings with it.
+    // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (design 3).
+    describe("removeMovedBlock", () => {
+        function paneWithTabs() {
+            const model = createLayoutModel();
+            const pane = insertRootBlock(model, "a1");
+            pushBlockOntoStack(model, pane, "a2"); // [a1, a2], a2 visible
+            model.treeReducer({
+                type: LayoutTreeActionType.InsertNode,
+                node: newLayoutNode(undefined, undefined, undefined, { blockId: "b1" }),
+                magnified: false,
+                focused: false,
+            } as LayoutTreeInsertNodeAction);
+            model.updateTree();
+            return { model, pane };
+        }
+
+        it("removes a BACKGROUND tab only; its pane and sibling stay", () => {
+            const { model } = paneWithTabs();
+            expect(removeMovedBlock(model, "a1")).toBe(true);
+            const pane = getNodeByBlockId(model, "a2")!;
+            expect(effectiveStack(pane.data!)).toEqual(["a2"]);
+            expect(pane.data!.activeBlockId).toBe("a2");
+            expect(model.leafs()).toHaveLength(2);
+        });
+
+        it("removes the VISIBLE tab; its neighbour becomes visible", () => {
+            const { model } = paneWithTabs();
+            expect(removeMovedBlock(model, "a2")).toBe(true);
+            const pane = getNodeByBlockId(model, "a1")!;
+            expect(effectiveStack(pane.data!)).toEqual(["a1"]);
+            expect(pane.data!.activeBlockId).toBe("a1");
+        });
+
+        it("removes the pane with its only tab, as a move: onNodeDelete is never called", () => {
+            const { model } = paneWithTabs();
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+            expect(removeMovedBlock(model, "b1")).toBe(true);
+            expect(getNodeByBlockId(model, "b1")).toBeFalsy();
+            expect(model.leafs()).toHaveLength(1);
+            expect(onNodeDelete).not.toHaveBeenCalled();
+        });
+
+        it("is a no-op for a block no pane holds (the queued backend delete got there first)", () => {
+            const { model } = paneWithTabs();
+            expect(removeMovedBlock(model, "not-here")).toBe(false);
+            expect(model.leafs()).toHaveLength(2);
         });
     });
 

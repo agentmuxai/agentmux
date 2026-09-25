@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { findNode } from "./layoutNode";
+import { findNode, findNodeByBlockId } from "./layoutNode";
 import { newLayoutNode } from "./layoutNode";
 import {
     LayoutNode,
@@ -11,7 +11,7 @@ import {
     LayoutTreeInsertNodeAction,
     LayoutTreeMagnifyNodeToggleAction,
 } from "./types";
-import { effectiveStack } from "./stackMembers";
+import { effectiveStack, removeMemberFromStack } from "./stackMembers";
 import { setTransform } from "./utils";
 import type { LayoutModel } from "./layoutModel";
 import { clearLeafRevealGate } from "@/app/store/tab-reveal";
@@ -57,6 +57,43 @@ export function removeLeafEmptiedByMove(model: LayoutModel, nodeId: string): voi
     };
     model.treeReducer(deleteAction, false);
     clearLeafRevealGate(nodeId);
+}
+
+/**
+ * Remove one block that has MOVED elsewhere (torn off into a floating pane,
+ * redocked into another window) from the leaf holding it, stack-aware:
+ * - one tab of a multi-tab pane: just that member leaves
+ *   (`removeMemberFromStack`; its right-hand neighbour becomes visible if it
+ *   was the visible one), and the pane and its other tabs stay;
+ * - the pane's only tab: the pane goes, as a move (`removeLeafEmptiedByMove`,
+ *   never `closeNode`, which would delete the block).
+ * Only edits `model.treeState`; the caller commits.
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (design 3).
+ */
+export function removeBlockFromLeaf(model: LayoutModel, leaf: LayoutNode, blockId: string): void {
+    if (leaf.data && removeMemberFromStack(leaf.data, blockId)) return;
+    removeLeafEmptiedByMove(model, leaf.id);
+}
+
+/**
+ * `removeBlockFromLeaf` for whichever leaf holds `blockId` (visible OR
+ * background member), then commit. Returns false, touching nothing, when no
+ * leaf holds it (e.g. the backend's queued `delete` for the same move got
+ * here first) — so calling it for an already-removed block is a safe no-op.
+ *
+ * Replaces the tear-off paths' old `treeReducer(DeleteNode,
+ * getNodeByBlockId(blockId).id)`, which deleted the WHOLE leaf even when the
+ * block was one background tab of it, taking its sibling tabs along.
+ */
+export function removeMovedBlock(model: LayoutModel, blockId: string): boolean {
+    const root = model.treeState.rootNode;
+    const leaf = root && findNodeByBlockId(root, blockId);
+    if (!leaf) return false;
+    removeBlockFromLeaf(model, leaf, blockId);
+    model.updateTree(false);
+    model.setter(model.localTreeStateAtom, { ...model.treeState });
+    model.persistToBackend();
+    return true;
 }
 
 /**

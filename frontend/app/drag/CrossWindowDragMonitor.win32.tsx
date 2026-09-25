@@ -23,7 +23,9 @@
 import { atoms, getApi } from "@/store/global";
 import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
-import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
+import { getLayoutModelForStaticTab } from "@/layout/index";
+import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
+import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
@@ -39,7 +41,10 @@ export type DragItemPayload =
     // in-window pane->tab drop path (droppable-tab.tsx) to build the
     // cross-tab redock call. Optional: cross-window consumers don't use it.
     | { kind: "tile"; node: LayoutNode; sourceTabId?: string }
-    | { kind: "tab"; tabId: string; workspaceId: string };
+    | { kind: "tab"; tabId: string; workspaceId: string }
+    // One Pane Tab pill (PaneTabStrip) — torn off on its own, never via
+    // the "tab" (whole window tab) path below. pane-tab-tearoff.ts.
+    | PaneTabDragPayload;
 
 // Module-level drag state so TileLayout/TabBar can set it before dragend fires
 let _currentDragPayload: DragItemPayload | null = null;
@@ -216,6 +221,13 @@ async function handleCrossWindowDragEnd(
 
     let dragPayloadForApi: { blockId?: string; tabId?: string };
     let dragType: "pane" | "tab";
+
+    // A single Pane Tab: its own rules (in-window guard, stack-safe source
+    // removal, rollback). SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5.
+    if (payload.kind === "pane-tab") {
+        await handlePaneTabDragEnd(payload, sourceWindow, cursorPoint, "win32");
+        return;
+    }
 
     if (payload.kind === "tile") {
         const blockId = payload.node?.data?.blockId;
@@ -398,13 +410,12 @@ async function performTearOff(
         // doesn't render twice.
         const layoutModel = getLayoutModelForStaticTab();
         if (layoutModel) {
-            const node = layoutModel.getNodeByBlockId(payload.blockId);
-            if (node) {
-                layoutModel.treeReducer({
-                    type: LayoutTreeActionType.DeleteNode,
-                    nodeId: node.id,
-                } as LayoutTreeDeleteNodeAction);
-            }
+            // Stack-safe: when the pane had other tabs, only this block leaves
+            // and the pane stays. The old DeleteNode(getNodeByBlockId(...))
+            // removed the WHOLE leaf, sibling tabs included, and raced the
+            // backend's own stack-safe queued delete.
+            // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (design 3).
+            removeMovedBlock(layoutModel, payload.blockId);
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);

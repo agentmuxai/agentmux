@@ -27,13 +27,23 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dropTargetCalls: any[] = [];
+const draggableCalls: any[] = [];
+const payloadCalls: unknown[] = [];
 
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
-    draggable: () => () => {},
+    draggable: (config: any) => {
+        draggableCalls.push(config);
+        return () => {};
+    },
     dropTargetForElements: (config: any) => {
         dropTargetCalls.push(config);
         return () => {};
     },
+}));
+// The cross-window drag payload a pill hands the tear-off monitors
+// (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5).
+vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
+    setCurrentDragPayload: (p: unknown) => payloadCalls.push(p),
 }));
 
 import { LANDING_BOUNCE_MS, paneTabItemType, PaneTabStrip } from "./PaneTabStrip";
@@ -41,6 +51,8 @@ import { LANDING_BOUNCE_MS, paneTabItemType, PaneTabStrip } from "./PaneTabStrip
 afterEach(() => cleanup());
 beforeEach(() => {
     dropTargetCalls.length = 0;
+    draggableCalls.length = 0;
+    payloadCalls.length = 0;
 });
 
 interface T {
@@ -378,5 +390,77 @@ describe("PaneTabStrip — landing bounce", () => {
         expect(onReorder).toHaveBeenCalledWith("b", "a", expect.any(String));
         expect(pill(container, "beta").classList.contains("pane-tab--landing")).toBe(true);
         expect(pill(container, "alpha").classList.contains("pane-tab--landing")).toBe(false);
+    });
+});
+
+// Tear-off to a floating pane (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5):
+// a pill's drag hands the cross-window monitors a "pane-tab" payload, and
+// every drop target INSIDE the window clears it, so a handled drop never
+// also tears the tab off on dragend.
+describe("PaneTabStrip — tear-off payload", () => {
+    function renderPane(sourceTabId?: string) {
+        return render(() => (
+            <div data-role="pane">
+                <div data-role="block-header">
+                    <PaneTabStrip
+                        tabs={TABS}
+                        activeId="a"
+                        getId={(t: T) => t.id}
+                        getLabel={(t: T) => t.label}
+                        onActivate={vi.fn()}
+                        paneKey="pane-self"
+                        onReorder={vi.fn(() => true)}
+                        onReceiveForeignTab={vi.fn(() => true)}
+                        sourceTabId={sourceTabId}
+                    />
+                </div>
+            </div>
+        ));
+    }
+
+    it("drag start sets a pane-tab payload with the pill's block, pane, window tab and pane size", () => {
+        renderPane("tab-1");
+        draggableCalls[1].onDragStart(); // the "beta" pill
+        expect(payloadCalls).toEqual([
+            {
+                kind: "pane-tab",
+                blockId: "b",
+                sourceNodeId: "pane-self",
+                sourceTabId: "tab-1",
+                paneSize: { width: 0, height: 0 }, // jsdom rects are all zero
+            },
+        ]);
+        draggableCalls[1].onDrop();
+    });
+
+    it("sets no payload without a sourceTabId (tear-off not enabled for this strip)", () => {
+        renderPane(undefined);
+        draggableCalls[0].onDragStart();
+        expect(payloadCalls).toEqual([]);
+    });
+
+    it("a same-pane reorder drop clears the payload", () => {
+        const { container } = renderPane("tab-1");
+        const alpha = [...container.querySelectorAll<HTMLElement>(".pane-tab")][0];
+        dropTargetCalls.find((c) => c.element === alpha)!.onDrop({
+            source: { data: { type: paneTabItemType, sourceNodeId: "pane-self", blockId: "b" } },
+            location: { current: { input: { clientX: 0 } } },
+        });
+        expect(payloadCalls).toContain(null);
+    });
+
+    it("a cross-pane drop clears the payload", () => {
+        vi.useFakeTimers();
+        try {
+            const { container } = renderPane("tab-1");
+            const pane = container.querySelector<HTMLElement>('[data-role="pane"]')!;
+            dropTargetCalls.find((c) => c.element === pane)!.onDrop({
+                source: { data: { type: paneTabItemType, sourceNodeId: "pane-other", blockId: "x" } },
+            });
+            expect(payloadCalls).toContain(null);
+            vi.runOnlyPendingTimers();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
