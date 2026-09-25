@@ -708,3 +708,184 @@ fn the_first_pass_imports_history_without_bringing_back_deleted_files() {
     assert_eq!((again.imported, again.written, again.captured), (0, 0, 0), "{again:?}");
     assert!(f.get("gone.md").is_none());
 }
+
+// ── Capture while the agent runs (the drift detector's hook) ───────────
+
+#[test]
+fn a_provider_write_while_running_is_recorded_without_touching_the_folder() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.put("notes.md", "v1");
+    f.run();
+    f.put("notes.md", "v2");
+    f.put("new.md", "a new memory");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 2);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v2"));
+    assert_eq!(f.head_body("new.md").as_deref(), Some("a new memory"));
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0, "already recorded");
+    // Projected here, so the next spawn is quiet.
+    let r = f.run();
+    assert_eq!((r.captured, r.written, r.conflicts), (0, 0, 0), "{r:?}");
+}
+
+/// The record moved on elsewhere since this folder was synced: left for
+/// the next spawn's reconcile, which keeps both — never recorded over it.
+#[test]
+fn a_file_the_record_changed_elsewhere_is_left_for_the_next_spawn() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    f.change_elsewhere("notes.md", Some("from another account"));
+    f.put("notes.md", "written here meanwhile");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("from another account"));
+    assert_eq!(f.get("notes.md").as_deref(), Some("written here meanwhile"), "the folder is untouched");
+    assert_eq!(f.run().conflicts, 1, "the spawn keeps both");
+}
+
+#[test]
+fn nothing_is_captured_from_a_folder_no_spawn_has_synced() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert!(record::heads(&f.fs, UID).unwrap().files.is_empty());
+}
+
+/// Re-checked before every capture: another agent claiming the folder
+/// since the spawn stops it.
+#[test]
+fn nothing_is_captured_once_another_agent_claims_the_folder() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    crate::backend::memory_dir_claims::check_and_claim(
+        &f.fs,
+        &f.store,
+        "agent-other",
+        &f.dir(),
+        "/work/other",
+        Instant::now() + Duration::from_secs(10),
+    )
+    .unwrap();
+    f.put("notes.md", "v2");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v1"));
+}
+
+#[test]
+fn nothing_is_captured_while_a_spawn_reconciles() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    f.put("notes.md", "v2");
+    let lease = take_pass_lease(&f.fs, UID, Instant::now() + Duration::from_secs(10)).unwrap().unwrap();
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    release_pass_lease(&f.fs, UID, &lease);
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 1);
+}
+
+/// Deletions wait for the spawn's reconcile and its missing-folder guards.
+#[test]
+fn a_deletion_while_running_is_not_recorded() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.put("notes.md", "v1");
+    f.run();
+    std::fs::remove_file(f.dir().join("notes.md")).unwrap();
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v1"));
+}
+
+/// Claimed, but no spawn has reconciled it (the pass was skipped): its
+/// files are not the record's yet, so nothing is captured from it.
+#[test]
+fn a_claimed_folder_no_spawn_has_synced_is_not_captured_from() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    crate::backend::memory_dir_claims::check_and_claim(&f.fs, &f.store, UID, &f.dir(), CWD, Instant::now() + Duration::from_secs(10))
+        .unwrap();
+    assert!(crate::backend::memory_dir_claims::held_exclusively(&f.fs, UID, &f.dir()).unwrap());
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert!(record::heads(&f.fs, UID).unwrap().files.is_empty());
+}
+
+/// A file still being written isn't captured: a torn body would become the
+/// head and be projected into the agent's other folders.
+#[test]
+fn a_file_written_moments_ago_waits_until_it_settles() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    f.put("notes.md", "half-writ");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::from_secs(60)).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v1"));
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 1);
+}
+
+// ── First sighting: content another agent's record already holds ───────
+
+fn put_in_other_record(f: &Fixture, body: &str) {
+    record::append_version(
+        &f.fs,
+        "agent-other",
+        NewVersion {
+            file: "their.md",
+            body: Some(body.as_bytes()),
+            expected_parent: None,
+            merged_parent: None,
+            conflicts_with: None,
+            source: "agent",
+            source_detail: "",
+            project_to: None,
+        },
+    )
+    .unwrap();
+}
+
+/// Spec §2.1.2: a file whose content another agent's record holds is not
+/// adopted — held for the adoption list, and left alone by later passes and
+/// by capture while running, until it changes.
+#[test]
+fn first_sighting_holds_content_another_agents_record_has() {
+    let f = fixture();
+    put_in_other_record(&f, "another agent's fact");
+    f.put("MEMORY.md", "idx");
+    f.put("copied.md", "another agent's fact");
+    let r = f.run();
+    assert_eq!((r.adopted, r.held), (1, 1), "{r:?}");
+    assert!(f.head_body("copied.md").is_none());
+    let again = f.run();
+    assert_eq!((again.captured, again.adopted), (0, 0), "{again:?}");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert!(f.head_body("copied.md").is_none());
+    assert_eq!(f.get("copied.md").as_deref(), Some("another agent's fact"), "left in place");
+    // Once this agent changes it, it is its own.
+    f.put("copied.md", "rewritten by this agent");
+    assert_eq!(f.run().captured, 1);
+    assert_eq!(f.head_body("copied.md").as_deref(), Some("rewritten by this agent"));
+}
+
+/// A baseline cut short by the budget: its rest is captured by the next
+/// pass as new files, never the held one.
+#[test]
+fn a_baseline_cut_short_never_takes_the_held_file_later() {
+    let f = fixture();
+    put_in_other_record(&f, "another agent's fact");
+    f.put("MEMORY.md", "idx");
+    f.put("a.md", "mine");
+    f.put("copied.md", "another agent's fact");
+    let r = f.run_files(1);
+    assert!(r.deferred, "{r:?}");
+    f.run();
+    assert!(f.head_body("a.md").is_some());
+    assert!(f.head_body("copied.md").is_none());
+}
+
+#[test]
+fn the_agents_own_record_is_not_another_agents() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.run();
+    let sha = record::sha256_hex(b"idx");
+    assert!(record::held_by_other_records(&f.fs, UID, &[sha]).unwrap().is_empty());
+}

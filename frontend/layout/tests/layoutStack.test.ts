@@ -726,6 +726,39 @@ describe("layoutStack", () => {
             expect(onNodeDelete).toHaveBeenCalledTimes(1);
         });
 
+        // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §2: a
+        // caller that already asked (close-agent-tab.ts) passes `confirmed`.
+        it("a close already confirmed by the caller does not ask again — one tab of a stack", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            const beforeNodeDelete = vi.fn().mockResolvedValue(false);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = beforeNodeDelete;
+
+            await closeBlockInStack(model, nodeId, "b1", { confirmed: true });
+
+            expect(beforeNodeDelete).not.toHaveBeenCalled();
+            expect(model.treeState.rootNode!.data!.blockStack).toEqual(["b2"]);
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+        });
+
+        it("a close already confirmed by the caller does not ask again — last tab closes the pane", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            const beforeNodeDelete = vi.fn().mockResolvedValue(false);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = beforeNodeDelete;
+
+            await closeBlockInStack(model, nodeId, "b1", { confirmed: true });
+
+            expect(beforeNodeDelete).not.toHaveBeenCalled();
+            expect(model.treeState.rootNode).toBeUndefined();
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+        });
+
         it("closing one tab of a stack hands onNodeDelete only that tab", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");

@@ -9,6 +9,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock every platform-layer module the model touches BEFORE import.
+// The model's own block goes through the host context (Pane Tab contract
+// Phase 2c): URL persistence is asserted on its setMeta.
+const ctxSetMeta = vi.fn((_patch: Record<string, unknown>) => Promise.resolve());
+function fakeCtx() {
+    return {
+        blockId: "test-block-id",
+        meta: () => ({}),
+        setMeta: ctxSetMeta,
+        isFocused: () => false,
+        visibility: () => "active" as const,
+    };
+}
+
 // vi.mock is hoisted, so the mocks are in place when browser-model imports them.
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: vi.fn(() => Promise.resolve()),
@@ -60,7 +73,7 @@ function capturedHandler(eventName: string): (payload: any) => void {
 function makeVM() {
     // BlockNodeModel is used only by blockAtom construction — a minimal
     // placeholder is enough for the gating tests.
-    const vm = new BrowserViewModel("test-block-id", {} as never);
+    const vm = new BrowserViewModel(fakeCtx());
     // The constructor calls `navigate(DEFAULT_BROWSER_URL)` and registers
     // two `listenEvent` subscriptions. Tests below assert call counts on
     // operations performed AFTER construction, so clear the mock history
@@ -73,7 +86,7 @@ function makeVM() {
  *  mock history (`makeVM`'s clear would wipe `listenEvent`'s recorded
  *  calls, taking the handler reference with it). */
 function makeVMWithNavStateHandler() {
-    const vm = new BrowserViewModel("test-block-id", {} as never);
+    const vm = new BrowserViewModel(fakeCtx());
     const navStateHandler = capturedHandler("browser-pane-nav-state");
     vi.clearAllMocks();
     return { vm, navStateHandler };
@@ -102,14 +115,14 @@ describe("BrowserViewModel lifecycle gating", () => {
         const urlBefore = vm.urlAtom();
         vm.dispose();
         vm.navigate("https://example.com");
-        expect(RpcApi.SetMetaCommand).not.toHaveBeenCalled();
+        expect(ctxSetMeta).not.toHaveBeenCalled();
         expect(vm.urlAtom()).toBe(urlBefore);
     });
 
     it("navigate() works before dispose", () => {
         const vm = makeVM();
         vm.navigate("https://example.com");
-        expect(RpcApi.SetMetaCommand).toHaveBeenCalledOnce();
+        expect(ctxSetMeta).toHaveBeenCalledOnce();
         expect(vm.urlAtom()).toBe("https://example.com");
     });
 
@@ -150,7 +163,7 @@ describe("BrowserViewModel lifecycle gating", () => {
 
         vm.dispose();
         vm.goBack();
-        expect(RpcApi.SetMetaCommand).not.toHaveBeenCalled();
+        expect(ctxSetMeta).not.toHaveBeenCalled();
     });
 
     it("goForward() is a no-op after dispose", () => {
@@ -162,7 +175,7 @@ describe("BrowserViewModel lifecycle gating", () => {
 
         vm.dispose();
         vm.goForward();
-        expect(RpcApi.SetMetaCommand).not.toHaveBeenCalled();
+        expect(ctxSetMeta).not.toHaveBeenCalled();
     });
 
     it("reload() is a no-op after dispose", () => {
@@ -379,14 +392,14 @@ describe("BrowserViewModel initial-URL fallback: configured start page", () => {
 
     it("navigates to the configured start page when meta.url is empty", () => {
         setFullConfigAtom({ browserstartpage: "https://start.example" } as never);
-        const vm = new BrowserViewModel("test-block-id", {} as never);
+        const vm = new BrowserViewModel(fakeCtx());
         expect(vm.urlAtom()).toBe("https://start.example");
         vm.dispose();
     });
 
     it("falls back to DEFAULT_BROWSER_URL when no start page is configured", () => {
         setFullConfigAtom(null);
-        const vm = new BrowserViewModel("test-block-id", {} as never);
+        const vm = new BrowserViewModel(fakeCtx());
         expect(vm.urlAtom()).toBe("https://agentmux.ai");
         vm.dispose();
     });

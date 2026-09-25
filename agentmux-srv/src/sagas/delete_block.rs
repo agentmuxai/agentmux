@@ -159,6 +159,10 @@ pub async fn run(
             state.broker.purge_scope(&format!("block:{}", block_id));
         }
     }
+    if let Err(reason) = &result {
+        // The pane is showing the shutdown log and waiting; tell it why.
+        super::close_pane::publish_shutdown_error(state, &block_id, reason);
+    }
     super::close_pane::finish_close(state, &block_id).await;
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result

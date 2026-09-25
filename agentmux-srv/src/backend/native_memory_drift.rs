@@ -251,6 +251,19 @@ pub(crate) fn reconciliation_sweep_once(
     drifted
 }
 
+/// Also record the provider's writes into the agent's memory record — a
+/// folder its spawn has reconciled, and whose claim it still holds alone
+/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3). Capture only;
+/// the folder isn't touched.
+fn capture_into_record(agent_id: &str, memory_dir: &Path) {
+    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return };
+    match crate::backend::memory_reconcile::capture_while_running(fs, agent_id, memory_dir, crate::backend::memory_reconcile::CAPTURE_SETTLE) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(agent_id, recorded = n, "native_memory_drift: recorded provider writes into the memory record"),
+        Err(e) => tracing::warn!(agent_id, error = %e, "native_memory_drift: memory record capture failed; retried next sweep"),
+    }
+}
+
 fn sweep_one_agent_dir(
     id_store: &Store,
     agent_id: &str,
@@ -258,6 +271,7 @@ fn sweep_one_agent_dir(
     detected_via: &str,
     broker: &crate::backend::mps::Broker,
 ) -> usize {
+    capture_into_record(agent_id, memory_dir);
     let entries = match std::fs::read_dir(memory_dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return 0,
@@ -410,6 +424,7 @@ fn spawn_fast_path(
                     // nothing recorded), logging "recorded an out-of-band
                     // write" for a no-op — a pre-existing log inaccuracy
                     // fixed as a side effect of needing this branch anyway.
+                    capture_into_record(&agent_id, parent);
                     match check_and_record_drift(&id_store, &agent_id, filename, &content, "fs_watch") {
                         Ok(true) => {
                             tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");

@@ -176,6 +176,9 @@ pub(crate) struct Report {
     pub adopted: usize,
     /// Versions imported from the per-channel history, the first time.
     pub imported: usize,
+    /// Files held for the adoption list at first sighting: another agent's
+    /// record already holds their content.
+    pub held: usize,
     pub written: usize,
     pub captured: usize,
     pub conflicts: usize,
@@ -402,8 +405,26 @@ fn adopt_baseline(
     budget: &mut Budget,
     report: &mut Report,
 ) -> Result<(), StoreError> {
+    // Content another agent's record already holds isn't this agent's to
+    // adopt: held for the adoption list (spec §2.1.2). All of it first, in
+    // one transaction, so a baseline cut short by the budget — whose rest
+    // the next pass captures as new files — never takes it either.
+    let shas: Vec<(String, String)> = disk
+        .iter()
+        .filter_map(|(name, d)| match d {
+            OnDisk::Body(b) => Some((name.clone(), record::sha256_hex(b))),
+            OnDisk::Unreadable => None,
+        })
+        .collect();
+    let foreign = record::held_by_other_records(fs, uid, &shas.iter().map(|(_, s)| s.clone()).collect::<Vec<_>>())?;
+    let held: Vec<(String, String)> = shas.into_iter().filter(|(_, sha)| foreign.contains(sha)).collect();
+    record::hold_for_adoption(fs, uid, dir_id, &held)?;
+    report.held = held.len();
     for (name, body) in disk {
         let OnDisk::Body(body) = body else { continue };
+        if held.iter().any(|(n, _)| n == name) {
+            continue;
+        }
         if budget.spent() {
             // The rest are captured, as new files, by the next pass.
             report.deferred = true;
@@ -433,6 +454,10 @@ fn adopt_baseline(
 /// The content `version` of `name` holds, from the log.
 fn sha_of(fs: &FileStore, uid: &str, name: &str, version: &str) -> Result<Option<String>, StoreError> {
     Ok(record::history(fs, uid, name)?.into_iter().find(|v| v.version == version).and_then(|v| v.sha256))
+}
+
+fn held_here<'h>(heads: &'h Heads, dir_id: &str, name: &str) -> Option<&'h str> {
+    heads.held.get(dir_id).and_then(|m| m.get(name)).map(String::as_str)
 }
 
 fn projected_version(heads: &Heads, dir_id: &str, name: &str) -> Option<String> {
@@ -468,6 +493,10 @@ fn reconcile_file(
     };
     let on_disk = on_disk.as_deref();
     let heads = record::heads(fs, uid)?;
+    // Held for the adoption list: left alone while it still holds that.
+    if on_disk.is_some_and(|b| held_here(&heads, dir_id, name) == Some(record::sha256_hex(b).as_str())) {
+        return Ok(());
+    }
     let head = heads.files.get(name).cloned();
     let head_sha = head.as_ref().and_then(|h| h.sha256.clone());
     let disk_sha = on_disk.map(record::sha256_hex);
@@ -712,6 +741,104 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
         write_atomic(dir, INDEX_FILE, &next)?;
     }
     Ok(())
+}
+
+/// How long a memory file must go unchanged before a capture while the
+/// agent runs takes it.
+pub(crate) const CAPTURE_SETTLE: Duration = Duration::from_secs(2);
+
+/// A file the provider changed in `dir` since it was last projected there,
+/// with the head it will be recorded on.
+struct PendingCapture {
+    name: String,
+    body: Vec<u8>,
+    head: String,
+}
+
+/// What [`capture_while_running`] would record now: files whose content
+/// differs from what was projected here, while the record hasn't moved on
+/// since (the head is still that projection). Files the record changed
+/// elsewhere meanwhile are left for the next spawn's reconcile, which
+/// raises the conflict; deletions too, with its missing-folder guards.
+fn pending_captures(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str, settle: Duration) -> Result<Vec<PendingCapture>, StoreError> {
+    let heads = record::heads(fs, uid)?;
+    let Some(projected) = heads.projected.get(dir_id) else { return Ok(Vec::new()) };
+    let Some(disk) = read_disk(dir)? else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for (name, on_disk) in disk {
+        let OnDisk::Body(body) = on_disk else { continue };
+        // Still being written (the watcher fires as the write starts): a
+        // torn body would become the head, and the next spawn elsewhere
+        // would project it. The next event or sweep takes it once settled.
+        let modified = std::fs::metadata(dir.join(&name)).and_then(|m| m.modified());
+        if modified.map_or(true, |t| t.elapsed().map_or(true, |age| age < settle)) {
+            continue;
+        }
+        let sha = record::sha256_hex(&body);
+        if held_here(&heads, dir_id, &name) == Some(sha.as_str()) {
+            continue;
+        }
+        let head = heads.files.get(&name);
+        if head.is_some_and(|h| h.sha256.as_deref() == Some(sha.as_str())) {
+            continue;
+        }
+        let projected_here = projected.get(&name);
+        match (head, projected_here) {
+            // The provider changed a file this folder holds the head of.
+            (Some(h), Some(p)) if &h.version == p => out.push(PendingCapture { name, body, head: h.version.clone() }),
+            // A new file the record has never had.
+            (None, None) => out.push(PendingCapture { name, body, head: String::new() }),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// Record what the provider wrote to `dir` while the agent runs — the drift
+/// detector's hook (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3).
+/// Capture only: nothing is written to the folder. Only a folder a spawn
+/// has already reconciled (it holds projections), whose claim `uid` still
+/// holds alone, and only files unchanged for `settle` ([`CAPTURE_SETTLE`]).
+/// Returns how many versions were recorded.
+pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path, settle: Duration) -> Result<usize, StoreError> {
+    let dir_id = claims::dir_id(dir);
+    // Cheap and read-only first: most sweeps find nothing to record.
+    if pending_captures(fs, uid, dir, &dir_id, settle)?.is_empty() {
+        return Ok(0);
+    }
+    if !claims::held_exclusively(fs, uid, dir)? {
+        return Ok(0);
+    }
+    let Some(lease) = take_pass_lease(fs, uid, Instant::now() + RECONCILE_BUDGET)? else {
+        // A spawn's reconcile is running; it records this itself.
+        return Ok(0);
+    };
+    let result = (|| {
+        let mut recorded = 0;
+        // Decided again under the lease, against a fresh read.
+        for p in pending_captures(fs, uid, dir, &dir_id, settle)? {
+            let outcome = record::append_version(
+                fs,
+                uid,
+                NewVersion {
+                    file: &p.name,
+                    body: Some(&p.body),
+                    expected_parent: (!p.head.is_empty()).then_some(p.head.as_str()),
+                    merged_parent: None,
+                    conflicts_with: None,
+                    source: "provider",
+                    source_detail: "while running",
+                    project_to: Some(&dir_id),
+                },
+            )?;
+            if matches!(outcome, AppendOutcome::Appended(_)) {
+                recorded += 1;
+            }
+        }
+        Ok(recorded)
+    })();
+    release_pass_lease(fs, uid, &lease);
+    result
 }
 
 /// `<stem>__conflict_<short>.md`, the stem cut so the whole name stays

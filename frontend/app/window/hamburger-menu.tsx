@@ -22,6 +22,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "@/app/store/keymodel-bindings";
 import { formatKeyDescription } from "@/util/keyutil";
+import { saveCurrentLayout } from "./save-layout";
 import { createMemo, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
 
@@ -101,6 +102,19 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 label: "Opacity",
                 icon: "circle-half-stroke",
                 subItems: opacitySubItems,
+            },
+            {
+                // SPEC_LAYOUT_FILES_2026_09_25.md §6.1 — placement per
+                // SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md §5.1.
+                label: "Layouts",
+                icon: "grip",
+                subItems: [
+                    {
+                        label: "Save layout…",
+                        icon: "floppy-disk",
+                        onClick: () => fireAndForget(saveCurrentLayout),
+                    },
+                ],
             },
             { label: "", divider: true },
             {

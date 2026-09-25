@@ -1,6 +1,10 @@
 # Spec: hover-to-peek on tool calls and thinking clumps
 
 **Status:** Implemented (PR #2392) — tool calls + thinking clumps per the original trigger below, PLUS regular user-input messages, added in a follow-up round of the same PR per explicit user request ("we also need it for user input nodes", 2026-08-03). See §2.5's scope note and §6, updated accordingly — this is no longer scoped to exactly two node kinds. Positioning also changed from the originally-planned "reuse the Session Context Tooltip-component code" to a new shared `PeekOverlay.tsx` (Portal-rendered, top-anchored to the entry) — the virtualized transcript's per-row CSS stacking contexts made a plain in-DOM absolute overlay (what "Session Context" originally did) paint UNDER later rows instead of over them; see that file's doc comment.
+**Superseded in part (2026-09-23):** the rule that the tool-call peek's
+command line stays hidden while the row is expanded no longer holds —
+it now shows in every state. See
+`SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md` §1.
 **Trigger (verbatim):** "we want to introduce hover to peek on each entry in the agent pane (each tool call, and each clump of thinking) .. we already have a 'Session Context' line that shows up, can u reuse that code? for all we want the time (and time ago) and the best stats like estimate token cost and other stuff you can think of. on tool calls, we want the time and the word-wrapped tool call in the hover peek."
 
 ## 0. Read this first — this is the third pass at broadly this idea

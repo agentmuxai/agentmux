@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Drone module barrel — wires the view component onto the model
-// prototype to avoid a circular import.
+// Drone module barrel — its native pane tab manifest (and the model).
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { DroneViewModel } from "./drone-model";

@@ -4012,3 +4012,19 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
     c.send_user_message("jekt".to_string()).unwrap();
     assert!(!c.turn_provenance().unwrap().tainted, "deferred, not delivered into the user's turn");
 }
+
+/// ReAgent P1 on #3789: the spawn path labels the turn from the queued
+/// message (`hint_next_turn`), `spawn_process` starts it, and then
+/// `mark_turn_active_and_publish` runs for the same message. That last call is
+/// bookkeeping, not new input, and must not taint the user's turn.
+#[tokio::test]
+async fn the_mark_after_a_spawn_does_not_taint_the_user_s_turn() {
+    use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+    use crate::backend::blockcontroller::Controller;
+    let (c, _rx) = idle_controller();
+    c.health_monitor.hint_next_turn(TurnInput { origin: TurnOrigin::User, text: "do X then quit".into() });
+    c.health_monitor.set_active_turn(true); // what spawn_process does
+    c.mark_turn_active_and_publish();
+    let p = c.turn_provenance().expect("a turn is in flight");
+    assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
+}

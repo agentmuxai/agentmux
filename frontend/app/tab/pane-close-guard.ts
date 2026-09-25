@@ -49,6 +49,29 @@ export async function busyMembers(blockIds: string[], probe: PaneCloseProbe): Pr
     return results.filter((m) => m.turnActive || m.processCount > 0);
 }
 
+/**
+ * Should closing these blocks keep the pane on screen with the shutdown log
+ * (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5)? Yes when any member is an agent:
+ * it has something to wind down worth showing. Terminals, editors and
+ * browsers close at once, as before.
+ */
+export function closesWithShutdownLog(blockIds: string[], isAgent: (blockId: string) => boolean): boolean {
+    return blockIds.some(isAgent);
+}
+
+/**
+ * srv rejected the whole close up front because NONE of the blocks exists
+ * any more (`close_pane::run_with`'s pre-check, "ClosePane: block not
+ * found: …") — then no tab is known to queue layout changes for, and the
+ * frontend drops them itself. Deliberately NOT any "block not found": a
+ * partial failure's per-member error ("ClosePane: id2: DeleteBlock: block not
+ * found: id2") means other blocks may still exist and must stay (ReAgent P1
+ * on #3784).
+ */
+export function isAllBlocksGoneError(err: unknown): boolean {
+    return /ClosePane: block not found:/.test(String(err));
+}
+
 /** One line per busy agent, e.g. "Posa — mid-turn, 2 processes running". */
 export function describeBusyMember(m: BusyMember): string {
     const parts: string[] = [];

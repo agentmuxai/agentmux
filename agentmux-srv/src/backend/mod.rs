@@ -12,6 +12,7 @@ pub mod identity_spawn;
 pub mod agent_session;
 pub mod blockcontroller;
 pub mod bookmarks_store;
+pub mod layout_file;
 pub mod browser_start_page;
 pub mod user_widgets;
 pub mod bundle_export;

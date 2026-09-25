@@ -697,8 +697,9 @@ impl PersistentSubprocessController {
         let action = self.decide_send_action_from(&json_str, None, origin);
         if matches!(action, SendAction::Queued | SendAction::BecomeSpawner { .. }) {
             // Delivered when the process spawns: the turn it starts is this one's.
-            if let Some(o) = queued_origin {
-                self.health_monitor.hint_next_turn(o);
+            match queued_origin {
+                Some(o) => self.health_monitor.hint_next_turn(o),
+                None => self.health_monitor.hint_next_turn_unlabelled(),
             }
         }
         match action {

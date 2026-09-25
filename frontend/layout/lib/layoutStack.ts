@@ -164,8 +164,16 @@ export function setActiveBlockInStack(model: LayoutModel, nodeId: string, blockI
  *  pane — delegates to the ordinary `closeNode` (tree-shape change, block
  *  deletion, the works). Otherwise: pop `blockId` out of the stack, pick a
  *  neighbor to activate if it was the active member, and delete just that
- *  one block — the leaf itself is untouched, no tree mutation. */
-export async function closeBlockInStack(model: LayoutModel, nodeId: string, blockId: string): Promise<void> {
+ *  one block — the leaf itself is untouched, no tree mutation.
+ *
+ *  `opts.confirmed`: the caller already asked `model.beforeNodeDelete` and
+ *  the user said yes — skip asking again (see closeNode). */
+export async function closeBlockInStack(
+    model: LayoutModel,
+    nodeId: string,
+    blockId: string,
+    opts?: { confirmed?: boolean }
+): Promise<void> {
     const node = findNode(model.treeState.rootNode, nodeId);
     if (!node?.data) {
         console.error("closeBlockInStack: node not found or has no data", nodeId);
@@ -180,13 +188,13 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         // once `idx >= 0` has confirmed `blockId` actually matches the
         // leaf's block, so a stale/wrong id from a caller can't
         // accidentally close a pane it doesn't belong to.
-        await closeNode(model, nodeId);
+        await closeNode(model, nodeId, opts);
         return;
     }
 
     // Same confirmation as closing the whole pane, scoped to this one tab.
     let leafData = node.data;
-    if (model.beforeNodeDelete) {
+    if (model.beforeNodeDelete && !opts?.confirmed) {
         if (!(await model.beforeNodeDelete({ blockId } as TabLayoutData))) return;
         // The tree may have changed while the prompt was open. Re-find by node
         // id, not object identity (`balanceNode` can swap the object when an

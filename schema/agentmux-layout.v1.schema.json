@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentmux.ai/schema/agentmux-layout.v1.schema.json",
+  "title": "AgentMux layout file (agentmux.layout, version 1)",
+  "description": "A window's tabs, split trees and typed pane views. Informative: readers accept unknown fields and preserve them. See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.",
+  "type": "object",
+  "required": ["format", "version", "windows"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": "agentmux.layout" },
+    "version": { "type": "integer", "minimum": 1 },
+    "name": { "type": "string" },
+    "saved_at": { "type": "string", "format": "date-time" },
+    "saved_by": {
+      "type": "object",
+      "properties": {
+        "app": { "type": "string" },
+        "app_version": { "type": "string" },
+        "instance": { "type": "string", "pattern": "^[a-z2-7]{26}$" }
+      }
+    },
+    "scope": { "enum": ["window", "tab"] },
+    "windows": { "type": "array", "items": { "$ref": "#/$defs/window" } }
+  },
+  "$defs": {
+    "window": {
+      "type": "object",
+      "required": ["tabs"],
+      "properties": {
+        "active_tab": { "type": "integer", "minimum": 0 },
+        "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
+      }
+    },
+    "tab": {
+      "type": "object",
+      "required": ["panes"],
+      "properties": {
+        "name": { "type": "string" },
+        "focused": { "type": "string" },
+        "magnified": { "type": "string" },
+        "root": { "$ref": "#/$defs/node" },
+        "panes": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/pane" }
+        }
+      }
+    },
+    "node": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["split", "children"],
+          "properties": {
+            "split": { "enum": ["row", "column"] },
+            "children": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["ratio", "node"],
+                "properties": {
+                  "ratio": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+                  "node": { "$ref": "#/$defs/node" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["pane"],
+          "properties": { "pane": { "type": "string" } }
+        }
+      ]
+    },
+    "pane": {
+      "type": "object",
+      "required": ["views"],
+      "properties": {
+        "views": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/view" } },
+        "active": { "type": "integer", "minimum": 0 },
+        "minimized": { "type": "boolean" }
+      }
+    },
+    "view": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "description": "agent, term, browser, editor, codeeditor, preview, media, sysinfo, armory, swarm, … — unknown types are kept as placeholders." },
+        "config": { "type": "object" },
+        "resume": { "type": "object", "description": "Opt-in, machine-local resume references (e.g. an agent session_id)." }
+      }
+    }
+  }
+}
