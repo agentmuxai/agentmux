@@ -6,8 +6,9 @@ per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
 PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
 split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
-activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in the PR
-after it; Phases 2c, 5–6 not started.
+activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
+Phase 5a (header/frame capabilities) in the PR after it; Phases 2c, 5b–6 not
+started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -428,6 +429,23 @@ working throughout through a legacy adapter.
      would, and a moved subtree can pause media or reset renderers).
 5. **Capabilities** replace the view-name checks (§2.4 #5). On the backend,
    `defaultMeta` comes from the manifest instead of the `pane.rs` allow-list.
+   - **5a (implemented): header and frame.** `PaneTabCapabilities` gains
+     `nativeSurface` (browser), `header: "surface"` (agent: an uncolored
+     header keeps the theme's block surface instead of the fixed default
+     color), `headerMic: { title }` (term: the header mic and its tooltip —
+     agent takes voice beside its composer, so it doesn't declare it),
+     `statsBadgeSetting` (term: `term:showstatsbadge`) and `hueBorder` (term:
+     `frame:hue` colors the active border). `paneTabCapability(view, key)`
+     reads one; an alias carries its view's. `blockframe.tsx`'s and
+     `PaneChrome.tsx`'s seven view-name checks for these read the
+     capabilities; `block-registry.test.ts` pins that exactly the view types
+     the old checks named declare each one.
+   - **5b:** keyboard and new-block behavior — term's cwd for a new block
+     (`keymodel-blockcreate.ts`), basic-terminal key routing (`keymodel.ts`),
+     editor's default zoom (`zoom.ts`), paste and split rules
+     (`pane-actions.ts`) — and the terminal's env-derived header name
+     (`blockframe.tsx`), which belongs in the terminal's own view model.
+   - **5c:** backend `defaultMeta` from the manifest.
 6. **Third-party loading:** trusted, locally installed ES-module widgets
    listed in widgets.json, a shared Solid runtime, `apiVersion` checks and
    error boundaries. No sandbox in v1 (decided, §5).

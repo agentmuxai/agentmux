@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
+import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Button } from "@/app/element/button";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
@@ -96,7 +97,7 @@ const NON_AGENT_DEFAULT_HEADER_BG = "hsl(220, 12%, 16%)";
  * agent pane (whose uncolored header has no fixed color): the theme's
  * opaque block surface. */
 export function computeBlockTabPillNeutralBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string {
-    if (!isLightTheme && blockMeta?.view !== "agent") return NON_AGENT_DEFAULT_HEADER_BG;
+    if (!isLightTheme && paneTabCapability(blockMeta?.view, "header") !== "surface") return NON_AGENT_DEFAULT_HEADER_BG;
     return "var(--block-bg-solid-color)";
 }
 
@@ -366,16 +367,15 @@ function EndIcons(props: {
                 SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md;
                 browser/editor expose no voiceHandle at all — keymodel.ts:163), so
                 naming it makes the unresolved state render nothing, which is the
-                safe default. See SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4. */}
-            <Show when={props.viewModel?.voiceHandle && props.blockView === "term"}>
+                safe default. See SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4.
+                The name check is now the `headerMic` capability (term's
+                manifest, Pane Tab contract Phase 5): still positive, still
+                nothing while the view is unresolved. */}
+            <Show when={props.viewModel?.voiceHandle && paneTabCapability(props.blockView, "headerMic")}>
                 <MicButton
                     blockId={props.blockId()}
                     handle={props.viewModel.voiceHandle!()}
-                    paneTitle={
-                        props.blockView === "term"
-                            ? "Speak into this terminal (Ctrl+Shift+V)"
-                            : undefined
-                    }
+                    paneTitle={paneTabCapability(props.blockView, "headerMic")?.title}
                 />
             </Show>
 
@@ -592,7 +592,7 @@ function BlockFrame_Header(
         // atom is being read with a non-empty value. Throttle is the
         // memo itself: it only re-fires when the dependent atom
         // changes, so this won't spam.
-        if (blockData()?.meta?.view === "browser") {
+        if (paneTabCapability(blockData()?.meta?.view, "nativeSurface")) {
             const vmId = (props.viewModel as any)?.__diagVmId ?? "?";
             console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)} vm=${vmId}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`);
         }
@@ -709,7 +709,7 @@ function BlockFrame_Header(
         if (bg) {
             style["background-color"] = bg;
             style.color = pickReadableTextColor(bg) ?? undefined;
-        } else if (blockData()?.meta?.view !== "agent") {
+        } else if (paneTabCapability(blockData()?.meta?.view, "header") !== "surface") {
             // Every non-agent pane (terminal, browser, editor, preview,
             // etc.) gets ONE fixed header color instead of the default
             // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
@@ -725,7 +725,7 @@ function BlockFrame_Header(
         <div
             class="block-frame-default-header"
             classList={{
-                "block-frame-default-header--agent": blockData()?.meta?.view === "agent",
+                "block-frame-default-header--agent": paneTabCapability(blockData()?.meta?.view, "header") === "surface",
                 "block-frame-default-header--has-summary": hasSummary(),
                 "block-frame-default-header--has-tabstrip": !!props.leadingTabStrip,
             }}
@@ -1123,7 +1123,10 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // types keep the badge unconditionally, matching prior behavior — this
     // setting exists specifically for the terminal pane's CPU%/mem overlay.
     const showStatsBadge = createMemo(
-        () => blockData()?.meta?.view !== "term" || getSettingsKeyAtom("term:showstatsbadge")() !== false,
+        () => {
+            const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting");
+            return setting == null || getSettingsKeyAtom(setting as any)() !== false;
+        },
     );
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.
@@ -1147,7 +1150,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // never seeded with frame:activebordercolor) no longer picks up a color
     // from that alone — only real agents (or an explicit hue pick) do.
     const blockAgentColor = createMemo(() => {
-        if (!props.preview && blockData()?.meta?.view === "term") {
+        if (!props.preview && paneTabCapability(blockData()?.meta?.view, "hueBorder")) {
             const hue = blockData()?.meta?.["frame:hue"];
             const color = typeof hue === "number"
                 ? hueToActiveBorder(hue)

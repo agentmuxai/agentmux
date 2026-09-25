@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { getBlockViewClass } from "./block-registry";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
-import { getPaneTab, isKeepAliveView, resolvePaneTabView } from "./pane-tab-registry";
+import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "./pane-tab-registry";
 
 const VIEWS = [
     "term", "cpuplot", "sysinfo", "help", "launcher", "agent", "swarm", "editor", "browser",
@@ -60,6 +60,22 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(resolvePaneTabView("forge")).toBe("agent");
         expect(resolvePaneTabView("workflows")).toBe("drone");
         expect(resolvePaneTabView("trust")).toBe("armory");
+    });
+
+    // Phase 5: each capability replaces a view-name check in shared code, so
+    // exactly the view types those checks named declare it.
+    it("declares exactly the capabilities the old view-name checks encoded", () => {
+        const holders = (key: string) => VIEWS.filter((v) => paneTabCapability(v, key as any) != null).sort();
+        expect(holders("header")).toEqual(["agent"]);
+        expect(paneTabCapability("agent", "header")).toBe("surface");
+        expect(holders("headerMic")).toEqual(["term"]);
+        expect(paneTabCapability("term", "headerMic")?.title).toBe("Speak into this terminal (Ctrl+Shift+V)");
+        expect(holders("statsBadgeSetting")).toEqual(["term"]);
+        expect(paneTabCapability("term", "statsBadgeSetting")).toBe("term:showstatsbadge");
+        expect(holders("hueBorder")).toEqual(["term"]);
+        expect(holders("nativeSurface")).toEqual(["browser"]);
+        // An alias carries its view's capabilities.
+        expect(paneTabCapability("forge", "header")).toBe("surface");
     });
 
     it("carries the term and agent tab descriptors", () => {

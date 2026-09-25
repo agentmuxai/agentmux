@@ -27,7 +27,7 @@ import {
     computeFocusRingBorderColor,
     computeMixedPaneHeaderBg,
 } from "@/app/block/blockframe";
-import { getPaneTab, resolvePaneTabView } from "@/app/block/pane-tab-registry";
+import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -233,7 +233,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         // so it would under-discriminate on a light-theme mixed pane.
         const headerKeyOf = (meta: Block["meta"] | undefined): string =>
             computeBlockColorBg(meta, isLightTheme) ??
-            (meta?.view === "agent" ? "\u0000agent-default" : "\u0000non-agent-default");
+            (paneTabCapability(meta?.view, "header") === "surface" ? "\u0000surface-default" : "\u0000fixed-default");
         const distinct = new Set<string>();
         for (const blockId of ids) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
