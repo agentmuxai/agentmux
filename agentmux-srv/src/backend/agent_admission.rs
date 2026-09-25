@@ -269,10 +269,38 @@ fn spawn_renewal(
         // A laptop waking from sleep fires one tick, not a burst.
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         interval.tick().await; // the first tick is immediate; the claim just wrote the file
+        let acquired_at_ms = agentmux_common::time::now_ms();
+        let my_host = this_host_label();
+        let mut ticks: u32 = 0;
         loop {
             interval.tick().await;
             if stopped.load(Ordering::SeqCst) {
                 break;
+            }
+            ticks = ticks.wrapping_add(1);
+            // LAN tier (spec §4.4): two hosts can start the same agent at the
+            // same moment, before either sees the other. Every
+            // LAN_RECHECK_TICKS renewals, ask the LAN again; the loser of the
+            // deterministic tie-break fences itself.
+            if ticks % LAN_RECHECK_TICKS == 0 {
+                if let Some(winner) = lan_holders(lease.instance_id())
+                    .await
+                    .into_iter()
+                    .find(|p| peer_wins(p.acquired_at_ms, &p.hostname, acquired_at_ms, &my_host))
+                {
+                    if stopped.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let why = lost.set_first(lan_lost_message(&agent, &winner));
+                    tracing::error!(
+                        agent = %agent,
+                        instance_id = %lease.instance_id(),
+                        peer_host = %winner.hostname,
+                        "agent_admission.fenced: another computer on the LAN runs this agent and wins the tie-break — stopping this one"
+                    );
+                    on_lost(why);
+                    break;
+                }
             }
             let (s, l) = (Arc::clone(&store), lease.clone());
             let renewed = tokio::task::spawn_blocking(move || s.renew(&l)).await;
@@ -342,6 +370,10 @@ pub async fn check_before_spawn(
             Ok(Err(e)) => tracing::warn!(agent, uid, error = %e, "agent_admission: early lease read failed — the spawn-time claim still decides"),
             Err(e) => tracing::warn!(agent, uid, error = %e, "agent_admission: early lease read panicked"),
         }
+    }
+    if let Some(peer) = lan_holders(uid).await.into_iter().next() {
+        tracing::warn!(agent, uid, peer_host = %peer.hostname, "agent_admission.denied: agent is live on a LAN peer");
+        return Err(lan_denied_message(agent, &peer));
     }
     if let Some(legacy) = probe_other_instances(uid).await {
         tracing::warn!(
@@ -445,6 +477,145 @@ fn find_uid_block(regs: &[serde_json::Value], uid: &str) -> Option<String> {
             r.get("block_id").and_then(|v| v.as_str()).unwrap_or_default().to_string()
         })
     })
+}
+
+// ── Phase 4: LAN tier — detect and yield (spec §4.4) ───────────────────
+
+/// Renewals between LAN re-checks: 6 × RENEW_INTERVAL_MS = 30 s.
+const LAN_RECHECK_TICKS: u32 = 6;
+
+/// Start times closer than this are "simultaneous": clocks on two hosts are
+/// not compared finer than this; the hostname decides instead (§4.4).
+pub const LAN_SKEW_BUDGET_MS: i64 = 10_000;
+
+/// How long one LAN peer gets to answer.
+const LAN_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1_500);
+
+static LAN_DISCOVERY: std::sync::OnceLock<Arc<crate::backend::lan_discovery::LanDiscoveryController>> =
+    std::sync::OnceLock::new();
+
+/// Called once at bootstrap: gives admission the LAN peer list. Without it
+/// (tests, LAN discovery off) the LAN tier is skipped.
+pub fn set_lan_discovery(lan: Arc<crate::backend::lan_discovery::LanDiscoveryController>) {
+    let _ = LAN_DISCOVERY.set(lan);
+}
+
+/// A LAN peer's answer to `GET /agentmux/agent/holding?uid=…`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PeerHolding {
+    pub held: bool,
+    #[serde(default)]
+    pub hostname: String,
+    #[serde(default)]
+    pub channel: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub acquired_at_ms: i64,
+}
+
+/// This host's label, as a LAN peer reports it and as the tie-break compares.
+fn this_host_label() -> String {
+    crate::backend::reactive::registry::local_host_label()
+}
+
+/// What this host answers to a LAN peer asking about `uid`: held when any
+/// instance on this host holds a live lease for it.
+pub fn local_holding(store: Option<&Arc<LeaseStore>>, uid: &str) -> PeerHolding {
+    let holder = store.and_then(|s| s.live_holder_other_than(uid, "").ok().flatten());
+    match holder {
+        Some(h) => PeerHolding {
+            held: true,
+            hostname: this_host_label(),
+            channel: h.channel,
+            version: h.version,
+            acquired_at_ms: h.acquired_at_ms,
+        },
+        None => PeerHolding { hostname: this_host_label(), ..Default::default() },
+    }
+}
+
+/// Every reachable LAN peer **on another host** that says it holds `uid`.
+/// Unreachable or older peers (no route) are skipped: not evidence either
+/// way (D2, fail open). Answers from this host are dropped: another AgentMux
+/// instance here also shows up as a LAN peer, but it reads this host's own
+/// lease store, so it would report this process's own lease back — the
+/// host tier already governs this host.
+pub async fn lan_holders(uid: &str) -> Vec<PeerHolding> {
+    let Some(lan) = LAN_DISCOVERY.get() else { return Vec::new() };
+    let peers = lan.get_instances();
+    if peers.is_empty() || uid.is_empty() {
+        return Vec::new();
+    }
+    let queries = peers.into_iter().map(|p| async move {
+        let url = format!("http://{}:{}/agentmux/agent/holding", p.address, p.port);
+        let req = PROBE_CLIENT
+            .get(url)
+            .query(&[("uid", uid)])
+            .header("X-AuthKey", p.auth_key.as_str())
+            .timeout(LAN_QUERY_TIMEOUT);
+        match req.send().await {
+            Ok(r) if r.status().is_success() => r.json::<PeerHolding>().await.ok(),
+            _ => None,
+        }
+    });
+    futures_util::future::join_all(queries)
+        .await
+        .into_iter()
+        .flatten()
+        .filter(|h| h.held && !is_this_host(&h.hostname))
+        .collect()
+}
+
+fn is_this_host(hostname: &str) -> bool {
+    hostname.trim().eq_ignore_ascii_case(&this_host_label())
+}
+
+/// The LAN tie-break (§4.4): does a peer that started the agent at
+/// `peer_at` on `peer_host` win over this host's claim at `mine_at`? The
+/// earlier start wins; starts within the skew budget are simultaneous and
+/// the lower hostname wins. Deterministic and symmetric: exactly one side
+/// wins for any pair of distinct hosts.
+pub fn peer_wins(peer_at: i64, peer_host: &str, mine_at: i64, my_host: &str) -> bool {
+    if (peer_at - mine_at).abs() < LAN_SKEW_BUDGET_MS {
+        peer_host < my_host
+    } else {
+        peer_at < mine_at
+    }
+}
+
+fn lan_place(peer: &PeerHolding) -> String {
+    let mut place = Vec::new();
+    if !peer.hostname.is_empty() {
+        place.push(format!("computer {}", peer.hostname));
+    }
+    if !peer.channel.is_empty() {
+        place.push(format!("channel {}", peer.channel));
+    }
+    if !peer.version.is_empty() {
+        place.push(format!("v{}", peer.version));
+    }
+    if place.is_empty() { String::new() } else { format!(" ({})", place.join(", ")) }
+}
+
+/// The refusal when a LAN peer runs the agent. Carries the same marker as
+/// the host refusal, so it classifies as `LiveElsewhere`.
+pub fn lan_denied_message(agent: &str, peer: &PeerHolding) -> String {
+    let agent = if agent.is_empty() { "This agent" } else { agent };
+    format!(
+        "{agent} is already running in another AgentMux instance on another computer on your network{}. \
+         Close it there, then try again — an agent can only run in one place at a time.",
+        lan_place(peer)
+    )
+}
+
+fn lan_lost_message(agent: &str, peer: &PeerHolding) -> String {
+    let agent = if agent.is_empty() { "This agent" } else { agent };
+    format!(
+        "{agent} was taken over by another AgentMux instance on another computer on your network{}, which started it \
+         first. It will not start another turn here.",
+        lan_place(peer)
+    )
 }
 
 // ── Phase 2: takeover (spec §4.6) ────────────────────────────────────────
@@ -827,6 +998,74 @@ mod tests {
         held.last_ok_ms.store(stale, Ordering::SeqCst);
         assert!(fence.may_write(), "nobody reclaimed it: still ours");
         assert!(held.last_ok_ms.load(Ordering::SeqCst) > stale, "confirmed again");
+    }
+
+    /// Phase 4 (§4.4): exactly one of two hosts wins, whatever the order
+    /// the check runs in, and near-simultaneous starts fall to the hostname.
+    #[test]
+    fn the_lan_tie_break_has_exactly_one_winner() {
+        let cases = [
+            (1_000_000, "alpha", 1_050_000, "beta"), // alpha 50 s earlier
+            (1_050_000, "alpha", 1_000_000, "beta"), // beta 50 s earlier
+            (1_000_000, "beta", 1_003_000, "alpha"), // within the skew budget
+            (1_000_000, "alpha", 1_000_000, "beta"), // identical
+        ];
+        for (a_at, a_host, b_at, b_host) in cases {
+            let a_wins = peer_wins(a_at, a_host, b_at, b_host); // b asks: does a win?
+            let b_wins = peer_wins(b_at, b_host, a_at, a_host); // a asks: does b win?
+            assert!(a_wins ^ b_wins, "exactly one winner for {a_host}@{a_at} vs {b_host}@{b_at}");
+        }
+        assert!(peer_wins(1_000_000, "alpha", 1_050_000, "beta"), "the earlier start wins");
+        assert!(peer_wins(1_003_000, "alpha", 1_000_000, "beta"), "within the budget the lower hostname wins");
+    }
+
+    #[test]
+    fn a_lan_refusal_is_recognised_and_names_the_computer() {
+        let peer = PeerHolding {
+            held: true,
+            hostname: "narko".into(),
+            channel: "stable".into(),
+            version: "0.58.0".into(),
+            acquired_at_ms: 1,
+        };
+        let m = lan_denied_message("Agent3", &peer);
+        assert!(m.contains("another computer on your network") && m.contains("computer narko"), "{m}");
+        assert!(is_admission_refusal(&m));
+        assert!(is_admission_refusal(&lan_lost_message("Agent3", &peer)));
+        assert_eq!(
+            crate::agents::failure::classify(None, None, &m, None).code,
+            crate::agents::failure::FailureClass::LiveElsewhere
+        );
+    }
+
+    #[test]
+    fn this_host_reports_holding_only_a_live_lease() {
+        let (_tmp, s) = store(60_000);
+        assert!(!local_holding(Some(&s), "uid-1").held);
+        let held = acquire(&s, "uid-1", "Agent3", &boot("boot-a"), "block-a", None, |_| {}).unwrap();
+        let h = local_holding(Some(&s), "uid-1");
+        assert!(h.held);
+        assert_eq!(h.version, env!("CARGO_PKG_VERSION"));
+        assert!(h.acquired_at_ms > 0);
+        drop(held);
+        assert!(!local_holding(Some(&s), "uid-1").held);
+        assert!(!local_holding(None, "uid-1").held, "no lease store, nothing held");
+    }
+
+    /// A second AgentMux instance on this same host is also a LAN peer, and
+    /// reports this host's leases — including this process's own. The LAN
+    /// tier must not refuse on that.
+    #[test]
+    fn an_answer_from_this_host_is_not_a_lan_holder() {
+        assert!(is_this_host(&this_host_label()));
+        assert!(is_this_host(&this_host_label().to_uppercase()));
+        assert!(!is_this_host("some-other-computer"));
+    }
+
+    #[tokio::test]
+    async fn without_lan_discovery_the_lan_tier_is_skipped() {
+        // LAN_DISCOVERY is never set in unit tests.
+        assert!(lan_holders("uid-1").await.is_empty());
     }
 
     #[test]
