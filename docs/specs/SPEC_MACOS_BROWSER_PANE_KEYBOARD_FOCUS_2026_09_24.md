@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Type:** Bug (macOS), plus one frontend focus bug on all platforms
-**Status:** Implemented in the PR that adds this doc.
+**Status:** implemented — PR #3737 (native key-window handoff + split focus + claim-on-create). Test-plan items 1–5 verified live 2026-09-24; 6–9 pending.
 **Scope:** `agentmux-cef/src/ui_tasks/{platform_macos,pane_geometry,window}.rs`,
 `agentmux-cef/src/browser_panes/clip.rs` (macOS only), and on the frontend
 `frontend/layout/lib/layoutPersistence.ts` and
