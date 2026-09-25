@@ -7,6 +7,17 @@
 use super::*;
 
 impl PersistentSubprocessController {
+    /// What a dead-air fallback needs to record its re-delivered line — see
+    /// [`RedeliveryPersister`].
+    pub(super) fn redelivery_persister(&self) -> RedeliveryPersister {
+        RedeliveryPersister {
+            broker: self.broker.clone(),
+            filestore: self.filestore.clone(),
+            mstore: self.mstore.clone(),
+            block_id: self.block_id.clone(),
+        }
+    }
+
     /// Encode a message as the stream-json stdin line the CLI expects.
     pub(super) fn encode_user_message(message: &str) -> String {
         serde_json::json!({
@@ -626,6 +637,7 @@ impl PersistentSubprocessController {
         let inner = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
         let resume_msg = build_answer_resume_message(&answers);
+        let persist = self.redelivery_persister();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
             // Any stdout frame since the snapshot means the turn resumed — nothing to do.
@@ -637,9 +649,24 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            // Delivery is unchanged (the raw send this fallback has always
+            // used). New: the line is recorded in the transcript (spec §6.9;
+            // #3703) — only if it was written, and not while a restart or stop
+            // is committed (the process is going down and may never read it;
+            // History must not claim a decision it never got). Recorded under
+            // the same `inner` acquisition as the send, so the fallbacks can't
+            // interleave with each other; ordering against a concurrent
+            // ordinary send is the same as between two ordinary sends (each
+            // records after its own send) — an open follow-up in the
+            // live-feed tracker. `persist.write` never takes `inner`.
+            let guard = inner.lock().unwrap();
+            let stdin_tx = guard.stdin_tx.clone();
             match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line).is_ok() => {
+                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
+                    if !guard.restart_pending && !guard.stop_pending {
+                        persist.write(&line);
+                    }
+                    drop(guard);
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -723,6 +750,7 @@ impl PersistentSubprocessController {
         let inner = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
         let resume_msg = build_deny_resume_message(&message);
+        let persist = self.redelivery_persister();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
             if stdout_seq.load(Ordering::Relaxed) != before_seq {
@@ -733,9 +761,24 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            // Delivery is unchanged (the raw send this fallback has always
+            // used). New: the line is recorded in the transcript (spec §6.9;
+            // #3703) — only if it was written, and not while a restart or stop
+            // is committed (the process is going down and may never read it;
+            // History must not claim a decision it never got). Recorded under
+            // the same `inner` acquisition as the send, so the fallbacks can't
+            // interleave with each other; ordering against a concurrent
+            // ordinary send is the same as between two ordinary sends (each
+            // records after its own send) — an open follow-up in the
+            // live-feed tracker. `persist.write` never takes `inner`.
+            let guard = inner.lock().unwrap();
+            let stdin_tx = guard.stdin_tx.clone();
             match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line).is_ok() => {
+                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
+                    if !guard.restart_pending && !guard.stop_pending {
+                        persist.write(&line);
+                    }
+                    drop(guard);
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -846,6 +889,7 @@ impl PersistentSubprocessController {
         let inner = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
         let resume_msg = build_tool_decision_resume_message(&tool_name, outcome, feedback.as_deref());
+        let persist = self.redelivery_persister();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
             if stdout_seq.load(Ordering::Relaxed) != before_seq {
@@ -856,9 +900,24 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            // Delivery is unchanged (the raw send this fallback has always
+            // used). New: the line is recorded in the transcript (spec §6.9;
+            // #3703) — only if it was written, and not while a restart or stop
+            // is committed (the process is going down and may never read it;
+            // History must not claim a decision it never got). Recorded under
+            // the same `inner` acquisition as the send, so the fallbacks can't
+            // interleave with each other; ordering against a concurrent
+            // ordinary send is the same as between two ordinary sends (each
+            // records after its own send) — an open follow-up in the
+            // live-feed tracker. `persist.write` never takes `inner`.
+            let guard = inner.lock().unwrap();
+            let stdin_tx = guard.stdin_tx.clone();
             match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line).is_ok() => {
+                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
+                    if !guard.restart_pending && !guard.stop_pending {
+                        persist.write(&line);
+                    }
+                    drop(guard);
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -965,5 +1024,34 @@ impl PersistentSubprocessController {
             });
             Self::push_stdin(inner, resp.to_string());
         }
+    }
+}
+
+/// Records a dead-air re-delivery in the transcript. The three dead-air
+/// fallbacks (answer, decline, tool-permission decision) re-send the user's
+/// choice as a follow-up stdin line when the CLI abandoned the pending tool
+/// call; the CLI then writes no tool result, so without this the choice is
+/// gone on reload, absent from History, and lost when the live feed rolls the
+/// turn off (spec §6.9; Codex review of #3703). Written like every other
+/// stdin line (`persist_message_to_blockfile`), after the send succeeded.
+pub(super) struct RedeliveryPersister {
+    broker: Option<Arc<mps::Broker>>,
+    filestore: Option<Arc<FileStore>>,
+    mstore: Option<Arc<Store>>,
+    block_id: String,
+}
+
+impl RedeliveryPersister {
+    pub(super) fn write(&self, line: &str) {
+        let global_zone =
+            super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        let record = format!("{line}\n");
+        super::super::shell::persist_user_line(
+            self.broker.as_deref(),
+            &self.block_id,
+            record.as_bytes(),
+            self.filestore.as_ref(),
+            global_zone.as_deref(),
+        );
     }
 }
