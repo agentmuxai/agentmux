@@ -15,7 +15,7 @@ import { resolveTermScrollback } from "./termscrollback";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
-import { setTermPaneChromeModel, setTerminalViewComponent, TermViewModel } from "./termViewModel";
+import { setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -547,18 +547,18 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
         // terminal, so they need a wrapper around the content region
         // rather than a slot beside it (term.scss's own
         // `> .term-pane-stack-body` positioning depends on this box).
-        wrapContent: (content: JSX.Element) => (
-            <div class="term-pane-stack-body">
-                <Show when={termBg()}>
-                    <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
-                </Show>
-                <Show when={runtimeLabel()}>
-                    <div class="agent-runtime-badge" title="Agent running time">
-                        {runtimeLabel()}
-                    </div>
-                </Show>
-                {content}
-            </div>
+        bodyClass: "term-pane-stack-body",
+        renderBehindContent: () => (
+            <>
+            <Show when={termBg()}>
+                <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
+            </Show>
+            <Show when={runtimeLabel()}>
+                <div class="agent-runtime-badge" title="Agent running time">
+                    {runtimeLabel()}
+                </div>
+            </Show>
+            </>
         ),
     };
 }
@@ -568,8 +568,5 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
 
 // Register TerminalView with the ViewModel to break the circular dependency
 setTerminalViewComponent(TerminalView);
-// Same late-binding registration, for the hoisted chrome half — see
-// setTermPaneChromeModel's own comment in termViewModel.ts.
-setTermPaneChromeModel(buildTermPaneChromeModel);
 
 export { TermViewModel };

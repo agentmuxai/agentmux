@@ -3,13 +3,12 @@
 
 import { createSignal } from "solid-js";
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import type { NodeModel } from "@/layout/index";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, MOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
-import { AgentBlockContent, buildAgentPaneChromeModel } from "./agent-view";
+import { AgentBlockContent } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
@@ -43,7 +42,6 @@ export class AgentViewModel implements ViewModel {
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
-    paneChromeModel: (nodeModel: NodeModel) => PaneChromeModel;
     setProgressBarMount: (el: HTMLDivElement | null) => void;
     /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
      *  reads this directly off its own concrete `AgentViewModel` instance
@@ -111,11 +109,6 @@ export class AgentViewModel implements ViewModel {
         this.nodeModel = nodeModel;
         this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
-        // What used to be AgentPaneChrome's bespoke component is this
-        // capability model, read by the shared chrome in its own reactive
-        // scope.
-        this.paneChromeModel = (leafNodeModel: NodeModel): PaneChromeModel =>
-            buildAgentPaneChromeModel(this.blockId, leafNodeModel);
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
         this.progressBarMount = progressBarMountSig;
         this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);
