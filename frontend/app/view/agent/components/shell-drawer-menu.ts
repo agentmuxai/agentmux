@@ -41,10 +41,8 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
     const selection = terminal?.getSelection() ?? "";
     const locked = deps.isAgentLocked();
 
-    // The reason/limit rides in the LABEL, not `sublabel`: the JS-rendered
-    // context menu (cef-api.ts showJsContextMenu) does not draw sublabels at
-    // all, so a sublabel here would be invisible. A greyed-out item then still
-    // says why.
+    // The reason/limit rides in the LABEL so a greyed-out item always says
+    // why, and the text reads as one unit with the action it qualifies.
     const pasteLabel = locked
         ? "Paste (agent is using this shell)"
         : `Paste (up to ${formatSize(SHELL_PASTE_MAX_BYTES)})`;
