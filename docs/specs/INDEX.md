@@ -239,6 +239,7 @@ partial list.
 | [`SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01`](SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md) | Working row: stand down on promotion, and sit above the composer |
 | [`SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03`](SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md) | SPEC: Ghost-Text Next-Prompt Suggestion — a Second Ambient Model Call Gateway Bind Point |
 | [`SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md) | SPEC: A Unified Framework for Ambient (Non-User-Driven) Model Calls |
+| [`SPEC_AMBIENT_NARRATION_INLINE_AGENT_VOICE_2026_09_24`](SPEC_AMBIENT_NARRATION_INLINE_AGENT_VOICE_2026_09_24.md) | SPEC: Ambient narration — render inline, in the agent's voice, with a trailing tag |
 | [`SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17`](SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md) | SPEC: Pane title tracks the session's overall goal, not the latest micro-step |
 | [`SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09`](SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md) | SPEC — Armory "Bind to Agent" context menu on account rows |
 | [`SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15`](SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md) | Spec: Armory Global Memory — declutter to a simple file list |
@@ -563,7 +564,6 @@ partial list.
 | [`SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21`](SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md) | SPEC: Tool-call bursts restart the agent-pane "Working…" row's type-out reveal |
 | [`SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03`](SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md) | SPEC: `AgentWorkingRow` typography refresh — drop the accent-color text, match the thinking-text font, go bold |
 | [`SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22`](SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22.md) | Per-agent zoom persistence |
-| [`SPEC_AMBIENT_NARRATION_INLINE_AGENT_VOICE_2026_09_24`](SPEC_AMBIENT_NARRATION_INLINE_AGENT_VOICE_2026_09_24.md) | SPEC: Ambient narration — render inline, in the agent's voice, with a trailing tag |
 | [`SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01`](SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md) | Spec: Drop the "Claude Code — host CLI config" block from Armory Global Memory |
 | [`SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20`](SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md) | SPEC: Keyboard-driven pause for the AskUserQuestion auto-timeout countdown |
 | [`SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15`](SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md) | SPEC: Auth Check False Positive — "authenticated as max" on Load |

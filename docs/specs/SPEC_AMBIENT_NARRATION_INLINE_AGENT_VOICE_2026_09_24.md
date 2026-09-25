@@ -1,7 +1,7 @@
 # SPEC: Ambient narration — render inline, in the agent's voice, with a trailing tag
 
 **Date:** 2026-09-24
-**Status:** Proposed; implementation in PR #3719 (Q1–Q3 resolved as recommended)
+**Status:** implemented in PR #3719 — Q1–Q3 resolved as recommended; Q4 (deterministic template instead of Haiku) still open. Not yet observed in a live app.
 **Builds on:** PR #3169 (`feat(agent-pane): narrate backgrounded tasks into the conversation`),
 `docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md` §8.3
 **Scope:** frontend rendering + where the narration lives. No backend change.
