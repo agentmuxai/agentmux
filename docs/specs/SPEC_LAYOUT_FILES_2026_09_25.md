@@ -13,7 +13,7 @@ that spec's naming ("Layout", §3) and menu placement (§5.1) stand. This spec
 export out of scope (its l.128, l.140) — with a file, and adds the file
 format it never had. Its Feature 1 (restore on relaunch) shipped in PR #2560
 and is unchanged here (§1.1).
-**Decision needed from the owner:** §5 (ABF), §9.
+**Decisions:** recorded in §9 (owner, 2026-09-25).
 
 ---
 
@@ -38,8 +38,8 @@ and is unchanged here (§1.1).
   general container — and the one strong case for that container is real: a
   layout that carries the agents it references (§5).
 - **v1 is exactly what was asked**: ☰ → Layouts → **Save layout…**, a native
-  Save dialog, one file written by the srv. Opening a layout is Phase 2 —
-  flagged in §9 because a save-only feature isn't useful for long (§6, §7).
+  Save dialog, one file written by the srv. "Open layout…" (Phase 2) follows
+  before the next release (decided, §9; why, §7).
 
 ---
 
@@ -396,7 +396,7 @@ people it's meant to be shared with.
 A saved file is already useful to read, diff and share, and it is the
 fixture Phase 2 needs. But the natural next click after "Save layout…" is
 "Open layout…", and the 08-13 spec's users asked for *reloadable* layouts.
-§9 asks whether Phase 2 should ship in the same release.
+Decided (§9): Phase 2 follows before the next release.
 
 ## 8. Out of scope
 
@@ -407,18 +407,16 @@ fixture Phase 2 needs. But the natural next click after "Save layout…" is
 - Updating the 08-13 spec's status line (it still says Feature 1 isn't built)
   is done in the PR that adds this spec.
 
-## 9. Open questions for the owner
+## 9. Decisions (owner, 2026-09-25: "proceed with your recommendations")
 
-1. **ABF (§5):** own JSON file now, ABF `kind`/`workspace` container later
-   (recommended) — or generalise ABF first?
-2. **Menu:** exactly one item ("Save layout…") as asked, or ship "Open
-   layout…" (Phase 2) in the same release?
-3. **Scope:** current window (recommended) or current tab by default?
-4. **Default folder:** `~/.agentmux/shared/layouts/` (cross-channel,
-   recommended) or per channel?
-5. **Resume:** keep agent `session_id` references opt-in and off by default
-   (recommended), or on by default for layouts saved and opened on the same
-   machine?
+1. **ABF (§5):** the layout is its own JSON file now; an ABF `kind` /
+   `workspace` container that carries a layout plus its agents is Phase 4.
+2. **Menu:** Phase 1 ships "Save layout…" alone, as its own PR; Phase 2
+   ("Open layout…") follows before the next release, so no release has save
+   without open.
+3. **Scope:** the current window (all its tabs).
+4. **Default folder:** `~/.agentmux/shared/layouts/` (cross-channel).
+5. **Resume:** agent `session_id` references are opt-in and off by default.
 
 ## 10. Key files
 
