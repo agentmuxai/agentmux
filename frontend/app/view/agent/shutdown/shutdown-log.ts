@@ -82,6 +82,16 @@ export function beginShutdownLog(blockId: string): void {
     unsubscribers.set(blockId, unsub ?? (() => {}));
 }
 
+/**
+ * The close request itself failed before srv could report anything (e.g.
+ * rejected up front): show the reason so the pane isn't left under
+ * "Shutting down…" with no way out (ReAgent P1 on #3784).
+ */
+export function failShutdownLog(blockId: string, message: string): void {
+    if (!logs[blockId] || logs[blockId]!.done) return;
+    setLogs(blockId, "error", message);
+}
+
 /** Stop showing it: the pane closed, or the user dismissed a failed close. */
 export function endShutdownLog(blockId: string): void {
     unsubscribers.get(blockId)?.();

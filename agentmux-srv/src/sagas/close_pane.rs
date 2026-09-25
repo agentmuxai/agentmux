@@ -129,7 +129,7 @@ pub async fn run_with(state: &AppState, block_ids: Vec<String>, opts: CloseOpts)
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga(
         "close_pane",
-        run_inner(ctx, tab_id, present.clone(), leaf_to_delete, opts),
+        run_inner(ctx, tab_id, present.clone(), leaf_to_delete, opts, gone_before(&ids, &present)),
     )
     .await;
     if let Err(reason) = &result {
@@ -150,8 +150,12 @@ async fn run_inner(
     block_ids: Vec<String>,
     leaf_to_delete: Option<(String, String)>,
     opts: CloseOpts,
+    // Asked for, but already gone before this close: a waiting frontend still
+    // shows them, so they get a frontend `delete` too.
+    gone: Vec<String>,
 ) -> Result<Value, String> {
     let mut failures = Vec::new();
+    let mut failed_ids: Vec<&String> = Vec::new();
     shutdown_agents(ctx.state, &block_ids).await;
     for block_id in &block_ids {
         if let Err(reason) = ctx
@@ -168,6 +172,7 @@ async fn run_inner(
                 reason
             );
             failures.push(format!("{block_id}: {reason}"));
+            failed_ids.push(block_id);
         }
     }
 
@@ -176,6 +181,15 @@ async fn run_inner(
     // prevent. Return before touching the layout (as `delete_block` does);
     // the pane stays, and closing it again finishes the job.
     if !failures.is_empty() {
+        // A waiting frontend still shows every member, including the ones
+        // that DID close — tell it to drop those, or they'd stay on screen
+        // with nothing behind them (ReAgent P1 on #3784). The failed ones stay
+        // and show the error.
+        if opts.frontend_waits {
+            let mut closed: Vec<String> = block_ids.iter().filter(|id| !failed_ids.contains(id)).cloned().collect();
+            closed.extend(gone.iter().cloned());
+            queue_member_deletes(ctx.state, &tab_id, &closed).await;
+        }
         return Err(format!("ClosePane: {}", failures.join("; ")));
     }
 
@@ -185,15 +199,9 @@ async fn run_inner(
         // one batch. Its handler removes just that member; the last one
         // removes the leaf. Queued whether or not the leaf goes — closing one
         // tab of a kept pane needs it just as much.
-        let actions = block_ids
-            .iter()
-            .map(|id| crate::server::service::layout_helpers::source_delete_action(id))
-            .collect();
-        if let Err(reason) =
-            crate::server::service::reducer_helpers::queue_layout_actions_via_reducer(ctx.state, &tab_id, actions).await
-        {
-            tracing::warn!(tab_id = %tab_id, "[saga] ClosePane: queueing frontend deletes failed (best-effort): {}", reason);
-        }
+        let mut closed = block_ids.clone();
+        closed.extend(gone.iter().cloned());
+        queue_member_deletes(ctx.state, &tab_id, &closed).await;
     }
     if let Some((node_id, visible_block_id)) = leaf_to_delete {
         // Best-effort, as in `delete_block`: the blocks are already gone.
@@ -333,6 +341,26 @@ async fn shutdown_one(state: &AppState, block_id: &str, deadline: std::time::Ins
         elapsed_ms = started.elapsed().as_millis() as u64,
         "agent_shutdown"
     );
+}
+
+/// The requested ids that no longer existed when this close began.
+fn gone_before(requested: &[String], present: &[String]) -> Vec<String> {
+    requested.iter().filter(|id| !present.contains(id)).cloned().collect()
+}
+
+/// One frontend `delete` per closed member, in one batch (best-effort: the
+/// blocks are already gone).
+async fn queue_member_deletes(state: &AppState, tab_id: &str, block_ids: &[String]) {
+    if block_ids.is_empty() {
+        return;
+    }
+    let actions = block_ids
+        .iter()
+        .map(|id| crate::server::service::layout_helpers::source_delete_action(id))
+        .collect();
+    if let Err(reason) = crate::server::service::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, actions).await {
+        tracing::warn!(tab_id = %tab_id, "[saga] ClosePane: queueing frontend deletes failed (best-effort): {}", reason);
+    }
 }
 
 /// `agent:shutdown` — the shutdown log a closing pane shows
@@ -649,6 +677,30 @@ mod tests {
         let long = process_line(&"x".repeat(200), 1, true);
         assert!(long.chars().count() <= SHUTDOWN_LINE_MAX && long.ends_with("— killed"), "{long}");
         assert_eq!(short_command("   "), "process");
+    }
+
+    /// ReAgent P1 on #3784: a waiting frontend is told to drop members that
+    /// were already gone, not left showing them with nothing behind.
+    #[tokio::test]
+    async fn a_waiting_frontend_also_drops_members_that_were_already_gone() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        let b = seed_block(&state, &tab_id).await;
+        set_tree(&state, &tab_id, stack_leaf("leaf", &[&a, &b], &a)).await;
+        run(&state, vec![b.clone()]).await.unwrap(); // b closed elsewhere first
+        let before = queued_deletes(&state, &tab_id).len();
+
+        run_with(&state, vec![a.clone(), b.clone()], CloseOpts { frontend_waits: true }).await.unwrap();
+        let queued = queued_deletes(&state, &tab_id);
+        assert_eq!(&queued[before..], &[a.clone(), b.clone()], "both leave the waiting frontend");
+    }
+
+    #[test]
+    fn gone_before_lists_requested_ids_missing_at_the_start() {
+        let ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        assert_eq!(gone_before(&ids, &["a".to_string(), "c".to_string()]), vec!["b".to_string()]);
+        assert!(gone_before(&ids, &ids).is_empty());
     }
 
     #[tokio::test]
