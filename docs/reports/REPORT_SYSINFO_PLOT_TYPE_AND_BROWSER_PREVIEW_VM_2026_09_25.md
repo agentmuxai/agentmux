@@ -16,7 +16,7 @@ and goes").
 Both reproduce in the v0.57.4 portable build (`main` at `f39d06da1`, no Phase 1),
 confirmed by the repo owner. PR #3752 is unaffected.
 
-## 2. Split browser pane stays black — root cause found
+## 2. Split browser pane stays black — root cause found, fixed
 
 ### 2.1 What the logs show
 
@@ -62,15 +62,48 @@ Which vm ends up owning the slot depends on mount order, which changes whenever
 the layout tree is rebuilt (a split, a tab move). That fits both the black split
 pane and the earlier intermittent "comes and goes".
 
-### 2.3 Proposed fix
+### 2.3 Fix: a preview never builds a live ViewModel
 
-A preview mount gets a side-effect-free view model: no slot registration, no IPC
-subscriptions, no navigate, no unregister on dispose — just title/favicon for the
-thumbnail. Test-first: (a) mounting and unmounting a preview vm leaves the real
-pane's slot and projections untouched; (b) split-like remount ordering (preview
-before/after real, preview unmount last) keeps the real pane receiving
-`loading=false`. Audit the other block-id-keyed stores for the same constructor
-pattern (agent document/layout/state stores, editor store).
+A preview mount never constructs the view's class. `block.tsx`'s
+`makePreviewViewModel` gives it a read-only stand-in: reads go to the live
+ViewModel registered for the block when there is one (the thumbnail still shows
+the page title), else to the default ViewModel for the view type. It registers,
+publishes and disposes nothing on the live one's behalf. This also stops every
+pane (terminal, agent, …) from building a second ViewModel for its thumbnail.
+
+Tests (`block.test.tsx`, "a preview never builds a live ViewModel"): a preview on
+its own constructs nothing; unmounting a preview leaves the real ViewModel alive
+and registered; the preview's header shows the live ViewModel's name.
+
+Live check in `task dev` after the change: 5 browser blocks → 5
+`viewmodel-constructed` (was 2 per block).
+
+### 2.4 A second path to the same black pane: the orphan close
+
+The same live session showed another way to lose the page. The host keys the
+native page by block id, and a view can mount twice in quick succession (here, a
+hot reload; equally a split or layout rebuild while a page is still being
+created — creates took up to ~400 ms):
+
+1. mount A sends `browser_pane_create` and unmounts before it returns;
+2. mount B sends `browser_pane_create`; the host answers `create-already-live`,
+   B adopts A's page;
+3. A's create returns; A sees it unmounted and "closes the orphan" —
+   `browser_pane_close` by block id, i.e. B's page. B still believes it has a
+   page and shows the spinner forever.
+
+Fix (`use-pane-rect-sync.ts`): the latest mount to request a block's page owns
+it (`nativePaneOwners`); an older mount closes the page — as an orphan or on
+unmount — only if it still owns it. Tests
+(`use-pane-rect-sync.ownership.test.tsx`) replay the logged sequence, plus the
+two cases that must still close (a true orphan; the owner's own unmount).
+
+### 2.5 Follow-up (not fixed here)
+
+A fresh page's first `nav-state` carries `url=""`, and the model writes it as the
+tab URL (and on to the block) before the real URL arrives. Harmless when the page
+survives; if it doesn't (as with 2.4), the block keeps an empty URL and shows
+"Enter a URL above to browse" on the next mount.
 
 ## 3. Sysinfo plot type stuck on CPU — root cause found, fixed
 
