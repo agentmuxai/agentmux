@@ -105,7 +105,7 @@ request, and key status is handed back when the user goes back to the app.
 | Focus request before the overlay exists or is on screen | `PENDING_PANE_KEY`, applied by `SetPaneBoundsViewsTask` right after it registers the overlay | the claim-on-create IPC beats the overlay setup; `makeKeyWindow` is a silent no-op on a window not yet shown, so an unsuccessful attempt is parked too |
 | Click on the app UI → the keyboard comes back | main-window branch of the sendEvent swizzle (button-down) | `reclaim_key_for_window(win)`, a no-op unless a pane overlay is key |
 | Frontend reclaims focus (`main_window_focus`) | `MainFocusReclaimTask` | `reclaim_key_for_window` + clear the parked request |
-| A DOM menu/popover opens over the pane | `SetPaneOverlayClipViewsTask` (hole mask) | reclaim key, so Escape and typing go to the DOM overlay, not the page under it |
+| A DOM menu/popover opens over the pane | `SetPaneOverlayClipViewsTask` (hole mask) → `reclaim_key_from_pane(label)` | reclaim key only if **that** pane holds it, so Escape and typing go to the DOM overlay, not the page under it, and an overlay over pane A never takes the keyboard from pane B (review P1; verified live: B kept typing while a menu was open over A) |
 | Resizes no longer steal the keyboard | `SetPaneBoundsViewsTask` | skip `makeKeyAndOrderFront:` on the main window while a pane overlay is key |
 | Keys reach Chromium, not the window | `swizzled_nsapp_send_event`, every keyDown/keyUp/flagsChanged for a tagged overlay | make the page's `RenderWidgetHostViewCocoa` first responder before dispatch |
 | Unhandled keys don't loop | same place | a key event re-sent for a pane overlay (same NSEvent: pointer + timestamp) is offered to the main menu once and dropped |
