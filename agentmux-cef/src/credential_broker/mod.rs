@@ -443,6 +443,20 @@ async fn call_credential_service(
     method: &str,
     args0: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    call_host_only_service(state, "credential", method, args0, SRV_CALL_TIMEOUT).await
+}
+
+/// POST `{"service": service, "method": ..., "args": [args0, secret]}` to
+/// srv's `/agentmux/service` — for srv services gated on the host secret
+/// (`credential`, `memoryadopt`). See [`call_credential_service`] for why
+/// the secret, not `X-AuthKey`, is what proves the caller is the host.
+pub(crate) async fn call_host_only_service(
+    state: &Arc<AppState>,
+    service: &str,
+    method: &str,
+    args0: serde_json::Value,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
     let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
     if web_endpoint.is_empty() {
         return Err("backend web_endpoint not yet configured".to_string());
@@ -450,18 +464,18 @@ async fn call_credential_service(
     let auth_key = state.auth_key.lock().clone();
     let host_reg_secret = state.host_reg_secret.lock().clone();
     if host_reg_secret.is_empty() {
-        // Every caller of this function already falls through to the manual
-        // prompt on Err, so failing here degrades to "no auto-fill" rather
-        // than breaking auth — the same posture as every other failure mode
-        // in this feature.
+        // Every credential caller falls through to the manual prompt on
+        // Err, so failing here degrades to "no auto-fill" rather than
+        // breaking auth — the same posture as every other failure mode in
+        // this feature.
         return Err(format!(
-            "credential.{method}: host has no AGENTMUX_HOST_REG_SECRET — cannot prove \
-             host identity to srv, falling through to the manual prompt"
+            "{service}.{method}: host has no AGENTMUX_HOST_REG_SECRET — cannot prove \
+             host identity to srv"
         ));
     }
     let url = format!("{}/agentmux/service", web_endpoint.trim_end_matches('/'));
     let body = serde_json::json!({
-        "service": "credential",
+        "service": service,
         "method": method,
         "args": [args0, host_reg_secret],
         "uicontext": serde_json::Value::Null,
@@ -471,21 +485,21 @@ async fn call_credential_service(
         .post(&url)
         .header("X-AuthKey", auth_key)
         .json(&body)
-        .timeout(SRV_CALL_TIMEOUT)
+        .timeout(timeout)
         .send()
         .await
-        .map_err(|e| format!("credential.{method}: request failed: {e}"))?;
+        .map_err(|e| format!("{service}.{method}: request failed: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("credential.{method}: HTTP {}", resp.status()));
+        return Err(format!("{service}.{method}: HTTP {}", resp.status()));
     }
 
     let parsed: WebReturn = resp
         .json()
         .await
-        .map_err(|e| format!("credential.{method}: bad response body: {e}"))?;
+        .map_err(|e| format!("{service}.{method}: bad response body: {e}"))?;
     if !parsed.success {
-        return Err(parsed.error.unwrap_or_else(|| format!("credential.{method}: unknown error")));
+        return Err(parsed.error.unwrap_or_else(|| format!("{service}.{method}: unknown error")));
     }
     Ok(parsed.data.unwrap_or(serde_json::Value::Null))
 }

@@ -42,6 +42,12 @@ pub struct CommandNativeMemoryListData {
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryListResult {
     pub files: Vec<NativeMemoryFileMeta>,
+    /// The folder was found by a guess (a blank working directory and no
+    /// spawn on record), not from the agent's own launch: shown read-only
+    /// until the agent launches (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
+    /// §2.1.2).
+    #[serde(default)]
+    pub unverified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
