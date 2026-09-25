@@ -809,6 +809,8 @@ impl PersistentSubprocessController {
                                     );
                                     // Appended after THIS line, like the boundary release.
                                     released_deferred_line = Some(released);
+                                    // Automated input inside the running turn.
+                                    health_read.note_input(crate::backend::blockcontroller::health::TurnOrigin::Automated);
                                 }
                                 DeferredFlush::Held | DeferredFlush::Failed => {
                                     if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
