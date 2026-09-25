@@ -19,10 +19,8 @@ type HostInfo = {
     hostname: string;
     os: string;
     localIp: string;
-    instanceId: string;
     version: string;
     dataDir: string;
-    hostType: string;
     pid: number;
     ports: {
         ipc: string;
@@ -127,6 +125,20 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
         });
     });
 
+    // Data-path link → OS file manager. Errors surface inline (a headless
+    // Linux box with no handler would otherwise look like a dead link).
+    const fileManagerLabel = () =>
+        isMacOS() ? "Reveal in Finder" : isLinux() ? "Open in file manager" : "Show in File Explorer";
+    const [openDirError, setOpenDirError] = createSignal<string | null>(null);
+    const openDataDir = async () => {
+        setOpenDirError(null);
+        try {
+            await invokeCommand("open_in_file_manager", { target: "data" });
+        } catch (e) {
+            setOpenDirError(`Couldn't open folder: ${e}`);
+        }
+    };
+
     const muxbus = props.muxbus;
     const muxbusOk = () => {
         const s = muxbus.status();
@@ -202,22 +214,40 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     <span class="status-bar-popover-mono">{props.hostInfo()!.localIp}</span>
                 </div>
 
-                {/* Instance Info */}
+                {/* Process Info */}
                 <div class="status-bar-popover-divider" />
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Instance</span>
-                    <span>{props.hostInfo()!.instanceId}</span>
-                </div>
                 <div class="status-bar-popover-row">
                     <span class="status-bar-popover-label">PID</span>
                     <span class="status-bar-popover-mono">{props.hostInfo()!.pid}</span>
                 </div>
                 <div class="status-bar-popover-row">
                     <span class="status-bar-popover-label">Data</span>
-                    <span class="status-bar-popover-mono" style={{ "font-size": "0.85em", "max-width": "220px", "overflow": "hidden", "text-overflow": "ellipsis" }}>
+                    {/* The path itself is the link: click opens it in the OS file
+                        manager. The host resolves the directory from a closed
+                        target, never from this path string.
+                        Spec: SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md §4 */}
+                    <button
+                        type="button"
+                        class="status-bar-popover-mono status-bar-popover-link"
+                        style={{ "font-size": "0.85em", "max-width": "220px", "overflow": "hidden", "text-overflow": "ellipsis" }}
+                        data-tip={`${fileManagerLabel()}: ${props.hostInfo()!.dataDir}`}
+                        onClick={() => void openDataDir()}
+                    >
                         {props.hostInfo()!.dataDir}
-                    </span>
+                    </button>
                 </div>
+                <Show when={openDirError()}>
+                    <div
+                        class="status-bar-popover-row"
+                        style={{
+                            "padding-left": "12px",
+                            "font-size": "0.85em",
+                            color: "var(--warning-color, #d97706)",
+                        }}
+                    >
+                        <span>⚠ {openDirError()}</span>
+                    </div>
+                </Show>
 
                 {/* Network — LAN discovery toggle.
                     Spec: docs/specs/lan-discovery-toggle.md */}
@@ -545,4 +575,4 @@ const HostPopover = (): JSX.Element => {
 
 HostPopover.displayName = "HostPopover";
 
-export { HostPopover };
+export { HostPopover, HostPopoverPanel };
