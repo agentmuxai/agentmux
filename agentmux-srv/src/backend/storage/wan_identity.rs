@@ -43,7 +43,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::error::StoreError;
 
 /// Bumped only by additive changes (new tables, new nullable columns).
-const SCHEMA_VERSION: i64 = 1;
+/// v2 (D2): the receiver tables — peer-record cache, known instances, and
+/// seen signatures.
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS wan_meta (
@@ -72,6 +74,40 @@ const SCHEMA: &str = "
         -- cloud directory, and when. NULL until then.
         published_fp TEXT,
         published_at INTEGER
+    );
+    -- v2 (D2, receiver side) --
+    -- Directory records fetched for verification. Self-certifying and
+    -- content-addressed by the key fingerprint, so a cached record never
+    -- expires; re-checked against its chain on every use.
+    CREATE TABLE IF NOT EXISTS wan_peer_records (
+        instance_id TEXT    NOT NULL,
+        agent_id    TEXT    NOT NULL,
+        channel     TEXT    NOT NULL,
+        key_fp      TEXT    NOT NULL,
+        record      TEXT    NOT NULL,
+        fetched_at  INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, agent_id, channel, key_fp)
+    );
+    -- Every verified instance, recorded on first sight (§2.6). approved_at is
+    -- written only by the host-gated approval window, which ships disabled;
+    -- revoked_at is sticky.
+    CREATE TABLE IF NOT EXISTS wan_known_instances (
+        instance_id           TEXT    PRIMARY KEY,
+        host_hint             TEXT    NOT NULL,
+        first_seen_at         INTEGER NOT NULL,
+        approved_at           INTEGER,
+        revoked_at            INTEGER,
+        revocation_checked_at INTEGER
+    );
+    -- (instance, agent, msgid) already delivered (§2.5). Written after
+    -- successful local delivery; pruned once the message could no longer
+    -- pass freshness.
+    CREATE TABLE IF NOT EXISTS wan_seen_sigs (
+        instance_id TEXT    NOT NULL,
+        agent_id    TEXT    NOT NULL,
+        msg_id      TEXT    NOT NULL,
+        expires_at  INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, agent_id, msg_id)
     );
 ";
 
@@ -143,8 +179,29 @@ impl WanAgentKey {
     }
 }
 
+/// What this install knows about another instance (§2.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KnownInstance {
+    pub approved_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+    pub revocation_checked_at: Option<i64>,
+}
+
 pub struct WanIdentityStore {
     conn: Mutex<Connection>,
+}
+
+static GLOBAL: std::sync::OnceLock<std::sync::Arc<WanIdentityStore>> = std::sync::OnceLock::new();
+
+/// Register the process's `wan.db` for code that has no channel object store
+/// in hand — the cloud subscriber runs against `id_store`. Set once, at
+/// bootstrap, alongside `Store::set_wan_identity`.
+pub fn install_global(store: std::sync::Arc<WanIdentityStore>) {
+    let _ = GLOBAL.set(store);
+}
+
+pub fn global() -> Option<std::sync::Arc<WanIdentityStore>> {
+    GLOBAL.get().cloned()
 }
 
 /// `<channel dir>/wan-identity/wan.db`, from the launcher-provided paths.
@@ -417,6 +474,128 @@ impl WanIdentityStore {
         )?;
         Self::agent_key_load_locked(&conn, &key)?
             .ok_or_else(|| StoreError::Other("wan_agent_keys row missing after mint".into()))
+    }
+
+    // ── Receiver side (D2, §2.3/§2.5/§2.6) ──
+
+    /// A cached directory record for exactly this (instance, agent, channel,
+    /// fingerprint). The caller re-checks its chain; a row that no longer
+    /// parses is treated as absent.
+    pub fn peer_record_get(
+        &self,
+        instance_id: &str,
+        agent_id: &str,
+        channel: &str,
+        key_fp: &str,
+    ) -> Result<Option<agentmux_common::jekt_sign::WanKeyRecord>, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT record FROM wan_peer_records \
+                 WHERE instance_id = ?1 AND agent_id = ?2 AND channel = ?3 AND key_fp = ?4",
+                params![instance_id.to_lowercase(), agent_id.to_lowercase(), channel, key_fp],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+    }
+
+    /// Cache a record whose chain the caller has checked.
+    pub fn peer_record_put(&self, record: &agentmux_common::jekt_sign::WanKeyRecord) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "INSERT OR REPLACE INTO wan_peer_records \
+             (instance_id, agent_id, channel, key_fp, record, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                record.instance_id,
+                record.agent_id,
+                record.channel,
+                record.key_fp,
+                serde_json::to_string(record)?,
+                agentmux_common::time::now_secs(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Forget every cached peer record — on logout or account switch (§2.3).
+    pub fn peer_cache_clear(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute("DELETE FROM wan_peer_records", [])?;
+        Ok(())
+    }
+
+    /// Record `instance_id` as seen (first sight inserts it) and return what
+    /// is known about it.
+    pub fn known_instance_observe(&self, instance_id: &str, host_hint: &str, now: i64) -> Result<KnownInstance, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "INSERT OR IGNORE INTO wan_known_instances (instance_id, host_hint, first_seen_at) VALUES (?1, ?2, ?3)",
+            params![instance_id, host_hint, now],
+        )?;
+        Ok(conn.query_row(
+            "SELECT approved_at, revoked_at, revocation_checked_at FROM wan_known_instances WHERE instance_id = ?1",
+            params![instance_id],
+            |r| {
+                Ok(KnownInstance {
+                    approved_at: r.get(0)?,
+                    revoked_at: r.get(1)?,
+                    revocation_checked_at: r.get(2)?,
+                })
+            },
+        )?)
+    }
+
+    /// Record a revocation-status check. `revoked` is sticky: a later check
+    /// that says "not revoked" never clears it.
+    pub fn known_instance_record_revocation_check(
+        &self,
+        instance_id: &str,
+        revoked: bool,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "UPDATE wan_known_instances SET revocation_checked_at = ?2, \
+             revoked_at = CASE WHEN ?3 THEN COALESCE(revoked_at, ?2) ELSE revoked_at END \
+             WHERE instance_id = ?1",
+            params![instance_id, now, revoked],
+        )?;
+        Ok(())
+    }
+
+    /// Whether this (instance, agent, msgid) was already delivered.
+    pub fn seen_sig_contains(&self, instance_id: &str, agent_id: &str, msg_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM wan_seen_sigs WHERE instance_id = ?1 AND agent_id = ?2 AND msg_id = ?3",
+                params![instance_id.to_lowercase(), agent_id.to_lowercase(), msg_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// Record a delivered signature until `expires_at`, and prune the rows
+    /// that could no longer pass freshness at `now` — the same clock the
+    /// verifier's freshness check used, so a row is never pruned while its
+    /// message could still verify.
+    pub fn seen_sig_record(
+        &self,
+        instance_id: &str,
+        agent_id: &str,
+        msg_id: &str,
+        expires_at: i64,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "INSERT OR IGNORE INTO wan_seen_sigs (instance_id, agent_id, msg_id, expires_at) VALUES (?1, ?2, ?3, ?4)",
+            params![instance_id.to_lowercase(), agent_id.to_lowercase(), msg_id, expires_at],
+        )?;
+        conn.execute("DELETE FROM wan_seen_sigs WHERE expires_at < ?1", params![now])?;
+        Ok(())
     }
 
     /// Delete the keys filed under each name (folded as the key tables fold).

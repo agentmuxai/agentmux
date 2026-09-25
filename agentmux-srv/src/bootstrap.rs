@@ -737,7 +737,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     host_hint = %instance.host_hint,
                     "wan identity: store attached"
                 );
-                mstore_raw.set_wan_identity(Arc::new(store));
+                let store = Arc::new(store);
+                backend::storage::wan_identity::install_global(store.clone());
+                mstore_raw.set_wan_identity(store);
             }
             Err(e) => tracing::warn!(
                 path = %path.display(),
