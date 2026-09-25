@@ -123,9 +123,6 @@ async fn main() {
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
-    // First versions for pre-existing memory files, before the detector can
-    // mistake them for outside writes (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md M1).
-    backend::native_memory_drift::backfill_first_sight_versions(&state.mstore, &state.id_store);
     backend::native_memory_drift::spawn(
         state.fs_watch_pool.clone(),
         state.mstore.clone(),

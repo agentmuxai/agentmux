@@ -90,13 +90,23 @@ pub(crate) fn check_and_record_drift(
 /// outside AgentMux", as it did for every file after a new local-build
 /// channel (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §1.3, phase M1).
 ///
-/// Runs at startup after the identity stores are attached, so an agent's
-/// account-linked directory resolves; this used to be migration m0024,
-/// which ran before that and fell back to a registry guess. Only verified
-/// directories are used (`list_all_memory_targets`). Returns the number of
-/// versions recorded.
-pub(crate) fn backfill_first_sight_versions(mstore: &Store, id_store: &Store) -> usize {
-    backfill_first_sight_versions_for(id_store, &list_all_memory_targets(mstore))
+/// Runs in the drift detector's sweep, once per agent, the first time the
+/// agent's directory is verified: at startup (after the identity stores are
+/// attached, so an agent's account-linked directory resolves — this used to
+/// be migration m0024, which ran before that and fell back to a registry
+/// guess), and later for an agent that becomes verified mid-session, e.g.
+/// on its first spawn. A file that appears in an already-known directory is
+/// left to drift detection. Returns the number of versions recorded.
+pub(crate) fn backfill_newly_verified(
+    id_store: &Store,
+    targets: &[(String, PathBuf)],
+    known: &mut HashSet<String>,
+) -> usize {
+    let new: Vec<(String, PathBuf)> = targets.iter().filter(|(id, _)| !known.contains(id)).cloned().collect();
+    for (id, _) in &new {
+        known.insert(id.clone());
+    }
+    backfill_first_sight_versions_for(id_store, &new)
 }
 
 fn backfill_first_sight_versions_for(id_store: &Store, targets: &[(String, PathBuf)]) -> usize {
@@ -317,8 +327,11 @@ fn spawn_slow_path(mstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::
         // watched_dirs/dir_to_agent — see reconciliation_sweep_once's own
         // doc comment on why this can't just be a fresh HashSet per call.
         let mut deleted_notified: HashSet<(String, String)> = HashSet::new();
+        // Agents whose directory has had its first-sight backfill.
+        let mut backfilled: HashSet<String> = HashSet::new();
         loop {
             tick.tick().await;
+            backfill_newly_verified(&id_store, &list_all_memory_targets(&mstore), &mut backfilled);
             reconciliation_sweep_once(&mstore, &id_store, &broker, &mut deleted_notified);
         }
     });
@@ -450,9 +463,19 @@ mod tests {
         std::fs::write(dir.path().join("MEMORY.md"), "pre-existing").unwrap();
         std::fs::write(dir.path().join("notes.txt"), "not memory").unwrap();
         let targets = vec![("agent-1".to_string(), dir.path().to_path_buf())];
+        let mut known = HashSet::new();
 
-        assert_eq!(backfill_first_sight_versions_for(&store, &targets), 1);
-        assert_eq!(backfill_first_sight_versions_for(&store, &targets), 0, "idempotent");
+        assert_eq!(backfill_newly_verified(&store, &targets, &mut known), 1);
+        // A file that appears later in a known directory is an outside write
+        // for drift detection to record, not another first sighting.
+        std::fs::write(dir.path().join("later.md"), "appeared later").unwrap();
+        assert_eq!(backfill_newly_verified(&store, &targets, &mut known), 0);
+        assert!(store.agent_native_memory_version_latest("agent-1", "later.md").unwrap().is_none());
+        // An agent verified mid-session gets its own first sighting.
+        let dir2 = tempfile::tempdir().unwrap();
+        std::fs::write(dir2.path().join("MEMORY.md"), "second agent").unwrap();
+        let more = vec![targets[0].clone(), ("agent-2".to_string(), dir2.path().to_path_buf())];
+        assert_eq!(backfill_newly_verified(&store, &more, &mut known), 1);
         let history = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].source, "agent_inferred");

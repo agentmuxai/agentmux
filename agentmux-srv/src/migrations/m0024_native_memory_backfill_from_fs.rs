@@ -119,7 +119,7 @@ impl Migration for M0024NativeMemoryBackfillFromFs {
         // account-linked directory can't be resolved yet, and the registry
         // guess it fell back to attributed one agent's files to another.
         // Startup runs it after the stores are attached instead
-        // (`native_memory_drift::backfill_first_sight_versions`,
+        // (`native_memory_drift::backfill_newly_verified`, in the drift sweep,
         // SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md phase M1).
         let _ = &ctx.channel_store_path;
         tracing::info!(relabeled, "native_memory_backfill_from_fs: complete (repair only)");
