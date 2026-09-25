@@ -254,6 +254,8 @@ mod spawn_site_coverage {
          "probe: OS builtin PATH lookup, output parsed then discarded"),
         ("src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
          "test: disposable `sleep 30` made its own process-group leader, to prove a group-kill reaches an isolated group"),
+        ("src/backend/claude_layout.rs", "\"git\"", 1,
+         "test: builds a throwaway repository with a linked worktree in a temp dir, to check the CLI's memory-folder rule"),
         ("src/backend/lsp/supervisor.rs", "&resolved", 1,
          "sanitized: language server, sanitize_process_command"),
         ("src/backend/mcp_probe.rs", "command", 1,
