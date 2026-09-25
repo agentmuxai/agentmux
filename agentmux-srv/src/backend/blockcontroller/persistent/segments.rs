@@ -51,17 +51,26 @@ impl PersistentSubprocessController {
             return;
         }
         let provider = crate::backend::obj::meta_get_string(&meta, "agentProvider", "");
-        let report = crate::backend::memory_reconcile::reconcile_before_spawn(
-            gfs,
-            mstore,
-            &crate::backend::memory_reconcile::SpawnMemory {
-                uid,
-                provider: &provider,
-                config_dir: config.env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str),
-                cwd: &config.working_dir,
-            },
-            crate::backend::memory_reconcile::RECONCILE_BUDGET,
-        );
+        let reconcile = || {
+            crate::backend::memory_reconcile::reconcile_before_spawn(
+                gfs,
+                mstore,
+                &crate::backend::memory_reconcile::SpawnMemory {
+                    uid,
+                    provider: &provider,
+                    config_dir: config.env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+                    cwd: &config.working_dir,
+                },
+                crate::backend::memory_reconcile::RECONCILE_BUDGET,
+            )
+        };
+        // Up to a second of blocking file and SQLite I/O: on the async
+        // callers' runtime (run_agent_turn, agent.send) hand the worker's
+        // other tasks off first. block_in_place panics on a current-thread
+        // runtime, where there is no other worker to hand them to.
+        let on_multi_thread = tokio::runtime::Handle::try_current()
+            .is_ok_and(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread);
+        let report = if on_multi_thread { tokio::task::block_in_place(reconcile) } else { reconcile() };
         if report.deferred {
             tracing::info!(block_id = %self.block_id, uid, "memory reconcile deferred: over budget");
         } else if report != Default::default() {

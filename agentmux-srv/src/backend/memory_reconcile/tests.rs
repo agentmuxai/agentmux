@@ -384,3 +384,90 @@ fn a_file_without_read_permission_is_not_taken_for_deleted() {
     assert_eq!(r.unreadable, 1);
     assert_eq!(f.head_body("locked.md").as_deref(), Some("secret"), "not tombstoned");
 }
+
+/// Second review P1: a refill of a missing folder cut short must not turn
+/// the files it didn't reach into deletions — here or anywhere else.
+#[test]
+fn a_refill_cut_short_never_deletes_the_rest() {
+    let f = fixture();
+    for n in ["MEMORY.md", "a.md", "b.md", "c.md"] {
+        f.put(n, n);
+    }
+    f.run();
+    // A second folder (another account) holding the same files.
+    let other = tempfile::tempdir().unwrap();
+    let other_cfg = other.path().display().to_string();
+    f.run_in(&other_cfg);
+    std::fs::remove_dir_all(f.dir()).unwrap();
+
+    let partial = f.run_files(2);
+    assert!(partial.deferred, "{partial:?}");
+    let next = f.run();
+    assert_eq!(next.captured, 0, "nothing captured as deleted: {next:?}");
+    assert_eq!(record::heads(&f.fs, UID).unwrap().live().count(), 4);
+    for n in ["a.md", "b.md", "c.md"] {
+        assert_eq!(f.get(n).as_deref(), Some(n));
+    }
+    assert_eq!(f.run_in(&other_cfg).deleted, 0, "the other folder keeps everything");
+}
+
+/// Second review P2: an emptied folder is refilled, not a wholesale deletion.
+#[test]
+fn an_emptied_folder_is_refilled_not_deleted_everywhere() {
+    let f = fixture();
+    for n in ["MEMORY.md", "a.md"] {
+        f.put(n, n);
+    }
+    f.run();
+    let other = tempfile::tempdir().unwrap();
+    let other_cfg = other.path().display().to_string();
+    f.run_in(&other_cfg);
+    for n in ["MEMORY.md", "a.md"] {
+        std::fs::remove_file(f.dir().join(n)).unwrap();
+    }
+    let r = f.run();
+    assert_eq!((r.captured, r.written), (0, 2), "{r:?}");
+    assert_eq!(f.run_in(&other_cfg).deleted, 0);
+}
+
+/// Second review P2: if the other side of a conflict can't be written, the
+/// winner isn't recorded either, so the conflict is raised again next pass.
+#[cfg(unix)]
+#[test]
+fn a_conflict_whose_copy_fails_is_raised_again_not_lost() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.put("notes.md", "base");
+    f.run();
+    f.change_elsewhere("notes.md", Some("theirs"));
+    f.put("notes.md", "mine");
+    std::fs::set_permissions(f.dir(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(f.dir().join(".probe"), b"").is_ok() {
+        std::fs::set_permissions(f.dir(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        return; // running as root
+    }
+    let failed = f.run();
+    std::fs::set_permissions(f.dir(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(failed.skipped, Some("error"));
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("theirs"), "the winner wasn't recorded");
+
+    let again = f.run();
+    assert_eq!(again.conflicts, 1, "{again:?}");
+    let copies = Fixture::conflict_files(&f.dir());
+    assert_eq!(f.get(&copies[0]).as_deref(), Some("theirs"));
+}
+
+/// Second review P2 (latent): a head whose name the disk scan doesn't
+/// recognise is neither written nor tombstoned.
+#[test]
+fn a_head_the_disk_scan_skips_is_left_out() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.run();
+    f.change_elsewhere("notes.v2.md", Some("x"));
+    f.run();
+    assert!(f.get("notes.v2.md").is_none());
+    f.run();
+    assert_eq!(f.head_body("notes.v2.md").as_deref(), Some("x"), "not tombstoned");
+}
