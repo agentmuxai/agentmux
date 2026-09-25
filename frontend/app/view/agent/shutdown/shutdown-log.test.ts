@@ -17,6 +17,7 @@ import {
     applyShutdownEvent,
     beginShutdownLog,
     endShutdownLog,
+    failShutdownLog,
     shutdownLogFor,
     visibleShutdownLines,
     type ShutdownLog,
@@ -64,5 +65,25 @@ describe("beginShutdownLog / endShutdownLog", () => {
         endShutdownLog("b1");
         expect(unsubscribe).toHaveBeenCalledTimes(1);
         expect(shutdownLogFor("b1")).toBeUndefined();
+    });
+});
+
+describe("failShutdownLog (ReAgent P1 on #3784)", () => {
+    it("a close rejected before srv reported anything shows the error, so the pane offers a way out", () => {
+        beginShutdownLog("b2");
+        failShutdownLog("b2", "ClosePane: tab not found");
+        expect(shutdownLogFor("b2")?.error).toBe("ClosePane: tab not found");
+        endShutdownLog("b2");
+    });
+
+    it("does nothing to a pane that isn't closing, or already finished", () => {
+        failShutdownLog("never-began", "x");
+        expect(shutdownLogFor("never-began")).toBeUndefined();
+        beginShutdownLog("b3");
+        const handler = subscriptions[subscriptions.length - 1].handler;
+        handler({ data: ev(1, "done", "closing") });
+        failShutdownLog("b3", "late");
+        expect(shutdownLogFor("b3")?.error).toBeUndefined();
+        endShutdownLog("b3");
     });
 });

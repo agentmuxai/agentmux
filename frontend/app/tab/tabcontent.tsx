@@ -22,7 +22,9 @@ import {
     type BusyMember,
     type PaneCloseProbe,
 } from "@/app/tab/pane-close-guard";
-import { beginShutdownLog } from "@/app/view/agent/shutdown/shutdown-log";
+import { beginShutdownLog, endShutdownLog, failShutdownLog } from "@/app/view/agent/shutdown/shutdown-log";
+import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
+import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -60,14 +62,26 @@ function isAgentBlock(blockId: string): boolean {
 /**
  * Close agent panes in place (§5.5): the pane stays, covered by its shutdown
  * log, and srv removes each tab from the layout once it is down — the
- * `delete` actions it queues for a waiting frontend. A failure before srv
- * could start (it reports later failures in the log itself) is flashed.
+ * `delete` actions it queues for a waiting frontend. srv reports failures
+ * during the close in the log itself; a rejection before it started is put
+ * there too, so the pane offers Keep open / Try again instead of hanging.
  */
-function closeWithShutdownLog(blockIds: string[]): void {
-    for (const id of blockIds) {
-        if (isAgentBlock(id)) beginShutdownLog(id);
-    }
+function closeWithShutdownLog(tabId: string, blockIds: string[]): void {
+    const agentIds = blockIds.filter(isAgentBlock);
+    for (const id of agentIds) beginShutdownLog(id);
     services.ObjectService.ClosePane(blockIds, true).catch((err) => {
+        if (/block not found/i.test(String(err))) {
+            // Every block was already gone, so srv can't name their tab to
+            // queue the layout change: drop them here instead (a safe no-op
+            // for any the layout no longer has).
+            const model = getLayoutModelForTabById(tabId);
+            for (const id of blockIds) {
+                if (model) removeMovedBlock(model, id);
+                endShutdownLog(id);
+            }
+            return;
+        }
+        for (const id of agentIds) failShutdownLog(id, String(err));
         pushFlashError({
             id: "",
             icon: "triangle-exclamation",
@@ -163,7 +177,7 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 if (!confirmed) return false;
             }
             if (closesWithShutdownLog(blockIds, isAgentBlock)) {
-                closeWithShutdownLog(blockIds);
+                closeWithShutdownLog(props.tabId, blockIds);
                 return false;
             }
             return true;
