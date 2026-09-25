@@ -1,6 +1,6 @@
 # Spec: Armory Personal Memory — Content View
 
-**Status:** proposed — not implemented yet.
+**Status:** implemented — #3218 (current content shown in the Personal Memory history panel). §6's "no editing in the Armory" non-goal is REVERSED by `SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md` §2.4 (approved by the repo owner): the Personal Memory full view is editable, with the content moved below the history.
 **Date:** 2026-09-11
 **Verified against:** `e9d1d1b4d` (code, not spec prose)
 **Follows:** the Global Memory markdown-preview/resizable fix (PR #3199, merged

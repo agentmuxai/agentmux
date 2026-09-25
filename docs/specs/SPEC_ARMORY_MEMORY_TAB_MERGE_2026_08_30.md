@@ -1,7 +1,7 @@
 # Spec: Armory rail — merge "Global Memory" + "Personal Memory" into one "Memory" tab
 
 **Date:** 2026-08-30
-**Status:** Proposed
+**Status:** implemented — #2844 (Global + Personal Memory merged into one Memory tab).
 **Motivated by:** direct request — collapse the two adjacent memory-scoped
 rail tabs into a single "Memory" tab, with Global and Personal as sections
 inside it, using the brain icon for the combined tab.
