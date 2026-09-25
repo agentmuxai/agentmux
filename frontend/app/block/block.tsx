@@ -27,7 +27,7 @@ import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
@@ -73,13 +73,37 @@ export function resolveEffectiveViewType(blockView: string): string {
     return effectiveView;
 }
 
+// Each ViewModel's own reactive root, disposed with it (`disposeViewModel`).
+const viewModelRoots = new WeakMap<ViewModel, () => void>();
+
+/**
+ * Builds a ViewModel in its OWN reactive root. It is called from inside
+ * `Block`'s effect, and a constructor's memos/effects used to belong to that
+ * effect run, while its reads (block meta, config) subscribed the effect to
+ * them. The first meta change then re-ran the effect, which disposed the run
+ * and with it every memo of the cached, reused ViewModel: Sysinfo's plot type
+ * changed once and then froze. `createRoot` gives the constructor an owner
+ * that lives as long as the ViewModel, and runs it untracked.
+ * REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §3.
+ */
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     const effectiveView = resolveEffectiveViewType(blockView);
     const ctor = getBlockViewClass(effectiveView);
-    if (ctor != null) {
-        return new ctor(blockId, nodeModel as any);
-    }
-    return makeDefaultViewModel(blockId, effectiveView);
+    let disposeRoot!: () => void;
+    const vm = createRoot((dispose) => {
+        disposeRoot = dispose;
+        return ctor != null
+            ? (new ctor(blockId, nodeModel as any) as ViewModel)
+            : makeDefaultViewModel(blockId, effectiveView);
+    });
+    viewModelRoots.set(vm, disposeRoot);
+    return vm;
+}
+
+function disposeViewModel(vm: ViewModel): void {
+    vm.dispose?.();
+    viewModelRoots.get(vm)?.();
+    viewModelRoots.delete(vm);
 }
 
 function getViewElem(
@@ -407,7 +431,7 @@ function Block(props: BlockProps): JSX.Element {
         // us, but never dispose someone else's live vm out from under them).
         const liveVm = getBlockComponentModel(props.nodeModel.blockId)?.viewModel;
         for (const vm of createdViewModels) {
-            if (vm !== liveVm) vm?.dispose?.();
+            if (vm && vm !== liveVm) disposeViewModel(vm);
         }
     });
 

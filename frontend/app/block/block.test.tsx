@@ -18,7 +18,7 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createMemo, createSignal, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
 
@@ -77,8 +77,26 @@ class TestAgentViewModel {
         constructedViewModels.push({ blockId, nodeModel });
     }
 }
+// Mirrors what SysinfoViewModel (and most view models) do in their
+// constructor: create a memo over the block's meta, and read the block
+// directly while building (sysinfo's loadInitialData -> numPoints()).
+const memoVmDisposals: string[] = [];
+class TestMemoViewModel {
+    viewType = "memo";
+    blockId: string;
+    viewComponent = null;
+    plotType: () => string | undefined;
+    constructor(blockId: string, _nodeModel: NodeModel) {
+        this.blockId = blockId;
+        const blockAtom = blockMetaSignals.get(blockId)![0] as () => { meta?: Record<string, unknown> };
+        void blockAtom()?.meta?.["plot"];
+        this.plotType = createMemo(() => blockAtom()?.meta?.["plot"] as string | undefined);
+        onCleanup(() => memoVmDisposals.push(blockId));
+    }
+}
 vi.mock("@/app/block/block-registry", () => ({
-    getBlockViewClass: (view: string) => (view === "agent" ? TestAgentViewModel : null),
+    getBlockViewClass: (view: string) =>
+        view === "agent" ? TestAgentViewModel : view === "memo" ? TestMemoViewModel : null,
 }));
 
 vi.mock("./blockframe", () => ({
@@ -139,7 +157,46 @@ afterEach(() => {
     blockMetaSignals.clear();
     registry.clear();
     constructedViewModels.length = 0;
+    memoVmDisposals.length = 0;
     setBackfillSettled(true);
+});
+
+/**
+ * block.tsx builds a ViewModel inside a reactive effect. A constructor's memos
+ * used to belong to that effect run, and its reads subscribed the effect to the
+ * block — so the first meta change re-ran the effect, disposed the run, and
+ * with it every memo of the (cached, reused) ViewModel. Sysinfo's plot type
+ * changed once, then froze (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §3).
+ */
+describe("Block — a ViewModel's own reactive state outlives meta changes", () => {
+    function setMeta(blockId: string, meta: Record<string, unknown>) {
+        const sig = blockMetaSignals.get(blockId);
+        if (sig) sig[1]({ meta } as any);
+        else blockMetaSignals.set(blockId, createSignal<{ meta?: any }>({ meta }));
+    }
+
+    it("a constructor memo keeps tracking the block across repeated meta changes", async () => {
+        setMeta("m1", { view: "memo", plot: "CPU" });
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "m1" })} preview={false} />);
+        const vm = (registry.get("m1") as { viewModel: TestMemoViewModel }).viewModel;
+        expect(vm.plotType()).toBe("CPU");
+
+        setMeta("m1", { view: "memo", plot: "CPU + Mem" });
+        expect(vm.plotType()).toBe("CPU + Mem");
+        setMeta("m1", { view: "memo", plot: "Mem" });
+        expect(vm.plotType()).toBe("Mem");
+        expect(memoVmDisposals).toEqual([]);
+    });
+
+    it("disposes the ViewModel's own reactive state when the mount that created it unmounts", async () => {
+        setMeta("m2", { view: "memo", plot: "CPU" });
+        const Block = await loadBlock();
+        const { unmount } = render(() => <Block nodeModel={makeNodeModel({ blockId: "m2" })} preview={false} />);
+        expect(memoVmDisposals).toEqual([]);
+        unmount();
+        expect(memoVmDisposals).toEqual(["m2"]);
+    });
 });
 
 describe("Block — preview/real ViewModel isolation", () => {
