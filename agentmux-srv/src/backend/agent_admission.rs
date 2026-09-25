@@ -424,11 +424,16 @@ fn find_uid_block(regs: &[serde_json::Value], uid: &str) -> Option<String> {
 
 /// Wording every single-live-instance refusal contains (lower-cased), so
 /// the failure classifier and callers can recognise one without a type.
-pub const REFUSAL_MARKERS: [&str; 4] = [
+///
+/// Only refusals that mean *another instance holds the agent*. `acquire`'s
+/// lease-file I/O failure ("… Refusing to start it twice.") is deliberately
+/// not one: it is a local, possibly transient error, and classifying it as
+/// "running in another instance" would offer Take over instead of Retry
+/// (ReAgent P1 on #3742).
+pub const REFUSAL_MARKERS: [&str; 3] = [
     "is already running in another agentmux instance",
     "was taken over by another agentmux instance",
     "lost its single-instance lease",
-    "refusing to start it twice",
 ];
 
 /// Is `message` a single-live-instance refusal (any of this module's
@@ -445,7 +450,10 @@ pub fn is_admission_refusal(message: &str) -> bool {
 /// back. A takeover the user starts from this srv clears it.
 pub const HANDOVER_HOLD: std::time::Duration = std::time::Duration::from_secs(30);
 
-static HANDOVER_HOLDS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>> =
+/// One entry per agent this srv handed over: until when, and to whom (for
+/// the refusal text). A single map, so an expired hold goes away whole
+/// (ReAgent P2 on #3742).
+static HANDOVER_HOLDS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, String)>>> =
     std::sync::LazyLock::new(Default::default);
 
 /// Record that this srv just handed `uid` over (see [`HANDOVER_HOLD`]).
@@ -453,46 +461,29 @@ pub fn hold_after_handover(uid: &str, to: &str) {
     HANDOVER_HOLDS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(uid.to_string(), std::time::Instant::now() + HANDOVER_HOLD);
-    HANDOVER_HOLDERS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(uid.to_string(), to.to_string());
+        .insert(uid.to_string(), (std::time::Instant::now() + HANDOVER_HOLD, to.to_string()));
 }
-
-static HANDOVER_HOLDERS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-    std::sync::LazyLock::new(Default::default);
 
 /// Drop any handover hold on `uid` — the user is taking it back.
 pub fn clear_handover_hold(uid: &str) {
     HANDOVER_HOLDS.lock().unwrap_or_else(|e| e.into_inner()).remove(uid);
-    HANDOVER_HOLDERS.lock().unwrap_or_else(|e| e.into_inner()).remove(uid);
 }
 
-/// `Some(refusal)` while `uid` is inside a handover hold on this srv.
+/// `Some(refusal)` while `uid` is inside a handover hold on this srv. An
+/// expired hold is removed here.
 fn handover_hold_refusal(uid: &str, agent: &str) -> Option<String> {
     let mut holds = HANDOVER_HOLDS.lock().unwrap_or_else(|e| e.into_inner());
-    match holds.get(uid) {
-        Some(until) if *until > std::time::Instant::now() => {
-            let to = HANDOVER_HOLDERS
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(uid)
-                .cloned()
-                .unwrap_or_default();
-            let agent = if agent.is_empty() { "This agent" } else { agent };
-            Some(format!(
-                "{agent} was taken over by another AgentMux instance on this host{}. \
-                 Use Take over to bring it back here.",
-                if to.is_empty() { String::new() } else { format!(" ({to})") }
-            ))
-        }
-        Some(_) => {
-            holds.remove(uid);
-            None
-        }
-        None => None,
+    let (until, to) = holds.get(uid)?.clone();
+    if until <= std::time::Instant::now() {
+        holds.remove(uid);
+        return None;
     }
+    let agent = if agent.is_empty() { "This agent" } else { agent };
+    Some(format!(
+        "{agent} was taken over by another AgentMux instance on this host{}. \
+         Use Take over to bring it back here.",
+        if to.is_empty() { String::new() } else { format!(" ({to})") }
+    ))
 }
 
 /// Where the instance currently running an agent can be reached.
@@ -729,6 +720,29 @@ mod tests {
             assert!(is_admission_refusal(&m), "not recognised: {m}");
         }
         assert!(!is_admission_refusal("failed to spawn persistent process: not found"));
+    }
+
+    /// ReAgent P1 on #3742: a local lease-file I/O error is not "running in
+    /// another instance" — it must keep a Retry, not get Take over.
+    #[test]
+    fn a_lease_file_io_error_is_not_classified_as_live_elsewhere() {
+        let io = "Could not confirm that Agent3 isn't already running elsewhere (lease file error: access denied). \
+                  Refusing to start it twice.";
+        assert!(!is_admission_refusal(io));
+        let f = crate::agents::failure::classify(None, None, io, None);
+        assert_ne!(f.code, crate::agents::failure::FailureClass::LiveElsewhere);
+    }
+
+    /// ReAgent P2 on #3742: an expired hold is removed whole.
+    #[test]
+    fn an_expired_handover_hold_is_removed() {
+        let uid = format!("uid-{}", uuid::Uuid::new_v4());
+        HANDOVER_HOLDS
+            .lock()
+            .unwrap()
+            .insert(uid.clone(), (std::time::Instant::now() - std::time::Duration::from_secs(1), "to".into()));
+        assert!(handover_hold_refusal(&uid, "Agent3").is_none());
+        assert!(!HANDOVER_HOLDS.lock().unwrap().contains_key(&uid));
     }
 
     #[test]
