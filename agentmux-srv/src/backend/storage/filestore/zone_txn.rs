@@ -101,6 +101,10 @@ impl FileStore {
     /// see the committed state and its writes commit together, or not at all
     /// when `f` returns `Err`. Serialized against every process sharing the
     /// database.
+    ///
+    /// `f` runs with this store's connection locked: it must not call any
+    /// other `FileStore` method (the lock isn't reentrant — that deadlocks).
+    /// Use the [`ZoneTxn`] it is given.
     pub fn zone_txn<T>(
         &self,
         zone_id: &str,
@@ -181,9 +185,11 @@ mod tests {
         let path = dir.path().join("filestore.db");
         let a = FileStore::open(&path).unwrap();
         let b = FileStore::open(&path).unwrap();
-        a.zone_txn(ZONE, |z| z.put("heads.json", b"short")).unwrap();
-        assert_eq!(b.read_file(ZONE, "heads.json").unwrap().as_deref(), Some(&b"short"[..])); // b caches size 5
+        // b creates the file, so b's cache holds its row (size 0) — the
+        // stale state a size-from-cache read would trust.
+        b.make_file(ZONE, "heads.json", Default::default(), Default::default()).unwrap();
         a.zone_txn(ZONE, |z| z.put("heads.json", b"a much longer body")).unwrap();
+        assert_eq!(b.read_file(ZONE, "heads.json").unwrap().as_deref(), Some(&b""[..]), "the cached read is stale");
         let got = b.read_files_consistent(ZONE, &["heads.json"]).unwrap();
         assert_eq!(got[0].as_deref(), Some(&b"a much longer body"[..]));
     }
