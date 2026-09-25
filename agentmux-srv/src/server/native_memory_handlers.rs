@@ -61,7 +61,12 @@ use super::AppState;
 /// The project folder is named by the CLI's own rule
 /// ([`crate::backend::claude_layout::project_dir_name`]).
 fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
-    let folder_name = crate::backend::claude_layout::project_dir_name(working_directory);
+    // Claude names the project folder from the absolute cwd, so `~` must be
+    // expanded first — a spawn segment records the block's `cmd:cwd`
+    // unexpanded (`~/.agentmux/agents/<slug>` for an agent.open default),
+    // and `--agentmux-agents-…` is a folder Claude never writes (#3603).
+    let working_directory = expand_home_dir_safe(working_directory);
+    let folder_name = crate::backend::claude_layout::project_dir_name(&working_directory.to_string_lossy());
 
     let base = if claude_config_dir.is_empty() {
         expand_home_dir_safe("~/.agentmux/shared/providers/claude")
@@ -147,6 +152,14 @@ pub(crate) fn memory_dir_for_agent(
         .instance_get_by_slug(agent_id)
         .map_err(|e| format!("memory: store: {e}"))?
     {
+        // The agent's own latest spawn knows its directory for certain
+        // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
+        if let Ok(Some(def)) = mstore.agent_def_get(&instance.id) {
+            let gfs = crate::backend::agent_session::global_transcript_store().map(|a| a.as_ref());
+            if let Some(dir) = memory_dir_from_latest_segment(gfs, &def.id) {
+                return Ok(dir);
+            }
+        }
         // Only trust the instance row when it actually carries a working
         // directory. An empty one is NOT an error and must NOT short-circuit:
         // `agent.open` substitutes a default (`~/.agentmux/agents/<slug>`)
@@ -340,53 +353,54 @@ fn memory_dir_for_registry_record(rec: &crate::registry::NamedAgentRecord) -> Op
     Some(memory_dir_for_cwd(&config_dir, &working_directory))
 }
 
-/// Every agent with a resolvable memory directory right now — both agents
-/// persisted to `db_agents` and live, registry-only agents that haven't
-/// been (or never will be) written back there. Deduped by canonical agent
-/// id; a `db_agents` row wins over its own registry record when both exist
-/// (the row is the more authoritative, complete source, and matches what
-/// `agent:memory:*` RPCs already key by).
+/// Every agent whose memory directory is verified — found from its own
+/// spawn or its explicit working directory — for the drift detector and the
+/// first-sight backfill (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2,
+/// phase M1).
 ///
-/// reagent P1 on PR #2675: the fs-watch drift detector's enumeration
-/// (`reconciliation_sweep_once`/`refresh_subscriptions` in
-/// `native_memory_drift.rs`) originally used only `mstore.agent_def_list()`
-/// — the same gap [`memory_dir_for_agent`] itself already had to work
-/// around for the App-API surface (see its own doc comment / issue #1836):
-/// a live agent spawned but not yet persisted to `db_agents` has no row
-/// there at all, so the detector silently skipped it, contradicting the
-/// spec's (§4.5) "every agent with an active session" contract.
+/// Unverified guesses (the registry record, the name-derived default for a
+/// blank working directory) are left out: a stale registry `identity_id`
+/// once made this list attribute one agent's files to another. A directory
+/// two agents resolve to is left out too — its files can't be attributed to
+/// either — until the memory record's claims decide it (phase M3).
 pub(crate) fn list_all_memory_targets(
     mstore: &crate::backend::storage::store::Store,
 ) -> Vec<(String, std::path::PathBuf)> {
+    let gfs = crate::backend::agent_session::global_transcript_store().map(|a| a.as_ref());
+    list_memory_targets_with(mstore, gfs)
+}
+
+fn list_memory_targets_with(
+    mstore: &crate::backend::storage::store::Store,
+    segments_fs: Option<&crate::backend::storage::filestore::FileStore>,
+) -> Vec<(String, std::path::PathBuf)> {
+    let Ok(agents) = mstore.agent_def_list() else {
+        return Vec::new();
+    };
+    let mut targets: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    let mut targets = Vec::new();
-
-    if let Ok(agents) = mstore.agent_def_list() {
-        for agent in &agents {
-            if let Some(dir) = memory_dir_for_agent_by_id(mstore, agent) {
-                if seen.insert(agent.id.clone()) {
-                    targets.push((agent.id.clone(), dir));
-                }
+    for agent in &agents {
+        if !seen.insert(agent.id.clone()) {
+            continue;
+        }
+        if let Some(r) = resolve_memory_dir_with(mstore, agent, segments_fs) {
+            if r.provenance != MemoryDirProvenance::Unverified {
+                targets.push((agent.id.clone(), r.path));
             }
         }
     }
-
-    if let Some(registry_dir) = crate::registry::resolve_shared_registry_dir() {
-        if let Ok(registry) = crate::registry::Registry::open(registry_dir) {
-            if let Ok(records) = registry.list_active() {
-                for rec in &records {
-                    let agent_id = rec.data.definition_id.clone();
-                    if agent_id.is_empty() || !seen.insert(agent_id.clone()) {
-                        continue;
-                    }
-                    if let Some(dir) = memory_dir_for_registry_record(rec) {
-                        targets.push((agent_id, dir));
-                    }
-                }
-            }
-        }
+    let key = |p: &std::path::PathBuf| p.canonicalize().unwrap_or_else(|_| p.clone());
+    let mut owners: std::collections::HashMap<std::path::PathBuf, usize> = std::collections::HashMap::new();
+    for (_, dir) in &targets {
+        *owners.entry(key(dir)).or_default() += 1;
     }
-
+    targets.retain(|(agent_id, dir)| {
+        let shared = owners.get(&key(dir)).copied().unwrap_or(0) > 1;
+        if shared {
+            tracing::debug!(agent_id, dir = %dir.display(), "memory: directory resolved by more than one agent; not attributed");
+        }
+        !shared
+    });
     targets
 }
 
@@ -630,6 +644,94 @@ pub(crate) fn memory_dir_for_agent_by_id(
     mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
 ) -> Option<std::path::PathBuf> {
+    resolve_memory_dir_by_id(mstore, agent).map(|r| r.path)
+}
+
+/// How an agent's memory directory was found
+/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2, phase M1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MemoryDirProvenance {
+    /// The config dir and working dir the agent's own latest spawn used,
+    /// from its continuity segment.
+    Spawn,
+    /// The agent's explicit working directory under its linked account.
+    WorkingDirectory,
+    /// A blank working directory with no spawn on record: the registry
+    /// record or the name-derived default. A guess — the stale registry
+    /// `identity_id` behind it once read another agent's files — so it is
+    /// read-only and never swept for drift.
+    Unverified,
+}
+
+pub(crate) struct ResolvedMemoryDir {
+    pub(crate) path: std::path::PathBuf,
+    pub(crate) provenance: MemoryDirProvenance,
+}
+
+/// The memory dir of the agent's latest Claude spawn, from its continuity
+/// segments in the global transcript store.
+fn memory_dir_from_latest_segment(
+    fs: Option<&crate::backend::storage::filestore::FileStore>,
+    agent_uid: &str,
+) -> Option<std::path::PathBuf> {
+    let latest = crate::backend::continuity_segments::segments(fs?, agent_uid)
+        .into_iter()
+        .filter(|s| s.start.provider == "claude" && !s.start.cwd.is_empty())
+        .max_by_key(|s| s.start.started_at_ms)?;
+    Some(memory_dir_for_cwd(latest.start.config_dir.as_deref().unwrap_or(""), &latest.start.cwd))
+}
+
+/// Resolve an agent's memory dir with how it was found: its latest spawn
+/// first, then its explicit working directory, then the blank-working-dir
+/// guess (read-only).
+pub(crate) fn resolve_memory_dir_by_id(
+    mstore: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+) -> Option<ResolvedMemoryDir> {
+    let gfs = crate::backend::agent_session::global_transcript_store().map(|a| a.as_ref());
+    resolve_memory_dir_with(mstore, agent, gfs)
+}
+
+fn resolve_memory_dir_with(
+    mstore: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+    segments_fs: Option<&crate::backend::storage::filestore::FileStore>,
+) -> Option<ResolvedMemoryDir> {
+    if let Some(path) = memory_dir_from_latest_segment(segments_fs, &agent.id) {
+        return Some(ResolvedMemoryDir { path, provenance: MemoryDirProvenance::Spawn });
+    }
+    legacy_memory_dir_by_id(mstore, agent).map(|(path, provenance)| ResolvedMemoryDir { path, provenance })
+}
+
+/// The memory dir of `agent_uid`'s latest spawn, if one is on record — for a
+/// caller that knows the agent's id but has no local row for it.
+pub(crate) fn memory_dir_from_spawn(agent_uid: &str) -> Option<std::path::PathBuf> {
+    let gfs = crate::backend::agent_session::global_transcript_store().map(|a| a.as_ref());
+    memory_dir_from_latest_segment(gfs, agent_uid)
+}
+
+/// The memory dir an AgentMux write may go to: never an unverified guess.
+pub(crate) fn memory_dir_for_write_by_id(
+    mstore: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+) -> Result<std::path::PathBuf, String> {
+    match resolve_memory_dir_by_id(mstore, agent) {
+        Some(r) if r.provenance != MemoryDirProvenance::Unverified => Ok(r.path),
+        Some(_) => Err(format!(
+            "agent {} has no verified memory directory yet (no working directory and no spawn on record); \
+             it becomes writable after the agent's next launch",
+            agent.id
+        )),
+        None => Err(format!("agent {} has no resolvable memory directory", agent.id)),
+    }
+}
+
+/// Today's resolution without spawn records: explicit working directory,
+/// else the blank-working-dir guess.
+fn legacy_memory_dir_by_id(
+    mstore: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+) -> Option<(std::path::PathBuf, MemoryDirProvenance)> {
     // Same blank-working_directory fallthrough as `memory_dir_for_agent`
     // (see its own note) — a blank field is "this row can't answer", not
     // "there is no memory dir". `agent.open` substitutes a default whenever
@@ -648,9 +750,13 @@ pub(crate) fn memory_dir_for_agent_by_id(
     // Both for the common case, since `working_directory` is blank by default.
     if !agent.working_directory.is_empty() {
         let config_dir = agent_claude_config_dir(mstore, &agent.id);
-        return Some(memory_dir_for_cwd(&config_dir, &agent.working_directory));
+        return Some((
+            memory_dir_for_cwd(&config_dir, &agent.working_directory),
+            MemoryDirProvenance::WorkingDirectory,
+        ));
     }
     memory_dir_for_blank_working_dir(mstore, &agent.id, &agent.name, &agent.slug)
+        .map(|dir| (dir, MemoryDirProvenance::Unverified))
 }
 
 fn version_summary_to_meta(v: crate::backend::storage::NativeMemoryVersionSummary) -> NativeMemoryVersionMeta {
@@ -1150,9 +1256,8 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 // See the identical comment on the list handler above — a
                 // blank working_directory is not "no memory dir".
-                let dir = memory_dir_for_agent_by_id(&mstore, &agent).ok_or_else(|| {
-                    format!("agent:memory:write_file: agent {} has no resolvable memory directory", cmd.agent_id)
-                })?;
+                let dir = memory_dir_for_write_by_id(&mstore, &agent)
+                    .map_err(|e| format!("agent:memory:write_file: {e}"))?;
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
 
@@ -1406,8 +1511,8 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // git-revert-not-git-reset guarantee from the spec's §4.3.
                 // See the identical comment on the list handler above — a
                 // blank working_directory is not "no memory dir".
-                let dir = memory_dir_for_agent_by_id(&mstore, &agent).ok_or_else(|| {
-                    format!("agent:memory:revert: agent {} has no resolvable memory directory", cmd.agent_id)
+                let dir = memory_dir_for_write_by_id(&mstore, &agent).map_err(|e| {
+                    format!("agent:memory:revert: {e}")
                 })?;
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:revert: mkdir: {e}"))?;
@@ -2319,67 +2424,35 @@ mod tests {
         assert!(history.versions[0].source_detail.contains("network-claimed"));
     }
 
-    /// The actual bug behind `SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md`:
-    /// SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md (#2901) fixed blank
-    /// `working_directory` resolution inside `memory_dir_for_agent`/
-    /// `memory_dir_for_agent_by_id` themselves, but these four RPC handlers had
-    /// their OWN separate, un-synced `agent.working_directory.is_empty()` check
-    /// that never called either resolver — so the fix never actually reached
-    /// `agent:memory:write_file`, the handler live traffic (the Armory Personal
-    /// Bundle grid, and the `MemoryWrite` MCP tool going through a *different*
-    /// path that DOES use the fixed resolver) hits. Live-tested against a running
-    /// v0.55.31 build: a `MemoryWrite` MCP call succeeded (App API path, already
-    /// fixed) while `agent:memory:write_file` for the exact same blank-workdir
-    /// agent definition failed outright with "has no configured working
-    /// directory" — this is the regression guard for that exact split.
+    /// A blank working directory with no spawn on record resolves only to a
+    /// guess — the name-derived default, which a same-named agent can share.
+    /// Reads still find it (the list test below), but a write is refused with
+    /// a message saying when it becomes writable
+    /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2, phase M1; this
+    /// reverses the write half of SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR).
     #[tokio::test]
-    async fn write_file_resolves_a_blank_working_directory_instead_of_erroring() {
+    async fn write_file_refuses_an_unverified_blank_working_directory() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
         let config = tempfile::tempdir().unwrap();
         let (engine, mut rx) = build_channel_state("agent-blankwd-write", "", config.path(), shared_id_store);
 
-        // Before the fix this errored with "has no configured working
-        // directory" — call_rpc itself asserts resp.error.is_empty().
-        call_rpc::<Option<serde_json::Value>>(
+        let err = call_rpc_expect_error(
             &engine,
             &mut rx,
             COMMAND_NATIVE_MEMORY_WRITE_FILE,
-            serde_json::json!({ "agent_id": "agent-blankwd-write", "filename": "MEMORY.md", "content": "hello from a blank-workdir agent" }),
+            serde_json::json!({ "agent_id": "agent-blankwd-write", "filename": "MEMORY.md", "content": "hello" }),
         )
         .await;
+        assert!(err.contains("no verified memory directory"), "{err}");
+        assert!(err.contains("next launch"), "the error says when it becomes writable: {err}");
 
-        let listed: NativeMemoryListResult = call_rpc(
-            &engine,
-            &mut rx,
-            COMMAND_NATIVE_MEMORY_LIST,
-            serde_json::json!({ "agent_id": "agent-blankwd-write" }),
-        )
-        .await;
-        assert_eq!(listed.files.len(), 1, "the write must be visible to list, not silently stranded");
-        assert_eq!(listed.files[0].filename, "MEMORY.md");
-
-        let read: NativeMemoryReadFileResult = call_rpc(
-            &engine,
-            &mut rx,
-            COMMAND_NATIVE_MEMORY_READ_FILE,
-            serde_json::json!({ "agent_id": "agent-blankwd-write", "filename": "MEMORY.md" }),
-        )
-        .await;
-        assert_eq!(read.content, "hello from a blank-workdir agent");
-
-        // It must have actually landed on disk at the SAME derived-default
-        // directory `agent.open` substitutes for this agent ("Test Agent") —
-        // not merely round-tripped through some other consistent-with-itself
-        // location. The sibling test below plants a file directly at this
-        // path and proves `list` finds it independently of this write path.
         let default_dir = crate::backend::base::expand_home_dir_safe(
             &crate::backend::storage::agents::default_agent_working_dir("Test Agent"),
         );
-        let expected_path =
-            memory_dir_for_cwd(&config.path().display().to_string(), &default_dir.to_string_lossy()).join("MEMORY.md");
-        assert!(expected_path.is_file(), "expected the write to land at {expected_path:?}");
+        let guessed = memory_dir_for_cwd(&config.path().display().to_string(), &default_dir.to_string_lossy());
+        assert!(!guessed.join("MEMORY.md").exists(), "nothing is written to the guessed directory");
     }
 
     /// list's OLD behavior for a blank working_directory was to silently
@@ -2423,42 +2496,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revert_resolves_a_blank_working_directory_instead_of_erroring() {
+    async fn revert_refuses_an_unverified_blank_working_directory() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
         let config = tempfile::tempdir().unwrap();
-        let (engine, mut rx) = build_channel_state("agent-blankwd-revert", "", config.path(), shared_id_store);
+        let (engine, mut rx) = build_channel_state("agent-blankwd-revert", "", config.path(), shared_id_store.clone());
+        let v1 = shared_id_store
+            .agent_native_memory_version_insert("agent-blankwd-revert", "MEMORY.md", "v1", "agent", "{}", "")
+            .unwrap();
 
-        call_rpc::<Option<serde_json::Value>>(
-            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
-            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md", "content": "v1" }),
-        ).await;
-        let history: NativeMemoryHistoryResult = call_rpc(
-            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
-            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md" }),
-        ).await;
-        call_rpc::<Option<serde_json::Value>>(
-            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
-            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md", "content": "v2" }),
-        ).await;
-
-        // Before the fix this errored with "has no configured working
-        // directory" — call_rpc itself asserts resp.error.is_empty().
-        call_rpc::<serde_json::Value>(
+        let err = call_rpc_expect_error(
             &engine, &mut rx, COMMAND_NATIVE_MEMORY_REVERT,
-            serde_json::json!({
-                "agent_id": "agent-blankwd-revert",
-                "filename": "MEMORY.md",
-                "target_version_id": history.versions[0].id,
-            }),
+            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md", "target_version_id": v1.id }),
         ).await;
-
-        let read: NativeMemoryReadFileResult = call_rpc(
-            &engine, &mut rx, COMMAND_NATIVE_MEMORY_READ_FILE,
-            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md" }),
-        ).await;
-        assert_eq!(read.content, "v1", "revert must have restored v1's content on disk");
+        assert!(err.contains("no verified memory directory"), "{err}");
     }
 
     #[tokio::test]
@@ -2742,12 +2794,12 @@ mod tests {
         assert_eq!(line_diff("c", "a\nb\nc\nd\ne"), "+ a\n+ b\n  c\n+ d\n+ e\n");
     }
 
-    // reagent P1 on PR #2675: the fs-watch drift detector's enumeration
-    // originally used only `mstore.agent_def_list()`, which misses a live
-    // agent spawned but never (or not yet) persisted to `db_agents` —
-    // contradicting spec §4.5's "every agent with an active session".
+    // A registry record is a guess about where an agent's memory is — its
+    // `identity_id` can be stale, which once attributed another agent's
+    // files to this one. Only verified directories are enumerated
+    // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2, phase M1).
     #[tokio::test]
-    async fn list_all_memory_targets_includes_registry_only_live_agents() {
+    async fn list_all_memory_targets_leaves_out_registry_only_agents() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
         let tmp = tempfile::tempdir().unwrap();
@@ -2778,8 +2830,8 @@ mod tests {
         let state = crate::server::tests::test_state();
         let targets = list_all_memory_targets(&state.mstore);
         assert!(
-            targets.iter().any(|(id, _)| id == "def-live-only"),
-            "a registry-only agent with no db_agents row must still be enumerated: {targets:?}"
+            !targets.iter().any(|(id, _)| id == "def-live-only"),
+            "a registry-only agent is a guess, not a verified directory: {targets:?}"
         );
 
         match prev {
@@ -3111,5 +3163,100 @@ mod tests {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
             None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
         }
+    }
+
+    // ── Memory directory provenance (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2, M1)
+
+    fn segment_start(uid: &str, config_dir: Option<&str>, cwd: &str, at: i64) -> crate::backend::continuity_segments::Start {
+        crate::backend::continuity_segments::Start {
+            segment_id: String::new(),
+            agent_uid: uid.into(),
+            definition_id: Some(uid.into()),
+            provider: "claude".into(),
+            config_dir: config_dir.map(Into::into),
+            provider_session_id: None,
+            cwd: cwd.into(),
+            channel: "test".into(),
+            agentmux_version: "test".into(),
+            block_id: "block-1".into(),
+            zone: None,
+            byte_start: None,
+            started_at_ms: at,
+            continuity_rung: crate::backend::continuity_segments::rung_for_spawn(false, false),
+            predecessor_segment_id: None,
+        }
+    }
+
+    #[test]
+    fn the_latest_spawn_decides_the_memory_directory() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("agent-seg", "/work/row-says");
+        mstore.agent_def_insert(&mut def).unwrap();
+        let fs = crate::backend::storage::filestore::FileStore::open_in_memory().unwrap();
+        crate::backend::continuity_segments::record_start(&fs, segment_start("agent-seg", Some("/cfg/old"), "/work/old", 1_000)).unwrap();
+        crate::backend::continuity_segments::record_start(&fs, segment_start("agent-seg", Some("/cfg/new"), "/work/new", 2_000)).unwrap();
+
+        let r = resolve_memory_dir_with(&mstore, &def, Some(&fs)).unwrap();
+        assert_eq!(r.provenance, MemoryDirProvenance::Spawn);
+        assert_eq!(r.path, memory_dir_for_cwd("/cfg/new", "/work/new"), "the newest spawn wins over the row");
+    }
+
+    #[test]
+    fn a_blank_working_directory_with_a_spawn_on_record_is_verified() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("agent-seg-blank", "");
+        mstore.agent_def_insert(&mut def).unwrap();
+        let fs = crate::backend::storage::filestore::FileStore::open_in_memory().unwrap();
+
+        let unverified = resolve_memory_dir_with(&mstore, &def, Some(&fs)).unwrap();
+        assert_eq!(unverified.provenance, MemoryDirProvenance::Unverified, "no spawn yet: a guess");
+
+        crate::backend::continuity_segments::record_start(&fs, segment_start("agent-seg-blank", Some("/cfg"), "/home/u/.agentmux/agents/x", 1_000)).unwrap();
+        let verified = resolve_memory_dir_with(&mstore, &def, Some(&fs)).unwrap();
+        assert_eq!(verified.provenance, MemoryDirProvenance::Spawn);
+    }
+
+    #[test]
+    fn an_explicit_working_directory_is_verified_without_a_spawn() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("agent-wd", "/work/explicit");
+        mstore.agent_def_insert(&mut def).unwrap();
+        let r = resolve_memory_dir_with(&mstore, &def, None).unwrap();
+        assert_eq!(r.provenance, MemoryDirProvenance::WorkingDirectory);
+    }
+
+    #[test]
+    fn a_directory_two_agents_resolve_to_is_not_attributed_to_either() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mstore = Store::open_in_memory().unwrap();
+        for id in ["agent-share-a", "agent-share-b"] {
+            let mut def = agent_def(id, "/work/shared");
+            mstore.agent_def_insert(&mut def).unwrap();
+        }
+        let mut solo = agent_def("agent-solo", "/work/solo");
+        mstore.agent_def_insert(&mut solo).unwrap();
+
+        let targets = list_memory_targets_with(&mstore, None);
+        let ids: Vec<&str> = targets.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["agent-solo"], "{targets:?}");
+    }
+
+    #[test]
+    fn a_spawn_recorded_with_an_unexpanded_home_names_claudes_real_folder() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("agent-tilde", "");
+        mstore.agent_def_insert(&mut def).unwrap();
+        let fs = crate::backend::storage::filestore::FileStore::open_in_memory().unwrap();
+        crate::backend::continuity_segments::record_start(&fs, segment_start("agent-tilde", Some("/cfg"), "~/.agentmux/agents/tilde", 1_000)).unwrap();
+
+        let r = resolve_memory_dir_with(&mstore, &def, Some(&fs)).unwrap();
+        let expanded = expand_home_dir_safe("~/.agentmux/agents/tilde");
+        let folder = crate::backend::claude_layout::project_dir_name(&expanded.to_string_lossy());
+        assert_eq!(r.path, std::path::PathBuf::from("/cfg").join("projects").join(&folder).join("memory"));
+        assert!(!folder.starts_with("--"), "the home dir is part of the folder name: {folder}");
     }
 }
