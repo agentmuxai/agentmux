@@ -4,7 +4,7 @@
 /**
  * Browser pane state store — slice #9.
  *
- * **Phase 1A** (`docs/specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md`) — the cell
+ * **Phase 1A** — the cell
  * now owns a tab list. Per-page projection setters (`url`, `loading`,
  * `error`, `canGoBack`, `canGoForward`, `title`, `faviconUrl`) project
  * the ACTIVE tab's values; the model code that consumes them via
@@ -56,6 +56,10 @@ export interface BrowserPaneProjections {
     canGoForward: (next: boolean) => void;
     /** Active tab's `title`. */
     title: (next: string) => void;
+    /** Active tab's `titleOverridden`: whether `title` is the page's real
+     *  title yet, rather than the "Browser" fallback or the URL-hostname
+     *  stand-in. Optional so existing projection sets stay valid. */
+    titleIsReal?: (next: boolean) => void;
     /** Active tab's `url`. */
     url: (next: string) => void;
     /** Active tab's `faviconUrl`. */
@@ -120,6 +124,7 @@ function activeTab(state: BrowserPaneState): BrowserTab | null {
 const EMPTY_TAB_DEFAULTS = {
     url: "",
     title: "Browser",
+    titleOverridden: false,
     faviconUrl: "",
     loading: false,
     error: null as string | null,
@@ -183,6 +188,7 @@ export function dispatch(
 
     if (nextView.url !== prevView.url) slot.proj.url(nextView.url);
     if (nextView.title !== prevView.title) slot.proj.title(nextView.title);
+    if (nextView.titleOverridden !== prevView.titleOverridden) slot.proj.titleIsReal?.(nextView.titleOverridden);
     if (nextView.faviconUrl !== prevView.faviconUrl) slot.proj.faviconUrl(nextView.faviconUrl);
     if (nextView.loading !== prevView.loading) slot.proj.loading(nextView.loading);
     if (nextView.error !== prevView.error) slot.proj.error(nextView.error);
