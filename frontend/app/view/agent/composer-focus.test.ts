@@ -80,6 +80,16 @@ describe("focusComposer (giveFocus)", () => {
         expect(ta.selectionEnd).toBe(5);
     });
 
+    it("never lets the browser scroll ancestors to reveal the composer (preventScroll)", () => {
+        // REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md: a plain focus()
+        // scrolled .tile-layout by half its height, shifting a whole tab.
+        const { ta } = makeBlock("blk");
+        const focus = vi.spyOn(ta, "focus");
+        focusComposer(ta);
+        expect(focus).toHaveBeenCalledTimes(1);
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    });
+
     it("steals nothing from the dummy input — it is a fallback, not a real owner", () => {
         const { ta, dummy } = makeBlock("blk");
         dummy.focus();

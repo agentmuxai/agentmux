@@ -5,7 +5,8 @@
 §6 records where the implementation deliberately differs from the design
 below.
 **Repo state:** `agentmuxai/agentmux` main @ `cdee2e2` (design);
-rebased onto main @ `934b335` — see §6 "Rebase onto #3519"
+rebased onto main @ `934b335` — see §6 "Rebase onto #3519"; rebased again
+onto main @ `06d1b76` (2026-09-26) — see §6 "Rebase onto `commitLaunch`"
 **Related:**
 `docs/reports/REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md` (#2972 — the decision §1 reverses),
 `docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`,
@@ -507,18 +508,41 @@ is not in a *different* block" (the stop rule above).
 test harness: nothing in the suite constructs one. The model's part is
 three lines:
 - `giveFocus()` passes `focusTargetRef` (#3519) through `focusComposer`;
-- `requestComposerFocus(blockId)` runs before the agentId `SetMetaCommand`;
-- `cancelComposerFocusRequest(blockId)` runs in the launch `catch`.
+- `requestComposerFocus(blockId)` runs before the launch's meta write
+  (`commitLaunch` since the second rebase, below);
+- `cancelComposerFocusRequest(blockId)` runs on both failure paths: the
+  launch `catch`, and `commitLaunch` returning `ok: false`.
 
 The behavior is covered through `composer-focus.test.ts` (16 cases) and
 `AgentFooter.test.tsx` → "AgentFooter keyboard focus" (4 cases).
 
-**Local test runs on Windows.** Every suite under
-`frontend/app/view/agent/` fails to *load* on Windows with
-`ERR_INVALID_ARG_VALUE … 'file:///@solid-refresh'`, a known
-pre-existing issue (`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`).
-Local runs for this change used an uncommitted config that re-registers
-`vite-plugin-solid` with `hot: false`. With it, the full frontend suite
-passes (after the rebase: 4782 tests, 3 skipped), and
-`tsc --noEmit -p tsconfig.citypecheck.json` is clean. Not verified in a
-running app yet.
+**Local test runs on Windows.** At the first rebase, every suite under
+`frontend/app/view/agent/` failed to *load* on Windows with
+`ERR_INVALID_ARG_VALUE … 'file:///@solid-refresh'`
+(`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`), and local
+runs needed an uncommitted `vite-plugin-solid` `hot: false` config. As of
+the second rebase the suites load with the stock config.
+
+**Rebase onto `commitLaunch` (main @ `06d1b76`, 2026-09-26).** 204 commits
+later, two conflicts, both in `agent-model.ts`:
+
+- Identity M4b-3 replaced the launch's direct `SetMetaCommand` with
+  `commitLaunch(...)`. `requestComposerFocus(blockId)` now runs just before
+  it. `commitLaunch` reports failure by *returning* `ok: false` rather than
+  throwing, so the launch `catch` no longer covers every failed launch. That
+  path now also calls `cancelComposerFocusRequest(blockId)`; otherwise a
+  failed launch would leave a request that a later, unrelated mount of the
+  block could honor within the 10 s TTL.
+- The half-window scroll fix (`REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md`)
+  had changed `giveFocus()` to `ta.focus({ preventScroll: true })`.
+  `giveFocus()` delegates to `focusComposer()`, which already passes
+  `preventScroll`. The report's comment moved there with it. Its grep guard
+  (`frontend/layout/tests/tileLayoutFocusScroll.test.ts`) now follows the
+  delegation: either `giveFocus()` passes `preventScroll` itself, or it calls
+  `focusComposer()`, whose only `focus()` call does. `composer-focus.test.ts`
+  adds a behavioral check (`focus` called once, with `{ preventScroll: true }`).
+  Both fail if `preventScroll` is removed; that was verified by removing it.
+
+After this rebase: `tsc --noEmit -p tsconfig.citypecheck.json` is clean,
+and the full frontend suite passes (5,738 tests; one failure before the
+guard fix above).
