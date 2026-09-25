@@ -351,7 +351,7 @@ impl FileStore {
     /// One append inside a caller's transaction: parts, size and counter.
     /// Returns where it landed and the new size (equal to the offset when
     /// nothing was written).
-    fn append_in_tx(
+    pub(super) fn append_in_tx(
         tx: &Transaction<'_>,
         zone_id: &str,
         name: &str,
