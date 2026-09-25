@@ -55,8 +55,8 @@
     flex-direction: column;
     height: 100%;
     width: 100%;
-    // Containing block for .agent-pane-progress-bar-slot below, which is
-    // now position: absolute (out of flex flow) rather than a flex child —
+    // Containing block for the chrome's absolutely-positioned
+    // .pane-progress-bar-slot (PaneChrome.scss) —
     // SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md.
     position: relative;
 
@@ -88,19 +88,8 @@
     // this class sits on (via PaneChromeModel.rootClass). The rules here
     // were byte-identical duplicates, and their `-focused`/`-focused-alone`
     // variants were dead outright — the chrome applies `pane-stack-focused*`,
-    // never the per-view-type names these matched.
-
-    // Progress bar's stripe color mirrors the pane's own selection ring
-    // exactly — same var() chain as PaneChrome.scss's `.pane-stack::after`/
-    // `.pane-stack-focused::after` pair above, just exposed as a custom
-    // property instead of border-color so `.agent-pane-progress-bar`
-    // (portaled elsewhere in this subtree — see agent-view.tsx) can read
-    // the identical value instead of hardcoding --accent-color on its own.
-    --progress-bar-color: var(--pane-ring-color, var(--border-color));
-
-    &.pane-stack-focused {
-        --progress-bar-color: var(--pane-ring-color, var(--accent-color));
-    }
+    // never the per-view-type names these matched. `--progress-bar-color`
+    // moved there too, with the progress-bar slot it colors.
 }
 
 .agent-pane-stack-content {
@@ -278,82 +267,14 @@
     }
 }
 
-// Progress bar's own overlay strip, above the tab strip — never taking
-// layout space, active or not (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_
-// 2026_08_25.md, superseding this rule's own previous "always-reserved 3px
-// row" — see that spec's §2.1 for why removing the reservation entirely
-// still preserves the original no-layout-shift guarantee rather than
-// reintroducing the problem it solved). Out of flex flow entirely
-// (position: absolute against .agent-pane-stack) so the tab strip below —
-// itself position: absolute; top: 0 relative to .agent-pane-stack-content —
-// now starts flush at the very top of the pane, with no reserved gap
-// between it and the pane header above.
-//
-// AgentPresentationView (nested inside the switch-scoped <Block> chrome
-// wraps, itself BELOW the tab strip in DOM order) portals
-// .agent-pane-progress-bar into this slot — bridged through the active
-// AgentViewModel's progressBarMount/setProgressBarMount (agent-model.ts),
-// since chrome (which owns this slot) and content are separate component
-// trees as of SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md. See
-// SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md. No CSS-only
-// fix reaches across that boundary: every ancestor between
-// .agent-pane-stack-content and here clips overflow before an
-// absolutely-positioned escape could ever become visible above the tab
-// strip.
-.agent-pane-progress-bar-slot {
-    position: absolute;
-    // Inset by .agent-pane-stack's own ::after ring's border width (2px,
-    // above) rather than sitting flush at 0 — otherwise the bar's fill
-    // paints directly over the new ring instead of nesting inside it
-    // (docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
-    // 2026_09_15.md). Covers the full pane rect now, not just a top strip —
-    // SPEC_AGENT_PANE_PROGRESS_BAR_FULL_PERIMETER_2026_09_18.md — still no
-    // reserved layout space, only the offset from the ring itself was ever
-    // new (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md).
-    //
-    // A transparent 2px BORDER, not `inset: 2px` — deliberate. `inset: 2px`
-    // and `.pane-stack::after`'s `border: 2px solid` (PaneChrome.scss) are
-    // two different CSS box-model computations (absolute-position offset
-    // arithmetic vs. border-width subtraction) even though both nominally
-    // mean "2px." Chromium can round them to different device pixels on
-    // fractional container sizes — confirmed live, and via ReAgent review
-    // on this PR (#3443): a first attempt closed that gap by widening this
-    // element's own painted ring instead, which broke as soon as the
-    // gap-hiding assumption ("the opaque border fully covers the extra
-    // pixel") met the *actual* border, which is translucent by default
-    // (`--border-color: rgba(255,255,255,0.16)`, theme.scss) and fully
-    // transparent in the single/unsplit-focused case
-    // (`.pane-stack-focused-alone::after { border-color: transparent; }`,
-    // this file) — in both, the extra pixel doesn't hide, it shows. Using
-    // the SAME mechanism (`border`) as `.pane-stack::after` for this
-    // element's own inset, instead of independently-computed pixel offsets,
-    // means both boxes ask the layout engine to solve the identical
-    // "2px border, 0 inset" problem against the same containing block, so
-    // there's nothing left to fix via a translucency-dependent hack. See
-    // docs/retro/RETRO_AGENT_PANE_PROGRESS_RING_TOP_EDGE_GAP_2026_09_19.md.
-    inset: 0;
-    border: 2px solid transparent;
-    // Matches the ring's own radius so the masked frame below (which has
-    // no border-radius awareness of its own beyond what its box carries)
-    // doesn't poke square corners past the pane's actual rounded corners.
-    border-radius: var(--block-border-radius);
-    overflow: hidden;
-    pointer-events: none;
-    // Above .pane-tab-strip (z: var(--z-pane-overlay, 4)) so the bar, when
-    // active, draws visibly on top of the tab strip's own top edge — both
-    // now occupy the same top:0 coordinates once neither reserves flex
-    // space.
-    z-index: calc(var(--z-pane-overlay, 4) + 1);
-}
-
 // === Marching-ants Progress Bar ===
-// Fills its slot above — no zoom-compensation math needed here (unlike
-// its previous home nested inside .agent-view), since this slot lives in
-// AgentPaneChrome's tree, outside .agent-view's per-pane `zoom` CSS
-// property entirely, alongside the tab strip and other unzoomed pane
-// chrome. Colors via color-mix() so every theme inherits without
-// hardcoded hex; the stripe color itself is --progress-bar-color
-// (.agent-pane-stack, above) rather than --accent-color directly, so the
+// Fills the chrome's .pane-progress-bar-slot (PaneChrome.scss) — no
+// zoom-compensation math needed here (unlike its previous home nested
+// inside .agent-view), since that slot lives in the chrome's tree,
+// outside .agent-view's per-pane `zoom` CSS property entirely, alongside
+// the tab strip and other unzoomed pane chrome. Colors via color-mix() so
+// every theme inherits without hardcoded hex; the stripe color itself is
+// --progress-bar-color (.pane-stack, PaneChrome.scss) rather than --accent-color directly, so the
 // bar matches the pane's own selection-ring color exactly — including
 // switching to the focused-ring color when the pane is focused — instead
 // of always reading as the same fixed accent blue regardless of pane
