@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13
 **Type:** Design spec (two related, independently-shippable features)
-**Status:** Proposed — not yet implemented. Naming decided (§3: "Layout"); hamburger-menu placement decided (§5.1).
+**Status:** active — Feature 1 (restore on relaunch) shipped in PR #2560 (`server/service/session_restore.rs`), without the §4 off switch (`frontend/app-init.ts:354` hardcodes `restoreIfAvailable: true`). Feature 2 (named Layouts) is not built; its storage decision (a `db_layouts` table, export out of scope) is replaced by `SPEC_LAYOUT_FILES_2026_09_25.md` (file-based, with a file format). Naming (§3: "Layout") and menu placement (§5.1) still stand. Verified 2026-09-25.
 **Trigger:** User request — AgentMux used to reopen with the same panes/tabs/Armory layout as when it was last closed; that behavior is gone (root-caused in `docs/retro/retro-pane-layout-restore-was-a-leak-not-a-feature-2026-08-13.md` — it was never a deliberate feature, it was a leaked-window-row bug that has since been correctly fixed). Separately, the user wants a "snapshots" concept: save a named pane arrangement on demand and reload it later, similar to a feature in Wave Terminal (the upstream project AgentMux forked from).
 **Builds on:** `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` (crash-only reproject — deliberately steady-state-never-rebuilds, so it does not cover either feature below, but its topology plumbing is directly reusable), `docs/specs/SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md` (per-window opacity / floating-pane placement write-through — same pattern this spec extends).
 
