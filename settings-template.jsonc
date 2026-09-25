@@ -95,6 +95,7 @@
     // "notify:taskbar:attention":               true,         // badge + flash the taskbar button
     // "notify:quiethours":                      "",           // e.g. "22:00-08:00" (local time)
     // "notify:os:preview":                      "redacted",   // "redacted" | "full" | "none"
+    // "notify:os:summary":                      true,         // the agent's session summary under the body
 
     // -- Tool-call tones (subliminal per-tool "voice") --
     // "notify:tooltones:enabled":               true,

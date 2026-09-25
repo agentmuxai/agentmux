@@ -740,12 +740,12 @@ impl PersistentSubprocessController {
                             // OS notification: the agent is now blocked on the
                             // user — known here even with no pane mounted
                             // (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 Phase 5).
-                            if let (Some(broker), Some(question)) = (
+                            if let (Some(broker), Some(asked)) = (
                                 broker_read.as_ref(),
                                 crate::backend::notify::sources::ask_user_question(&parsed),
                             ) {
                                 if let Some(r) = crate::backend::notify::router::get(broker) {
-                                    r.input_waiting_nonblocking(&block_id_read, question);
+                                    r.input_waiting_nonblocking(&block_id_read, asked.text, asked.count);
                                 }
                             }
                             continue;

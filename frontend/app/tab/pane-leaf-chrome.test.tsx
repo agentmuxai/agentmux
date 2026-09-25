@@ -421,8 +421,8 @@ describe("PaneLeafChrome — chrome tracks the active vm after keep-alive latche
 
         setActiveBlockId("a1");
 
-        // Keep-alive is on now: both members mounted at once.
-        expect(screen.getByTestId("block-s1")).toBeInTheDocument();
+        // The agent tab is mounted (keep-alive is per tab, so the inactive
+        // Swarm tab need not stay mounted — #3725's per-tab keep-alive).
         expect(screen.getByTestId("block-a1")).toBeInTheDocument();
         expect((chromeNodeModel.activeViewModel?.() as any)?.blockId).toBe("a1");
         // Chrome itself was not rebuilt to get there.

@@ -1,6 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { initialState } from "../../store/agent-document/types";
 import { update } from "../../store/agent-document/reducer";
@@ -134,6 +137,25 @@ describe("settings and providers", () => {
         expect(resolveLiveFeedTurns(0)).toBe(LIVE_FEED_DEFAULT_TURNS);
         expect(resolveLiveFeedTurns(2.5)).toBe(LIVE_FEED_DEFAULT_TURNS);
         expect(resolveLiveFeedTurns(undefined)).toBe(LIVE_FEED_DEFAULT_TURNS);
+    });
+
+    it("the settings schema advertises the same default the pane uses", () => {
+        // agent:livefeedturns is read with this constant as its fallback; the
+        // schema's default is what the settings UI shows. They must agree.
+        const schema = JSON.parse(
+            readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../schema/settings.json"), "utf8")
+        );
+        const find = (o: unknown): unknown => {
+            if (!o || typeof o !== "object") return undefined;
+            const rec = o as Record<string, unknown>;
+            if ("agent:livefeedturns" in rec) return rec["agent:livefeedturns"];
+            for (const v of Object.values(rec)) {
+                const hit = find(v);
+                if (hit !== undefined) return hit;
+            }
+            return undefined;
+        };
+        expect((find(schema) as { default?: number } | undefined)?.default).toBe(LIVE_FEED_DEFAULT_TURNS);
     });
 
     it("rolls off only for providers whose transcript holds the user's messages", () => {

@@ -117,6 +117,7 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             firePaneEvent(opts.blockId, {
                 type: "waiting-for-input",
                 question: qs[0]?.question?.questions?.[0]?.question,
+                questionCount: qs[0]?.question?.questions?.length,
             });
         } else if (!hasAny && hadAny) {
             waitingToneActive = false;
