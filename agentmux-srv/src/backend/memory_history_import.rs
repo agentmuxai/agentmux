@@ -38,6 +38,10 @@ fn history_store_paths() -> Vec<PathBuf> {
     let Some(shared) = crate::registry::resolve_global_shared_root() else {
         return Vec::new();
     };
+    history_store_paths_under(&shared)
+}
+
+fn history_store_paths_under(shared: &std::path::Path) -> Vec<PathBuf> {
     let mut paths = vec![shared.join("store.db")];
     if let Some(home) = shared.parent() {
         let children = |dir: PathBuf| -> Vec<PathBuf> {
@@ -46,7 +50,10 @@ fn history_store_paths() -> Vec<PathBuf> {
         for channel in children(home.join("channels")) {
             paths.push(channel.join("identity-store.db"));
         }
+        // A dev instance's store sits at `dev/<branch>/<clone>/`, or at
+        // `dev/<branch>/` itself in the older layout without a clone id.
         for branch in children(home.join("dev")) {
+            paths.push(branch.join("identity-store.db"));
             for instance in children(branch) {
                 paths.push(instance.join("identity-store.db"));
             }
