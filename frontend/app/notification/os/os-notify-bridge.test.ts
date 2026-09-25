@@ -12,7 +12,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/agent-pane-state-store", () => ({ addEventListener: () => () => {} }));
-vi.mock("@/app/store/focusManager", () => ({ focusManager: { blockFocusAtom: () => null } }));
+vi.mock("@/app/store/focusManager", () => ({ focusManager: { blockFocusAtom: () => null }, giveBlockFocus: () => {} }));
+vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w1" }));
 vi.mock("@/app/store/global", () => ({
     getApi: () => ({}),
     getSettingsKeyAtom: () => () => undefined,
@@ -26,7 +27,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/window/window-focus", () => ({ makeWindowFocusSignal: () => () => true }));
 vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForTabById: () => undefined }));
 
-import { attentionCount, inputWaitingCount, paneEventToNotify } from "./os-notify-bridge";
+import { attentionCount, inputWaitingCount, paneEventToNotify, shouldActivateHere } from "./os-notify-bridge";
 
 describe("attentionCount", () => {
     it("counts attention items and tolerates junk", () => {
@@ -65,6 +66,14 @@ describe("paneEventToNotify", () => {
         });
     });
 
+    it("forwards how many questions the call asks", () => {
+        expect(paneEventToNotify({ type: "waiting-for-input", question: "Which branch?", questionCount: 3 })).toEqual({
+            event: "input_waiting",
+            question: "Which branch?",
+            question_count: 3,
+        });
+    });
+
     it("resolves on submitted, but NOT on closed", () => {
         expect(paneEventToNotify({ type: "waiting-ended", reason: "submitted" } as any)).toEqual({ event: "input_resolved" });
         expect(paneEventToNotify({ type: "waiting-ended", reason: "closed" } as any)).toBeNull();
@@ -72,5 +81,23 @@ describe("paneEventToNotify", () => {
 
     it("ignores unrelated events", () => {
         expect(paneEventToNotify({ type: "pending-accepted" } as any)).toBeNull();
+    });
+});
+
+describe("shouldActivateHere", () => {
+    const now = 100_000;
+    it("acts only in the window srv named", () => {
+        expect(shouldActivateHere({ block_id: "b1", window_id: "w1", at_ms: now }, "w1", now)).toBe(true);
+        expect(shouldActivateHere({ block_id: "b1", window_id: "w2", at_ms: now }, "w1", now)).toBe(false);
+    });
+
+    it("an older srv names no window: every window tries, as before", () => {
+        expect(shouldActivateHere({ block_id: "b1", at_ms: now }, "w1", now)).toBe(true);
+    });
+
+    it("ignores stale clicks and payloads without a block", () => {
+        expect(shouldActivateHere({ block_id: "b1", window_id: "w1", at_ms: now - 60_000 }, "w1", now)).toBe(false);
+        expect(shouldActivateHere({ window_id: "w1", at_ms: now }, "w1", now)).toBe(false);
+        expect(shouldActivateHere(undefined, "w1", now)).toBe(false);
     });
 });

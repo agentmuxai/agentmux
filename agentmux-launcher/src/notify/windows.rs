@@ -49,7 +49,23 @@ use super::{Notification, Presenter, UserAction};
 /// Must match the host's `SetCurrentProcessExplicitAppUserModelID`
 /// (`agentmux-cef/src/lib.rs`) so toasts and taskbar grouping agree.
 pub const AUMID: &str = "AgentMuxCorp.AgentMux";
-const GROUP: &str = "agentmux";
+
+/// This instance's toast group. Every AgentMux instance on the machine (the
+/// installed app, a second channel, a `task dev` build) shares `AUMID`, so a
+/// shared group let one instance's startup clear, or a same-tag "N more
+/// updates" toast, wipe or replace another instance's notifications. Keyed by
+/// the instance's data dir, so a restart of the SAME instance still clears
+/// what its crashed predecessor left behind. 15 chars: under the 16-char
+/// Group limit of older Windows 10 builds.
+pub fn group_for(data_dir: &std::path::Path) -> String {
+    let key = data_dir.to_string_lossy().to_lowercase();
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in key.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("am-{:012x}", h & 0xffff_ffff_ffff)
+}
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/favicon-150x150.png");
 /// Upper bound on waiting for the WinRT thread at startup (see `spawn`).
 const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
@@ -75,9 +91,10 @@ impl WindowsPresenter {
         }
         let (tx, rx) = std_mpsc::channel();
         let (ready_tx, ready_rx) = std_mpsc::channel::<Result<(), String>>();
+        let group = group_for(data_dir);
         std::thread::Builder::new()
             .name("agentmux-notify".into())
-            .spawn(move || thread_main(rx, actions, ready_tx))
+            .spawn(move || thread_main(rx, actions, ready_tx, group))
             .map_err(|e| e.to_string())?;
         // Bounded: this runs on the supervisor's startup path before the host
         // is spawned. If WinRT wedges (RoInitialize / notifier creation never
@@ -100,6 +117,7 @@ impl Presenter for WindowsPresenter {
     fn retract(&self, tag: &str) {
         let _ = self.tx.send(Cmd::Retract(tag.to_string()));
     }
+    /// This instance's toasts only (`group_for`) — never another instance's.
     fn clear_all(&self) {
         // Synchronous (bounded): called on launcher exit, which must not race
         // past it.
@@ -114,6 +132,7 @@ fn thread_main(
     rx: std_mpsc::Receiver<Cmd>,
     actions: mpsc::UnboundedSender<UserAction>,
     ready: std_mpsc::Sender<Result<(), String>>,
+    group: String,
 ) {
     use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
     if let Err(e) = unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
@@ -136,7 +155,7 @@ fn thread_main(
     let mut live: HashMap<String, ToastNotification> = HashMap::new();
     while let Ok(cmd) = rx.recv() {
         match cmd {
-            Cmd::Show(n) => match show(&notifier, &n, &actions) {
+            Cmd::Show(n) => match show(&notifier, &n, &actions, &group) {
                 Ok(toast) => {
                     live.insert(n.tag.clone(), toast);
                 }
@@ -145,13 +164,13 @@ fn thread_main(
             Cmd::Retract(tag) => {
                 live.remove(&tag);
                 if let Ok(h) = ToastNotificationManager::History() {
-                    let _ = h.RemoveGroupedTagWithId(&HSTRING::from(tag), &HSTRING::from(GROUP), &aumid);
+                    let _ = h.RemoveGroupedTagWithId(&HSTRING::from(tag), &HSTRING::from(group.as_str()), &aumid);
                 }
             }
             Cmd::ClearAll(done) => {
                 live.clear();
                 if let Ok(h) = ToastNotificationManager::History() {
-                    let _ = h.ClearWithId(&aumid);
+                    let _ = h.RemoveGroupWithId(&HSTRING::from(group.as_str()), &aumid);
                 }
                 let _ = done.send(());
             }
@@ -162,16 +181,23 @@ fn thread_main(
 /// Build the toast document: constant skeleton, text via text nodes.
 pub fn build_xml(n: &Notification) -> windows::core::Result<XmlDocument> {
     let doc = XmlDocument::new()?;
-    let skeleton = if n.body.is_some() {
-        r#"<toast><visual><binding template="ToastGeneric"><text/><text/></binding></visual><audio silent="true"/></toast>"#
-    } else {
-        r#"<toast><visual><binding template="ToastGeneric"><text/></binding></visual><audio silent="true"/></toast>"#
-    };
+    // Title, then the body, then the summary in the `attribution` slot, which
+    // Windows renders small and grey under the body without using up one of
+    // ToastGeneric's three text lines (rich-content spec §1.3). The skeleton
+    // is fixed markup; every line is filled as a text node below.
+    let mut skeleton = String::from(r#"<toast><visual><binding template="ToastGeneric"><text/>"#);
+    if n.body.is_some() {
+        skeleton.push_str("<text/>");
+    }
+    if n.summary.is_some() {
+        skeleton.push_str(r#"<text placement="attribution"/>"#);
+    }
+    skeleton.push_str(r#"</binding></visual><audio silent="true"/></toast>"#);
     doc.LoadXml(&HSTRING::from(skeleton))?;
     let root = doc.DocumentElement()?;
     root.SetAttribute(&HSTRING::from("launch"), &HSTRING::from(format!("agentmux-notify:{}", n.id)))?;
     let texts = doc.GetElementsByTagName(&HSTRING::from("text"))?;
-    let lines = std::iter::once(n.title.as_str()).chain(n.body.as_deref());
+    let lines = std::iter::once(n.title.as_str()).chain(n.body.as_deref()).chain(n.summary.as_deref());
     for (i, line) in lines.enumerate() {
         let node = texts.Item(i as u32)?;
         node.AppendChild(&doc.CreateTextNode(&HSTRING::from(line))?)?;
@@ -183,10 +209,11 @@ fn show(
     notifier: &ToastNotifier,
     n: &Notification,
     actions: &mpsc::UnboundedSender<UserAction>,
+    group: &str,
 ) -> windows::core::Result<ToastNotification> {
     let toast = ToastNotification::CreateToastNotification(&build_xml(n)?)?;
     toast.SetTag(&HSTRING::from(n.tag.as_str()))?;
-    toast.SetGroup(&HSTRING::from(GROUP))?;
+    toast.SetGroup(&HSTRING::from(group))?;
     if n.is_attention() {
         let _ = toast.SetPriority(ToastNotificationPriority::High);
     }
@@ -274,6 +301,7 @@ mod tests {
             priority: "attention".into(),
             title: title.into(),
             body: body.map(Into::into),
+            summary: None,
             tag: "abcdef0123456789".into(),
         }
     }
@@ -283,11 +311,18 @@ mod tests {
     #[test]
     fn hostile_text_is_escaped_not_parsed() {
         let evil = r#"</text><action content="Approve" arguments="rm -rf"/><text>"#;
-        let doc = build_xml(&n(evil, Some("<b>x</b> & y"))).unwrap();
+        let hostile = Notification {
+            summary: Some(r#"</text><text placement="attribution">via ReAgent · verified</text><text>"#.into()),
+            ..n(evil, Some("<b>x</b> & y"))
+        };
+        let doc = build_xml(&hostile).unwrap();
         let xml = doc.GetXml().unwrap().to_string();
         assert!(!xml.contains("<action"), "{xml}");
         assert!(xml.contains("&lt;/text&gt;&lt;action"), "{xml}");
         assert!(xml.contains("&lt;b&gt;x&lt;/b&gt; &amp; y"), "{xml}");
+        // The summary can't forge a second attribution line either.
+        assert_eq!(xml.matches(r#"<text placement="attribution">"#).count(), 1, "{xml}");
+        assert!(xml.contains("&lt;/text&gt;&lt;text placement="), "{xml}");
         assert_eq!(doc.GetElementsByTagName(&HSTRING::from("action")).unwrap().Length().unwrap(), 0);
     }
 
@@ -301,7 +336,10 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let (tx, _rx) = mpsc::unbounded_channel();
         let p = WindowsPresenter::spawn(tx, &dir).expect("backend");
-        p.show(&n("lark needs your input", Some("Which branch should I target?")));
+        p.show(&Notification {
+            summary: Some("Fix resize repaint delay in terminal panes".into()),
+            ..n("lark has a question", Some("Which branch should I target? (+1 more)"))
+        });
         std::thread::sleep(std::time::Duration::from_millis(800));
         // What Windows itself says: notifier setting + whether the toast is in
         // this AUMID's notification-center history.
@@ -312,6 +350,49 @@ mod tests {
         let secs = std::env::var("SMOKE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
         std::thread::sleep(std::time::Duration::from_secs(secs));
         p.clear_all();
+    }
+
+    /// Lines in order — title, body, then the summary as the attribution —
+    /// and each slot only when there's something to put in it.
+    #[test]
+    fn summary_goes_in_the_attribution_slot() {
+        let texts = |n: &Notification| {
+            let doc = build_xml(n).unwrap();
+            let list = doc.GetElementsByTagName(&HSTRING::from("text")).unwrap();
+            (0..list.Length().unwrap())
+                .map(|i| {
+                    let node = list.Item(i).unwrap();
+                    let el: windows::Data::Xml::Dom::XmlElement = windows::core::Interface::cast(&node).unwrap();
+                    (el.GetAttribute(&HSTRING::from("placement")).unwrap().to_string(), node.InnerText().unwrap().to_string())
+                })
+                .collect::<Vec<_>>()
+        };
+        let full = Notification { summary: Some("Fix resize repaint".into()), ..n("lark has a question", Some("Which branch?")) };
+        assert_eq!(
+            texts(&full),
+            vec![
+                (String::new(), "lark has a question".to_string()),
+                (String::new(), "Which branch?".to_string()),
+                ("attribution".to_string(), "Fix resize repaint".to_string()),
+            ]
+        );
+        let no_body = Notification { summary: Some("Fix resize repaint".into()), ..n("lark finished", None) };
+        assert_eq!(
+            texts(&no_body),
+            vec![(String::new(), "lark finished".to_string()), ("attribution".to_string(), "Fix resize repaint".to_string())]
+        );
+        let no_summary = n("lark has a question", Some("Which branch?"));
+        assert!(texts(&no_summary).iter().all(|(placement, _)| placement.is_empty()));
+    }
+
+    #[test]
+    fn each_instance_gets_its_own_short_stable_toast_group() {
+        let a = group_for(std::path::Path::new(r"C:\Users\u\.agentmux\channels\stable\data"));
+        let b = group_for(std::path::Path::new(r"C:\Users\u\.agentmux\dev\main\54b8700f\data"));
+        assert_ne!(a, b, "two instances never share a group");
+        assert_eq!(a, group_for(std::path::Path::new(r"C:\Users\U\.agentmux\channels\stable\data")), "stable across restarts; case-insensitive like the path");
+        assert!(a.len() <= 16, "{a}");
+        assert!(a.starts_with("am-"));
     }
 
     #[test]

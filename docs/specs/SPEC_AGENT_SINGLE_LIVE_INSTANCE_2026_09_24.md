@@ -1,9 +1,10 @@
 # SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN
 
 **Date:** 2026-09-24
-**Status:** proposed — nothing built. Design only; §9 is the delivery order. §10's decisions are taken at their
-recommended option (repo owner, 2026-09-25: proceed to implementation without further sign-off). §11's open questions are
-all answered from logs and code.
+**Status:** active — Phase 1 (host tier: lease, admission, fencing) shipped in PR #3738; Phase 2 (Take over) in PR
+#3742; Phase 3 (record fencing) in PR #3744; Phase 4 (LAN) in PR #3745; Phase 5 (WAN) in PR #3746 (client) and
+agentmux-cloud#92 (relay). See §12–§16 for what was built and what was left out. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
+proceed to implementation without further sign-off). §11's open questions are all answered from logs and code.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-09-24: *"by mistake I opened up an instance of you in a 57.2 version running on the same
 host … we want a best practice method to ensure that 2 agents can't open simultaneously, even across the 3 tiers."*
@@ -173,11 +174,15 @@ that is live elsewhere writes nothing shared at all until the user chooses obser
   user agent that equals the definition id and the registry's `instance_id` — `fb3e692d…` for all three in Agent3's
   registry record **[verified]**. Template launches get a fresh UID per launch **[spec]**, so they correctly never collide.
 - **Store:** extend `registry::LeaseStore` rather than write a second one. Add to `LeaseFile`: `epoch` (u64, incremented on
-  **every ownership change**, never reused), `channel`, `version`, `srv_url`, `hostname`, `host_id`, and the holder's
-  `pid` **plus process start time** (PID alone is reusable). `boot_id` stays the owner id.
-- **Lifetime:** the claim is per **pane/controller lifetime**, not per turn (the `subprocess` path's per-turn claim leaves
-  the gaps between turns open). Taken when the controller registers; renewed every 5 s by a task **independent of turns**;
-  released on close/exit.
+  **every ownership change**, never reused), `channel`, `version`, `hostname`, and the holder's `pid` **plus process start
+  time** (PID alone is reusable). `boot_id` stays the owner id. All new fields are `serde(default)`, so a lease written by
+  an older build still parses — version skew must never look like corruption. **The epoch lives in its own per-key
+  counter file (`<uid>.epoch`), never deleted** — release deletes the lease file, so an epoch kept only there would restart
+  after a clean release and let a stale writer's epoch be reused (Codex P2 on #3730).
+- **Lifetime:** the claim is per **CLI process lifetime**, not per turn (the `subprocess` path's per-turn claim leaves
+  the gaps between turns open). Taken right before the process is spawned; renewed every 5 s by a task **independent of
+  turns**; released when that process exits. A respawn in the same pane keeps the lease it already holds instead of
+  re-claiming. A persistent controller with no process holds nothing — it is not driving the agent.
 - **One entry point:** `AgentAdmission::acquire(uid) -> Granted{epoch} | Denied{holder} | Unknown{reason}`. **Every** path
   that can start an agent calls it before spawning — eager resume, first spawn, resume retry, the queue's leftover respawn,
   picker "Continue", `agent.open`, cron/work-queue spawns, jekt-triggered spawns. Per-path checks are exactly how today's
@@ -193,15 +198,21 @@ The shared root is host-global and already carries the cross-channel registry (`
 this tier can be a real critical section, not a best effort.
 
 1. `acquire(uid)` enters the per-UID critical section and reads the lease.
-2. **Free / expired / corrupt →** claim, `epoch += 1`.
+2. **Free / expired →** claim, `epoch` = next value of the counter. **Unreadable → held (fail closed)** until the file has
+   not been rewritten for a full TTL: a parse failure proves nothing about the holder, and a live holder rewrites the file
+   on every renewal (Codex P1 on #3730).
 3. **Held, unexpired, by another `boot_id` →** `Denied{holder}`.
 4. **Held, but the holder is provably dead** (same host: `pid` gone or start time differs) → reclaim **immediately**, do not
-   wait 15 s. Reuse the orphan reconciler's cross-platform probe.
+   wait 15 s. Only when the lease names **this** host — a holder on another host (a shared root on a network drive) is
+   never presumed dead. (The orphan reconciler named in Related probes CEF windows, not pids; `sysinfo` is used instead.)
 5. **Compatibility probe for lease-unaware holders (every version before this ships).** No lease file exists for them.
    Before granting, also read the host-global cross-channel registry (`~/.agentmux/shared/agents/reactive`, `AgentEntry`:
-   `agent_id`, `local_url`, `block_id`, `pid`, `channel`) for an entry for **this agent on another channel** — matched by
-   name, since older entries carry no UID — whose `pid` is alive **and** whose `local_url` answers. Such an entry ⇒ treat as
-   holder (`Denied{holder, lease: none}`). In §1.1 OLD's entry was exactly this (channel `local-main-b28b7a-27a8ae9b`,
+   `agent_id`, `local_url`, `block_id`, `pid`, `channel`) for every **other** channel's live srv (`pid` alive), and ask each
+   one — `GET <local_url>/agentmux/reactive/agents` with that entry's `auth_key` — for its registrations. A registration
+   whose **`uid`** equals this agent's ⇒ treat as holder (`Denied{holder, lease: none}`). **Never matched by name**: display
+   names are not unique, so a same-named but different agent must not block this one (Codex P2 on #3730). Registrations
+   carry `uid` since #3560, before v0.57.0; an instance too old to report one, or one that does not answer within 1.5 s,
+   is skipped and logged — not evidence either way. In §1.1 OLD's entry was exactly this (channel `local-main-b28b7a-27a8ae9b`,
    `127.0.0.1:61134`, visible to NEW as `cross_channel` in `DiscoverAgents`). Remove the probe once the oldest supported
    version carries the lease. (The registry's `registration_nonce` cannot serve as an epoch here: it is a per-srv counter
    that restarts at 1 — `persistent/mod.rs:116` — and the frontend presence path writes `0`.)
@@ -214,8 +225,10 @@ this tier can be a real critical section, not a best effort.
 
 ### 4.3 Fencing — a lost claim must stop the holder (I4)
 
-- The controller **checks** the claim (cheap, in-memory epoch compared with the last renewal result) before every turn
-  starts, and treats a failed renew as **lost** once it has failed for > TTL.
+- **In Phase 1, not deferred** (Codex P1 on #3730: TTL reclaim without fencing lets a woken holder and the new one both
+  drive). The controller **verifies** the lease before every turn starts — both send paths, a read under the key's lock —
+  and the renewal task treats a renew that finds another owner as **lost**. Either way the CLI process is killed and the
+  turn refused; a transient I/O error is not a loss.
 - On loss it enters a **Superseded** state: no new turns, no injected input accepted, the pane shows *"Agent3 is now driven
   by v0.57.2 on this host"* with **[Open read-only]**, and the controller goes through the existing graceful shutdown
   (`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN`). It does not race the new holder.
@@ -347,15 +360,19 @@ lesson, and the way that incident began).
 
 0. **Now, no code:** treat "start a second instance of a live agent" as unsafe — the retro's rule; open a different agent,
    or a fresh test agent, for anything experimental.
-1. **Host tier — prevent.** `AgentAdmission::acquire` keyed by UID over the extended `LeaseStore`; wire the `persistent`
-   controller (claim at register, independent renewal, release on exit); route **every** spawn path through it; admission
-   before any shared write (I9); pid-probe reclaim; compat probe for lease-unaware holders; UI message naming the holder.
-   This alone closes today's incident.
-2. **Fencing + takeover UX.** Pre-turn check, Superseded state, fence request, the takeover dialog, observer panes.
+1. **Host tier — prevent, with fencing.** `agent_admission::acquire` keyed by UID over the extended `LeaseStore`; wire the
+   `persistent` controller (claim at spawn, independent renewal, release on exit); admission before any shared write (I9);
+   pid-probe reclaim; compat probe for lease-unaware holders; pre-turn verify and kill-on-loss; refusal message naming the
+   holder. This alone closes today's incident. **Implemented — §12.**
+2. **Takeover UX.** Superseded state in the pane, fence request, the takeover dialog, observer panes; the §6 counters.
+   **Built: the refusal row and Take over — §13.** The badge, a separate observer mode and the counters are still open.
 3. **Record fencing.** Epoch on record appends; store rejects stale epochs; `fork` ledger event.
-4. **LAN — detect and yield.** Advertisement field, peer query, tie-break.
+   **Built as a writer-side fence plus the epoch in the segment ledger — §14.** A store-side epoch check was not built,
+   and §14 says why.
+4. **LAN — detect and yield.** Advertisement field, peer query, tie-break. **Built as a peer query plus a periodic
+   re-check — §15.**
 5. **WAN — relay coordinator.** UID-keyed lease endpoints and fenced pending pulls in `agentmux-cloud`; the client side
-   here.
+   here. **Built — §16. The relay half is agentmux-cloud#92 (not deployed by merging).**
 
 Phases 4 and 5 can proceed independently of 2–3. Phase 1 is small: the lease, the locking and the tests exist; what is
 missing is the wiring and the key.
@@ -393,3 +410,283 @@ missing is the wiring and the key.
 Still open, deliberately left to implementation: the exact list of spawn paths for test §7.5 (enumerated when Phase 1
 routes them), and whether the 0.57.0 srv's "row not found" came from reading a per-channel account table or a schema gap —
 irrelevant to the fix, which is I9.
+
+---
+
+## 12. Phase 1 as built
+
+**Code.**
+- `agentmux-srv/src/registry/leases.rs`: `claim_as` with `ClaimantInfo`, the epoch counter, unreadable-is-held, the dead
+  and reused-pid reclaim, `verify`, and `live_holder_other_than`. Two rules added in review:
+  - **One driver inside a process too** (ReAgent P1 on #3738): a claim by another block of the same srv is refused while
+    the first block's lease is live. `verify`, `renew` and `release` all require the block to match.
+  - **A per-claim token** (`claim_id`, fresh on every claim, including a same-block re-claim): only the current handle may
+    renew, verify or release. Without it, a controller replaced for the same block (for example, a forced restart that
+    eager-resumes at once) re-claims before the old process's exit runs. That exit's release would delete the new
+    process's lease, and the new process would then be fenced — killed — at its next renew.
+- `agentmux-srv/src/backend/agent_admission.rs` (new):
+  - `acquire` returns a `HeldAgentLease`, which has its own renewal task, `verify`, and release on drop. It fails closed on
+    I/O after one retry (D2).
+  - `check_before_spawn` is the early read-only check: the lease plus the compat probe.
+  - `denied_message` is the refusal text.
+- `persistent/`:
+  - `with_agent_lease_store`, used by the one place persistent controllers are built (`blockcontroller/mod.rs`).
+  - `acquire_agent_lease` in `spawn_process`, just before `cmd.spawn()`. All four spawn paths pass through that point.
+  - Release in both current-generation exit arms.
+  - `fence_check` at the top of `send_message` and `send_user_message_with_policy`.
+  - The early check in `try_eager_resume`, before the spawn claim and the credential gate.
+- Early checks elsewhere:
+  - `run_agent_turn`, before `build_persistent_spawn_env`. A refusal takes the gate's error path, so it is persisted and
+    shown in the pane.
+  - `agent.open`, right after its per-agent lock and before any write; the error is `AGENT_LIVE_ELSEWHERE: …`.
+  - The frontend presence registration (`POST /agentmux/reactive/register`). It answers 409 and registers nothing, because
+    delivery prefers the freshest cross-instance entry, so registering a refused pane would pull the live instance's
+    jekts. This is a fourth I9 write that §1.1 had not listed.
+
+**Tests.**
+- `registry::leases`: 24 tests. Among them: fail-closed on an unreadable file, reclaim of a stale unreadable file, old
+  format honoured, epochs across release and across TTL reclaim, dead pid, reused pid, another host, and `verify`. Also:
+  a second block of the same process is refused; a block superseded after expiry is fenced and cannot release; and a
+  same-block re-claim supersedes the older handle.
+- `backend::agent_admission`: 9 tests. Among them: refusal naming the holder, a takeover reported by the renewal task
+  through `on_lost`, and the probe matching by UID only.
+- `persistent::tests::single_live_instance`: 5 tests. Refused before spawn; lease held until the process exits; a pane that
+  lost its lease starts no turn and is killed; no UID takes no lease; the early check.
+- `agent_open::single_live_instance_tests`: the I9 test (§7.9). It passes with the check and fails when the check is
+  removed.
+
+**Live check (2026-09-25).**
+- **Done:** the compat probe's contract against a real, lease-unaware release (v0.57.2 on this host). I ran it exactly as
+  the probe does, by hand and read-only: take `local_url` and `auth_key` from its shared-registry entry, then
+  `GET /agentmux/reactive/agents`. The response was HTTP 200 with 9 registrations, each carrying `uid`. Matching Agent3's
+  UID found its live block `204dc49b…`, so a Phase 1 build opening Agent3 would be refused.
+- **Not done:** an end-to-end run on a `task dev` build with a fresh test agent (§7.6). Agents can be created only through
+  the WebSocket RPC, and exercising the check with any real agent risks resuming its live session if the check were wrong
+  — the 2026-07-29 incident.
+- **Found while testing:** a test that really spawns a process must not put `AGENTMUX_AGENT_ID` in its env. With it, the
+  spawn auto-registers that name in the host-global `~/.agentmux/shared` registry, outside any temp dir. An early
+  revision of this PR's tests left a stray `agent3/stable.json` there; the test is fixed and the file was removed.
+
+**Not in Phase 1.**
+- §4.2 step 6, the volume check for an overridden shared root.
+- The §6 counters. Phase 1 has structured logs only: `agent_admission.{granted,denied,fenced,unknown,compat_probe_hit}`.
+- The Superseded, observer and takeover UI. A refusal and a fenced turn surface as the spawn-gate error text in the pane.
+- A spawn env without an agent UID takes no lease and is logged: tokenless and legacy panes (D3's minting is outside this
+  spec).
+- The subprocess controller keeps its per-turn claim on the same key. It now also sees persistent holders, which is
+  intended.
+
+---
+
+## 13. Phase 2 as built — Take over
+
+**What the user sees.**
+- A pane refused because another instance runs its agent now shows **"Running in another AgentMux instance"**. The
+  refusal names the holder. Before this it was an unclassified failure offering a Retry that is refused identically.
+- The row's action is **Take over**. It takes two clicks: the first arms it ("Confirm take over", for 5 s), the second
+  confirms. This is the human confirmation D7 asks for, since the action stops the agent in the other instance.
+- On success the row clears, and the refused turn is re-run when there was one.
+- On failure the row stays, retitled "Could not take over", with the reason. For example: the holder is an older build
+  that cannot hand over, it is unreachable, or it did not let go within 25 s.
+- The instance that gave the agent up shows **"Taken over by another AgentMux instance"** in that pane, with the same
+  Take over action to bring it back.
+
+**Observer mode (D5)** needed no new code. A refused pane already renders the agent's history, which comes from the
+UID-keyed record. It just starts no turns. There is no separate read-only pane type.
+
+**Code.**
+- `agents::failure`: the new class `LiveElsewhere` (`live_elsewhere`), recognised by
+  `agent_admission::REFUSAL_MARKERS`. The title separates "running in" from "taken over by", and the detail is the refusal
+  line itself.
+- `run_agent_turn`:
+  - the gate's surfacing (output frame, `agent:last_failure`, `agentfailure` event) is now a shared closure;
+  - a single-live-instance refusal from inside the controller also goes through it — the spawn-time claim losing a race,
+    or the pre-turn fence. Before, those errors reached no row.
+- `server/agent_takeover.rs` (new; both routes need full auth, and neither is reachable from a jekt — I5):
+  - `POST /api/v1/agent/takeover {block_id}`, on the requester. It finds the holder with `agent_admission::locate_holder`:
+    the lease holder's channel mapped to its live srv through the shared registry, or the compat probe's hit. It asks
+    the holder to let go, then waits until the lease and the probe are both clear.
+  - `POST /agentmux/agent/release {uid}`, on the holder. Each of its panes holding that UID's lease stops its CLI process
+    gracefully (`release_to_other_instance`): stdin EOF, so a turn in flight finishes, then a kill after 10 s. That
+    pane's row then shows "taken over".
+- **Handover hold.** For 30 s after handing an agent over, the holder srv refuses to claim it again on its own
+  (`agent_admission::hold_after_handover`). Without the hold, a jekt arriving between the holder's exit and the
+  requester's claim would respawn the agent there and win it straight back. A Take over started from that srv clears the
+  hold.
+- Frontend:
+  - `failure/takeover.ts` (`requestAgentTakeover`);
+  - the `live_elsewhere` arm in `failure-accessory.ts`;
+  - the arm/confirm state in `useAgentFailure`;
+  - the `onTakeOver` wiring in `agent-view.tsx`;
+  - `live_elsewhere` in the hand-maintained `srv-types.d.ts`.
+
+**Tests.**
+- Rust:
+  - `a_single_live_instance_refusal_is_its_own_class`;
+  - the holder-side message classifies as taken over;
+  - every refusal text is recognised;
+  - the handover hold refuses until cleared;
+  - `HolderEndpoint`'s Debug never prints the auth key.
+- Vitest:
+  - the takeover request (route, auth, released / refused / non-JSON);
+  - the row: Take over and not Retry, the armed and busy states, no action without a handler;
+  - the hook: arm then confirm then clear, disarm after timeout, a failed takeover keeps the row with its reason.
+
+**Limits.**
+- **An older holder cannot hand over.** It has no release route, so Take over tells the user to close the agent there.
+  It is detected by the compat probe, but only an instance that takes the lease (this build or later) can be asked to
+  let go.
+- **Any caller with this srv's auth key can take over.** The takeover route is behind full auth, so the frontend and
+  anything else holding the key can call it — including an agent running in this srv, whose MCP carries that key. That
+  is the same exposure `/api/v1/agent/open` already has. The human confirmation lives in the pane's two-click action,
+  not in the server.
+- **No Superseded badge or counters yet.** A fenced or refused pane shows the failure row only, and there are still only
+  logs (§6).
+
+---
+
+## 14. Phase 3 as built — record fencing
+
+**The residual risk after Phases 1–2.**
+- A holder that loses its lease is refused its next turn (the pre-turn verify) and killed (by the renewal task).
+- Until then, though, its CLI can still write to the agent's shared record, `agent:<UID>:current`.
+- The case that matters is a **suspended** holder. Its CLI, its stdout reader and its renewal task all resume together.
+  Output the CLI had buffered could reach the record before the renew notices that another instance reclaimed the
+  lease during the suspension.
+
+**The fence (`agent_admission::RecordFence`).** Every stdout-reader and process-waiter append to the shared record passes
+through `fenced_zone(zone, &fence)`. The pane's own output log is unaffected.
+- **Recent confirmation — no I/O.** While the lease was confirmed ours within the TTL, the fence answers from memory
+  alone. Nobody can have reclaimed an unexpired lease, so this is exact.
+- **Older confirmation — check the file.** After a longer gap, the first append verifies against the lease file before
+  writing. A reclaimed lease marks the handle lost, drops the write, and logs `agent_admission.fenced`. The same
+  loss is then seen by the pre-turn fence, and the process is killed.
+- The confirmation time is updated on claim, on every successful renew, and on every successful verify.
+
+**The ledger.** Each segment's `start` record now carries `lease_epoch`: the ownership generation its process held.
+- A change of epoch between consecutive segments is an ownership change — another instance, or a takeover — so it is
+  visible in the chain.
+- The field is `serde(default)` and skipped when `None`, so older records still read and older builds ignore it.
+- No separate `fork` event was added. With Phases 1–2, two lease-holding instances cannot both append, so there is no
+  divergence left for one to mark. Only lease-unaware (older) builds can still overlap, and they would not write the
+  event either.
+
+**Why not a store-side check.** "The store rejects an append with a stale epoch" would mean the transcript store
+(`FileStore`, shared by every srv on the host) reading the lease on every append — or storing epochs itself. That is a
+schema and hot-path change to a store that older builds also write, and they would bypass it anyway. The writer-side
+fence covers the one realistic case, the woken holder, at no cost to the common path.
+
+**Tests.**
+- `agent_admission`:
+  - `the_record_fence_passes_a_recently_confirmed_lease_without_io`;
+  - `the_record_fence_keeps_a_reclaimed_holders_output_out_after_a_gap` (the write is dropped, and the loss reaches the
+    pre-turn fence);
+  - `the_record_fence_confirms_and_resumes_when_the_lease_is_still_ours_after_a_gap`.
+- `continuity_segments::segments_record_the_lease_epoch_and_older_records_still_read`.
+
+---
+
+## 15. Phase 4 as built — LAN tier
+
+**Query, not advertisement.**
+- The design (§4.4) put `live_agents` into the mDNS advertisement. The built version asks instead, with
+  `GET /agentmux/agent/holding?uid=…` on each peer.
+- mDNS TXT records are small, and are refreshed on the record's TTL, not when an agent starts. A peer asked at the moment
+  of claiming answers from its live lease store.
+- The route sits with the other LAN-peer routes, behind `lan_or_full_auth_middleware`. A peer's scoped `lan_key` reads it,
+  just as it reads the agent-name list. It discloses only whether a UID is live on that host, since when, and in which
+  channel and version.
+- The spec asked for a signed request here. The existing LAN-key authentication was used instead.
+
+**Early check.**
+- `check_before_spawn` asks every LAN peer, concurrently, 1.5 s each, after the host checks.
+- A peer that holds the agent refuses the spawn: "… running … on another computer on your network (computer X, channel,
+  version)". That text classifies as `LiveElsewhere`, like every other refusal.
+- Unreachable peers, and peers too old to have the route, are skipped. This is D2's fail-open.
+
+**Simultaneous starts.**
+- Every 6th renewal (30 s), the holder asks the LAN again. If a peer holds the same UID and wins the tie-break, this
+  holder fences itself: the loss is recorded, `on_lost` kills the process, and the next turn is refused.
+- `peer_wins`: the earlier start wins. Starts within 10 s of each other are simultaneous, and the lower hostname wins.
+  Exactly one of two distinct hosts wins, whichever side evaluates.
+- Start times are each host's own clock. Only differences beyond the skew budget are trusted to order them.
+
+**Same host.** Answers from this host are ignored. A second AgentMux instance on the same machine also appears as a LAN
+peer, but it reads this machine's lease store, so it would report this process's own lease back. The host tier already
+governs this host.
+
+**Code.**
+- `agent_admission`:
+  - `set_lan_discovery`, called from `bootstrap.rs` with the LAN discovery controller;
+  - `lan_holders`, `local_holding` and `peer_wins`;
+  - the LAN refusal and LAN loss texts;
+  - the re-check in the renewal task.
+- `server/agent_takeover.rs`: `handle_agent_holding`.
+
+**Tests.**
+- The tie-break has exactly one winner: earlier start, near-simultaneous start, identical start.
+- A LAN refusal names the computer and classifies as `LiveElsewhere`.
+- This host reports holding only a live lease.
+- An answer from this host is not a LAN holder.
+- Without LAN discovery, the tier is skipped.
+
+**Limits.**
+- An overlap between two hosts lasts until the next 30 s re-check (bounded; §4.4 never promised prevention across a
+  partition).
+- Take over (§13) does not reach LAN peers: the release route is full-auth only. A LAN refusal tells the user to close
+  the agent on the other computer.
+
+---
+
+## 16. Phase 5 as built — WAN tier
+
+**Relay (agentmux-cloud#92).**
+- `agent-lease-store.ts` keeps one row per agent in a new `muxbus-agent-leases-${env}` table, keyed by the normalized agent
+  **name**. That is the key the relay's pending queue already uses, and a fence on pulls has to match it (see Limits).
+- Claim, renew and release are conditional writes guarded by the row as it was read, so two simultaneous claims cannot
+  both win. The epoch goes up on each ownership change. TTL is 60 s, and expired rows are swept by DynamoDB TTL.
+- Routes: `POST /agents/lease`, `POST /agents/lease/renew` and `POST /agents/lease/release`, for the caller's own agent
+  only (`X-Agent-ID` must match, and `checkAgentBinding` applies). A refusal names the holder's host, channel and version,
+  never its account or instance id.
+- **The fence.** `GET /reactive/pending/:agent_id` and `POST /reactive/ack` answer **409 `not_holder`** while another
+  instance holds a live lease. Callers identify themselves in `X-Agent-Instance`.
+  - With no lease, nothing changes, so older clients are unaffected until a newer client holds the agent.
+  - The check fails open if the lease table cannot be read.
+- Merging does not deploy it (`deploy.yml` is manual). Either half is safe to land first.
+
+**Client (this repo, `muxbus/wan_lease.rs`).**
+- The instance id is `host/channel`.
+- `cloud_subscriber` claims or renews the lease before every pending pull, at most every 20 s. It sends
+  `X-Agent-Instance` on pulls and acks.
+- A 20 s tick renews the leases of all registered agents between wake signals. Unregistering an agent releases its lease.
+- **Another instance holds the agent** (refused claim or 409 on a pull): this instance
+  - skips the pull, so it never consumes that instance's jekts;
+  - fences the local holder of that agent through `agent_admission::fence_agent_named`, which records the loss (the next
+    turn is refused) and stops the CLI process. The newcomer yields (D1).
+- The early admission check refuses a spawn when a recent answer (within 90 s) said another instance holds the agent.
+  The refusal classifies as `LiveElsewhere`.
+- A relay without the routes (404) turns the WAN tier off for 10 minutes. An unreachable relay or an error means fail
+  open (D2).
+
+**Tests.**
+- Relay (8 + 8):
+  - claim, refuse and idempotent re-claim; expired takeover with a higher epoch; renew only for the holder; release;
+  - the fence (holder, other instance, header-less caller); two simultaneous claims have one winner;
+  - route-level (`app.inject`): no lease, no change; the holder pulls while others get 409; acks are fenced; the check
+    fails open; claim refused while held, and only for the caller's own agent.
+- Client:
+  - holder description; claim answers mapped to outcomes; a `not_holder` answer is remembered for the early check and
+    cleared by a grant; the instance id;
+  - admission: the relay can fence the local holder by name (only its own entry, only once); a WAN refusal classifies as
+    `LiveElsewhere`.
+
+**Limits.**
+- **Keyed by name, not UID.** The relay routes jekts by agent name, so its lease is by name too. Two *different* agents
+  with the same name on two computers fence each other. That is a limit of name-keyed WAN routing that predates this
+  spec — the relay already delivered one's jekts to the other. Re-keying the relay's queue by UID is the fix, and it is
+  outside this spec.
+- **Registered, not running.** On the WAN, an instance holds the agent while the agent is *registered* there (its pane
+  is open and receiving jekts), not only while its CLI process runs. The host lease is per process. An idle but open
+  pane therefore keeps the WAN lease, which is deliberate: that pane is where the agent's jekts go.
+- **Detection is up to 20 s late.** A newcomer that starts between two renewals runs until its first claim is refused.
+- **No end-to-end check.** It needs the relay change deployed and two computers.

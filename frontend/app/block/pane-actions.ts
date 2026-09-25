@@ -6,6 +6,7 @@
  * Used from both handleHeaderContextMenu (header) and onContextMenu (body) in blockframe.tsx.
  */
 
+import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
@@ -29,32 +30,15 @@ function getPaneSelection(viewModel?: ViewModel): string {
 }
 
 /**
- * Returns true if the pane accepts text input (i.e. paste makes sense).
- * Currently only terminal panes accept input via the PTY.
+ * Returns true if the pane accepts text input (i.e. paste makes sense) — its
+ * view's `acceptsInput` capability (today: the terminal, via its PTY).
  */
 function paneAcceptsInput(blockData: Block): boolean {
-    return blockData.meta?.view === "term";
+    return paneTabCapability(blockData.meta?.view, "acceptsInput") === true;
 }
 
 // ─── Split ────────────────────────────────────────────────────────────────────
 
-// Agent-specific meta fields that should NOT be inherited when splitting.
-// A split agent pane should open the picker, not re-launch the same agent.
-const agentInheritBlocklist = new Set([
-    "agentId",
-    "agentName",
-    "agentIcon",
-    "agentMode",
-    "agentProvider",
-    "agentCliPath",
-    "agentCliArgs",
-    "agentOutputFormat",
-    "agentBinDir",
-    "cmd",
-    "cmd:args",
-    "cmd:interactive",
-    "cmd:runonstart",
-]);
 
 /**
  * Split the pane in the given direction, spawning a new pane of the same type
@@ -70,12 +54,11 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
     if (!sourceConn || sourceConn === "local") {
         delete meta["connection"];
     }
-    // Agent panes: drop all agent-specific fields so the new pane shows
-    // the agent picker instead of re-launching the same agent session.
-    if (blockData.meta?.view === "agent") {
-        for (const key of agentInheritBlocklist) {
-            delete meta[key];
-        }
+    // A view can declare meta a split must not copy (`splitDropsMeta`, Pane
+    // Tab contract Phase 5) — the agent pane drops its agent-specific fields
+    // so the new pane shows the picker instead of re-launching the same agent.
+    for (const key of paneTabCapability(blockData.meta?.view, "splitDropsMeta") ?? []) {
+        delete meta[key];
     }
     const blockDef: BlockDef = { meta };
 
@@ -102,12 +85,12 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
 // ─── Replace With submenu ─────────────────────────────────────────────────────
 
 /**
- * Build a "Replace With..." submenu listing all pane-based widgets (grouped
- * widgets — e.g. the Messengers group's Discord/Slack/etc. — nest under
- * their parent's own label rather than each showing up individually; see
- * buildPaneWidgetMenuItems). Returns an array with the submenu item + a
- * trailing separator, or empty array if no replacement widgets are
- * available.
+ * Build the "Replace With..." submenu entry listing all pane-based widgets
+ * (grouped widgets — e.g. the Messengers group's Discord/Slack/etc. — nest
+ * under their parent's own label rather than each showing up individually;
+ * see buildPaneWidgetMenuItems). Returns a one-item array, or an empty array
+ * if no replacement widgets are available. Separators between sections are
+ * added by buildPaneContextMenu, not here.
  */
 function buildReplaceSubmenu(blockData: Block): ContextMenuItem[] {
     const fullConfig = atoms.fullConfigAtom();
@@ -121,13 +104,41 @@ function buildReplaceSubmenu(blockData: Block): ContextMenuItem[] {
     );
 
     if (items.length === 0) return [];
-    return [
-        { label: "Replace With...", type: "submenu" as const, submenu: items },
-        { type: "separator" as const },
-    ];
+    return [{ label: "Replace With...", type: "submenu" as const, submenu: items }];
 }
 
 // ─── Menu builder ─────────────────────────────────────────────────────────────
+
+/**
+ * Join item groups with one separator between each pair of NON-EMPTY groups.
+ * Empty groups contribute nothing (not even a separator), so callers can pass
+ * conditionally-empty groups without ever producing a leading, trailing, or
+ * doubled separator.
+ */
+export function joinMenuGroups(groups: ContextMenuItem[][]): ContextMenuItem[] {
+    const menu: ContextMenuItem[] = [];
+    for (const group of groups) {
+        if (group.length === 0) continue;
+        if (menu.length > 0) menu.push({ type: "separator" });
+        menu.push(...group);
+    }
+    return menu;
+}
+
+/**
+ * Named sections of the pane menu. A region (see context-menu-region.ts) drops
+ * sections by name instead of filtering by label. `viewItems` is composed by
+ * blockframe.tsx (ViewModel.getBodyContextMenuItems) ahead of these, so it is
+ * honoured there rather than in buildPaneContextMenu.
+ */
+export type PaneMenuSection =
+    | "viewItems" // viewModel.getBodyContextMenuItems()
+    | "clipboard" // Copy / Paste
+    | "split" // Split Up / Down / Left / Right
+    | "replace" // Replace With...
+    | "magnify" // Magnify / Un-Magnify Pane
+    | "close" // Close Pane
+    | "inspect"; // Inspect Element
 
 export interface PaneContextMenuOpts {
     magnified: boolean;
@@ -140,74 +151,89 @@ export interface PaneContextMenuOpts {
      * `show_dev_tools(..., inspect_element_at)`). Omit to suppress the entry.
      */
     inspectAt?: { x: number; y: number };
+    /** Sections to leave out entirely. Separators are generated between the
+     *  surviving groups, so any combination is safe. */
+    omit?: ReadonlySet<PaneMenuSection>;
 }
 
 /**
  * Build the reusable pane context menu items shared between header and body right-click.
  * Pass viewModel to enable terminal-aware copy/paste.
+ *
+ * Layout is a list of groups joined by separators; empty groups (everything in
+ * them omitted, or nothing applies — e.g. no replacement widgets) are skipped,
+ * so no combination can leave a leading, trailing, or doubled separator:
+ *
+ *   [clipboard] ─ [split] ─ [replace] ─ [magnify, close] ─ [inspect]
  */
 export function buildPaneContextMenu(
     blockData: Block,
     opts: PaneContextMenuOpts,
     viewModel?: ViewModel
 ): ContextMenuItem[] {
-    const selection = getPaneSelection(viewModel);
-    const hasSelection = selection.length > 0;
-    const canPaste = paneAcceptsInput(blockData);
+    const has = (section: PaneMenuSection) => !opts.omit?.has(section);
 
-    return [
+    const clipboard: ContextMenuItem[] = [];
+    if (has("clipboard")) {
+        const selection = getPaneSelection(viewModel);
         // Copy — always present; disabled when nothing is selected
-        {
+        clipboard.push({
             label: "Copy",
-            enabled: hasSelection,
+            enabled: selection.length > 0,
             click: () => {
                 if (selection) {
                     clipboardWriteText(selection).catch(console.error);
                 }
             },
-        },
+        });
         // Paste — only shown for input-accepting panes (terminals)
-        ...(canPaste
-            ? [
-                  {
-                      label: "Paste",
-                      click: () => {
-                          void (async () => {
-                              try {
-                                  const text = await clipboardReadText();
-                                  if (!text) return;
-                                  const terminal = (viewModel as any)?.termRef?.current?.terminal;
-                                  if (terminal) {
-                                      terminal.paste(text);
-                                  }
-                              } catch (e) {
-                                  console.error("[pane-actions] paste failed:", e);
-                              }
-                          })();
-                      },
-                  } as ContextMenuItem,
-              ]
+        if (paneAcceptsInput(blockData)) {
+            clipboard.push({
+                label: "Paste",
+                click: () => {
+                    void (async () => {
+                        try {
+                            const text = await clipboardReadText();
+                            if (!text) return;
+                            const terminal = (viewModel as any)?.termRef?.current?.terminal;
+                            if (terminal) {
+                                terminal.paste(text);
+                            }
+                        } catch (e) {
+                            console.error("[pane-actions] paste failed:", e);
+                        }
+                    })();
+                },
+            });
+        }
+    }
+
+    const split: ContextMenuItem[] = has("split")
+        ? [
+              { label: "Split Up", click: () => void handleSplitPane(blockData, "up") },
+              { label: "Split Down", click: () => void handleSplitPane(blockData, "down") },
+              { label: "Split Left", click: () => void handleSplitPane(blockData, "left") },
+              { label: "Split Right", click: () => void handleSplitPane(blockData, "right") },
+          ]
+        : [];
+
+    const replace: ContextMenuItem[] = has("replace") ? buildReplaceSubmenu(blockData) : [];
+
+    const paneActions: ContextMenuItem[] = [
+        ...(has("magnify")
+            ? [{ label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane", click: opts.onMagnifyToggle }]
             : []),
-        { type: "separator" },
-        { label: "Split Up",    click: () => void handleSplitPane(blockData, "up") },
-        { label: "Split Down",  click: () => void handleSplitPane(blockData, "down") },
-        { label: "Split Left",  click: () => void handleSplitPane(blockData, "left") },
-        { label: "Split Right", click: () => void handleSplitPane(blockData, "right") },
-        { type: "separator" },
-        ...buildReplaceSubmenu(blockData),
-        {
-            label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane",
-            click: opts.onMagnifyToggle,
-        },
-        { label: "Close Pane", click: opts.onClose },
-        // Inspect Element — opens CEF DevTools focused on whatever was
-        // under the right-click. Only appears when `inspectAt` was supplied
-        // (call sites that don't capture click coords don't get the entry).
-        // Available in any build; the DevTools window itself decides whether
-        // to launch based on the app's debug flags.
-        ...(opts.inspectAt
+        ...(has("close") ? [{ label: "Close Pane", click: opts.onClose }] : []),
+    ];
+
+    // Inspect Element — opens CEF DevTools focused on whatever was
+    // under the right-click. Only appears when `inspectAt` was supplied
+    // (call sites that don't capture click coords don't get the entry).
+    // Available in any build; the DevTools window itself decides whether
+    // to launch based on the app's debug flags.
+    const inspect: ContextMenuItem[] =
+        has("inspect") && opts.inspectAt
             ? [
-                  { type: "separator" } as ContextMenuItem,
                   {
                       label: "Inspect Element",
                       click: () => {
@@ -217,8 +243,9 @@ export function buildPaneContextMenu(
                               console.error("[pane-actions] inspect failed:", e);
                           }
                       },
-                  } as ContextMenuItem,
+                  },
               ]
-            : []),
-    ];
+            : [];
+
+    return joinMenuGroups([clipboard, split, replace, paneActions, inspect]);
 }

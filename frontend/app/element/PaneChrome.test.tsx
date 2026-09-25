@@ -159,7 +159,17 @@ vi.mock("@/layout/lib/layoutNode", () => ({
 
 import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
-import { registerPaneTabDescriptor } from "./pane-tab-model";
+import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
+import type { PaneTabDescriptor } from "./pane-tab-model";
+
+// A test view type whose manifest carries only a pane-tab descriptor.
+const unregisterTestTabs: (() => void)[] = [];
+function registerPaneTabDescriptor(view: string, tab: PaneTabDescriptor): void {
+    unregisterTestTabs.push(registerPaneTab(legacyAdapter(view, class {} as any, { tab })));
+}
+afterEach(() => {
+    while (unregisterTestTabs.length) unregisterTestTabs.pop()!();
+});
 
 function fakeNodeModel(overrides: Record<string, any> = {}): any {
     return {
@@ -459,6 +469,11 @@ describe("renderPaneChromeShell — header tail color", () => {
     // Asserted as "same across every active tab" rather than against a
     // literal, because that invariant IS the feature.
     it("two UNCOLORED tabs of different views still give one stable tail", () => {
+        // Agent's uncolored header keeps the theme surface — its manifest's
+        // `header: "surface"` capability (Pane Tab contract Phase 5).
+        unregisterTestTabs.push(
+            registerPaneTab(legacyAdapter("agent", class {} as any, { capabilities: { header: "surface" } }))
+        );
         setObjectValue("block:b1", { meta: { view: "agent" } });
         setObjectValue("block:b2", { meta: { view: "term" } });
         const [agentActive, termActive] = tailBgAcrossEveryActiveTab(["b1", "b2"]);
@@ -588,18 +603,19 @@ describe("renderPaneChromeShell — error isolation", () => {
     });
 });
 
-// The trait-like opt-in surface (ViewModel.paneChromeModel) — what makes
-// ONE chrome able to serve every view type instead of agent/term keeping
-// their own components. Nothing here is view-type-specific: these same
-// hooks are available to any pane.
+// The trait-like opt-in surface (a manifest's `chrome`, Pane Tab contract
+// Phase 4) — what makes ONE chrome able to serve every view type instead of
+// agent/term keeping their own components. Nothing here is
+// view-type-specific: these same hooks are available to any pane.
 describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
+    /** Registers a view type whose manifest contributes `model`, and makes b1
+     *  (the active tab) that view type, keeping any meta a test already set. */
     function renderWithModel(model: any, stack = ["b1", "b2"], nodeOverrides: Record<string, any> = {}) {
+        unregisterTestTabs.push(registerPaneTab(legacyAdapter("test-chrome", class {} as any, { chrome: () => model })));
+        setObjectValue("block:b1", { meta: { ...(signalFor("block:b1")[0]()?.meta ?? {}), view: "test-chrome" } });
         mockLayoutModel = fakeLayoutModel(stack);
-        const nodeModel = fakeNodeModel({
-            activeViewModel: () => ({ paneChromeModel: () => model }),
-            ...nodeOverrides,
-        });
-        const res = render(() => renderPaneChromeShell(nodeModel, <div>content</div>) as any);
+        const nodeModel = fakeNodeModel(nodeOverrides);
+        const res = render(() => renderPaneChromeShell(nodeModel, <div data-testid="content">content</div>) as any);
         return { ...res, nodeModel };
     }
 
@@ -656,15 +672,71 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
 
         const root = container.querySelector(".pane-stack")!;
         const kids = Array.from(root.children).map((el) => el.getAttribute("data-testid") ?? el.className);
-        expect(kids).toEqual(["pane-header-tab-strip", "below-header", "pane-progress-bar-slot", "pane-stack-content"]);
+        expect(kids).toEqual(["pane-header-tab-strip", "below-header", "pane-progress-bar-slot", "pane-stack-body"]);
     });
 
-    it("wrapContent wraps the content region, for a surface spanning more than the content box", () => {
+    it("bodyClass and renderBehindContent decorate the body, for a surface spanning more than the content box", () => {
         const { container } = renderWithModel({
-            wrapContent: (c: any) => <div class="my-body">{c}</div>,
+            bodyClass: "my-body",
+            renderBehindContent: () => <div data-testid="bg-layer" />,
         });
 
-        expect(container.querySelector(".my-body > .pane-stack-content")).toBeTruthy();
+        const body = container.querySelector(".pane-stack-body.my-body")!;
+        expect(body).toBeTruthy();
+        expect(Array.from(body.children).map((el) => el.getAttribute("data-testid") ?? el.className)).toEqual([
+            "bg-layer",
+            "pane-stack-content",
+        ]);
+    });
+
+    // Phase 4 (spec §2.4 #2): the model follows the ACTIVE tab's view type —
+    // it used to be the pane's FIRST tab's, forever.
+    it("reads the chrome model of the active tab's view type, and keeps the content's DOM node", () => {
+        unregisterTestTabs.push(
+            registerPaneTab(legacyAdapter("plain-view", class {} as any)),
+            registerPaneTab(
+                legacyAdapter("decorated-view", class {} as any, {
+                    chrome: () => ({ rootClass: "decorated", bodyClass: "decorated-body" }),
+                })
+            )
+        );
+        setObjectValue("block:b1", { meta: { view: "plain-view" } });
+        setObjectValue("block:b2", { meta: { view: "decorated-view" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        const [active, setActive] = createSignal("b1");
+        const { container, getByTestId } = render(
+            () => renderPaneChromeShell(fakeNodeModel({ activeBlockId: active }), <div data-testid="content">content</div>) as any
+        );
+        const root = container.querySelector(".pane-stack")!;
+        const contentEl = getByTestId("content");
+        expect(root.classList.contains("decorated")).toBe(false);
+
+        setActive("b2");
+        expect(root.classList.contains("decorated")).toBe(true);
+        expect(container.querySelector(".pane-stack-body")!.classList.contains("decorated-body")).toBe(true);
+        expect(getByTestId("content")).toBe(contentEl);
+
+        setActive("b1");
+        expect(root.classList.contains("decorated")).toBe(false);
+        expect(getByTestId("content")).toBe(contentEl);
+    });
+
+    it("builds a view type's chrome model once per pane, however often the tabs switch", () => {
+        const build = vi.fn(() => ({ rootClass: "x" }));
+        unregisterTestTabs.push(
+            registerPaneTab(legacyAdapter("once-view", class {} as any, { chrome: build })),
+            registerPaneTab(legacyAdapter("other-view", class {} as any))
+        );
+        setObjectValue("block:b1", { meta: { view: "once-view" } });
+        setObjectValue("block:b2", { meta: { view: "other-view" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        const [active, setActive] = createSignal("b1");
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: active }), <div />) as any);
+        setActive("b2");
+        setActive("b1");
+        setActive("b2");
+        setActive("b1");
+        expect(build).toHaveBeenCalledTimes(1);
     });
 
     it("rootClass is applied alongside the chrome's own classes, not instead of them", () => {
@@ -703,7 +775,7 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
         expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "browser" } }, undefined);
     });
 
-    it("a view type that opts out entirely (no paneChromeModel) keeps every default", () => {
+    it("a view type whose manifest has no chrome keeps every default", () => {
         setObjectValue("block:b1", { meta: { "frame:title": "One" } });
         setObjectValue("block:b2", { meta: { "frame:title": "Two" } });
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
@@ -865,7 +937,7 @@ describe("renderPaneChromeShell — progress-bar slot follows the ACTIVE view mo
     }
 
     it("renders the slot even when the latched view model has no PaneChromeModel", () => {
-        const swarmVm = {}; // Swarm: no paneChromeModel, no setProgressBarMount
+        const swarmVm = {}; // Swarm: no chrome model, no setProgressBarMount
         const { slot } = renderSwitchable(swarmVm);
 
         expect(slot).toBeTruthy();

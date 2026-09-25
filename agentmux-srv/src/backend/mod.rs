@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
+pub mod agent_admission;
 pub mod agent_color;
 pub mod agent_config;
 pub mod agent_registry_lookup;
@@ -12,6 +13,7 @@ pub mod agent_session;
 pub mod blockcontroller;
 pub mod bookmarks_store;
 pub mod browser_start_page;
+pub mod user_widgets;
 pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_validate;
@@ -57,11 +59,13 @@ pub mod session_backfill;
 pub mod claude_layout;
 pub mod continuity;
 pub mod continuity_segments;
-#[allow(dead_code)] // wired by reconciliation (SPEC_MEMORY_FOLLOWS_THE_AGENT phase M3b)
 pub mod memory_record;
+pub mod memory_dir_claims;
+pub mod memory_reconcile;
 pub mod continuity_state;
 pub mod shellexec;
 pub mod transcript_backfill;
+pub mod gh_guard;
 pub mod pane_env;
 pub mod shellintegration;
 pub mod sysinfo;

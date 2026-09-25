@@ -1,5 +1,27 @@
 # AgentMux Version History
 
+## 0.57.4 — 2026-09-25
+
+- feat(history): SearchHistory searches every session in the agent's own record, including sessions whose transcript is gone
+- fix(memory): memory is found only where the agent's own spawn or working directory puts it
+- feat(panes): drag a Pane Tab out of the window to make it a floating pane
+- feat(armory): memory editors pinned to the bottom; Global Memory as tiles with history; Personal Memory editable in the Armory; unsaved drafts survive live changes (base_sha256 on saves)
+- feat(sound,tabs): the activity flash follows its sound — one pulse per strike (Edit's three knocks flash three times), at relative loudness, timed to the audible tone
+- fix(pane-tabs): a browser tab's label no longer flashes "Browser" when you switch to it
+- feat(memory): the memory record and a cross-process zone transaction in the filestore
+- fix(panes): agent busy ring shows in panes that started as another view type (Swarm, terminal, …)
+- fix(pane-tabs): pane tabs keep their own name, icon and content when you switch between them
+- fix(agent-pane): a history tab is titled "<agent>'s History" instead of a bare "History"
+- feat(memory): an agent's memory follows it into a new account, working directory or channel
+- fix(panes): an inactive tab can no longer show through as a brief "ghost" (Help)
+- feat(panes): browser and editor tabs keep their state when you switch tabs; other tabs no longer stay mounted
+- feat(agent-pane): live feed keeps 6 finished turns by default (was 3), and up to 2 MB of them (was 1 MB)
+- srv tests no longer leak a 4.4 MB fake App Server build into the temp dir on every run
+- feat(notify): a question toast reads "<agent> has a question", shows how many more it asks, and every agent toast carries what the agent is working on
+- feat(notify): toasts show what the agent is working on — a small grey line on Windows, the last body line on Linux
+- fix(notify): clicking a toast brings up the right window with the agent's pane focused — minimized, behind another app, or on a workspace no window shows
+- fix(notify): one AgentMux instance starting or restarting no longer wipes another instance's toasts on Windows
+
 ## 0.57.3 — 2026-09-24
 
 - fix(agent): resume finds a Claude conversation whose working directory has an underscore, a space or other punctuation

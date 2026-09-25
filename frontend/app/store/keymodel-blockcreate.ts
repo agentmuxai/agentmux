@@ -1,6 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically, getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
@@ -26,7 +27,7 @@ function getDefaultNewBlockDef(): BlockDef {
     if (focusedNode != null) {
         const blockAtom = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", focusedNode.data?.blockId));
         const blockData = blockAtom();
-        if (blockData?.meta?.view == "term") {
+        if (paneTabCapability(blockData?.meta?.view, "sharesCwd")) {
             if (blockData?.meta?.["cmd:cwd"] != null) {
                 termBlockDef.meta["cmd:cwd"] = blockData.meta["cmd:cwd"];
             }

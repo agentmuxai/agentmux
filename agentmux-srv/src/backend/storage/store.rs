@@ -44,6 +44,10 @@ pub struct Store {
     /// token → UID for attributing requests (identity M4a). `None` except on
     /// the channel's object store at runtime; see `attach_token_index`.
     pub(super) token_index: Mutex<Option<Arc<super::agent_tokens::TokenIndex>>>,
+    /// The channel-wide WAN identity store (`wan-identity/wan.db`). `None`
+    /// except on the channel's object store at runtime, and when the file
+    /// couldn't be opened — WAN signing is then off. See `wan_identity.rs`.
+    wan_identity: Mutex<Option<Arc<super::wan_identity::WanIdentityStore>>>,
     /// Base directory that named-instance `working_directory` values are
     /// expressed **relative to** in the instance registry (write side:
     /// `registry_mirror`; read side: the `listnamedagents` handler).
@@ -106,6 +110,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             token_index: Mutex::new(None),
+            wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -116,6 +121,17 @@ impl Store {
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
         Self::configure_and_migrate(conn)
+    }
+
+    /// Which store this is, stable for its lifetime: the database file, or —
+    /// for an in-memory store — its address. Lets a record written into a
+    /// machine-wide zone say which channel's store wrote it.
+    pub fn origin_id(&self) -> String {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        match conn.path() {
+            Some(p) if !p.is_empty() => p.to_string(),
+            _ => format!("memory:{:p}", self),
+        }
     }
 
     /// TEST-ONLY: additionally install the **identity-store** schema on this
@@ -165,6 +181,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             token_index: Mutex::new(None),
+            wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -201,6 +218,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             token_index: Mutex::new(None),
+            wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -226,6 +244,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             token_index: Mutex::new(None),
+            wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -303,6 +322,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             token_index: Mutex::new(None),
+            wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -366,6 +386,16 @@ impl Store {
     /// Attach the GLOBAL (cross-channel) agent-definition store. Called
     /// once on srv startup after `Store::open`, before the store is
     /// wrapped in `Arc`. Definition mutations then mirror to it.
+    pub fn set_wan_identity(&self, wan_identity: Arc<super::wan_identity::WanIdentityStore>) {
+        *self.wan_identity.lock().unwrap_or_else(|e| e.into_inner()) = Some(wan_identity);
+    }
+
+    /// The channel-wide WAN identity store, if attached. `None` means WAN
+    /// signing is off for this process — never fall back to another store.
+    pub fn wan_identity(&self) -> Option<Arc<super::wan_identity::WanIdentityStore>> {
+        self.wan_identity.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     pub fn set_def_registry(&self, def_registry: Arc<DefinitionStore>) {
         *self.def_registry.lock().unwrap_or_else(|e| e.into_inner()) = Some(def_registry);
     }

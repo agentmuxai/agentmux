@@ -274,8 +274,8 @@ async fn run_pty_output_flusher(
 /// another pane happened to configure there — and register_agent_with_nonce
 /// unconditionally evicts whoever previously held that agent_key, so the
 /// second such pane to register silently steals the first's jekt identity
-/// (same-host cross-instance jekt misdelivery). See the child-env injection
-/// loop below (`settings.cmd_env` iteration) for the matching fix that keeps
+/// (same-host cross-instance jekt misdelivery). See `cmd_env_overrides` below
+/// (its `settings.cmd_env` loop) for the matching fix that keeps
 /// this global value out of the pane's OWN environment too — otherwise a
 /// pane could still pick it up via OSC 16162 and re-register through the
 /// frontend's `/agentmux/reactive/register` path instead (reagentx P1,
@@ -296,8 +296,8 @@ fn resolve_agent_id_for_jekt(block_meta: &MetaMapType) -> Option<String> {
 }
 
 /// Whether `key` may be injected into a pane's actual OS environment from
-/// the global settings' `cmd_env` defaults (`start()`'s child-env-injection
-/// loop, lowest priority — the block's own `cmd:env` override, highest
+/// the global settings' `cmd_env` defaults (`cmd_env_overrides`, lowest
+/// priority — the block's own `cmd:env` override, highest
 /// priority, is never filtered by this and can always set either key
 /// explicitly). Identity keys are excluded (reagentx P1, round 2 on #2694):
 /// without this, a global cmd_env.AGENTMUX_AGENT_ID setting would still land
@@ -310,6 +310,91 @@ fn resolve_agent_id_for_jekt(block_meta: &MetaMapType) -> Option<String> {
 /// backend auto-register path specifically.
 fn is_global_cmd_env_injectable(key: &str) -> bool {
     !matches!(key, "AGENTMUX_AGENT_ID" | "WAVEMUX_AGENT_ID")
+}
+
+/// The `cmd:env` part of an interactive shell's environment, computed from
+/// the global settings and the block's own metadata. See
+/// [`cmd_env_overrides`].
+#[derive(Debug)]
+struct CmdEnvOverrides {
+    /// `(key, value)` pairs in application order: global settings first,
+    /// block metadata last. Applied one by one, so a later entry for the same
+    /// key wins. Kept as a list rather than merged into a map because
+    /// `CommandBuilder` matches env keys case-insensitively on Windows: a
+    /// block's `PATH` must still override a global `Path`.
+    vars: Vec<(String, String)>,
+    /// Whether the block's own `cmd:env` sets `AGENTMUX_AGENT_ID`. When it
+    /// does not, the inherited agent-identity vars are stripped.
+    block_sets_agent_id: bool,
+}
+
+impl CmdEnvOverrides {
+    fn apply_to(&self, c: &mut CommandBuilder) {
+        for (k, v) in &self.vars {
+            c.env(k, v);
+        }
+        // Strip host-inherited agent identity unless the block's own cmd:env
+        // sets it. (Global settings never can: `is_global_cmd_env_injectable`.)
+        // This also supersedes the old WAVEMUX backward-compat bridge — both
+        // AGENTMUX_* and WAVEMUX_* vars are removed so new panes start as
+        // plain "Terminal".
+        if !self.block_sets_agent_id {
+            c.env_remove("AGENTMUX_AGENT_ID");
+            c.env_remove("WAVEMUX_AGENT_ID");
+            c.env_remove("WAVEMUX_AGENT_COLOR");
+        }
+    }
+}
+
+/// Compute an interactive shell's `cmd:env` overrides.
+///
+/// Precedence, lowest to highest:
+/// 1. `settings.cmd_env`, the global `cmd:env` from settings.json, minus the
+///    identity keys `is_global_cmd_env_injectable` excludes.
+/// 2. The block's own `cmd:env` metadata.
+///
+/// Values get `~` expanded. `settings` must come from the live config
+/// ([`ShellController::live_settings`]). The spawn once read a freshly built
+/// default config instead, whose `cmd_env` is always empty, so the global
+/// setting never reached any shell.
+fn cmd_env_overrides(
+    settings: &crate::backend::wconfig::SettingsType,
+    block_meta: &MetaMapType,
+) -> CmdEnvOverrides {
+    let mut vars = Vec::new();
+    let mut block_sets_agent_id = false;
+
+    // Global defaults.
+    for (k, v) in &settings.cmd_env {
+        if !is_global_cmd_env_injectable(k) {
+            continue;
+        }
+        let expanded = crate::backend::base::expand_home_dir_safe(v);
+        vars.push((k.clone(), expanded.to_string_lossy().into_owned()));
+    }
+
+    // Block metadata (per-block overrides).
+    if let Some(obj) = block_meta.get(META_KEY_CMD_ENV).and_then(|m| m.as_object()) {
+        for (k, v) in obj {
+            if let Some(val) = v.as_str() {
+                if k == "AGENTMUX_AGENT_ID" {
+                    block_sets_agent_id = true;
+                }
+                let expanded = crate::backend::base::expand_home_dir_safe(val);
+                vars.push((k.clone(), expanded.to_string_lossy().into_owned()));
+            }
+        }
+    }
+
+    CmdEnvOverrides { vars, block_sets_agent_id }
+}
+
+impl ShellController {
+    /// Apply `cmd:env` to an interactive shell's command: the live global
+    /// settings, then the block's own metadata, then the identity strip.
+    fn apply_cmd_env(&self, c: &mut CommandBuilder, block_meta: &MetaMapType) {
+        cmd_env_overrides(&self.live_settings(), block_meta).apply_to(c);
+    }
 }
 
 impl Controller for ShellController {
@@ -691,49 +776,10 @@ impl Controller for ShellController {
                 }
             }
 
-            // Inject cmd:env from wconfig settings and block metadata.
-            // Track whether AGENTMUX_AGENT_ID is explicitly set so we know
-            // whether to apply the backward-compat WAVEMUX bridge.
-            let mut has_agent_id = false;
-
-            // Settings (global defaults, lowest priority)
-            let config = crate::backend::wconfig::ConfigState::with_config(
-                crate::backend::wconfig::build_default_config(),
-            );
-            let settings = config.get_settings();
-            for (k, v) in &settings.cmd_env {
-                if !is_global_cmd_env_injectable(k) {
-                    continue;
-                }
-                let expanded = crate::backend::base::expand_home_dir_safe(v);
-                c.env(k, expanded.to_string_lossy().as_ref());
-            }
-
-            // Block metadata (per-block overrides, highest priority)
-            if let Some(env_map) = block_meta.get(META_KEY_CMD_ENV) {
-                if let Some(obj) = env_map.as_object() {
-                    for (k, v) in obj {
-                        if let Some(val) = v.as_str() {
-                            if k == "AGENTMUX_AGENT_ID" {
-                                has_agent_id = true;
-                            }
-                            let expanded = crate::backend::base::expand_home_dir_safe(val);
-                            c.env(k, expanded.to_string_lossy().as_ref());
-                        }
-                    }
-                }
-            }
-
-            // Strip host-inherited agent identity unless explicitly configured
-            // in settings.cmd_env or block cmd:env metadata.
-            // This also supersedes the old WAVEMUX backward-compat bridge —
-            // both AGENTMUX_* and WAVEMUX_* vars are removed so new panes
-            // start as plain "Terminal".
-            if !has_agent_id {
-                c.env_remove("AGENTMUX_AGENT_ID");
-                c.env_remove("WAVEMUX_AGENT_ID");
-                c.env_remove("WAVEMUX_AGENT_COLOR");
-            }
+            // cmd:env: global settings (lowest priority), then the block's
+            // own metadata (highest), then the agent-identity strip. The
+            // settings come from the live config — see `cmd_env_overrides`.
+            self.apply_cmd_env(&mut c, &block_meta);
 
             c
         };
@@ -1873,6 +1919,215 @@ mod agent_id_for_jekt_tests {
         let this_blocks_meta = MetaMapType::new();
         assert_eq!(resolve_agent_id_for_jekt(&other_blocks_meta), Some("agenty".to_string()));
         assert_eq!(resolve_agent_id_for_jekt(&this_blocks_meta), None);
+    }
+}
+
+/// Global `cmd:env` (settings.json) reaching an interactive shell's env.
+///
+/// Settings enter a `ConfigState` the way they do in production: a
+/// settings.json parsed by `read_config_file`, then `update_settings`, which
+/// is what `config_watcher_fs` does at startup and on every save. The env is
+/// read off a real `CommandBuilder` after `apply_cmd_env`, the call `start()`
+/// makes.
+#[cfg(test)]
+mod global_cmd_env_tests {
+    use std::sync::Arc;
+
+    use portable_pty::CommandBuilder;
+
+    use super::super::controller::ShellController;
+    use super::cmd_env_overrides;
+    use crate::backend::blockcontroller::META_KEY_CMD_ENV;
+    use crate::backend::obj::MetaMapType;
+    use crate::backend::wconfig::{self, ConfigState};
+
+    /// Load `settings_json` into `config` as the settings watcher does.
+    fn load_settings(config: &ConfigState, settings_json: &str) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(wconfig::SETTINGS_FILE);
+        std::fs::write(&path, settings_json).unwrap();
+        let (settings, errors): (wconfig::SettingsType, _) = wconfig::read_config_file(&path);
+        assert!(errors.is_empty(), "test settings.json must parse: {errors:?}");
+        config.update_settings(settings);
+    }
+
+    /// A config built like `bootstrap.rs`'s, with `settings_json` loaded.
+    fn live_config(settings_json: &str) -> Arc<ConfigState> {
+        let config = Arc::new(ConfigState::with_config(wconfig::build_default_config()));
+        load_settings(&config, settings_json);
+        config
+    }
+
+    fn controller(config: Option<Arc<ConfigState>>) -> ShellController {
+        ShellController::new(
+            "shell".to_string(),
+            "tab-cmd-env".to_string(),
+            "block-cmd-env".to_string(),
+            None,
+            None,
+            None,
+            None,
+            String::new(),
+        )
+        .with_config(config)
+    }
+
+    fn block_env(pairs: &[(&str, &str)]) -> MetaMapType {
+        let mut obj = serde_json::Map::new();
+        for (k, v) in pairs {
+            obj.insert(k.to_string(), serde_json::json!(v));
+        }
+        let mut meta = MetaMapType::new();
+        meta.insert(META_KEY_CMD_ENV.to_string(), serde_json::Value::Object(obj));
+        meta
+    }
+
+    /// The env a spawn from `ctrl` gets for `block_meta`. Starts from an empty
+    /// env so the test process's own variables can't leak into assertions.
+    fn spawn_env(ctrl: &ShellController, block_meta: &MetaMapType) -> CommandBuilder {
+        let mut c = CommandBuilder::new("shell-under-test");
+        c.env_clear();
+        ctrl.apply_cmd_env(&mut c, block_meta);
+        c
+    }
+
+    fn var(c: &CommandBuilder, key: &str) -> Option<String> {
+        c.get_env(key).map(|v| v.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn defaults_carry_no_cmd_env() {
+        // Precondition for every test below: a value they observe can only
+        // have come from the loaded settings, never from the defaults.
+        assert!(wconfig::build_default_config().settings.cmd_env.is_empty());
+    }
+
+    #[test]
+    fn global_cmd_env_from_the_live_config_is_applied() {
+        let ctrl = controller(Some(live_config(
+            r#"{ "cmd:env": { "AMUX_TEST_GLOBAL": "from-settings" } }"#,
+        )));
+        let env = spawn_env(&ctrl, &MetaMapType::new());
+        assert_eq!(var(&env, "AMUX_TEST_GLOBAL").as_deref(), Some("from-settings"));
+    }
+
+    #[test]
+    fn block_cmd_env_overrides_the_global_value() {
+        let ctrl = controller(Some(live_config(
+            r#"{ "cmd:env": { "AMUX_TEST_SHARED": "global", "AMUX_TEST_GLOBAL_ONLY": "g" } }"#,
+        )));
+        let env = spawn_env(&ctrl, &block_env(&[("AMUX_TEST_SHARED", "block")]));
+        assert_eq!(var(&env, "AMUX_TEST_SHARED").as_deref(), Some("block"));
+        assert_eq!(
+            var(&env, "AMUX_TEST_GLOBAL_ONLY").as_deref(),
+            Some("g"),
+            "a global key the block doesn't set still applies"
+        );
+    }
+
+    /// Windows env names are case-insensitive, and `CommandBuilder` matches
+    /// them that way there. The block must still win when its key differs
+    /// from the global one only in case.
+    #[cfg(windows)]
+    #[test]
+    fn block_cmd_env_overrides_a_global_key_differing_only_in_case() {
+        let ctrl = controller(Some(live_config(
+            r#"{ "cmd:env": { "Amux_Test_Case": "global" } }"#,
+        )));
+        let env = spawn_env(&ctrl, &block_env(&[("AMUX_TEST_CASE", "block")]));
+        assert_eq!(var(&env, "AMUX_TEST_CASE").as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn global_agent_identity_keys_are_still_not_injected() {
+        let ctrl = controller(Some(live_config(
+            r#"{ "cmd:env": {
+                "AGENTMUX_AGENT_ID": "shared-id",
+                "WAVEMUX_AGENT_ID": "shared-legacy-id",
+                "AMUX_TEST_NEIGHBOUR": "applied"
+            } }"#,
+        )));
+
+        // Excluded at injection (#2694), not merely removed by the strip.
+        let overrides = cmd_env_overrides(&ctrl.live_settings(), &MetaMapType::new());
+        let keys: Vec<&str> = overrides.vars.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, vec!["AMUX_TEST_NEIGHBOUR"]);
+
+        let plain = spawn_env(&ctrl, &MetaMapType::new());
+        assert_eq!(var(&plain, "AMUX_TEST_NEIGHBOUR").as_deref(), Some("applied"));
+        assert_eq!(var(&plain, "AGENTMUX_AGENT_ID"), None);
+        assert_eq!(var(&plain, "WAVEMUX_AGENT_ID"), None);
+
+        // A block with its own identity skips the strip, so only the global
+        // exclusion keeps the shared legacy id out here.
+        let agent = spawn_env(&ctrl, &block_env(&[("AGENTMUX_AGENT_ID", "block-id")]));
+        assert_eq!(var(&agent, "AGENTMUX_AGENT_ID").as_deref(), Some("block-id"));
+        assert_eq!(var(&agent, "WAVEMUX_AGENT_ID"), None);
+    }
+
+    #[test]
+    fn a_settings_change_reaches_the_next_spawn_of_the_same_controller() {
+        let config = live_config(r#"{ "cmd:env": { "AMUX_TEST_LIVE": "v1" } }"#);
+        let ctrl = controller(Some(Arc::clone(&config)));
+        assert_eq!(var(&spawn_env(&ctrl, &MetaMapType::new()), "AMUX_TEST_LIVE").as_deref(), Some("v1"));
+
+        // A later settings.json save, reloaded as the watcher does.
+        load_settings(&config, r#"{ "cmd:env": { "AMUX_TEST_LIVE": "v2" } }"#);
+        assert_eq!(var(&spawn_env(&ctrl, &MetaMapType::new()), "AMUX_TEST_LIVE").as_deref(), Some("v2"));
+
+        // A Settings-pane save: the `setconfig` handler merges into memory.
+        let mut keys = serde_json::Map::new();
+        keys.insert("cmd:env".to_string(), serde_json::json!({ "AMUX_TEST_LIVE": "v3" }));
+        let merged = crate::backend::config_watcher_fs::merge_settings_into_current(&config, keys);
+        config.update_settings(merged);
+        assert_eq!(var(&spawn_env(&ctrl, &MetaMapType::new()), "AMUX_TEST_LIVE").as_deref(), Some("v3"));
+
+        // Dropping the key from settings.json drops it from the next spawn.
+        load_settings(&config, "{}");
+        assert_eq!(var(&spawn_env(&ctrl, &MetaMapType::new()), "AMUX_TEST_LIVE"), None);
+    }
+
+    #[test]
+    fn no_attached_config_applies_only_the_block_env() {
+        let ctrl = controller(None);
+        let env = spawn_env(&ctrl, &block_env(&[("AMUX_TEST_BLOCK", "b")]));
+        assert_eq!(var(&env, "AMUX_TEST_BLOCK").as_deref(), Some("b"));
+    }
+
+    /// The production entry point: `resync_controller` must hand the config
+    /// it is given to the shell controller it creates.
+    #[test]
+    fn resync_controller_gives_a_new_shell_controller_the_live_config() {
+        use crate::backend::blockcontroller as bc;
+
+        let block_id = "cmd-env-resync-wiring";
+        let config = live_config(r#"{ "cmd:env": { "AMUX_TEST_WIRED": "yes" } }"#);
+        let mut meta = MetaMapType::new();
+        meta.insert(bc::META_KEY_CONTROLLER.to_string(), serde_json::json!(bc::BLOCK_CONTROLLER_SHELL));
+        // Register the controller without spawning a real shell.
+        meta.insert(bc::META_KEY_CMD_RUN_ON_START.to_string(), serde_json::json!(false));
+        let block = crate::backend::obj::Block {
+            oid: block_id.to_string(),
+            meta,
+            ..Default::default()
+        };
+
+        bc::resync_controller(
+            &block, "tab-cmd-env", None, false, true,
+            None, None, None, None, None, None, None,
+            Arc::from("test-boot"), "test-key",
+            Some(Arc::clone(&config)),
+        )
+        .expect("resync");
+        let registered = bc::get_controller(block_id).expect("controller registered");
+        let shell = registered
+            .as_any()
+            .downcast_ref::<ShellController>()
+            .expect("a shell controller");
+        let seen = var(&spawn_env(shell, &MetaMapType::new()), "AMUX_TEST_WIRED");
+        bc::delete_controller(block_id);
+
+        assert_eq!(seen.as_deref(), Some("yes"));
     }
 }
 

@@ -73,6 +73,15 @@ describe("buildBtwContextSnapshot", () => {
         expect(snapshot).toBe("User: still here");
     });
 
+    it("omits ambient narration — AgentMux's own line is not part of the conversation", () => {
+        const nodes: DocumentNode[] = [
+            { type: "ambient_narration", id: "a", kind: "background_task", text: "Running task dev in the background.", timestamp: 0 },
+            userMsg("2", "still here"),
+        ];
+
+        expect(buildBtwContextSnapshot(nodes)).toBe("User: still here");
+    });
+
     it("caps the number of included nodes, keeping only the most recent", () => {
         const nodes: DocumentNode[] = Array.from({ length: 60 }, (_, i) => userMsg(String(i), `message ${i}`));
 

@@ -2,16 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal } from "solid-js";
-import type { JSX } from "solid-js";
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import type { NodeModel } from "@/layout/index";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, MOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
-import { AgentBlockContent, buildAgentPaneChromeModel } from "./agent-view";
-import { renderPaneChromeShell } from "@/app/element/PaneChrome";
+import { AgentBlockContent } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
@@ -29,7 +26,6 @@ import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color"
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
-import "./agent-pane-tab";
 import { quickForkAgent } from "./quick-fork";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
@@ -46,9 +42,6 @@ export class AgentViewModel implements ViewModel {
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
-    noHeader: () => boolean;
-    renderPaneChrome: (nodeModel: NodeModel, content: JSX.Element) => JSX.Element;
-    paneChromeModel: (nodeModel: NodeModel) => PaneChromeModel;
     setProgressBarMount: (el: HTMLDivElement | null) => void;
     /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
      *  reads this directly off its own concrete `AgentViewModel` instance
@@ -116,15 +109,6 @@ export class AgentViewModel implements ViewModel {
         this.nodeModel = nodeModel;
         this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
-        // Agent now renders through the ONE shared chrome like every other
-        // widget type; what used to be AgentPaneChrome's bespoke component
-        // is the capability model below. The old createComponent dance
-        // existed to give that component the right reactive owner — the
-        // shared chrome calls paneChromeModel in its own scope, which is
-        // the same ownership by construction.
-        this.renderPaneChrome = renderPaneChromeShell;
-        this.paneChromeModel = (leafNodeModel: NodeModel): PaneChromeModel =>
-            buildAgentPaneChromeModel(this.blockId, leafNodeModel);
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
         this.progressBarMount = progressBarMountSig;
         this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);
@@ -171,20 +155,6 @@ export class AgentViewModel implements ViewModel {
         // swarm-model.ts also reads term:ambient_summary for the Swarm view.
         this.viewText = (): HeaderElem[] => [];
         this.noPadding = () => true;
-        // True exactly when something above this Block is already rendering
-        // a replacement header — i.e. pane-leaf-chrome.tsx's hoisted branch,
-        // which tags the NodeModel wrapper it passes down
-        // (`paneChromeHoisted`). Suppressing BlockFrame's own inline header
-        // there is what keeps chrome's header and Block's from
-        // double-rendering.
-        //
-        // NOT unconditional (codex P2 on this PR): `tabcontent.tsx`'s
-        // `renderPreview` builds a drag-preview thumbnail as a plain
-        // `<Block preview>` with the RAW leaf nodeModel — no chrome around
-        // it — and `BlockFrame_Default_Component` honors `noHeader` in
-        // preview mode too, so a blanket `true` silently stripped the title
-        // off every agent pane's drag thumbnail.
-        this.noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;
             const oref = MOS.makeORef("block", this.blockId);

@@ -42,6 +42,7 @@ fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
         leftover_resume_candidate: None,
         pending_questions: HashMap::new(),
         pending_permissions: HashMap::new(),
+        agent_lease: None,
     }
 }
 

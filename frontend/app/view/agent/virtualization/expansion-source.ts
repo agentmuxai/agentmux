@@ -129,5 +129,27 @@ export function currentExpansion(
         case "resume_preflight":
             // Fixed-height continuity notice — never collapsible.
             return OPEN_DEFAULT;
+
+        case "memory_reinjection":
+            // Label-only row (hover reveals the breakdown in an overlay) — fixed
+            // height, never collapsible. Had no case before the exhaustiveness
+            // guard below exposed it.
+            return OPEN_DEFAULT;
+
+        case "ambient_narration":
+            // Plain in-flow text — never collapsible.
+            return OPEN_DEFAULT;
+
+        default: {
+            // A new DocumentNode type with no case above would fall off the end
+            // and return undefined; the layout effect then dispatches
+            // ExpansionResolved with `to: undefined`, which throws in
+            // expansionEq. `noImplicitReturns` is off in tsconfig.json, so
+            // nothing else catches it: this `never` assignment is what makes a
+            // forgotten case a compile error instead of a runtime crash.
+            const _exhaustive: never = node;
+            void _exhaustive;
+            return OPEN_DEFAULT;
+        }
     }
 }

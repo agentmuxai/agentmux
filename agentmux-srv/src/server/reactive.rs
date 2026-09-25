@@ -1528,6 +1528,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                 priority,
             );
             let body = crate::backend::reactive::types::InjectionResponse {
+                deferred: None,
                 success: true,
                 request_id,
                 block_id: None,
@@ -1684,6 +1685,35 @@ pub(super) async fn handle_reactive_register(
                 None
             })
     };
+    // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
+    // Phase 1, I9): a pane whose agent runs in another AgentMux instance on
+    // this host must not register it — the cross-instance registries written
+    // below are how other senders route this agent's jekts, and delivery
+    // prefers the freshest entry, so registering here would pull the live
+    // instance's messages to a pane that is refused its turns. The frontend
+    // only logs a failed registration; it does not retry.
+    if let Some(uid) = uid.as_deref() {
+        if let Err(refusal) = crate::backend::agent_admission::check_before_spawn(
+            crate::backend::agent_admission::lease_store_for(state.mstore.shared_agent_registry()),
+            uid,
+            &req.agent_id,
+            &state.boot_id,
+        )
+        .await
+        {
+            tracing::warn!(
+                agent_id = %req.agent_id,
+                block_id = %req.block_id,
+                uid,
+                "reactive register refused: agent is live in another AgentMux instance on this host"
+            );
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({ "success": false, "error": refusal })),
+            )
+                .into_response();
+        }
+    }
     match state.reactive_handler.register_agent_full(
         &req.agent_id,
         &req.block_id,

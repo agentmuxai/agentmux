@@ -163,6 +163,25 @@ describe("agent document reducer", () => {
             expect(r.events[0]).toMatchObject({ appendedNew: 2, collidedAndUpdated: 0 });
         });
 
+        it("appends an ambient_narration node after an in-progress markdown node without disturbing its streaming update", () => {
+            // Narrations arrive mid-stream. The narration lands after whatever is
+            // last; a later delta for the still-streaming message must still find
+            // its target by id and grow in place ABOVE the narration.
+            const narration: DocumentNode = {
+                type: "ambient_narration",
+                id: "ambient-1-1",
+                kind: "background_task",
+                text: "Running task dev in the background.",
+                timestamp: 1,
+            };
+            let s = update(initialState(), { type: "StreamFlush", newNodes: [md("m1", "Hello")], updatedNodes: [] }).state;
+            s = update(s, { type: "StreamFlush", newNodes: [narration], updatedNodes: [] }).state;
+            s = update(s, { type: "StreamFlush", newNodes: [], updatedNodes: [md("m1", "Hello world")] }).state;
+            expect(s.nodes.map((n) => n.id)).toEqual(["m1", "ambient-1-1"]);
+            expect((s.nodes[0] as Extract<DocumentNode, { type: "markdown" }>).content).toBe("Hello world");
+            expect(s.nodes[1].type).toBe("ambient_narration");
+        });
+
         it("history then stream produces history-then-stream order", () => {
             const s0 = update(initialState(), {
                 type: "HistoryLoaded",

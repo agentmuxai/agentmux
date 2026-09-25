@@ -11,9 +11,28 @@
 import { MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { registerPaneTabDescriptor, type PaneTabIcon } from "@/element/pane-tab-model";
+import type { PaneTabDescriptor, PaneTabIcon } from "@/element/pane-tab-model";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
+
+/** Agent-specific meta a split must not copy, so the new pane shows the
+ *  agent picker instead of re-launching the same agent session (the agent
+ *  manifest's `splitDropsMeta`, block-registry.ts). */
+export const AGENT_SPLIT_DROPPED_META = [
+    "agentId",
+    "agentName",
+    "agentIcon",
+    "agentMode",
+    "agentProvider",
+    "agentCliPath",
+    "agentCliArgs",
+    "agentOutputFormat",
+    "agentBinDir",
+    "cmd",
+    "cmd:args",
+    "cmd:interactive",
+    "cmd:runonstart",
+];
 
 /** Same precedence as AgentViewModel.viewIcon; undefined falls through to
  *  the shared default (frame:icon, then the "agent" view icon). */
@@ -31,7 +50,8 @@ export function agentTabIcon(meta: MetaType | undefined): PaneTabIcon | undefine
     return undefined;
 }
 
-registerPaneTabDescriptor("agent", {
+/** The agent manifest's `tab` (block-registry.ts). */
+export const agentPaneTab: PaneTabDescriptor = {
     label: ({ meta }) => {
         // A history reader carries its live sibling's agentName, so it has
         // to read distinctly — and name whose history it is.
@@ -60,4 +80,4 @@ registerPaneTabDescriptor("agent", {
             }).catch(() => {});
         };
     },
-});
+};

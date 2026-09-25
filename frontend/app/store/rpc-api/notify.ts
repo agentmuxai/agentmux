@@ -10,6 +10,7 @@ import type { NotifyAckResult } from "@/types/rpc/NotifyAckResult";
 import type { NotifyEmitParams } from "@/types/rpc/NotifyEmitParams";
 import type { NotifyFocusParams } from "@/types/rpc/NotifyFocusParams";
 import type { NotifyOk } from "@/types/rpc/NotifyOk";
+import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivationParams";
 import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
 
 export const NotifyApi = {
@@ -25,7 +26,11 @@ export const NotifyApi = {
     NotifyTestCommand(client: RpcClient, opts?: RpcOpts): Promise<NotifyOk> {
         return client.rpcCall("notify.test", {}, opts);
     },
-    NotifyTakeActivationCommand(client: RpcClient, opts?: RpcOpts): Promise<NotifyTakeActivationResult> {
-        return client.rpcCall("notify.takeactivation", {}, opts);
+    NotifyTakeActivationCommand(
+        client: RpcClient,
+        data?: NotifyTakeActivationParams,
+        opts?: RpcOpts
+    ): Promise<NotifyTakeActivationResult> {
+        return client.rpcCall("notify.takeactivation", data ?? {}, opts);
     },
 };

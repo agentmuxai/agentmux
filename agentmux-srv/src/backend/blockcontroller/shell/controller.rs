@@ -24,6 +24,7 @@ use crate::backend::shellexec::ConnInterface;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 use crate::backend::mps;
+use crate::backend::wconfig::{ConfigState, SettingsType};
 
 /// Cap on the out-of-order input reorder buffer (`input_seq_buf`).
 ///
@@ -121,6 +122,12 @@ pub struct ShellController {
     /// this process's own environment right after startup (PR #801) — so it
     /// has to be threaded in explicitly instead.
     pub(super) auth_key: String,
+    /// The live, file-watched config (`bootstrap.rs`'s `config_watcher`, kept
+    /// current by `config_watcher_fs` and the `setconfig` handler), read at
+    /// each spawn for the global `cmd:env` defaults. `None` in tests and mock
+    /// contexts, which then get no global defaults. Set via
+    /// [`with_config`](Self::with_config).
+    pub(super) config: Option<Arc<ConfigState>>,
 }
 
 impl ShellController {
@@ -162,7 +169,26 @@ impl ShellController {
             mstore,
             filestore,
             auth_key,
+            config: None,
         }
+    }
+
+    /// Attach the live config handle the spawn reads global `cmd:env`
+    /// defaults from. Builder-style, like `PersistentSubprocessController::
+    /// with_identity_stores`.
+    pub fn with_config(mut self, config: Option<Arc<ConfigState>>) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Current global settings. Read from the live config on every call, not
+    /// captured at construction, so a settings.json edit reaches the next
+    /// spawn of an existing pane too. Defaults when no config is attached.
+    pub(super) fn live_settings(&self) -> SettingsType {
+        self.config
+            .as_ref()
+            .map(|config| config.get_settings())
+            .unwrap_or_default()
     }
 
     /// Set a custom ConnInterface factory (for testing).

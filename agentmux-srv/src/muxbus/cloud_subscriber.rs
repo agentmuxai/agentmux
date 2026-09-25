@@ -428,6 +428,11 @@ async fn connect_and_run(
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
 
+    // Where the REST calls of this session go: the relay's pending pulls,
+    // acks and releases, and the WAN agent lease. Resolved once per session.
+    let base = super::relay::rest_base_url();
+    let base = base.as_str();
+
     // Issue #2091: a hand-built `http::Request` (as this used to be, via
     // `Request::builder()...body(())`) is NOT auto-completed by tungstenite.
     // `IntoClientRequest for Request` is a bare passthrough (`Ok(self)`) —
@@ -469,6 +474,10 @@ async fn connect_and_run(
         .map_err(|e| format!("send subscribe: {e}"))?;
 
     let mut ping_interval = tokio::time::interval(Duration::from_secs(CLIENT_PING_INTERVAL_SECS));
+    // Keeps every registered agent's relay lease renewed between wake
+    // signals (the relay's lease TTL is 60 s; wakes can be far apart).
+    let mut lease_interval = tokio::time::interval(super::wan_lease::RENEW_EVERY);
+    lease_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ping_interval.tick().await; // first tick fires immediately — consume it, we just connected
 
@@ -481,6 +490,20 @@ async fn connect_and_run(
             // own schedule regardless of whether a WS session happens to be
             // open, so a long-lived session no longer needs to special-case
             // its own credential check here.
+            _ = lease_interval.tick() => {
+                let registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
+                futures_util::future::join_all(registered.iter().map(|agent_id| async move {
+                    let per_agent = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
+                    let agent_token = per_agent.unwrap_or_else(|| token.to_string());
+                    if let super::wan_lease::Outcome::HeldElsewhere(where_) =
+                        super::wan_lease::ensure(base, agent_id, &agent_token, http).await
+                    {
+                        crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+                    }
+                }))
+                .await;
+            }
+
             _ = ping_interval.tick() => {
                 let ping_msg = serde_json::to_string(&ClientMsg::Ping)
                     .map_err(|e| format!("serialize ping: {e}"))?;
@@ -496,7 +519,7 @@ async fn connect_and_run(
                     Some(Err(e)) => return Err(format!("ws recv: {e}")),
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(server_msg) = serde_json::from_str::<ServerMsg>(&text) {
-                            match handle_server_msg(server_msg, token, http, &agents, mstore).await {
+                            match handle_server_msg(server_msg, base, token, http, &agents, mstore).await {
                                 Ok(()) => {}
                                 // Eviction or expired token — close stream to trigger reconnect.
                                 Err(ref e) if e.starts_with("reconnect:") => {
@@ -527,6 +550,11 @@ async fn connect_and_run(
                         let _ = write.send(Message::Text(msg.into())).await;
                     }
                     Some(CtrlMsg::RemoveAgent(id)) => {
+                        // The agent went away here: let another instance have it.
+                        {
+                            let (id, base, token, http) = (id.clone(), base.to_string(), token.to_string(), http.clone());
+                            tokio::spawn(async move { super::wan_lease::release(&base, &id, &token, &http).await });
+                        }
                         let msg = serde_json::to_string(&ClientMsg::SubscribeRemove { agents: vec![id] })
                             .unwrap_or_default();
                         let _ = write.send(Message::Text(msg.into())).await;
@@ -547,6 +575,7 @@ async fn connect_and_run(
 /// agents via REST to find pending injections, so a compromised subscriber gains nothing.
 async fn handle_server_msg(
     msg: ServerMsg,
+    base: &str,
     token: &str,
     http: &reqwest::Client,
     agents: &Arc<Mutex<HashSet<String>>>,
@@ -570,7 +599,7 @@ async fn handle_server_msg(
             let outcomes = futures_util::future::join_all(
                 registered
                     .iter()
-                    .map(|agent_id| sync_agent_reactive(agent_id, token, http, mstore, handler)),
+                    .map(|agent_id| sync_agent_reactive(base, agent_id, token, http, mstore, handler)),
             )
             .await;
 
@@ -677,7 +706,11 @@ fn shared_token_rejection_outcome(status: reqwest::StatusCode, agent_id: &str) -
 /// this spec identified before `ENFORCE_AGENT_BINDING` is safe to flip —
 /// without it, a genuine binding mismatch degrades to a silent stall
 /// instead of falling back the same way an expired token already does).
+///
+/// `base` is the relay's REST base URL ([`super::relay::rest_base_url`]); a
+/// parameter so a test can point one sync at a fake relay.
 async fn sync_agent_reactive(
+    base: &str,
     agent_id: &str,
     token: &str,
     http: &reqwest::Client,
@@ -723,12 +756,25 @@ async fn sync_agent_reactive(
     let mut agent_token = per_agent_token.clone().unwrap_or_else(|| token.to_string());
     let mut using_per_agent = per_agent_token.is_some();
 
-    let url = format!("{}/reactive/pending/{}", MUXBUS_REST_URL, agent_id);
+    // One live instance per agent across the WAN
+    // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.5): claim or renew this
+    // agent's relay lease before pulling. If another instance holds it, do
+    // not take its jekts — and fence the local holder of this agent, if any
+    // (the newcomer yields). Fails open on any error (wan_lease::Outcome::Unknown).
+    if let super::wan_lease::Outcome::HeldElsewhere(where_) =
+        super::wan_lease::ensure(base, agent_id, &agent_token, http).await
+    {
+        crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+        return AgentSyncOutcome::Ok;
+    }
+
+    let url = format!("{}/reactive/pending/{}", base, agent_id);
     let body: PendingResp = loop {
         let resp = match http
             .get(&url)
             .header("Authorization", format!("Bearer {}", agent_token))
             .header("X-Agent-ID", agent_id)
+            .header("X-Agent-Instance", super::wan_lease::instance_id())
             .send()
             .await
         {
@@ -768,6 +814,13 @@ async fn sync_agent_reactive(
             }
             return shared_token_rejection_outcome(resp.status(), agent_id);
         }
+        if resp.status() == reqwest::StatusCode::CONFLICT {
+            // The relay's lease fence: another instance holds this agent.
+            let body = resp.json::<serde_json::Value>().await.unwrap_or_default();
+            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
+            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            return AgentSyncOutcome::Ok;
+        }
         if !resp.status().is_success() {
             tracing::warn!(
                 status = %resp.status(),
@@ -802,12 +855,13 @@ async fn sync_agent_reactive(
     // successes afterward, which let two concurrent pollers both deliver
     // the same injection.
     let all_ids: Vec<String> = body.injections.iter().map(|inj| inj.id.clone()).collect();
-    let ack_url = format!("{}/reactive/ack", MUXBUS_REST_URL);
+    let ack_url = format!("{}/reactive/ack", base);
     let claimed: AckResp = loop {
         let claim_resp = match http
             .post(&ack_url)
             .header("Authorization", format!("Bearer {}", agent_token))
             .header("X-Agent-ID", agent_id)
+            .header("X-Agent-Instance", super::wan_lease::instance_id())
             .json(&serde_json::json!({ "injection_ids": all_ids }))
             .send()
             .await
@@ -841,6 +895,15 @@ async fn sync_agent_reactive(
                 continue;
             }
             return shared_token_rejection_outcome(claim_resp.status(), agent_id);
+        }
+        if claim_resp.status() == reqwest::StatusCode::CONFLICT {
+            // The relay's lease fence on acks (the lease changed hands between
+            // this pull and this claim): same handling as a 409 on the pull —
+            // claim nothing, and fence the local holder (ReAgent P1 on #3746).
+            let body = claim_resp.json::<serde_json::Value>().await.unwrap_or_default();
+            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
+            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            return AgentSyncOutcome::Ok;
         }
         if !claim_resp.status().is_success() {
             tracing::warn!(
@@ -974,7 +1037,7 @@ async fn sync_agent_reactive(
             // ready) — release it back to pending so it's retried, instead
             // of silently dropping it now that claiming already marked it
             // "delivered".
-            let release_url = format!("{}/reactive/release", MUXBUS_REST_URL);
+            let release_url = format!("{}/reactive/release", base);
             match http
                 .post(&release_url)
                 .header("Authorization", format!("Bearer {}", agent_token))
@@ -1264,5 +1327,144 @@ mod tests {
         }
         assert_eq!(headers.get("Authorization").unwrap(), "Bearer test-token");
     }
-}
 
+    // ── The relay's lease fence, end to end against a fake relay ──────────
+    // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.5). Each 409 the relay
+    // can answer while another instance holds the agent must fence this
+    // process's local holder and take nothing.
+
+    use std::sync::{Arc, Mutex};
+
+    type Seen = Arc<Mutex<Vec<String>>>;
+
+    /// A fake muxbus relay answering `"METHOD /path"` with the scripted
+    /// status and JSON body (anything else: 404), recording every request.
+    /// Every script answers the lease claim: a 404 there would switch the WAN
+    /// tier off for the whole test process (`wan_lease::UNSUPPORTED_UNTIL`).
+    async fn fake_relay(routes: Vec<(String, u16, serde_json::Value)>) -> (String, Seen) {
+        let seen: Seen = Arc::default();
+        let app = axum::Router::new().fallback({
+            let seen = Arc::clone(&seen);
+            move |req: axum::extract::Request| {
+                let (seen, routes) = (Arc::clone(&seen), routes.clone());
+                async move {
+                    let line = format!("{} {}", req.method(), req.uri().path());
+                    seen.lock().unwrap().push(line.clone());
+                    let (status, body) = routes
+                        .iter()
+                        .find(|(route, _, _)| *route == line)
+                        .map(|(_, status, body)| (*status, body.clone()))
+                        .unwrap_or((404, serde_json::Value::Null));
+                    (axum::http::StatusCode::from_u16(status).unwrap(), axum::Json(body))
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}"), seen)
+    }
+
+    /// Hold `agent` in this process, as a running agent pane does. The
+    /// receiver gets the reason when the holder is fenced.
+    fn hold_locally(
+        agent: &str,
+    ) -> (tempfile::TempDir, crate::backend::agent_admission::HeldAgentLease, std::sync::mpsc::Receiver<String>) {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Arc::new(crate::registry::LeaseStore::open_with_ttl(tmp.path(), 60_000).unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let held = crate::backend::agent_admission::acquire(
+            &store,
+            &format!("uid-{agent}"),
+            agent,
+            &Arc::from("boot-test"),
+            "block-test",
+            None,
+            move |why| {
+                let _ = tx.lock().unwrap().send(why);
+            },
+        )
+        .unwrap();
+        (tmp, held, rx)
+    }
+
+    fn not_holder() -> serde_json::Value {
+        serde_json::json!({
+            "error": "not_holder",
+            "held_by": { "host": "desk", "channel": "stable", "version": "0.58.0" },
+        })
+    }
+
+    fn lease_granted() -> (String, u16, serde_json::Value) {
+        ("POST /agents/lease".into(), 200, serde_json::json!({ "ok": true, "epoch": 1 }))
+    }
+
+    /// Run one `InjectAvailable` sync of `agent` against the relay at `base`.
+    async fn sync(base: &str, agent: &str) {
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let handler = crate::backend::reactive::handler::get_global_handler();
+        let outcome = super::sync_agent_reactive(base, agent, "test-token", &reqwest::Client::new(), &mstore, handler).await;
+        assert!(matches!(outcome, AgentSyncOutcome::Ok));
+    }
+
+    fn assert_fenced(agent: &str, rx: &std::sync::mpsc::Receiver<String>) {
+        let why = rx.try_recv().expect("the local holder was fenced");
+        assert!(why.contains("taken over") && why.contains("computer desk"), "{why}");
+        assert_eq!(
+            crate::muxbus::wan_lease::held_elsewhere(agent).as_deref(),
+            Some("computer desk, channel stable, v0.58.0"),
+            "remembered for the early admission check"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lease_held_elsewhere_fences_the_local_holder_before_any_pull() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        let (_tmp, _held, rx) = hold_locally(&agent);
+        let (base, seen) = fake_relay(vec![("POST /agents/lease".into(), 409, not_holder())]).await;
+
+        sync(&base, &agent).await;
+
+        assert_fenced(&agent, &rx);
+        assert_eq!(*seen.lock().unwrap(), ["POST /agents/lease"], "no pending pull");
+    }
+
+    #[tokio::test]
+    async fn a_409_on_the_pending_pull_fences_the_local_holder_and_claims_nothing() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        let (_tmp, _held, rx) = hold_locally(&agent);
+        let pending = format!("GET /reactive/pending/{agent}");
+        let (base, seen) = fake_relay(vec![lease_granted(), (pending.clone(), 409, not_holder())]).await;
+
+        sync(&base, &agent).await;
+
+        assert_fenced(&agent, &rx);
+        assert_eq!(*seen.lock().unwrap(), ["POST /agents/lease", pending.as_str()], "no ack");
+    }
+
+    /// ReAgent P1 on #3746: the lease can change hands between the pull and
+    /// the ack. A 409 on the ack must fence like one on the pull, not be
+    /// logged as a generic error while the local copy keeps running.
+    #[tokio::test]
+    async fn a_409_on_the_ack_fences_the_local_holder_and_delivers_nothing() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        let (_tmp, _held, rx) = hold_locally(&agent);
+        let pending = format!("GET /reactive/pending/{agent}");
+        let (base, seen) = fake_relay(vec![
+            lease_granted(),
+            (pending.clone(), 200, serde_json::json!({ "injections": [{ "id": "inj-1", "message": "hello" }] })),
+            ("POST /reactive/ack".into(), 409, not_holder()),
+        ])
+        .await;
+
+        sync(&base, &agent).await;
+
+        assert_fenced(&agent, &rx);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            ["POST /agents/lease", pending.as_str(), "POST /reactive/ack"],
+            "nothing delivered, so nothing released"
+        );
+    }
+}

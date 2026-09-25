@@ -117,6 +117,13 @@ impl PersistentSubprocessController {
         self.send_user_message_with_policy(message, DeliverPolicy::NextIdle)
     }
 
+    /// [`send_user_message`], reporting whether the message went to the agent
+    /// now or is waiting for the current turn to end — so an automated sender
+    /// can tell its caller the truth (MCP `SendMessage`).
+    pub fn send_user_message_outcome(&self, message: String) -> Result<SendOutcome, String> {
+        self.send_user_message_outcome_with_policy(message, DeliverPolicy::NextIdle)
+    }
+
     /// [`send_user_message`] with an explicit delivery policy.
     ///
     /// `Immediate` preserves the pre-2026-09-23 behavior (write to live stdin
@@ -128,6 +135,17 @@ impl PersistentSubprocessController {
         message: String,
         policy: DeliverPolicy,
     ) -> Result<(), String> {
+        self.send_user_message_outcome_with_policy(message, policy).map(|_| ())
+    }
+
+    /// [`send_user_message_with_policy`], reporting [`SendOutcome`].
+    pub fn send_user_message_outcome_with_policy(
+        &self,
+        message: String,
+        policy: DeliverPolicy,
+    ) -> Result<SendOutcome, String> {
+        // Pre-turn fence — see `send_message`.
+        self.fence_check()?;
         let json_str = Self::encode_user_message(&message);
 
         // ONE lock acquisition covers the turn-state read, the enqueue and the
@@ -211,12 +229,16 @@ impl PersistentSubprocessController {
             self.ensure_deferred_watchdog();
         }
 
+        // FIFO: when a backlog existed, what was just written is the OLDEST
+        // queued message, and this one is still waiting behind it. So this
+        // message went out now only if nothing is left queued.
+        let outcome = if policy == DeliverPolicy::Immediate || (delivered.is_some() && !still_queued) { SendOutcome::Sent } else { SendOutcome::Deferred };
         let Some((sent_line, was_active)) = delivered else {
             tracing::info!(
                 block_id = %self.block_id,
                 "delivery deferred — a turn is in flight; will flush at the next turn boundary"
             );
-            return Ok(());
+            return Ok(outcome);
         };
 
         // Everything below needs the `inner` lock released: `publish_status`
@@ -232,7 +254,7 @@ impl PersistentSubprocessController {
         }
         self.publish_status();
         self.append_delivered_message(&sent_line);
-        Ok(())
+        Ok(outcome)
     }
 
     /// Mark the turn active while the caller already holds `inner`.

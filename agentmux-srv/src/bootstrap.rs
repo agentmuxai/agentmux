@@ -719,6 +719,34 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         Ok(_) => tracing::info!("identity: agent token index attached"),
         Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
     }
+    // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2): the channel-wide
+    // WAN identity store. Opened and its instance minted here, once, so every
+    // spawn signs as the same instance. Best-effort and never redirected: if
+    // the file can't be opened or the instance can't be minted, WAN signing
+    // is simply off for this process (agents get no WAN key), which degrades
+    // every WAN jekt to today's unsigned `TRUST=network-claimed`.
+    match backend::storage::wan_identity::resolve_wan_identity_path() {
+        Some(path) => match backend::storage::wan_identity::WanIdentityStore::open(&path).and_then(|store| {
+            let instance = store.instance_ensure(&crate::backend::reactive::registry::local_host_label())?;
+            Ok((store, instance))
+        }) {
+            Ok((store, instance)) => {
+                tracing::info!(
+                    path = %path.display(),
+                    instance = %instance.instance_id,
+                    host_hint = %instance.host_hint,
+                    "wan identity: store attached"
+                );
+                mstore_raw.set_wan_identity(Arc::new(store));
+            }
+            Err(e) => tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "wan identity: store unavailable — WAN jekt signing is off for this process"
+            ),
+        },
+        None => tracing::warn!("wan identity: channel dir unresolved — WAN jekt signing is off for this process"),
+    }
     let mstore = Arc::new(mstore_raw);
     // Identity M4a: lets spawn sites tell a row-backed block from a row-less
     // one when the environment carries no UID.
@@ -1074,6 +1102,16 @@ pub fn spawn_background_subsystems(
         event_bus.clone(),
     );
 
+    // The user's own widgets.json beside settings.json, merged over the
+    // built-in widgets (Pane Tab contract Phase 6: where an `ext:` widget is
+    // added). Same load-then-watch shape, same pool.
+    backend::user_widgets::load_user_widgets_from_disk(&config_watcher);
+    backend::user_widgets::spawn_user_widgets_watcher(
+        fs_watch_pool.clone(),
+        config_watcher.clone(),
+        event_bus.clone(),
+    );
+
     // Browser pane start page — same load-then-watch shape as settings.json
     // above, on the SAME fs_watch_pool instance, so it rides the existing
     // GetFullConfig/live-broadcast pipeline instead of a parallel one. See
@@ -1139,8 +1177,9 @@ pub fn spawn_background_subsystems(
     // keystrokes only for terminal-based agents.
     reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str| {
         match backend::blockcontroller::deliver_agent_message(block_id, message) {
-            Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(true),
-            Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(false),
+            Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(reactive::SenderDelivery::Delivered),
+            Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => Ok(reactive::SenderDelivery::Deferred),
+            Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(reactive::SenderDelivery::Pty),
             Err(e) => Err(e),
         }
     }));
@@ -1551,6 +1590,8 @@ pub async fn bind_listeners_and_network(
         event_bus.clone(),
         config.lan_key.clone(),
     ));
+    // The LAN tier of one-live-instance-per-agent asks these peers.
+    backend::agent_admission::set_lan_discovery(lan_discovery.clone());
     // Deliberately NOT applied here. The supervisor below is the single driver
     // of `lan_discovery.apply`, so mDNS can never advertise an endpoint before
     // (or without) a socket actually listening on it. `main.rs` reads the
@@ -2116,8 +2157,11 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 .is_some();
             if !is_subprocess {
                 match backend::blockcontroller::deliver_agent_message(block_id, message) {
-                    Ok(backend::blockcontroller::AgentDelivery::Structured) => return Ok(true),
-                    Ok(backend::blockcontroller::AgentDelivery::Pty) => return Ok(false),
+                    Ok(backend::blockcontroller::AgentDelivery::Structured) => return Ok(reactive::SenderDelivery::Delivered),
+                    Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => {
+                        return Ok(reactive::SenderDelivery::Deferred)
+                    }
+                    Ok(backend::blockcontroller::AgentDelivery::Pty) => return Ok(reactive::SenderDelivery::Pty),
                     Err(e) => {
                         // A persistent controller that is REGISTERED BUT NOT YET
                         // SPAWNED can't be steered — `deliver_agent_message`
@@ -2224,7 +2268,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 ))
             });
             match started {
-                Ok(()) => Ok(true),
+                Ok(()) => Ok(reactive::SenderDelivery::Delivered),
                 Err(e) => {
                     tracing::error!(
                         block_id = %block_id_owned,

@@ -4,8 +4,6 @@
 import { For, onCleanup, onMount, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { BundleManager } from "@/app/view/bundle/bundle-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBundleManager } from "@/app/view/global-bundle/global-bundle-manager";
@@ -35,23 +33,17 @@ const MEMORY_SUBNAV: { id: MemorySubsection; label: string }[] = [
     { id: "personal", label: "Personal" },
 ];
 
-export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
+export function ArmoryView(props: { model: ArmoryViewModel }): JSX.Element {
     const model = props.model;
     // Meta-backed on the model (armory-model.ts's sectionAtom) rather than a
     // local createSignal — so ArmoryViewModel.viewName can react to it, and
     // the selected tab survives a block remount.
     const section = model.sectionAtom;
     const setSection = (id: ArmorySection) =>
-        void RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: `block:${model.blockId}`,
-            meta: { "armory:section": id },
-        });
+        model.setMeta({ "armory:section": id });
     const subsection = model.memorySubsectionAtom;
     const setSubsection = (id: MemorySubsection) =>
-        void RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: `block:${model.blockId}`,
-            meta: { "armory:memory:subsection": id },
-        });
+        model.setMeta({ "armory:memory:subsection": id });
     let viewRef: HTMLDivElement | undefined;
 
     // Ctrl+Wheel zoom — same term:zoom-on-block-meta pipeline as editor/term/
@@ -73,10 +65,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
             const STEP = 0.1;
             const current = model.zoomAtom();
             const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
-            void RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: `block:${model.blockId}`,
-                meta: { "term:zoom": next === 1.0 ? null : next },
-            });
+            model.setMeta({ "term:zoom": next === 1.0 ? null : next });
         };
         viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => viewRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));

@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::backend::storage::store::Store;
-use crate::muxbus::cloud_subscriber::{load_valid_token, MUXBUS_REST_URL};
+use crate::muxbus::cloud_subscriber::load_valid_token;
 
 /// Per-request timeout for the two HTTP calls in this module. The shared
 /// `http` client (built via `reqwest::Client::new()` in
@@ -247,7 +247,7 @@ async fn provision_agent_client(agent_id: &str, mstore: &Arc<Store>, http: &reqw
         token_endpoint: String,
     }
 
-    let url = format!("{}/agents/provision", MUXBUS_REST_URL);
+    let url = format!("{}/agents/provision", crate::muxbus::relay::rest_base_url());
     // `http` (built via reqwest::Client::new() in cloud_subscriber::run_loop)
     // carries no default timeout, and this call is awaited inline in the
     // per-agent InjectAvailable loop — a stalled provisioning endpoint would

@@ -7,6 +7,7 @@ pub(crate) mod app_api;
 // `pub` so `bootstrap::install_agent_turn_delivery` can reach `run_agent_turn`
 // to start a turn outside the RPC path.
 pub mod agent_handlers;
+mod agent_takeover;
 mod editor_handlers;
 pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
@@ -380,6 +381,8 @@ pub fn build_router(state: AppState) -> Router {
             "/agentmux/reactive/agent-names",
             get(reactive::handle_reactive_agent_names),
         )
+        // One live instance per agent, LAN tier (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.4).
+        .route("/agentmux/agent/holding", get(agent_takeover::handle_agent_holding))
         // Identity M4a: inner to the auth layer (route_layer order: the
         // last one added runs first), so it sees which key authenticated.
         .route_layer(middleware::from_fn_with_state(
@@ -403,6 +406,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
         .route("/agentmux/reactive/audit", get(reactive::handle_reactive_audit))
         .route("/agentmux/reactive/register", post(reactive::handle_reactive_register))
+        // Holder side of a takeover — full auth only, never LAN (spec §4.6).
+        .route("/agentmux/agent/release", post(agent_takeover::handle_agent_release))
         .route(
             "/agentmux/reactive/unregister",
             post(reactive::handle_reactive_unregister),
@@ -512,6 +517,8 @@ pub fn build_router(state: AppState) -> Router {
         // could not START one anywhere — see
         // REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
         .route("/api/v1/agent/open", post(handle_agent_open))
+        // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
+        .route("/api/v1/agent/takeover", post(agent_takeover::handle_agent_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one
         // silence-bounded utterance per request); we forward to a Whisper
         // backend and return the transcript. Key stays server-side.
@@ -1039,6 +1046,9 @@ async fn handle_shell_create(
     if let Some(req_env) = req.env {
         effective_env.extend(req_env);
     }
+    // After the caller's overrides: a command run on an agent's behalf gets the
+    // same plain-`gh` guard as the agent itself, and `req.env` can't lift it.
+    crate::backend::gh_guard::apply_gh_guard(&mut effective_env);
 
     tracing::info!(
         block_id = %req.agent_block_id,
@@ -1314,6 +1324,7 @@ async fn try_attach_to_existing_shell(
         registry,
         state.boot_id.clone(),
         &state.auth_key,
+        Some(Arc::clone(&state.config_watcher)),
     ) {
         if e == blockcontroller::RESYNC_ERR_ALREADY_EXITED {
             // Treating an exited shell like a stale pointer (return
@@ -1695,6 +1706,7 @@ async fn handle_pty_shell_create(
         registry,
         state.boot_id.clone(),
         &state.auth_key,
+        Some(Arc::clone(&state.config_watcher)),
     ) {
         // Roll back — the block was already inserted and linked into the
         // parent's subblockids above (Codex P2 on PR #3177): without this,

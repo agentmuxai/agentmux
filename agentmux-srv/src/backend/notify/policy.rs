@@ -83,6 +83,12 @@ impl NotifyKind {
         }
     }
 
+    /// Kinds about one agent carry its summary line; the digest and the test
+    /// toast are about no agent.
+    fn has_summary(self) -> bool {
+        !matches!(self, NotifyKind::Summary | NotifyKind::Test)
+    }
+
     /// Within one group, a later event must not replace a more informative
     /// earlier one: srv's `AgentCrashed` (with a reason) outranks the
     /// renderer's generic `TurnErrored`, which often arrives just after it.
@@ -134,6 +140,8 @@ pub struct Settings {
     /// Behaves like a pause, but is NOT shown as one in the tray (it isn't
     /// something "Resume" can undo — it's a schedule).
     pub quiet_until_ms: i64,
+    /// `notify:os:summary` — show the agent's session summary line.
+    pub show_summary: bool,
 }
 
 impl Default for Settings {
@@ -146,6 +154,7 @@ impl Default for Settings {
             pause_until_ms: 0,
             pause_allow_attention: false,
             quiet_until_ms: 0,
+            show_summary: true,
         }
     }
 }
@@ -161,6 +170,12 @@ impl Settings {
     fn kind_on(&self, kind: NotifyKind) -> bool {
         *self.kind_enabled.get(&kind).unwrap_or(&true)
     }
+
+    /// The summary line is decoration: off with its own setting, and with
+    /// preview=none like the body (rich-content spec §1.2).
+    fn summary_on(&self) -> bool {
+        self.show_summary && self.preview != Preview::None
+    }
 }
 
 /// What one frontend window last reported about focus.
@@ -168,6 +183,10 @@ impl Settings {
 pub struct FocusReport {
     pub window_focused: bool,
     pub block_id: Option<String>,
+    /// The reporting window's own `Window` oid (rich-content spec §3.3 A):
+    /// what makes "is that window open" answerable. `None` from an older
+    /// frontend.
+    pub window_id: Option<String>,
 }
 
 /// A request from a source. `agent_name` / `body` are already resolved and
@@ -179,6 +198,8 @@ pub struct Request {
     pub block_id: String,
     pub agent_name: String,
     pub body: Option<String>,
+    /// The agent's session summary (`term:ambient_summary`), sanitized.
+    pub summary: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -250,6 +271,11 @@ pub struct Notification {
     pub agent_name: String,
     pub title: String,
     pub body: Option<String>,
+    /// What the agent is working on — a small third line under the body
+    /// (rich-content spec §1). Absent when the agent has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub summary: Option<String>,
     /// Stable per group: OS toast replace/remove key (≤16 chars, Win10-safe).
     pub tag: String,
     #[ts(type = "number")]
@@ -279,6 +305,9 @@ pub struct PolicyState {
     /// group_key → the one live (pending or shown) notification for it.
     live: HashMap<String, Live>,
     focus: HashMap<String, FocusReport>,
+    /// The connection whose window most recently reported being focused —
+    /// where a click with no pane of its own raises (§3.3 F).
+    last_focused_conn: Option<String>,
     next_seq: u64,
     /// block_id → last time a toast for it was shown (per-block limit).
     last_shown: HashMap<String, i64>,
@@ -292,7 +321,7 @@ pub struct PolicyState {
 /// interpolated, and it arrives pre-sanitized.
 pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
     match kind {
-        NotifyKind::InputWaiting => format!("{agent_name} needs your input"),
+        NotifyKind::InputWaiting => format!("{agent_name} has a question"),
         NotifyKind::TurnCompleted => format!("{agent_name} finished"),
         NotifyKind::TurnErrored => format!("{agent_name} stopped with an error"),
         NotifyKind::AgentCrashed => format!("{agent_name} stopped unexpectedly"),
@@ -344,6 +373,25 @@ impl PolicyState {
         !self.focus.is_empty()
     }
 
+    /// Whether a connected frontend reports being window `window_id`.
+    pub fn window_open(&self, window_id: &str) -> bool {
+        self.focus.values().any(|f| f.window_id.as_deref() == Some(window_id))
+    }
+
+    /// The window a click should raise when it names none of its own: the
+    /// most recently focused one, else any connected window with an id.
+    pub fn raise_window(&self) -> Option<String> {
+        self.last_focused_conn
+            .as_ref()
+            .and_then(|c| self.focus.get(c))
+            .and_then(|f| f.window_id.clone())
+            .or_else(|| {
+                let mut ids: Vec<&String> = self.focus.values().filter_map(|f| f.window_id.as_ref()).collect();
+                ids.sort();
+                ids.first().map(|s| (*s).clone())
+            })
+    }
+
     /// §6.0 gate, evaluated at the moment a notification becomes due.
     fn should_show(&self, n: &Notification, s: &Settings) -> bool {
         if n.kind == NotifyKind::Test {
@@ -377,12 +425,15 @@ impl PolicyState {
                     // The same question reported again — srv detected it, then
                     // the renderer mounts the pane and reports it too (the one
                     // kind with two reporters). Idempotent: no retract, no
-                    // re-debounce; only fill a body we didn't have. Other kinds
-                    // are distinct events (a second crash is news) and replace
-                    // as before (Codex P2s on #3662).
+                    // re-debounce; only fill a body or summary we didn't have.
+                    // Other kinds are distinct events (a second crash is news)
+                    // and replace as before (Codex P2s on #3662).
                     if existing.notification.kind == req.kind && req.kind == NotifyKind::InputWaiting {
                         if existing.notification.body.is_none() && s.preview != Preview::None {
                             existing.notification.body = req.body;
+                        }
+                        if existing.notification.summary.is_none() && s.summary_on() {
+                            existing.notification.summary = req.summary;
                         }
                         return out;
                     }
@@ -404,6 +455,7 @@ impl PolicyState {
                         Preview::None => None,
                         _ => req.body,
                     },
+                    summary: if s.summary_on() && req.kind.has_summary() { req.summary } else { None },
                     tag,
                     created_at_ms: now_ms,
                 };
@@ -433,6 +485,9 @@ impl PolicyState {
             Input::Focus { conn_id, report } => {
                 let looking = report.window_focused.then(|| report.block_id.clone()).flatten();
                 let app_focused = report.window_focused;
+                if app_focused {
+                    self.last_focused_conn = Some(conn_id.clone());
+                }
                 self.focus.insert(conn_id, report);
                 // Back in the app: the digest of what you missed is moot.
                 if app_focused {
@@ -446,6 +501,9 @@ impl PolicyState {
             }
             Input::Disconnect { conn_id } => {
                 self.focus.remove(&conn_id);
+                if self.last_focused_conn.as_deref() == Some(conn_id.as_str()) {
+                    self.last_focused_conn = None;
+                }
             }
             Input::Ack { id, clicked } => {
                 let group = self
@@ -542,6 +600,7 @@ impl PolicyState {
             agent_name: String::new(),
             title: summary_title(self.summarized),
             body: Some("Open AgentMux to catch up.".to_string()),
+            summary: None,
             tag: tag_for(&group),
             created_at_ms: now_ms,
         };
@@ -590,10 +649,10 @@ mod tests {
     use super::*;
 
     fn req(kind: NotifyKind, block: &str) -> Request {
-        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: Some("Which branch?".into()) }
+        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: Some("Which branch?".into()), summary: None }
     }
     fn focus(window: bool, block: Option<&str>) -> Input {
-        Input::Focus { conn_id: "c1".into(), report: FocusReport { window_focused: window, block_id: block.map(Into::into) } }
+        Input::Focus { conn_id: "c1".into(), report: FocusReport { window_focused: window, block_id: block.map(Into::into), window_id: None } }
     }
     fn shows(a: &[Action]) -> Vec<&Notification> {
         a.iter().filter_map(|x| if let Action::Show(n) = x { Some(n) } else { None }).collect()
@@ -710,7 +769,7 @@ mod tests {
         let s = Settings { enabled: false, when: When::Never, ..Settings::default() };
         let mut p = PolicyState::new();
         p.step(focus(true, Some("")), 0, &s);
-        let a = p.step(Input::Emit(Request { kind: NotifyKind::Test, block_id: String::new(), agent_name: String::new(), body: None }), 0, &s);
+        let a = p.step(Input::Emit(Request { kind: NotifyKind::Test, block_id: String::new(), agent_name: String::new(), body: None, summary: None }), 0, &s);
         assert_eq!(shows(&a).len(), 1);
         assert_eq!(shows(&a)[0].title, "AgentMux notifications are working");
     }
@@ -754,14 +813,14 @@ mod tests {
         assert_eq!(tag_for("x").len(), 16);
     }
     fn req_b(kind: NotifyKind, block: &str) -> Request {
-        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: None }
+        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: None, summary: None }
     }
 
     #[test]
     fn crash_outranks_later_generic_error_in_same_group() {
         let s = Settings::default();
         let mut p = PolicyState::new();
-        p.step(Input::Emit(Request { kind: NotifyKind::AgentCrashed, block_id: "b1".into(), agent_name: "lark".into(), body: Some("Needs you to sign in again".into()) }), 0, &s);
+        p.step(Input::Emit(Request { kind: NotifyKind::AgentCrashed, block_id: "b1".into(), agent_name: "lark".into(), body: Some("Needs you to sign in again".into()), summary: None }), 0, &s);
         p.step(Input::Emit(req_b(NotifyKind::TurnErrored, "b1")), 500, &s);
         let a = p.step(Input::Tick, 10_000, &s);
         let n = shows(&a);
@@ -869,7 +928,7 @@ mod tests {
         let t = p.tray_state(&s, 10_000);
         assert_eq!(t.attention.len(), 1);
         assert_eq!(t.attention[0].block_id, "b1");
-        assert_eq!(t.attention[0].title, "lark needs your input");
+        assert_eq!(t.attention[0].title, "lark has a question");
         assert_eq!(t.attention[0].kind, NotifyKind::InputWaiting);
         assert_eq!(t.paused_until_ms, 1_000_000);
         assert_eq!(p.tray_state(&s, 2_000_000).paused_until_ms, 0);
@@ -910,6 +969,96 @@ mod tests {
         let second = shows(&p.step(Input::Tick, 70_000, &s))[0].clone();
         assert_ne!(first.id, second.id);
         assert_eq!(first.tag, second.tag);
+    }
+
+    fn req_s(kind: NotifyKind, block: &str, summary: Option<&str>) -> Request {
+        Request { summary: summary.map(Into::into), ..req(kind, block) }
+    }
+
+    #[test]
+    fn summary_rides_along_and_is_dropped_by_its_setting_or_preview_none() {
+        let mut p = PolicyState::new();
+        let s = Settings::default();
+        p.step(Input::Emit(req_s(NotifyKind::InputWaiting, "b1", Some("Fix resize repaint"))), 0, &s);
+        let n = shows(&p.step(Input::Tick, 6_000, &s))[0].clone();
+        assert_eq!(n.title, "lark has a question");
+        assert_eq!(n.body.as_deref(), Some("Which branch?"));
+        assert_eq!(n.summary.as_deref(), Some("Fix resize repaint"));
+
+        for off in [
+            Settings { show_summary: false, ..Settings::default() },
+            Settings { preview: Preview::None, ..Settings::default() },
+        ] {
+            let mut p = PolicyState::new();
+            p.step(Input::Emit(req_s(NotifyKind::TurnCompleted, "b1", Some("Fix resize repaint"))), 0, &off);
+            assert_eq!(shows(&p.step(Input::Tick, 10_000, &off))[0].summary, None, "{off:?}");
+        }
+    }
+
+    #[test]
+    fn duplicate_question_report_fills_a_missing_summary() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        // srv sees the question first (no pane → no summary read yet), then
+        // the renderer reports it with the block's summary set.
+        p.step(Input::Emit(req_s(NotifyKind::InputWaiting, "b1", None)), 0, &s);
+        p.step(Input::Emit(req_s(NotifyKind::InputWaiting, "b1", Some("Fix resize repaint"))), 1_000, &s);
+        let n = shows(&p.step(Input::Tick, 6_000, &s))[0].clone();
+        assert_eq!(n.summary.as_deref(), Some("Fix resize repaint"));
+
+        let off = Settings { show_summary: false, ..Settings::default() };
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_s(NotifyKind::InputWaiting, "b1", None)), 0, &off);
+        p.step(Input::Emit(req_s(NotifyKind::InputWaiting, "b1", Some("x"))), 1_000, &off);
+        assert_eq!(shows(&p.step(Input::Tick, 6_000, &off))[0].summary, None);
+    }
+
+    #[test]
+    fn summary_line_is_left_out_on_the_digest_and_the_test_toast() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        let a = p.step(Input::Emit(req_s(NotifyKind::Test, "", Some("x"))), 0, &s);
+        assert_eq!(shows(&a)[0].summary, None);
+    }
+
+    #[test]
+    fn serialized_payload_omits_an_absent_summary() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_s(NotifyKind::InputWaiting, "b1", None)), 0, &s);
+        let n = shows(&p.step(Input::Tick, 6_000, &s))[0].clone();
+        let v = serde_json::to_value(&n).unwrap();
+        assert!(v.get("summary").is_none(), "an older launcher sees the same shape as before: {v}");
+        // And a payload without the field still deserializes.
+        let back: Notification = serde_json::from_value(v).unwrap();
+        assert_eq!(back.summary, None);
+    }
+
+    fn focus_as(conn: &str, window_id: &str, focused: bool) -> Input {
+        Input::Focus {
+            conn_id: conn.into(),
+            report: FocusReport { window_focused: focused, block_id: None, window_id: Some(window_id.into()) },
+        }
+    }
+
+    #[test]
+    fn open_windows_and_the_raise_target_follow_focus_reports() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        assert!(!p.window_open("w1"));
+        assert_eq!(p.raise_window(), None);
+        p.step(focus_as("c1", "w1", false), 0, &s);
+        p.step(focus_as("c2", "w2", false), 0, &s);
+        assert!(p.window_open("w1") && p.window_open("w2"));
+        assert!(!p.window_open("w3"));
+        // Nobody focused yet: some open window, deterministically.
+        assert_eq!(p.raise_window().as_deref(), Some("w1"));
+        p.step(focus_as("c2", "w2", true), 1, &s);
+        p.step(focus_as("c2", "w2", false), 2, &s);
+        assert_eq!(p.raise_window().as_deref(), Some("w2"), "last focused, even after it blurred");
+        p.step(Input::Disconnect { conn_id: "c2".into() }, 3, &s);
+        assert!(!p.window_open("w2"));
+        assert_eq!(p.raise_window().as_deref(), Some("w1"));
     }
 
     #[test]

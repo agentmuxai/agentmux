@@ -12,23 +12,27 @@
  * 2. **Focus** — whether this window is foreground and which block is
  *    focused in it. Forwarded as `notify.focus` on change, plus a heartbeat so
  *    a reconnected WS (new srv-side conn id) is re-registered promptly.
- * 3. **Activation** — when the user clicks a toast, the Router publishes
- *    `notification:activate`; the window that holds the block switches to its
- *    tab, focuses the pane and raises itself.
+ * 3. **Activation** — when the user clicks a toast, the Router resolves the
+ *    pane's tab and the open window showing it, and publishes
+ *    `notification:activate` naming that window. Only that window switches
+ *    to the tab and focuses the pane; the launcher raises it
+ *    (SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md §3.3).
  *
- * All failures are swallowed: notifications are best-effort and must never
- * break the pane or window init.
+ * Failures never break the pane or window init. Activation failures are
+ * logged (console.warn reaches the host log), so "clicked and nothing
+ * happened" can be diagnosed.
  */
 
 import { createEffect, createRoot, on } from "solid-js";
 
 import { addEventListener as addPaneListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
-import { focusManager } from "@/app/store/focusManager";
+import { focusManager, giveBlockFocus } from "@/app/store/focusManager";
 import { getApi, getSettingsKeyAtom, MOS, setActiveTab, workspace } from "@/app/store/global";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { windowId } from "@/app/store/window-identity";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { NotifyPaneEvent } from "@/types/rpc/NotifyPaneEvent";
@@ -52,12 +56,14 @@ const FOCUS_HEARTBEAT_MS = 20_000;
  * unmounts (e.g. its window closed into background mode) while the agent is
  * still blocked on the question, which is exactly when the toast matters.
  */
-export function paneEventToNotify(ev: AgentPaneEvent): { event: NotifyPaneEvent; question?: string } | null {
+export function paneEventToNotify(
+    ev: AgentPaneEvent
+): { event: NotifyPaneEvent; question?: string; question_count?: number } | null {
     switch (ev.type) {
         case "turn-ended":
             return ev.outcome === "stopped" || ev.outcome === "interrupted" ? { event: "turn_stopped" } : null;
         case "waiting-for-input":
-            return { event: "input_waiting", question: ev.question };
+            return { event: "input_waiting", question: ev.question, question_count: ev.questionCount };
         case "waiting-ended":
             return ev.reason === "submitted" ? { event: "input_resolved" } : null;
         default:
@@ -68,7 +74,12 @@ export function paneEventToNotify(ev: AgentPaneEvent): { event: NotifyPaneEvent;
 function emit(blockId: string, ev: AgentPaneEvent): void {
     const m = paneEventToNotify(ev);
     if (!m) return;
-    RpcApi.NotifyEmitCommand(TabRpcClient, { block_id: blockId, event: m.event, question: m.question }).catch(() => {});
+    RpcApi.NotifyEmitCommand(TabRpcClient, {
+        block_id: blockId,
+        event: m.event,
+        question: m.question,
+        question_count: m.question_count,
+    }).catch(() => {});
 }
 
 async function raiseThisWindow(): Promise<void> {
@@ -80,34 +91,65 @@ async function raiseThisWindow(): Promise<void> {
     }
 }
 
+/** The `notification:activate` payload (srv `Router::ack`). */
+export type ActivatePayload = {
+    block_id?: string;
+    tab_id?: string;
+    window_id?: string;
+    at_ms?: number;
+};
+
 /**
- * Focus `blockId` if it lives in THIS window's workspace. Unlike
- * `focusBlock()`'s fast path this also finds tabs whose layout model hasn't
- * been created yet (never visited in this window), via `Tab.blockids`.
- * Returns whether the block was found here.
+ * Should THIS window act on a click? Only the window srv named (two windows
+ * showing one workspace would otherwise both switch and race to the front).
+ * A payload without `window_id` comes from an older srv: every window tries,
+ * and the one holding the block wins, as before.
  */
-export async function activateBlockLocally(blockId: string): Promise<boolean> {
+export function shouldActivateHere(d: ActivatePayload | undefined, myWindowId: string, nowMs: number): boolean {
+    if (!d?.block_id) return false;
+    if (typeof d.at_ms === "number" && nowMs - d.at_ms > ACTIVATION_MAX_AGE_MS) return false;
+    return !d.window_id || d.window_id === myWindowId;
+}
+
+async function focusBlockInTab(tabId: string, blockId: string): Promise<void> {
+    await setActiveTab(tabId);
+    // The layout model for a not-yet-visited tab exists only after the
+    // switch renders — retry briefly.
+    for (let i = 0; i < 10; i++) {
+        const node = getLayoutModelForTabById(tabId)?.getNodeByBlockId(blockId);
+        if (node?.id != null) {
+            getLayoutModelForTabById(tabId)!.focusNode(node.id);
+            break;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+    }
+    // focusNode no-ops when the pane is already the tab's focused node, which
+    // leaves the caret wherever it was — put it in the pane's composer.
+    giveBlockFocus(blockId);
+}
+
+/**
+ * Focus `blockId` if it lives in THIS window's workspace. With `tabId` (srv
+ * resolved it) the tab is used directly; without, the workspace's tabs are
+ * searched via `Tab.blockids`, which also finds tabs whose layout model
+ * hasn't been created yet. Returns whether the block was found here.
+ */
+export async function activateBlockLocally(blockId: string, tabId?: string): Promise<boolean> {
     const ws = workspace();
     if (!ws) return false;
     const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
-    for (const tabId of tabIds) {
-        const oref = MOS.makeORef("tab", tabId);
+    const candidates = tabId && tabIds.includes(tabId) ? [tabId] : tabIds;
+    for (const id of candidates) {
+        const oref = MOS.makeORef("tab", id);
         const tab = MOS.getObjectValue<Tab>(oref) ?? (await MOS.reloadMuxObject<Tab>(oref));
         if (!tab?.blockids?.includes(blockId)) continue;
-        await setActiveTab(tabId);
-        // The layout model for a not-yet-visited tab exists only after the
-        // switch renders — retry briefly.
-        for (let i = 0; i < 10; i++) {
-            const node = getLayoutModelForTabById(tabId)?.getNodeByBlockId(blockId);
-            if (node?.id != null) {
-                getLayoutModelForTabById(tabId)!.focusNode(node.id);
-                break;
-            }
-            await new Promise((r) => setTimeout(r, 50));
-        }
+        await focusBlockInTab(id, blockId);
+        // The launcher already raised this window; this is a second try that
+        // is harmless when it already worked.
         await raiseThisWindow();
         return true;
     }
+    console.warn("[os-notify] activation: block not in this window's workspace", { blockId, tabId });
     return false;
 }
 
@@ -158,10 +200,14 @@ export function installOsNotifyBridge(): () => void {
     const report = (force = false) => {
         const windowFocused = makeWindowFocusSignal()();
         const blockId = focusManager.blockFocusAtom() ?? undefined;
-        const key = `${windowFocused}|${blockId ?? ""}`;
+        const key = `${windowFocused}|${blockId ?? ""}|${windowId()}`;
         if (!force && key === lastSent) return;
         lastSent = key;
-        RpcApi.NotifyFocusCommand(TabRpcClient, { window_focused: windowFocused, block_id: blockId }).catch(() => {
+        RpcApi.NotifyFocusCommand(TabRpcClient, {
+            window_focused: windowFocused,
+            block_id: blockId,
+            window_id: windowId() || undefined,
+        }).catch(() => {
             lastSent = ""; // retry on next tick
         });
     };
@@ -175,10 +221,11 @@ export function installOsNotifyBridge(): () => void {
     const activateUnsub = muxEventSubscribe({
         eventType: EVENT_NOTIFICATION_ACTIVATE,
         handler: (event) => {
-            const d = event.data as { block_id?: string; at_ms?: number } | undefined;
-            if (!d?.block_id) return;
-            if (typeof d.at_ms === "number" && Date.now() - d.at_ms > ACTIVATION_MAX_AGE_MS) return;
-            void activateBlockLocally(d.block_id).catch(() => {});
+            const d = event.data as ActivatePayload | undefined;
+            if (!shouldActivateHere(d, windowId(), Date.now())) return;
+            void activateBlockLocally(d!.block_id!, d!.tab_id).catch((e) =>
+                console.warn("[os-notify] activation failed", { blockId: d!.block_id, error: String(e) })
+            );
         },
     });
 
@@ -208,11 +255,12 @@ export function installOsNotifyBridge(): () => void {
         return dispose;
     });
 
-    // A click that arrived while no window was open (background mode): the
-    // launcher opened this window; pick the target up once.
-    void RpcApi.NotifyTakeActivationCommand(TabRpcClient)
-        .then((r) => (r?.block_id ? activateBlockLocally(r.block_id) : false))
-        .catch(() => {});
+    // A click whose pane's workspace was open in no window: the launcher
+    // opened this window on that workspace; pick the target up once. srv
+    // hands it only to a window on the right workspace, within 30 s.
+    void RpcApi.NotifyTakeActivationCommand(TabRpcClient, { workspace_id: workspace()?.oid })
+        .then((r) => (r?.block_id ? activateBlockLocally(r.block_id, r.tab_id) : false))
+        .catch((e) => console.warn("[os-notify] takeactivation failed", String(e)));
 
     return () => {
         paneUnsub();

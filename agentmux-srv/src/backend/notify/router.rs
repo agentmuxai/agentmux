@@ -19,7 +19,7 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::backend::mps::{Broker, MuxEvent};
-use crate::backend::obj::Block;
+use crate::backend::obj::{Block, Tab, Window, Workspace};
 use crate::backend::storage::store::Store;
 use crate::backend::wconfig::ConfigState;
 
@@ -42,7 +42,8 @@ enum Internal {
     /// doesn't know.
     Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
     /// Raw question text — redacted by `emit` like a renderer report.
-    InputWaiting { block_id: String, question: Option<String> },
+    /// `count`: how many questions the call asks (0 = unknown).
+    InputWaiting { block_id: String, question: Option<String>, count: usize },
     /// Resolve through the SAME ordered queue as the srv-side emits, so a
     /// resolve can never overtake the emit it cancels (Codex P2 on #3662).
     Resolve { block_id: String, family: Family },
@@ -91,19 +92,100 @@ pub fn turn_transition(prev: Option<bool>, active: bool, stopped_recently: bool)
     }
 }
 
+/// A click's target is picked up by a newly opened window only this long
+/// after the click (rich-content spec §3.3 D) — never "jumps to an old block
+/// much later".
+pub const PENDING_ACTIVATION_MAX_AGE_MS: i64 = 30_000;
+
+/// Where a toast click lands (rich-content spec §3.3 A). Resolved by srv from
+/// its own store for the notification the click acked — never taken from the
+/// toast's launch argument (§3.4).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClickTarget {
+    pub block_id: String,
+    pub tab_id: String,
+    /// `None` when the tab belongs to no workspace any more.
+    pub workspace_id: Option<String>,
+    /// Every `Window` object showing that workspace. Whether one is actually
+    /// open is the policy's call (a connected frontend reports it).
+    pub window_ids: Vec<String>,
+}
+
+/// Walk block → tab → workspace → windows. `None` when the block or its tab
+/// is gone. BLOCKING (store reads).
+pub fn resolve_click_target(store: &Store, block_id: &str) -> Option<ClickTarget> {
+    let block = store.get::<Block>(block_id).ok().flatten()?;
+    let tab_id = block.parentoref.strip_prefix("tab:")?.to_string();
+    store.get::<Tab>(&tab_id).ok().flatten()?;
+    let workspace_id = store
+        .get_all::<Workspace>()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|w| w.tabids.contains(&tab_id) || w.pinnedtabids.contains(&tab_id))
+        .map(|w| w.oid);
+    let mut window_ids: Vec<String> = match &workspace_id {
+        Some(ws) => store
+            .get_all::<Window>()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| &w.workspaceid == ws)
+            .map(|w| w.oid)
+            .collect(),
+        None => Vec::new(),
+    };
+    window_ids.sort();
+    Some(ClickTarget { block_id: block_id.to_string(), tab_id, workspace_id, window_ids })
+}
+
+/// What a click asks of the launcher (the `notify.ack` response).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AckOutcome {
+    /// The ack named a live notification. An unknown id (a toast from before
+    /// an srv restart) still raises the app (§3.3 F).
+    pub known: bool,
+    /// The window to raise, when one is open. For a pane's toast it is the
+    /// window showing the pane; otherwise the most recently focused window.
+    pub window_id: Option<String>,
+    /// For a pane whose workspace is open in no window: open a window on it.
+    pub workspace_id: Option<String>,
+    /// Kept for launchers older than `window_id`: false means "open a window".
+    pub has_window: bool,
+}
+
+/// A click that arrived while its pane's workspace was open in no window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingActivation {
+    pub block_id: String,
+    pub tab_id: String,
+    pub workspace_id: Option<String>,
+    pub at_ms: i64,
+}
+
+/// Pure: may a window showing `workspace_id` (None = an older frontend that
+/// doesn't say) take `pending` at `now_ms`?
+pub fn may_take_pending(pending: &PendingActivation, workspace_id: Option<&str>, now_ms: i64) -> bool {
+    if now_ms - pending.at_ms > PENDING_ACTIVATION_MAX_AGE_MS {
+        return false;
+    }
+    match (pending.workspace_id.as_deref(), workspace_id) {
+        (Some(want), Some(have)) => want == have,
+        _ => true,
+    }
+}
+
 const AGENT_NAME_MAX: usize = 32;
 const BODY_MAX: usize = 80;
+/// Rich-content spec §1.2: the summary line's cap, before the `…`.
+const SUMMARY_MAX: usize = 90;
 
 pub struct Router {
     policy: Mutex<PolicyState>,
     broker: Arc<Broker>,
     config: Arc<ConfigState>,
     store: Arc<Store>,
-    /// Block to activate once a window connects (click while no window open).
-    pending_activation: Mutex<Option<String>>,
-    /// block_id → sanitized agent name. Names change rarely; caching keeps
-    /// the store (one process-wide SQLite mutex) off the hot path.
-    names: Mutex<std::collections::HashMap<String, String>>,
+    /// A click whose pane's workspace was open in no window: taken by the
+    /// window the launcher opens on that workspace.
+    pending_activation: Mutex<Option<PendingActivation>>,
     internal: tokio::sync::mpsc::UnboundedSender<Internal>,
     last_tray: Mutex<Option<TrayState>>,
     /// block_id → last `turn_active` seen in `controllerstatus`.
@@ -149,7 +231,6 @@ pub fn init(
                 config,
                 store,
                 pending_activation: Mutex::new(None),
-                names: Mutex::new(Default::default()),
                 internal: tx,
                 last_tray: Mutex::new(None),
                 turn_active: Mutex::new(Default::default()),
@@ -230,9 +311,9 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     })
                     .await;
                 }
-                Internal::InputWaiting { block_id, question } => {
+                Internal::InputWaiting { block_id, question, count } => {
                     let _ = tokio::task::spawn_blocking(move || {
-                        r.emit(NotifyKind::InputWaiting, &block_id, question.as_deref())
+                        r.emit(NotifyKind::InputWaiting, &block_id, question.as_deref(), count)
                     })
                     .await;
                 }
@@ -250,7 +331,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                 Internal::TurnStatus { block_id, active } => {
                     let prev = {
                         let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
-                        // Bounded like `names`: forgetting an IDLE block is
+                        // Bounded: forgetting an IDLE block is
                         // harmless — its next `true` still reads as Started.
                         if turns.len() > TURN_MAP_MAX {
                             turns.retain(|_, active| *active);
@@ -271,7 +352,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                             r.resolve(&block_id, Family::Turn)
                         }
                         TurnTransition::Finished => {
-                            let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None))
+                            let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None, 0))
                                 .await;
                         }
                         TurnTransition::Nothing => {}
@@ -315,7 +396,9 @@ fn spawn_ticker(r: std::sync::Weak<Router>) {
         loop {
             iv.tick().await;
             match r.upgrade() {
-                Some(r) => r.step(Input::Tick),
+                Some(r) => {
+                    r.step(Input::Tick);
+                }
                 None => return,
             }
         }
@@ -346,6 +429,37 @@ pub fn sanitize_name(raw: &str) -> String {
 
 fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Rich-content spec §1.2: the agent's session summary as a single line —
+/// controls and bidi stripped, whitespace collapsed, capped at 90 characters.
+/// A summary that trips the jekt keyword list is dropped, not replaced: it is
+/// decoration, not something the user needs to be told is hidden.
+pub fn sanitize_summary(raw: &str) -> Option<String> {
+    if crate::backend::reactive::sanitize::is_sensitive_message(raw) {
+        return None;
+    }
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !is_bidi_control(*c))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    let mut out: String = line.chars().take(SUMMARY_MAX).collect();
+    if line.chars().count() > SUMMARY_MAX {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// Rich-content spec §2.1: " (+N more)" after the (already truncated) first
+/// question, so the count survives truncation. No body, no suffix — the
+/// title "has a question" stands on its own.
+pub fn with_question_count(body: Option<String>, count: usize) -> Option<String> {
+    body.map(|b| if count > 1 { format!("{b} (+{} more)", count - 1) } else { b })
 }
 
 /// §9.2 body policy: first line, sanitized, truncated, and replaced wholesale
@@ -428,6 +542,7 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
         quiet_until_ms: setting_str(extra, "notify:quiethours")
             .and_then(|spec| quiet_hours_until(spec, chrono::Local::now()))
             .unwrap_or(0),
+        show_summary: setting_bool(extra, "notify:os:summary", true),
     };
     for kind in [
         NotifyKind::InputWaiting,
@@ -453,38 +568,28 @@ impl Router {
         matches!(self.store.get::<Block>(block_id), Ok(Some(_)))
     }
 
-    /// BLOCKING on a cache miss (SQLite behind `Store`'s process-wide mutex).
-    /// Only ever reached through `emit`, which callers must run off the async
-    /// workers — `notify_handlers.rs` uses `spawn_blocking` (the #1782 failure
-    /// class; see websocket.rs's controllerinput note).
-    fn agent_name(&self, block_id: &str) -> String {
-        if let Some(n) = self.names.lock().unwrap_or_else(|e| e.into_inner()).get(block_id) {
-            return n.clone();
+    /// The block's sanitized agent name and session summary, from one read.
+    /// BLOCKING (SQLite behind `Store`'s process-wide mutex) — only ever
+    /// reached through `emit` / `emit_fixed`, which callers must run off the
+    /// async workers (`spawn_blocking`; the #1782 failure class, see
+    /// websocket.rs's controllerinput note). Not cached: the summary changes
+    /// every turn and emits are rare, so the read the summary needs anyway
+    /// also serves the name.
+    fn block_labels(&self, block_id: &str) -> (String, Option<String>) {
+        let block = self.store.get::<Block>(block_id).ok().flatten();
+        let meta = |key: &str| {
+            block.as_ref().map(|b| crate::backend::obj::meta_get_string(&b.meta, key, "")).unwrap_or_default()
+        };
+        let mut raw_name = meta("agentName");
+        if raw_name.is_empty() {
+            raw_name = meta("agentId");
         }
-        let raw = self
-            .store
-            .get::<Block>(block_id)
-            .ok()
-            .flatten()
-            .map(|b| {
-                let name = crate::backend::obj::meta_get_string(&b.meta, "agentName", "");
-                if name.is_empty() {
-                    crate::backend::obj::meta_get_string(&b.meta, "agentId", "")
-                } else {
-                    name
-                }
-            })
-            .unwrap_or_default();
-        let name = sanitize_name(&raw);
-        let mut cache = self.names.lock().unwrap_or_else(|e| e.into_inner());
-        if cache.len() > 1024 {
-            cache.clear();
-        }
-        cache.insert(block_id.to_string(), name.clone());
-        name
+        (sanitize_name(&raw_name), sanitize_summary(&meta("term:ambient_summary")))
     }
 
-    fn step(&self, input: Input) {
+    /// Run the policy and publish what it decided. `Activate` is returned,
+    /// not published: only `ack` produces it, and it needs a store lookup.
+    fn step(&self, input: Input) -> Vec<Action> {
         let settings = self.settings();
         let now = now_ms();
         let (actions, tray) = {
@@ -492,10 +597,11 @@ impl Router {
             let actions = p.step(input, now, &settings);
             (actions, p.tray_state(&settings, now))
         };
-        for a in actions {
+        for a in &actions {
             self.publish(a);
         }
         self.publish_tray_if_changed(tray);
+        actions
     }
 
     fn publish_tray_if_changed(&self, tray: TrayState) {
@@ -515,20 +621,17 @@ impl Router {
         });
     }
 
-    fn publish(&self, action: Action) {
+    fn publish(&self, action: &Action) {
         let (event, data) = match action {
-            Action::Show(n) => (EVENT_NOTIFICATION, serde_json::to_value(&n).ok()),
+            Action::Show(n) => (EVENT_NOTIFICATION, serde_json::to_value(n).ok()),
             Action::Retract { id, tag } => (EVENT_NOTIFICATION_RETRACT, Some(serde_json::json!({ "id": id, "tag": tag }))),
-            Action::Activate { id, block_id } => {
-                if !self.has_window() {
-                    *self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()) = Some(block_id.clone());
-                }
-                (
-                    EVENT_NOTIFICATION_ACTIVATE,
-                    Some(serde_json::json!({ "id": id, "block_id": block_id, "at_ms": now_ms() })),
-                )
-            }
+            // Resolved and published by `ack`.
+            Action::Activate { .. } => return,
         };
+        self.publish_event(event, data);
+    }
+
+    fn publish_event(&self, event: &str, data: Option<serde_json::Value>) {
         tracing::info!(event, "notify: publish");
         self.broker.publish(MuxEvent {
             event: event.to_string(),
@@ -542,31 +645,36 @@ impl Router {
     // ── Source entry points ───────────────────────────────────────────────
 
     /// A frontend reports a pane event. `question` is only used for
-    /// `InputWaiting` and goes through `redact_body`.
+    /// `InputWaiting` and goes through `redact_body`; `question_count` adds
+    /// " (+N more)" after it.
     ///
-    /// BLOCKING (agent-name lookup may hit the store) — call from
+    /// BLOCKING (the block lookup hits the store) — call from
     /// `spawn_blocking`, never inline on an async worker.
-    pub fn emit(&self, kind: NotifyKind, block_id: &str, question: Option<&str>) {
+    pub fn emit(&self, kind: NotifyKind, block_id: &str, question: Option<&str>, question_count: usize) {
         let preview = self.settings().preview;
         let body = match kind {
-            NotifyKind::InputWaiting => question.and_then(|q| redact_body(q, preview)),
+            NotifyKind::InputWaiting => {
+                with_question_count(question.and_then(|q| redact_body(q, preview)), question_count)
+            }
             _ => None,
         };
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name: self.agent_name(block_id), body }));
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
     }
 
     /// srv-internal sources: the body is app-controlled fixed text, so it is
     /// not redacted — only the preview=none setting strips it (in policy).
-    /// BLOCKING on a name-cache miss, like `emit`.
+    /// BLOCKING, like `emit`.
     pub fn emit_fixed(&self, kind: NotifyKind, block_id: &str, body: Option<String>) {
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name: self.agent_name(block_id), body }));
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
     }
 
     /// srv-observed "agent is waiting on you" (Phase 5). Non-blocking: safe
     /// from the controller's stdout reader thread. Coalesces with the
     /// renderer's own report for the same block (same `input:` group).
-    pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>) {
-        let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question });
+    pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>, count: usize) {
+        let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question, count });
     }
 
     /// Queued emit with no body (turn outcomes).
@@ -601,6 +709,7 @@ impl Router {
             block_id: String::new(),
             agent_name: String::new(),
             body: Some("You'll see alerts like this when an agent needs you.".to_string()),
+            summary: None,
         }));
     }
 
@@ -612,20 +721,84 @@ impl Router {
         self.step(Input::Disconnect { conn_id: conn_id.to_string() });
     }
 
-    /// Presenter feedback. Returns whether a window is connected so a
-    /// click-while-no-window caller knows to open one.
-    pub fn ack(&self, id: &str, clicked: bool) -> bool {
-        self.step(Input::Ack { id: id.to_string(), clicked });
-        self.has_window()
+    /// Presenter feedback (rich-content spec §3.3 A–D, F). For a click on a
+    /// pane's toast: find the open window showing the pane and tell only it
+    /// to select the pane (`notification:activate` names the window); if the
+    /// pane's workspace is open nowhere, park the click for the window the
+    /// launcher will open on it. The outcome tells the launcher what to raise
+    /// or open — every click ends with something in front.
+    ///
+    /// BLOCKING (store reads) — call from `spawn_blocking`.
+    pub fn ack(&self, id: &str, clicked: bool) -> AckOutcome {
+        let actions = self.step(Input::Ack { id: id.to_string(), clicked });
+        // A live notification always retracts on ack; an unknown id yields nothing.
+        let known = !actions.is_empty();
+        let activated = actions.into_iter().find_map(|a| match a {
+            Action::Activate { id, block_id } => Some((id, block_id)),
+            _ => None,
+        });
+        let target = activated.as_ref().and_then(|(_, block_id)| resolve_click_target(&self.store, block_id));
+        let (open_window, raise, any_window) = {
+            let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
+            let raise = p.raise_window();
+            let open: Vec<&String> = target.iter().flat_map(|t| t.window_ids.iter()).filter(|w| p.window_open(w)).collect();
+            // Two windows on one workspace: prefer the one the user was last in.
+            let pick = open.iter().find(|w| Some(w.as_str()) == raise.as_deref()).or(open.first()).map(|w| (*w).clone());
+            (pick, raise, p.has_window())
+        };
+        let mut outcome = AckOutcome { known, window_id: None, workspace_id: None, has_window: any_window };
+        match (activated, target) {
+            (Some((id, _)), Some(t)) => {
+                if let Some(window_id) = open_window {
+                    self.publish_event(
+                        EVENT_NOTIFICATION_ACTIVATE,
+                        Some(serde_json::json!({
+                            "id": id,
+                            "block_id": t.block_id,
+                            "tab_id": t.tab_id,
+                            "window_id": window_id,
+                            "workspace_id": t.workspace_id,
+                            "at_ms": now_ms(),
+                        })),
+                    );
+                    outcome.window_id = Some(window_id);
+                    outcome.has_window = true;
+                } else {
+                    tracing::info!(workspace = ?t.workspace_id, "notify: click target's workspace is open in no window");
+                    outcome.workspace_id = t.workspace_id.clone();
+                    outcome.has_window = false;
+                    *self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()) = Some(PendingActivation {
+                        block_id: t.block_id,
+                        tab_id: t.tab_id,
+                        workspace_id: t.workspace_id,
+                        at_ms: now_ms(),
+                    });
+                }
+            }
+            (Some((_, block_id)), None) => {
+                tracing::info!(block_id, "notify: click target is gone; raising the app");
+                outcome.window_id = raise;
+            }
+            // A summary toast, or an id this srv never issued: raise the app.
+            (None, _) if clicked => outcome.window_id = raise,
+            (None, _) => {}
+        }
+        outcome
     }
 
-    pub fn has_window(&self) -> bool {
-        self.policy.lock().unwrap_or_else(|e| e.into_inner()).has_window()
-    }
-
-    /// One-shot: the block a click asked for before any window existed.
-    pub fn take_pending_activation(&self) -> Option<String> {
-        self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()).take()
+    /// One-shot: the pane a click asked for while its workspace was open in
+    /// no window. Only a window on that workspace takes it (`workspace_id`
+    /// None = an older frontend, which takes any), and only for 30 s.
+    pub fn take_pending_activation(&self, workspace_id: Option<&str>) -> Option<PendingActivation> {
+        let mut slot = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
+        let now = now_ms();
+        if slot.as_ref().is_some_and(|p| now - p.at_ms > PENDING_ACTIVATION_MAX_AGE_MS) {
+            *slot = None;
+        }
+        if slot.as_ref().is_some_and(|p| may_take_pending(p, workspace_id, now)) {
+            return slot.take();
+        }
+        None
     }
 }
 
@@ -719,6 +892,32 @@ mod tests {
     }
 
     #[test]
+    fn pending_activation_is_scoped_to_its_workspace_and_expires() {
+        let p = PendingActivation { block_id: "b".into(), tab_id: "t".into(), workspace_id: Some("ws1".into()), at_ms: 1_000 };
+        assert!(may_take_pending(&p, Some("ws1"), 2_000));
+        assert!(!may_take_pending(&p, Some("ws2"), 2_000), "another workspace's window must not steal it");
+        assert!(may_take_pending(&p, None, 2_000), "an older frontend doesn't say");
+        assert!(may_take_pending(&p, Some("ws1"), 1_000 + PENDING_ACTIVATION_MAX_AGE_MS));
+        assert!(!may_take_pending(&p, Some("ws1"), 1_001 + PENDING_ACTIVATION_MAX_AGE_MS), "30 s, then gone");
+        let orphan = PendingActivation { workspace_id: None, ..p };
+        assert!(may_take_pending(&orphan, Some("ws2"), 2_000));
+    }
+
+    #[test]
+    fn click_target_walks_block_to_tab_workspace_and_windows() {
+        let store = Store::open_in_memory().unwrap();
+        crate::backend::wcore::ensure_initial_data(&store).unwrap();
+        let block = store.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let t = resolve_click_target(&store, &block.oid).expect("resolves");
+        let ws = store.get_all::<Workspace>().unwrap().into_iter().next().unwrap();
+        let win = store.get_all::<Window>().unwrap().into_iter().next().unwrap();
+        assert_eq!(t.workspace_id.as_deref(), Some(ws.oid.as_str()));
+        assert!(ws.tabids.contains(&t.tab_id) || ws.pinnedtabids.contains(&t.tab_id));
+        assert_eq!(t.window_ids, vec![win.oid]);
+        assert_eq!(resolve_click_target(&store, "gone"), None);
+    }
+
+    #[test]
     fn body_redaction() {
         assert_eq!(redact_body("\n  Which branch?\nmore", Preview::Redacted).as_deref(), Some("Which branch?"));
         assert_eq!(redact_body("Paste your API token here", Preview::Redacted).as_deref(),
@@ -731,10 +930,36 @@ mod tests {
     }
 
     #[test]
+    fn summary_sanitization() {
+        assert_eq!(sanitize_summary("Fix resize repaint delay").as_deref(), Some("Fix resize repaint delay"));
+        assert_eq!(sanitize_summary("  two\nlines\tand   spaces ").as_deref(), Some("two lines and spaces"));
+        assert_eq!(sanitize_summary("evil\u{202E}gnp.exe").as_deref(), Some("evilgnp.exe"));
+        assert_eq!(sanitize_summary("   "), None);
+        assert_eq!(sanitize_summary(""), None);
+        // Sensitive → dropped entirely, never "sensitive content".
+        assert_eq!(sanitize_summary("Rotate the api_key for staging"), None);
+        let long = "word ".repeat(40);
+        let s = sanitize_summary(&long).unwrap();
+        assert_eq!(s.chars().count(), SUMMARY_MAX + 1);
+        assert!(s.ends_with('…'));
+    }
+
+    #[test]
+    fn question_count_suffix_survives_truncation() {
+        let long = "q".repeat(300);
+        let body = with_question_count(redact_body(&long, Preview::Redacted), 3).unwrap();
+        assert!(body.ends_with("… (+2 more)"), "{body}");
+        assert_eq!(with_question_count(Some("Which branch?".into()), 1).as_deref(), Some("Which branch?"));
+        assert_eq!(with_question_count(Some("Which branch?".into()), 0).as_deref(), Some("Which branch?"));
+        assert_eq!(with_question_count(None, 4), None, "no text → the title stands alone");
+    }
+
+    #[test]
     fn settings_defaults_and_overrides() {
         let mut extra = std::collections::HashMap::new();
         let s = settings_from_extra(&extra);
         assert!(s.enabled);
+        assert!(s.show_summary);
         assert_eq!(s.when, When::Unfocused);
         assert_eq!(s.preview, Preview::Redacted);
         extra.insert("notify:os:when".into(), serde_json::json!("never"));
@@ -743,7 +968,9 @@ mod tests {
         extra.insert("notify:os:enabled".into(), serde_json::json!(false));
         extra.insert("notify:pause:until".into(), serde_json::json!(1234));
         extra.insert("notify:os:agentcrashed".into(), serde_json::json!(false));
+        extra.insert("notify:os:summary".into(), serde_json::json!(false));
         let s = settings_from_extra(&extra);
+        assert!(!s.show_summary);
         assert_eq!(s.pause_until_ms, 1234);
         assert!(!s.pause_allow_attention);
         assert_eq!(s.kind_enabled.get(&NotifyKind::AgentCrashed), Some(&false));

@@ -677,8 +677,29 @@ pub(crate) async fn build_persistent_spawn_env(
             env_vars.insert("PATH".to_string(), new_path);
         }
     }
+    // Plain `gh` must not act as a human's gh login (see `gh_guard`). Last, so
+    // nothing above — a persisted `cmd:env`, an identity binding — can set it
+    // back: this is a reserved variable, not a default.
+    crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
 
     Ok(env_vars)
+}
+
+/// Why `run_agent_turn` refused to spawn, before any process started.
+enum TurnGate {
+    /// Another AgentMux instance on this host runs this agent.
+    Admission(String),
+    /// The identity/credential spawn gate refused.
+    Identity(crate::identity::resolver::SpawnGateError),
+}
+
+impl std::fmt::Display for TurnGate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TurnGate::Admission(refusal) => f.write_str(refusal),
+            TurnGate::Identity(e) => write!(f, "{e}"),
+        }
+    }
 }
 
 pub async fn run_agent_turn(
@@ -736,25 +757,48 @@ pub async fn run_agent_turn(
     // comment. Broker hand-in lets the OAuth expiry probe (PR D, spec §4.4)
     // publish `identitybundlebindings:changed:<bundle_id>` when it flips a
     // token's status valid→expired etc.
-    let mut env_vars = match build_persistent_spawn_env(
-        mstore.clone(),
-        id_store.clone(),
-        identity_store.clone(),
-        Some(broker.clone()),
-        &block.meta,
-        &block_id,
-        &auth_key,
-        env_vars,
-    )
-    .await
+    //
+    // Before all of that — the env build writes shared identity state — a
+    // persistent pane about to spawn checks that no other AgentMux instance
+    // on this host runs this agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
+    // Phase 1, I9). A refusal takes the gate's error path below, so it is
+    // persisted and shown in the pane like any other spawn refusal.
+    let admission = match ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
     {
-        Ok(env) => env,
-        Err(gate) => {
+        Some(p) if p.needs_spawn() => {
+            let uid = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+            let name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
+            p.check_admission(&uid, &name).await
+        }
+        _ => Ok(()),
+    };
+    let env_result = match admission {
+        Err(refusal) => Err(TurnGate::Admission(refusal)),
+        Ok(()) => build_persistent_spawn_env(
+            mstore.clone(),
+            id_store.clone(),
+            identity_store.clone(),
+            Some(broker.clone()),
+            &block.meta,
+            &block_id,
+            &auth_key,
+            env_vars,
+        )
+        .await
+        .map_err(TurnGate::Identity),
+    };
+    // Show a refusal that happened before any process ran in the pane: the
+    // raw frame in the output log, plus the classified failure the recovery
+    // row reads. Used by the gate below and by a single-live-instance
+    // refusal from the persistent spawn/fence path further down.
+    let surface_refusal = |message: &str| {
             let error_frame = serde_json::json!({
                 "type": "result",
                 "is_error": true,
                 "subtype": "error_during_execution",
-                "error": {"message": format!("[AgentMux] {gate}")}
+                "error": {"message": format!("[AgentMux] {message}")}
             })
             .to_string();
             // Some(&filestore_gate): the frame must be PERSISTED
@@ -788,7 +832,7 @@ pub async fn run_agent_turn(
             // Display text, exactly like health.rs's in-band-error
             // reclassification call.
             let gate_failure =
-                crate::agents::failure::classify(None, None, &gate.to_string(), None);
+                crate::agents::failure::classify(None, None, message, None);
             crate::backend::blockcontroller::core::persist_last_failure(
                 &block_id,
                 Some(&gate_failure),
@@ -802,7 +846,15 @@ pub async fn run_agent_turn(
                 persist: 1,
                 data: serde_json::to_value(&gate_failure).ok(),
             });
-            return Err(format!("identity spawn gate: {gate}"));
+    };
+    let mut env_vars = match env_result {
+        Ok(env) => env,
+        Err(gate) => {
+            surface_refusal(&gate.to_string());
+            return Err(match &gate {
+                TurnGate::Admission(refusal) => refusal.clone(),
+                TurnGate::Identity(e) => format!("identity spawn gate: {e}"),
+            });
         }
     };
     // Identity M2: the UID this turn's spawn env carries (M1a), kept for the
@@ -870,7 +922,15 @@ pub async fn run_agent_turn(
             session_id: persisted_session_id,
             message_id: message_id.clone(),
         };
-        persistent_ctrl.send_message(message, config)?;
+        if let Err(e) = persistent_ctrl.send_message(message, config) {
+            // A single-live-instance refusal from inside the controller (the
+            // spawn-time claim losing to another instance, or the pre-turn
+            // fence) gets the same pane treatment as the early check above.
+            if crate::backend::agent_admission::is_admission_refusal(&e) {
+                surface_refusal(&e);
+            }
+            return Err(e);
+        }
     } else if let Some(subprocess_ctrl) =
         ctrl.as_any()
             .downcast_ref::<blockcontroller::subprocess::SubprocessController>()

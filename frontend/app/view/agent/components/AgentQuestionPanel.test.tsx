@@ -800,7 +800,7 @@ describe("AgentQuestionPanel scroll structure (SPEC_ASK_USER_QUESTION_PANEL_SCRO
 });
 
 // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md: once agent tabs stay mounted
-// while backgrounded (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES), an unmount
+// while backgrounded (keep-alive views, `isKeepAliveView`), an unmount
 // no longer implicitly pauses this countdown — it must be paused explicitly
 // or it would auto-answer a question the user was never shown.
 describe("AgentQuestionPanel dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md)", () => {

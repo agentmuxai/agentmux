@@ -101,7 +101,8 @@ declare global {
             | "no_output"
             | "spawn_failure"
             | "unknown_non_zero"
-            | "agent_deleted";
+            | "agent_deleted"
+            | "live_elsewhere";
         title: string;
         detail: string;
         exitCode?: number;
@@ -1122,6 +1123,7 @@ declare global {
         "notify:taskbar:attention"?: boolean;
         "notify:quiethours"?: string;
         "notify:os:preview"?: "redacted" | "full" | "none";
+        "notify:os:summary"?: boolean;
         "notify:sounds:enabled"?: boolean;
         "notify:sounds:volume"?: number;
         "notify:sounds:suppresswhenfocused"?: boolean;
@@ -1573,6 +1575,8 @@ declare global {
         description?: string;
         magnified?: boolean;
         children?: string[];
+        /** A third-party pane tab's ES module (Pane Tab contract Phase 6). */
+        module?: string;
         blockdef: BlockDef;
     };
 

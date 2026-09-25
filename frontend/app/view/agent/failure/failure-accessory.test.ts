@@ -21,7 +21,7 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, bindAccount: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, bindAccount: 0, newSession: 0, toggleDetails: 0, dismiss: 0, takeOver: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
@@ -183,6 +183,36 @@ describe("failureToRow", () => {
         );
         expect(action(row, "Retry")).toBeUndefined();
         expect(action(row, "Details")).toBeDefined();
+        expect(action(row, "×")).toBeDefined();
+    });
+
+    // SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6: the agent runs in
+    // another AgentMux instance. A Retry is refused identically, so the row
+    // offers Take over — and renders its two-step confirmation.
+    it("live_elsewhere offers Take over, not Retry, and shows the armed state", () => {
+        const takeOver = vi.fn();
+        const f = mkFailure({ code: "live_elsewhere", title: "Running in another AgentMux instance", retryable: false });
+        const row = failureToRow(f, mkView(), { ...mkActions(), takeOver });
+        expect(row.sigil).toBe("⇄");
+        expect(action(row, "Retry")).toBeUndefined();
+        expect(action(row, "Retry now")).toBeUndefined();
+        const btn = action(row, "Take over");
+        expect(btn?.primary).toBe(true);
+        expect(btn?.danger).toBe(false);
+        btn!.onClick!(undefined as unknown as MouseEvent);
+        expect(takeOver).toHaveBeenCalledTimes(1);
+
+        const armed = failureToRow(f, mkView({ takeoverArmed: true }), { ...mkActions(), takeOver });
+        expect(action(armed, "Confirm take over")?.danger).toBe(true);
+
+        const busy = failureToRow(f, mkView({ takingOver: true }), { ...mkActions(), takeOver });
+        expect(action(busy, "Taking over…")?.disabled).toBe(true);
+    });
+
+    it("live_elsewhere without a takeover handler offers only Details and Dismiss", () => {
+        const row = failureToRow(mkFailure({ code: "live_elsewhere", retryable: false }), mkView(), mkActions());
+        expect(action(row, "Take over")).toBeUndefined();
+        expect(action(row, "Retry")).toBeUndefined();
         expect(action(row, "×")).toBeDefined();
     });
 

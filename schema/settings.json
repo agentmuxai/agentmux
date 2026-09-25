@@ -305,7 +305,7 @@
         "notify:os:inputwaiting": {
           "type": "boolean",
           "default": true,
-          "description": "Notify when an agent asks a question and waits for your answer."
+          "description": "Notify when an agent asks a question and waits for your answer (\"<agent> has a question\")."
         },
         "notify:os:turncompleted": {
           "type": "boolean",
@@ -347,6 +347,11 @@
           "default": true,
           "description": "Badge the AgentMux taskbar button (and flash it once) while an agent needs you. Windows only for now."
         },
+        "notify:os:summary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the agent's current session summary as a small line under its notifications. Left out when the agent has none. See docs/specs/SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md §1."
+        },
         "notify:os:preview": {
           "type": "string",
           "enum": ["redacted", "full", "none"],
@@ -374,7 +379,7 @@
         "notify:tooltones:flash": {
           "type": "boolean",
           "default": true,
-          "description": "Pair every tool-call tone with a brief flash on the source pane's pill in its pane header (a brightened version of the pane's color) and a subtler one on its window tab, so a tone from a pane you can't see can be traced. Follows the tone's own enable/scope gates. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md."
+          "description": "Pair every sound from a pane (tool-call tones and the turn/message event sounds) with a flash on the source pane's pill in its pane header (a brightened version of the pane's color) and a subtler one on its window tab, so a sound from a pane you can't see can be traced. One pulse per strike of the sound, timed to the audible sound, brighter for louder sounds. Follows each sound's own enable/scope/focus gates. Key name kept for compatibility; it covers all sounds. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md and SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md."
         },
         "dnd:enabled": {
           "type": "boolean",

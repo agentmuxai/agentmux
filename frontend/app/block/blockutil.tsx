@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NumActiveConnColors } from "@/app/block/blockframe";
+import { paneTabIconFor, paneTabLabelFor } from "@/app/block/pane-tab-registry";
 import { getConnStatusAtom } from "@/app/store/global";
 import * as util from "@/util/util";
 import clsx from "clsx";
@@ -11,57 +12,14 @@ import dotsUrl from "../asset/dots-anim-4.svg?url";
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
 
+/** Default icon for a view type — its manifest's (`pane-tab-registry.ts`). */
 export function blockViewToIcon(view: string): string {
-    if (view == "term") {
-        return "terminal";
-    }
-    if (view == "agent") {
-        return "sparkles";
-    }
-    if (view == "browser") {
-        return "globe";
-    }
-    if (view == "sysinfo") {
-        return "chart-line";
-    }
-    if (view == "editor") {
-        return "file-lines";
-    }
-    if (view == "help") {
-        return "circle-question";
-    }
-    if (view == "swarm") {
-        return "diagram-project";
-    }
-    if (view == "drone") {
-        return "diagram-project";
-    }
-    if (view == "media") {
-        return "photo-film";
-    }
-    return "square";
+    return paneTabIconFor(view);
 }
 
-const VIEW_LABELS: Record<string, string> = {
-    agent: "Agent",
-    browser: "Browser",
-    drone: "Drone",
-    editor: "Editor",
-    help: "Help",
-    identity: "Identity",
-    media: "Media",
-    memory: "Memory",
-    swarm: "Swarm",
-    sysinfo: "Sysinfo",
-    term: "Terminal",
-    warden: "Warden",
-};
-
+/** Default name for a view type — its manifest's label. */
 export function blockViewToName(view: string): string {
-    if (util.isBlank(view)) {
-        return "(No View)";
-    }
-    return VIEW_LABELS[view] ?? view;
+    return paneTabLabelFor(util.isBlank(view) ? undefined : view);
 }
 
 export function getBlockHeaderIcon(blockIcon: string, blockData: Block): JSX.Element {

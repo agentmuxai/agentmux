@@ -634,6 +634,16 @@ pub enum DeliverPolicy {
     NextIdle,
 }
 
+/// What a [`DeliverPolicy`] send actually did with one message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendOutcome {
+    /// Written to the agent's input now.
+    Sent,
+    /// Queued behind the turn in flight (or older queued messages); released
+    /// at a later turn boundary.
+    Deferred,
+}
+
 /// How a controller-aware agent message was delivered.
 #[derive(Debug)]
 pub enum AgentDelivery {
@@ -644,8 +654,12 @@ pub enum AgentDelivery {
     /// "Accepted", not necessarily "already written": under
     /// [`DeliverPolicy::NextIdle`] a message arriving mid-turn is held and
     /// released at the next turn boundary. This variant means the controller
-    /// has taken responsibility for it, not that the agent has seen it yet.
+    /// has taken responsibility for it, not that the agent has seen it yet —
+    /// [`AgentDelivery::StructuredDeferred`] says when it is still waiting.
     Structured,
+    /// Accepted like [`AgentDelivery::Structured`], but held for the next
+    /// turn boundary because the agent is mid-turn (`DeliverPolicy::NextIdle`).
+    StructuredDeferred,
     /// The controller is PTY/terminal-based (shell/term) or otherwise has no
     /// structured input channel. The caller should fall back to keystroke
     /// injection.
@@ -684,8 +698,10 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
         .as_any()
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
-        persistent_ctrl.send_user_message(message.to_string())?;
-        return Ok(AgentDelivery::Structured);
+        return Ok(match persistent_ctrl.send_user_message_outcome(message.to_string())? {
+            SendOutcome::Sent => AgentDelivery::Structured,
+            SendOutcome::Deferred => AgentDelivery::StructuredDeferred,
+        });
     }
 
     if ctrl.controller_type() == BLOCK_CONTROLLER_ACP {
@@ -779,6 +795,11 @@ pub fn resync_controller(
     registry: Option<Arc<crate::registry::Registry>>,
     boot_id: Arc<str>,
     auth_key: &str,
+    // The live, file-watched config (`AppState::config_watcher`). Only the
+    // shell/cmd controller reads it, for the global `cmd:env` defaults its
+    // interactive-shell spawn applies. `None` (tests) means no global
+    // defaults.
+    config: Option<Arc<crate::backend::wconfig::ConfigState>>,
 ) -> Result<(), String> {
     let block_id = &block.oid;
     let block_meta = &block.meta;
@@ -911,7 +932,8 @@ pub fn resync_controller(
                 mstore,
                 filestore,
                 auth_key.to_string(),
-            );
+            )
+            .with_config(config);
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
             let result = ctrl.start(block_meta.clone(), rt_opts, force);
@@ -953,7 +975,9 @@ pub fn resync_controller(
                 mstore,
                 filestore,
             )
-            .with_identity_stores(id_store, identity_store, auth_key.to_string());
+            .with_identity_stores(id_store, identity_store, auth_key.to_string())
+            // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24).
+            .with_agent_lease_store(registry, boot_id);
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
@@ -1240,7 +1264,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, Arc::from("test-boot"), "test-key", None);
         assert!(result.is_ok(), "resync_controller failed: {result:?}");
 
         assert_eq!(
@@ -1378,7 +1402,7 @@ mod tests {
             ..Default::default()
         };
         // No "controller" key in meta = no-op
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key", None);
         assert!(result.is_ok());
     }
 
@@ -1395,7 +1419,7 @@ mod tests {
             meta,
             ..Default::default()
         };
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key", None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
     }

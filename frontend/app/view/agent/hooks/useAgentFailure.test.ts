@@ -47,7 +47,7 @@ vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
 }));
 
-import { jitteredBackoffSeconds, useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
+import { jitteredBackoffSeconds, TAKEOVER_CONFIRM_MS, useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
 
 const BLOCK_ID = "b";
 const transient = (): AgentFailure => ({ code: "rate_limited", title: "Throttled", detail: "429", retryable: true });
@@ -337,7 +337,7 @@ describe("useAgentFailure auto-retry budget (§6)", () => {
 });
 
 // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md: once agent tabs stay mounted
-// while backgrounded (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES), an unmount no
+// while backgrounded (keep-alive views, `isKeepAliveView`), an unmount no
 // longer implicitly kills this countdown — a hidden tab must not silently
 // fire doRetry() (re-sending a turn to the CLI) while nobody can see it.
 describe("useAgentFailure dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md)", () => {
@@ -502,5 +502,126 @@ describe("useAgentFailure — turnAttempted forwarding (PLAN_LOGIN_CTA_SURFACE_C
             });
             expect(seen).toEqual([turnAttempted]);
         }
+    });
+});
+
+// SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6: Take over stops the agent
+// in another AgentMux instance, so it takes two clicks, and a failed
+// takeover keeps the row with the reason.
+describe("useAgentFailure — Take over (live_elsewhere)", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        vi.useFakeTimers();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const liveElsewhere = (): AgentFailure => ({
+        code: "live_elsewhere",
+        title: "Running in another AgentMux instance",
+        detail: "Agent3 is already running in another AgentMux instance on this host (channel x).",
+        retryable: false,
+    });
+
+    const mount = (onTakeOver: (t: boolean) => Promise<void>) => {
+        const { model, failure } = makeFakeModel();
+        const ui = useAgentFailure({
+            blockId: BLOCK_ID,
+            model,
+            failure,
+            onRetry() {},
+            onLoginAgain() {},
+            onLoginViaTerminal() {},
+            onOpenArmory() {},
+            onNewSession() {},
+            onTakeOver,
+        });
+        return { ui, model };
+    };
+    const button = (ui: UseAgentFailureResult, label: string) => (ui.row()?.actions ?? []).find((a) => a.label === label);
+
+    it("arms on the first click, takes over on the second, then clears the row", async () => {
+        const onTakeOver = vi.fn(async () => {});
+        await createRoot(async (dispose) => {
+            const { ui } = mount(onTakeOver);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            expect(onTakeOver).not.toHaveBeenCalled();
+            button(ui, "Confirm take over")!.onClick!(undefined as unknown as MouseEvent);
+            expect(onTakeOver).toHaveBeenCalledWith(true);
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("disarms if the confirming click does not come in time", async () => {
+        const onTakeOver = vi.fn(async () => {});
+        await createRoot(async (dispose) => {
+            const { ui } = mount(onTakeOver);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            vi.advanceTimersByTime(TAKEOVER_CONFIRM_MS + 1);
+            expect(button(ui, "Take over")).toBeDefined();
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            expect(onTakeOver).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    // ReAgent P1 on #3742: arm, then a fresh message is refused again — the
+    // new row must need two clicks again, not execute on the first.
+    it("a newly observed failure starts disarmed", async () => {
+        const onTakeOver = vi.fn(async () => {});
+        await createRoot(async (dispose) => {
+            const { ui } = mount(onTakeOver);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            expect(button(ui, "Confirm take over")).toBeDefined();
+            fire("agentfailure", liveElsewhere());
+            expect(button(ui, "Confirm take over")).toBeUndefined();
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            expect(onTakeOver).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("an externally cleared row takes its armed state with it", async () => {
+        const onTakeOver = vi.fn(async () => {});
+        await createRoot(async (dispose) => {
+            const { ui, model } = mount(onTakeOver);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            simulateFreshTurnStartClearingFailure(model);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            expect(button(ui, "Take over")).toBeDefined();
+            expect(onTakeOver).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("a failed takeover keeps the row and says why", async () => {
+        const onTakeOver = vi.fn(async () => {
+            throw new Error("The AgentMux instance running Agent3 (channel x) is too old to hand it over.");
+        });
+        await createRoot(async (dispose) => {
+            const { ui } = mount(onTakeOver);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            button(ui, "Confirm take over")!.onClick!(undefined as unknown as MouseEvent);
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(ui.row()?.title).toBe("Could not take over");
+            expect(ui.row()?.detail).toContain("too old to hand it over");
+            expect(button(ui, "Take over")).toBeDefined();
+            dispose();
+        });
     });
 });

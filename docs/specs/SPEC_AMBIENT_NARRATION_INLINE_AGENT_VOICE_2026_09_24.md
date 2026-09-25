@@ -1,7 +1,7 @@
 # SPEC: Ambient narration — render inline, in the agent's voice, with a trailing tag
 
 **Date:** 2026-09-24
-**Status:** Proposed; implementation in PR #3719 (Q1–Q3 resolved as recommended)
+**Status:** implemented in PR #3719 — Q1 resolved as live-only (not persisted — corrected after review), Q2–Q3 as recommended; Q4 (deterministic template instead of Haiku) still open. Not yet observed in a live app.
 **Builds on:** PR #3169 (`feat(agent-pane): narrate backgrounded tasks into the conversation`),
 `docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md` §8.3
 **Scope:** frontend rendering + where the narration lives. No backend change.
@@ -166,9 +166,14 @@ break the append-only assumption the virtualiser relies on. Open question Q2.
    be `user-select: none` **or** included — decide deliberately. Recommendation:
    include it in copied text (so a pasted transcript keeps the provenance), i.e.
    do not set `user-select: none`.
-5. **Snapshot persistence.** `HistoryRestored` re-hydrates the document from a
-   pane-close snapshot (`SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15`). Nodes in
-   the store may therefore now survive a pane reopen, unlike today's signal. Q1.
+5. **Persistence — corrected after review (Codex P2 on #3719).** An earlier
+   draft of this spec claimed the document snapshot would carry ambient nodes across
+   a pane reopen. It does not: `useSnapshotPersistence.ts` deliberately omits
+   `nodes[]` and the document is rebuilt from the NDJSON output log, which ambient
+   broadcasts never enter. So an `ambient_narration` node is **live-only** — gone on
+   reopen and absent from Agent History — and `live-feed.ts` rolls it off with its
+   turn (only shell nodes block roll-off), exactly as it already does for the other
+   live-only decoration rows (stderr, notifications, "Interrupted"). Q1.
 6. **Accessibility.** The tag must be readable by a screen reader in-line
    ("…, ambient") or replaced by an `aria-label` on the row; do not rely on visual
    position alone.
@@ -194,13 +199,13 @@ break the append-only assumption the virtualiser relies on. Open question Q2.
 
 ## 8. Open questions (need a decision)
 
-- **Q1. Persistence.** Should narrations survive pane close/reopen? Inserting into
-  the document store makes them ride the existing snapshot (persistent) by default.
-  #3169's report §8.3 chose view-only ("vanishes on reload"). Options: (a) accept
-  persistence — simplest, and arguably better for "why did this pane go quiet an
-  hour ago"; (b) filter `ambient_narration` out of the snapshot writer to preserve
-  the view-only behaviour. **Recommendation: (a)**, since the tag already carries
-  provenance and there is no longer a reason to hide them.
+- **Q1. Persistence.** Should narrations survive pane close/reopen? **Resolved:
+  no — live-only** (see §6.5). The first draft recommended persistence on the
+  mistaken belief that the snapshot carries `nodes[]`. Making them durable would
+  need a real serialization/replay path (the log the document is rebuilt from never
+  sees them) plus a roll-off rule, which is a larger change than this spec covers.
+  #3169's report §8.3 already chose view-only. If "why did this pane go quiet an
+  hour ago" turns out to matter, that is a follow-up with its own design.
 - **Q2. Placement.** Arrival-order append (recommended, §4.4) vs. splice after the
   originating tool node.
 - **Q3. Tag wording.** `ambient` (current word, keeps continuity) vs. something

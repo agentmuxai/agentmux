@@ -19,10 +19,10 @@ import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
-import { isBlockDormant } from "@/app/store/block-component-registry";
 import { AgentDormancyProvider } from "./agent-dormancy";
-import { useWindowTabHidden } from "@/app/workspace/window-tab-visibility";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
+import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     atoms,
@@ -88,7 +88,6 @@ import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
-import { AmbientNarrationRow } from "./components/AmbientNarrationRow";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentSessionNotices } from "./components/AgentSessionNotices";
 import { AgentShellInfoPanel } from "./components/AgentShellInfoPanel";
@@ -123,6 +122,7 @@ import { useAgentFailure } from "./hooks/useAgentFailure";
 import { computeAccountBindCandidates } from "./failure/bind-account-candidates";
 import { retryRecheckAfterBind } from "./failure/recheck-after-bind";
 import { decideSyntheticRow } from "./failure/synthetic-row";
+import { requestAgentTakeover } from "./failure/takeover";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -332,7 +332,8 @@ AgentBlockContent.displayName = "AgentBlockContent";
 
 /**
  * Chrome half of the agent pane — the header, tab strip and progress-bar
- * slot, rendered via `AgentViewModel.renderPaneChrome` for EVERY agent pane
+ * slot, rendered by the shared `renderPaneChromeShell` (pane-leaf-chrome.tsx's
+ * fallback when a view supplies no `renderPaneChrome`) for EVERY agent pane
  * (see `pane-leaf-chrome.tsx`'s `hoisted` memo for why gating this on stack
  * size was a catch-22), wrapping whichever `AgentBlockContent` instance is
  * currently the active stack member's own switch-scoped `<Block>`
@@ -525,13 +526,15 @@ const AgentPresentationView = ({
     progressBarMount: () => HTMLDivElement | undefined;
 }): JSX.Element => {
     const block = model.blockAtom;
-    // True while this tab is a hidden, kept-alive pane-tab-strip member
-    // (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) rather than the one the
-    // user is looking at — threaded into AgentQuestionPanel's auto-timeout
-    // and useAgentFailure's auto-retry below so neither fires invisibly
-    // while backgrounded.
-    const dormant = isBlockDormant(model.blockId);
-    const windowTabHidden = useWindowTabHidden();
+    // True while the user can't see this tab: a hidden, kept-alive
+    // pane-tab-strip member (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md), or
+    // its window tab isn't displayed (`usePaneTabVisibility`, Pane Tab
+    // contract Phase 3). Render work pauses on it, and it's threaded into
+    // AgentQuestionPanel's auto-timeout and useAgentFailure's auto-retry below
+    // so neither fires invisibly while backgrounded — which, before Phase 3b,
+    // covered only the pane-stack case.
+    const visibility = usePaneTabVisibility(model.blockId);
+    const hidden = (): boolean => visibility() !== "active";
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
@@ -1069,7 +1072,7 @@ const AgentPresentationView = ({
     );
     createEffect(
         on(
-            () => dormant() || windowTabHidden(),
+            hidden,
             (hidden) => {
                 if (hidden) scheduleRollOff();
             },
@@ -1593,9 +1596,15 @@ const AgentPresentationView = ({
     // invariant that prevents the mid-session wipe bug.
     const pendingMessages = () => paneModel.state.pending;
     // Short lines from AgentMux about its own actions (first consumer: a tool
-    // call the harness detached). Subscribe-only — nothing here can fail in a
-    // way that affects the pane, and an absent narration is simply silence.
-    const ambientNarrations = useAmbientNarration(model.blockId);
+    // call the harness detached), inserted in-flow as `ambient_narration` nodes.
+    // Dispatched straight to the document store like `postSystemNotification`,
+    // NOT through the stream-flush queue: that queue's flush also reports the
+    // batch to the pane as turn activity, and AgentMux talking to itself is not
+    // evidence the model is doing anything. Best-effort — nothing here can fail
+    // in a way that affects the pane, and an absent narration is simply silence.
+    useAmbientNarration(model.blockId, (node) => {
+        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
+    });
     // Forwarded to ActivityDock so it can render registry-known background
     // tasks the transcript itself has no record of (Tier 1 of
     // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
@@ -2109,9 +2118,18 @@ const AgentPresentationView = ({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
-        isDormant: dormant,
+        isDormant: hidden,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
+        // live_elsewhere — take the agent over from the other AgentMux
+        // instance running it, then re-run the refused turn if there was one
+        // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).
+        onTakeOver: async (turnAttempted: boolean) => {
+            log("agent", "Take over — asking the other AgentMux instance to hand this agent over");
+            const r = await requestAgentTakeover(model.blockId);
+            log("agent", r.released ? `Take over — released by ${r.fromChannel ?? "the other instance"}` : "Take over — nobody else was running it");
+            if (turnAttempted) retryLastTurn();
+        },
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
         // context_exceeded recovery — archive the over-full session and return
         // to the picker for a clean relaunch (resuming would only re-fail).
@@ -2342,6 +2360,11 @@ const AgentPresentationView = ({
 
     // Context menu for copy
     const handleContextMenu = (e: MouseEvent) => {
+        // A registered context-menu region under the click (the Shell drawer)
+        // owns its own menu — this handler runs first (it is a descendant of
+        // blockframe's), so without yielding a transcript selection would win
+        // and show a Copy for the wrong text inside the terminal.
+        if (resolveContextMenuRegion(e.target, e.currentTarget as Element)) return;
         const sel = window.getSelection()?.toString();
         if (!sel) return; // no selection, let default behavior
         e.preventDefault();
@@ -2355,10 +2378,10 @@ const AgentPresentationView = ({
         // tuned, and should not grow another prop it would only forward.
         // See `agent-dormancy.tsx` for why rendering (not data) is what gets
         // gated.
-        // A hidden window tab kept laid out (`window:keepinactivetabslaidout`)
-        // pauses rendering the same way; only rendering, so this doesn't
-        // touch the question auto-timeout or auto-retry `dormant` also drives.
-        <AgentDormancyProvider dormant={() => dormant() || windowTabHidden()}>
+        // `hidden` covers a dormant pane-stack member and a hidden window tab
+        // alike; this provider gates only rendering (the timers read `hidden`
+        // directly).
+        <AgentDormancyProvider dormant={hidden}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls
@@ -2668,7 +2691,7 @@ const AgentPresentationView = ({
                 pending={pendingQuestions}
                 onAnswer={handleAnswer}
                 onCancel={handleCancel}
-                isDormant={dormant}
+                isDormant={hidden}
             />
 
             {/* Queue sits directly below the feed so the user's newly-
@@ -2740,12 +2763,6 @@ const AgentPresentationView = ({
                 subagents) sit just above the composer so task status is adjacent
                 to where the user's attention already is. Moved from the top per
                 SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
-            {/* Ambient narration — AgentMux explaining its own actions, in the
-                model's voice but attributed. Directly above the dock: the first
-                consumer narrates a task the dock is about to start showing, so
-                the sentence and the row it refers to read together. */}
-            <AmbientNarrationRow narrations={ambientNarrations()} />
-
             <ActivityDock
                 documentNodes={paneModel.document}
                 blockId={model.blockId}

@@ -2,7 +2,19 @@
 
 export type NotifyAckResult = { 
 /**
- * False when no frontend window is connected — the caller (launcher)
- * should open one; it will pick the block up via `notify.takeactivation`.
+ * False when the click's window isn't open — an older launcher opens a
+ * window; the new one picks the pane up via `notify.takeactivation`.
  */
-has_window: boolean, };
+has_window: boolean, 
+/**
+ * The acked id named a live notification.
+ */
+known: boolean, 
+/**
+ * Raise this window (a connected frontend's `Window` oid).
+ */
+window_id?: string, 
+/**
+ * No window shows the pane: open one on this workspace.
+ */
+workspace_id?: string, };
