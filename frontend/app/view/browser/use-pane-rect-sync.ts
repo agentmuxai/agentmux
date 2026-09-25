@@ -45,6 +45,26 @@ export function isInsideHiddenTabContent(el: HTMLElement): boolean {
 }
 
 /**
+ * Which mount of a block's browser view owns its native page. The host keys
+ * the page by block id, and a view can mount again before an earlier mount's
+ * `browser_pane_create` returns (a split, a layout rebuild, a hot reload); the
+ * host then answers the newer create with `create-already-live` and the newer
+ * mount adopts the page. The LATEST mount to request it owns it: an older
+ * mount must not close it on unmount or as a "finished after unmount" orphan,
+ * or the newer mount is left with no page — a black pane
+ * (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §2.4).
+ */
+const nativePaneOwners = new Map<string, symbol>();
+
+/** Releases `token`'s claim on `blockId`'s native page; true when it still
+ *  owned it, i.e. the caller should close the page. */
+function releaseNativePane(blockId: string, token: symbol | null): boolean {
+    if (token == null || nativePaneOwners.get(blockId) !== token) return false;
+    nativePaneOwners.delete(blockId);
+    return true;
+}
+
+/**
  * Syncs the native browser-pane HWND's position/size to this pane's
  * placeholder div, and owns pane creation. A native browser-pane HWND
  * can't be moved by CSS, so this polls (ResizeObserver + a safety-net
@@ -180,9 +200,14 @@ export function usePaneRectSync(params: {
     // native page would be created afterwards and never closed, left drawn
     // over whatever tab is active.
     let disposed = false;
+    // This mount's claim on the block's native page (`nativePaneOwners`).
+    let ownerToken: symbol | null = null;
 
     const createPane = async (url: string) => {
         if (!placeholderRef()) return;
+        const token = Symbol(model.blockId);
+        ownerToken = token;
+        nativePaneOwners.set(model.blockId, token);
         try {
             diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
             await invokeCommand("browser_pane_create", {
@@ -192,8 +217,12 @@ export function usePaneRectSync(params: {
                 ...paneRect(),
             });
             if (disposed) {
-                diag(`createPane finished after unmount — closing the orphan`);
-                invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+                if (releaseNativePane(model.blockId, token)) {
+                    diag(`createPane finished after unmount — closing the orphan`);
+                    invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+                } else {
+                    diag(`createPane finished after unmount — a newer mount owns the page, leaving it open`);
+                }
                 return;
             }
             setPaneCreated(true);
@@ -259,8 +288,10 @@ export function usePaneRectSync(params: {
         // backend pane to Closing, so any in-flight resize/focus/nav calls
         // that haven't reached the backend yet get no-op'd there instead of
         // racing a mid-destruction HWND. See SPEC_BROWSER_PANE_LIFECYCLE.md §5.
-        if (paneCreated()) {
+        if (paneCreated() && releaseNativePane(model.blockId, ownerToken)) {
             invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+        } else if (paneCreated()) {
+            diag(`view-unmount — a newer mount owns the page, leaving it open`);
         }
         resizeObserver?.disconnect();
         if (positionInterval) {
