@@ -58,6 +58,9 @@ export interface PaneTabCapabilities {
     /** A new block created while this one is focused starts in its
      *  `cmd:cwd`. */
     sharesCwd?: boolean;
+    /** Meta keys a split of this pane does NOT copy into the new pane (agent:
+     *  its agent-specific fields, so the new pane opens the picker). */
+    splitDropsMeta?: string[];
 }
 
 /** What the host gives a native instance — its only way in (no raw

@@ -81,6 +81,10 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("acceptsInput")).toEqual(["term"]);
         expect(holders("shellKeys")).toEqual(["term"]);
         expect(holders("sharesCwd")).toEqual(["term"]);
+        expect(holders("splitDropsMeta")).toEqual(["agent"]);
+        expect(paneTabCapability("agent", "splitDropsMeta")).toEqual(
+            expect.arrayContaining(["agentId", "agentName", "agentProvider", "cmd", "cmd:args"])
+        );
         // An alias carries its view's capabilities.
         expect(paneTabCapability("forge", "header")).toBe("surface");
     });

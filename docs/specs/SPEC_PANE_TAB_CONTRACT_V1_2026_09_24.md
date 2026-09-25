@@ -450,9 +450,10 @@ working throughout through a legacy adapter.
      block's `cmd:cwd` (`keymodel-blockcreate.ts`). The basic-terminal count
      needs no capability — only the terminal implements `isBasicTerm`. The
      terminal's env-derived header name moved into the terminal itself
-     (`termViewName`, termutil.ts, used by `TermViewModel.viewName`). The
-     split rule's agent blocklist is keyed by meta field, not view name, and
-     stays. No view-name check remains in shared header, frame, zoom, key or
+     (`termViewName`, termutil.ts, used by `TermViewModel.viewName`).
+     `splitDropsMeta` (agent: `AGENT_SPLIT_DROPPED_META`) lists the meta a
+     split must not copy — the split rule applied that blocklist only when
+     `view === "agent"`. No view-name check remains in shared header, frame, zoom, key or
      pane-menu code; `command-registry.ts`/`keymodel-blockcreate.ts` still
      *create* terminals by name, which is a choice of default, not a check.
    - **5c (dropped, 2026-09-25):** backend `defaultMeta` from the manifest.

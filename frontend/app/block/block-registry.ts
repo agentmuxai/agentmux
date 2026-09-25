@@ -25,7 +25,7 @@ import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { WardenViewModel } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
-import { agentPaneTab } from "@/app/view/agent/agent-pane-tab";
+import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "@/app/view/agent/agent-pane-tab";
 import { buildAgentPaneChromeModel } from "@/app/view/agent/agent-view";
 import { buildTermPaneChromeModel } from "@/view/term/term";
 import { termPaneTab } from "@/view/term/term-pane-tab";
@@ -59,7 +59,7 @@ const builtins = [
         icon: "sparkles",
         aliases: ["forge"],
         lifecycle: "keepAlive",
-        capabilities: { header: "surface", paneZoom: {} },
+        capabilities: { header: "surface", paneZoom: {}, splitDropsMeta: AGENT_SPLIT_DROPPED_META },
         tab: agentPaneTab,
         chrome: buildAgentPaneChromeModel,
     }),
