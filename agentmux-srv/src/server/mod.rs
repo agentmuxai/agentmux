@@ -381,6 +381,8 @@ pub fn build_router(state: AppState) -> Router {
             "/agentmux/reactive/agent-names",
             get(reactive::handle_reactive_agent_names),
         )
+        // One live instance per agent, LAN tier (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.4).
+        .route("/agentmux/agent/holding", get(agent_takeover::handle_agent_holding))
         // Identity M4a: inner to the auth layer (route_layer order: the
         // last one added runs first), so it sees which key authenticated.
         .route_layer(middleware::from_fn_with_state(

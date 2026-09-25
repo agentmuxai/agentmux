@@ -90,6 +90,30 @@ pub(super) async fn handle_agent_takeover(
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct HoldingQuery {
+    uid: String,
+}
+
+/// `GET /agentmux/agent/holding?uid=…` — a LAN peer asking whether this host
+/// runs `uid` (spec §4.4, Phase 4). LAN-key readable, like the agent-name
+/// list: it discloses only whether an agent UID is live here, since when,
+/// and in which channel/version.
+pub(super) async fn handle_agent_holding(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<HoldingQuery>,
+) -> Response {
+    let uid = q.uid.trim().to_string();
+    if uid.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "uid required" }))).into_response();
+    }
+    let store = agent_admission::lease_store_for(state.mstore.shared_agent_registry());
+    let holding = tokio::task::spawn_blocking(move || agent_admission::local_holding(store.as_ref(), &uid))
+        .await
+        .unwrap_or_default();
+    (StatusCode::OK, Json(json!(holding))).into_response()
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct ReleaseRequest {
     uid: String,
     #[serde(default)]
