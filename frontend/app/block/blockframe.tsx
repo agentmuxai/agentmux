@@ -964,15 +964,13 @@ function ConnStatusOverlay({
 }
 
 /**
- * The vivid, border-strength color a block's OWN color resolves to — no
- * tab-level override consulted at all, unlike computeFocusRingBorderColor
- * below (which folds in tabMeta's bg:activebordercolor for the single
- * currently-focused block's outer ring). PaneChrome's pane-tab pills need
- * this pure per-block form: computing each pill's own color by handing
- * every one through computeFocusRingBorderColor with the SAME shared
- * tabMeta would let one tab-wide bg:activebordercolor collapse every
- * pill's underline to that one color, defeating the point of a per-block
- * underline (reagent P1, PR #3484).
+ * The vivid, border-strength color a block's OWN color resolves to. Pane-tab
+ * pills (PaneChrome) use this directly, one call per pill's own block, so each
+ * pill carries its own color. Nothing tab-wide may feed into it: when a
+ * tab-level override tier still existed, routing pills through it collapsed
+ * every pill's underline to one color (reagent P1, PR #3484). That tier is
+ * gone now (SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md §3); the rule
+ * that pills are strictly per-block stays.
  *
  * frame:hue is an explicit user choice from the pane-header "Pane Color"
  * picker (pane-color-menu.ts's setHue); frame:activebordercolor is a
@@ -996,33 +994,24 @@ export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefin
 }
 
 /**
- * The same per-block/tab border-color resolution `BlockMask` (below) paints
- * onto `.block-mask` — extracted so hoisted pane chrome (AgentPaneChrome,
- * TermPaneChrome) can paint the IDENTICAL color onto its own outer selection
- * ring instead of hardcoding `--accent-color`. Without this, a pane's
- * `frame:activebordercolor`/`frame:hue` (agent identity color seeded at
- * launch, SPEC_AGENT_COLOR_2026_08_08.md, or an explicit "Pane Color" picker
- * choice) or tab-level `bg:bordercolor`/`bg:activebordercolor` would still
- * compute correctly here but never reach the new outer ring that replaced
+ * The border color `BlockMask` (below) paints onto `.block-mask`, and hoisted
+ * pane chrome paints onto its own outer selection ring (PaneChrome), so the
+ * two are IDENTICAL instead of the ring hardcoding `--accent-color`. Without
+ * this, a pane's `frame:activebordercolor`/`frame:hue` (agent identity color
+ * seeded at launch, SPEC_AGENT_COLOR_2026_08_08.md, or an explicit "Pane
+ * Color" picker choice) would never reach the outer ring that replaced
  * `.block-mask` as the visible perimeter once chrome was hoisted outside it
  * (codex P2, reagent P2, PR #3226). Returns `undefined` when nothing
  * overrides the default — callers fall back to their own default (accent
  * when focused, the dim border color otherwise) via `var(--x, <default>)`.
  *
- * Unlike computeBlockActiveBorderColor above, this DOES consult tab-level
- * meta (`bg:activebordercolor` / `bg:bordercolor`), which is why the pill
- * underlines can't use it — see that function's own comment.
+ * Block meta only. A tab-level tier (`bg:activebordercolor` /
+ * `bg:bordercolor`, left over from Wave-era tab background presets) used to
+ * sit on top of this; nothing wrote those keys any more, so it was removed
+ * (SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md §3).
  */
-export function computeFocusRingBorderColor(
-    isFocused: boolean,
-    blockMeta: Block["meta"] | undefined,
-    tabMeta: Record<string, unknown> | undefined,
-): string | undefined {
+export function computeFocusRingBorderColor(isFocused: boolean, blockMeta: Block["meta"] | undefined): string | undefined {
     if (isFocused) {
-        const tabActiveBorderColor = tabMeta?.["bg:activebordercolor"] as string | undefined;
-        if (tabActiveBorderColor) {
-            return tabActiveBorderColor;
-        }
         // This used to inline the hue/activebordercolor check itself,
         // checking activebordercolor first and returning before ever
         // reaching hue — silently reintroducing the exact bug #2477 fixed
@@ -1030,10 +1019,6 @@ export function computeFocusRingBorderColor(
         // Now shares computeBlockActiveBorderColor's already-correct
         // hue-first precedence instead of duplicating it.
         return computeBlockActiveBorderColor(blockMeta);
-    }
-    const tabBorderColor = tabMeta?.["bg:bordercolor"] as string | undefined;
-    if (tabBorderColor) {
-        return tabBorderColor;
     }
     // Same precedence fix as the focused branch above, for the unfocused
     // (dimmed) border — frame:bordercolor is frame:activebordercolor's
@@ -1056,7 +1041,7 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
 
     const style = createMemo<JSX.CSSProperties>(() => {
-        const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta, atoms.tabAtom()?.meta);
+        const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta);
         return color ? { "border-color": color } : {};
     });
 

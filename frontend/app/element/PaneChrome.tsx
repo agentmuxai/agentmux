@@ -28,7 +28,7 @@ import {
     computeMixedPaneHeaderBg,
 } from "@/app/block/blockframe";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
-import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
+import { getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
@@ -57,7 +57,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const isFocused = () => nodeModel.isFocused();
     const isAlone = () => nodeModel.numLeafs() <= 1;
     const ringBorderColor = createMemo(() =>
-        computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, atoms.tabAtom()?.meta)
+        computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta)
     );
 
     // The active ViewModel's opted-in capabilities, resolved ONCE here (not
@@ -128,11 +128,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // folded into tabInfos above) since it needs the current theme's
     // polarity, which label/icon description has no reason to depend on.
     //
-    // computeBlockActiveBorderColor, NOT computeFocusRingBorderColor — the
-    // latter also folds in the single shared atoms.tabAtom() tab-level
-    // bg:activebordercolor override, which would collapse every pill's
-    // underline to that one tab-wide color instead of each block's own
-    // (reagent P1, PR #3484).
+    // computeBlockActiveBorderColor, one call per pill's own block: a pill's
+    // color must never come from anything tab-wide, or every pill's
+    // underline collapses to one shared color (reagent P1, PR #3484 — back
+    // when a tab-level override tier still existed).
     const tabColors = createMemo(() => {
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);

@@ -340,6 +340,7 @@ partial list.
 | [`SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18`](SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md) | SPEC: A pane's chrome must resolve its own tab's LayoutModel, never "whichever tab is globally active" |
 | [`SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23`](SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md) | Clicking an input in an unselected pane should focus that input — in one click |
 | [`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md) | Spec: pane close/reopen must guarantee conversation continuity, or say so |
+| [`SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20`](SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md) | SPEC: consolidate pane/tab color systems — persist explicit agent-pane picks, unify the tab-select indicator |
 | [`SPEC_PANE_DRAG_TO_TAB_2026_07_10`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md) | Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop) |
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
