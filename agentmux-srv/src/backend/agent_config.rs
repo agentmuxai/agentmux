@@ -1296,12 +1296,21 @@ fn write_managed_mcp_server_names<'a>(base_path: &std::path::Path, names: impl I
 /// created `0600` on Unix so the content is never readable by others, even
 /// for a moment. `rename` replaces an existing file (and its old mode) on
 /// every platform we ship.
+///
+/// The temp name is unique per call (a v4 UUID, as `bookmarks_store.rs`
+/// does), not per process: two launches into one shared project directory
+/// run concurrently in the same srv (`agent_open`'s dedupe lock is keyed by
+/// agent, not by directory), and a shared temp path would let their writes
+/// interleave into one file before either rename — publishing corrupt JSON.
+/// With unique temps the worst case is last-write-wins. `create_new` also
+/// refuses to open anything already sitting at the temp path (including a
+/// planted symlink).
 fn write_owner_only_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-    let tmp = path.with_file_name(format!(".{file_name}.agentmux-tmp-{}", std::process::id()));
+    let tmp = path.with_file_name(format!(".{file_name}.{}.agentmux-tmp", uuid::Uuid::new_v4()));
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -2694,6 +2703,41 @@ mod mcp_json_tests {
             .filter(|e| e.file_name().to_string_lossy().contains("agentmux-tmp"))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn mcp_json_concurrent_launches_into_one_dir_never_publish_corrupt_json() {
+        // ReAgent P1 on #3803: a per-process temp name let two same-srv writes
+        // interleave into one temp file before either rename. Many writers of
+        // differently sized content maximise the chance of interleaving.
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_path_buf();
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let base = base.clone();
+                std::thread::spawn(move || {
+                    let padding = "x".repeat(i * 4096);
+                    let content = format!(
+                        r#"{{"mcpServers":{{"agentmux":{{"command":"agentmux-mcp","env":{{"AGENTMUX_AGENT_ID":"a{i}","PAD":"{padding}"}}}}}}}}"#
+                    );
+                    for _ in 0..10 {
+                        write_mcp_json_respecting_user_servers(&base, &content).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let raw = std::fs::read_to_string(base.join(".mcp.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("published .mcp.json must be valid JSON");
+        assert!(v["mcpServers"]["agentmux"].is_object());
+        let leftovers = std::fs::read_dir(&base)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains("agentmux-tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
     }
 
     #[cfg(unix)]
