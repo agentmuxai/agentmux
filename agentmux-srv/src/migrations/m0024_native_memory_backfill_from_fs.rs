@@ -38,7 +38,8 @@
 //!
 //! ## What this does
 //!
-//! 1. **Backfill from the filesystem**, the same source the detector
+//! 1. *(Moved out of this migration by SPEC_MEMORY_FOLLOWS_THE_AGENT
+//!    phase M1 — see `up`.)* **Backfill from the filesystem**, the same source the detector
 //!    trusts, via the same `list_all_memory_targets` enumeration — so the
 //!    two agree by construction instead of by coincidence. Idempotent and
 //!    ordering-safe for exactly the reason `m0023` documents: only a pair
@@ -113,88 +114,15 @@ impl Migration for M0024NativeMemoryBackfillFromFs {
                 MigrationError(format!("native_memory_backfill_from_fs: relabel: {e}"))
             })?;
 
-        // ── 2. Backfill anything still unversioned, reading the filesystem.
-        // Enumerate with the CHANNEL store — see the module doc. Absent on
-        // a channel whose objects.db hasn't been created yet, in which case
-        // there are no agents here to backfill and the repair above was the
-        // whole job.
-        if !ctx.channel_store_path.exists() {
-            tracing::info!(
-                relabeled,
-                "native_memory_backfill_from_fs: no channel store yet; repair-only pass"
-            );
-            return Ok(());
-        }
-        let channel_store = Store::open(&ctx.channel_store_path).map_err(|e| {
-            MigrationError(format!("native_memory_backfill_from_fs: open channel store: {e}"))
-        })?;
-        let targets =
-            crate::server::native_memory_handlers::list_all_memory_targets(&channel_store);
-        let mut backfilled = 0usize;
-        let mut skipped_already_versioned = 0usize;
-        let mut unreadable = 0usize;
-
-        for (agent_id, dir) in targets {
-            let entries = match std::fs::read_dir(&dir) {
-                Ok(e) => e,
-                // A configured agent whose memory dir doesn't exist yet is
-                // ordinary, not an error. Same tolerance the sweep has.
-                Err(_) => continue,
-            };
-            for entry in entries.flatten() {
-                let filename = entry.file_name().to_string_lossy().into_owned();
-                if !filename.ends_with(".md") {
-                    continue;
-                }
-                if !entry.path().is_file() {
-                    continue;
-                }
-                let existing = store
-                    .agent_native_memory_version_latest(&agent_id, &filename)
-                    .map_err(|e| {
-                        MigrationError(format!(
-                            "native_memory_backfill_from_fs: check existing for {agent_id}/{filename}: {e}"
-                        ))
-                    })?;
-                if existing.is_some() {
-                    skipped_already_versioned += 1;
-                    continue;
-                }
-                // Oversized/unreadable files are skipped, never truncated:
-                // recording a partial body as a *version* would misrepresent
-                // content the file never held as authoritative (the same
-                // reasoning `read_memory_file_lossy` documents). One bad file
-                // must not abort the backfill for every other agent.
-                let content = match crate::backend::native_memory_drift::read_memory_file_lossy(
-                    &entry.path(),
-                ) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!(
-                            agent_id, filename, error = %e,
-                            "native_memory_backfill_from_fs: skipping unreadable file"
-                        );
-                        unreadable += 1;
-                        continue;
-                    }
-                };
-                store
-                    .agent_native_memory_version_insert(
-                        &agent_id, &filename, &content, "agent_inferred", "{}", "",
-                    )
-                    .map_err(|e| {
-                        MigrationError(format!(
-                            "native_memory_backfill_from_fs: insert for {agent_id}/{filename}: {e}"
-                        ))
-                    })?;
-                backfilled += 1;
-            }
-        }
-
-        tracing::info!(
-            relabeled, backfilled, skipped_already_versioned, unreadable,
-            "native_memory_backfill_from_fs: complete"
-        );
+        // ── 2. The filesystem backfill no longer runs here. Migrations run
+        // before the identity stores are attached, so an agent's
+        // account-linked directory can't be resolved yet, and the registry
+        // guess it fell back to attributed one agent's files to another.
+        // Startup runs it after the stores are attached instead
+        // (`native_memory_drift::backfill_newly_verified`, in the drift sweep,
+        // SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md phase M1).
+        let _ = &ctx.channel_store_path;
+        tracing::info!(relabeled, "native_memory_backfill_from_fs: complete (repair only)");
         Ok(())
     }
 }
@@ -280,57 +208,6 @@ mod tests {
         let versions = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].source, "agent_inferred");
-    }
-
-    /// The regression the review caught before merge: enumeration must use
-    /// the CHANNEL store. With the shared store, `agent_def_list()` fails on
-    /// the missing `db_agents` table, `list_all_memory_targets` swallows the
-    /// error, and this agent's on-disk memory is silently never backfilled —
-    /// the same "wrong source, empty list, looks fine" failure as m0023.
-    #[test]
-    fn backfills_an_on_disk_file_for_an_agent_only_the_channel_store_knows() {
-        let tmp = tempfile::tempdir().unwrap();
-        let shared_path = tmp.path().join("shared.db");
-        let channel_path = tmp.path().join("objects.db");
-        let shared = Store::open_shared(&shared_path).unwrap();
-        let channel = Store::open(&channel_path).unwrap();
-
-        // An agent whose memory dir resolves via working_directory +
-        // CLAUDE_CONFIG_DIR — both per-channel reads.
-        let mut def = crate::backend::storage::agents::test_agent_def(
-            "agent-1", "Agent One", "claude", "agent", 1000, "",
-        );
-        def.working_directory = "/wd".to_string();
-        channel.agent_def_insert(&mut def).unwrap();
-        channel
-            .agent_content_set(&crate::backend::storage::AgentContent {
-                agent_id: def.id.clone(),
-                content_type: "env".to_string(),
-                content: format!("CLAUDE_CONFIG_DIR={}\n", tmp.path().display()),
-                updated_at: 1000,
-            })
-            .unwrap();
-
-        // memory_dir_for_cwd maps "/wd" -> "-wd" (non-alphanumerics to '-').
-        let mem_dir = tmp.path().join("projects").join("-wd").join("memory");
-        std::fs::create_dir_all(&mem_dir).unwrap();
-        std::fs::write(mem_dir.join("MEMORY.md"), "content that predates version tracking").unwrap();
-
-        M0024NativeMemoryBackfillFromFs
-            .up(&MigrationContext {
-                home: tmp.path().to_path_buf(),
-                data_dir: tmp.path().to_path_buf(),
-                shared_store_path: shared_path.clone(),
-                channel_store_path: channel_path.clone(),
-            })
-            .unwrap();
-
-        let latest = shared
-            .agent_native_memory_version_latest(&def.id, "MEMORY.md")
-            .unwrap()
-            .expect("the on-disk file must be backfilled, not silently skipped");
-        assert_eq!(latest.source, "agent_inferred");
-        assert_eq!(latest.content, "content that predates version tracking");
     }
 
     /// A store with no shared file at all must not error — the migration

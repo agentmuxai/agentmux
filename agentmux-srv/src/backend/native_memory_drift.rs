@@ -83,6 +83,75 @@ pub(crate) fn check_and_record_drift(
         .map(|v| v.is_some())
 }
 
+/// Give every verified agent's memory file with no recorded version its
+/// first one, labelled `agent_inferred` ("Agent" in the Armory), before the
+/// drift detector starts. Otherwise the detector finds these ordinary files
+/// on its first sweep and records them as `external_fs_write`, "Detected
+/// outside AgentMux", as it did for every file after a new local-build
+/// channel (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §1.3, phase M1).
+///
+/// Covers only files that **predate tracking**: those already in the
+/// directory at the moment it is first verified — at startup (after the
+/// identity stores are attached, so an agent's account-linked directory
+/// resolves; this used to be migration m0024, which ran before that and fell
+/// back to a registry guess), or later for an agent verified mid-session.
+///
+/// Anything written after that is a change, and drift detection records it
+/// exactly as it records every direct write to the folder today — including
+/// Claude's own auto-memory writes, which never go through AgentMux. So an
+/// agent whose folder doesn't exist yet is still counted as seen: its first
+/// files are written after verification, like every later one. Pre-existing
+/// files raise no fs-watch event, so the fast path can't race this.
+/// Returns the number of versions recorded.
+pub(crate) fn backfill_newly_verified(
+    id_store: &Store,
+    targets: &[(String, PathBuf)],
+    known: &mut HashSet<String>,
+) -> usize {
+    let new: Vec<(String, PathBuf)> = targets.iter().filter(|(id, _)| !known.contains(id)).cloned().collect();
+    for (id, _) in &new {
+        known.insert(id.clone());
+    }
+    backfill_first_sight_versions_for(id_store, &new)
+}
+
+fn backfill_first_sight_versions_for(id_store: &Store, targets: &[(String, PathBuf)]) -> usize {
+    let mut recorded = 0;
+    for (agent_id, dir) in targets {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        for entry in entries.flatten() {
+            let filename = entry.file_name().to_string_lossy().into_owned();
+            if !filename.ends_with(".md") || !entry.path().is_file() {
+                continue;
+            }
+            match id_store.agent_native_memory_version_latest(agent_id, &filename) {
+                Ok(None) => {}
+                Ok(Some(_)) => continue,
+                Err(e) => {
+                    tracing::warn!(agent_id, filename, error = %e, "native_memory: first-sight backfill: lookup failed");
+                    continue;
+                }
+            }
+            let content = match read_memory_file_lossy(&entry.path()) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(agent_id, filename, error = %e, "native_memory: first-sight backfill: skipping unreadable file");
+                    continue;
+                }
+            };
+            match id_store.agent_native_memory_version_insert_if_changed(agent_id, &filename, &content, "agent_inferred", "{}", "") {
+                Ok(Some(_)) => recorded += 1,
+                Ok(None) => {}
+                Err(e) => tracing::warn!(agent_id, filename, error = %e, "native_memory: first-sight backfill: insert failed"),
+            }
+        }
+    }
+    if recorded > 0 {
+        tracing::info!(recorded, "native_memory: first-sight backfill recorded versions");
+    }
+    recorded
+}
+
 /// Read one `.md` file's content the same way the rest of the native-memory
 /// code does: lossy UTF-8. Unlike `native_memory_handlers.rs`'s own
 /// mirror-refresh path — which truncates an oversized file and separately
@@ -264,8 +333,11 @@ fn spawn_slow_path(mstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::
         // watched_dirs/dir_to_agent — see reconciliation_sweep_once's own
         // doc comment on why this can't just be a fresh HashSet per call.
         let mut deleted_notified: HashSet<(String, String)> = HashSet::new();
+        // Agents whose directory has had its first-sight backfill.
+        let mut backfilled: HashSet<String> = HashSet::new();
         loop {
             tick.tick().await;
+            backfill_newly_verified(&id_store, &list_all_memory_targets(&mstore), &mut backfilled);
             reconciliation_sweep_once(&mstore, &id_store, &broker, &mut deleted_notified);
         }
     });
@@ -297,7 +369,7 @@ fn spawn_fast_path(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
-                    refresh_subscriptions(&fs_watch_pool, &mstore, &mut watched_dirs, &mut dir_to_agent);
+                    refresh_subscriptions(&fs_watch_pool, &mstore, &id_store, &mut watched_dirs, &mut dir_to_agent);
                 }
                 event = events.recv() => {
                     let event = match event {
@@ -362,6 +434,7 @@ fn spawn_fast_path(
 fn refresh_subscriptions(
     fs_watch_pool: &Arc<FsWatchPool>,
     mstore: &Store,
+    id_store: &Store,
     watched_dirs: &mut HashSet<PathBuf>,
     dir_to_agent: &mut std::collections::HashMap<PathBuf, String>,
 ) {
@@ -372,6 +445,11 @@ fn refresh_subscriptions(
         // see subscribe_dir's own doc comment).
         let canonical = memory_dir.canonicalize().unwrap_or_else(|_| memory_dir.clone());
         if watched_dirs.insert(canonical.clone()) {
+            // Record the files already here BEFORE watching, so a write
+            // landing right after the subscription is a change against them
+            // — never the first sighting that skips their own version. The
+            // slow sweep runs the same idempotent backfill.
+            backfill_first_sight_versions_for(id_store, &[(agent_id.clone(), memory_dir.clone())]);
             fs_watch_pool.subscribe_dir(&memory_dir);
             dir_to_agent.insert(canonical, agent_id);
         }
@@ -385,6 +463,83 @@ mod tests {
     fn shared_store() -> Store {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         Store::open_shared(tmp.path()).unwrap()
+    }
+
+    /// A pre-existing file gets one `agent_inferred` version at startup, so
+    /// the first sweep sees no drift and never labels it "Detected outside
+    /// AgentMux" (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §1.3, M1).
+    #[test]
+    fn first_sight_backfill_records_once_and_the_sweep_then_sees_no_drift() {
+        let store = shared_store();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("MEMORY.md"), "pre-existing").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "not memory").unwrap();
+        let targets = vec![("agent-1".to_string(), dir.path().to_path_buf())];
+        let mut known = HashSet::new();
+
+        assert_eq!(backfill_newly_verified(&store, &targets, &mut known), 1);
+        // A file that appears later in a known directory is an outside write
+        // for drift detection to record, not another first sighting.
+        std::fs::write(dir.path().join("later.md"), "appeared later").unwrap();
+        assert_eq!(backfill_newly_verified(&store, &targets, &mut known), 0);
+        assert!(store.agent_native_memory_version_latest("agent-1", "later.md").unwrap().is_none());
+        // An agent verified mid-session gets its own first sighting.
+        let dir2 = tempfile::tempdir().unwrap();
+        std::fs::write(dir2.path().join("MEMORY.md"), "second agent").unwrap();
+        let more = vec![targets[0].clone(), ("agent-2".to_string(), dir2.path().to_path_buf())];
+        assert_eq!(backfill_newly_verified(&store, &more, &mut known), 1);
+
+        // A folder that doesn't exist yet has nothing that predates tracking:
+        // the agent is seen, and files written later are changes for drift
+        // detection, like every direct write to the folder.
+        let root = tempfile::tempdir().unwrap();
+        let not_yet = root.path().join("memory");
+        let pending = vec![("agent-3".to_string(), not_yet.clone())];
+        assert_eq!(backfill_newly_verified(&store, &pending, &mut known), 0);
+        assert!(known.contains("agent-3"));
+        std::fs::create_dir_all(&not_yet).unwrap();
+        std::fs::write(not_yet.join("MEMORY.md"), "first write").unwrap();
+        assert_eq!(backfill_newly_verified(&store, &pending, &mut known), 0);
+        let history = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].source, "agent_inferred");
+
+        let drifted = check_and_record_drift(&store, "agent-1", "MEMORY.md", "pre-existing", "reconciliation_sweep").unwrap();
+        assert!(!drifted, "unchanged content is not an outside write");
+    }
+
+    /// The fast path records a folder's existing files before it starts
+    /// watching, so an edit right after subscribing is a change against
+    /// them, not their first sighting (ReAgent P1 on #3707).
+    #[tokio::test]
+    async fn the_fast_path_backfills_a_folder_before_watching_it() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let id_store = shared_store();
+        let mstore = Store::open_in_memory().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("agent-fp", "Agent FP", "claude", "agent", 1, "");
+        def.working_directory = "/work/fp".to_string();
+        mstore.agent_def_insert(&mut def).unwrap();
+        mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+        let dir = memory_dir_for_agent_by_id(&mstore, &def).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("MEMORY.md"), "before watching").unwrap();
+
+        let pool = FsWatchPool::new();
+        let mut watched = HashSet::new();
+        let mut dir_to_agent = std::collections::HashMap::new();
+        refresh_subscriptions(&pool, &mstore, &id_store, &mut watched, &mut dir_to_agent);
+
+        let v = id_store.agent_native_memory_version_latest(&def.id, "MEMORY.md").unwrap().unwrap();
+        assert_eq!(v.source, "agent_inferred");
+        assert_eq!(v.content, "before watching");
     }
 
     #[test]
