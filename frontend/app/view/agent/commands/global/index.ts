@@ -12,6 +12,7 @@ import { clearCommand } from "./clear";
 import { forkCommand } from "./fork";
 import { helpCommand } from "./help";
 import { loginCommand } from "./login";
+import { quitCommand } from "./quit";
 import { RUNTIME_COMMANDS } from "./runtime";
 import { terminalCommand } from "./terminal";
 import { toolsCommand } from "./tools";
@@ -26,4 +27,5 @@ export function registerGlobalCommands(registry: SlashCommandRegistry): void {
     registry.register(toolsCommand);
     registry.register(terminalCommand);
     registry.register(forkCommand);
+    registry.register(quitCommand);
 }

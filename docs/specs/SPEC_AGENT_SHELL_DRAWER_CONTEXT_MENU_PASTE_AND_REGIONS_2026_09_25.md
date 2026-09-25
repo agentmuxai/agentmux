@@ -1,7 +1,7 @@
 # SPEC: Agent shell drawer — right-click Paste, and a "context-menu region" mechanism to strip pane entries
 
 **Date:** 2026-09-25
-**Status:** implemented — #3762 (Phase 1 and Phase 2 together; see §3.5 for the decisions made during implementation)
+**Status:** implemented — #3762 (Phase 1 and Phase 2 together; see §3.5 for the decisions made during implementation). Follow-ups: #3774 (Ctrl+Shift+V / Ctrl+Shift+C, §3.6) and #3772 (the JS menu now draws sublabels, §3.5).
 **Related:**
 `docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md` (same root cause — a pane-body handler swallows right-click and never offers Paste; fixed there per-`<input>`, not for terminals nested in a non-terminal pane),
 `docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (the `getBodyContextMenuItems` extension point this builds on),
@@ -19,6 +19,8 @@ Two asks, one root cause:
 2. **The menu that does appear is the wrong menu for a terminal drawer.** It carries entries that make no sense from there — Split Up/Down/Left/Right and Replace With… — and there is currently no way for a region of a pane to drop entries from the shared menu.
 
 ### What right-click in the drawer shows today
+
+*(Describes the code as of 2026-09-25, before #3762 — the `file:line` references below name where the behavior lived then and have since moved; this section is the problem statement, not a description of current main. The current design is §2–§3.)*
 
 The drawer (`AgentShellSubblock`, mounted at `agent-view.tsx:2935`) is a DOM descendant of the agent pane's body, so its `contextmenu` event bubbles up through two handlers:
 
@@ -188,7 +190,7 @@ Implemented as specced: the chunked sender moved out of `TermViewModel` **verbat
 
 Chunking makes big pastes *work*; it doesn't make megabytes into a shell a good idea (the line editor re-renders the text, scrollback churns, and a slow chunked send blocks typing while it drains). So the menu Paste has an explicit limit, **1 MB** (`SHELL_PASTE_MAX_BYTES`, UTF-8 bytes of the clipboard text), and the UI states it at both moments a user needs it:
 
-- **Before:** the item reads "Paste (up to 1 MB)". While the agent holds the shell it reads "Paste (agent is using this shell)" and is disabled, so a greyed-out item always says why. (Carried in the *label*, not `ContextMenuItem.sublabel`: the JS-rendered menu, `showJsContextMenu` in `cef-api.ts`, never draws sublabels — found by right-clicking in the running app, where the first cut's sublabel was invisible. `bind-to-agent-menu.ts`'s sublabels are invisible for the same reason; not touched here.)
+- **Before:** the item reads "Paste (up to 1 MB)". While the agent holds the shell it reads "Paste (agent is using this shell)" and is disabled, so a greyed-out item always says why. (Carried in the *label*, not `ContextMenuItem.sublabel`. When this shipped the JS-rendered menu, `showJsContextMenu` in `cef-api.ts`, never drew sublabels — found by right-clicking in the running app, where the first cut's sublabel was invisible; #3772 has since made it draw them, which also un-hides `bind-to-agent-menu.ts`'s. The label form was kept on purpose: the text reads as one unit with the action it qualifies, and it needed no change.)
 - **After, when exceeded:** nothing is sent, and a warning notification says what happened, the limit, and the alternative: "The clipboard is 3.2 MB; the shell accepts up to 1 MB. Save it to a file and reference it from the shell instead."
 
 Best-practice notes applied: state the limit up front rather than only on failure; never fail silently; refuse cleanly (nothing partially pasted) rather than truncate; name the alternative action; measure in bytes, since that is what the wire and PTY see. The limit applies to menu Paste and Ctrl+Shift+V (§3.6). Plain Ctrl+V goes straight through xterm's own native paste handling and is unchanged apart from now being chunked.
@@ -219,6 +221,7 @@ Verified live after the fix: Ctrl+Shift+V pasted the clipboard at the shell prom
 | `frontend/app/view/agent/agent-view.tsx` | `handleContextMenu` early-returns inside a registered region |
 | `frontend/app/view/agent/components/AgentShellSubblock.tsx` | Register the drawer region; use `BlockInputSender` for input |
 | `frontend/app/view/agent/components/shell-drawer-menu.ts` | **New.** Copy/Paste items, size limit, `formatSize` (kept out of the component so it is unit-testable without xterm) |
+| `frontend/app/view/agent/components/shell-drawer-keys.ts` | **New (#3774, §3.6).** `handleShellDrawerKeydown` — Ctrl+Shift+V / Ctrl+Shift+C for the drawer's xterm; shares `pasteClipboardIntoShell` with the menu |
 | `frontend/app/view/term/block-input-sender.ts` | **New.** Chunked, ordered `blockinput` sender extracted from `TermViewModel` (§3.4) |
 | `frontend/app/view/term/termViewModel.ts` | `sendDataToController` delegates to `BlockInputSender` |
 | `frontend/app/block/pane-actions.test.ts` (new or extended) | §5 |
@@ -257,7 +260,7 @@ Run as a `task dev` instance of this branch and driven over CDP with real (synth
 - **The ~100 KB gate (§3.4), done:** a 100,081-byte PowerShell here-string (2,000 lines) placed on the OS clipboard and pasted via the menu arrived intact — the shell reported `count=2000 bytes=99999`, exactly the expected line count and byte count. Chunked send, no truncation, no reordering.
 - **Over the limit:** a 1.5 MB clipboard → nothing typed into the shell; the warning notification "Paste too large for the shell — The clipboard is 1.4 MB; the shell accepts up to 1 MB. Save it to a file and reference it from the shell instead." appeared.
 
-Not exercised in the running app: Copy of a real terminal selection (covered by unit tests only), the agent-locked disabled state (unit tests only — no agent was driving the shell), and the stale-transcript-selection regression from §2.4 (unit-level only; the handler yielding is a one-line guard).
+Not exercised in the running app at the time: Copy of a real terminal selection, the agent-locked disabled state, and the stale-transcript-selection regression from §2.4. Copy of a real selection was checked live afterwards (§3.6). Still unit-tested only: the agent-locked disabled state (no agent was driving the shell) and the §2.4 regression (the handler yielding is a one-line guard).
 
 ## 6. Decisions on the open questions
 
@@ -269,6 +272,6 @@ Resolved by judgment during implementation rather than left open:
 
 ## 7. Out of scope
 
-- Keyboard paste/copy in the drawer. `AgentShellSubblock` constructs `TermWrap` with no `keydownHandler`, so `TermViewModel`'s Ctrl+Shift+V/C handling does not apply to it. Whether native Ctrl+V reaches xterm's paste event correctly there was not verified here; worth checking alongside Phase 1 but a separate concern.
-- Adopting regions elsewhere. Other places that could use it (composer strip, drone/swarm rows) are not touched; the mechanism is deliberately generic so they can opt in later.
+- ~~Keyboard paste/copy in the drawer.~~ Was listed here as unverified; checked afterwards and fixed — Ctrl+V worked, Ctrl+Shift+V started voice dictation and Ctrl+Shift+C did nothing. See §3.6 (#3774).
+- Adopting regions elsewhere. No other place uses the region mechanism today. #3773 gave Swarm sub-rows and Drone nodes their own right-click Copy menus, deliberately with the simple per-row `showContextMenu` pattern rather than regions (many small dynamic rows; a region per row wasn't worth it) — so the drawer is still the only region. The mechanism remains generic for a future opt-in.
 - Redesigning the pane menu's contents for any pane other than the shell drawer.
