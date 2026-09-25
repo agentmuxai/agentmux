@@ -469,6 +469,10 @@ async fn connect_and_run(
         .map_err(|e| format!("send subscribe: {e}"))?;
 
     let mut ping_interval = tokio::time::interval(Duration::from_secs(CLIENT_PING_INTERVAL_SECS));
+    // Keeps every registered agent's relay lease renewed between wake
+    // signals (the relay's lease TTL is 60 s; wakes can be far apart).
+    let mut lease_interval = tokio::time::interval(super::wan_lease::RENEW_EVERY);
+    lease_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ping_interval.tick().await; // first tick fires immediately — consume it, we just connected
 
@@ -481,6 +485,20 @@ async fn connect_and_run(
             // own schedule regardless of whether a WS session happens to be
             // open, so a long-lived session no longer needs to special-case
             // its own credential check here.
+            _ = lease_interval.tick() => {
+                let registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
+                futures_util::future::join_all(registered.iter().map(|agent_id| async move {
+                    let per_agent = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
+                    let agent_token = per_agent.unwrap_or_else(|| token.to_string());
+                    if let super::wan_lease::Outcome::HeldElsewhere(where_) =
+                        super::wan_lease::ensure(agent_id, &agent_token, http).await
+                    {
+                        crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+                    }
+                }))
+                .await;
+            }
+
             _ = ping_interval.tick() => {
                 let ping_msg = serde_json::to_string(&ClientMsg::Ping)
                     .map_err(|e| format!("serialize ping: {e}"))?;
@@ -527,6 +545,11 @@ async fn connect_and_run(
                         let _ = write.send(Message::Text(msg.into())).await;
                     }
                     Some(CtrlMsg::RemoveAgent(id)) => {
+                        // The agent went away here: let another instance have it.
+                        {
+                            let (id, token, http) = (id.clone(), token.to_string(), http.clone());
+                            tokio::spawn(async move { super::wan_lease::release(&id, &token, &http).await });
+                        }
                         let msg = serde_json::to_string(&ClientMsg::SubscribeRemove { agents: vec![id] })
                             .unwrap_or_default();
                         let _ = write.send(Message::Text(msg.into())).await;
@@ -723,12 +746,25 @@ async fn sync_agent_reactive(
     let mut agent_token = per_agent_token.clone().unwrap_or_else(|| token.to_string());
     let mut using_per_agent = per_agent_token.is_some();
 
+    // One live instance per agent across the WAN
+    // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.5): claim or renew this
+    // agent's relay lease before pulling. If another instance holds it, do
+    // not take its jekts — and fence the local holder of this agent, if any
+    // (the newcomer yields). Fails open on any error (wan_lease::Outcome::Unknown).
+    if let super::wan_lease::Outcome::HeldElsewhere(where_) =
+        super::wan_lease::ensure(agent_id, &agent_token, http).await
+    {
+        crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+        return AgentSyncOutcome::Ok;
+    }
+
     let url = format!("{}/reactive/pending/{}", MUXBUS_REST_URL, agent_id);
     let body: PendingResp = loop {
         let resp = match http
             .get(&url)
             .header("Authorization", format!("Bearer {}", agent_token))
             .header("X-Agent-ID", agent_id)
+            .header("X-Agent-Instance", super::wan_lease::instance_id())
             .send()
             .await
         {
@@ -767,6 +803,13 @@ async fn sync_agent_reactive(
                 continue;
             }
             return shared_token_rejection_outcome(resp.status(), agent_id);
+        }
+        if resp.status() == reqwest::StatusCode::CONFLICT {
+            // The relay's lease fence: another instance holds this agent.
+            let body = resp.json::<serde_json::Value>().await.unwrap_or_default();
+            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
+            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            return AgentSyncOutcome::Ok;
         }
         if !resp.status().is_success() {
             tracing::warn!(
@@ -808,6 +851,7 @@ async fn sync_agent_reactive(
             .post(&ack_url)
             .header("Authorization", format!("Bearer {}", agent_token))
             .header("X-Agent-ID", agent_id)
+            .header("X-Agent-Instance", super::wan_lease::instance_id())
             .json(&serde_json::json!({ "injection_ids": all_ids }))
             .send()
             .await
@@ -841,6 +885,15 @@ async fn sync_agent_reactive(
                 continue;
             }
             return shared_token_rejection_outcome(claim_resp.status(), agent_id);
+        }
+        if claim_resp.status() == reqwest::StatusCode::CONFLICT {
+            // The relay's lease fence on acks (the lease changed hands between
+            // this pull and this claim): same handling as a 409 on the pull —
+            // claim nothing, and fence the local holder (ReAgent P1 on #3746).
+            let body = claim_resp.json::<serde_json::Value>().await.unwrap_or_default();
+            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
+            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            return AgentSyncOutcome::Ok;
         }
         if !claim_resp.status().is_success() {
             tracing::warn!(

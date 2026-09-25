@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-24
 **Status:** active — Phase 1 (host tier: lease, admission, fencing) shipped in PR #3738; Phase 2 (Take over) in PR
-#3742; Phase 3 (record fencing) in PR #3744; Phase 4 (LAN) in PR #3745. See §12–§15 for what was built and what was
-left out. Phase 5 (WAN) not started. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
+#3742; Phase 3 (record fencing) in PR #3744; Phase 4 (LAN) in PR #3745; Phase 5 (WAN) in PR #3746 (client) and
+agentmux-cloud#92 (relay). See §12–§16 for what was built and what was left out. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
 proceed to implementation without further sign-off). §11's open questions are all answered from logs and code.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-09-24: *"by mistake I opened up an instance of you in a 57.2 version running on the same
@@ -372,7 +372,7 @@ lesson, and the way that incident began).
 4. **LAN — detect and yield.** Advertisement field, peer query, tie-break. **Built as a peer query plus a periodic
    re-check — §15.**
 5. **WAN — relay coordinator.** UID-keyed lease endpoints and fenced pending pulls in `agentmux-cloud`; the client side
-   here.
+   here. **Built — §16. The relay half is agentmux-cloud#92 (not deployed by merging).**
 
 Phases 4 and 5 can proceed independently of 2–3. Phase 1 is small: the lease, the locking and the tests exist; what is
 missing is the wiring and the key.
@@ -635,3 +635,58 @@ governs this host.
   partition).
 - Take over (§13) does not reach LAN peers: the release route is full-auth only. A LAN refusal tells the user to close
   the agent on the other computer.
+
+---
+
+## 16. Phase 5 as built — WAN tier
+
+**Relay (agentmux-cloud#92).**
+- `agent-lease-store.ts` keeps one row per agent in a new `muxbus-agent-leases-${env}` table, keyed by the normalized agent
+  **name**. That is the key the relay's pending queue already uses, and a fence on pulls has to match it (see Limits).
+- Claim, renew and release are conditional writes guarded by the row as it was read, so two simultaneous claims cannot
+  both win. The epoch goes up on each ownership change. TTL is 60 s, and expired rows are swept by DynamoDB TTL.
+- Routes: `POST /agents/lease`, `POST /agents/lease/renew` and `POST /agents/lease/release`, for the caller's own agent
+  only (`X-Agent-ID` must match, and `checkAgentBinding` applies). A refusal names the holder's host, channel and version,
+  never its account or instance id.
+- **The fence.** `GET /reactive/pending/:agent_id` and `POST /reactive/ack` answer **409 `not_holder`** while another
+  instance holds a live lease. Callers identify themselves in `X-Agent-Instance`.
+  - With no lease, nothing changes, so older clients are unaffected until a newer client holds the agent.
+  - The check fails open if the lease table cannot be read.
+- Merging does not deploy it (`deploy.yml` is manual). Either half is safe to land first.
+
+**Client (this repo, `muxbus/wan_lease.rs`).**
+- The instance id is `host/channel`.
+- `cloud_subscriber` claims or renews the lease before every pending pull, at most every 20 s. It sends
+  `X-Agent-Instance` on pulls and acks.
+- A 20 s tick renews the leases of all registered agents between wake signals. Unregistering an agent releases its lease.
+- **Another instance holds the agent** (refused claim or 409 on a pull): this instance
+  - skips the pull, so it never consumes that instance's jekts;
+  - fences the local holder of that agent through `agent_admission::fence_agent_named`, which records the loss (the next
+    turn is refused) and stops the CLI process. The newcomer yields (D1).
+- The early admission check refuses a spawn when a recent answer (within 90 s) said another instance holds the agent.
+  The refusal classifies as `LiveElsewhere`.
+- A relay without the routes (404) turns the WAN tier off for 10 minutes. An unreachable relay or an error means fail
+  open (D2).
+
+**Tests.**
+- Relay (8 + 8):
+  - claim, refuse and idempotent re-claim; expired takeover with a higher epoch; renew only for the holder; release;
+  - the fence (holder, other instance, header-less caller); two simultaneous claims have one winner;
+  - route-level (`app.inject`): no lease, no change; the holder pulls while others get 409; acks are fenced; the check
+    fails open; claim refused while held, and only for the caller's own agent.
+- Client:
+  - holder description; claim answers mapped to outcomes; a `not_holder` answer is remembered for the early check and
+    cleared by a grant; the instance id;
+  - admission: the relay can fence the local holder by name (only its own entry, only once); a WAN refusal classifies as
+    `LiveElsewhere`.
+
+**Limits.**
+- **Keyed by name, not UID.** The relay routes jekts by agent name, so its lease is by name too. Two *different* agents
+  with the same name on two computers fence each other. That is a limit of name-keyed WAN routing that predates this
+  spec — the relay already delivered one's jekts to the other. Re-keying the relay's queue by UID is the fix, and it is
+  outside this spec.
+- **Registered, not running.** On the WAN, an instance holds the agent while the agent is *registered* there (its pane
+  is open and receiving jekts), not only while its CLI process runs. The host lease is per process. An idle but open
+  pane therefore keeps the WAN lease, which is deliberate: that pane is where the agent's jekts go.
+- **Detection is up to 20 s late.** A newcomer that starts between two renewals runs until its first claim is refused.
+- **No end-to-end check.** It needs the relay change deployed and two computers.
