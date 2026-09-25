@@ -37,7 +37,7 @@ The warning text alone is not a security boundary — a prompt injection that ta
 **Goals**
 1. A user can end an agent from its own composer with `/quit`, gracefully, without hunting for the pane ×.
 2. An agent the user tells to quit ("finish the PR, then quit") can do so itself.
-3. Nothing but the human user can cause an agent to quit itself: not another agent, not a message, not a schedule.
+3. Nothing but the human user can cause an agent to quit itself: not another agent, not a message, not a schedule. **Revised 2026-09-25 (§0.1):** an agent shuts down *without the user being told first and able to stop it* only when the user asked. Every other shutdown, including one requested by another agent, goes through the 15 s override (§6.5).
 4. Quitting is graceful (turn interrupted cleanly, CLI gets EOF, state saved) and leaves nothing behind that keeps acting in the agent's name (§4.3).
 5. Every self-quit is visible and audited: who, why, and on whose instruction.
 
@@ -320,6 +320,8 @@ A human-confirm dialog ("Camper wants to quit — Allow?") would close the resid
 7. **Repeat requests** for a block already pending return the same pending state and deadline. They don't restart the clock.
 8. **Audit.** One entry per request: requester, via, reason, and outcome (`shut_down`, `kept_by_user`, or `superseded` when the user closed the pane themselves meanwhile).
 
+**Relation to today's behaviour.** The cross-agent paths in the table (`ClosePane block_id=`, `FleetBulkStop`) exist now and shut the target down immediately. §6.5 adds the override in front of them; it doesn't open any new way to shut an agent down. Callers stay authenticated: `verified_block_id` for `ClosePane`, the caller's token for the rest. Every request is audited with the verified caller as its source.
+
 **Nobody present.** If no window is open (background mode), the OS notification and tone still fire. If nobody overrides, the shutdown proceeds. The override protects a user who is there. It doesn't hold an agent open indefinitely for one who isn't.
 
 **The caller waits at least 15 s, and is told so.**
@@ -329,6 +331,8 @@ A human-confirm dialog ("Camper wants to quit — Allow?") would close the resid
 - `FleetBulkStop` runs all its targets' windows in parallel, one countdown each, and returns per-target outcomes.
 
 ## 7. Close the existing back door: `ClosePane` with no arguments
+
+> **Scope (2026-09-25).** This section covers the *no-argument* (self) form. The cross-agent forms, `ClosePane block_id=` and `FleetBulkStop`, already exist and today shut the target down **at once**. They are authenticated (`verified_block_id` or the caller's own token) and audited as fleet actions. §6.5 (Phase 2b) puts them behind the 15 s user override; that is stricter than today, not deferred to Phase 3. Refusing them outright is out of scope: agents are trusted to act on the fleet (§0.1-1), and the user keeps the final say through the override.
 
 Today `ClosePane` with no arguments is an unwarned, unaudited self-kill that also closes sibling tabs (§2.1). Once `QuitSelf` exists:
 
