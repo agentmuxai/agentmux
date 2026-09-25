@@ -1,8 +1,8 @@
 # SPEC: Pane Tab contract v1 — one general interface for every pane tab (and future user-loaded widgets), starting with the Help "ghost" fix
 
 **Date:** 2026-09-24
-**Status:** active — Phase 0 (§1.5, the Help ghost) implemented in the PR that
-commits this document; per-tab keep-alive (§5, decided) is next; Phases 1–6 not started.
+**Status:** active — Phase 0 (§1.5, the Help ghost) implemented in PR #3723;
+per-tab keep-alive (§5, decided) is next; Phases 1–6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
