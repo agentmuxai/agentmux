@@ -714,6 +714,89 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
     Ok(())
 }
 
+/// A file the provider changed in `dir` since it was last projected there,
+/// with the head it will be recorded on.
+struct PendingCapture {
+    name: String,
+    body: Vec<u8>,
+    head: String,
+}
+
+/// What [`capture_while_running`] would record now: files whose content
+/// differs from what was projected here, while the record hasn't moved on
+/// since (the head is still that projection). Files the record changed
+/// elsewhere meanwhile are left for the next spawn's reconcile, which
+/// raises the conflict; deletions too, with its missing-folder guards.
+fn pending_captures(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> Result<Vec<PendingCapture>, StoreError> {
+    let heads = record::heads(fs, uid)?;
+    let Some(projected) = heads.projected.get(dir_id) else { return Ok(Vec::new()) };
+    let Some(disk) = read_disk(dir)? else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for (name, on_disk) in disk {
+        let OnDisk::Body(body) = on_disk else { continue };
+        let sha = record::sha256_hex(&body);
+        let head = heads.files.get(&name);
+        if head.is_some_and(|h| h.sha256.as_deref() == Some(sha.as_str())) {
+            continue;
+        }
+        let projected_here = projected.get(&name);
+        match (head, projected_here) {
+            // The provider changed a file this folder holds the head of.
+            (Some(h), Some(p)) if &h.version == p => out.push(PendingCapture { name, body, head: h.version.clone() }),
+            // A new file the record has never had.
+            (None, None) => out.push(PendingCapture { name, body, head: String::new() }),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// Record what the provider wrote to `dir` while the agent runs — the drift
+/// detector's hook (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3).
+/// Capture only: nothing is written to the folder. Only a folder a spawn
+/// has already reconciled (it holds projections), whose claim `uid` still
+/// holds alone. Returns how many versions were recorded.
+pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path) -> Result<usize, StoreError> {
+    let dir_id = claims::dir_id(dir);
+    // Cheap and read-only first: most sweeps find nothing to record.
+    if pending_captures(fs, uid, dir, &dir_id)?.is_empty() {
+        return Ok(0);
+    }
+    if !claims::held_exclusively(fs, uid, dir)? {
+        return Ok(0);
+    }
+    let Some(lease) = take_pass_lease(fs, uid, Instant::now() + RECONCILE_BUDGET)? else {
+        // A spawn's reconcile is running; it records this itself.
+        return Ok(0);
+    };
+    let result = (|| {
+        let mut recorded = 0;
+        // Decided again under the lease, against a fresh read.
+        for p in pending_captures(fs, uid, dir, &dir_id)? {
+            let outcome = record::append_version(
+                fs,
+                uid,
+                NewVersion {
+                    file: &p.name,
+                    body: Some(&p.body),
+                    expected_parent: (!p.head.is_empty()).then_some(p.head.as_str()),
+                    merged_parent: None,
+                    conflicts_with: None,
+                    source: "provider",
+                    source_detail: "while running",
+                    project_to: Some(&dir_id),
+                },
+            )?;
+            if matches!(outcome, AppendOutcome::Appended(_)) {
+                recorded += 1;
+            }
+        }
+        Ok(recorded)
+    })();
+    release_pass_lease(fs, uid, &lease);
+    result
+}
+
 /// `<stem>__conflict_<short>.md`, the stem cut so the whole name stays
 /// within `validate_filename`'s 200-character stem.
 pub(crate) fn conflict_file_name(name: &str, version: &str) -> String {
