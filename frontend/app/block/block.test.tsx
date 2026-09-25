@@ -100,6 +100,29 @@ class TestMemoViewModel {
         onCleanup(() => memoVmDisposals.push(blockId));
     }
 }
+// The one visibility signal (Phase 3), per block, driven by the tests.
+const visibilitySignals = new Map<string, ReturnType<typeof createSignal<"active" | "dormant" | "windowHidden">>>();
+function visibilityOf(id: string) {
+    if (!visibilitySignals.has(id)) visibilitySignals.set(id, createSignal<"active" | "dormant" | "windowHidden">("active"));
+    return visibilitySignals.get(id)!;
+}
+vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: (id: string) => visibilityOf(id)[0] }));
+
+// Records a native tab's lifecycle hooks (Phase 3b).
+const lifecycle: string[] = [];
+registerPaneTab({
+    apiVersion: 1,
+    view: "lifecycle",
+    label: "Lifecycle",
+    icon: "l",
+    create: (ctx) => ({
+        component: () => null as any,
+        onActivate: () => lifecycle.push(`activate ${ctx.blockId}`),
+        onDeactivate: () => lifecycle.push(`deactivate ${ctx.blockId}`),
+        focus: () => (lifecycle.push(`focus ${ctx.blockId}`), true),
+    }),
+});
+
 // A native pane tab (Pane Tab contract Phase 2b): `create(ctx)`, no class.
 // Real registry, not mocked — block.tsx looks the manifest up there.
 const nativeCreates: { blockId: string; disposed: boolean }[] = [];
@@ -185,6 +208,8 @@ afterEach(() => {
     memoVmDisposals.length = 0;
     previewViewModels.clear();
     nativeCreates.length = 0;
+    lifecycle.length = 0;
+    visibilitySignals.clear();
     setBackfillSettled(true);
 });
 
@@ -304,6 +329,46 @@ describe("Block — a preview never builds a live ViewModel", () => {
         render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={false} />);
         render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={true} />);
         expect(previewViewModels.get("p3").viewName()).toBe("live name of p3");
+    });
+});
+
+/**
+ * Pane Tab contract Phase 3b: the host fires onActivate/onDeactivate from the
+ * one visibility signal — on BOTH paths (a remount tab activates by mounting,
+ * a kept-alive one by leaving dormancy) — and a tab that becomes active in a
+ * focused pane gets focus, whatever tab type the pane started with.
+ */
+describe("Block — the host fires a tab's activation hooks", () => {
+    it("activates on mount, deactivates when it goes dormant, activates again when it comes back", async () => {
+        setBlockView("l1", "lifecycle");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "l1" })} preview={false} />);
+        expect(lifecycle).toEqual(["activate l1"]);
+
+        visibilityOf("l1")[1]("dormant");
+        visibilityOf("l1")[1]("windowHidden");
+        visibilityOf("l1")[1]("active");
+        expect(lifecycle).toEqual(["activate l1", "deactivate l1", "activate l1"]);
+    });
+
+    it("gives the newly active tab focus only when its pane is focused", async () => {
+        setBlockView("l2", "lifecycle");
+        const [paneFocused, setPaneFocused] = createSignal(false);
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "l2", isFocused: paneFocused })} preview={false} />);
+        visibilityOf("l2")[1]("dormant");
+        setPaneFocused(true);
+        visibilityOf("l2")[1]("active");
+        expect(lifecycle).toEqual(["activate l2", "deactivate l2", "activate l2", "focus l2"]);
+    });
+
+    it("deactivates an active tab when it unmounts, and never fires for a preview", async () => {
+        setBlockView("l3", "lifecycle");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "l3" })} preview={true} />);
+        const real = render(() => <Block nodeModel={makeNodeModel({ blockId: "l3" })} preview={false} />);
+        real.unmount();
+        expect(lifecycle).toEqual(["activate l3", "deactivate l3"]);
     });
 });
 

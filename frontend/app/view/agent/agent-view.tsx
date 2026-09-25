@@ -19,7 +19,6 @@ import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
-import { isBlockDormant } from "@/app/store/block-component-registry";
 import { AgentDormancyProvider } from "./agent-dormancy";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
@@ -526,15 +525,13 @@ const AgentPresentationView = ({
     progressBarMount: () => HTMLDivElement | undefined;
 }): JSX.Element => {
     const block = model.blockAtom;
-    // True while this tab is a hidden, kept-alive pane-tab-strip member
-    // (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) rather than the one the
-    // user is looking at — threaded into AgentQuestionPanel's auto-timeout
-    // and useAgentFailure's auto-retry below so neither fires invisibly
-    // while backgrounded.
-    const dormant = isBlockDormant(model.blockId);
-    // Not visible to the user: a dormant pane-stack member, or its window tab
-    // isn't displayed (`usePaneTabVisibility`, Pane Tab contract Phase 3).
-    // Render work pauses on this; the timers above stay on `dormant`.
+    // True while the user can't see this tab: a hidden, kept-alive
+    // pane-tab-strip member (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md), or
+    // its window tab isn't displayed (`usePaneTabVisibility`, Pane Tab
+    // contract Phase 3). Render work pauses on it, and it's threaded into
+    // AgentQuestionPanel's auto-timeout and useAgentFailure's auto-retry below
+    // so neither fires invisibly while backgrounded — which, before Phase 3b,
+    // covered only the pane-stack case.
     const visibility = usePaneTabVisibility(model.blockId);
     const hidden = (): boolean => visibility() !== "active";
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
@@ -2120,7 +2117,7 @@ const AgentPresentationView = ({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
-        isDormant: dormant,
+        isDormant: hidden,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         // live_elsewhere — take the agent over from the other AgentMux
@@ -2375,9 +2372,9 @@ const AgentPresentationView = ({
         // tuned, and should not grow another prop it would only forward.
         // See `agent-dormancy.tsx` for why rendering (not data) is what gets
         // gated.
-        // A hidden window tab kept laid out (`window:keepinactivetabslaidout`)
-        // pauses rendering the same way; only rendering, so this doesn't
-        // touch the question auto-timeout or auto-retry `dormant` also drives.
+        // `hidden` covers a dormant pane-stack member and a hidden window tab
+        // alike; this provider gates only rendering (the timers read `hidden`
+        // directly).
         <AgentDormancyProvider dormant={hidden}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
@@ -2688,7 +2685,7 @@ const AgentPresentationView = ({
                 pending={pendingQuestions}
                 onAnswer={handleAnswer}
                 onCancel={handleCancel}
-                isDormant={dormant}
+                isDormant={hidden}
             />
 
             {/* Queue sits directly below the feed so the user's newly-

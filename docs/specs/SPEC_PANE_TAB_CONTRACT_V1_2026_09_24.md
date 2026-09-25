@@ -5,8 +5,8 @@
 per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
 PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
 split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
-Help as pilot) in #3759; Phase 3a (one visibility signal) in the PR after it;
-Phases 2c, 3b–6 not started.
+Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
+activation, focus hand-off) in the PR after it; Phases 2c, 4–6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -393,10 +393,18 @@ working throughout through a legacy adapter.
      default) this is the same behavior; with them not laid out, a
      window-hidden agent pane now also pauses rendering, which
      `content-visibility` already skipped. Keep-alive is per tab since #3725.
-   - **3b:** the host fires `onActivate`/`onDeactivate` on both paths (term's
-     focus hand-off on a tab switch becomes the generic behavior), and the
-     agent's auto-timeout/auto-retry timers decide whether a window-hidden
-     tab should pause them too (today they pause on pane dormancy only).
+   - **3b (implemented):** `Block` (block.tsx, real mounts only) fires a
+     tab's `onActivate`/`onDeactivate` from the visibility signal on both
+     paths — a remount tab activates by mounting, a kept-alive one by leaving
+     dormancy or a hidden window tab; unmounting while visible deactivates —
+     and a tab that becomes visible in a focused pane gets `giveFocus()`.
+     That hand-off used to be the terminal's pane-chrome `onActivate`, so a
+     pane only had it if its FIRST tab was a terminal (§2.4 #2), and then for
+     every tab; it's gone, and every pane has it. `ViewModel` and
+     `PaneTabInstance` gain `onActivate`/`onDeactivate`. The agent's question
+     auto-timeout and failure auto-retry now pause whenever the tab isn't
+     visible (their stated intent: never fire invisibly), not only while it's
+     a dormant pane-stack member.
 4. **Per-active-tab chrome:** `PaneChromeModel` becomes `instance.chrome`,
    read for the active tab.
 5. **Capabilities** replace the view-name checks (§2.4 #5). On the backend,

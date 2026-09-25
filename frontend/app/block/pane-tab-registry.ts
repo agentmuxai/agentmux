@@ -52,6 +52,11 @@ export interface PaneTabInstance {
     contextMenu?(ctx?: unknown): ContextMenuItem[];
     focus?(): boolean;
     onKeyDown?(e: MuxKeyboardEvent): boolean;
+    /** Fired by the host on BOTH paths when the tab becomes visible, and when
+     *  it stops being visible (Phase 3b). A tab that becomes visible in a
+     *  focused pane also gets `focus()`. */
+    onActivate?(): void;
+    onDeactivate?(): void;
     /** Runs when the host disposes the instance; its reactive root (host rule
      *  8) is disposed right after. */
     dispose?(): void;
