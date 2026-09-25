@@ -18,7 +18,7 @@
  * §4.1/§4.5.
  */
 
-import { createMemo, createSignal, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import {
     computeBlockActiveBorderColor,
     computeBlockColorBg,
@@ -310,6 +310,23 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
 
+    // The busy-indicator slot is the chrome's own, on every pane, not a
+    // `model` capability: `model` belongs to whichever view was active when
+    // this pane first hoisted (pane-leaf-chrome.tsx latches it), so an agent
+    // added as a tab to a pane that started as Swarm or a terminal got no
+    // slot and its busy ring never rendered
+    // (RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md).
+    // The handoff follows the ACTIVE view model instead, re-pointing on
+    // every switch; a view model without `setProgressBarMount` just leaves
+    // the slot empty.
+    const [progressSlotEl, setProgressSlotEl] = createSignal<HTMLDivElement | null>(null);
+    createEffect(() => {
+        const vm = nodeModel.activeViewModel?.() ?? null;
+        const el = progressSlotEl();
+        vm?.setProgressBarMount?.(el);
+        onCleanup(() => vm?.setProgressBarMount?.(null));
+    });
+
     const renderHeader = (viewModel: ViewModel | null): JSX.Element => (
         <PaneHeaderTabStrip
             tabs={tabIds()}
@@ -367,6 +384,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                 {renderHeader(activeViewModelOrUndefined() ?? null)}
             </ErrorBoundary>
             {model?.renderBelowHeader?.()}
+            <div class="pane-progress-bar-slot" ref={setProgressSlotEl} />
             {model?.wrapContent ? model.wrapContent(contentRegion) : contentRegion}
         </div>
     );

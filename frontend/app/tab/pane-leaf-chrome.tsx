@@ -97,8 +97,24 @@ const HOISTS_OWN_CHROME = new Set([
  * keep-alive they'd otherwise keep running invisibly. Both are now
  * explicitly gated on `isBlockDormant` instead of relying on that
  * incidental pause — see each one's own doc comment.
+ *
+ * `"browser"` and `"editor"` added per the repo owner's decision in
+ * SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5: remounting a browser reloads
+ * its page on every switch (scroll, form input and in-page state lost, title
+ * and favicon re-loading), and remounting an editor loses cursor, scroll and
+ * undo. A kept-alive browser's native page is collapsed while its tab is
+ * dormant (`isBlockDormant` in use-pane-rect-sync.ts), so it can't show over
+ * the active tab.
+ *
+ * This is PER TAB: only members whose OWN view type is in this set stay
+ * mounted while inactive. Every other member (help, sysinfo, swarm, …) is
+ * unmounted when it isn't the active tab, even in a pane that keeps other
+ * tabs alive — see `mountedBlockIds` below. (It used to be per pane: one
+ * agent or terminal tab kept every tab of its pane mounted, which is what let
+ * Help's content ghost over the next tab.) This set is the stand-in for the
+ * contract's per-view `capabilities.lifecycle`.
  */
-const KEEP_ALIVE_TYPES = new Set(["term", "agent"]);
+const KEEP_ALIVE_TYPES = new Set(["term", "agent", "browser", "editor"]);
 
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;
@@ -316,6 +332,20 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         return stack;
     });
 
+    // Which members are actually mounted in the keep-alive branch: the active
+    // one, plus any member whose OWN view type keeps its state
+    // (KEEP_ALIVE_TYPES). A remount-type member (help, sysinfo, …) mounts only
+    // while it's the active tab and unmounts as soon as another tab is picked,
+    // exactly as it would in a pane with no keep-alive tabs at all. A member
+    // whose block data hasn't loaded yet counts as remount until it has.
+    // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
+    const viewTypeOf = (id: string) =>
+        resolveEffectiveViewType(MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta?.view ?? "");
+    const mountedBlockIds = createMemo<string[]>(() => {
+        const active = activeBlockId();
+        return stackBlockIds().filter((id) => id === active || KEEP_ALIVE_TYPES.has(viewTypeOf(id)));
+    });
+
     // The NodeModel chrome itself renders with — plain passthrough when not
     // keeping tabs alive (unchanged), otherwise `activeViewModel` is
     // overridden to the per-id lookup above so a switch re-points the read
@@ -361,7 +391,8 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                 </Key>
             }
         >
-            {/* Every stack member mounted simultaneously, absolutely
+            {/* Every KEPT-ALIVE member (plus the active one, whatever its
+                type — see `mountedBlockIds`) mounted simultaneously, absolutely
                 positioned over one another inside the (already
                 `position: relative`) content slot each keep-alive pane
                 type reserves (e.g. term.scss's `.term-pane-stack-content`)
@@ -371,7 +402,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                 `display: none` would), so its own ResizeObserver-driven
                 fit logic (e.g. TermWrap's) stays correct in the background
                 and there is nothing to re-fit when it's revealed again. */}
-            <For each={stackBlockIds()}>
+            <For each={mountedBlockIds()}>
                 {(id) => {
                     // Codex P1/P2 + ReAgent P1 on PR #3187: every "all
                     // panes" consumer of the block-component registry
@@ -402,6 +433,17 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                                 // would show through a hidden window tab kept laid out
                                 // with `visibility: hidden` (workspace.tsx).
                                 visibility: id === activeBlockId() ? "inherit" : "hidden",
+                                // Opacity as well as visibility: a descendant can keep
+                                // painting through `visibility: hidden` (a CSS transition
+                                // on `visibility` holds it `visible` for its duration, and
+                                // an explicit `visibility: visible` escapes it outright),
+                                // which showed the Help tab's content as a ~300ms "ghost"
+                                // over the newly selected tab. Nothing escapes a
+                                // container's opacity, and it keeps the slot's real size
+                                // (unlike display:none / content-visibility:hidden, which
+                                // the keep-alive guarantee above rules out).
+                                // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §1.
+                                opacity: id === activeBlockId() ? "1" : "0",
                                 "pointer-events": id === activeBlockId() ? "auto" : "none",
                             }}
                         >
