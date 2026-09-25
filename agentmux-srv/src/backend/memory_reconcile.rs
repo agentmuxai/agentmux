@@ -714,6 +714,10 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
     Ok(())
 }
 
+/// How long a memory file must go unchanged before a capture while the
+/// agent runs takes it.
+pub(crate) const CAPTURE_SETTLE: Duration = Duration::from_secs(2);
+
 /// A file the provider changed in `dir` since it was last projected there,
 /// with the head it will be recorded on.
 struct PendingCapture {
@@ -727,13 +731,20 @@ struct PendingCapture {
 /// since (the head is still that projection). Files the record changed
 /// elsewhere meanwhile are left for the next spawn's reconcile, which
 /// raises the conflict; deletions too, with its missing-folder guards.
-fn pending_captures(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> Result<Vec<PendingCapture>, StoreError> {
+fn pending_captures(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str, settle: Duration) -> Result<Vec<PendingCapture>, StoreError> {
     let heads = record::heads(fs, uid)?;
     let Some(projected) = heads.projected.get(dir_id) else { return Ok(Vec::new()) };
     let Some(disk) = read_disk(dir)? else { return Ok(Vec::new()) };
     let mut out = Vec::new();
     for (name, on_disk) in disk {
         let OnDisk::Body(body) = on_disk else { continue };
+        // Still being written (the watcher fires as the write starts): a
+        // torn body would become the head, and the next spawn elsewhere
+        // would project it. The next event or sweep takes it once settled.
+        let modified = std::fs::metadata(dir.join(&name)).and_then(|m| m.modified());
+        if modified.map_or(true, |t| t.elapsed().map_or(true, |age| age < settle)) {
+            continue;
+        }
         let sha = record::sha256_hex(&body);
         let head = heads.files.get(&name);
         if head.is_some_and(|h| h.sha256.as_deref() == Some(sha.as_str())) {
@@ -755,11 +766,12 @@ fn pending_captures(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> Resu
 /// detector's hook (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3).
 /// Capture only: nothing is written to the folder. Only a folder a spawn
 /// has already reconciled (it holds projections), whose claim `uid` still
-/// holds alone. Returns how many versions were recorded.
-pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path) -> Result<usize, StoreError> {
+/// holds alone, and only files unchanged for `settle` ([`CAPTURE_SETTLE`]).
+/// Returns how many versions were recorded.
+pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path, settle: Duration) -> Result<usize, StoreError> {
     let dir_id = claims::dir_id(dir);
     // Cheap and read-only first: most sweeps find nothing to record.
-    if pending_captures(fs, uid, dir, &dir_id)?.is_empty() {
+    if pending_captures(fs, uid, dir, &dir_id, settle)?.is_empty() {
         return Ok(0);
     }
     if !claims::held_exclusively(fs, uid, dir)? {
@@ -772,7 +784,7 @@ pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path) -> Re
     let result = (|| {
         let mut recorded = 0;
         // Decided again under the lease, against a fresh read.
-        for p in pending_captures(fs, uid, dir, &dir_id)? {
+        for p in pending_captures(fs, uid, dir, &dir_id, settle)? {
             let outcome = record::append_version(
                 fs,
                 uid,
