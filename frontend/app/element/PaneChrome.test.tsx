@@ -656,7 +656,7 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
 
         const root = container.querySelector(".pane-stack")!;
         const kids = Array.from(root.children).map((el) => el.getAttribute("data-testid") ?? el.className);
-        expect(kids).toEqual(["pane-header-tab-strip", "below-header", "pane-stack-content"]);
+        expect(kids).toEqual(["pane-header-tab-strip", "below-header", "pane-progress-bar-slot", "pane-stack-content"]);
     });
 
     it("wrapContent wraps the content region, for a surface spanning more than the content box", () => {
@@ -846,5 +846,60 @@ describe("renderPaneChromeShell — resolves the OWNING tab's LayoutModel, never
         capturedOnSelect!({ meta: { view: "agent" } });
 
         expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "agent" } }, undefined);
+    });
+});
+
+// RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md:
+// the chrome's `model` is latched from whichever view was active when the
+// pane first hoisted, so the busy-indicator slot must not depend on it. An
+// agent tab added to a pane that started as Swarm used to get no slot, and
+// its busy ring never rendered.
+describe("renderPaneChromeShell — progress-bar slot follows the ACTIVE view model", () => {
+    function renderSwitchable(initialVm: any) {
+        mockLayoutModel = fakeLayoutModel(["swarm-1", "agent-1"]);
+        const [activeVm, setActiveVm] = createSignal<any>(initialVm);
+        const nodeModel = fakeNodeModel({ activeViewModel: activeVm });
+        const res = render(() => renderPaneChromeShell(nodeModel, <div>content</div>) as any);
+        const slot = res.container.querySelector(".pane-progress-bar-slot");
+        return { ...res, slot, setActiveVm };
+    }
+
+    it("renders the slot even when the latched view model has no PaneChromeModel", () => {
+        const swarmVm = {}; // Swarm: no paneChromeModel, no setProgressBarMount
+        const { slot } = renderSwitchable(swarmVm);
+
+        expect(slot).toBeTruthy();
+    });
+
+    it("hands the slot to an agent tab activated in a Swarm-first pane", () => {
+        const swarmVm = {};
+        const agentVm = { setProgressBarMount: vi.fn() };
+        const { slot, setActiveVm } = renderSwitchable(swarmVm);
+
+        setActiveVm(agentVm);
+
+        expect(agentVm.setProgressBarMount).toHaveBeenLastCalledWith(slot);
+    });
+
+    it("takes the slot back when the agent tab stops being active", () => {
+        const swarmVm = {};
+        const agentVm = { setProgressBarMount: vi.fn() };
+        const { setActiveVm } = renderSwitchable(agentVm);
+
+        setActiveVm(swarmVm);
+
+        expect(agentVm.setProgressBarMount).toHaveBeenLastCalledWith(null);
+    });
+
+    it("moves the slot between two agent tabs on a switch", () => {
+        const first = { setProgressBarMount: vi.fn() };
+        const second = { setProgressBarMount: vi.fn() };
+        const { slot, setActiveVm } = renderSwitchable(first);
+        expect(first.setProgressBarMount).toHaveBeenLastCalledWith(slot);
+
+        setActiveVm(second);
+
+        expect(first.setProgressBarMount).toHaveBeenLastCalledWith(null);
+        expect(second.setProgressBarMount).toHaveBeenLastCalledWith(slot);
     });
 });

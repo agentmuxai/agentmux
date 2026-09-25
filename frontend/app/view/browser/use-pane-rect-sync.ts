@@ -7,6 +7,7 @@ import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { TAB_VISIBILITY_CHANGED_EVENT } from "@/app/workspace/window-tab-visibility";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
+import { isBlockDormant } from "@/app/store/block-component-registry";
 import type { BrowserViewModel } from "./browser-model";
 
 export interface PaneRect {
@@ -122,9 +123,16 @@ export function usePaneRectSync(params: {
         // and composited — invisible to any DOM-level fix (content-visibility,
         // pointer-events), since native panes composite ABOVE the DOM
         // entirely, independent of it. codex P1 on PR #3239.
-        const rect = isInsideHiddenTabContent(placeholderRef()!)
-            ? { x: 0, y: 0, width: 0, height: 0 }
-            : paneRect();
+        //
+        // Same for a browser that is a kept-alive but INACTIVE pane tab
+        // (pane-leaf-chrome keeps every tab of a keep-alive pane mounted and
+        // only hides the inactive ones with `visibility`, which changes
+        // neither this rect nor any window-tab marker). Without this its
+        // native page stayed drawn over whichever tab was active in the pane.
+        const rect =
+            isInsideHiddenTabContent(placeholderRef()!) || isBlockDormant(model.blockId)()
+                ? { x: 0, y: 0, width: 0, height: 0 }
+                : paneRect();
         if (
             lastSentRect &&
             lastSentRect.x === rect.x &&
@@ -166,6 +174,13 @@ export function usePaneRectSync(params: {
         }
     });
 
+    // Set on unmount. `browser_pane_create` is async: if the view unmounts
+    // (its tab switched away) while the create is still in flight, the
+    // unmount's close is skipped (`paneCreated()` is still false), and the
+    // native page would be created afterwards and never closed, left drawn
+    // over whatever tab is active.
+    let disposed = false;
+
     const createPane = async (url: string) => {
         if (!placeholderRef()) return;
         try {
@@ -176,6 +191,11 @@ export function usePaneRectSync(params: {
                 window_label: windowLabel,
                 ...paneRect(),
             });
+            if (disposed) {
+                diag(`createPane finished after unmount — closing the orphan`);
+                invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+                return;
+            }
             setPaneCreated(true);
             diag(`paneCreated=true`);
             // The HWND is now live — open a fresh settle window in case the
@@ -221,7 +241,16 @@ export function usePaneRectSync(params: {
         if (url) createPane(url);
     });
 
+    // Re-sync when this tab goes dormant or wakes up (see syncPosition): the
+    // placeholder's geometry doesn't change, so the ResizeObserver can't see
+    // it, and waiting for the 200ms interval would show a stale frame.
+    createEffect(() => {
+        isBlockDormant(model.blockId)();
+        if (placeholderRef()) syncPosition();
+    });
+
     onCleanup(() => {
+        disposed = true;
         diag(`view-unmount paneCreated=${paneCreated()}`);
         // Drop from the overlay-clip short-circuit registry FIRST so a late
         // sendClip() doesn't see a stale rect for the closed pane.

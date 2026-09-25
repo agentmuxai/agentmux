@@ -474,22 +474,9 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
         if (!node) return;
         void closeBlockInStack(layoutModel, node.id, targetBlockId);
     };
-    // Progress-bar mount handoff — bridges chrome's own DOM slot to
-    // whichever AgentViewModel is CURRENTLY active (nodeModel.activeViewModel(),
-    // see that field's own doc comment in types.ts for why this can't read
-    // the global block-component registry). onCleanup inside the effect
-    // clears the OLD vm's mount target before the NEW one is set, whenever
-    // the active vm changes — the same idiom NodeModel's own
-    // activeViewModel/setActiveViewModel wiring in block.tsx uses.
-    const [slotEl, setSlotEl] = createSignal<HTMLDivElement | null>(null);
-    createEffect(() => {
-        const vm = nodeModel.activeViewModel?.() as AgentViewModel | null;
-        const el = slotEl();
-        vm?.setProgressBarMount?.(el);
-        onCleanup(() => {
-            vm?.setProgressBarMount?.(null);
-        });
-    });
+    // No progress-bar slot here: the shared chrome renders it on every pane
+    // and hands it to whichever view model is active (PaneChrome.tsx), so an
+    // agent tab in a pane that started as another view type gets it too.
     return {
         extraTabs,
         // Both return true ("handled"): an agent tab may live in a
@@ -507,12 +494,6 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
         },
         rootClass: "agent-pane-stack",
         contentClass: "agent-pane-stack-content",
-        // The marching-ants turn-progress bar. Empty div; its only content
-        // is whatever the active AgentPresentationView portals into it via
-        // progressBarMount. Floats over the content without reserving
-        // layout space (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md,
-        // positioned in agent-view.scss).
-        renderBelowHeader: () => <div class="agent-pane-progress-bar-slot" ref={(el) => setSlotEl(el)} />,
     };
 }
 
