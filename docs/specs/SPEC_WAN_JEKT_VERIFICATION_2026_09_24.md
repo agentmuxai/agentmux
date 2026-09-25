@@ -5,7 +5,7 @@
 revocation, envelope and freshness checks; §2.7) shipped in PR #3727; C1
 shipped in agentmux-cloud#91 (merged, not yet deployed); D1a (`wan.db`,
 instance key, agent keys, purge) shipped in PR #3734; D1b (certify, publish,
-carry gate) is in PR #3771; D2 (verifier, marker, tier rules, audit, `wan`
+carry gate) shipped in PR #3771; D2 (verifier, marker, tier rules, audit, `wan`
 grants off; `muxbus/wan_verify.rs`) ships in the PR that changes this line —
 see §2.8 for what it does not include. Remaining: the host-gated approval
 window (held for GHSA-6726-q276-g6f6), instance retirement, the agent
