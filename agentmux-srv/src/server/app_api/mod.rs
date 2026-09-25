@@ -1128,14 +1128,19 @@ impl<'a> SelfOwner<'a> {
     /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
     fn dir_for_write(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
         let id = self.owner_id(mstore).map_err(|e| format!("memory: {e}"))?;
-        let agent = mstore
-            .agent_def_get(&id)
-            .map_err(|e| format!("memory: store: {e}"))?
-            .ok_or_else(|| {
-                format!("memory: agent {} has no local row, so its memory directory can't be verified for a write", self.label())
-            })?;
-        crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, &agent)
-            .map_err(|e| format!("memory: {e}"))
+        match mstore.agent_def_get(&id).map_err(|e| format!("memory: store: {e}"))? {
+            Some(agent) => crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, &agent)
+                .map_err(|e| format!("memory: {e}")),
+            // No local row (a slug caller naming a registry-only agent): its
+            // own spawn record still proves its directory.
+            None => crate::server::native_memory_handlers::memory_dir_from_spawn(&id).ok_or_else(|| {
+                format!(
+                    "memory: agent {} has no local row and no spawn on record, so its memory directory \
+                     can't be verified for a write",
+                    self.label()
+                )
+            }),
+        }
     }
 
     /// The owner's definition id (`db_agents.id`) — what its memory versions,
@@ -1794,6 +1799,47 @@ mod global_memory_impl_tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    /// A slug caller naming an agent that exists only in the registry (no
+    /// local row) is refused unless the agent's own spawn record proves its
+    /// directory — the registry's `identity_id` is never used to find it
+    /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
+    #[tokio::test]
+    async fn memory_write_for_a_registry_only_agent_without_a_spawn_is_refused() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+        let registry = crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 1,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-reg-only".to_string(),
+                    instance_name: "RegOnly".to_string(),
+                    definition_id: "def-reg-only-no-spawn".to_string(),
+                    identity_id: Some("stale-account".to_string()),
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "reg-only".to_string(),
+                    source_agents_base: Some(tmp.path().join("agents").to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let state = crate::server::tests::test_state();
+        let err = memory_write_impl(&state, "regonly", "MEMORY.md", "x", None).unwrap_err();
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        assert!(err.contains("no local row and no spawn on record"), "{err}");
+        assert!(!tmp.path().join("identities").join("stale-account").exists(), "nothing written under the stale account");
     }
 
     #[tokio::test]
