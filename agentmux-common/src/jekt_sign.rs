@@ -535,6 +535,360 @@ pub fn verify_wan_jekt(
     verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
+// ── W3-S: same-account WAN verification (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) ──
+//
+// The pure half of W3-S: identifiers, the instance-signed agent-key
+// certificate, the revocation record, and the checks a receiver runs on the
+// fields the cloud relay carried. Storage, publishing, directory lookup and
+// replay tracking live in agentmux-srv; the cloud re-implements the chain
+// check in TypeScript (`muxbus/server/src/wan-keys.ts`) and must match the
+// byte formats here exactly — the fixed vectors in the tests below are the
+// contract between the two.
+
+/// Domain separator for an instance's certificate over one agent key (§2.2).
+const WAN_CERT_DOMAIN: &str = "amx-wan-agent-cert-v1";
+
+/// Domain separator for an instance revocation record (§2.2).
+const WAN_REVOKE_DOMAIN: &str = "amx-wan-instance-revoke-v1";
+
+/// How old a carried `wan_ts_secs` may be: the relay's own 1800 s delivery
+/// TTL plus 300 s of slack (§2.4). A shorter window would reject messages
+/// the relay is still legitimately holding.
+pub const WAN_SIG_MAX_AGE_SECS: i64 = 1800 + 300;
+
+/// How far in the future a carried `wan_ts_secs` may be — desktop clock skew
+/// between sender and receiver (§2.4).
+pub const WAN_SIG_MAX_FUTURE_SKEW_SECS: i64 = 300;
+
+/// Length of an instance id: 128 bits as unpadded base32.
+pub const WAN_INSTANCE_ID_LEN: usize = 26;
+
+/// Length of a key fingerprint: 256 bits as unpadded base64url.
+pub const WAN_KEY_FP_LEN: usize = 43;
+
+const BASE32_ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+
+/// RFC 4648 base32, lowercase, no padding.
+fn base32_lower_nopad(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity((bytes.len() * 8).div_ceil(5));
+    let mut buffer: u32 = 0;
+    let mut bits = 0;
+    for &byte in bytes {
+        buffer = (buffer << 8) | u32::from(byte);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(BASE32_ALPHABET[((buffer >> bits) & 0x1f) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        out.push(BASE32_ALPHABET[((buffer << (5 - bits)) & 0x1f) as usize] as char);
+    }
+    out
+}
+
+/// An instance's id: the first 128 bits of `SHA-256(instance public key)`,
+/// lowercase unpadded base32 — 26 chars of `[a-z2-7]` (§2.2).
+///
+/// Not secret. It names the key, so anything signed by the instance key can
+/// be checked against the id without trusting whoever supplied the key.
+pub fn wan_instance_id(instance_public_key: &[u8; 32]) -> String {
+    use sha2::Digest;
+    let digest = Sha256::digest(instance_public_key);
+    base32_lower_nopad(&digest[..16])
+}
+
+/// An agent key's fingerprint: `SHA-256(agent public key)`, unpadded
+/// base64url — 43 chars. Carried as `wan_key_fp`, an unsigned lookup hint
+/// (§2.1): a wrong value finds a key the signature won't verify under.
+pub fn wan_key_fingerprint(agent_public_key: &[u8; 32]) -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use sha2::Digest;
+    URL_SAFE_NO_PAD.encode(Sha256::digest(agent_public_key))
+}
+
+/// Whether `host_hint` is safe to render: `[a-z0-9.-]{1,48}` (§2.6). The
+/// hint is sender-chosen; anything else renders as `?`.
+pub fn is_valid_wan_host_hint(host_hint: &str) -> bool {
+    (1..=48).contains(&host_hint.len())
+        && host_hint.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+}
+
+/// The label a human sees for a verified instance: `<host_hint>~<id8>`
+/// (§2.6). The suffix comes from the id the chain proved, never from the
+/// sender's own label, so two instances claiming the same hostname still
+/// render differently.
+pub fn wan_instance_display_label(host_hint: &str, verified_instance_id: &str) -> String {
+    let hint = if is_valid_wan_host_hint(host_hint) { host_hint } else { "?" };
+    let id8: String = verified_instance_id.chars().take(8).collect();
+    format!("{hint}~{id8}")
+}
+
+/// Whether a carried `wan_ts_secs` is inside the freshness window (§2.4).
+/// Both bounds inclusive. Outside it the verdict is `None` (stale), not
+/// `Some(false)`: a stale signature grants nothing that dropping it wouldn't.
+pub fn wan_sig_is_fresh(wan_ts_secs: i64, now_secs: i64) -> bool {
+    now_secs.saturating_sub(wan_ts_secs) <= WAN_SIG_MAX_AGE_SECS
+        && wan_ts_secs.saturating_sub(now_secs) <= WAN_SIG_MAX_FUTURE_SKEW_SECS
+}
+
+/// ASCII case-insensitive equality after trimming — the one comparison every
+/// W3-S identifier check uses (§2.1). Agent ids are ASCII-only, and the cloud
+/// lowercases most of them but stores `github*` sources raw.
+fn wan_id_eq(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+}
+
+fn wan_cert_material(
+    instance_id: &str,
+    agent_id: &str,
+    channel: &str,
+    agent_public_key_b64: &str,
+    host_hint: &str,
+    issued_at: i64,
+) -> String {
+    let agent_id = agent_id.to_ascii_lowercase();
+    format!(
+        "{WAN_CERT_DOMAIN}{FIELD_SEP}{instance_id}{FIELD_SEP}{agent_id}{FIELD_SEP}\
+         {channel}{FIELD_SEP}{agent_public_key_b64}{FIELD_SEP}{host_hint}{FIELD_SEP}{issued_at}"
+    )
+}
+
+fn wan_revoke_material(old_instance_id: &str, new_instance_id: &str, revoked_at: i64) -> String {
+    format!("{WAN_REVOKE_DOMAIN}{FIELD_SEP}{old_instance_id}{FIELD_SEP}{new_instance_id}{FIELD_SEP}{revoked_at}")
+}
+
+fn ed25519_sign_b64(private_key: &[u8], material: &str) -> Option<String> {
+    let seed: [u8; 32] = private_key.try_into().ok()?;
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let signature = ed25519_dalek::Signer::sign(&signing_key, material.as_bytes());
+    Some(BASE64.encode(signature.to_bytes()))
+}
+
+fn ed25519_verify_b64(public_key: &[u8; 32], material: &str, sig_b64: &str) -> bool {
+    let Ok(verifying_key) = VerifyingKey::from_bytes(public_key) else { return false };
+    let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
+    let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
+    verifying_key.verify(material.as_bytes(), &Signature::from_bytes(&sig_arr)).is_ok()
+}
+
+fn decode_public_key_b64(b64: &str) -> Option<[u8; 32]> {
+    BASE64.decode(b64).ok()?.try_into().ok()
+}
+
+/// One entry in the per-account key directory (§2.2): an agent key,
+/// certified by the instance that minted it. Public keys are standard
+/// base64 of the raw 32 bytes; `cert_sig` is standard base64 Ed25519.
+///
+/// Every field is untrusted until [`WanKeyRecord::check_chain`] passes —
+/// the record arrives from the cloud, which may be tampering.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WanKeyRecord {
+    pub instance_id: String,
+    pub agent_id: String,
+    pub channel: String,
+    pub key_fp: String,
+    pub instance_pubkey: String,
+    pub agent_pubkey: String,
+    pub host_hint: String,
+    pub issued_at: i64,
+    pub cert_sig: String,
+}
+
+impl WanKeyRecord {
+    /// Certify `agent_public_key` with the instance key. Called by the srv
+    /// that owns the instance; returns `None` for a malformed instance
+    /// private key, never panics.
+    pub fn certify(
+        instance_private_key: &[u8],
+        agent_id: &str,
+        channel: &str,
+        agent_public_key: &[u8; 32],
+        host_hint: &str,
+        issued_at: i64,
+    ) -> Option<Self> {
+        let seed: [u8; 32] = instance_private_key.try_into().ok()?;
+        let instance_public_key = ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let instance_id = wan_instance_id(&instance_public_key);
+        let agent_pubkey = BASE64.encode(agent_public_key);
+        let material = wan_cert_material(&instance_id, agent_id, channel, &agent_pubkey, host_hint, issued_at);
+        Some(Self {
+            instance_id,
+            agent_id: agent_id.to_ascii_lowercase(),
+            channel: channel.to_string(),
+            key_fp: wan_key_fingerprint(agent_public_key),
+            instance_pubkey: BASE64.encode(instance_public_key),
+            agent_pubkey,
+            host_hint: host_hint.to_string(),
+            issued_at,
+            cert_sig: ed25519_sign_b64(&seed, &material)?,
+        })
+    }
+
+    /// The chain every holder of a record checks — the cloud on `PUT`
+    /// (hygiene) and the receiver before trusting it (the real anchor):
+    /// the instance id is the hash of the instance key, the fingerprint is
+    /// the hash of the agent key, and the instance key signed the
+    /// certificate. Returns the decoded agent public key on success.
+    pub fn check_chain(&self) -> Option<[u8; 32]> {
+        let instance_public_key = decode_public_key_b64(&self.instance_pubkey)?;
+        let agent_public_key = decode_public_key_b64(&self.agent_pubkey)?;
+        if wan_instance_id(&instance_public_key) != self.instance_id
+            || wan_key_fingerprint(&agent_public_key) != self.key_fp
+            || self.agent_id != self.agent_id.to_ascii_lowercase()
+        {
+            return None;
+        }
+        let material = wan_cert_material(
+            &self.instance_id,
+            &self.agent_id,
+            &self.channel,
+            &self.agent_pubkey,
+            &self.host_hint,
+            self.issued_at,
+        );
+        ed25519_verify_b64(&instance_public_key, &material, &self.cert_sig).then_some(agent_public_key)
+    }
+}
+
+/// An instance revocation (§2.2), signed by the **old** instance key so only
+/// the owner of that key can retire it. Sticky: nothing un-revokes an id.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WanRevocation {
+    pub old_instance_id: String,
+    pub old_instance_pubkey: String,
+    pub new_instance_id: String,
+    pub revoked_at: i64,
+    pub sig: String,
+}
+
+impl WanRevocation {
+    /// Sign a revocation of the instance whose private key is `old_private_key`.
+    pub fn sign(old_private_key: &[u8], new_instance_id: &str, revoked_at: i64) -> Option<Self> {
+        let seed: [u8; 32] = old_private_key.try_into().ok()?;
+        let old_public_key = ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let old_instance_id = wan_instance_id(&old_public_key);
+        let material = wan_revoke_material(&old_instance_id, new_instance_id, revoked_at);
+        Some(Self {
+            old_instance_id,
+            old_instance_pubkey: BASE64.encode(old_public_key),
+            new_instance_id: new_instance_id.to_string(),
+            revoked_at,
+            sig: ed25519_sign_b64(&seed, &material)?,
+        })
+    }
+
+    /// The old id is the hash of the old key, and the old key signed it.
+    pub fn verify(&self) -> bool {
+        let Some(old_public_key) = decode_public_key_b64(&self.old_instance_pubkey) else { return false };
+        wan_instance_id(&old_public_key) == self.old_instance_id
+            && ed25519_verify_b64(
+                &old_public_key,
+                &wan_revoke_material(&self.old_instance_id, &self.new_instance_id, self.revoked_at),
+                &self.sig,
+            )
+    }
+}
+
+/// The signed tuple as carried through the relay (§2.1). All of it is
+/// sender-supplied; `key_fp` is a lookup hint and is not signed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WanCarried<'a> {
+    pub sig: &'a str,
+    pub msg_id: &'a str,
+    pub ts_secs: i64,
+    pub source_agent: &'a str,
+    pub target_agent: &'a str,
+    pub source_host: &'a str,
+    pub source_channel: &'a str,
+    pub key_fp: &'a str,
+}
+
+/// Why a carried signature did not verify. Each maps to the §2.3 verdict the
+/// caller records; the ones that are `None` there are "couldn't check",
+/// never a forgery signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WanCheckFailure {
+    /// The carried source or target isn't the one actually delivered →
+    /// `Some(false)`.
+    EnvelopeMismatch,
+    /// Outside the freshness window → `None`, audit `wan_sig_stale`.
+    Stale,
+    /// The directory record's chain is broken → `Some(false)`, audit
+    /// `wan_cert_invalid`. Only a tampering cloud or a bug produces this.
+    CertInvalid,
+    /// The record is for a different instance, channel, agent or key than
+    /// the carried one → `Some(false)`.
+    RecordMismatch,
+    /// The message signature doesn't verify under the certified key →
+    /// `Some(false)`.
+    BadSignature,
+}
+
+impl WanCheckFailure {
+    /// The `wan_verified` value this failure records: `None` for "couldn't
+    /// check", `Some(false)` for an active verification failure.
+    pub fn verdict(self) -> Option<bool> {
+        match self {
+            Self::Stale => None,
+            Self::EnvelopeMismatch | Self::CertInvalid | Self::RecordMismatch | Self::BadSignature => Some(false),
+        }
+    }
+}
+
+/// The checks that need no directory record, in the §2.3 order: the
+/// envelope binding, then freshness. `row_source_agent` is the cloud row's
+/// `source_agent`; `polled_agent_id` is the agent the subscriber is
+/// delivering to — **not** a row field, so a cloud can't move a message
+/// signed for one agent into another's queue.
+pub fn check_wan_envelope(
+    carried: &WanCarried<'_>,
+    row_source_agent: &str,
+    polled_agent_id: &str,
+    now_secs: i64,
+) -> Result<(), WanCheckFailure> {
+    if !wan_id_eq(carried.source_agent, row_source_agent) || !wan_id_eq(carried.target_agent, polled_agent_id) {
+        return Err(WanCheckFailure::EnvelopeMismatch);
+    }
+    if !wan_sig_is_fresh(carried.ts_secs, now_secs) {
+        return Err(WanCheckFailure::Stale);
+    }
+    Ok(())
+}
+
+/// The checks against a directory record, in the §2.3 order: the chain, the
+/// record matching what was carried, then the message signature. Run after
+/// [`check_wan_envelope`] passes and a record was found. Replay is the
+/// caller's (it needs state).
+pub fn verify_wan_against_record(
+    carried: &WanCarried<'_>,
+    record: &WanKeyRecord,
+    message: &str,
+) -> Result<(), WanCheckFailure> {
+    let agent_public_key = record.check_chain().ok_or(WanCheckFailure::CertInvalid)?;
+    if record.instance_id != carried.source_host
+        || record.channel != carried.source_channel
+        || !wan_id_eq(&record.agent_id, carried.source_agent)
+        || record.key_fp != carried.key_fp
+    {
+        return Err(WanCheckFailure::RecordMismatch);
+    }
+    if !verify_wan_jekt(
+        &agent_public_key,
+        carried.msg_id,
+        carried.source_agent,
+        carried.source_host,
+        carried.source_channel,
+        carried.target_agent,
+        carried.ts_secs,
+        message,
+        carried.sig,
+    ) {
+        return Err(WanCheckFailure::BadSignature);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1181,5 +1535,219 @@ mod tests {
         assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &channel_sig
         ));
         assert_ne!(wan_sig, lan_sig);
+    }
+
+    // ── W3-S ──
+    //
+    // The vectors below were computed by an independent implementation
+    // (Node's `crypto`: raw Ed25519 from a PKCS#8-wrapped seed, SHA-256,
+    // hand-rolled base32) and pasted in. The cloud's TypeScript chain check
+    // (`muxbus/server/src/wan-keys.ts`) asserts the same values, so a byte
+    // drift on either side fails a test instead of every verification.
+    // Instance seed [1; 32], agent seed [2; 32], successor instance [3; 32].
+
+    const V_INSTANCE_PUBKEY: &str = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=";
+    const V_INSTANCE_ID: &str = "gr2q7gf5lh6pzfdnurnkvputhm";
+    const V_AGENT_PUBKEY: &str = "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=";
+    const V_KEY_FP: &str = "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc";
+    const V_CERT_SIG: &str =
+        "ighbn1y/kyisIolSHwNyRtBqC2u95zQEBtGc3wxwksBUBHrDoUvXmz8yEXY20TFzOBC6IDEsG51WzTNJCrgNAA==";
+    const V_NEW_INSTANCE_ID: &str = "wyxim75c6m5p4ywv22ywilqwee";
+    const V_REVOKE_SIG: &str =
+        "DOQzFIVNGItL3mkN7IPlEk5lBrmM96Dgub7jbL5JmTR5oDnCwWlfKzuYsyvZcUJJMRs56glIBhrDVHIeclqEDg==";
+    const V_MSG_SIG: &str =
+        "49VODE2M7pORgWgcQPl2p+M8W2ccaXJ1O8Zu1XeR4qRiJDsshawzq8eMpSkKTz+CJE0CXz2oTlXsNDobpgsRBw==";
+    const V_ISSUED_AT: i64 = 1_790_000_000;
+    const V_MSG_TS: i64 = 1_790_000_100;
+
+    fn vector_record() -> WanKeyRecord {
+        let (agent_public_key, _) = generate_wan_keypair([2; 32]);
+        WanKeyRecord::certify(&[1; 32], "camper", "stable", &agent_public_key, "narko", V_ISSUED_AT).unwrap()
+    }
+
+    fn vector_carried() -> WanCarried<'static> {
+        WanCarried {
+            sig: V_MSG_SIG,
+            msg_id: "msg-1",
+            ts_secs: V_MSG_TS,
+            source_agent: "camper",
+            target_agent: "agent2",
+            source_host: V_INSTANCE_ID,
+            source_channel: "stable",
+            key_fp: V_KEY_FP,
+        }
+    }
+
+    #[test]
+    fn w3s_identifiers_and_certificate_match_the_cross_language_vectors() {
+        let record = vector_record();
+        assert_eq!(record.instance_pubkey, V_INSTANCE_PUBKEY);
+        assert_eq!(record.instance_id, V_INSTANCE_ID);
+        assert_eq!(record.instance_id.len(), WAN_INSTANCE_ID_LEN);
+        assert_eq!(record.agent_pubkey, V_AGENT_PUBKEY);
+        assert_eq!(record.key_fp, V_KEY_FP);
+        assert_eq!(record.key_fp.len(), WAN_KEY_FP_LEN);
+        assert_eq!(record.cert_sig, V_CERT_SIG);
+        assert!(record.check_chain().is_some());
+
+        let (new_instance_public_key, _) = generate_wan_keypair([3; 32]);
+        assert_eq!(wan_instance_id(&new_instance_public_key), V_NEW_INSTANCE_ID);
+        let revocation = WanRevocation::sign(&[1; 32], V_NEW_INSTANCE_ID, 1_790_000_500).unwrap();
+        assert_eq!(revocation.sig, V_REVOKE_SIG);
+        assert!(revocation.verify());
+
+        let (_, agent_private_key) = generate_wan_keypair([2; 32]);
+        let msg_sig = sign_wan_jekt(&agent_private_key, "msg-1", "camper", V_INSTANCE_ID, "stable", "agent2", V_MSG_TS, "hello");
+        assert_eq!(msg_sig.as_deref(), Some(V_MSG_SIG));
+    }
+
+    #[test]
+    fn base32_matches_rfc4648_lowercased() {
+        // RFC 4648 §10 test vectors, lowercased and unpadded.
+        for (input, expected) in
+            [("", ""), ("f", "my"), ("fo", "mzxq"), ("foo", "mzxw6"), ("foob", "mzxw6yq"), ("fooba", "mzxw6ytb"), ("foobar", "mzxw6ytboi")]
+        {
+            assert_eq!(base32_lower_nopad(input.as_bytes()), expected, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn a_certificate_chain_breaks_on_any_substituted_field() {
+        let good = vector_record();
+        let (other_public_key, _) = generate_wan_keypair([9; 32]);
+        let other_b64 = BASE64.encode(other_public_key);
+        type Mutation<'a> = (&'a str, Box<dyn Fn(&mut WanKeyRecord) + 'a>);
+        let mutations: Vec<Mutation> = vec![
+            // A cloud swapping in its own agent key, with a matching fingerprint.
+            ("agent key", Box::new(|r| {
+                r.agent_pubkey = other_b64.clone();
+                r.key_fp = wan_key_fingerprint(&other_public_key);
+            })),
+            // A cloud swapping the instance key: the id no longer matches.
+            ("instance key", Box::new(|r| r.instance_pubkey = other_b64.clone())),
+            // ...or relabelling the id to match its own key: the cert no longer verifies.
+            ("instance id + key", Box::new(|r| {
+                r.instance_pubkey = other_b64.clone();
+                r.instance_id = wan_instance_id(&other_public_key);
+            })),
+            ("fingerprint", Box::new(|r| r.key_fp = wan_key_fingerprint(&other_public_key))),
+            ("agent id", Box::new(|r| r.agent_id = "lark".into())),
+            ("uppercased agent id", Box::new(|r| r.agent_id = "Camper".into())),
+            ("channel", Box::new(|r| r.channel = "beta".into())),
+            ("host hint", Box::new(|r| r.host_hint = "area54".into())),
+            ("issued_at", Box::new(|r| r.issued_at += 1)),
+            ("cert sig", Box::new(|r| r.cert_sig = V_REVOKE_SIG.into())),
+            ("garbage key", Box::new(|r| r.agent_pubkey = "not base64".into())),
+        ];
+        for (name, mutate) in mutations {
+            let mut record = good.clone();
+            mutate(&mut record);
+            assert!(record.check_chain().is_none(), "{name} substitution passed the chain");
+        }
+    }
+
+    #[test]
+    fn certify_lowercases_the_agent_id_and_rejects_a_bad_seed() {
+        let (agent_public_key, _) = generate_wan_keypair([2; 32]);
+        let record = WanKeyRecord::certify(&[1; 32], "Camper", "stable", &agent_public_key, "narko", V_ISSUED_AT).unwrap();
+        assert_eq!(record, vector_record());
+        assert!(WanKeyRecord::certify(&[1; 31], "camper", "stable", &agent_public_key, "narko", 0).is_none());
+    }
+
+    #[test]
+    fn a_revocation_verifies_only_as_signed_by_the_old_key() {
+        let good = WanRevocation::sign(&[1; 32], V_NEW_INSTANCE_ID, 1_790_000_500).unwrap();
+        let mut retargeted = good.clone();
+        retargeted.new_instance_id = V_INSTANCE_ID.into();
+        assert!(!retargeted.verify());
+        let mut redated = good.clone();
+        redated.revoked_at += 1;
+        assert!(!redated.verify());
+        // Someone else's key revoking this instance: the id doesn't match the key.
+        let mut foreign = WanRevocation::sign(&[9; 32], V_NEW_INSTANCE_ID, 1_790_000_500).unwrap();
+        foreign.old_instance_id = V_INSTANCE_ID.into();
+        assert!(!foreign.verify());
+    }
+
+    #[test]
+    fn freshness_window_boundaries() {
+        let now = 1_790_000_000;
+        assert!(wan_sig_is_fresh(now, now));
+        assert!(wan_sig_is_fresh(now - WAN_SIG_MAX_AGE_SECS, now));
+        assert!(!wan_sig_is_fresh(now - WAN_SIG_MAX_AGE_SECS - 1, now));
+        assert!(wan_sig_is_fresh(now + WAN_SIG_MAX_FUTURE_SKEW_SECS, now));
+        assert!(!wan_sig_is_fresh(now + WAN_SIG_MAX_FUTURE_SKEW_SECS + 1, now));
+        assert_eq!(WAN_SIG_MAX_AGE_SECS, 2100);
+        // Extremes saturate instead of overflowing into "fresh".
+        assert!(!wan_sig_is_fresh(i64::MIN, now));
+        assert!(!wan_sig_is_fresh(i64::MAX, now));
+    }
+
+    #[test]
+    fn the_envelope_binds_source_to_the_row_and_target_to_the_polled_agent() {
+        let carried = vector_carried();
+        assert_eq!(check_wan_envelope(&carried, "camper", "agent2", V_MSG_TS), Ok(()));
+        // Trimmed and case-folded, as the cloud normalises (or, for github*, doesn't).
+        assert_eq!(check_wan_envelope(&carried, " Camper ", "AGENT2", V_MSG_TS), Ok(()));
+        // A cloud moving a message signed for agent2 into lark's queue.
+        assert_eq!(check_wan_envelope(&carried, "camper", "lark", V_MSG_TS), Err(WanCheckFailure::EnvelopeMismatch));
+        assert_eq!(check_wan_envelope(&carried, "clamk", "agent2", V_MSG_TS), Err(WanCheckFailure::EnvelopeMismatch));
+        // The binding is checked before freshness: a moved stale message is still a mismatch.
+        assert_eq!(
+            check_wan_envelope(&carried, "camper", "lark", V_MSG_TS + 10_000),
+            Err(WanCheckFailure::EnvelopeMismatch)
+        );
+        assert_eq!(check_wan_envelope(&carried, "camper", "agent2", V_MSG_TS + 2_101), Err(WanCheckFailure::Stale));
+        assert_eq!(WanCheckFailure::Stale.verdict(), None);
+        assert_eq!(WanCheckFailure::EnvelopeMismatch.verdict(), Some(false));
+    }
+
+    #[test]
+    fn a_carried_message_verifies_against_its_certified_record() {
+        assert_eq!(verify_wan_against_record(&vector_carried(), &vector_record(), "hello"), Ok(()));
+    }
+
+    #[test]
+    fn each_carried_field_altered_in_turn_fails() {
+        let record = vector_record();
+        let cases: Vec<(&str, WanCarried<'static>, WanCheckFailure)> = vec![
+            ("msg_id", WanCarried { msg_id: "msg-2", ..vector_carried() }, WanCheckFailure::BadSignature),
+            ("ts", WanCarried { ts_secs: V_MSG_TS + 1, ..vector_carried() }, WanCheckFailure::BadSignature),
+            ("target", WanCarried { target_agent: "lark", ..vector_carried() }, WanCheckFailure::BadSignature),
+            ("sig", WanCarried { sig: V_CERT_SIG, ..vector_carried() }, WanCheckFailure::BadSignature),
+            ("source", WanCarried { source_agent: "lark", ..vector_carried() }, WanCheckFailure::RecordMismatch),
+            ("host", WanCarried { source_host: V_NEW_INSTANCE_ID, ..vector_carried() }, WanCheckFailure::RecordMismatch),
+            ("channel", WanCarried { source_channel: "beta", ..vector_carried() }, WanCheckFailure::RecordMismatch),
+            ("key_fp", WanCarried { key_fp: "x", ..vector_carried() }, WanCheckFailure::RecordMismatch),
+        ];
+        for (name, carried, expected) in cases {
+            assert_eq!(verify_wan_against_record(&carried, &record, "hello"), Err(expected), "altered {name}");
+        }
+        assert_eq!(
+            verify_wan_against_record(&vector_carried(), &record, "hello!"),
+            Err(WanCheckFailure::BadSignature)
+        );
+    }
+
+    #[test]
+    fn a_tampered_record_is_cert_invalid_before_anything_else() {
+        let mut record = vector_record();
+        record.host_hint = "evil".into();
+        assert_eq!(
+            verify_wan_against_record(&vector_carried(), &record, "hello"),
+            Err(WanCheckFailure::CertInvalid)
+        );
+    }
+
+    #[test]
+    fn host_hints_and_display_labels() {
+        assert!(is_valid_wan_host_hint("narko"));
+        assert!(is_valid_wan_host_hint("host-1.lan"));
+        for bad in ["", "Narko", "narko~x", "has space", "ümlaut", &"a".repeat(49)] {
+            assert!(!is_valid_wan_host_hint(bad), "{bad:?}");
+        }
+        assert_eq!(wan_instance_display_label("narko", V_INSTANCE_ID), "narko~gr2q7gf5");
+        // A sender-chosen label that tries to smuggle its own suffix renders as `?`.
+        assert_eq!(wan_instance_display_label("narko~abcdefgh", V_INSTANCE_ID), "?~gr2q7gf5");
     }
 }
