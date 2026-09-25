@@ -8,6 +8,7 @@ import { TAB_VISIBILITY_CHANGED_EVENT } from "@/app/workspace/window-tab-visibil
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import { isBlockDormant } from "@/app/store/block-component-registry";
+import { focusManager } from "@/app/store/focusManager";
 import type { BrowserViewModel } from "./browser-model";
 
 export interface PaneRect {
@@ -202,6 +203,13 @@ export function usePaneRectSync(params: {
             // layout changed while the async create was in-flight.
             notifyPaneReflow();
             registerPaneRect(model.blockId, paneRectCss());
+            // The page exists now, so it can take the keyboard: if this pane
+            // is the selected one (opened with focus, e.g. `muxsh web`), move
+            // the caret into it, as terminal/editor panes do on mount. A
+            // giveFocus() attempted earlier (at layout insert) found no page
+            // yet. claimFocusOnMount skips a background tab's pane and a
+            // caret the user already put in this pane's own URL bar.
+            focusManager.claimFocusOnMount(model.blockId, () => model.giveFocus());
             // NOTE: does NOT call model.onLoad() here. Real load-finished
             // comes from the browser-pane-nav-state listener in
             // browser-model.ts. See

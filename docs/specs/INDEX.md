@@ -71,6 +71,7 @@ See also:
 | [SPEC_BROWSER_PANE_LIFECYCLE](SPEC_BROWSER_PANE_LIFECYCLE.md) | Lifecycle: mount, navigate, unmount |
 | [SPEC_BROWSER_DOM_API](SPEC_BROWSER_DOM_API.md) | DOM injection / bridge API |
 | [SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Favicon + title propagation |
+| [SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24](SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md) | macOS: typing reaches the page — the pane overlay can become key; `muxsh web` selects and focuses the new pane |
 
 ## Editor Pane
 
