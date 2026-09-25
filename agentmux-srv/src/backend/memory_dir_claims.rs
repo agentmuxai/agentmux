@@ -22,8 +22,13 @@
 //!    to the same canonical directory. Guesses count here (a veto only ever
 //!    removes a directory; the resolver never uses one to *find* memory).
 //! 3. **A machine-wide claim** — zone `memory-dir:<hash>` in the global
-//!    store. A live claim by another UID makes it shared. A claim by an agent
-//!    that no longer exists (no local row, no active definition) is released.
+//!    store. Every spawn that uses the folder records one, a shared one
+//!    too: channels share `projects/` folders, and an agent in another
+//!    channel is visible here only through its claim. A claim by another
+//!    UID makes the folder shared. A claim is released only by the channel
+//!    store that wrote it, once that store no longer has the agent and no
+//!    active shared definition does — another channel can't tell a live
+//!    agent of its neighbour's from a deleted one.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -93,16 +98,25 @@ fn claims_zone(dir_id: &str) -> String {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Claims {
-    /// UID → when it claimed.
     #[serde(default)]
-    uids: BTreeMap<String, i64>,
+    uids: BTreeMap<String, Claim>,
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
 }
 
-/// Whether `uid` still exists: a local row, or an active shared definition.
-fn uid_is_live(mstore: &Store, defs: Option<&crate::registry::DefinitionStore>, uid: &str) -> bool {
-    matches!(mstore.agent_def_get(uid), Ok(Some(_))) || defs.is_some_and(|d| d.exists(uid))
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct Claim {
+    #[serde(default)]
+    at_ms: i64,
+    /// The channel store the claiming agent lives in ([`Store::origin_id`]).
+    #[serde(default)]
+    origin: String,
+}
+
+/// Whether a claim can be shown to be stale: only the store that wrote it
+/// can say its agent is gone.
+fn claim_is_stale(mstore: &Store, origin: &str, defs: Option<&crate::registry::DefinitionStore>, uid: &str, c: &Claim) -> bool {
+    c.origin == origin && !matches!(mstore.agent_def_get(uid), Ok(Some(_))) && !defs.is_some_and(|d| d.exists(uid))
 }
 
 /// Decide whether `dir` — the memory directory `uid`'s spawn uses, from
@@ -118,23 +132,27 @@ pub(crate) fn check_and_claim(
     deadline: std::time::Instant,
 ) -> Result<Exclusivity, StoreError> {
     let id = dir_id(dir);
-    if let Some(reason) = known_shared_or_vetoed(mstore, uid, &id, cwd, deadline) {
-        return Ok(Exclusivity::Shared(reason));
-    }
+    // Claimed first, whatever the verdict: a spawn using a folder it may
+    // not write still has to be visible to the agents that might.
     let defs = crate::registry::resolve_shared_definitions_dir()
         .and_then(|dir| crate::registry::DefinitionStore::open(dir).ok());
+    let origin = mstore.origin_id();
     let other = fs.zone_txn(&claims_zone(&id), |z| {
         let mut claims: Claims = match z.read(CLAIMS_FILE)? {
             None => Claims::default(),
             Some(b) => serde_json::from_slice(&b)
                 .map_err(|e| StoreError::Other(format!("memory dir claims unreadable: {e}")))?,
         };
-        claims.uids.retain(|claimant, _| claimant == uid || uid_is_live(mstore, defs.as_ref(), claimant));
-        claims.uids.entry(uid.to_string()).or_insert_with(agentmux_common::time::now_ms);
+        claims.uids.retain(|claimant, c| claimant == uid || !claim_is_stale(mstore, &origin, defs.as_ref(), claimant, c));
+        let mine = claims.uids.entry(uid.to_string()).or_insert_with(|| Claim { at_ms: agentmux_common::time::now_ms(), origin: String::new() });
+        mine.origin = origin.clone();
         let other = claims.uids.keys().find(|c| c.as_str() != uid).cloned();
         z.put(CLAIMS_FILE, &serde_json::to_vec(&claims).map_err(|e| StoreError::Other(e.to_string()))?)?;
         Ok(other)
     })?;
+    if let Some(reason) = known_shared_or_vetoed(mstore, uid, &id, cwd, deadline) {
+        return Ok(Exclusivity::Shared(reason));
+    }
     Ok(match other {
         Some(other_uid) => Exclusivity::Shared(SharedReason::Claimed { other_uid }),
         None => Exclusivity::Exclusive,
@@ -305,6 +323,30 @@ mod tests {
             None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
         }
         assert_eq!(got, Exclusivity::Exclusive);
+    }
+
+    /// A claim from another channel's store is never released here, though
+    /// this store has no row for its agent: only its own store can tell.
+    /// And a shared verdict still records the claim.
+    #[test]
+    fn another_channels_claim_is_kept_and_a_shared_spawn_still_claims() {
+        let _g = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let shared = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", shared.path());
+        let fs = FileStore::open_in_memory().unwrap();
+        let (ch1, ch2) = (Store::open_in_memory().unwrap(), Store::open_in_memory().unwrap());
+        agent(&ch1, "agent-a", "/work/a");
+        agent(&ch2, "agent-b", "");
+        let dir = tempfile::tempdir().unwrap();
+        let b = check_and_claim_now(&fs, &ch2, "agent-b", dir.path(), "~/.agentmux/agents/agent-b").unwrap();
+        let a = check_and_claim_now(&fs, &ch1, "agent-a", dir.path(), "/work/a").unwrap();
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        assert_eq!(b, Exclusivity::Shared(SharedReason::KnownSharedLocation));
+        assert_eq!(a, Exclusivity::Shared(SharedReason::Claimed { other_uid: "agent-b".into() }));
     }
 
     #[test]

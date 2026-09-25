@@ -141,7 +141,13 @@ fn canonical_worktree_root(root: &std::path::Path) -> std::path::PathBuf {
         std::fs::read_to_string(p).ok().map(|s| s.trim().to_string())
     }
     fn real(p: &Path) -> PathBuf {
-        p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+        let real = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        // Windows: `\\?\C:\repo` names the folder `---C--repo`; the CLI
+        // sees `C:\repo`.
+        match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+            Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
+            _ => real,
+        }
     }
     let resolve = || -> Option<PathBuf> {
         let git_file = read_trimmed(&root.join(".git"))?;

@@ -546,6 +546,8 @@ fn an_overridden_memory_folder_is_left_alone() {
     assert!(spawn_overrides_memory_dir(&env, &[]));
     assert!(spawn_overrides_memory_dir(&Default::default(), &["--settings".into(), "s.json".into()]));
     assert!(!spawn_overrides_memory_dir(&Default::default(), &["--model".into(), "opus".into()]));
+    let env = std::collections::HashMap::from([("CLAUDE_CODE_PROJECT_DIR_NAME".to_string(), "fixed".to_string())]);
+    assert!(spawn_overrides_memory_dir(&env, &[]));
 }
 
 /// Data-loss review 3, P2: indexing a conflict keeps an index that isn't
@@ -605,6 +607,72 @@ fn a_second_pass_while_one_runs_skips() {
     let zone = pass_zone(UID);
     f.fs.zone_txn(&zone, |z| {
         z.put(PASS_LEASE_FILE, &serde_json::to_vec(&PassLease { owner: "crashed".into(), until_ms: 1 }).unwrap())
+    })
+    .unwrap();
+    assert_eq!(f.run().skipped, None);
+}
+
+/// Data-loss review 4, P1: channels share `projects/` folders, and an agent
+/// in another channel is visible only through its claim — so a spawn that
+/// finds its folder shared still claims it. Here B (channel 2, a
+/// subdirectory) spawns first; A (channel 1, the repository root, same
+/// folder) must then leave B's memory alone.
+#[test]
+fn an_agent_in_another_channel_sharing_the_folder_keeps_it_shared() {
+    let f = fixture();
+    let base = tempfile::tempdir().unwrap();
+    let repo = base.path().canonicalize().unwrap().join("solo");
+    std::fs::create_dir_all(repo.join("sub")).unwrap();
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    let (root_s, sub_s, cfg) = (repo.to_string_lossy().into_owned(), repo.join("sub").to_string_lossy().into_owned(), f.cfg());
+    let channel2 = Store::open_in_memory().unwrap();
+    let mut b = crate::backend::storage::agents::test_agent_def("agent-b", "agent-b", "claude", "agent", 1, "");
+    b.working_directory = sub_s.clone();
+    channel2.agent_def_insert(&mut b).unwrap();
+    let spawn = |store: &Store, uid: &str, cwd: &str| {
+        reconcile_before_spawn(
+            &f.fs,
+            store,
+            &SpawnMemory { uid, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            Duration::from_secs(10),
+        )
+    };
+    assert_eq!(spawn(&channel2, "agent-b", &sub_s).skipped, Some("shared directory"));
+    let dir = crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &root_s);
+    put_in(&dir, "MEMORY.md", "b's index");
+    put_in(&dir, "b_private.md", "B's own memory");
+    assert_eq!(spawn(&f.store, UID, &root_s).skipped, Some("shared directory"));
+    assert!(record::heads(&f.fs, UID).unwrap().files.is_empty(), "nothing of B's captured into A's record");
+    assert_eq!(std::fs::read_to_string(dir.join("b_private.md")).unwrap(), "B's own memory");
+}
+
+/// Data-loss review 4, P2: a conflict in a folder with no MEMORY.md gets an
+/// index written, not just recorded — so the next pass doesn't take the
+/// index for deleted, and Claude sees the other copy.
+#[test]
+fn a_conflict_in_a_folder_without_an_index_gets_one() {
+    let f = fixture();
+    f.put("topic.md", "v1");
+    f.run();
+    f.change_elsewhere("topic.md", Some("record v2"));
+    f.put("topic.md", "disk v2");
+    assert_eq!(f.run().conflicts, 1);
+    let index = f.get("MEMORY.md").expect("the index is written");
+    assert!(index.contains("topic__conflict_"), "{index}");
+    let r = f.run();
+    assert_eq!((r.captured, r.conflicts, r.deleted), (0, 0, 0), "{r:?}");
+    assert!(f.head_body("MEMORY.md").is_some(), "the index is not tombstoned");
+}
+
+/// A lease left by a pass that crashed while the clock was far ahead
+/// doesn't block every pass until the clock catches up.
+#[test]
+fn a_lease_from_a_clock_far_ahead_is_taken_over() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    let far = agentmux_common::time::now_ms() + 3_600_000;
+    f.fs.zone_txn(&pass_zone(UID), |z| {
+        z.put(PASS_LEASE_FILE, &serde_json::to_vec(&PassLease { owner: "crashed".into(), until_ms: far }).unwrap())
     })
     .unwrap();
     assert_eq!(f.run().skipped, None);
