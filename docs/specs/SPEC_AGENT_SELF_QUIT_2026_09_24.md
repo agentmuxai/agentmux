@@ -397,10 +397,10 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 
 ## 11. Open questions
 
-- **Q1. `/exit` alias.** Recommended yes (§5.1). Say no if you want `/exit` to keep reaching the CLI.
-- **Q2. Crons on quit.** Recommended: keep and report (§4.3). Alternative: pause them on quit and resume them on reopen.
+- **Q1. `/exit` alias.** **Decided 2026-09-25: yes** (§5.1).
+- **Q2. Crons on quit.** **Decided 2026-09-25: keep and report** (§4.3).
 - **Q3. Human-confirm dialog for `QuitSelf`.** **Decided 2026-09-25:** no dialog when the user asked; any external shutdown gets a 15 s notify-and-override window with its own tone, and the caller waits at least 15 s (§6.5).
-- **Q4. `ClosePane` no-argument form.** Recommended: reroute through self-quit (§7-1).
+- **Q4. `ClosePane` no-argument form.** **Decided 2026-09-25: reroute through self-quit** (§7-1), closing the caller's tab with `delete_block::run` (§12.4).
 - **Q5. Per-agent "Quit gracefully" button in the pane-close modal.** ~~Recommended: not in v1; the text tip (§5.4) first.~~ **Moot (2026-09-25):** the × itself is now the graceful path (§5.5).
 
 ## 12. Contracts (srv ↔ frontend), for building in parallel
