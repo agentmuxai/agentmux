@@ -2,7 +2,7 @@
 
 **Author:** Agent4
 **Date:** 2026-09-25
-**Status:** proposed
+**Status:** implemented — Part A in PR #3800, Part B in PR #3801 (see B.4, "What was built")
 **Related:** `SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md` (the agent-pane
 follow work, PR #3652, tracking issue #3655 — Part B below is that spec's Phase 3,
 pulled forward), `SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md` (the FLIP height
@@ -35,59 +35,62 @@ replaced that with (1) above. The draft is superseded, not partly kept (§7).
 The cap is `max-height` in `vh` (window height), on `.agent-tool-panel`. Nothing is in
 px or lines.
 
-| Where | Rule | Applies to |
-|---|---|---|
-| `frontend/app/view/agent/styles/_document-nodes.scss` (`.agent-tool-block .agent-tool-panel`, ~line 375) | `max-height: 50vh` | agent pane < 900 px wide |
-| `frontend/app/view/agent/styles/_responsive.scss` (Tier 4, `@container agent-pane (min-width: 900px)`, ~line 58) | `max-height: 60vh` | agent pane ≥ 900 px wide |
-| `frontend/app/view/agent/styles/_shell-node.scss` (`.agent-shell-block .agent-tool-panel`, ~line 39) | `max-height: 50vh` | persistent-shell log (not a tool preview) |
+| Where | Rule | Specificity | Takes effect? |
+|---|---|---|---|
+| `_document-nodes.scss` — `.agent-view .agent-tool-block .agent-tool-panel` | `max-height: 50vh` | 0,3,0 | **yes** — every tool preview |
+| `_responsive.scss` Tier 4 — `.agent-view .agent-tool-panel` inside `@container agent-pane (min-width: 900px)` | `max-height: 60vh` | 0,2,0 | **no** (see below) |
+| `_shell-node.scss` — `.agent-shell-block .agent-tool-panel` | `max-height: 50vh` | 0,2,0 | yes — persistent-shell log |
 
-Log lines are 12 px × 1.4 = 16.8 px (`_tool-overlay-portal.scss`, `.agent-tool-log-line`).
+> Correction (2026-09-25, found while implementing): an earlier revision of this spec
+> said wide panes get `60vh`. They don't. A container query adds no specificity, so the
+> Tier 4 rule (0,2,0) loses to the tool block's own rule (0,3,0). It ties with the shell
+> block's rule but loads earlier, so it loses there too. Only `ToolBlock.tsx` and
+> `PersistentShellBlock.tsx` use the class, so the rule never applied anywhere. The
+> tallest preview today is `50vh` at every pane width.
+
+**Measured live, 2026-09-25:** in a ~507 px-wide agent pane, a full tool preview's panel
+was **698 px** tall. That is 50vh of a ~1396 px window, or ≈ 41 lines at 16.8 px/line
+(`.agent-tool-log-line`: 12 px × 1.4). This matches the user's "about 40 lines". The
+reading was taken with `UIQuery` on this agent's own pane.
+
 The panel has `padding: 0`; the log inside it (`.agent-tool-overlay-log`) is the single
 scroll container and carries its own padding. Content shorter than the cap already
 renders at natural height; that does not change.
 
-The user's "about 40 lines" matches 60 vh on a ~1150 px-tall window or 50 vh on a
-~1370 px-tall one. That is an inference from the numbers, not a measurement.
-
 ### A.2 Change
 
-Keep the scheme; divide both values by three. Put the number behind one custom property
-so the two tiers cannot drift apart.
+Keep the scheme and divide the one real value by three:
 
 ```scss
-// _document-nodes.scss, on the agent-pane container (or .agent-tool-block)
---agent-tool-panel-max-h: calc(50vh / 3);   // was 50vh  (≈16.7vh)
-
-// _responsive.scss, Tier 4 container query
---agent-tool-panel-max-h: calc(60vh / 3);   // was 60vh  (= 20vh)
-
-// .agent-tool-block .agent-tool-panel
-max-height: var(--agent-tool-panel-max-h);
+// _document-nodes.scss — .agent-view .agent-tool-block .agent-tool-panel
+max-height: calc(50vh / 3);   // was 50vh (≈ 16.7vh)
 ```
 
-Writing it as `calc(50vh / 3)` keeps the "one third of what it was" intent readable in
-the source.
+Writing it as `calc(50vh / 3)` keeps "one third of what it was" readable in the source.
+No custom property is needed now that there is only one value.
 
-Approximate visible lines at the cap (panel height ÷ 16.8 px, minus ~1 line for log
+Delete the dead Tier 4 rule and leave a comment saying why. Behaviour doesn't change,
+and it stops the next reader from believing wide panes get a taller cap.
+
+Approximate visible lines at the new cap (panel height ÷ 16.8 px, minus ~1 line for log
 padding; a failed/denied/awaiting tool's header row takes about one more):
 
-| Window height | < 900 px pane (16.7vh) | ≥ 900 px pane (20vh) |
-|---|---|---|
-| 800 px | ~7 | ~8 |
-| 1080 px | ~10 | ~12 |
-| 1200 px | ~11 | ~13 |
-| 1440 px | ~13 | ~16 |
+| Window height | Lines at `calc(50vh / 3)` |
+|---|---|
+| 800 px | ~7 |
+| 1080 px | ~10 |
+| 1200 px | ~11 |
+| 1400 px (the measured window) | ~13 |
 
-So "40 → about 13–15" holds on the user's setup. On small windows it gets short (~7 lines
-at 800 px); no floor is added (§7 item 1).
+That takes the user's "about 40" to about 13, close to their "15 or so". On small
+windows it gets short (~7 lines at 800 px); no floor is added (§7 item 1).
 
 ### A.3 Scope
 
-- **In:** tool previews (`.agent-tool-block .agent-tool-panel`), both width tiers.
+- **In:** tool previews (`.agent-tool-block .agent-tool-panel`), at every pane width.
 - **Out:** the persistent-shell log (`.agent-shell-block`). It is a long-running
-  build/dev log rather than a tool preview and keeps `50vh` (§7 item 2). It must not
-  pick up the new custom property by
-  accident: the property is set on the tool-block scope, not globally.
+  build/dev log rather than a tool preview and keeps `50vh` (§7 item 2). Its own rule is
+  separate, so the change above doesn't touch it.
 - **Out:** the px-based composer / decision / question panel caps.
 
 ### A.4 Knock-on edits
@@ -133,20 +136,24 @@ once the tool finishes.
 
 ### B.2 Why it wanders — likely causes
 
-These come from reading the code. **None is confirmed by a live repro yet**; B.4 step 1
-exists to do that. They are ordered by how well they explain "ends up in the middle".
+These come from reading the code, and cause 1 and cause 3 are reproduced by unit tests
+(see the correction below). **None is confirmed by a live repro in the running app.**
+They are ordered by how well they explain "ends up in the middle".
 
-1. **No pin when the finished result replaces the live log.** The effect's only
-   dependencies are `chunks()` and `panelHidden()`. When a tool completes, the `<Switch>`
-   swaps `ChunkList` for `ToolOverlayResult`, a different DOM tree with a different
-   height, and nothing re-pins. `scrollTop` keeps its old number, which inside the new
-   content is usually somewhere in the middle. This fits the symptom best, since it
-   happens at the end of every streamed tool call.
-2. **Only chunk arrival triggers a pin.** Anything else that changes the content or the
-   box's height doesn't: async rendering inside the result (syntax highlighting, lazy
-   renderers), the 120 ms `max-height` transition, the FLIP animation, a pane or window
-   resize. The single `requestAnimationFrame` pin can also run before such a change
-   settles, landing short of the true bottom.
+> Correction (2026-09-25, found while implementing): an earlier revision of cause 1 said
+> nothing re-pins when the finished result replaces the live log. That was wrong. The
+> effect reads `props.node` through `chunks()`, so it re-runs on **every** node update,
+> including the swap, and schedules one `requestAnimationFrame` pin. The gap is what
+> happens after that one frame, which is cause 1 as now written.
+
+1. **One pin per node update, and never after the last one.** Each node update schedules
+   a single `requestAnimationFrame` pin, and nothing else ever pins. Content that keeps
+   changing size after that frame is left with its bottom out of view once updates stop.
+   That includes async rendering inside the result (syntax highlighting, lazy
+   renderers), the running→result FLIP, the 120 ms `max-height` transition, and a pane
+   or window resize. A tool's final update is its result, so this lands at the end of
+   every tool call. That fits "ends up in the middle" best.
+2. *(merged into 1)*
 3. **Detach is decided from geometry, not from the user.** Any `scroll` event more than
    40 px from the bottom turns follow off, whoever caused it: a browser clamp when
    content shrinks, a scroll-anchoring adjustment, the output cap
@@ -235,6 +242,24 @@ Replace the 40 px rule with a user-gesture gate, re-pin on a ResizeObserver, and
 on the branch swap. It is roughly a 60-line change and can later be deleted in favour of
 the primitive.
 
+**What was built (2026-09-25): the fallback.** On 2026-09-25 #3655 had no Phase 1 work,
+and there was no branch or PR for a follow controller. Building the shared reducer
+without Agent2 risked a competing design, so the change is local to `ToolOverlayLog.tsx`:
+- FOLLOWING / DETACHED / SUSPENDED as described in B.3.
+- Pins from a ResizeObserver on the scroller and on a new content wrapper
+  (`.agent-tool-overlay-log-content`), with a `requestAnimationFrame` fallback only where
+  ResizeObserver is missing (jsdom).
+- The same 250 ms user-input window and 24 px re-attach as the pane.
+- One `[scroll-follow] tool=…` line per state change.
+
+It replaces the old per-update `requestAnimationFrame` pin, so a streaming flush no longer
+schedules a layout read per mounted tool log. It is meant to be deleted when the shared
+controller exists (the 09-24 spec's Phase 3). A note was left on #3655.
+
+Step 1's **live** repro was not done: the running app here isn't built from the branch.
+Cause 1 and cause 3 are reproduced by unit tests instead. The `[scroll-follow] tool=`
+lines give the live confirmation once the change ships.
+
 ---
 
 ## 4. Tests
@@ -242,12 +267,12 @@ the primitive.
 **Height (Part A)**
 
 - jsdom can't lay out, so unit tests can't check `vh`. Assert the stylesheet contract
-  instead: `.agent-tool-block .agent-tool-panel` reads `var(--agent-tool-panel-max-h)`,
-  and the shell block keeps `50vh`. A small SCSS-source test, or skip it and rely on the
+  instead: `.agent-tool-block .agent-tool-panel` has `max-height: calc(50vh / 3)`, and
+  the shell block keeps `50vh`. A small SCSS-source test, or skip it and rely on the
   pixel check.
 - **Pixel check** (`scripts/ui-screenshots/`): a 200-line Bash output at window heights
-  800 / 1080 / 1440 in both pane-width tiers. Assert the panel height is within ±2 px of
-  `innerHeight × 0.5 / 3` (or `× 0.6 / 3` in the wide tier). A 3-line output renders at
+  800 / 1080 / 1440, in a narrow and a ≥ 900 px pane. Assert the panel height is within
+  ±2 px of `innerHeight × 0.5 / 3` at both widths. A 3-line output renders at
   natural height with no empty gap. Repeat at a **non-100% app zoom**: I haven't verified
   how the app's zoom handling (`docs/specs/zoom-architecture.md`) interacts with `vh`, so
   check it rather than assume it.
@@ -256,9 +281,10 @@ the primitive.
 FLIP tests and `AgentDocumentVirtualList.pin.test.tsx` already do.
 
 1. Streaming chunks keep the log pinned to the bottom.
-2. **Running → result swap while FOLLOWING ends at the bottom.** This is the regression
-   test for B.2 cause 1 and must fail on today's code.
-3. Content growing with no new chunk (a mocked RO callback) re-pins while FOLLOWING.
+2. Running → result swap while FOLLOWING ends at the bottom.
+3. **Content growing after the last node update (a mocked RO callback, no new node)
+   re-pins while FOLLOWING.** This is the regression test for B.2 cause 1 and must fail
+   on the old code.
 4. Wheel up → DETACHED; later chunks and the result swap do not move `scrollTop`.
 5. A `scroll` event 200 px from the bottom with **no** preceding gesture does not detach.
    This is the regression test for cause 3 and must fail on today's code.
@@ -272,6 +298,14 @@ FLIP tests and `AgentDocumentVirtualList.pin.test.tsx` already do.
 10. A Read/Write/Edit/Diff preview opens at the top (DETACHED), and a user scroll to its
     bottom attaches it.
 11. All existing FLIP and no-layout-read tests in the file still pass unchanged.
+
+As built: items 2 and 3 are one test ("re-pins when the result keeps growing after the
+last node update"). Item 9 has no separate remount test: a remount is a fresh mount, which
+items 1 and 10 already exercise. The old code was run against the new tests with a
+synchronous `requestAnimationFrame`, so its one-frame pin counted. Six of the eight fail
+there: late growth, a non-user scroll, re-attach, wheel hand-off, the Read-at-top default,
+and basic growth. The two that pass (detach on a user scroll, no reads while hidden) cover
+behaviour the old code already had.
 
 Then a live check with the telemetry from B.4 step 1: run a few long Bash calls, scroll
 up mid-stream in one of them, and confirm every `[scroll-follow]` transition has a user
@@ -293,9 +327,9 @@ transcript.
 
 ## 6. Implementation checklist
 
-- [ ] A: `--agent-tool-panel-max-h` at `calc(50vh / 3)` and `calc(60vh / 3)`; panel reads it; shell block untouched.
+- [ ] A: `.agent-tool-block .agent-tool-panel` → `max-height: calc(50vh / 3)`; delete the dead Tier 4 rule; shell block untouched.
 - [ ] A: update the `50vh` comments listed in A.4.
-- [ ] A: pixel check across window heights, both tiers, and one non-100% zoom.
+- [ ] A: pixel check across window heights, a narrow and a ≥ 900 px pane, and one non-100% zoom.
 - [ ] B: telemetry + CDP repro; record which B.2 cause(s) were confirmed, in this spec.
 - [ ] B: coordinate with Agent2 / issue #3655 on the reducer.
 - [ ] B: follow controller in `ToolOverlayLog` (shared reducer or the Phase-0-style fallback); tests 1–11.

@@ -490,3 +490,203 @@ describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-0
         expect(container.textContent).toContain("line 1");
     });
 });
+
+// ── Follow the latest output ────────────────────────────────────────────────
+// SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §3 / §4.
+// jsdom has no layout: each test gives the scroller its own geometry (a
+// clamped scrollTop over a settable scrollHeight/clientHeight) and drives a
+// fake ResizeObserver, the same approach as AgentDocumentVirtualList.pin.test.
+
+describe("ToolOverlayLog — follows the latest output", () => {
+    type ROCallback = () => void;
+    let roCallbacks: ROCallback[] = [];
+    class FakeResizeObserver {
+        constructor(private cb: ROCallback) {
+            roCallbacks.push(cb);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {
+            roCallbacks = roCallbacks.filter((c) => c !== this.cb);
+        }
+    }
+    const fireResize = () => roCallbacks.forEach((cb) => cb());
+
+    afterEach(() => {
+        roCallbacks = [];
+        vi.unstubAllGlobals();
+    });
+
+    /** Give the scroller real-ish geometry. `g` is live: mutate it to model growth. */
+    function withGeometry(el: HTMLElement, g: { scrollHeight: number; clientHeight: number }) {
+        let top = 0;
+        Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => g.scrollHeight });
+        Object.defineProperty(el, "clientHeight", { configurable: true, get: () => g.clientHeight });
+        Object.defineProperty(el, "scrollTop", {
+            configurable: true,
+            get: () => top,
+            set: (v: number) => {
+                top = Math.max(0, Math.min(v, g.scrollHeight - g.clientHeight));
+            },
+        });
+        const bottom = () => g.scrollHeight - g.clientHeight;
+        return { bottom, get top() { return top; } };
+    }
+
+    /** A user scroll: the gesture first (opens the user-input window), then the scroll. */
+    function userScrollTo(el: HTMLElement, top: number, deltaY: number) {
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY, bubbles: true }));
+        el.scrollTop = top;
+        el.dispatchEvent(new Event("scroll"));
+    }
+
+    /** A scroll the browser made on its own (clamp, anchoring): no gesture. */
+    function browserScrollTo(el: HTMLElement, top: number) {
+        el.scrollTop = top;
+        el.dispatchEvent(new Event("scroll"));
+    }
+
+    const bashRunning = (lines: number): ToolNode => ({
+        ...streamingNode,
+        log: {
+            open: true,
+            chunks: Array.from({ length: lines }, (_, i) => ({ kind: "stdout", content: `line ${i + 1}`, timestamp: i + 1 })),
+        },
+    });
+
+    function mount(node: () => ToolNode) {
+        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+        const g = { scrollHeight: 1000, clientHeight: 200 };
+        const geo = withGeometry(el, g);
+        fireResize(); // first observation, as RO does on observe()
+        return { el, g, geo };
+    }
+
+    it("pins streamed output to the bottom as it grows", () => {
+        const [node, setNode] = createSignal(bashRunning(40));
+        const { g, geo } = mount(node);
+        expect(geo.top).toBe(geo.bottom());
+
+        setNode(bashRunning(60));
+        g.scrollHeight = 1400;
+        fireResize();
+        expect(geo.top).toBe(geo.bottom());
+    });
+
+    it("re-pins when the result keeps growing after the last node update (late render)", () => {
+        const [node, setNode] = createSignal(bashRunning(40));
+        const { g, geo } = mount(node);
+        setNode(terminalNode); // result replaces the live log
+        g.scrollHeight = 800;
+        fireResize();
+        expect(geo.top).toBe(geo.bottom());
+
+        // No further node updates — the result finishes rendering (e.g. async
+        // highlighting) and grows. The old single rAF pin never saw this.
+        g.scrollHeight = 1600;
+        fireResize();
+        expect(geo.top).toBe(geo.bottom());
+    });
+
+    it("a scroll far from the bottom with no user gesture does not stop following", () => {
+        const [node, setNode] = createSignal(bashRunning(40));
+        const { el, g, geo } = mount(node);
+
+        browserScrollTo(el, 300); // 500 px from the bottom, nobody touched it
+        setNode(bashRunning(60));
+        g.scrollHeight = 1400;
+        fireResize();
+        expect(geo.top).toBe(geo.bottom());
+    });
+
+    it("a user scroll up detaches; new output and the result swap then leave the reader alone", () => {
+        const [node, setNode] = createSignal(bashRunning(40));
+        const { el, g, geo } = mount(node);
+
+        userScrollTo(el, 300, -120);
+        setNode(bashRunning(60));
+        g.scrollHeight = 1400;
+        fireResize();
+        expect(geo.top).toBe(300);
+
+        setNode(terminalNode);
+        g.scrollHeight = 900;
+        fireResize();
+        expect(geo.top).toBe(300);
+    });
+
+    it("a user scroll back to within 24 px of the bottom re-attaches", () => {
+        const [node, setNode] = createSignal(bashRunning(40));
+        const { el, g, geo } = mount(node);
+
+        userScrollTo(el, 300, -120);
+        userScrollTo(el, geo.bottom() - 10, 120);
+        setNode(bashRunning(60));
+        g.scrollHeight = 1400;
+        fireResize();
+        expect(geo.top).toBe(geo.bottom());
+    });
+
+    it("a wheel down at the bottom hands off to the pane and keeps following", () => {
+        const [node, setNode] = createSignal(bashRunning(40));
+        const { el, g, geo } = mount(node);
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true }));
+        setNode(bashRunning(60));
+        g.scrollHeight = 1400;
+        fireResize();
+        expect(geo.top).toBe(geo.bottom());
+    });
+
+    it("a finished Read preview opens at the top, and a user scroll to its bottom attaches it", () => {
+        const readNode: ToolNode = {
+            type: "tool",
+            id: "tc-read",
+            tool: "Read",
+            params: { file_path: "/tmp/a.ts" },
+            status: "success",
+            collapsed: false,
+            summary: "Read /tmp/a.ts",
+            result: { content: "const a = 1;\nconst b = 2;" } as any,
+        };
+        const { el, g, geo } = mount(() => readNode);
+        expect(geo.top).toBe(0);
+        g.scrollHeight = 1200; // highlighted content lands
+        fireResize();
+        expect(geo.top).toBe(0);
+
+        userScrollTo(el, geo.bottom(), 400);
+        g.scrollHeight = 1300;
+        fireResize();
+        expect(geo.top).toBe(geo.bottom());
+    });
+
+    it("does not read or write scroll geometry while the panel is hidden, and pins when shown", () => {
+        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+        const [node, setNode] = createSignal(bashRunning(40));
+        const { container } = render(() => (
+            <div class="agent-tool-panel agent-tool-panel--hidden">
+                <ToolOverlayLog node={node()} />
+            </div>
+        ));
+        const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+        const g = { scrollHeight: 1000, clientHeight: 200 };
+        const geo = withGeometry(el, g);
+        let reads = 0;
+        const realScrollHeight = Object.getOwnPropertyDescriptor(el, "scrollHeight")!.get!;
+        Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => (reads++, realScrollHeight()) });
+
+        setNode(bashRunning(60));
+        fireResize();
+        expect(reads).toBe(0);
+        expect(geo.top).toBe(0);
+
+        panel.classList.remove("agent-tool-panel--hidden"); // MutationObserver → panelHidden=false
+        return Promise.resolve().then(() => {
+            fireResize(); // box grows from 0 when shown
+            expect(geo.top).toBe(geo.bottom());
+        });
+    });
+});
