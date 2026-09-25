@@ -22,55 +22,66 @@ describe("accountLabel", () => {
 });
 
 // The agent composer's "Logged in" chip shows the account email instead, in
-// at most 12 characters (full address in the tooltip). The part before the @
-// shortens first, in the middle, down to its first character + its last two;
-// only then does the domain shorten the same way, keeping its TLD.
+// at most 22 characters by default (full address in the tooltip). The part
+// before the @ shortens first, in the middle, down to its first character +
+// its last two; only then does the domain shorten the same way, keeping its TLD.
 describe("shortenEmail", () => {
-    const fits = (s: string) => expect(s.length).toBeLessThanOrEqual(12);
+    describe("default budget (22)", () => {
+        it("returns an email that fits unchanged", () => {
+            expect(shortenEmail("asafebgi@gmail.com")).toBe("asafebgi@gmail.com");
+            expect(shortenEmail("someone@anthropic.com")).toBe("someone@anthropic.com");
+        });
 
-    it("returns an email that fits in 12 unchanged", () => {
-        expect(shortenEmail("me@gmail.com")).toBe("me@gmail.com");
-        expect(shortenEmail("a@b.co")).toBe("a@b.co");
+        it("shortens only the part before @ while the whole domain still fits", () => {
+            expect(shortenEmail("jonathan.ross@anthropic.com")).toBe("jonat…ss@anthropic.com");
+            expect(shortenEmail("jonathan.ross@anthropic.com").length).toBeLessThanOrEqual(22);
+        });
+
+        it("keeps the last two characters before @ so similar names stay distinguishable", () => {
+            expect(shortenEmail("asafe.bgi.dev.one@gmail.com")).toBe("asafe.bgi…ne@gmail.com");
+            expect(shortenEmail("asafe.bgi.dev.two@gmail.com")).toBe("asafe.bgi…wo@gmail.com");
+        });
+
+        it("then shortens a long domain the same way, keeping its TLD", () => {
+            const out = shortenEmail("someone@engineering.example-corporation.com");
+            expect(out.startsWith("s…ne@")).toBe(true);
+            expect(out.endsWith("n.com")).toBe(true);
+            expect(out.length).toBeLessThanOrEqual(22);
+        });
+
+        it("middle-shortens a value with no @ rather than breaking", () => {
+            const out = shortenEmail("claude-oauth-account-with-a-long-name");
+            expect(out).toContain("…");
+            expect(out.length).toBeLessThanOrEqual(22);
+        });
     });
 
-    it("shortens only the part before @ while the whole domain still fits", () => {
-        expect(shortenEmail("jonathan.ross@ex.io")).toBe("jon…ss@ex.io");
-        fits(shortenEmail("jonathan.ross@ex.io"));
-    });
+    describe("a tighter budget (12)", () => {
+        const fits = (s: string) => expect(s.length).toBeLessThanOrEqual(12);
 
-    it("then shortens the domain the same way, keeping its TLD", () => {
-        expect(shortenEmail("asafebgi@gmail.com")).toBe("a…gi@g…l.com");
-        expect(shortenEmail("someone@anthropic.com")).toBe("s…ne@a…c.com");
-        fits(shortenEmail("asafebgi@gmail.com"));
-        fits(shortenEmail("someone@anthropic.com"));
-    });
+        it("returns an email that fits unchanged", () => {
+            expect(shortenEmail("me@gmail.com", 12)).toBe("me@gmail.com");
+        });
 
-    it("keeps the last two characters before @ so similar names stay distinguishable", () => {
-        expect(shortenEmail("asafe.bgi.dev.one@gmail.com")).toBe("a…ne@g…l.com");
-        expect(shortenEmail("asafe.bgi.dev.two@gmail.com")).toBe("a…wo@g…l.com");
-    });
+        it("shortens only the part before @ while the whole domain still fits", () => {
+            expect(shortenEmail("jonathan.ross@ex.io", 12)).toBe("jon…ss@ex.io");
+        });
 
-    it("never shortens a part that is already at or below its minimum", () => {
-        expect(shortenEmail("ab@engineering.example.com")).toBe("ab@eng…e.com");
-        fits(shortenEmail("ab@engineering.example.com"));
-    });
+        it("then shortens the domain the same way, keeping its TLD", () => {
+            expect(shortenEmail("asafebgi@gmail.com", 12)).toBe("a…gi@g…l.com");
+            expect(shortenEmail("someone@anthropic.com", 12)).toBe("s…ne@a…c.com");
+            fits(shortenEmail("asafebgi@gmail.com", 12));
+        });
 
-    it("handles a domain without a dot", () => {
-        const out = shortenEmail("someone@localhost-machine");
-        expect(out.startsWith("s…ne@")).toBe(true);
-        expect(out).toContain("…");
-        fits(out);
-    });
+        it("never shortens a part that is already at or below its minimum", () => {
+            expect(shortenEmail("ab@engineering.example.com", 12)).toBe("ab@eng…e.com");
+        });
 
-    it("honors a custom max length", () => {
-        expect(shortenEmail("asafebgi@gmail.com", 22)).toBe("asafebgi@gmail.com");
-        expect(shortenEmail("jonathan.ross@anthropic.com", 22)).toBe("jonat…ss@anthropic.com");
-    });
-
-    it("middle-shortens a value with no @ rather than breaking", () => {
-        const out = shortenEmail("claude-oauth-account");
-        expect(out).toBe("claude…count");
-        fits(out);
+        it("handles a domain without a dot", () => {
+            const out = shortenEmail("someone@localhost-machine", 12);
+            expect(out.startsWith("s…ne@")).toBe(true);
+            fits(out);
+        });
     });
 });
 

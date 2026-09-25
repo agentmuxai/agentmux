@@ -401,11 +401,12 @@ function ellipsizeMiddle(s: string, head: number, tail: number): string {
  * The part before the @ shortens first, in the middle, down to its first
  * character + last two (the tail is what tells `…one@` from `…two@`). Only
  * when that minimum still doesn't fit does the domain shorten the same way,
- * keeping its TLD: `asafebgi@gmail.com` → `a…gi@g…l.com`. A part already at or
- * below its minimum is never shortened, so a pathological address can still
- * exceed `max` rather than lose its shape.
+ * keeping its TLD. E.g. at the default 22, `jonathan.ross@anthropic.com` →
+ * `jonat…ss@anthropic.com`; at 12, `asafebgi@gmail.com` → `a…gi@g…l.com`.
+ * A part already at or below its minimum is never shortened, so a
+ * pathological address can still exceed `max` rather than lose its shape.
  */
-export function shortenEmail(email: string, max = 12): string {
+export function shortenEmail(email: string, max = 22): string {
     if (email.length <= max) return email;
     const at = email.lastIndexOf("@");
     if (at <= 0) {

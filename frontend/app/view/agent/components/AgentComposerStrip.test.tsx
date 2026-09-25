@@ -921,7 +921,7 @@ describe("computeStatsInline", () => {
     });
 });
 
-// The sign-in chip names the account: its email, shortened to 12 characters
+// The sign-in chip names the account: its email, shortened to 22 characters
 // (identity-model's shortenEmail), full address in the tooltip. The green dot
 // stays; without a recorded email it keeps saying "Logged in".
 describe("AgentComposerStrip — sign-in chip shows the account email", () => {
@@ -929,20 +929,20 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
 
     it("shows the shortened email, with the full address in the tooltip, when signed in", () => {
         const { container } = render(() => (
-            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="asafebgi@gmail.com" />
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="jonathan.ross@anthropic.com" />
         ));
-        expect(chip(container)).toHaveTextContent("a…gi@g…l.com");
+        expect(chip(container)).toHaveTextContent("jonat…ss@anthropic.com");
         expect(chip(container)).not.toHaveTextContent("Logged in");
-        expect(chip(container).getAttribute("title")).toBe("Signed in as asafebgi@gmail.com");
+        expect(chip(container).getAttribute("title")).toBe("Signed in as jonathan.ross@anthropic.com");
         expect(chip(container).querySelector(".agent-composer-strip-auth-dot")).not.toBeNull();
         expect(chip(container).classList.contains("agent-composer-strip-auth--ok")).toBe(true);
     });
 
     it("an email that fits is shown whole", () => {
         const { container } = render(() => (
-            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="me@gmail.com" />
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="asafebgi@gmail.com" />
         ));
-        expect(chip(container)).toHaveTextContent("me@gmail.com");
+        expect(chip(container)).toHaveTextContent("asafebgi@gmail.com");
     });
 
     it("keeps 'Logged in' when no email is known", () => {
