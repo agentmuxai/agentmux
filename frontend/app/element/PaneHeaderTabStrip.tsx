@@ -89,6 +89,9 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             // `canDrop` uses it to reject a pill dragged from a DIFFERENT
             // pane (see that prop's own doc comment). ReAgent P1 on PR #3444.
             paneKey={props.nodeModel.nodeId}
+            // The window tab this pane lives in — enables dragging a pill out
+            // of the window into a floating pane (PaneTabStrip's own doc).
+            sourceTabId={props.nodeModel.layoutModel?.tabAtom?.()?.oid}
         />
     );
 

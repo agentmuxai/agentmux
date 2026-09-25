@@ -260,6 +260,10 @@ class WorkspaceServiceType {
     // exact slot the ghost previewed (SplitHorizontal/SplitVertical instead of
     // the generic InsertNode). Pass null for both to keep the old behavior.
     //
+    // `asTab` (with targetBlockId): land the block as a TAB of targetBlockId's
+    // pane, active, instead of a split/insert — the rollback of a failed
+    // pane-tab tear-off (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5).
+    //
     // @returns { redocked: true, block_id, target_tab_id } (and object updates)
     RedockFloatingPane(
         blockId: string,
@@ -269,6 +273,7 @@ class WorkspaceServiceType {
         targetWsId: string,
         targetBlockId?: string | null,
         direction?: number | null,
+        asTab?: boolean,
     ): Promise<{ redocked: boolean; block_id?: string; target_tab_id?: string }> {
         return MOS.callBackendService("workspace", "RedockFloatingPane", Array.from(arguments))
     }

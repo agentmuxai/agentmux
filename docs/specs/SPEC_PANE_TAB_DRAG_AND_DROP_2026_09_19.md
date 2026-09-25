@@ -2,16 +2,14 @@
 
 **Date:** 2026-09-19
 **Author:** Agent3
-**Status:** active — shipped: Phase 1 in PR #3441, Phase 2 in PR #3442,
+**Status:** implemented — Phase 1 in PR #3441, Phase 2 in PR #3442,
 Phase 3 (same-pane reorder) in PR #3444, header drop (§3.4) in PR #3447 and
-PR #3449, plus the follow-ups in PR #3692, PR #3694 and PR #3698 (header
-always shows its tabs, Window-Tab drop flash + landing bounce, moving a
-pane's last tab closes it; see
-`SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md`). §3.3 was
-**revised** 2026-09-24 (a drop on a pane's body does the same as a drop on its
-header, no split) and shipped in PR #3706. §3.5
-(tear-off to a floating pane) is designed below (revision 2026-09-24) and
-ships in its own follow-up PR.
+PR #3449, follow-ups in PR #3692, PR #3694 and PR #3698 (header always shows
+its tabs, Window-Tab drop flash + landing bounce, moving a pane's last tab
+closes it; see `SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md`),
+body drop = header drop (§3.3, revised) in PR #3706, and tear-off to a
+floating pane (§3.5, revised) in PR #3708. What's left is only the named
+out-of-scope items at the end of §3.5. Not yet verified in a running app.
 
 **Revision 2026-09-24 (repo owner):**
 - **§3.3 split-on-content is dropped.** Dragging a Pane Tab over another
@@ -697,7 +695,7 @@ flash) — flagged as the one place in this plan where "verified via
 `task dev`, not just tests" matters most, matching how the universal
 redesign's own Task Group B4 flagged its own visual-verification limits.
 
-### Phase 6 — Drag out of window → floating pane (§3.5) — design revised 2026-09-24
+### Phase 6 — Drag out of window → floating pane (§3.5) — design revised 2026-09-24, shipped in #3708
 Build §3.5's design (points 1–7), not the original plan. The original plan
 (wire the payload into the `"tile"` branch; wait for sign-off on the
 close-and-reopen question) is superseded: the sign-off question is resolved in
