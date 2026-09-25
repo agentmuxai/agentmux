@@ -8,9 +8,18 @@
  */
 
 import { For, onCleanup, Show } from "solid-js";
-import * as services from "@/store/services";
-import { beginShutdownLog, endShutdownLog, shutdownLogFor, visibleShutdownLines } from "./shutdown-log";
+import { atoms } from "@/store/global";
+import * as MOS from "@/store/mos";
+import { closeWithShutdownLog } from "./close-with-log";
+import { endShutdownLog, shutdownLogFor, visibleShutdownLines } from "./shutdown-log";
 import "./ShutdownOverlay.scss";
+
+/** The tab the block is in: its parent, or else this window's tab (the one
+ *  showing it, since its overlay is being clicked). */
+function tabOf(blockId: string): string {
+    const parent = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.parentoref ?? "";
+    return parent.startsWith("tab:") ? parent.slice(4) : atoms.staticTabId();
+}
 
 export function ShutdownOverlay(props: { blockId: string; agentName?: string }) {
     // The pane unmounts when srv's `delete` action removes it: stop listening.
@@ -18,11 +27,12 @@ export function ShutdownOverlay(props: { blockId: string; agentName?: string }) 
     const log = () => shutdownLogFor(props.blockId);
     const view = () => visibleShutdownLines(log()?.lines ?? []);
 
+    // Same path as the pane ×, so a rejection shows here again rather than
+    // leaving "Shutting down…" up for good (ReAgent P1 on #3784).
     const retry = () => {
         const id = props.blockId;
         endShutdownLog(id);
-        beginShutdownLog(id);
-        services.ObjectService.ClosePane([id], true).catch(() => {});
+        void closeWithShutdownLog(tabOf(id), [id], () => true);
     };
 
     return (
