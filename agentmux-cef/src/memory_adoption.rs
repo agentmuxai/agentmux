@@ -16,6 +16,10 @@
 //!
 //! An agent can click the Armory's button and open the subwindow; it can't
 //! approve in it.
+//!
+//! The same window confirms releasing an agent's claim on a memory folder
+//! (`memory_release_request`, srv `memoryadopt.Release`), which can make the
+//! folder another agent's to write in.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -33,10 +37,18 @@ const APPROVAL_TTL: Duration = Duration::from_secs(10 * 60);
 const ADOPT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const RESULT_EVENT: &str = "memory-adoption-result";
 
+/// What the human is asked to confirm.
+enum Action {
+    /// Adopt these `(index, dir_hash)` choices of an adoption list.
+    Adopt { choices: Vec<serde_json::Value> },
+    /// Release the claim at `index` of a claims list.
+    Release { index: u64 },
+}
+
 struct Pending {
     agent_id: String,
     list_id: String,
-    choices: Vec<serde_json::Value>,
+    action: Action,
     parent_label: String,
     window_id: Option<String>,
     at: Instant,
@@ -61,6 +73,34 @@ pub fn request(
     if choices.is_empty() {
         return Err("memory_adoption_request: nothing chosen".into());
     }
+    open(state, parent_label, agent_id, list_id, Action::Adopt { choices }, summary)
+}
+
+/// Open the approval subwindow for releasing `agent_id`'s claim at `index`
+/// of claims list `list_id`.
+pub fn request_release(
+    state: &Arc<AppState>,
+    parent_label: &str,
+    agent_id: &str,
+    list_id: &str,
+    index: u64,
+    summary: serde_json::Value,
+) -> Result<String, String> {
+    open(state, parent_label, agent_id, list_id, Action::Release { index }, summary)
+}
+
+fn open(
+    state: &Arc<AppState>,
+    parent_label: &str,
+    agent_id: &str,
+    list_id: &str,
+    action: Action,
+    summary: serde_json::Value,
+) -> Result<String, String> {
+    let kind = match action {
+        Action::Adopt { .. } => "adopt",
+        Action::Release { .. } => "release",
+    };
     let approval_id = uuid::Uuid::new_v4().simple().to_string();
     {
         let mut map = pending().lock();
@@ -70,14 +110,14 @@ pub fn request(
             Pending {
                 agent_id: agent_id.to_string(),
                 list_id: list_id.to_string(),
-                choices,
+                action,
                 parent_label: parent_label.to_string(),
                 window_id: None,
                 at: Instant::now(),
             },
         );
     }
-    let meta = serde_json::json!({ "approval_id": approval_id, "summary": summary }).to_string();
+    let meta = serde_json::json!({ "approval_id": approval_id, "kind": kind, "summary": summary }).to_string();
     let opened = crate::commands::window::open_subwindow(
         state,
         parent_label.to_string(),
@@ -107,17 +147,28 @@ pub async fn decide(state: &Arc<AppState>, approval_id: &str, approve: bool) -> 
         tracing::warn!("[memory-adoption] decide for unknown or expired approval {approval_id}");
         return Ok(serde_json::json!(false));
     };
+    let (kind, method, args) = match &p.action {
+        Action::Adopt { choices } => (
+            "adopt",
+            "Adopt",
+            serde_json::json!({ "agent_id": p.agent_id, "list_id": p.list_id, "choices": choices }),
+        ),
+        Action::Release { index } => (
+            "release",
+            "Release",
+            serde_json::json!({ "agent_id": p.agent_id, "list_id": p.list_id, "index": index }),
+        ),
+    };
     let outcome = if approve {
-        let args = serde_json::json!({ "agent_id": p.agent_id, "list_id": p.list_id, "choices": p.choices });
-        match crate::credential_broker::call_host_only_service(state, "memoryadopt", "Adopt", args, ADOPT_TIMEOUT).await {
-            Ok(report) => serde_json::json!({ "agent_id": p.agent_id, "status": "adopted", "report": report }),
+        match crate::credential_broker::call_host_only_service(state, "memoryadopt", method, args, ADOPT_TIMEOUT).await {
+            Ok(report) => serde_json::json!({ "agent_id": p.agent_id, "kind": kind, "status": "done", "report": report }),
             Err(e) => {
-                tracing::warn!("[memory-adoption] Adopt failed: {e}");
-                serde_json::json!({ "agent_id": p.agent_id, "status": "failed", "error": e })
+                tracing::warn!("[memory-adoption] {method} failed: {e}");
+                serde_json::json!({ "agent_id": p.agent_id, "kind": kind, "status": "failed", "error": e })
             }
         }
     } else {
-        serde_json::json!({ "agent_id": p.agent_id, "status": "declined" })
+        serde_json::json!({ "agent_id": p.agent_id, "kind": kind, "status": "declined" })
     };
     crate::events::emit_event_to_window(state, &p.parent_label, RESULT_EVENT, &outcome);
     if let Some(window_id) = p.window_id {
@@ -142,7 +193,11 @@ pub fn cancel_for_window(state: &AppState, label: &str) {
         ids.into_iter().filter_map(|id| map.remove(&id)).collect()
     };
     for p in dropped {
-        let outcome = serde_json::json!({ "agent_id": p.agent_id, "status": "declined" });
+        let kind = match p.action {
+            Action::Adopt { .. } => "adopt",
+            Action::Release { .. } => "release",
+        };
+        let outcome = serde_json::json!({ "agent_id": p.agent_id, "kind": kind, "status": "declined" });
         crate::events::emit_event_to_window(state, &p.parent_label, RESULT_EVENT, &outcome);
     }
 }
