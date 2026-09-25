@@ -477,6 +477,10 @@ pub const COMMAND_MEMORY_WRITE: &str = "memory.write";
 pub const COMMAND_BOOKMARKS_LIST: &str = "bookmarks.list";
 pub const COMMAND_BOOKMARKS_SET: &str = "bookmarks.set";
 
+// Layout files — save a window as `*.agentmux-layout.json`.
+// See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.
+pub const COMMAND_LAYOUT_SAVE: &str = "layout.save";
+
 // Browser-pane start page — a single URL, also global (shared_dir-backed).
 // Write-only RPC: the value is read via GetFullConfig's `browserstartpage`
 // field, not a dedicated `.get`, so a new browser pane can read it

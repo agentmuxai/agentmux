@@ -107,6 +107,15 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.noPadding?.()).toBe(true);
     });
 
+    it("maps a live header icon", () => {
+        const icon = { elemtype: "iconbutton", icon: "file-code" } as any;
+        const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
+            component: () => null as any,
+            headerIcon: () => icon,
+        });
+        expect(vm.viewIcon?.()).toBe(icon);
+    });
+
     it("leaves out what the instance does not provide, so the host's defaults apply", () => {
         const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
             component: () => null as any,

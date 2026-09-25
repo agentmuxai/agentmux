@@ -186,6 +186,13 @@ declare global {
          *  the user cancelled. See
          *  docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §4 Step 1. */
         showOpenBundleDialog(): Promise<string | null>;
+        /** Native "save file" dialog for a layout file
+         *  (`*.agentmux-layout.json`), opening in
+         *  `~/.agentmux/shared/layouts/` with `<defaultName>` suggested.
+         *  Resolves to the chosen absolute path (extension ensured), or null
+         *  if the user cancelled. Writes nothing itself. See
+         *  docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §6.1. */
+        showSaveLayoutDialog(defaultName: string): Promise<string | null>;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;

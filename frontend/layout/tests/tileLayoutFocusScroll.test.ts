@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 const TILE_LAYOUT_SCSS = join(__dirname, "..", "lib", "tilelayout.scss");
 const AGENT_MODEL = join(__dirname, "..", "..", "app", "view", "agent", "agent-model.ts");
+const COMPOSER_FOCUS = join(__dirname, "..", "..", "app", "view", "agent", "composer-focus.ts");
 
 /** The declarations directly inside the top-level `.tile-layout {` rule, before its first nested block. */
 function tileLayoutOwnDeclarations(scss: string): string {
@@ -36,12 +37,30 @@ describe(".tile-layout can't be scrolled by focus", () => {
     });
 });
 
+/** The body of the function/method that starts at `signature`, up to its closing brace at `indent`. */
+function bodyOf(src: string, signature: string, indent: string): string {
+    const start = src.indexOf(signature);
+    expect(start).toBeGreaterThanOrEqual(0);
+    return src.slice(start, src.indexOf(`\n${indent}}`, start));
+}
+
+const PREVENT_SCROLL = /\.focus\(\{\s*preventScroll:\s*true\s*\}\)/;
+
 describe("the agent pane focuses its composer without scrolling ancestors", () => {
-    it("giveFocus() passes preventScroll", () => {
-        const src = readFileSync(AGENT_MODEL, "utf8");
-        const start = src.indexOf("giveFocus(): boolean {");
-        expect(start).toBeGreaterThanOrEqual(0);
-        const body = src.slice(start, src.indexOf("\n    }", start));
-        expect(body).toMatch(/\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
+    it("giveFocus() passes preventScroll, directly or through focusComposer()", () => {
+        const body = bodyOf(readFileSync(AGENT_MODEL, "utf8"), "giveFocus(): boolean {", "    ");
+        if (PREVENT_SCROLL.test(body)) return;
+        // giveFocus() delegates to composer-focus.ts
+        // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3), so the
+        // guard must hold there instead.
+        expect(body).toMatch(/\bfocusComposer\(/);
+        const composer = bodyOf(
+            readFileSync(COMPOSER_FOCUS, "utf8"),
+            "export function focusComposer(ta: HTMLTextAreaElement): boolean {",
+            ""
+        );
+        expect(composer).toMatch(PREVENT_SCROLL);
+        // …and no other focus() call in it that could scroll.
+        expect(composer.match(/\.focus\(/g)?.length).toBe(1);
     });
 });
