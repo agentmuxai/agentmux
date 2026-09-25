@@ -53,6 +53,24 @@ describe("pane tab memory", () => {
     const dormant = (blockId: string) =>
         ({ blockId, view: "browser", meta: { view: "browser" }, ordinal: 1, liveViewModel: null }) as any;
 
+    // A re-mounted ViewModel reports the view's generic name ("Browser")
+    // until its real title loads. That placeholder must not flash over the
+    // remembered page title when the tab becomes active again.
+    it("doesn't let a freshly mounted ViewModel's placeholder name replace the remembered one", () => {
+        const memory = createPaneTabMemory();
+        describePaneTab(live("b1", "A Very Long Page Title"), undefined, memory);
+        expect(describePaneTab(dormant("b1"), undefined, memory).label).toBe("A Very Long Page Title");
+        // Reactivated: the new ViewModel says "Browser" first...
+        expect(describePaneTab(live("b1", "Browser"), undefined, memory).label).toBe("A Very Long Page Title");
+        // ...then the real title arrives (and a changed title still updates).
+        expect(describePaneTab(live("b1", "Another Page"), undefined, memory).label).toBe("Another Page");
+    });
+
+    it("still shows the placeholder when nothing better has been seen yet", () => {
+        const memory = createPaneTabMemory();
+        expect(describePaneTab(live("b2", "Browser"), undefined, memory).label).toBe("Browser");
+    });
+
     it("keeps a tab's last live name once it goes dormant", () => {
         const memory = createPaneTabMemory();
         describePaneTab(live("b1", "Example Domain"), undefined, memory);
