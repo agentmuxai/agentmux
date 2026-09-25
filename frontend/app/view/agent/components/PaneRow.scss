@@ -125,6 +125,40 @@
     }
 }
 
+// Narrow panes — labelled-action rows (failure recovery: Log in / Login via
+// terminal / Bind / Armory) stack their buttons instead of clipping them.
+// Buttons keep their normal look; only the flow changes. Uses the same
+// `agent-pane` container as every other agent-pane breakpoint
+// (styles/_responsive.scss) — see docs/specs/responsive-agent-pane.md.
+//
+// Tier 1 (<= 479px): the summary wraps, so buttons that no longer fit beside
+// the title drop onto their own line(s) and flow as a row.
+@container agent-pane (max-width: 479px) {
+    .pane-row--labeled-actions > .pane-row-summary {
+        flex-wrap: wrap;
+        row-gap: var(--space-1);
+        padding-block: var(--space-1);
+        white-space: normal;
+
+        .pane-row-title {
+            // Let a long title wrap onto its own line rather than ellipsise.
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        // The auto left margin only right-aligns the cluster on a single line.
+        .pane-row-action:first-of-type { margin-left: 0; }
+    }
+}
+
+// Tier 2 (<= 249px): one button per line, full width.
+@container agent-pane (max-width: 249px) {
+    .pane-row--labeled-actions > .pane-row-summary .pane-row-action--labeled {
+        flex: 1 0 100%;
+        justify-content: flex-start;
+    }
+}
+
 // Expanded body for the failure-recovery row: explanation + stderr/result tail.
 .pane-row-body .agent-failure-detail {
     display: flex;
