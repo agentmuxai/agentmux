@@ -80,14 +80,16 @@ function playTone(
 /**
  * Play a polite tone matching the category through `out`. `gain`
  * scales the per-tone peak. Returns immediately — the audio plays
- * asynchronously and self-disposes.
+ * asynchronously and self-disposes. The return value is the context
+ * time the first tone was scheduled at (the activity flash times itself
+ * from it).
  */
 export function playSynthFallback(
     ctx: AudioContext,
     out: AudioNode,
     category: SoundCategory,
     gain: number,
-): void {
+): number {
     const now = ctx.currentTime;
     const p = synthParamsFor(category);
     const scaledPeak = p.peak * Math.max(0, Math.min(1, gain));
@@ -95,4 +97,5 @@ export function playSynthFallback(
     if (p.second) {
         playTone(ctx, out, p.wave, p.second.freq, scaledPeak, now + p.second.delayMs / 1000);
     }
+    return now;
 }

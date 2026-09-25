@@ -379,7 +379,7 @@
         "notify:tooltones:flash": {
           "type": "boolean",
           "default": true,
-          "description": "Pair every tool-call tone with a brief flash on the source pane's pill in its pane header (a brightened version of the pane's color) and a subtler one on its window tab, so a tone from a pane you can't see can be traced. Follows the tone's own enable/scope gates. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md."
+          "description": "Pair every sound from a pane (tool-call tones and the turn/message event sounds) with a flash on the source pane's pill in its pane header (a brightened version of the pane's color) and a subtler one on its window tab, so a sound from a pane you can't see can be traced. One pulse per strike of the sound, timed to the audible sound, brighter for louder sounds. Follows each sound's own enable/scope/focus gates. Key name kept for compatibility; it covers all sounds. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md and SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md."
         },
         "dnd:enabled": {
           "type": "boolean",

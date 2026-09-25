@@ -101,7 +101,7 @@
     // "notify:tooltones:enabled":               true,
     // "notify:tooltones:volume":                0.25,
     // "notify:tooltones:scope":                 "all",  // "all" or "focused"
-    // "notify:tooltones:flash":                 true,   // fade the source tab with each tone
+    // "notify:tooltones:flash":                 true,   // flash the source tab with each sound (tones + event sounds)
 
     // -- Voice input (speech-to-text) --
     // "voice:enabled":          true,       // show the per-pane mic button (default true)
