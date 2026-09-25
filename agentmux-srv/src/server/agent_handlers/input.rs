@@ -677,6 +677,10 @@ pub(crate) async fn build_persistent_spawn_env(
             env_vars.insert("PATH".to_string(), new_path);
         }
     }
+    // Plain `gh` must not act as a human's gh login (see `gh_guard`). Last, so
+    // nothing above — a persisted `cmd:env`, an identity binding — can set it
+    // back: this is a reserved variable, not a default.
+    crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
 
     Ok(env_vars)
 }
