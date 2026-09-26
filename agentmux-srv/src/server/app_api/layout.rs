@@ -120,7 +120,9 @@ pub(super) async fn layout_open_impl(
     }
     let new_window = req.new_window.unwrap_or(false);
     let ws_id = if new_window {
-        create_empty_workspace(state, &plan.name).await?
+        // Blank falls back to "Layout", as `layout.save` and the preview do.
+        let name = plan.name.trim();
+        create_empty_workspace(state, if name.is_empty() { "Layout" } else { name }).await?
     } else {
         state
             .mstore
@@ -514,6 +516,29 @@ mod tests {
             .find(|b| obj::meta_get_string(&b.meta, "view", "") == "term")
             .unwrap();
         assert_eq!(obj::meta_get_string(&term.meta, "controller", ""), "shell");
+    }
+
+    #[tokio::test]
+    async fn a_new_windows_workspace_is_called_layout_when_the_file_has_no_name() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_layout(dir.path(), OWN);
+        let mut doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        doc["name"] = serde_json::json!("   ");
+        std::fs::write(&path, doc.to_string()).unwrap();
+        let out = layout_open_impl(
+            &state,
+            CommandLayoutOpenData {
+                path: path.to_string_lossy().to_string(),
+                window_id: String::new(),
+                run_commands: Some(false),
+                new_window: Some(true),
+            },
+            &trust(dir.path(), Some(OWN)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(state.mstore.get::<Workspace>(&out.workspace_id).unwrap().unwrap().name, "Layout");
     }
 
     #[tokio::test]
