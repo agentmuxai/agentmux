@@ -900,6 +900,12 @@ pub async fn run_agent_turn(
         let sid = crate::backend::obj::meta_get_string(&block.meta, "agent:sessionid", "");
         let new_session_key = format!("block:{block_id}:new");
         let session_key = if sid.is_empty() { new_session_key.clone() } else { format!("session:{sid}") };
+        // Re-derive any send-copy whose fingerprint is stale (a changed send
+        // edge) under the service's CPU and memory limits, before the
+        // blocking resolve below looks the files up.
+        for a in &attachments {
+            svc.ensure_derived(&a.id).await;
+        }
         let prepared = tokio::task::spawn_blocking(move || {
             use crate::backend::attachments::prompt;
             if session_key != new_session_key {
