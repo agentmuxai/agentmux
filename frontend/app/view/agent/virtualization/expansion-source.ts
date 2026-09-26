@@ -35,6 +35,7 @@
  */
 
 import type { Expansion } from "@/app/store/agent-pane-layout/types";
+import { isContentFirstTool } from "../components/tool-presentation";
 import type { DocumentNode, DocumentState } from "../types";
 
 /** The only `documentState` the mapping depends on — the collapse/pin sets plus
@@ -55,6 +56,12 @@ export function currentExpansion(
 ): Expansion {
     switch (node.type) {
         case "tool":
+            // A finished content-first tool (WebSearch) is open by default,
+            // like a message, until the user collapses it.
+            // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.1.
+            if (isContentFirstTool(node)) {
+                return state.collapsedNodes.has(node.id) ? CLOSED : OPEN_DEFAULT;
+            }
             // pin wins; otherwise a live tool is auto-expanded. A completed tool
             // stays open while held in `expandedTools` (added on live completion,
             // removed once it scrolls off the top — the scroll-driven replacement

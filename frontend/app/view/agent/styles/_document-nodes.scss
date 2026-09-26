@@ -657,6 +657,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         &.pill-exit-err { color: var(--error-color);   background: color-mix(in srgb, var(--error-color)   14%, transparent); }
         &.pill-files    { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
         &.pill-matches  { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
+        &.pill-sources  { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
         &.pill-written  { color: var(--success-color);       background: color-mix(in srgb, var(--success-color)       14%, transparent); }
         &.pill-edited   { color: var(--warning-color);       background: color-mix(in srgb, var(--warning-color)       14%, transparent); }
         &.pill-agent    { color: var(--term-bright-magenta); background: color-mix(in srgb, var(--term-bright-magenta) 12%, transparent); }
@@ -1575,6 +1576,162 @@ $transcript-preview-max-height: calc(50vh / 3);
     td {
         color: var(--main-text-color);
         opacity: 0.9;
+    }
+}
+
+// Claude Code WebSearch answer (SearchResults.tsx → WebSearchAnswer): the
+// search sub-model's markdown answer first, then a strip of source chips, one
+// per domain. The answer is prose, so it reads in the transcript's body type,
+// not the tool log's monospace. Everything opens in the system browser.
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.4.
+.agent-websearch {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    .agent-search-summary {
+        // Mirrors .agent-tool-read-md: markdown inside the capped preview box.
+        padding: 2px var(--space-1) 0;
+        font-family: var(--font-sans);
+        user-select: text;
+        cursor: text;
+
+        .markdown,
+        .markdown > .content {
+            display: block;
+            height: auto;
+            overflow: visible;
+        }
+
+        // Compact markdown: the box is capped at ~13 lines, and document-
+        // size headings (2em / 1.5em with a rule) spent most of it on one
+        // "## Official docs". Headings become bold body-size labels.
+        .markdown > .content {
+            font-size: 13px;
+
+            .heading {
+                margin: 0.6em 0 0.2em;
+                padding-top: 0;
+                font-weight: 600;
+            }
+
+            .heading.is-1,
+            .heading.is-2,
+            .heading.is-3,
+            .heading.is-4 {
+                font-size: 1em;
+                border-bottom: none;
+                padding-bottom: 0;
+            }
+
+            .paragraph {
+                margin-bottom: 6px;
+            }
+        }
+    }
+
+    .agent-search-sources {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-1) 2px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .agent-search-sources-label {
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--secondary-text-color);
+    }
+
+    .agent-search-source-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .agent-search-source {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+        padding: 1px 6px;
+        // Square, transparent: same card language as .agent-search-card.
+        border: 1px solid var(--border-color);
+        border-radius: 0;
+        background: transparent;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        cursor: pointer;
+
+        &:hover,
+        &:focus-visible,
+        &.agent-search-source--open {
+            color: var(--main-text-color);
+            border-color: var(--accent-color);
+        }
+    }
+
+    .agent-search-source-domain {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .agent-search-source-count {
+        flex-shrink: 0;
+        opacity: 0.7;
+        font-family: var(--fixed-font, monospace);
+        font-size: 10px;
+    }
+
+    .agent-search-links {
+        display: flex;
+        flex-direction: column;
+    }
+
+    // One line per link: favicon · title · domain (dim), ellipsized.
+    .agent-search-link {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        padding: 2px var(--space-1);
+        font-size: 12px;
+        cursor: pointer;
+
+        &:hover,
+        &:focus-visible {
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        }
+    }
+
+    .agent-search-link-title {
+        flex: 0 1 auto;
+        min-width: 0;
+        color: var(--accent-color);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .agent-search-link-domain {
+        flex: 1 1 0;
+        min-width: 0;
+        color: var(--secondary-text-color);
+        font-size: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .agent-search-card-favicon {
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        border-radius: 2px;
+        opacity: 0.85;
     }
 }
 
