@@ -444,6 +444,8 @@ const AppInner = () => {
                         can show at once if both are true. */}
                     <MemoryPressureBanner kind="ram" />
                     <MemoryPressureBanner kind="pagefile" />
+                    {/* srv health-probe latency, same banner system — analysis §8.2. */}
+                    <MemoryPressureBanner kind="backend" />
                 </Show>
                 <Show
                     when={IS_FLOATING_PANE}

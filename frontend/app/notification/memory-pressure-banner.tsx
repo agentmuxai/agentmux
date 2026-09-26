@@ -37,7 +37,10 @@ import { listenEvent } from "@/app/platform/ipc";
 import "./memory-pressure-banner.scss";
 
 export type PressureLevel = "normal" | "warn" | "critical";
-export type PressureKind = "ram" | "pagefile";
+/** "backend" is srv's health-probe latency (the launcher's rolling average of
+ *  probe round-trips), shown through the same banner — analysis §8.2 of
+ *  ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26. */
+export type PressureKind = "ram" | "pagefile" | "backend";
 type ActiveLevel = Exclude<PressureLevel, "normal">;
 
 interface MemoryPressurePayload {
@@ -49,6 +52,8 @@ interface MemoryPressurePayload {
     commit_free_mb?: number;
     system_managed?: boolean;
     disk_free_pct?: number;
+    // "backend" payloads carry this.
+    avg_ms?: number;
 }
 
 /** Ordinal severity, so escalation (warn→critical) can re-show a dismissed banner. */
@@ -99,8 +104,23 @@ export function pagefileGuidance(systemManaged?: boolean, diskFreePct?: number):
 
 /** The full banner text for a given kind/level/payload — RAM never has
  *  disk/OS-managed guidance (that concept doesn't apply to physical RAM). */
+/** "1.8s" from a rolling-average ms value; empty when the host sent none. */
+export function formatAvg(avgMs?: number): string {
+    if (avgMs === undefined || !Number.isFinite(avgMs)) return "";
+    return `${(avgMs / 1000).toFixed(1)}s`;
+}
+
+export function backendMessage(level: ActiveLevel, avgMs?: number): string {
+    const avg = formatAvg(avgMs);
+    const avgPart = avg ? ` (avg ${avg})` : "";
+    return level === "critical"
+        ? `AgentMux is barely responding${avgPart} — it may restart itself to recover.`
+        : `AgentMux is responding slowly${avgPart}. Heavy CPU use by other processes, including agents' builds, can cause this.`;
+}
+
 export function messageFor(kind: PressureKind, level: ActiveLevel, payload: MemoryPressurePayload): string {
     if (kind === "ram") return RAM_MESSAGE[level];
+    if (kind === "backend") return backendMessage(level, payload.avg_ms);
     return PAGEFILE_MESSAGE[level] + pagefileGuidance(payload.system_managed, payload.disk_free_pct);
 }
 
@@ -151,7 +171,13 @@ export const MemoryPressureBanner = (props: MemoryPressureBannerProps) => {
                     class="memory-pressure-banner-dismiss"
                     type="button"
                     title="Dismiss"
-                    aria-label={props.kind === "ram" ? "Dismiss low-RAM warning" : "Dismiss low-page-file warning"}
+                    aria-label={
+                        props.kind === "ram"
+                            ? "Dismiss low-RAM warning"
+                            : props.kind === "backend"
+                              ? "Dismiss slow-response warning"
+                              : "Dismiss low-page-file warning"
+                    }
                     onClick={() => setDismissedAt(level())}
                 >
                     ×

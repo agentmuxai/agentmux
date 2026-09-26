@@ -471,9 +471,12 @@ pub(crate) async fn run_windows(
     // (live-reproduced 2026-07-11: respawned srv logged "stdin closed,
     // shutting down" 7ms after binding its listeners).
     let mut srv_stdin_keepalive = srv_child.stdin.take();
-    // SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03 — start the liveness
-    // prober's counters clean for this srv instance.
-    crate::srv_liveness::reset();
+    // SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03 + analysis §8.1/§8.2 —
+    // the liveness prober's recycle decision and latency signal, clean for
+    // this srv instance (and reset again on every respawn below).
+    let mut srv_recycle = crate::srv_liveness::RecyclePolicy::default();
+    let mut srv_latency = crate::srv_liveness::LatencyTracker::default();
+    let mut srv_probe_count: u64 = 0;
 
     // 4-6. Spawn the host (suspended) → assign to J0 → resume, via
     // spawn_host_supervised(). The splash event is passed on every launch
@@ -727,29 +730,65 @@ pub(crate) async fn run_windows(
                 }
             }
             _ = srv_probe_interval.tick() => {
-                if crate::srv_liveness::probe(&srv_result.web_endpoint, SRV_PROBE_TIMEOUT).await {
-                    crate::srv_liveness::record_success();
-                } else {
-                    let misses = crate::srv_liveness::record_failure();
+                let rtt = crate::srv_liveness::probe_rtt(&srv_result.web_endpoint, SRV_PROBE_TIMEOUT).await;
+                // Latency signal (§8.2): a miss counts as the full timeout.
+                let rtt_ms = rtt
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(SRV_PROBE_TIMEOUT.as_millis() as u64);
+                srv_probe_count += 1;
+                if let Some(level) = srv_latency.observe(rtt_ms) {
+                    let avg_ms = srv_latency.average_ms();
                     log(&format!(
-                        "[srv-liveness] missed health probe ({} consecutive)",
-                        misses
+                        "[srv-latency] level -> {} (avg {}ms over the last {} probes)",
+                        level.as_str(),
+                        avg_ms,
+                        crate::srv_liveness::LATENCY_WINDOW
                     ));
-                    if crate::srv_liveness::should_recycle() {
+                    if let Err(e) = host_pipe
+                        .try_send_command_no_buffer(&agentmux_common::ipc::Command::NotifySrvLatency {
+                            level: level.as_str().to_string(),
+                            avg_ms,
+                        })
+                        .await
+                    {
+                        log(&format!("[srv-latency] notify send failed (transport): {:?}", e));
+                    }
+                } else if srv_probe_count % crate::srv_liveness::LATENCY_WINDOW as u64 == 0 {
+                    // Once a minute, so the average can be graphed from the log.
+                    log(&format!(
+                        "[srv-latency] avg {}ms ({})",
+                        srv_latency.average_ms(),
+                        srv_latency.level().as_str()
+                    ));
+                }
+                match rtt {
+                    Some(_) => srv_recycle.record_success(),
+                    None => {
+                        // Progress evidence (§8.1): a slow srv still burning
+                        // CPU is working through load, not stuck.
+                        let cpu = crate::srv_liveness::process_cpu_time(srv_result.pid);
+                        let decision = srv_recycle.record_miss(std::time::Instant::now(), cpu);
                         log(&format!(
-                            "[srv-liveness] srv wedged (alive, unresponsive to {} consecutive health \
-                             probes) — forcing recycle",
-                            misses
+                            "[srv-liveness] missed health probe ({} consecutive)",
+                            srv_recycle.misses()
                         ));
-                        crate::srv_liveness::reset();
-                        // Kill srv directly (not via J0/TerminateJobObject —
-                        // this is scoped to srv alone, not a whole-tree
-                        // teardown). The srv_status = srv_child.wait() arm
-                        // (next iteration) picks up the exit and runs the
-                        // already-shipped #2107 respawn/rebind/host-recycle
-                        // path unmodified — this arm's only job is deciding
-                        // "treat this as a crash".
-                        let _ = srv_child.start_kill();
+                        if let Some(reason) = decision {
+                            log(&format!(
+                                "[srv-liveness] srv wedged ({:?}: unresponsive to {} consecutive health \
+                                 probes) — forcing recycle",
+                                reason,
+                                srv_recycle.misses()
+                            ));
+                            srv_recycle = crate::srv_liveness::RecyclePolicy::default();
+                            // Kill srv directly (not via J0/TerminateJobObject —
+                            // this is scoped to srv alone, not a whole-tree
+                            // teardown). The srv_status = srv_child.wait() arm
+                            // (next iteration) picks up the exit and runs the
+                            // already-shipped #2107 respawn/rebind/host-recycle
+                            // path unmodified — this arm's only job is deciding
+                            // "treat this as a crash".
+                            let _ = srv_child.start_kill();
+                        }
                     }
                 }
             }
@@ -1111,10 +1150,12 @@ pub(crate) async fn run_windows(
                         // of this arm.
                         srv_stdin_keepalive = srv_child.stdin.take();
                         // A freshly respawned srv must not inherit its
-                        // predecessor's miss count (whether this respawn was
-                        // triggered by a real crash or by the liveness
-                        // prober's own recycle-kill above).
-                        crate::srv_liveness::reset();
+                        // predecessor's miss run or latency history (whether
+                        // this respawn was triggered by a real crash or by the
+                        // liveness prober's own recycle-kill above). The host
+                        // is recycled too, so its banner starts clear.
+                        srv_recycle = crate::srv_liveness::RecyclePolicy::default();
+                        srv_latency = crate::srv_liveness::LatencyTracker::default();
                         log(&format!(
                             "srv respawned (pid {}) — new endpoints ws={} web={}; recycling host",
                             srv_result.pid, srv_result.ws_endpoint, srv_result.web_endpoint

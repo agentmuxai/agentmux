@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    backendMessage,
+    formatAvg,
     messageFor,
     pagefileGuidance,
     severity,
@@ -91,5 +93,32 @@ describe("memory-pressure banner — messageFor", () => {
         });
         expect(msg).toMatch(/page file/i);
         expect(msg).toMatch(/fixed size/);
+    });
+});
+
+describe("memory-pressure banner — backend (srv latency) kind", () => {
+    it("formats the rolling average in seconds, and nothing when absent", () => {
+        expect(formatAvg(1840)).toBe("1.8s");
+        expect(formatAvg(undefined)).toBe("");
+        expect(formatAvg(Number.NaN)).toBe("");
+    });
+
+    it("warn says slow and names the likely cause, with the average", () => {
+        const msg = messageFor("backend", "warn", { kind: "backend", level: "warn", avg_ms: 1200 });
+        expect(msg).toBe(backendMessage("warn", 1200));
+        expect(msg).toMatch(/responding slowly \(avg 1\.2s\)/);
+        expect(msg).toMatch(/agents' builds/);
+    });
+
+    it("critical warns it may restart itself", () => {
+        const msg = messageFor("backend", "critical", { kind: "backend", level: "critical", avg_ms: 2900 });
+        expect(msg).toMatch(/barely responding \(avg 2\.9s\)/);
+        expect(msg).toMatch(/restart itself/);
+    });
+
+    it("never mentions memory or the page file", () => {
+        for (const level of ["warn", "critical"] as const) {
+            expect(messageFor("backend", level, { kind: "backend", level })).not.toMatch(/page file|RAM|memory/i);
+        }
     });
 });

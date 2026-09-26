@@ -22,93 +22,20 @@
 //! it is running.
 //!
 //! Recovery deliberately does NOT duplicate the existing crash-recycle
-//! logic: on `SRV_HANG_REQUIRED_MISSES` consecutive failed probes, the
-//! caller kills srv's process directly (`Child::start_kill()`) and resets
-//! this module's counters. The next loop iteration's existing
+//! logic: when [`RecyclePolicy`] decides srv is stuck (no answer for a minute
+//! AND no CPU progress, or three minutes regardless), the caller kills srv's
+//! process directly (`Child::start_kill()`). The next loop iteration's
 //! `srv_status = srv_child.wait()` arm sees the exit and runs the
 //! already-shipped #2107 respawn/rebind/host-recycle path unmodified — this
 //! module's only job is deciding "treat this as a crash", never how to
-//! recover from one.
+//! recover from one. [`LatencyTracker`] turns the same probes into a health
+//! signal the host shows as a banner.
 //!
-//! Like `ui_liveness`, all logic lives on the struct (unit-testable without
-//! real I/O or a mock clock — there's no elapsed-time gate, just a
-//! consecutive-failure counter); the module-level functions delegate to one
-//! process-global instance, mirroring `ui_liveness`'s reasoning for why each
-//! test constructs its own instance instead of sharing the process-global
-//! cell (parallel test execution would otherwise interleave).
+//! All decisions are pure types owned by the supervisor loop (no process-
+//! global state), so each test builds its own instances with injected times.
 
-use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// Consecutive missed health probes before srv counts as wedged. At the
-/// `SRV_PROBE_INTERVAL` (10s) this bounds worst-case wedge→recycle latency
-/// to roughly 3 probe intervals plus their timeouts (~30s) — the same
-/// order of magnitude as the host teardown backstop's 30s grace.
-pub const SRV_HANG_REQUIRED_MISSES: u32 = 3;
-
-#[derive(Debug, Default)]
-pub struct SrvLiveness {
-    consecutive_misses: u32,
-    last_alive: Option<Instant>,
-}
-
-impl SrvLiveness {
-    /// Record a successful probe. Clears the miss streak — any answer
-    /// proves srv's async runtime is pumping right now.
-    pub fn record_success(&mut self, now: Instant) {
-        self.consecutive_misses = 0;
-        self.last_alive = Some(now);
-    }
-
-    /// Record a missed probe (timeout or connection failure). Returns the
-    /// new consecutive-miss count.
-    pub fn record_failure(&mut self) -> u32 {
-        self.consecutive_misses = self.consecutive_misses.saturating_add(1);
-        self.consecutive_misses
-    }
-
-    /// Clear all state. Called after every srv (re)spawn — a freshly
-    /// started srv must not inherit its predecessor's miss count.
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-
-    /// The recycle decision: pure read, caller executes.
-    pub fn should_recycle(&self, required_misses: u32) -> bool {
-        self.consecutive_misses >= required_misses
-    }
-
-    #[allow(dead_code)] // telemetry surface, mirrors ui_liveness::last_alive
-    pub fn last_alive(&self) -> Option<Instant> {
-        self.last_alive
-    }
-}
-
-fn cell() -> &'static Mutex<SrvLiveness> {
-    static S: OnceLock<Mutex<SrvLiveness>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(SrvLiveness::default()))
-}
-
-/// See [`SrvLiveness::record_success`]. Process-global instance.
-pub fn record_success() {
-    cell().lock().unwrap().record_success(Instant::now());
-}
-
-/// See [`SrvLiveness::record_failure`]. Process-global instance.
-pub fn record_failure() -> u32 {
-    cell().lock().unwrap().record_failure()
-}
-
-/// See [`SrvLiveness::reset`]. Process-global instance.
-pub fn reset() {
-    cell().lock().unwrap().reset();
-}
-
-/// See [`SrvLiveness::should_recycle`]. Process-global instance, evaluated
-/// against the spec constant.
-pub fn should_recycle() -> bool {
-    cell().lock().unwrap().should_recycle(SRV_HANG_REQUIRED_MISSES)
-}
 
 /// Hand-rolled HTTP `GET /` against srv's web endpoint, bounded end-to-end
 /// by `timeout`. Deliberately not reqwest — same reasoning as
@@ -131,9 +58,17 @@ pub fn should_recycle() -> bool {
 /// function stripped a `http://` prefix that never exists, so every probe
 /// silently failed and every healthy srv got recycled to death.)
 pub async fn probe(web_endpoint: &str, timeout: Duration) -> bool {
-    tokio::time::timeout(timeout, probe_inner(web_endpoint))
-        .await
-        .unwrap_or(false)
+    probe_rtt(web_endpoint, timeout).await.is_some()
+}
+
+/// [`probe`], returning how long the successful round-trip took. `None` is a
+/// miss (timeout, refused, or a non-200 answer).
+pub async fn probe_rtt(web_endpoint: &str, timeout: Duration) -> Option<Duration> {
+    let started = Instant::now();
+    match tokio::time::timeout(timeout, probe_inner(web_endpoint)).await {
+        Ok(true) => Some(started.elapsed()),
+        _ => None,
+    }
 }
 
 async fn probe_inner(host_port: &str) -> bool {
@@ -153,55 +88,201 @@ async fn probe_inner(host_port: &str) -> bool {
     }
 }
 
+// ── Slow vs. dead, and a latency signal ─────────────────────────────────────
+//
+// docs/analysis/ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26.md §8.1/§8.2.
+// Three consecutive 3s misses used to recycle srv — ~30s of slowness killed
+// every agent session, including when srv was only slow under host load and
+// recovering on its own. The probe's round-trip time is also a health signal
+// the user never saw. Both are decided here, as pure types, so the supervisor
+// only feeds samples in and acts on the answer.
+
+/// Consecutive misses before a recycle is even considered (60s at the 10s
+/// probe interval), and the minimum span they must cover.
+pub const RECYCLE_MIN_MISSES: u32 = 6;
+pub const RECYCLE_MIN_SPAN: Duration = Duration::from_secs(55);
+/// CPU time srv must have used across the miss window to count as "still
+/// working". A deadlocked or parked srv uses almost none; one grinding
+/// through load uses far more than this.
+pub const PROGRESS_CPU: Duration = Duration::from_millis(250);
+/// Recycle regardless of progress after this many consecutive misses (~3 min):
+/// a srv spinning without ever answering is not "slow", it is stuck too.
+pub const RECYCLE_HARD_CAP_MISSES: u32 = 18;
+
+/// Why a recycle was decided, for the log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecycleReason {
+    /// Missed for ≥ `RECYCLE_MIN_SPAN` and used under `PROGRESS_CPU` of CPU.
+    NoProgress,
+    /// `RECYCLE_HARD_CAP_MISSES` consecutive misses, progress or not.
+    HardCap,
+}
+
+/// Recycle decision over a run of consecutive misses. Pure: the caller passes
+/// the time and srv's cumulative CPU time (`None` when unreadable, which counts
+/// as no evidence of progress).
+#[derive(Debug, Default)]
+pub struct RecyclePolicy {
+    /// `(time, srv cpu)` of each miss in the current run, oldest first.
+    run: std::collections::VecDeque<(Instant, Option<Duration>)>,
+    misses: u32,
+}
+
+impl RecyclePolicy {
+    pub fn record_success(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Record a miss; returns `Some(reason)` when srv should be recycled.
+    ///
+    /// Progress is measured over the last `RECYCLE_MIN_SPAN` only, not since
+    /// the run began — a srv that worked for a minute and then deadlocked must
+    /// not be kept alive by the CPU it used before it stuck.
+    pub fn record_miss(&mut self, now: Instant, srv_cpu: Option<Duration>) -> Option<RecycleReason> {
+        self.misses = self.misses.saturating_add(1);
+        self.run.push_back((now, srv_cpu));
+        if self.misses >= RECYCLE_HARD_CAP_MISSES {
+            return Some(RecycleReason::HardCap);
+        }
+        let first = self.run.front().map(|(t, _)| *t).unwrap_or(now);
+        if self.misses < RECYCLE_MIN_MISSES || now.duration_since(first) < RECYCLE_MIN_SPAN {
+            return None;
+        }
+        // Window start: the newest miss at least RECYCLE_MIN_SPAN old.
+        let window_start = self
+            .run
+            .iter()
+            .rev()
+            .find(|(t, _)| now.duration_since(*t) >= RECYCLE_MIN_SPAN)
+            .map(|(_, cpu)| *cpu)
+            .unwrap_or(None);
+        // Keep the run bounded: nothing older than the window start matters.
+        while self.run.len() > 1 && now.duration_since(self.run[1].0) >= RECYCLE_MIN_SPAN {
+            self.run.pop_front();
+        }
+        let progressed = match (window_start, srv_cpu) {
+            (Some(a), Some(b)) => b.saturating_sub(a) >= PROGRESS_CPU,
+            _ => false,
+        };
+        if progressed { None } else { Some(RecycleReason::NoProgress) }
+    }
+
+    pub fn misses(&self) -> u32 {
+        self.misses
+    }
+}
+
+/// Health level of the probe's rolling average round-trip time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LatencyLevel {
+    Normal,
+    Warn,
+    Critical,
+}
+
+impl LatencyLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LatencyLevel::Normal => "normal",
+            LatencyLevel::Warn => "warn",
+            LatencyLevel::Critical => "critical",
+        }
+    }
+}
+
+/// Probes averaged (1 minute at the 10s interval).
+pub const LATENCY_WINDOW: usize = 6;
+/// Enter/exit thresholds on the rolling average, in ms. Exit below entry so a
+/// value hovering at a threshold doesn't flap the banner.
+pub const LATENCY_WARN_ENTER_MS: u64 = 1_000;
+pub const LATENCY_WARN_EXIT_MS: u64 = 600;
+pub const LATENCY_CRITICAL_ENTER_MS: u64 = 2_500;
+pub const LATENCY_CRITICAL_EXIT_MS: u64 = 1_800;
+
+/// Rolling average of probe RTTs with a debounced level, the same shape as the
+/// host's memory `PressureTracker`. A miss is fed in as the probe timeout.
+#[derive(Debug)]
+pub struct LatencyTracker {
+    samples: std::collections::VecDeque<u64>,
+    level: LatencyLevel,
+}
+
+impl Default for LatencyTracker {
+    fn default() -> Self {
+        Self { samples: std::collections::VecDeque::with_capacity(LATENCY_WINDOW), level: LatencyLevel::Normal }
+    }
+}
+
+impl LatencyTracker {
+    pub fn average_ms(&self) -> u64 {
+        if self.samples.is_empty() {
+            return 0;
+        }
+        self.samples.iter().sum::<u64>() / self.samples.len() as u64
+    }
+
+    pub fn level(&self) -> LatencyLevel {
+        self.level
+    }
+
+    /// Add a sample; returns the new level when it changed.
+    pub fn observe(&mut self, rtt_ms: u64) -> Option<LatencyLevel> {
+        if self.samples.len() == LATENCY_WINDOW {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(rtt_ms);
+        let avg = self.average_ms();
+        let next = match self.level {
+            LatencyLevel::Normal if avg >= LATENCY_CRITICAL_ENTER_MS => LatencyLevel::Critical,
+            LatencyLevel::Normal if avg >= LATENCY_WARN_ENTER_MS => LatencyLevel::Warn,
+            LatencyLevel::Warn if avg >= LATENCY_CRITICAL_ENTER_MS => LatencyLevel::Critical,
+            LatencyLevel::Warn if avg < LATENCY_WARN_EXIT_MS => LatencyLevel::Normal,
+            LatencyLevel::Critical if avg < LATENCY_WARN_EXIT_MS => LatencyLevel::Normal,
+            LatencyLevel::Critical if avg < LATENCY_CRITICAL_EXIT_MS => LatencyLevel::Warn,
+            same => same,
+        };
+        if next != self.level {
+            self.level = next;
+            Some(next)
+        } else {
+            None
+        }
+    }
+}
+
+/// Total CPU time (kernel + user) a process has used — the progress evidence
+/// for [`RecyclePolicy`]. `None` if the process can't be opened.
+#[cfg(windows)]
+pub fn process_cpu_time(pid: u32) -> Option<Duration> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    let ft = |f: FILETIME| ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64;
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let zero = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let (mut c, mut e, mut k, mut u) = (zero, zero, zero, zero);
+        let ok = GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u);
+        CloseHandle(h);
+        if ok == 0 {
+            return None;
+        }
+        // FILETIME ticks are 100ns.
+        Some(Duration::from_nanos((ft(k) + ft(u)) * 100))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn process_cpu_time(_pid: u32) -> Option<Duration> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::SrvLiveness;
     use std::time::Instant;
 
-    // Each test owns its OWN SrvLiveness instance — no process-global
-    // state, no parallel-execution interleaving (same reasoning as
-    // ui_liveness's tests).
-
-    #[test]
-    fn first_failure_does_not_recycle() {
-        let mut l = SrvLiveness::default();
-        l.record_failure();
-        assert!(!l.should_recycle(3));
-    }
-
-    #[test]
-    fn required_consecutive_failures_recycles() {
-        let mut l = SrvLiveness::default();
-        l.record_failure();
-        l.record_failure();
-        assert!(!l.should_recycle(3), "2 of 3 required misses must not recycle yet");
-        l.record_failure();
-        assert!(l.should_recycle(3));
-    }
-
-    #[test]
-    fn success_resets_miss_count() {
-        let mut l = SrvLiveness::default();
-        l.record_failure();
-        l.record_failure();
-        l.record_success(Instant::now());
-        assert!(l.last_alive().is_some());
-        l.record_failure();
-        l.record_failure();
-        assert!(!l.should_recycle(3), "streak must have reset on success");
-    }
-
-    #[test]
-    fn reset_clears_state() {
-        let mut l = SrvLiveness::default();
-        l.record_failure();
-        l.record_failure();
-        l.record_failure();
-        assert!(l.should_recycle(3));
-        l.reset();
-        assert!(!l.should_recycle(3));
-        assert!(l.last_alive().is_none());
-    }
 
     #[tokio::test]
     async fn probe_succeeds_against_a_real_200_response() {
@@ -246,5 +327,134 @@ mod tests {
         drop(listener);
         let ok = super::probe(&addr.to_string(), std::time::Duration::from_secs(1)).await;
         assert!(!ok);
+    }
+
+    mod slow_vs_dead {
+        use super::super::*;
+        use std::time::{Duration, Instant};
+
+        fn feed(p: &mut RecyclePolicy, t0: Instant, n: u32, cpu_step_ms: u64) -> Option<RecycleReason> {
+            let mut last = None;
+            for i in 0..n {
+                let now = t0 + Duration::from_secs(10 * i as u64);
+                last = p.record_miss(now, Some(Duration::from_millis(1_000 + cpu_step_ms * i as u64)));
+            }
+            last
+        }
+
+        #[test]
+        fn three_misses_no_longer_recycle() {
+            let mut p = RecyclePolicy::default();
+            assert_eq!(feed(&mut p, Instant::now(), 3, 0), None);
+        }
+
+        #[test]
+        fn a_minute_of_misses_with_no_cpu_progress_recycles() {
+            let mut p = RecyclePolicy::default();
+            // 7 misses 10s apart = 60s span; CPU flat.
+            assert_eq!(feed(&mut p, Instant::now(), 7, 0), Some(RecycleReason::NoProgress));
+        }
+
+        #[test]
+        fn a_slow_but_working_srv_is_left_alone_until_the_hard_cap() {
+            let mut p = RecyclePolicy::default();
+            // CPU advances 100ms per 10s: working, just not answering in time.
+            assert_eq!(feed(&mut p, Instant::now(), 17, 100), None);
+            // …but three minutes without one answer is stuck regardless.
+            let t = Instant::now() + Duration::from_secs(170);
+            assert_eq!(p.record_miss(t, Some(Duration::from_secs(9))), Some(RecycleReason::HardCap));
+        }
+
+        #[test]
+        fn a_srv_that_worked_then_deadlocked_is_recycled_within_a_minute_of_sticking() {
+            let mut p = RecyclePolicy::default();
+            let t0 = Instant::now();
+            let mut cpu = 1_000u64;
+            // 8 misses while working (CPU +100ms per probe)…
+            for i in 0..8u64 {
+                cpu += 100;
+                assert_eq!(p.record_miss(t0 + Duration::from_secs(10 * i), Some(Duration::from_millis(cpu))), None);
+            }
+            // …then CPU goes flat. Within ~6 more probes the window holds no progress.
+            let mut got = None;
+            let mut probes = 0;
+            for i in 8..18u64 {
+                probes += 1;
+                got = p.record_miss(t0 + Duration::from_secs(10 * i), Some(Duration::from_millis(cpu)));
+                if got.is_some() { break; }
+            }
+            assert_eq!(got, Some(RecycleReason::NoProgress));
+            assert!(probes <= 7, "took {probes} probes after sticking");
+        }
+
+        #[test]
+        fn unreadable_cpu_counts_as_no_progress() {
+            let mut p = RecyclePolicy::default();
+            let t0 = Instant::now();
+            let mut last = None;
+            for i in 0..7u64 {
+                last = p.record_miss(t0 + Duration::from_secs(10 * i), None);
+            }
+            assert_eq!(last, Some(RecycleReason::NoProgress));
+        }
+
+        #[test]
+        fn one_answer_resets_the_run() {
+            let mut p = RecyclePolicy::default();
+            feed(&mut p, Instant::now(), 5, 0);
+            p.record_success();
+            assert_eq!(p.misses(), 0);
+            assert_eq!(feed(&mut p, Instant::now(), 3, 0), None);
+        }
+
+        #[test]
+        fn latency_levels_enter_and_exit_with_hysteresis() {
+            let mut t = LatencyTracker::default();
+            for _ in 0..6 {
+                assert_eq!(t.observe(5), None);
+            }
+            assert_eq!(t.level(), LatencyLevel::Normal);
+            // Six 1.2s samples → avg crosses 1s → Warn (once).
+            let mut changes = Vec::new();
+            for _ in 0..6 {
+                if let Some(l) = t.observe(1_200) { changes.push(l); }
+            }
+            assert_eq!(changes, vec![LatencyLevel::Warn]);
+            // Timeouts (3000) push the average past 2.5s → Critical.
+            let mut changes = Vec::new();
+            for _ in 0..6 {
+                if let Some(l) = t.observe(3_000) { changes.push(l); }
+            }
+            assert_eq!(changes.last(), Some(&LatencyLevel::Critical));
+            // Hovering at 2s (between critical exit 1.8s and entry 2.5s) stays Critical…
+            for _ in 0..6 { t.observe(2_000); }
+            assert_eq!(t.level(), LatencyLevel::Critical);
+            // …fast answers bring it back to Normal.
+            for _ in 0..6 { t.observe(5); }
+            assert_eq!(t.level(), LatencyLevel::Normal);
+            assert!(t.average_ms() < LATENCY_WARN_EXIT_MS);
+        }
+
+        #[tokio::test]
+        async fn probe_rtt_measures_a_real_round_trip() {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 256];
+                let _ = sock.read(&mut buf).await;
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                let _ = sock.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await;
+            });
+            let rtt = probe_rtt(&addr.to_string(), Duration::from_secs(2)).await.expect("answered");
+            assert!(rtt >= Duration::from_millis(100), "{rtt:?}");
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn own_process_cpu_time_is_readable() {
+            assert!(process_cpu_time(std::process::id()).is_some());
+        }
     }
 }

@@ -285,6 +285,11 @@ pub async fn connect_to_launcher(
                             // silence IS the signal.
                             crate::ui_tasks::post_probe_ui_thread_reply(nonce);
                         }
+                        Ok(HostFrame::Command(Command::NotifySrvLatency { level, avg_ms })) => {
+                            // Not a saga command: a display-only signal the launcher
+                            // derives from its srv health probes (analysis §8.2).
+                            crate::ui_tasks::post_srv_latency(&state_for_reader, &level, avg_ms);
+                        }
                         Ok(HostFrame::Command(cmd)) => {
                             tracing::info!(
                                 "[launcher-ipc] received saga command: {:?}",
@@ -496,6 +501,11 @@ pub async fn connect_to_launcher(
                             // task never executes and no reply is sent —
                             // silence IS the signal.
                             crate::ui_tasks::post_probe_ui_thread_reply(nonce);
+                        }
+                        Ok(HostFrame::Command(Command::NotifySrvLatency { level, avg_ms })) => {
+                            // Not a saga command: a display-only signal the launcher
+                            // derives from its srv health probes (analysis §8.2).
+                            crate::ui_tasks::post_srv_latency(&state_for_reader, &level, avg_ms);
                         }
                         Ok(HostFrame::Command(cmd)) => {
                             tracing::info!(

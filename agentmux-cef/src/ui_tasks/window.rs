@@ -808,6 +808,37 @@ pub fn post_memory_pressure_pagefile(
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── srv latency → frontend banner event ────────────────────────────────────
+
+wrap_task! {
+    // Same `memory-pressure` event and banner as RAM / Page File, with its
+    // own kind, so the frontend's existing banner system shows it
+    // (analysis §8.2). `avg_ms` is the launcher's rolling probe average.
+    pub struct EmitSrvLatencyTask {
+        state: Arc<AppState>,
+        level: String,
+        avg_ms: u64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let payload = serde_json::json!({
+                "kind": "backend",
+                "level": self.level,
+                "avg_ms": self.avg_ms,
+            });
+            crate::events::emit_event_to_top_level_windows(&self.state, "memory-pressure", &payload);
+        }
+    }
+}
+
+/// Push a srv-latency level change to the frontend banner. Callable from any
+/// thread (the launcher-IPC reader); the emit runs on the UI thread.
+pub fn post_srv_latency(state: &Arc<AppState>, level: &str, avg_ms: u64) {
+    let mut task = EmitSrvLatencyTask::new(state.clone(), level.to_string(), avg_ms);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Minimize ─────────────────────────────────────────────────────────────
 
 wrap_task! {
