@@ -1795,7 +1795,7 @@ impl Store {
             }
         }
         let canonical = self.instance_get(&key)?.ok_or(StoreError::NotFound)?;
-        self.registry_upsert_if_named(&canonical);
+        self.registry_upsert_if_named(&canonical, !inst.session_id.is_empty());
         // A freshly created launch's session_id is never a genuine capture
         // in production (continuations start with ""), so only a non-empty
         // one is worth propagating to the registry.
@@ -2217,7 +2217,7 @@ impl Store {
             return Ok(false);
         }
         if let Some(fresh) = self.instance_get(id)? {
-            self.registry_upsert_if_named(&fresh);
+            self.registry_upsert_if_named(&fresh, false);
         }
         Ok(true)
     }
@@ -2279,7 +2279,7 @@ impl Store {
         }
         let fresh = self.instance_get(id)?;
         if let Some(f) = &fresh {
-            self.registry_upsert_if_named(f);
+            self.registry_upsert_if_named(f, upd.session_id.is_some());
             // Only propagate when THIS call actually targeted session_id —
             // `Some("")` (a deliberate clear) and `Some(real_sid)` both mean
             // this call wrote it; `None` means the row's existing value is

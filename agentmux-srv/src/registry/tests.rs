@@ -51,6 +51,39 @@ fn upsert_update_replaces_known_fields() {
     assert_eq!(listed[0].data.last_launched_at_ms, 200);
 }
 
+/// #3586: a launch mirror keeps the session id the record already holds,
+/// fills one in where it holds none, and moves every other field.
+#[test]
+fn upsert_keeping_session_keeps_a_held_session_id() {
+    let (_t, reg) = fresh();
+    let mut newer = record("aaa", "demo", 100);
+    newer.data.session_id = Some("s-new".to_string());
+    reg.upsert(&newer).unwrap();
+
+    let mut launch = record("aaa", "demo", 200);
+    launch.data.session_id = Some("s-old".to_string());
+    reg.upsert_keeping_session(&launch).unwrap();
+    let got = reg.get("aaa").unwrap().unwrap();
+    assert_eq!(got.data.session_id.as_deref(), Some("s-new"));
+    assert_eq!(got.data.last_launched_at_ms, 200);
+
+    let mut unset = record("bbb", "other", 100);
+    reg.upsert(&unset).unwrap();
+    unset.data.session_id = Some("s-first".to_string());
+    reg.upsert_keeping_session(&unset).unwrap();
+    assert_eq!(
+        reg.get("bbb").unwrap().unwrap().data.session_id.as_deref(),
+        Some("s-first")
+    );
+
+    // A plain upsert — a session capture — still replaces it.
+    reg.upsert(&launch).unwrap();
+    assert_eq!(
+        reg.get("aaa").unwrap().unwrap().data.session_id.as_deref(),
+        Some("s-old")
+    );
+}
+
 #[test]
 fn get_returns_none_for_missing_record() {
     let (_t, reg) = fresh();
