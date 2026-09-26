@@ -152,6 +152,14 @@ pub trait TrackerHandle: Send + Sync {
     /// Surfaced to the UI so the user can tell when tracking is
     /// best-effort and escape-prone.
     fn confidence(&self) -> TrackingConfidence;
+
+    /// Run every process in this tree at below-normal CPU priority (`on`), or
+    /// back at normal. Descendants inherit it and cannot raise it themselves.
+    /// Windows only (a Job Object priority-class limit); a no-op elsewhere.
+    /// See `docs/analysis/ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26.md` §8.3.
+    fn set_below_normal_priority(&self, _on: bool) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// How reliable this platform's tracker is.
