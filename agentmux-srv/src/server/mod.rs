@@ -1082,7 +1082,9 @@ async fn handle_shell_create(
     }
     // After the caller's overrides: a command run on an agent's behalf gets the
     // same plain-`gh` guard as the agent itself, and `req.env` can't lift it.
+    // Nor can it hand that command the account's cloud login.
     crate::backend::gh_guard::apply_gh_guard(&mut effective_env);
+    crate::backend::account_login_guard::strip_account_login(&mut effective_env);
 
     tracing::info!(
         block_id = %req.agent_block_id,

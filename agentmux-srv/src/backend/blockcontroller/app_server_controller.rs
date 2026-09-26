@@ -150,6 +150,7 @@ impl AppServerController {
             );
         }
         crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
+        crate::backend::account_login_guard::strip_account_login(&mut env_vars);
         // Identity M4a: record what this process is actually given.
         crate::backend::identity_spawn::record_process_spawn(
             &self.block_id,
