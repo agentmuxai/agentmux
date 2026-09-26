@@ -107,7 +107,7 @@ impl PersistentSubprocessController {
         if swept > 0 {
             tracing::info!(target: "continuity", block_id = %self.block_id, swept, "resume gate: removed relocated copies a dead spawn left");
         }
-        let head = segs::chain_head(gfs, uid);
+        let head = segs::chain_head(gfs, uid).map(segs::with_legacy_identity);
         let identity = crate::identity::account_email::identity_key_from_oauth_dir("claude", config_dir);
         let input = segs::GateInput {
             candidate: &candidate,

@@ -1,6 +1,6 @@
 # SPEC: one resume gate, and native continuation across logins of the same identity
 
-**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key, no resume across identities) in #3839; Phase 3 (same-identity relocation + fork) in #3841; Phase 4 (fork a session continued outside AgentMux) in #3844. Remaining: the pane-facing wording for a fork (§4.4). See §7.
+**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key, no resume across identities) in #3839; Phase 3 (same-identity relocation + fork) in #3841; Phase 4 (fork a session continued outside AgentMux) in #3844; the pre-#3839 identity fallback in #3850. Remaining: the pane-facing wording for a fork (§4.4). See §7.
 **Date:** 2026-09-25
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at operator request
 **Related:** `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` (§4.1 segments, §4.2 the rung
@@ -132,6 +132,15 @@ host. The email is never used as the key (H3).
 It's recorded on each segment `Start` as `identity_key: Option<String>`
 (`#[serde(default, skip_serializing_if = "Option::is_none")]`, same compatibility pattern as
 `lease_epoch`).
+
+**Heads recorded before identity keys.** A segment recorded by a build before #3839 carries no
+key, and §4.3 requires both keys, so an agent's first upgrade from such a build could never
+relocate. For a head whose segment has no key, the gate reads the key from the head's own
+config dir (`continuity_segments::with_legacy_identity`). That file names whoever is signed in
+there now, which for an account's own dir is the login the session ran under, unless the dir
+was since re-logged-into as someone else. A recorded key always wins, and an unreadable dir
+(a removed channel) stays unknown, which never relocates. This matters only once per agent:
+every segment from #3839 on records its key.
 
 ### 4.2 The gate
 A pure decision in `continuity_segments.rs`, called once in `spawn_process` after the id is
