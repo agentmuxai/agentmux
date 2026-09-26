@@ -509,6 +509,7 @@ partial list.
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22`](SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md) | Spec: Hidden memory reinjection after compaction |
+| [`SPEC_HOST_API_SEAM_2026_09_26`](SPEC_HOST_API_SEAM_2026_09_26.md) | SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do |
 | [`SPEC_IDENTITY_STORE_SPLIT_2026_08_17`](SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md) | SPEC: Split the multi-concern shared store — permanent global identity data vs. explicitly-disposable Armory test accounts |
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
