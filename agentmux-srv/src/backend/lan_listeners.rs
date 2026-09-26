@@ -225,9 +225,10 @@ const RECONCILE_INTERVAL_SECS: u64 = 20;
 /// still come up. Contrast the startup path, whose `.expect()` is fine at boot
 /// and would be unacceptable for a runtime toggle.
 pub struct LanListenerSupervisor {
-    /// Filled by `main.rs` once the router exists — `build_router` consumes
+    /// Filled by `main.rs` once the router exists — `build_routers` consumes
     /// `AppState`, which owns this supervisor, so the router cannot be
-    /// available at construction time.
+    /// available at construction time. This is `SrvRouters::lan`, never the
+    /// full router: only the LAN-peer routes are served off-host.
     router: std::sync::OnceLock<axum::Router>,
     web_port: u16,
     ws_port: u16,
@@ -267,8 +268,8 @@ impl LanListenerSupervisor {
         let _ = self.discovery.set(discovery);
     }
 
-    /// Hand the supervisor the router. Called once from `main.rs` after
-    /// `build_router`. Until this lands, `apply(true)` logs and defers — there
+    /// Hand the supervisor the LAN router (`SrvRouters::lan`). Called once
+    /// from `main.rs` after `build_routers`. Until this lands, `apply(true)` logs and defers — there
     /// is nothing to serve yet, and the next sweep picks it up.
     pub fn set_router(&self, router: axum::Router) {
         let _ = self.router.set(router);
