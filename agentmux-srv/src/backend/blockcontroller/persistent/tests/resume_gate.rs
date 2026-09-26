@@ -50,6 +50,11 @@ fn segment(gfs: &FileStore, sid: &str, at: i64) {
 
 /// [`segment`], recorded under the identity `identity_key`.
 fn segment_as(gfs: &FileStore, sid: &str, at: i64, identity_key: Option<&str>) {
+    segment_in(gfs, sid, at, identity_key, None);
+}
+
+/// [`segment_as`], recorded as run under `config_dir`.
+fn segment_in(gfs: &FileStore, sid: &str, at: i64, identity_key: Option<&str>, config_dir: Option<&str>) {
     let id = segs::record_start(
         gfs,
         segs::Start {
@@ -57,7 +62,7 @@ fn segment_as(gfs: &FileStore, sid: &str, at: i64, identity_key: Option<&str>) {
             agent_uid: UID.into(),
             definition_id: None,
             provider: "claude".into(),
-            config_dir: None,
+            config_dir: config_dir.map(str::to_string),
             provider_session_id: None,
             cwd: WORK.into(),
             channel: "local-test".into(),
@@ -70,6 +75,7 @@ fn segment_as(gfs: &FileStore, sid: &str, at: i64, identity_key: Option<&str>) {
             predecessor_segment_id: None,
             lease_epoch: None,
             identity_key: identity_key.map(str::to_string),
+            forked_from: None,
         },
     )
     .unwrap();
@@ -94,7 +100,7 @@ fn a_stale_held_session_is_redirected_to_the_chain_head() {
     segment(&f.gfs, "s1", 1_000);
     segment(&f.gfs, "s2", 2_000);
     let c = controller_holding(Some("s1"));
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c).as_deref(), Some("s2"));
 }
 
@@ -106,7 +112,7 @@ fn a_stale_held_session_is_cleared_when_the_head_is_out_of_reach() {
     segment(&f.gfs, "s1", 1_000);
     segment(&f.gfs, "s2", 2_000);
     let c = controller_holding(Some("s1"));
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c), None);
 }
 
@@ -116,7 +122,7 @@ fn the_chain_head_is_left_alone() {
     segment(&f.gfs, "s1", 1_000);
     segment(&f.gfs, "s2", 2_000);
     let c = controller_holding(Some("s2"));
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c).as_deref(), Some("s2"));
 }
 
@@ -124,7 +130,7 @@ fn the_chain_head_is_left_alone() {
 fn an_agent_without_a_chain_resumes_as_before() {
     let f = fixture(&["s1"]);
     let c = controller_holding(Some("s1"));
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c).as_deref(), Some("s1"));
 }
 
@@ -136,7 +142,7 @@ fn a_poisoned_head_does_not_displace_the_held_session() {
     segment(&f.gfs, "s2", 2_000);
     let c = controller_holding(Some("s1"));
     c.inner.lock().unwrap().resume_poisoned = Some("s2".into());
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c).as_deref(), Some("s1"));
 }
 
@@ -154,11 +160,11 @@ fn nothing_is_gated_without_what_the_gate_needs() {
 
     for config in [&no_uid, &no_config_dir, &no_resume] {
         let c = controller_holding(Some("s1"));
-        c.apply_resume_gate_with(config, Some(&f.gfs));
+        c.apply_resume_gate_with(config, Some(&f.gfs), None);
         assert_eq!(held(&c).as_deref(), Some("s1"));
     }
     let c = controller_holding(Some("s1"));
-    c.apply_resume_gate_with(&f.config, None);
+    c.apply_resume_gate_with(&f.config, None, None);
     assert_eq!(held(&c).as_deref(), Some("s1"), "no global store");
 }
 
@@ -182,7 +188,7 @@ fn the_head_recorded_under_another_identity_is_not_resumed() {
     let _now = sign_in(&f, "acc-new", "org-new");
     segment_as(&f.gfs, "s2", 2_000, Some("0000000000000000"));
     let c = controller_holding(Some("s2"));
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c), None);
 }
 
@@ -192,7 +198,7 @@ fn the_head_recorded_under_the_same_identity_is_resumed() {
     let key = sign_in(&f, "acc-1", "org-1");
     segment_as(&f.gfs, "s2", 2_000, Some(&key));
     let c = controller_holding(Some("s1"));
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c).as_deref(), Some("s2"));
 }
 
@@ -201,6 +207,132 @@ fn a_spawn_holding_no_session_is_untouched() {
     let f = fixture(&["s2"]);
     segment(&f.gfs, "s2", 2_000);
     let c = controller_holding(None);
-    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
     assert_eq!(held(&c), None, "the gate never invents a resume");
 }
+
+// ── Relocation (spec §4.3): the head under another login of the same identity ──
+
+/// A second login's config dir, signed in as `account`/`org`, holding the
+/// complete session `sid` for [`WORK`].
+fn other_login(account: &str, org: &str, sid: &str) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".claude.json"),
+        format!(r#"{{"oauthAccount":{{"accountUuid":"{account}","organizationUuid":"{org}"}}}}"#),
+    )
+    .unwrap();
+    let dir = tmp.path().join("projects").join(crate::backend::claude_layout::project_dir_name(WORK));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{sid}.jsonl")), b"{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n").unwrap();
+    tmp
+}
+
+fn here(f: &Fixture, sid: &str) -> std::path::PathBuf {
+    crate::backend::session_backfill::session_file_path(&f.config.env_vars["CLAUDE_CONFIG_DIR"], WORK, sid).unwrap()
+}
+
+/// The operator's rebuild: a new login, same person. The pane holds the
+/// head; its file is only under the old login.
+#[test]
+fn the_head_under_another_login_of_the_same_identity_is_relocated_to_fork_from() {
+    let f = fixture(&[]);
+    let key = sign_in(&f, "acc-1", "org-1");
+    let old = other_login("acc-1", "org-1", "s2");
+    segment_in(&f.gfs, "s2", 2_000, Some(&key), Some(&old.path().to_string_lossy()));
+    let c = controller_holding(Some("s2"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+
+    assert_eq!(held(&c).as_deref(), Some("s2"));
+    let copy = c.inner.lock().unwrap().fork_copy.clone().expect("a copy to fork from");
+    assert_eq!(copy, here(&f, "s2"));
+    assert_eq!(std::fs::read(&copy).unwrap(), std::fs::read(old.path().join("projects").join(crate::backend::claude_layout::project_dir_name(WORK)).join("s2.jsonl")).unwrap());
+}
+
+/// A new pane holds no id; the history it renders is the head, under the old
+/// login. The first spawn relocates it rather than starting blank.
+#[test]
+fn a_first_spawn_relocates_the_history_it_renders() {
+    let f = fixture(&[]);
+    let key = sign_in(&f, "acc-1", "org-1");
+    let old = other_login("acc-1", "org-1", "s2");
+    segment_in(&f.gfs, "s2", 2_000, Some(&key), Some(&old.path().to_string_lossy()));
+    let c = controller_holding(None);
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), Some("s2".into()));
+    assert_eq!(held(&c).as_deref(), Some("s2"));
+    assert!(c.inner.lock().unwrap().fork_copy.is_some());
+}
+
+/// The history candidate is for relocation only: a head the spawn could only
+/// redirect to, or refuse, leaves a first spawn holding no id, as before.
+#[test]
+fn a_first_spawn_takes_nothing_but_a_relocation_from_its_history() {
+    let f = fixture(&["s2"]);
+    segment(&f.gfs, "s2", 2_000);
+    let c = controller_holding(None);
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), Some("s1".into()));
+    assert_eq!(held(&c), None);
+}
+
+#[test]
+fn another_identity_under_another_login_is_never_relocated() {
+    let f = fixture(&[]);
+    let _now = sign_in(&f, "acc-1", "org-team");
+    let old = other_login("acc-1", "org-personal", "s2");
+    let old_key = crate::identity::account_email::identity_key_from_oauth_dir("claude", &old.path().to_string_lossy()).unwrap();
+    segment_in(&f.gfs, "s2", 2_000, Some(&old_key), Some(&old.path().to_string_lossy()));
+    let c = controller_holding(Some("s2"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert_eq!(held(&c), None);
+    assert!(!here(&f, "s2").exists(), "nothing copied");
+}
+
+/// A copy a dead spawn left behind is swept before the gate looks, so it is
+/// relocated afresh (and forked) instead of resumed in place.
+#[test]
+fn a_leftover_copy_is_swept_and_relocated_afresh() {
+    let f = fixture(&[]);
+    let key = sign_in(&f, "acc-1", "org-1");
+    let old = other_login("acc-1", "org-1", "s2");
+    segment_in(&f.gfs, "s2", 2_000, Some(&key), Some(&old.path().to_string_lossy()));
+    let first = controller_holding(Some("s2"));
+    first.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert!(first.inner.lock().unwrap().fork_copy.is_some());
+
+    // That spawn died before its fork reported an id; the copy is still there.
+    let second = controller_holding(Some("s2"));
+    second.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert!(second.inner.lock().unwrap().fork_copy.is_some(), "relocated again, so it forks again");
+}
+
+#[test]
+fn a_fork_reporting_its_own_id_is_the_resume_succeeding() {
+    use persistent_resume::SessionOutcome::{Fresh, Resumed};
+    use super::super::segments::forked_outcome;
+    assert_eq!(forked_outcome(Fresh, Some("s2"), "s2", Some("s3")), Resumed);
+    assert_eq!(forked_outcome(Fresh, None, "s2", Some("s3")), Fresh, "not a relocated spawn");
+    assert_eq!(forked_outcome(Fresh, Some("s2"), "s2", None), Fresh, "no new id");
+    assert_eq!(forked_outcome(Fresh, Some("s9"), "s2", Some("s3")), Fresh, "another attempt");
+    assert_eq!(forked_outcome(Resumed, Some("s2"), "s2", None), Resumed);
+}
+
+#[test]
+fn the_copy_goes_once_the_fork_has_its_own_id() {
+    use super::super::segments::settle_relocated_copy;
+    let f = fixture(&[]);
+    let old = other_login("acc-1", "org-1", "s2");
+    let src = old.path().join("projects").join(crate::backend::claude_layout::project_dir_name(WORK)).join("s2.jsonl");
+    let dest_dir = f.config.env_vars["CLAUDE_CONFIG_DIR"].clone();
+
+    let copy = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
+    settle_relocated_copy("block", &copy, Some("s2"), "s3");
+    assert!(!copy.exists(), "forked: the copy goes");
+
+    // The CLI resumed the copy in place (no fork): it is the live session now.
+    let copy = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
+    settle_relocated_copy("block", &copy, Some("s2"), "s2");
+    assert!(copy.exists());
+    assert_eq!(crate::backend::continuity_relocate::sweep(&dest_dir, WORK, UID), 0, "no longer marked as a copy");
+    assert!(src.exists(), "the original is never touched");
+}
+

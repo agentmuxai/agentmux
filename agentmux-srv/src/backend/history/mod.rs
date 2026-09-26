@@ -736,6 +736,7 @@ mod agent_record_search_tests {
                 predecessor_segment_id: None,
                 lease_epoch: None,
                 identity_key: None,
+                forked_from: None,
             },
         )
         .unwrap();

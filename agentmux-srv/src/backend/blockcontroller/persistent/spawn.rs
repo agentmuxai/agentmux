@@ -52,6 +52,9 @@ impl PersistentSubprocessController {
             let inner = self.inner.lock().unwrap();
             inner.session_id.is_none() && inner.spawn_generation == 0
         };
+        // The session the pane's history belongs to when `--resume` can't
+        // reach it here: the resume gate may relocate it (spec §4.3).
+        let mut unreachable_history_session: Option<String> = None;
         if first_spawn_without_sid {
             if let Some(sid) = self.find_continuation_session_id(&config) {
                 if self.session_held_elsewhere(&sid).is_none() {
@@ -68,12 +71,20 @@ impl PersistentSubprocessController {
                         "continuity: prior session is live in another pane; starting fresh"
                     );
                 }
+            } else if !config.resume_flag.is_empty() {
+                unreachable_history_session = pane_history_session_id(
+                    self.filestore.as_deref(),
+                    self.mstore.as_deref(),
+                    &self.block_id,
+                    &config.session_id_field,
+                )
+                .filter(|sid| self.session_held_elsewhere(sid).is_none());
             }
         }
         // Whatever id the paths above settled on, only the head of the
         // agent's chain is resumed natively
         // (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2).
-        self.apply_resume_gate(&config);
+        self.apply_resume_gate(&config, unreachable_history_session);
 
         // Append `--resume <sid>` when we have a session id and the provider
         // supports simple-flag resume — same construction as
@@ -146,13 +157,27 @@ impl PersistentSubprocessController {
         // A refusal returns before anything is spawned; any early return
         // after this point drops the handle, which releases the lease.
         let agent_lease = self.acquire_agent_lease(&config, requested_sid.as_deref())?;
+        // Set when the resume gate relocated the session this spawn resumes
+        // (spec §4.3): the copy it placed, which the fork reads and never
+        // writes.
+        let mut relocated_copy: Option<std::path::PathBuf> = None;
         {
-            let inner = self.inner.lock().unwrap();
-            if let Some(ref sid) = inner.session_id {
+            let mut inner = self.inner.lock().unwrap();
+            let fork_copy = inner.fork_copy.take();
+            if let Some(sid) = inner.session_id.clone() {
                 if !config.resume_flag.is_empty() {
                     spawn_args.push(config.resume_flag.clone());
                     spawn_args.push(sid.clone());
-                    attempted_resume_sid = Some(sid.clone());
+                    if fork_copy.is_some() {
+                        spawn_args.push("--fork-session".to_string());
+                        relocated_copy = fork_copy.clone();
+                    }
+                    attempted_resume_sid = Some(sid);
+                }
+            }
+            if relocated_copy.is_none() {
+                if let Some(copy) = fork_copy {
+                    crate::backend::continuity_relocate::remove(&copy);
                 }
             }
         }
@@ -519,6 +544,7 @@ impl PersistentSubprocessController {
                 uid,
                 &config,
                 attempted_resume_sid.as_deref(),
+                relocated_copy.as_ref().and(attempted_resume_sid.as_deref()),
                 continuation.is_some(),
                 agent_lease.as_ref().map(|l| l.epoch()),
             )
@@ -526,6 +552,9 @@ impl PersistentSubprocessController {
         *self.current_segment.lock().unwrap() = segment.as_ref().map(|(_, id)| id.clone());
         let segment_read = segment.clone();
         let segment_wait = segment;
+        // A relocated resume's copy, removed once the fork reports its id.
+        let mut relocated_copy_read = relocated_copy.clone();
+        let forked_from_read = relocated_copy.as_ref().and(attempted_resume_sid.clone());
         // Defaults to this spawn's own nonce; overridden below if
         // registration is skipped (reagent P1 on PR #3084 — see the `Err`
         // arm just below for why `my_registration_nonce` alone is wrong
@@ -1045,6 +1074,11 @@ impl PersistentSubprocessController {
                                 );
                                 core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
                                 super::segments::record_segment_session(&segment_read, &sid_string);
+                                // The fork has its own session now; the copy it
+                                // read from goes (spec §4.3 (3), I4).
+                                if let Some(copy) = relocated_copy_read.take() {
+                                    super::segments::settle_relocated_copy(&block_id_read, &copy, forked_from_read.as_deref(), &sid_string);
+                                }
                             }
                             // reagentx P0 on PR #2373: resolving tracking
                             // here can legitimately flush a held-back
@@ -1067,6 +1101,14 @@ impl PersistentSubprocessController {
                                         attempted_sid,
                                         actual_sid,
                                     } => {
+                                        // A fork reports a new id by design: that is
+                                        // the resume succeeding, not a fresh start.
+                                        let outcome = super::segments::forked_outcome(
+                                            outcome,
+                                            forked_from_read.as_deref(),
+                                            &attempted_sid,
+                                            actual_sid.as_deref(),
+                                        );
                                         // The retry (if any led here) is now resolved one
                                         // way or the other — clear "Reconnecting…". A no-op
                                         // publish (still fine) when this outcome came from a
