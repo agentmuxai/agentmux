@@ -140,24 +140,15 @@ fn canonical_worktree_root(root: &std::path::Path) -> std::path::PathBuf {
     fn read_trimmed(p: &Path) -> Option<String> {
         std::fs::read_to_string(p).ok().map(|s| s.trim().to_string())
     }
-    fn real(p: &Path) -> PathBuf {
-        let real = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-        // Windows: `\\?\C:\repo` names the folder `---C--repo`; the CLI
-        // sees `C:\repo`.
-        match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-            Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
-            _ => real,
-        }
-    }
     let resolve = || -> Option<PathBuf> {
         let git_file = read_trimmed(&root.join(".git"))?;
-        let git_dir = real(&root.join(git_file.strip_prefix("gitdir:")?.trim()));
-        let common = real(&git_dir.join(read_trimmed(&git_dir.join("commondir"))?));
+        let git_dir = real_path(&root.join(git_file.strip_prefix("gitdir:")?.trim()));
+        let common = real_path(&git_dir.join(read_trimmed(&git_dir.join("commondir"))?));
         if git_dir.parent()? != common.join("worktrees") {
             return None;
         }
-        let back = real(&git_dir.join(read_trimmed(&git_dir.join("gitdir"))?));
-        if back != real(root).join(".git") {
+        let back = real_path(&git_dir.join(read_trimmed(&git_dir.join("gitdir"))?));
+        if back != real_path(root).join(".git") {
             return None;
         }
         if common.file_name()? != ".git" {
@@ -168,6 +159,25 @@ fn canonical_worktree_root(root: &std::path::Path) -> std::path::PathBuf {
         common.parent().map(Path::to_path_buf)
     };
     resolve().unwrap_or_else(|| root.to_path_buf())
+}
+
+/// `p` with symlinks resolved, as the CLI's process would name it. On
+/// Windows `canonicalize` returns a `\\?\` verbatim path, which names the
+/// folder `----C--repo` where the CLI, seeing `C:\repo`, names it
+/// `C--repo`. Tests that build a working directory take it from here too:
+/// a raw `canonicalize` gives them a path no real cwd has (#3749).
+pub fn real_path(p: &std::path::Path) -> std::path::PathBuf {
+    without_verbatim_prefix(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
+}
+
+/// `p` without a leading `\\?\`. A verbatim UNC path (`\\?\UNC\server\…`)
+/// is kept: dropping only the prefix would leave `UNC\server\…`, which is
+/// not the path the CLI sees.
+fn without_verbatim_prefix(p: std::path::PathBuf) -> std::path::PathBuf {
+    match p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with("UNC\\") => std::path::PathBuf::from(rest),
+        _ => p,
+    }
 }
 
 #[cfg(test)]
@@ -250,18 +260,25 @@ pub(crate) mod tests {
         assert_eq!(radix_36(0), "0");
     }
 
-    /// A repository with one commit, and a linked worktree of it outside it,
-    /// as the CLI's process would see them: symlinks resolved, and on Windows
-    /// without `canonicalize`'s `\\?\` prefix, which a real working directory
-    /// never has.
-    pub(crate) fn repo_with_worktree(base: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
-        fn cli_path(p: &std::path::Path) -> std::path::PathBuf {
-            let real = p.canonicalize().unwrap();
-            match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-                Some(rest) => std::path::PathBuf::from(rest),
-                None => real,
-            }
+    // The prefix rule is string handling, so it is checked on every
+    // platform — PR CI runs no tests on Windows (ci-pr.yml).
+    #[test]
+    fn a_verbatim_drive_path_loses_its_prefix() {
+        use std::path::PathBuf;
+        assert_eq!(without_verbatim_prefix(PathBuf::from(r"\\?\C:\repo")), PathBuf::from(r"C:\repo"));
+    }
+
+    #[test]
+    fn a_verbatim_unc_path_and_a_plain_path_are_kept() {
+        use std::path::PathBuf;
+        for p in [r"\\?\UNC\server\share\repo", r"C:\repo", "/home/u/repo"] {
+            assert_eq!(without_verbatim_prefix(PathBuf::from(p)), PathBuf::from(p));
         }
+    }
+
+    /// A repository with one commit, and a linked worktree of it outside it,
+    /// as the CLI's process would see them ([`real_path`]).
+    pub(crate) fn repo_with_worktree(base: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
         let (repo, wt) = (base.join("repo"), base.join("wt"));
         std::fs::create_dir_all(repo.join("sub")).unwrap();
         let git = |args: &[&str]| {
@@ -278,7 +295,7 @@ pub(crate) mod tests {
         git(&["add", "."]);
         git(&["commit", "-qm", "x"]);
         git(&["worktree", "add", "-q", wt.to_str().unwrap()]);
-        (cli_path(&repo), cli_path(&wt))
+        (real_path(&repo), real_path(&wt))
     }
 
     #[test]
@@ -294,7 +311,7 @@ pub(crate) mod tests {
     #[test]
     fn outside_a_repository_memory_is_keyed_by_the_physical_directory() {
         let base = tempfile::tempdir().unwrap();
-        let real = base.path().canonicalize().unwrap().join("plain");
+        let real = real_path(base.path()).join("plain");
         std::fs::create_dir_all(&real).unwrap();
         assert_eq!(memory_project_root(&real), real);
         #[cfg(unix)]
@@ -308,7 +325,7 @@ pub(crate) mod tests {
     #[test]
     fn a_git_file_that_is_not_a_linked_worktree_keeps_its_own_root() {
         let base = tempfile::tempdir().unwrap();
-        let dir = base.path().canonicalize().unwrap().join("odd");
+        let dir = real_path(base.path()).join("odd");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(".git"), "gitdir: ../nowhere\n").unwrap();
         assert_eq!(memory_project_root(&dir), dir);
