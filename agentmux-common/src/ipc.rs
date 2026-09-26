@@ -82,6 +82,15 @@ pub enum Command {
     ReportUiThreadAlive {
         nonce: u64,
     },
+    /// Launcher → host: the level of srv's health-probe latency changed —
+    /// the rolling average of the launcher's probe round-trip times crossed a
+    /// threshold. The host shows it through the memory-pressure banner system
+    /// as kind `"backend"`. `level` is `"normal" | "warn" | "critical"`.
+    /// See docs/analysis/ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26.md §8.2.
+    NotifySrvLatency {
+        level: String,
+        avg_ms: u64,
+    },
     /// Graceful disconnect. Server logs and closes the connection.
     /// In B.3+ this becomes `Quit { reason }` with shutdown semantics;
     /// for B.2 it's just a polite goodbye.

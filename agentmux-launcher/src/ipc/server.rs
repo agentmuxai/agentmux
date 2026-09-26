@@ -841,6 +841,9 @@ async fn enforce_register_first(
         Command::ProbeUiThread { .. } => {
             ("ProbeUiThread before Register (wrong direction)".to_string(), false)
         }
+        Command::NotifySrvLatency { .. } => {
+            ("NotifySrvLatency before Register (wrong direction)".to_string(), false)
+        }
         Command::Goodbye => ("Goodbye before Register".to_string(), true),
         Command::ReportWindowOpened { .. } => {
             ("ReportWindowOpened before Register".to_string(), true)
