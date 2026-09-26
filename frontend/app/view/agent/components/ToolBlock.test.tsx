@@ -742,3 +742,38 @@ describe("ToolBlock — content-first (WebSearch)", () => {
         expect(onToggleCollapse).not.toHaveBeenCalled();
     });
 });
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5 — Claude Code's Grep
+// result is a string, not a `matches` array, so the pill counts its lines.
+describe("ToolBlock — Grep pill", () => {
+    it("counts the non-empty lines of a string result", () => {
+        const grep: ToolNode = {
+            type: "tool",
+            id: "g-1",
+            tool: "Grep",
+            toolName: "Grep",
+            params: { pattern: "x" },
+            status: "success",
+            collapsed: true,
+            summary: "x",
+            result: { content: "a.ts:1:x\nb.ts:2:x\n" } as any,
+        };
+        const { container } = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-result-pill")!.textContent).toBe("2 matches");
+    });
+
+    it("reads the default files_with_matches header as files, and an empty search as zero", () => {
+        const pill = (content: string) => {
+            const n: ToolNode = {
+                type: "tool", id: "g-2", tool: "Grep", toolName: "Grep", params: { pattern: "x" },
+                status: "success", collapsed: true, summary: "x", result: { content } as any,
+            };
+            const { container, unmount } = render(() => <ToolBlock node={n} pinned={false} onTogglePin={() => {}} />);
+            const text = container.querySelector(".agent-tool-result-pill")?.textContent;
+            unmount();
+            return text;
+        };
+        expect(pill("Found 3 files\n/a.ts\n/b.ts\n/c.ts")).toBe("3 files");
+        expect(pill("No files found")).toBe("0 files");
+    });
+});

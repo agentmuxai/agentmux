@@ -50,3 +50,11 @@ describe("extractRecords", () => {
         expect(cellText("x".repeat(300))).toHaveLength(201); // 200 + ellipsis
     });
 });
+
+// A content-block array ([{type:"text", text}]) is flat records by shape, but
+// it's text, not a table (SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.6).
+describe("extractRecords — content blocks", () => {
+    it("rejects an all-text content-block array", () => {
+        expect(extractRecords([{ type: "text", text: "a" }, { type: "text", text: "b" }])).toBeNull();
+    });
+});

@@ -11,6 +11,7 @@
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompactResult } from "./CompactResult";
+import { MAX_TOOL_OUTPUT_CHARS } from "./output-cap";
 
 afterEach(() => cleanup());
 
@@ -47,5 +48,40 @@ describe("CompactResult — terminal vs JSON body", () => {
         expand(container);
         expect(container.querySelector(".agent-terminal-output")).toBeNull();
         expect(container.querySelector(".agent-tool-compact-json")).not.toBeNull();
+    });
+});
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5 — the tool panel is
+// already the expand/collapse control; a second `▸` inside it for a text
+// body was the "tree parent". Only structured results keep it.
+describe("CompactResult — no chevron for a text body", () => {
+    it("shows a multi-line text body directly, as a terminal", () => {
+        const { container } = render(() => (
+            <CompactResult tool="Other" params={{}} result={{ content: "line1\nline2" }} />
+        ));
+        expect(container.querySelector(".agent-tool-compact-summary")).toBeNull();
+        expect(container.querySelector(".agent-terminal-output")).not.toBeNull();
+        expect(container.textContent).toContain("line2");
+    });
+
+    it("shows a one-line text body as plain text, without a toggle", () => {
+        const { container } = render(() => <CompactResult tool="Other" params={{}} result={{ content: "Todos updated" }} />);
+        expect(container.querySelector(".agent-tool-compact-chevron")).toBeNull();
+        expect(container.querySelector(".agent-terminal-output")).toBeNull();
+        expect(container.textContent).toBe("Todos updated");
+    });
+
+    it("caps one huge unbroken line (ReAgent P1 on #3877: minified JSON, base64)", () => {
+        const huge = "x".repeat(MAX_TOOL_OUTPUT_CHARS + 5000);
+        const { container } = render(() => <CompactResult tool="Other" params={{}} result={{ content: huge }} />);
+        const shown = container.querySelector(".agent-tool-compact-line")!.textContent!;
+        expect(shown.length).toBeLessThan(MAX_TOOL_OUTPUT_CHARS + 200);
+    });
+
+    it("keeps the chevron for a structured result", () => {
+        const { container } = render(() => (
+            <CompactResult tool="Task" params={{}} result={{ status: "done", count: 3, items: [1, 2, 3] }} />
+        ));
+        expect(container.querySelector(".agent-tool-compact-chevron")).not.toBeNull();
     });
 });

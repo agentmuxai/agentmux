@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * CompactResult - Shows tool results as a compact summary with expand-to-JSON.
+ * CompactResult - the default tool result body.
  *
- * Default view: a short one-line description extracted from the result shape.
- * Expanded view: pretty-printed JSON, render-capped per
- * SPEC_TOOL_OUTPUT_CAP_2026_05_30.md so a large structured result can't bloat
- * the conversation DOM once expanded.
+ * A text body (stdout / output / content) is shown as-is: one line as plain
+ * text, several as a terminal. A structured result shows a short one-line
+ * description with `▸` expand-to-JSON, render-capped per
+ * SPEC_TOOL_OUTPUT_CAP_2026_05_30.md so a large payload can't bloat the
+ * conversation DOM once expanded.
  */
 
 import { For, createSignal, Show, type JSX } from "solid-js";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { TerminalOutput } from "./TerminalOutput";
 import { terminalText } from "./terminal-text";
 
@@ -107,42 +108,72 @@ function shortPath(p: string): string {
     return parts.length <= 2 ? p : ".../" + parts.slice(-2).join("/");
 }
 
-export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX.Element => {
-    const [expanded, setExpanded] = createSignal(tool === "Glob");
+export const CompactResult = (props: CompactResultProps): JSX.Element => {
+    // `props.x`, never destructured: a destructured prop is frozen at mount,
+    // so a caller that kept this mounted across a result update would show
+    // stale output (see ToolBlock.tsx's reactivity note).
+    //
+    // A terminal-style string body (stdout/output/content) is shown directly:
+    // the tool panel around it is already the expand/collapse control, and a
+    // second `▸` inside it was the "tree parent" that hid the content
+    // (SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5). One line reads as
+    // plain text; several lines render as a terminal. Only a structured result
+    // (no string body) keeps the one-line summary + `▸` JSON.
+    //
+    // Both text branches are capped like every other body
+    // (SPEC_TOOL_OUTPUT_CAP_2026_05_30.md): TerminalOutput by lines, the
+    // one-line branch by characters (a minified JSON or base64 line). A
+    // search result list (Grep / Glob) reads from its first line; other
+    // text (logs, command output) from its latest.
+    const termText = () => terminalText(props.result);
+    const readFrom = (): "head" | "tail" => (props.tool === "Grep" || props.tool === "Glob" ? "head" : "tail");
+    return (
+        <Show
+            when={termText() == null}
+            fallback={
+                <div class="agent-tool-compact-result">
+                    <Show
+                        when={termText()!.trim().includes("\n")}
+                        fallback={<div class="agent-tool-compact-line">{capChars(termText()!.trim())}</div>}
+                    >
+                        <TerminalOutput text={termText()!} from={readFrom()} />
+                    </Show>
+                </div>
+            }
+        >
+            <StructuredResult tool={props.tool} params={props.params} result={props.result} />
+        </Show>
+    );
+};
 
-    const summary = summarize(tool, params, result);
-    // When the result carries a terminal-style string body (stdout/output/
-    // content), render it as a terminal instead of a JSON blob. Structured
-    // results (no string body) fall back to JSON.
-    const termText = terminalText(result);
-    const fullJson = result != null ? JSON.stringify(result, null, 2) : "";
-    // Expandable when there's more to show than the one-line summary. A terminal
-    // body is worth expanding whenever it's multi-line (the summary collapses
-    // it) or longer than the summary.
-    const hasDetail = termText != null
-        ? termText.includes("\n") || termText.length > summary.length
-        : fullJson.length > summary.length + 10;
+function StructuredResult(props: CompactResultProps): JSX.Element {
+    const [expanded, setExpanded] = createSignal(props.tool === "Glob");
+
+    const summary = () => summarize(props.tool, props.params, props.result);
+    const fullJson = () => (props.result != null ? JSON.stringify(props.result, null, 2) : "");
+    // Expandable when there's more to show than the one-line summary.
+    const hasDetail = () => fullJson().length > summary().length + 10;
     // Head-cap the expanded JSON so a large structured payload (Glob / Grep /
     // Agent) can't add an unbounded <pre> once the summary is expanded.
-    const jsonCap = capText(fullJson, MAX_TOOL_OUTPUT_LINES, "head");
+    const jsonCap = () => capText(fullJson(), MAX_TOOL_OUTPUT_LINES, "head");
 
     return (
         <div class="agent-tool-compact-result">
             <div
                 class="agent-tool-compact-summary"
-                classList={{ clickable: hasDetail }}
-                onClick={() => hasDetail && setExpanded(!expanded())}
-                title={hasDetail ? (expanded() ? "Collapse" : "Expand full result") : undefined}
+                classList={{ clickable: hasDetail() }}
+                onClick={() => hasDetail() && setExpanded(!expanded())}
+                title={hasDetail() ? (expanded() ? "Collapse" : "Expand full result") : undefined}
             >
-                <Show when={hasDetail}>
+                <Show when={hasDetail()}>
                     <span class="agent-tool-compact-chevron">{expanded() ? "▾" : "▸"}</span>
                 </Show>
-                <span class="agent-tool-compact-text">{summary}</span>
+                <span class="agent-tool-compact-text">{summary()}</span>
             </div>
             <Show when={expanded()}>
-                {tool === "Glob" && Array.isArray(result?.files)
+                {props.tool === "Glob" && Array.isArray(props.result?.files)
                     ? (() => {
-                        const files: string[] = result.files;
+                        const files: string[] = props.result.files;
                         const visible = files.slice(0, MAX_TOOL_OUTPUT_LINES);
                         const hidden = files.length - visible.length;
                         return (
@@ -158,13 +189,11 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
                             </>
                         );
                     })()
-                    : termText != null
-                    ? <TerminalOutput text={termText} from="tail" />
                     : (
                         <>
-                            <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
-                            <Show when={jsonCap.hiddenLines > 0}>
-                                <OutputHiddenMarker hidden={jsonCap.hiddenLines} noun="line" from="head" />
+                            <pre class="agent-tool-compact-json">{jsonCap().text}</pre>
+                            <Show when={jsonCap().hiddenLines > 0}>
+                                <OutputHiddenMarker hidden={jsonCap().hiddenLines} noun="line" from="head" />
                             </Show>
                         </>
                     )
@@ -172,4 +201,4 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
             </Show>
         </div>
     );
-};
+}

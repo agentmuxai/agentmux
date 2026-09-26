@@ -284,6 +284,35 @@ describe("ClaudeTranslator", () => {
             expect((events[0] as any).status).toBe("success");
         });
 
+        // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.6 — MCP and Agent
+        // results arrive as [{type:"text", text}] blocks. Passed through raw,
+        // they rendered as a `type | text` table (MCP) or `0: {2 keys}` (Agent).
+        const resultOf = (content: unknown) => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "user",
+                message: { content: [{ type: "tool_result", tool_use_id: "tb", content, is_error: false }] },
+            });
+            return (events[0] as any).result;
+        };
+
+        it("joins an all-text content-block array into {content}", () => {
+            expect(resultOf([{ type: "text", text: "first" }, { type: "text", text: "second" }])).toEqual({
+                content: "first\n\nsecond",
+            });
+            expect(resultOf([{ type: "text", text: "only" }])).toEqual({ content: "only" });
+        });
+
+        it("passes an array with any non-text block through unchanged", () => {
+            const withImage = [
+                { type: "text", text: "caption" },
+                { type: "image", source: { type: "base64", media_type: "image/png", data: "x" } },
+            ];
+            expect(resultOf(withImage)).toEqual(withImage);
+            const refs = [{ type: "tool_reference", tool_name: "mcp__agentmux__WhoAmI" }];
+            expect(resultOf(refs)).toEqual(refs);
+        });
+
         it("marks error tool_results as failed", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({

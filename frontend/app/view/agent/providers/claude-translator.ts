@@ -4,6 +4,20 @@
 import type { PermissionRequestEvent, SessionStats, StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
 
+/** The text of a non-empty content-block array made only of `{type:"text",
+ *  text}` blocks, joined by a blank line; null for anything else. */
+export function textOfContentBlocks(content: unknown): string | null {
+    if (!Array.isArray(content) || content.length === 0) return null;
+    const texts: string[] = [];
+    for (const b of content) {
+        if (!b || typeof b !== "object" || (b as { type?: unknown }).type !== "text") return null;
+        const text = (b as { text?: unknown }).text;
+        if (typeof text !== "string") return null;
+        texts.push(text);
+    }
+    return texts.join("\n\n");
+}
+
 /**
  * Translates Claude Code CLI stream-json output into StreamEvent format.
  *
@@ -386,9 +400,18 @@ export class ClaudeTranslator implements OutputTranslator {
                 // (e.g. web_search_result blocks), use it directly — applying the
                 // terminal-shaped { stdout, stderr } sibling would discard the real data.
                 const blockContentIsString = typeof block.content === "string";
+                // An all-text content-block array (MCP tools, Agent reports)
+                // is text: join it into the same `{content}` shape a string
+                // result gets. Raw, it rendered as a `type | text` table or
+                // `0: {2 keys}`. Arrays with any other block (image,
+                // tool_reference) pass through for their own renderers.
+                // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.6.
+                const blockText = textOfContentBlocks(block.content);
                 const fallback = blockContentIsString
                     ? { content: block.content }
-                    : block.content;
+                    : blockText != null
+                      ? { content: blockText }
+                      : block.content;
                 const useStructured = canApplyStructured && blockContentIsString;
                 results.push({
                     type: "tool_result",
