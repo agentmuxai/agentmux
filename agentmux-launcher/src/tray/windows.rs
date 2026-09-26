@@ -63,7 +63,7 @@ pub fn spawn(
         })
         .map_err(|e| format!("spawn tray thread: {}", e))?;
 
-    match ready_rx.recv_timeout(super::ready_timeout(crate::autostart::login_start())) {
+    match ready_rx.recv_timeout(super::READY_TIMEOUT) {
         Ok(Ok(())) => Ok(rx),
         Ok(Err(e)) => Err(e),
         Err(_) => Err("tray icon was not built within the timeout".to_string()),

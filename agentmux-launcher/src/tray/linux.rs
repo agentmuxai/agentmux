@@ -174,6 +174,7 @@ pub fn spawn(data_dir: std::path::PathBuf, dir_hash: String) -> Result<mpsc::Rec
     let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
     let running = super::service_reachable(&data_dir, &dir_hash);
     let login_start = crate::autostart::login_start();
+    let timeout = super::ready_timeout(login_start);
 
     std::thread::Builder::new()
         .name("agentmux-tray".into())
@@ -226,10 +227,10 @@ pub fn spawn(data_dir: std::path::PathBuf, dir_hash: String) -> Result<mpsc::Rec
         .map_err(|e| e.to_string())?;
     // Bounded, like the Windows toast backend: a missing/wedged session bus
     // must not stall the supervisor.
-    match ready_rx.recv_timeout(super::ready_timeout(login_start)) {
+    match ready_rx.recv_timeout(timeout) {
         Ok(Ok(())) => {}
         Ok(Err(e)) => return Err(e),
-        Err(_) => return Err("tray did not start within 5s".into()),
+        Err(_) => return Err(format!("tray did not start within {}s", timeout.as_secs())),
     }
 
     let wake_tx = utx.clone();
