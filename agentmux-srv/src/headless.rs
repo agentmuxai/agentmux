@@ -188,43 +188,28 @@ fn origin_in(origin: &str, allowed: &[String]) -> bool {
     normalize_origin(origin).is_ok_and(|o| allowed.contains(&o))
 }
 
-/// An origin as browsers send it: `scheme://host[:port]`, http or https,
-/// lowercase, with no path and without the scheme's default port. A trailing
-/// `/` is accepted and dropped.
+/// An origin as browsers send it, via the WHATWG URL parser browsers use:
+/// http or https, a host, an optional port — no path, user, query or
+/// fragment. Serialized the way `Origin` is: lowercase, IDNA hosts in
+/// punycode, canonical IPv4/IPv6, and no default port, so every spelling of
+/// one origin compares equal (Codex P2s on #3900). A trailing `/` is fine.
 fn normalize_origin(origin: &str) -> Result<String, String> {
-    let lower = origin.trim().to_ascii_lowercase();
-    let lower = lower.strip_suffix('/').unwrap_or(&lower);
-    let (scheme, rest) = lower.split_once("://").ok_or("expected scheme://host[:port]")?;
-    let default_port: u16 = match scheme {
-        "http" => 80,
-        "https" => 443,
-        _ => return Err("scheme must be http or https".into()),
-    };
-    // Bracketed IPv6 hosts contain ':', so split the port off after `]`.
-    let (host, port) = match rest.rfind(':') {
-        Some(i) if !rest[i..].contains(']') => (&rest[..i], Some(&rest[i + 1..])),
-        _ => (rest, None),
-    };
-    let host_ok = match host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
-        Some(v6) => !v6.is_empty() && v6.bytes().all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.'),
-        None => !host.is_empty() && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'),
-    };
-    if !host_ok {
-        return Err("expected scheme://host[:port], with no path, user or query".into());
+    const SHAPE: &str = "expected scheme://host[:port], with no path, user or query";
+    let url = url::Url::parse(origin.trim()).map_err(|e| format!("{SHAPE} ({e})"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("scheme must be http or https".into());
     }
-    // Numeric, as browsers serialize it: `:0443` is the default port and
-    // `:08443` is `:8443` (Codex P2 on #3900).
-    let port = match port {
-        None => None,
-        Some(p) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => {
-            Some(p.parse::<u16>().map_err(|_| "port must be a number from 0 to 65535")?)
-        }
-        Some(_) => return Err("port must be a number from 0 to 65535".into()),
-    };
-    match port {
-        Some(p) if p != default_port => Ok(format!("{scheme}://{host}:{p}")),
-        _ => Ok(format!("{scheme}://{host}")),
+    let only_origin = url.host().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    // `Url` drops an empty `?` / `#`; refuse them too.
+    if !only_origin || origin.contains(['?', '#', '@']) {
+        return Err(SHAPE.into());
     }
+    Ok(url.origin().ascii_serialization())
 }
 
 /// Read a key from a file the operator provided; surrounding whitespace is ignored.
@@ -361,6 +346,11 @@ mod tests {
         assert_eq!(n("http://[::1]:8190").unwrap(), "http://[::1]:8190");
         assert_eq!(n("https://app.example.com:0443").unwrap(), "https://app.example.com");
         assert_eq!(n("https://app.example.com:08443").unwrap(), "https://app.example.com:8443");
+        assert_eq!(n("http://[0:0:0:0:0:0:0:1]:8190").unwrap(), "http://[::1]:8190");
+        assert_eq!(n("http://127.1:8190").unwrap(), "http://127.0.0.1:8190");
+        // An empty port is the default one, as browsers parse it.
+        assert_eq!(n("https://app.example.com:").unwrap(), "https://app.example.com");
+        assert_eq!(n("https://bücher.example").unwrap(), "https://xn--bcher-kva.example");
         for bad in [
             "app.example.com",
             "ftp://app.example.com",
@@ -368,7 +358,9 @@ mod tests {
             "https://app.example.com/path",
             "https://user@app.example.com",
             "https://app.example.com?x=1",
-            "https://app.example.com:",
+            "https://app.example.com?",
+            "https://app.example.com#",
+            "https://user:pw@app.example.com",
             "https://app.example.com:99999",
             "http://[evil/x]",
             "*",
