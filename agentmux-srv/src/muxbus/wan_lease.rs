@@ -58,6 +58,16 @@ struct Entry {
 }
 
 static STATE: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
+/// One claim, renewal or release at a time per agent. Without it a
+/// release still in flight (the RemoveAgent arm's runs detached, after a
+/// token refresh) could land after the agent was subscribed and claimed
+/// again, and release that fresh claim (Codex P2 on #3897).
+static OPS: LazyLock<Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> = LazyLock::new(Default::default);
+
+fn op_lock(agent_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    OPS.lock().unwrap_or_else(|e| e.into_inner()).entry(key(agent_id)).or_default().clone()
+}
+
 static UNSUPPORTED_UNTIL: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Default::default);
 
 fn key(agent_id: &str) -> String {
@@ -79,6 +89,22 @@ pub(crate) fn holder_on_this_computer(desc: &str) -> bool {
 }
 
 const THIS_COMPUTER: &str = "this computer";
+
+/// The channel of another instance on this computer that, per a recent
+/// relay answer, holds `agent` — what Take over needs to find it.
+pub(crate) fn held_on_this_computer_by(agent: &str) -> Option<String> {
+    let desc = held_elsewhere(agent)?;
+    if !holder_on_this_computer(&desc) {
+        return None;
+    }
+    desc.split(", ").find_map(|part| part.strip_prefix("channel ")).map(str::to_string)
+}
+
+/// Where the holder is when a recent relay answer put `agent` on another
+/// computer (a [`describe_holder`] description), else `None`.
+pub(crate) fn held_on_another_computer(agent: &str) -> Option<String> {
+    held_elsewhere(agent).filter(|desc| !desc.is_empty() && !holder_on_this_computer(desc))
+}
 
 /// Describe the relay's `held_by` for a refusal: "computer X, channel Y, vZ".
 pub(crate) fn describe_holder(held_by: &serde_json::Value) -> String {
@@ -136,6 +162,8 @@ pub(crate) async fn ensure(base: &str, agent_id: &str, token: &str, http: &reqwe
     if UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now()) {
         return Outcome::Unknown;
     }
+    let op = op_lock(agent_id);
+    let _op = op.lock().await;
     let renew_due = {
         let state = STATE.lock().unwrap_or_else(|e| e.into_inner());
         match state.get(&key(agent_id)) {
@@ -204,8 +232,22 @@ async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, p
     }
 }
 
-/// Release `agent_id`'s lease (best effort) and forget it.
-pub(crate) async fn release(base: &str, agent_id: &str, token: &str, http: &reqwest::Client) {
+/// Release `agent_id`'s lease (best effort) and forget it — unless
+/// `still_gone` says it was subscribed again by the time this runs.
+pub(crate) async fn release(
+    base: &str,
+    agent_id: &str,
+    token: &str,
+    http: &reqwest::Client,
+    still_gone: impl Fn() -> bool,
+) {
+    let op = op_lock(agent_id);
+    let _op = op.lock().await;
+    // Checked under the op lock: an agent subscribed again since the
+    // release was queued keeps its (possibly fresh) claim.
+    if !still_gone() {
+        return;
+    }
     let was_held = STATE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -219,6 +261,33 @@ pub(crate) async fn release(base: &str, agent_id: &str, token: &str, http: &reqw
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Codex P2 (third pass) on #3897: the RemoveAgent arm's release runs
+    // detached; if the agent was subscribed and claimed again meanwhile, it
+    // released that fresh claim and let another instance fence the agent.
+    #[tokio::test]
+    async fn a_release_skips_an_agent_subscribed_again() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        record(&agent, &Outcome::Held);
+        release("http://127.0.0.1:9", &agent, "", &reqwest::Client::new(), || false).await;
+        let held = STATE.lock().unwrap().get(&key(&agent)).is_some_and(|e| e.held);
+        assert!(held, "the fresh claim is left alone");
+    }
+
+    #[tokio::test]
+    async fn a_release_waits_for_a_claim_in_progress_for_the_same_agent() {
+        let agent = format!("Agent-{}", uuid::Uuid::new_v4());
+        let lock = op_lock(&agent.to_lowercase());
+        let claim = lock.lock().await;
+        let a = agent.clone();
+        let release = tokio::spawn(async move {
+            super::release("http://127.0.0.1:9", &a, "", &reqwest::Client::new(), || true).await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!release.is_finished(), "the release waits for the claim");
+        drop(claim);
+        tokio::time::timeout(Duration::from_secs(5), release).await.unwrap().unwrap();
+    }
 
     #[test]
     fn the_holder_is_described_without_account_or_instance() {
@@ -236,6 +305,24 @@ mod tests {
         assert_eq!(describe_holder(&held_by), "this computer, channel local-main-x, v0.57.6");
         assert!(holder_on_this_computer(&describe_holder(&held_by)));
         assert!(!holder_on_this_computer("computer desk, channel stable, v0.58.0"));
+    }
+
+    // Take over needs the channel of a same-computer holder the relay
+    // reported, to find that instance and ask it to let go.
+    #[test]
+    fn a_same_computer_holder_gives_take_over_its_channel() {
+        let here = crate::backend::reactive::registry::local_host_label();
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        note_not_holder(&agent, &serde_json::json!({ "held_by": { "host": here, "channel": "local-main-x", "version": "0.57.6" } }));
+        assert_eq!(held_on_this_computer_by(&agent).as_deref(), Some("local-main-x"));
+        assert_eq!(held_on_another_computer(&agent), None);
+
+        let other = format!("agent-{}", uuid::Uuid::new_v4());
+        note_not_holder(&other, &serde_json::json!({ "held_by": { "host": "desk", "channel": "stable" } }));
+        assert_eq!(held_on_this_computer_by(&other), None);
+        assert_eq!(held_on_another_computer(&other).as_deref(), Some("computer desk, channel stable"));
+
+        assert_eq!(held_on_this_computer_by("never-seen"), None);
     }
 
     #[test]
