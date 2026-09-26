@@ -19,7 +19,6 @@
  */
 
 import { WorkspaceService } from "@/app/store/services";
-import { invokeCommand } from "@/app/platform/ipc";
 import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { findNodeByBlockId } from "@/layout/lib/layoutNode";
@@ -195,7 +194,7 @@ export async function tearOffPaneTab(
  *  path uses for the brief "a pane is currently closing" window. */
 async function openFloatingPaneWindow(args: Record<string, unknown>): Promise<boolean> {
     try {
-        await invokeCommand<{ window_label: string }>("open_floating_pane_window", args);
+        await getApi().windows.openFloatingPane(args);
         return true;
     } catch (e) {
         if (!String(e).includes("currently closing")) {
@@ -205,7 +204,7 @@ async function openFloatingPaneWindow(args: Record<string, unknown>): Promise<bo
     }
     await sleep(350);
     try {
-        await invokeCommand<{ window_label: string }>("open_floating_pane_window", args);
+        await getApi().windows.openFloatingPane(args);
         return true;
     } catch (e) {
         Logger.error("dnd:cross", "open_floating_pane_window failed after retry", { error: String(e), paneId: args.pane_id });

@@ -26,7 +26,6 @@ import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
-import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
@@ -94,7 +93,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             // Query Windows directly: is the left mouse button still held?
             let isButtonPressed = false;
             try {
-                isButtonPressed = await invokeCommand<boolean>("get_mouse_button_state");
+                isButtonPressed = await getApi().getMouseButtonState();
             } catch (e) {
                 // If the call fails, be conservative and reschedule rather than
                 // triggering a spurious tearoff.
@@ -195,7 +194,7 @@ async function handleCrossWindowDragEnd(
 ) {
     let cursorPoint: { x: number; y: number };
     try {
-        cursorPoint = await invokeCommand<{ x: number; y: number }>("get_cursor_point");
+        cursorPoint = await getApi().windows.getCursorScreenPoint();
     } catch (e) {
         Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
         return;
@@ -335,7 +334,7 @@ async function performTearOff(
         }
         // Diagnostic snapshot — awaited so it captures state before the IPC
         // starts (a fire-and-forget races the IPC and may read post-start state).
-        await invokeCommand("get_pane_debug_state", {}).then((snap) => {
+        await getApi().windows.getPaneDebugState().then((snap) => {
             Logger.info("dnd:cross", "tear-off pre-flight state", {
                 blockId: payload.blockId,
                 ...snap,
@@ -351,7 +350,7 @@ async function performTearOff(
         // `blockids` but with no layout node and no floater.
         // Reagent P1 on PR #1073.
         try {
-            await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+            await getApi().windows.openFloatingPane({
                 pane_id: payload.blockId,
                 workspace_id: newWsId,
                 x: screenX,
@@ -377,7 +376,7 @@ async function performTearOff(
             if (msg.includes("currently closing")) {
                 await sleep(350);
                 try {
-                    await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                    await getApi().windows.openFloatingPane({
                         pane_id: payload.blockId,
                         workspace_id: newWsId,
                         x: screenX,

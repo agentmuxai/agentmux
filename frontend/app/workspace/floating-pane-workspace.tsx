@@ -38,7 +38,6 @@
  * Block / view-model / RPC subscriptions all behave the same.
  */
 
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { isLinux, isMacOS, isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
@@ -280,7 +279,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const sendRect = (r: { x: number; y: number; width: number; height: number }): void => {
                 if (rectInFlight) { pendingRect = r; return; }
                 rectInFlight = true;
-                invokeCommand("set_window_rect", { label, ...r })
+                getApi().windows.setRect(label, r)
                     .catch(() => {})
                     .finally(() => {
                         rectInFlight = false;
@@ -303,10 +302,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // Take capture synchronously so moves keep flowing even as the
                 // cursor leaves the window; then fetch the start rect.
                 try { target.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-                invokeCommand<{ x: number; y: number; width: number; height: number }>(
-                    "get_window_rect",
-                    { label },
-                ).then((r) => {
+                getApi().windows.getRect(label).then((r) => {
                     if (r.width > 0 && r.height > 0) {
                         startRect = { x: r.x, y: r.y, w: r.width, h: r.height };
                         resizing = true;
@@ -377,7 +373,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 return;
             }
             jsDragSetPosInFlight = true;
-            invokeCommand("set_window_position", { x, y, label })
+            getApi().windows.setPosition(label, x, y)
                 .catch(() => {})
                 .finally(() => {
                     jsDragSetPosInFlight = false;
@@ -422,7 +418,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 armedAtRelease = null;
                 capturedGhostForDrop = null;
                 capturedGhostForWindow = null;
-                invokeCommand<{ x: number; y: number }>("get_window_position", { label })
+                getApi().windows.getPosition(label)
                     .then((pos) => {
                         if (myId !== jsDragMouseDownId) return;
                         jsDragInitWinX = pos.x;
@@ -458,7 +454,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // The host owns motion + capture and emits update_floating_redock_hover
             // itself while the renderer is dark; renderer sees mouseup via the
             // dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
-            invokeCommand("start_window_drag", { label }).catch(() => {});
+            getApi().windows.startDrag(label).catch(() => {});
             dragging = true;
             hasMoved = false;
             pendingRedockCoords = null;
@@ -506,14 +502,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (!capturedGhostForDrop) {
                 capturedGhostForWindow = arming.target();
                 capturedGhostForDrop = capturedGhostForWindow
-                    ? invokeCommand<{ block_id?: string; dir?: number }>(
-                          "get_floating_redock_target",
-                          { window_label: capturedGhostForWindow },
-                      ).catch(() => ({}))
+                    ? getApi().windows.getFloatingRedockTarget(capturedGhostForWindow).catch(() => ({}))
                     : Promise.resolve({});
             }
             const preGhostWindow = capturedGhostForWindow;
-            invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+            getApi().windows.clearFloatingRedockHover().catch(() => {});
             if (isWindows()) {
                 // On Windows the redock itself is committed by window_drag_ended
                 // (it carries host cursor coords, so it doesn't have to trust the
@@ -551,7 +544,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             handler: (payload: T) => void,
         ): (() => void) => {
             let unlisten: (() => void) | null = null;
-            listenEvent<T>(event, handler).then(u => {
+            getApi().listen<T>(event, handler).then(u => {
                 if (cleaned) { u(); } else { unlisten = u; }
             }).catch(() => {});
             return () => { unlisten?.(); };
@@ -606,10 +599,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     const preGhostWindow = arming.target();
                     capturedGhostForWindow = preGhostWindow;
                     capturedGhostForDrop = preGhostWindow
-                        ? invokeCommand<{ block_id?: string; dir?: number }>(
-                              "get_floating_redock_target",
-                              { window_label: preGhostWindow },
-                          ).catch(() => ({}))
+                        ? getApi().windows.getFloatingRedockTarget(preGhostWindow).catch(() => ({}))
                         : Promise.resolve({});
                 }
                 // Whichever of DOM mouseup / this event ran first recorded the
@@ -618,7 +608,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 const armedAtEnd = consumeArmedAtRelease();
                 // Always clear hover — safety net for non-Windows where onMouseUp
                 // may not have fired (BeginWindowDrag absorbs the release).
-                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                getApi().windows.clearFloatingRedockHover().catch(() => {});
                 if (ev.moved && !cleaned && armedAtEnd) {
                     // Prefer host-provided cursor coords (physical px → CSS px via
                     // posScale). On Windows these are always present. On non-Windows
@@ -672,7 +662,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         t: performance.now(),
                     });
                     if (clearIndicator) {
-                        invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                        getApi().windows.clearFloatingRedockHover().catch(() => {});
                     }
                 },
             );
@@ -710,7 +700,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 const sampleX = screenX;
                 const sampleY = screenY;
                 const sampleT = now;
-                invokeCommand<{ target_label?: string | null }>("update_floating_redock_hover", {
+                getApi().windows.updateFloatingRedockHover({
                     source_label: sourceLabel,
                     x: Math.round(screenX * scale),
                     y: Math.round(screenY * scale),
@@ -725,7 +715,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         t: sampleT,
                     });
                     if (clearIndicator) {
-                        invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                        getApi().windows.clearFloatingRedockHover().catch(() => {});
                     }
                 }).catch(() => {});
             };
@@ -807,10 +797,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // the host's Z-order walk would return the floater itself
                 // — it's at the cursor (the JS-driven drag follows the
                 // cursor), so it's always topmost where the cursor is.
-                target = await invokeCommand<{
-                    label: string | null;
-                    window_id: string | null;
-                }>("resolve_window_at_cursor", {
+                target = await getApi().windows.resolveWindowAtCursor({
                     x: px,
                     y: py,
                     exclude_label: ourLabel,

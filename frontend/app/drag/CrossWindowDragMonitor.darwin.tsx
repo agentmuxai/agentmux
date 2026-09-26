@@ -10,7 +10,6 @@
 
 import { atoms, getApi } from "@/store/global";
 import { sleep } from "@/util/util";
-import { invokeCommand } from "@/app/platform/ipc";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
@@ -240,7 +239,7 @@ async function performTearOff(
         // `blockids` but with no layout node and no floater. Reagent P1 on
         // PR #1073 (Windows path).
         try {
-            await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+            await getApi().windows.openFloatingPane({
                 pane_id: payload.blockId,
                 workspace_id: newWsId,
                 x: screenX,
@@ -259,7 +258,7 @@ async function performTearOff(
             if (msg.includes("currently closing")) {
                 await sleep(350);
                 try {
-                    await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                    await getApi().windows.openFloatingPane({
                         pane_id: payload.blockId,
                         workspace_id: newWsId,
                         x: screenX,

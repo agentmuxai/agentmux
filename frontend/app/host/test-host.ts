@@ -12,6 +12,9 @@ import { NO_HOST_CAPS } from "@/app/host/host-caps";
 export function makeTestHostApi(overrides: Partial<AppApi> = {}, caps: Partial<HostCaps> = {}): AppApi {
     const base: Partial<AppApi> = {
         getHostCaps: () => ({ ...NO_HOST_CAPS, ...caps }),
+        // Keep listen's contract (a promise of an unsubscribe function): UI
+        // awaits it and calls the result on cleanup. The event never fires.
+        listen: () => Promise.resolve(() => {}),
         ...overrides,
     };
     return new Proxy(base, {

@@ -19,7 +19,8 @@
 // mouse-up. Mirrors the Linux model (which routes the same IPC to
 // `CefWindow::BeginWindowDrag`); macOS stays on stock libcef.
 
-import { detectHost, invokeCommand } from "@/app/platform/ipc";
+import { hostHas } from "@/app/host/host-caps";
+import { getApi } from "@/app/store/app-api";
 
 let cefDragListenerInstalled = false;
 
@@ -51,7 +52,7 @@ function isInDragRegion(target: HTMLElement | null): boolean {
 }
 
 function installCefDragListener() {
-    if (cefDragListenerInstalled || detectHost() !== "cef") return;
+    if (cefDragListenerInstalled || !hostHas("nativeWindowChrome")) return;
     cefDragListenerInstalled = true;
 
     let pressX = 0;
@@ -95,7 +96,7 @@ function installCefDragListener() {
             // move loop (set_bounds per event) until the mouse is released.
             dragInitiated = true;
             pressArmed = false;
-            invokeCommand("start_window_drag", { label: currentWindowLabel() }).catch(() => {
+            getApi().windows.startDrag(currentWindowLabel()).catch(() => {
                 dragInitiated = false;
             });
         },
@@ -120,7 +121,7 @@ function installCefDragListener() {
             e.preventDefault();
             pressArmed = false;
             dragInitiated = false;
-            invokeCommand("maximize_window", { label: currentWindowLabel() }).catch(() => {});
+            getApi().windows.maximize(currentWindowLabel()).catch(() => {});
         },
         true,
     );
@@ -130,7 +131,7 @@ export function useWindowDrag(): { dragProps: Record<string, unknown> } {
     installCefDragListener();
     // The marker drives the JS listener, installed only for CEF. On non-CEF
     // hosts emit no attribute so the element stays strictly HTCLIENT.
-    if (detectHost() !== "cef") return { dragProps: {} };
+    if (!hostHas("nativeWindowChrome")) return { dragProps: {} };
     // Tabs/buttons inside the header set data-drag-region="false" to opt out
     // of the drag listener individually.
     return { dragProps: { "data-drag-region": true } };

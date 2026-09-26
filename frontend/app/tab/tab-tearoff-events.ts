@@ -89,7 +89,7 @@ export function useTabTearOffEvents(
         const physicalToClientX = (px: number) => px / dpr() - window.screenX;
         const physicalToClientY = (py: number) => py / dpr() - window.screenY;
         fireAndForget(async () => {
-            const { listenEvent } = await import("@/app/platform/ipc");
+            const listenEvent: AppApi["listen"] = (event, callback) => getApi().listen(event, callback);
             if (!mounted) return;
 
             trackOrDispose(

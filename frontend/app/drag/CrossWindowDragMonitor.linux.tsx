@@ -14,7 +14,6 @@ import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
-import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
@@ -259,7 +258,7 @@ async function performTearOff(
         // no floater. Reagent P1 on PR #1073 (Windows path); the same
         // ordering is preserved here.
         try {
-            await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+            await getApi().windows.openFloatingPane({
                 pane_id: payload.blockId,
                 workspace_id: newWsId,
                 x: screenX,
@@ -284,7 +283,7 @@ async function performTearOff(
             if (msg.includes("currently closing")) {
                 await sleep(350);
                 try {
-                    await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                    await getApi().windows.openFloatingPane({
                         pane_id: payload.blockId,
                         workspace_id: newWsId,
                         x: screenX,

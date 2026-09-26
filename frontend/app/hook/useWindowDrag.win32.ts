@@ -24,7 +24,8 @@
 //   localStorage['agentmux.win32NativeDrag'] = '0'
 // in DevTools and reload the window.
 
-import { detectHost, invokeCommand } from "@/app/platform/ipc";
+import { hostHas } from "@/app/host/host-caps";
+import { getApi } from "@/app/store/app-api";
 
 let cefDragListenerInstalled = false;
 
@@ -116,7 +117,7 @@ function installNativeDragListener() {
             // the input path.
             dragInitiated = true;
             pressArmed = false;
-            invokeCommand("start_window_drag", { label: ownWindowLabel() }).catch(() => {
+            getApi().windows.startDrag(ownWindowLabel()).catch(() => {
                 dragInitiated = false;
             });
         },
@@ -140,7 +141,7 @@ function installNativeDragListener() {
             e.preventDefault();
             pressArmed = false;
             dragInitiated = false;
-            invokeCommand("maximize_window", { label: ownWindowLabel() }).catch(() => {});
+            getApi().windows.maximize(ownWindowLabel()).catch(() => {});
         },
         true,
     );
@@ -179,9 +180,7 @@ function installJsDragListener() {
             latestScreenX = e.screenX;
             latestScreenY = e.screenY;
             try {
-                const pos = await invokeCommand<{ x: number; y: number }>("get_window_position", {
-                    label: ownWindowLabel(),
-                });
+                const pos = await getApi().windows.getPosition(ownWindowLabel());
                 // Race guard: bail if a mouseup or a newer mousedown happened
                 // during the IPC round-trip.
                 if (myId !== currentMouseDownId) return;
@@ -217,7 +216,7 @@ function installJsDragListener() {
             return;
         }
         setPosInFlight = true;
-        invokeCommand("set_window_position", { x, y, label: ownWindowLabel() })
+        getApi().windows.setPosition(ownWindowLabel(), x, y)
             .catch(() => {})
             .finally(() => {
                 setPosInFlight = false;
@@ -254,14 +253,14 @@ function installJsDragListener() {
             if (!isInDragRegion(e.target as HTMLElement)) return;
             e.preventDefault();
             dragging = false;
-            invokeCommand("maximize_window").catch(() => {});
+            getApi().windows.maximize().catch(() => {});
         },
         true,
     );
 }
 
 function installCefDragListener() {
-    if (cefDragListenerInstalled || detectHost() !== "cef") return;
+    if (cefDragListenerInstalled || !hostHas("nativeWindowChrome")) return;
     cefDragListenerInstalled = true;
     if (useNativeDrag()) {
         console.info("[window-drag] win32: host-side native move loop (start_window_drag)");
