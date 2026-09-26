@@ -454,7 +454,6 @@ pub(crate) async fn handle_quit_self(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     axum::Json(req): axum::Json<agentmux_common::api_types::QuitSelfRequest>,
 ) -> impl axum::response::IntoResponse {
-    use crate::sagas::self_quit;
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use axum::Json;
@@ -463,38 +462,57 @@ pub(crate) async fn handle_quit_self(
         Ok(b) => b,
         Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
     };
-    let agent = req.auth.agent_id.clone();
-    let detail = format!("{} | user said: {:?}", req.reason.trim(), req.user_instruction);
+    quit_self(&state, &block_id, &req.auth.agent_id, "QuitSelf", req.reason.trim(), &req.user_instruction)
+}
+
+/// An agent ending its own session — `QuitSelf`, or `ClosePane` with no
+/// arguments (§7), which has no quote and so always asks the user. A
+/// user-started, untainted turn with the user's quote quits when the turn
+/// ends; anything else waits 15 s for the user to keep it (§6.5).
+fn quit_self(
+    state: &AppState,
+    block_id: &str,
+    agent: &str,
+    via: &str,
+    reason: &str,
+    user_instruction: &str,
+) -> axum::response::Response {
+    use crate::sagas::self_quit;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+
+    let detail = format!("{reason} | user said: {user_instruction:?}");
     // Scheduled, closing, or a user-override window that already ran out.
-    let under_way = crate::sagas::pending_shutdown::active_for(&block_id).is_some_and(|v| v.status == "proceeding");
-    if self_quit::is_quitting(&block_id) || under_way {
+    let under_way = crate::sagas::pending_shutdown::active_for(block_id).is_some_and(|v| v.status == "proceeding");
+    if self_quit::is_quitting(block_id) || under_way {
         return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
     }
-    let provenance = crate::backend::blockcontroller::get_controller(&block_id).and_then(|c| c.turn_provenance());
-    if let Err(refusal) = self_quit::gate(provenance.as_ref(), &req.user_instruction) {
+    let provenance = crate::backend::blockcontroller::get_controller(block_id).and_then(|c| c.turn_provenance());
+    if let Err(refusal) = self_quit::gate(provenance.as_ref(), user_instruction) {
         // Not the user's own ask: the user decides, within 15 s (§6.5). Audited
         // with why the gate didn't pass (§4.4); the outcome is audited too.
         let pending = crate::sagas::pending_shutdown::request(
-            &state,
-            &block_id,
-            &agent,
-            "QuitSelf",
-            req.reason.trim(),
+            state,
+            block_id,
+            agent,
+            via,
+            reason,
             crate::sagas::pending_shutdown::Action::SelfQuit { detail: detail.clone() },
         );
         state.reactive_handler.log_fleet_action_audit(
-            Some(&agent),
-            &agent,
-            &block_id,
+            Some(agent),
+            agent,
+            block_id,
             "agent.quit_self",
             true,
             Some(refusal.as_str()),
             &pending.request_id,
-            Some(&format!("{}: {detail}", crate::sagas::pending_shutdown::audit_note(&pending, &agent, "QuitSelf"))),
+            Some(&format!("{} ({via}): {detail}", crate::sagas::pending_shutdown::audit_note(&pending, agent, via))),
         );
         return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
     }
-    if !self_quit::schedule_after_turn(&state, &block_id, detail) {
+    if !self_quit::schedule_after_turn(state, block_id, detail) {
         return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
     }
     (StatusCode::ACCEPTED, Json(json!({ "status": "scheduled" }))).into_response()
@@ -542,6 +560,14 @@ pub(crate) async fn handle_close_pane(
         Ok(b) => b,
         Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
     };
+
+    // No arguments: the agent closing itself. That is `QuitSelf` without its
+    // quote (§7): its own tab only, siblings keep running, and only after the
+    // user's 15 s window. Closing the whole pane takes an explicit block_id.
+    if req.block_id.is_none() {
+        let reason = req.reason.clone().unwrap_or_default();
+        return quit_self(&state, &verified_own_block_id, &caller_agent_id, "ClosePane", reason.trim(), "");
+    }
 
     let target_block_id = req.block_id.clone().unwrap_or_else(|| verified_own_block_id.clone());
     let is_cross_pane = req.block_id.is_some();
@@ -702,10 +728,20 @@ mod close_pane_tests {
         UiAutomationAuth { agent_id: agent_id.to_string(), ts_secs, sig }
     }
 
+    /// §7: with no arguments, ClosePane is the agent quitting itself — no
+    /// quote, so always the user's 15 s window, then its own tab only.
     #[tokio::test]
-    async fn own_pane_close_removes_the_caller_s_own_block() {
+    async fn no_argument_close_is_a_self_quit_behind_the_user_s_window() {
         let state = test_state();
         let (tab_id, block_id) = seed(&state).await;
+        let sibling = dispatch_apply(&state, Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .unwrap();
         let agent_id = format!("close-own-{}", uuid::Uuid::new_v4());
         state.reactive_handler.register_agent(&agent_id, &block_id, Some(&tab_id)).unwrap();
         let auth = sign_auth(&state, &agent_id);
@@ -713,14 +749,23 @@ mod close_pane_tests {
         let resp = handle_close_pane(
             axum::extract::State(state.clone()),
             None,
-            axum::Json(ClosePaneRequest { auth, block_id: None, reason: None }),
+            axum::Json(ClosePaneRequest { auth, block_id: None, reason: Some("done".into()) }),
         )
         .await
         .into_response();
-        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+        let body = body_json(resp).await;
+        assert_eq!(body["status"], "pending_user_override", "no quote: the user is asked");
+        let request_id = body["request_id"].as_str().unwrap().to_string();
+        let pending = crate::sagas::pending_shutdown::status(&request_id).unwrap();
+        assert_eq!((pending.via.as_str(), pending.by.as_str()), ("ClosePane", agent_id.as_str()));
+        assert!(state.srv_state.lock().await.blocks.contains_key(&block_id), "still running during the window");
 
+        crate::sagas::pending_shutdown::expire_now(&request_id);
+        assert_eq!(crate::sagas::pending_shutdown::settled(&request_id).await.status, "shut_down");
         let s = state.srv_state.lock().await;
-        assert!(!s.blocks.contains_key(&block_id), "own pane must be gone after close");
+        assert!(!s.blocks.contains_key(&block_id), "its own tab is gone");
+        assert!(s.blocks.contains_key(&sibling), "a sibling tab keeps running");
     }
 
     #[tokio::test]
