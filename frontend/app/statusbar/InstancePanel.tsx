@@ -459,12 +459,12 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                 </Show>
                 <Show when={about().gitHash}>
                     <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">Build</span>
+                        <span class="instance-panel-label">Commit</span>
                         <span class="instance-panel-value instance-panel-mono">{about().gitHash}</span>
                         <button
                             type="button"
                             class="instance-panel-copy"
-                            title="Copy build hash"
+                            title="Copy commit hash"
                             onClick={() => clipboardWriteText(about().gitHash!)}
                         >
                             ⧉
