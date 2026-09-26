@@ -757,7 +757,10 @@ export function renderAgent(node: ToolNode): JSX.Element {
     // compact one-liner (SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.6).
     // No description line: the row header already shows it (tool-header.ts),
     // running or finished.
-    const report = terminalText(node.result);
+    // Head-capped like a Read preview: the panel's max-height bounds what's
+    // visible, not the DOM, and a subagent report can be very long.
+    const text = terminalText(node.result);
+    const report = text ? capText(text, MAX_TOOL_OUTPUT_LINES, "head") : null;
     return (
         <div class="agent-tool-agent">
             <Show
@@ -770,8 +773,11 @@ export function renderAgent(node: ToolNode): JSX.Element {
             >
                 <div class="agent-tool-agent-report">
                     {/* scrollable={false} — see renderRead's markdown branch. */}
-                    <Markdown text={report!} scrollable={false} />
+                    <Markdown text={report!.text} scrollable={false} />
                 </div>
+                <Show when={report!.hiddenLines > 0}>
+                    <OutputHiddenMarker hidden={report!.hiddenLines} noun="line" from="head" />
+                </Show>
             </Show>
         </div>
     );

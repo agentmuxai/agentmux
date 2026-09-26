@@ -13,7 +13,7 @@
 
 import { For, createSignal, Show, type JSX } from "solid-js";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { TerminalOutput } from "./TerminalOutput";
 import { terminalText } from "./terminal-text";
 
@@ -119,7 +119,14 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
     // (SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5). One line reads as
     // plain text; several lines render as a terminal. Only a structured result
     // (no string body) keeps the one-line summary + `▸` JSON.
+    //
+    // Both text branches are capped like every other body
+    // (SPEC_TOOL_OUTPUT_CAP_2026_05_30.md): TerminalOutput by lines, the
+    // one-line branch by characters (a minified JSON or base64 line). A
+    // search result list (Grep / Glob) reads from its first line; other
+    // text (logs, command output) from its latest.
     const termText = () => terminalText(props.result);
+    const readFrom = (): "head" | "tail" => (props.tool === "Grep" || props.tool === "Glob" ? "head" : "tail");
     return (
         <Show
             when={termText() == null}
@@ -127,9 +134,9 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
                 <div class="agent-tool-compact-result">
                     <Show
                         when={termText()!.trim().includes("\n")}
-                        fallback={<div class="agent-tool-compact-line">{termText()!.trim()}</div>}
+                        fallback={<div class="agent-tool-compact-line">{capChars(termText()!.trim())}</div>}
                     >
-                        <TerminalOutput text={termText()!} from="tail" />
+                        <TerminalOutput text={termText()!} from={readFrom()} />
                     </Show>
                 </div>
             }

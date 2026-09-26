@@ -761,4 +761,19 @@ describe("ToolBlock — Grep pill", () => {
         const { container } = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-tool-result-pill")!.textContent).toBe("2 matches");
     });
+
+    it("reads the default files_with_matches header as files, and an empty search as zero", () => {
+        const pill = (content: string) => {
+            const n: ToolNode = {
+                type: "tool", id: "g-2", tool: "Grep", toolName: "Grep", params: { pattern: "x" },
+                status: "success", collapsed: true, summary: "x", result: { content } as any,
+            };
+            const { container, unmount } = render(() => <ToolBlock node={n} pinned={false} onTogglePin={() => {}} />);
+            const text = container.querySelector(".agent-tool-result-pill")?.textContent;
+            unmount();
+            return text;
+        };
+        expect(pill("Found 3 files\n/a.ts\n/b.ts\n/c.ts")).toBe("3 files");
+        expect(pill("No files found")).toBe("0 files");
+    });
 });

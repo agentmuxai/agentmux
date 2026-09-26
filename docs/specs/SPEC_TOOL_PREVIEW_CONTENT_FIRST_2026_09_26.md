@@ -345,8 +345,16 @@ results.
 Grep (F4):
 - Drop the `Pattern:` line; the row shows it.
 - The body is the match lines.
-- The existing Grep pill falls back to counting non-empty content lines when
-  there's no `matches` array.
+- With no `matches` array, the Grep pill reads Claude Code's text per
+  `output_mode` (`grep-result.ts`, formats captured from live calls):
+  `Found N files` → "N files" (the default, `files_with_matches`); the
+  `count` trailer's total → "N matches"; `content` lines, minus `--`
+  separators and the pagination notice → "N matches"; `No files found` /
+  `No matches found` → zero. Counting every line read 3 files as "4 matches"
+  (Opaz P1 on #3877).
+- Grep and Glob text bodies read from the head (a result list); other text
+  bodies keep the tail. One-line text bodies are character-capped, and the
+  Agent report markdown is line-capped, like every other body.
 
 ### 3.6 Unwrap text content-block arrays (F2, F3)
 

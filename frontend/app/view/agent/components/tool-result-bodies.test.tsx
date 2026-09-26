@@ -47,6 +47,26 @@ describe("Agent report body", () => {
     });
 });
 
+describe("Agent report cap", () => {
+    it("caps a very long report and says how much is hidden", async () => {
+        const long = Array.from({ length: 1500 }, (_, i) => `line ${i}`).join("\n\n");
+        const { container } = render(() => (
+            <ToolOverlayLog node={node({ tool: "Agent", toolName: "Agent", result: { content: long } as any })} />
+        ));
+        expect(container.querySelector(".agent-output-hidden-marker")).not.toBeNull();
+    });
+});
+
+describe("Grep reading order", () => {
+    it("a long match list opens on its first lines", () => {
+        const lines = Array.from({ length: 1200 }, (_, i) => `f${i}.ts:1:x`).join("\n");
+        const { container } = render(() => (
+            <ToolOverlayLog node={node({ tool: "Grep", toolName: "Grep", params: { pattern: "x" }, result: { content: lines } as any })} />
+        ));
+        expect(container.textContent).toContain("f0.ts:1:x");
+    });
+});
+
 describe("Workflow body", () => {
     const wf = (params: Record<string, string>) =>
         node({ tool: "Workflow", toolName: "Workflow", params, result: { status: "done" } as any });

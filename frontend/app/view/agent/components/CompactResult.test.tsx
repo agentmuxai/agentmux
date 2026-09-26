@@ -11,6 +11,7 @@
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompactResult } from "./CompactResult";
+import { MAX_TOOL_OUTPUT_CHARS } from "./output-cap";
 
 afterEach(() => cleanup());
 
@@ -68,6 +69,13 @@ describe("CompactResult — no chevron for a text body", () => {
         expect(container.querySelector(".agent-tool-compact-chevron")).toBeNull();
         expect(container.querySelector(".agent-terminal-output")).toBeNull();
         expect(container.textContent).toBe("Todos updated");
+    });
+
+    it("caps one huge unbroken line (ReAgent P1 on #3877: minified JSON, base64)", () => {
+        const huge = "x".repeat(MAX_TOOL_OUTPUT_CHARS + 5000);
+        const { container } = render(() => <CompactResult tool="Other" params={{}} result={{ content: huge }} />);
+        const shown = container.querySelector(".agent-tool-compact-line")!.textContent!;
+        expect(shown.length).toBeLessThan(MAX_TOOL_OUTPUT_CHARS + 200);
     });
 
     it("keeps the chevron for a structured result", () => {
