@@ -264,7 +264,9 @@ pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
             "ipc": format!("127.0.0.1:{}", ipc_port),
             "web": endpoints.web_endpoint,
             "ws": endpoints.ws_endpoint,
-            "devtools": format!("127.0.0.1:{}", debug_port),
+            // "off": release builds run no CDP server unless AGENTMUX_CDP_PORT
+            // opts in (#3681, `crate::cdp_port`).
+            "devtools": if debug_port == 0 { "off".to_string() } else { format!("127.0.0.1:{}", debug_port) },
         }
     })
 }

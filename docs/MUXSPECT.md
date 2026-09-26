@@ -260,7 +260,9 @@ It **cannot** see the Agent pane's Activity Dock — that's pure in-renderer
 SolidJS state, never persisted or exposed via any RPC, by design (not an
 oversight `muxspect` will "eventually" fix). For that, use the CEF host's
 own remote-debugging port (Chrome DevTools Protocol) — see the spec's §5.3
-for why that's the right tool for that specific gap.
+for why that's the right tool for that specific gap. (Release builds only run
+that port when launched with `AGENTMUX_CDP_PORT` set; dev builds run it by
+default — #3681.)
 
 ## Why it can't just query any instance yet
 

@@ -523,6 +523,12 @@ wrap_life_span_handler! {
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
+            // Drop this browser's in-process DevTools observer and fail any
+            // browser-API call still waiting on it (#3681) — before the
+            // browser is torn down, so no reply lands on a dead browser.
+            if let Some(b) = browser.as_deref() {
+                crate::browser_api::cdp::on_browser_closed(b.identifier());
+            }
             let mut inner = self.inner.lock();
             inner.on_before_close(browser);
         }

@@ -193,33 +193,6 @@ impl BrowserPaneManager {
         state.get_browser(&label)
     }
 
-    /// Return the current URL of the pane's main frame, if the pane
-    /// is Live. Used by the browser DOM API resolver
-    /// (`crate::browser_api::resolver`) to match CEF `/json` targets
-    /// against block ids without a first-class `browserId` field on
-    /// the CEF side.
-    pub fn pane_url(&self, state: &Arc<AppState>, block_id: &str) -> Option<String> {
-        let browser = self.live_browser(state, block_id)?;
-        let frame = browser.main_frame()?;
-        Some(CefString::from(&frame.url()).to_string())
-    }
-
-    /// Run `js` in the pane's main frame, if the pane is Live. Used by the
-    /// browser DOM API resolver to tag this pane's own page with a one-off
-    /// value it can then find among same-URL CDP targets
-    /// (`crate::browser_api::resolver::TargetCache::pick_by_stamp`). CEF
-    /// frame methods may be called on any thread in the browser process,
-    /// same as `pane_url` above. Returns false when the pane isn't Live.
-    pub fn run_js_in_pane(&self, state: &Arc<AppState>, block_id: &str, js: &str) -> bool {
-        let Some(frame) = self.live_browser(state, block_id).and_then(|b| b.main_frame()) else {
-            return false;
-        };
-        let code = CefString::from(js);
-        let url = CefString::from("");
-        frame.execute_java_script(Some(&code), Some(&url), 0);
-        true
-    }
-
     pub fn create(
         &self,
         state: &Arc<AppState>,
