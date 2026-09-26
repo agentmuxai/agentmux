@@ -119,6 +119,28 @@ wrap_task! {
             // for the platforms where that path is the live one.
             #[cfg(target_os = "windows")]
             if self.label == "main" {
+                // Hide the window FIRST. The synchronous notify below makes srv
+                // delete this window's window/workspace/tab/block rows and
+                // publish those deletes to the still-live page, so the user
+                // watched their panes get torn down (and, before #3860, an
+                // error screen) for the whole round trip before the window
+                // went away. SPEC_SHUTDOWN_INVALID_CONFIGURATION_FLASH_2026_09_22
+                // §11. Closing hides this window anyway (a Views close
+                // hides/recycles it), so this only moves the same HIDE earlier:
+                // the WRR hook callbacks it triggers are delivered through this
+                // (blocked) UI thread's queue, i.e. after this task — the same
+                // point they arrive today. Strict resolver only: never act on
+                // a window we can't positively identify as main.
+                // SAFETY: resolve_window_hwnd_strict returns only a validated
+                // live HWND; ShowWindow on it has no other preconditions.
+                unsafe {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                    if let Some(hwnd) =
+                        crate::commands::window::resolve_window_hwnd_strict(&self.state, &self.label)
+                    {
+                        ShowWindow(hwnd, SW_HIDE);
+                    }
+                }
                 crate::launcher_ipc::report_panes_reaped(self.label.clone());
                 let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
                 let auth_key = self.state.auth_key.lock().clone();

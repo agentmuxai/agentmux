@@ -225,7 +225,7 @@ error. See §11 for making the teardown itself invisible.
   `FALLBACK TEXT IN DOM` before the window closes. A dev-build startup that
   genuinely fails to load (e.g. srv down) must still show the error.
 
-## 11. Out of scope (follow-up worth considering)
+## 11. Follow-up: make the teardown invisible (done — see below)
 
 **Make the teardown invisible, not just error-free.** On the main-window path, the
 host could hide the window (`ShowWindow(SW_HIDE)` or the CEF Views equivalent)
@@ -235,6 +235,25 @@ click, and none of the pane teardown would be visible. Not proposed here, becaus
 the WRR and quit-watchdog logic reacts to window visibility and lifecycle events
 (`should_quit_on_last_window`, the `draining` state), and hiding first has to be
 checked against it. The §9 fix is safe regardless and should land first.
+
+**Done 2026-09-26** (Windows; `CloseWindowTask`'s `main` branch in
+`ui_tasks/window.rs`). The main HWND is hidden via the strict resolver before the
+synchronous notify. Checked against the concern above: a Views close already hides
+this window, so the WRR sees the same HIDE event it always did. Its hook callbacks
+are delivered through the UI thread's queue, which the close task is blocking, so
+they arrive after the task, as before. The frontend's only `beforeunload` listener
+never vetoes a close.
+
+Measured with a real title-bar click, a 2 ms `IsWindowVisible` sampler, and the page
+console on one clock (ms after the click):
+
+| build | window deletes reach the page | window no longer visible |
+|---|---|---|
+| before (2 runs) | +251, +261 | +283, +287 (destroyed) |
+| after (2 runs) | not observed before close | **+55, +57** (hidden), destroyed at +275 |
+
+srv still deletes the window: after each "after" close, the next launch on the same
+data directory logged `CreateWindow (no windows)` instead of resurrecting it.
 
 **Seen while reproducing, unrelated:** on each of three fresh `task dev` launches
 on 2026-09-25/26, the main window's first load stayed blank (bare "AgentMux" title,
