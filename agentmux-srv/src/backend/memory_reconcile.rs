@@ -378,12 +378,13 @@ fn reconcile_dir(
     names.dedup();
 
     let mut deletions: Vec<Deletion> = Vec::new();
+    let mut shas = ShaCache::default();
     for name in &names {
         if budget.spent() {
             report.deferred = true;
             break;
         }
-        reconcile_file(fs, uid, dir, &dir_id, name, report, &mut deletions, true)?;
+        reconcile_file(fs, uid, dir, &dir_id, name, report, &mut deletions, &mut shas, true)?;
     }
     if report.deferred {
         return Ok(());
@@ -451,9 +452,22 @@ fn adopt_baseline(
     Ok(())
 }
 
-/// The content `version` of `name` holds, from the log.
-fn sha_of(fs: &FileStore, uid: &str, name: &str, version: &str) -> Result<Option<String>, StoreError> {
-    Ok(record::history(fs, uid, name)?.into_iter().find(|v| v.version == version).and_then(|v| v.sha256))
+/// Versions' content hashes for one pass, read from the log once — not
+/// once per file, which made a pass quadratic in the log's length. A
+/// version appended during the pass is found by reading it again.
+#[derive(Default)]
+pub(crate) struct ShaCache {
+    shas: std::collections::HashMap<String, Option<String>>,
+}
+
+impl ShaCache {
+    fn sha_of(&mut self, fs: &FileStore, uid: &str, version: &str) -> Result<Option<String>, StoreError> {
+        if let Some(sha) = self.shas.get(version) {
+            return Ok(sha.clone());
+        }
+        self.shas = record::version_shas(fs, uid)?;
+        Ok(self.shas.get(version).cloned().flatten())
+    }
 }
 
 fn held_here<'h>(heads: &'h Heads, dir_id: &str, name: &str) -> Option<&'h str> {
@@ -481,6 +495,7 @@ fn reconcile_file(
     name: &str,
     report: &mut Report,
     deletions: &mut Vec<Deletion>,
+    shas: &mut ShaCache,
     may_retry: bool,
 ) -> Result<(), StoreError> {
     // Always decide against the disk and the record as they are now, never
@@ -513,7 +528,7 @@ fn reconcile_file(
     }
 
     let projected_sha = match &projected {
-        Some(p) => sha_of(fs, uid, name, p)?,
+        Some(p) => shas.sha_of(fs, uid, p)?,
         None => None,
     };
     let disk_changed = match &projected {
@@ -576,7 +591,7 @@ fn reconcile_file(
             match outcome {
                 AppendOutcome::Appended(_) => report.captured += 1,
                 AppendOutcome::StaleParent { .. } if may_retry => {
-                    return reconcile_file(fs, uid, dir, dir_id, name, report, deletions, false);
+                    return reconcile_file(fs, uid, dir, dir_id, name, report, deletions, shas, false);
                 }
                 _ => {}
             }
@@ -622,7 +637,7 @@ fn reconcile_file(
             match outcome {
                 AppendOutcome::Appended(_) => report.conflicts += 1,
                 AppendOutcome::StaleParent { .. } if may_retry => {
-                    return reconcile_file(fs, uid, dir, dir_id, name, report, deletions, false);
+                    return reconcile_file(fs, uid, dir, dir_id, name, report, deletions, shas, false);
                 }
                 _ => {}
             }
