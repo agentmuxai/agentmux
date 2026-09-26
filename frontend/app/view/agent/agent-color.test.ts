@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { AGENT_COLOR_PALETTE, dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
+import { AGENT_COLOR_PALETTE, dimAgentColor, isValidAgentColor, lightenAgentColor, pickAgentColor } from "./agent-color";
 
 describe("pickAgentColor", () => {
     it("is deterministic", () => {
@@ -53,5 +53,21 @@ describe("dimAgentColor", () => {
 
     it("passes invalid input through unchanged", () => {
         expect(dimAgentColor("junk")).toBe("junk");
+    });
+});
+
+describe("lightenAgentColor", () => {
+    it("scales channels toward white and stays valid", () => {
+        expect(lightenAgentColor("#000000")).toBe("#737373");
+        expect(lightenAgentColor("#ffffff")).toBe("#ffffff");
+        for (const hex of AGENT_COLOR_PALETTE) {
+            const lightened = lightenAgentColor(hex);
+            expect(isValidAgentColor(lightened)).toBe(true);
+            expect(lightened).not.toBe(hex);
+        }
+    });
+
+    it("passes invalid input through unchanged", () => {
+        expect(lightenAgentColor("junk")).toBe("junk");
     });
 });
