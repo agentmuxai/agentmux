@@ -26,6 +26,8 @@ import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthDat
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData";
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
+import type { EnsureProviderAuthDirReq } from "@/types/rpc/EnsureProviderAuthDirReq";
+import type { EnsureProviderAuthDirResult } from "@/types/rpc/EnsureProviderAuthDirResult";
 import type { ToolchainEnvReq } from "@/types/rpc/ToolchainEnvReq";
 
 /**
@@ -183,6 +185,16 @@ export const WorkspaceApi = {
 
     CheckCliAuthCommand(client: RpcClient, data: CommandCheckCliAuthData, opts?: RpcOpts): Promise<CheckCliAuthResult> {
         return client.rpcCall("checkcliauth", data, opts);
+    },
+
+    // command "provider.ensureauthdir" — create the provider's default
+    // (shared) auth dir with its isolation guarantees; returns the path.
+    EnsureProviderAuthDirCommand(
+        client: RpcClient,
+        data: EnsureProviderAuthDirReq,
+        opts?: RpcOpts,
+    ): Promise<EnsureProviderAuthDirResult> {
+        return client.rpcCall("provider.ensureauthdir", data, opts);
     },
 
     RunCliLoginCommand(client: RpcClient, data: CommandRunCliLoginData, opts?: RpcOpts): Promise<RunCliLoginResult> {

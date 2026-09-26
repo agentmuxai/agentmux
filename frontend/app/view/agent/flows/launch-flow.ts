@@ -146,7 +146,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // use it in place of `authEnv`'s generic provider-default dir for both
     // the meta env below and the auth check in Phase 2. Without this, the
     // mount-time auth check validates the wrong directory for any agent with
-    // a real account binding — `ensureAuthDir` (which built `authEnv`) has no
+    // a real account binding — `ensureProviderAuthDir` (which built `authEnv`) has no
     // way to know which account this specific agent is bound to, so it
     // always resolves the shared default, which can disagree with the
     // per-account dir the real spawn (`inject_identity_env`) uses. See

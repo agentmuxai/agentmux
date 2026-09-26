@@ -921,6 +921,21 @@ pub fn seed_transcript_retention_if_missing(
     Ok(true)
 }
 
+/// `provider`'s DEFAULT auth/config dir: `~/.agentmux/shared/providers/<auth_dir_name>/`
+/// — account-wide and version/channel-independent, so one login is shared by
+/// every instance (the structural fix for the per-channel validate-spin
+/// regression). A per-identity bundle override (identity_handlers) still wins
+/// for explicit multi-account. Shared by agent open and `provider.ensureauthdir`.
+pub fn default_auth_dir(provider: &ProviderConfig) -> Result<String, String> {
+    if let Some(paths) = agentmux_common::DataPaths::from_env() {
+        return Ok(paths.provider_auth_dir(provider.auth_dir_name).to_string_lossy().into_owned());
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "cannot determine home directory".to_string())?;
+    Ok(format!("{}/.agentmux/shared/providers/{}", home, provider.auth_dir_name))
+}
+
 /// Prepare an isolated provider auth/config directory for use as
 /// `CLAUDE_CONFIG_DIR` (or a provider's equivalent): create it, then apply
 /// every isolation guarantee that directory needs before a CLI is pointed

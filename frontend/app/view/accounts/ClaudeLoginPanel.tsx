@@ -27,6 +27,7 @@ import { runProviderLogin, type ProviderLoginOutcome } from "@/app/view/agent/fl
 import { InAppLoginPanel, type InAppLoginPhase } from "@/app/view/agent/components/InAppLoginPanel";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { Modal, type ModalScope } from "@/element/modal";
+import { ensureProviderAuthDir } from "@/app/view/agent/agent-launch-env";
 
 const CLAUDE_PROVIDER = PROVIDERS["claude"];
 
@@ -170,7 +171,7 @@ export function ClaudeLoginPanel(props: {
             const authEnv: Record<string, string> = {};
             if (CLAUDE_PROVIDER.authConfigDirEnvVar) {
                 try {
-                    authEnv[CLAUDE_PROVIDER.authConfigDirEnvVar] = await getApi().ensureAuthDir(CLAUDE_PROVIDER.id);
+                    authEnv[CLAUDE_PROVIDER.authConfigDirEnvVar] = await ensureProviderAuthDir(CLAUDE_PROVIDER.id);
                 } catch (e) {
                     setError((e as Error)?.message ?? String(e));
                     return;

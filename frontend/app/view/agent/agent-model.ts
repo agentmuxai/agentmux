@@ -18,7 +18,7 @@ import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { buildConfigFiles, deriveSlug } from "./agent-config-builder";
-import { checkNodejsForProvider, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
+import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
@@ -324,7 +324,7 @@ export class AgentViewModel {
 
         // Provider auth isolation (skip if provider has no isolated auth dir configured)
         if (provider.authConfigDirEnvVar) {
-            const authDir = await getApi().ensureAuthDir(provider.id);
+            const authDir = await ensureProviderAuthDir(provider.id);
             envVars[provider.authConfigDirEnvVar] = authDir;
         }
         if (provider.authExtraEnv) {
@@ -584,11 +584,11 @@ export class AgentViewModel {
 
         // Provider auth: the default lives in the account-wide, version- and
         // channel-independent shared dir (~/.agentmux/shared/providers/<provider>/),
-        // resolved by ensureAuthDir → ensure_auth_dir; one login is shared across
+        // resolved by ensureProviderAuthDir → srv provider.ensureauthdir; one login is shared across
         // every instance / channel / version. Skip the env var only for providers
         // with no isolated auth dir configured.
         if (provider.authConfigDirEnvVar) {
-            const authDir = await getApi().ensureAuthDir(provider.id);
+            const authDir = await ensureProviderAuthDir(provider.id);
             envVars[provider.authConfigDirEnvVar] = authDir;
         }
         if (provider.authExtraEnv) {

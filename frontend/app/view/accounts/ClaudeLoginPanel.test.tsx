@@ -33,7 +33,6 @@ const hub = vi.hoisted(() => ({
 
 vi.mock("@/app/store/global", () => ({
     getApi: () => ({
-        ensureAuthDir: (...args: unknown[]) => hub.ensureAuthDir(...args),
         cancelCliLogin: (...args: unknown[]) => hub.cancelCliLogin(...args),
     }),
 }));
@@ -45,6 +44,10 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+// The auth dir now comes from srv (provider.ensureauthdir) via this helper.
+vi.mock("@/app/view/agent/agent-launch-env", () => ({
+    ensureProviderAuthDir: (...args: unknown[]) => hub.ensureAuthDir(...args),
+}));
 vi.mock("@/app/errors/translate", () => ({
     translateError: (e: any) => ({ title: "Error", message: String(e?.message ?? e), retry: "" }),
 }));

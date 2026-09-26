@@ -587,6 +587,23 @@ pub struct CheckCliAuthResult {
     pub raw_output: String,
 }
 
+/// Request for `provider.ensureauthdir`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct EnsureProviderAuthDirReq {
+    /// Provider id or alias (e.g. "claude").
+    pub provider_id: String,
+}
+
+/// Result of `provider.ensureauthdir`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct EnsureProviderAuthDirResult {
+    /// Absolute path of the provider's default auth dir, created and
+    /// isolation-prepared (e.g. Claude's CLAUDE.md placeholder).
+    pub path: String,
+}
+
 /// Input for RunCliLoginCommand — spawns the CLI login flow and extracts the OAuth URL
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]

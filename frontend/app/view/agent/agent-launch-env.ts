@@ -50,6 +50,17 @@ export async function checkNodejsForProvider(provider: Pick<ProviderDefinition, 
 }
 
 /**
+ * A provider's default auth/config dir (`~/.agentmux/shared/providers/<id>/`),
+ * created and isolation-prepared by srv (`provider.ensureauthdir`) — the same
+ * step srv's own agent open runs, e.g. Claude's CLAUDE.md placeholder. The
+ * value for the provider's `authConfigDirEnvVar`.
+ */
+export async function ensureProviderAuthDir(providerId: string): Promise<string> {
+    const { path } = await RpcApi.EnsureProviderAuthDirCommand(TabRpcClient, { provider_id: providerId });
+    return path;
+}
+
+/**
  * Return the AgentMux user-home base directory as an absolute path.
  *
  * Routed by the CEF host so per-agent paths (e.g. the working dir)

@@ -8,7 +8,8 @@ use crate::backend::rpc_types::{
     ToolchainEnvReq, ToolchainEnvResult, ToolchainVersionsReq,
     WidgetApiResult, WidgetHealthResult,
     CheckCliAuthResult, CommandCheckCliAuthData, CommandResolveCliData, CommandRunCliLoginData,
-    ResolveCliResult, RunCliLoginResult, COMMAND_CHECK_CLI_AUTH, COMMAND_RESOLVE_CLI,
+    EnsureProviderAuthDirReq, EnsureProviderAuthDirResult, ResolveCliResult, RunCliLoginResult,
+    COMMAND_CHECK_CLI_AUTH, COMMAND_ENSURE_PROVIDER_AUTH_DIR, COMMAND_RESOLVE_CLI,
 };
 
 use super::AppState;
@@ -453,6 +454,22 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
+    // provider.ensureauthdir → create the provider's default (shared) auth dir
+    // and apply its isolation guarantees, exactly as agent open does; returns
+    // the path for the launch env (e.g. CLAUDE_CONFIG_DIR). Replaces the CEF
+    // host's `ensure_auth_dir`, which only created the dir.
+    engine.register_typed(
+        COMMAND_ENSURE_PROVIDER_AUTH_DIR,
+        |req: EnsureProviderAuthDirReq, _ctx| async move {
+            let provider = crate::backend::providers::get_provider(&req.provider_id)
+                .ok_or_else(|| format!("provider.ensureauthdir: unknown provider {:?}", req.provider_id))?;
+            let path = crate::backend::providers::default_auth_dir(provider)?;
+            crate::backend::providers::prepare_provider_auth_dir(provider, &path)
+                .map_err(|e| format!("provider.ensureauthdir: failed to prepare {path}: {e}"))?;
+            Ok(EnsureProviderAuthDirResult { path })
+        },
+    );
+
     // runclilogin → spawn CLI login flow, extract OAuth URL from output, return immediately
     engine.register_typed(
         "runclilogin",
@@ -855,6 +872,26 @@ async fn get_cli_version(cli_path: &str) -> String {
 mod tests {
     use super::*;
 
+    /// An unknown provider is refused before anything touches the disk.
+    #[tokio::test]
+    async fn ensure_provider_auth_dir_rejects_an_unknown_provider() {
+        let state = crate::server::tests::test_state();
+        let (engine, mut out) = WshRpcEngine::new();
+        register_cli_handlers(&engine, &state);
+        engine.handle_message(crate::backend::rpc_types::RpcMessage {
+            command: COMMAND_ENSURE_PROVIDER_AUTH_DIR.to_string(),
+            reqid: "r1".to_string(),
+            data: Some(serde_json::json!({ "provider_id": "no-such-provider" })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), out.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp.data.is_none(), "{resp:?}");
+        assert!(resp.error.contains("unknown provider"), "{resp:?}");
+    }
+
     /// All seven cli/toolchain/widget commands record their request and
     /// response types.
     ///
@@ -882,6 +919,7 @@ mod tests {
             (COMMAND_RESOLVE_CLI, "CommandResolveCliData", "ResolveCliResult"),
             (COMMAND_CHECK_CLI_AUTH, "CommandCheckCliAuthData", "CheckCliAuthResult"),
             ("runclilogin", "CommandRunCliLoginData", "RunCliLoginResult"),
+            (COMMAND_ENSURE_PROVIDER_AUTH_DIR, "EnsureProviderAuthDirReq", "EnsureProviderAuthDirResult"),
             ("toolchain.versions", "ToolchainVersionsReq", "HashMap<alloc::string::String, core::option::Option<alloc::string::String>>"),
         ] {
             let row = find(cmd);
