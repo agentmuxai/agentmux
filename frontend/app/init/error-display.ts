@@ -222,6 +222,30 @@ export function tryAutoRecover(message: string): boolean {
     return false;
 }
 
+/**
+ * Thrown by `failStartup` once a startup failure has been handled (a reload
+ * is scheduled or the recovery card is up). Lets `bootstrap` tell a handled
+ * failure from success — it used to see the init functions return normally,
+ * log "✅ Main application loaded successfully" and reset the reload budget —
+ * and from an unhandled one it should recover itself.
+ */
+export class StartupFailureHandled extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "StartupFailureHandled";
+    }
+}
+
+/**
+ * Handle a failed window startup: bounded auto-reload first, the recovery card
+ * once the budget is spent (`tryAutoRecover`). Always throws
+ * `StartupFailureHandled` so callers don't carry on as if startup succeeded.
+ */
+export function failStartup(message: string): never {
+    tryAutoRecover(message);
+    throw new StartupFailureHandled(message);
+}
+
 /** True once the bounded auto-reload budget is spent — reloading has not
  *  reconnected, so the card escalates its copy and drops the auto-loop. */
 function reloadBudgetExhausted(): boolean {
@@ -286,19 +310,21 @@ export function showStartupError(message: string): void {
         `font-family:${FONT};color:#e8e8e8;`;
 
     const title = document.createElement("h2");
+    // Neutral on purpose: this card also shows for failures that aren't a lost
+    // host — one refused request during startup, a missing object (#3868).
     title.textContent = exhausted
-        ? "Can't reconnect to AgentMux"
-        : "AgentMux lost its connection to the host";
+        ? "AgentMux couldn't start this window"
+        : "This window didn't finish starting";
     title.style.cssText = "margin:0 0 10px;font-size:18px;color:#ffd479;";
     card.appendChild(title);
 
     const body = document.createElement("p");
     body.textContent = exhausted
-        ? "Reconnecting on its own didn't work. Press Restore — it rebuilds this " +
+        ? "Retrying on its own didn't work. Press Restore — it rebuilds this " +
           "window's connection to the host and reopens your workspace. If Restore " +
           "can't reach the host either, the host has stopped; restart AgentMux."
-        : "The interface loaded but couldn't reach the AgentMux host process. " +
-          "This is almost always temporary — Restore reconnects it.";
+        : "Something this window needed from the AgentMux host didn't come through " +
+          "while it was starting. This is almost always temporary — Restore retries it.";
     body.style.cssText = "margin:0 0 18px;font-size:14px;line-height:1.5;color:rgba(255,255,255,0.8);";
     card.appendChild(body);
 
@@ -341,7 +367,7 @@ export function showStartupError(message: string): void {
         "background:transparent;color:rgba(255,255,255,0.8);";
     copyBtn.onclick = () => {
         copyBtn.disabled = true;
-        const report = formatErrorReport({ title: title.textContent || "AgentMux connection lost", details: message });
+        const report = formatErrorReport({ title: title.textContent || "AgentMux window startup failed", details: message });
         void copyErrorReport(report, "dom").then((ok) => {
             copyBtn.textContent = ok ? "Copied ✓" : "Copy failed";
             copyBtn.disabled = false;
