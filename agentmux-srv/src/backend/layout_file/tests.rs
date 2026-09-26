@@ -382,3 +382,248 @@ fn an_unknown_window_or_an_empty_one_is_an_error() {
     store.insert(&mut empty_win).unwrap();
     assert!(export_window(&store, "w-empty", "x", &ctx(false)).unwrap_err().contains("no tabs"));
 }
+
+// ── Apply plan (spec §3.5, Phase 2) ──
+
+fn doc_with_tab(panes: Value, root: Value) -> LayoutDoc {
+    parse_layout(
+        &json!({
+            "format": "agentmux.layout",
+            "version": 1,
+            "name": "t",
+            "windows": [{ "active_tab": 0, "tabs": [{ "name": "one", "root": root, "panes": panes, "focused": "p2" }] }]
+        })
+        .to_string(),
+    )
+    .unwrap()
+}
+
+fn one_pane(view: Value) -> LayoutDoc {
+    doc_with_tab(json!({ "p1": { "views": [view] } }), json!({ "pane": "p1" }))
+}
+
+fn opts(home: &Path, run_commands: bool) -> PlanOptions {
+    PlanOptions { home: Some(home.to_path_buf()), run_commands }
+}
+
+fn block_meta(plan: &ApplyPlan, tab: usize, i: usize) -> &Map<String, Value> {
+    plan.tabs[tab].blocks[i].as_object().unwrap()
+}
+
+#[test]
+fn an_exported_window_plans_back_into_the_same_tree() {
+    let store = seeded_store();
+    let doc = export_window(&store, "w-1", "x", &ctx(false)).unwrap().doc;
+    let home = tempfile::tempdir().unwrap();
+    let plan = plan_from_doc(&store, &doc, &opts(home.path(), false));
+    assert_eq!(plan.tabs.len(), 2);
+    assert_eq!(plan.active_tab, Some(1));
+    let main = &plan.tabs[0];
+    assert_eq!(main.blocks.len(), 4, "agent + term (one pane) + browser + editor");
+    let root = main.rootnode.as_ref().unwrap();
+    assert_eq!(root.children.len(), 2);
+    assert_eq!(root.children[0].size, 75.0);
+    assert_eq!(root.children[1].size, 25.0);
+    assert_eq!(root.children[1].flex_direction, agentmux_common::layout_types::FlexDirection::Column);
+    let agent_leaf = root.children[0].data.as_ref().unwrap();
+    assert_eq!(agent_leaf.block_stack.len(), 2, "the agent pane keeps its two pane tabs");
+    assert_eq!(agent_leaf.block_id, agent_leaf.active_block_id);
+    // The agent resolves to the local definition by its slug.
+    assert_eq!(block_meta(&plan, 0, 0)[META_LAYOUT_AGENT], "def-uuid-1");
+    assert_eq!(block_meta(&plan, 0, 0)["view"], "agent");
+    // Focus follows the file's pane to the new node id.
+    let web_node = &root.children[1].children[0];
+    assert_eq!(main.focused, web_node.id);
+    // Node ids are fresh, never the store's.
+    assert!(!root.id.is_empty() && root.id != "n-root");
+}
+
+#[test]
+fn agents_resolve_by_slug_then_name_only_when_unambiguous_and_never_to_a_template() {
+    let store = Store::open_in_memory().unwrap();
+    let mut template = crate::backend::storage::agents::test_agent_def("tmpl", "Reviewer", "claude", "agent", 1, "");
+    template.slug = "reviewer".into();
+    template.is_seeded = 1;
+    store.agent_def_insert(&mut template).unwrap();
+    for (id, name) in [("a1", "Twin"), ("a2", "twin")] {
+        let mut d = crate::backend::storage::agents::test_agent_def(id, name, "claude", "agent", 1, "");
+        d.slug = id.into();
+        store.agent_def_insert(&mut d).unwrap();
+    }
+    let home = tempfile::tempdir().unwrap();
+
+    // Only the template matches: not launchable.
+    let plan = plan_from_doc(
+        &store,
+        &one_pane(json!({ "type": "agent", "config": { "agent": "reviewer", "name": "Reviewer" } })),
+        &opts(home.path(), false),
+    );
+    assert!(block_meta(&plan, 0, 0).get(META_LAYOUT_AGENT).is_none());
+    assert!(plan.notes.iter().any(|n| n.contains("agent picker")), "{:?}", plan.notes);
+
+    // Two user agents share the name: ambiguous, picker.
+    let plan = plan_from_doc(&store, &one_pane(json!({ "type": "agent", "config": { "name": "TWIN" } })), &opts(home.path(), false));
+    assert!(block_meta(&plan, 0, 0).get(META_LAYOUT_AGENT).is_none());
+
+    // The slug is unique: resolved.
+    let plan = plan_from_doc(
+        &store,
+        &one_pane(json!({ "type": "agent", "config": { "agent": "A2", "name": "twin" } })),
+        &opts(home.path(), false),
+    );
+    assert_eq!(block_meta(&plan, 0, 0)[META_LAYOUT_AGENT], "a2");
+}
+
+#[test]
+fn terminal_commands_run_only_when_allowed_and_are_always_listed() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join("src")).unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let doc = one_pane(json!({ "type": "term", "config": { "cwd": "~/src", "command": "npm", "args": ["test"] } }));
+
+    let held = plan_from_doc(&store, &doc, &opts(home.path(), false));
+    let m = block_meta(&held, 0, 0);
+    assert_eq!(m["controller"], "shell");
+    assert!(m.get("cmd").is_none(), "an untrusted command does not run");
+    assert_eq!(m["cmd:cwd"], home.path().join("src").to_string_lossy().as_ref());
+    assert_eq!(held.commands, ["npm test"]);
+    assert!(held.tabs[0].summary[0].contains("command not run"));
+
+    let run = plan_from_doc(&store, &doc, &opts(home.path(), true));
+    let m = block_meta(&run, 0, 0);
+    assert_eq!(m["controller"], "cmd");
+    assert_eq!(m["cmd"], "npm");
+    assert_eq!(m["cmd:args"], json!(["test"]));
+}
+
+#[test]
+fn a_missing_folder_is_dropped_with_a_note() {
+    let home = tempfile::tempdir().unwrap();
+    let plan = plan_from_doc(
+        &Store::open_in_memory().unwrap(),
+        &one_pane(json!({ "type": "term", "config": { "cwd": "~/nope" } })),
+        &opts(home.path(), false),
+    );
+    assert!(block_meta(&plan, 0, 0).get("cmd:cwd").is_none());
+    assert!(plan.notes.iter().any(|n| n.contains("doesn't exist")));
+}
+
+#[test]
+fn only_http_urls_reach_a_browser_pane() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    for (url, kept) in [
+        ("https://a.b/c", true),
+        ("http://a.b", true),
+        ("javascript:alert(1)", false),
+        ("file:///etc/passwd", false),
+    ] {
+        let plan = plan_from_doc(&store, &one_pane(json!({ "type": "browser", "config": { "url": url } })), &opts(home.path(), false));
+        assert_eq!(block_meta(&plan, 0, 0).contains_key("url"), kept, "{url}");
+    }
+}
+
+#[test]
+fn unknown_types_open_as_empty_panes_with_a_sanitized_name() {
+    let home = tempfile::tempdir().unwrap();
+    let plan = plan_from_doc(
+        &Store::open_in_memory().unwrap(),
+        &one_pane(json!({ "type": "holo<script>gram", "config": { "x": 1 } })),
+        &opts(home.path(), false),
+    );
+    assert_eq!(block_meta(&plan, 0, 0)["view"], "holoscriptgram");
+    assert_eq!(block_meta(&plan, 0, 0).len(), 1, "nothing from an unknown type's config is carried");
+    assert!(plan.notes.iter().any(|n| n.contains("isn't known")));
+}
+
+#[test]
+fn editor_like_views_open_as_the_editor() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join("a.md"), "x").unwrap();
+    let store = Store::open_in_memory().unwrap();
+    for kind in ["editor", "codeeditor", "preview"] {
+        let plan = plan_from_doc(&store, &one_pane(json!({ "type": kind, "config": { "file": "~/a.md" } })), &opts(home.path(), false));
+        let m = block_meta(&plan, 0, 0);
+        assert_eq!(m["view"], "editor", "{kind}");
+        assert_eq!(m["file"], home.path().join("a.md").to_string_lossy().as_ref());
+        assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+    }
+}
+
+#[test]
+fn panes_missing_from_the_map_are_skipped_and_a_tab_with_none_left_is_noted() {
+    let home = tempfile::tempdir().unwrap();
+    let doc = doc_with_tab(json!({}), json!({ "pane": "ghost" }));
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    assert!(plan.tabs.is_empty());
+    assert!(plan.notes.iter().any(|n| n.contains("skipped")));
+}
+
+#[test]
+fn a_dangling_or_empty_pane_is_dropped_with_a_note_naming_it() {
+    let home = tempfile::tempdir().unwrap();
+    let doc = doc_with_tab(
+        json!({ "p1": { "views": [{ "type": "sysinfo" }] }, "hollow": { "views": [] } }),
+        json!({ "split": "row", "children": [
+            { "ratio": 0.4, "node": { "pane": "p1" } },
+            { "ratio": 0.3, "node": { "pane": "ghost" } },
+            { "ratio": 0.3, "node": { "pane": "hollow" } }
+        ] }),
+    );
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    assert_eq!(plan.tabs[0].blocks.len(), 1);
+    assert!(plan.notes.iter().any(|n| n.contains("“ghost”")), "{:?}", plan.notes);
+    assert!(plan.notes.iter().any(|n| n.contains("“hollow”")), "{:?}", plan.notes);
+}
+
+#[test]
+fn panes_past_the_per_tab_limit_are_dropped_with_one_note() {
+    let home = tempfile::tempdir().unwrap();
+    let count = MAX_PANES_PER_TAB + 2;
+    let panes: Map<String, Value> = (0..count).map(|i| (format!("p{i}"), json!({ "views": [{ "type": "sysinfo" }] }))).collect();
+    let children: Vec<Value> = (0..count).map(|i| json!({ "ratio": 1.0 / count as f64, "node": { "pane": format!("p{i}") } })).collect();
+    let doc = doc_with_tab(Value::Object(panes), json!({ "split": "row", "children": children }));
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    assert_eq!(plan.tabs[0].blocks.len(), MAX_PANES_PER_TAB);
+    let capped: Vec<_> = plan.notes.iter().filter(|n| n.contains(&MAX_PANES_PER_TAB.to_string())).collect();
+    assert_eq!(capped.len(), 1, "{:?}", plan.notes);
+    assert!(capped[0].contains("one"), "names the tab: {}", capped[0]);
+}
+
+#[test]
+fn a_tree_nested_past_the_limit_is_cut_with_one_note() {
+    let home = tempfile::tempdir().unwrap();
+    // Every level holds a pane beside the next level, so several branches
+    // cross the depth limit.
+    let mut root = json!({ "pane": "p0" });
+    for _ in 0..MAX_TREE_DEPTH + 3 {
+        root = json!({ "split": "row", "children": [{ "ratio": 0.5, "node": { "pane": "p0" } }, { "ratio": 0.5, "node": root }] });
+    }
+    let doc = doc_with_tab(json!({ "p0": { "views": [{ "type": "sysinfo" }] } }), root);
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    assert!(!plan.tabs[0].blocks.is_empty());
+    assert_eq!(plan.notes.iter().filter(|n| n.contains("nests too deeply")).count(), 1, "{:?}", plan.notes);
+}
+
+#[test]
+fn trust_needs_both_this_install_and_the_layouts_folder() {
+    let mut doc = export(false).doc;
+    let dir = PathBuf::from(if cfg!(windows) { "C:\\l" } else { "/l" });
+    let inside = dir.join("x.agentmux-layout.json");
+    let outside = PathBuf::from(if cfg!(windows) { "C:\\elsewhere\\x.agentmux-layout.json" } else { "/elsewhere/x.agentmux-layout.json" });
+    let own = "gr2q7gf5lh6pzfdnurnkvputhm";
+    assert!(is_trusted(&doc, &inside, Some(own), Some(&dir)));
+    assert!(!is_trusted(&doc, &outside, Some(own), Some(&dir)), "a file saved here but moved elsewhere");
+    assert!(!is_trusted(&doc, &inside, Some("aaaaaaaaaaaaaaaaaaaaaaaaaa"), Some(&dir)), "another install's file");
+    assert!(!is_trusted(&doc, &inside, None, Some(&dir)), "no wan.db: can't tell, so not trusted");
+    doc.saved_by.instance = None;
+    assert!(!is_trusted(&doc, &inside, Some(own), Some(&dir)));
+}
+
+#[test]
+fn a_file_too_large_to_be_a_layout_is_refused_unread() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("big.agentmux-layout.json");
+    std::fs::write(&path, vec![b' '; (MAX_LAYOUT_FILE_BYTES + 1) as usize]).unwrap();
+    assert!(read_layout_file(&path).unwrap_err().contains("too large"));
+}
