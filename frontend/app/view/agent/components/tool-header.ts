@@ -55,10 +55,13 @@ export function hasAuthoredSummary(node: ToolNode): boolean {
     return node.toolName === "AskUserQuestion";
 }
 
-/** The same header as one plain string, e.g. "🌐 solid docs" (or the authored
- *  summary, see `hasAuthoredSummary`). */
+/** The header as one plain string for text consumers (the /btw snapshot),
+ *  e.g. "🌐 solid docs", plus any reducer-set `statusNote` — which ToolBlock
+ *  renders in its own span — so no consumer loses it. An authored summary
+ *  (see `hasAuthoredSummary`) is returned as-is. */
 export function toolHeaderText(node: ToolNode): string {
     if (hasAuthoredSummary(node)) return node.summary;
     const { icon, label, detail } = toolHeaderParts(node);
-    return [icon, label, detail].filter(Boolean).join(" ");
+    const header = [icon, label, detail].filter(Boolean).join(" ");
+    return node.statusNote ? `${header} — ${node.statusNote}` : header;
 }

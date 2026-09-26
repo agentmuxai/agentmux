@@ -80,6 +80,21 @@ describe("buildBtwContextSnapshot", () => {
         expect(buildBtwContextSnapshot([search])).toBe("Tool WebSearch (canceled): 🌐 solid docs");
     });
 
+    it("carries a reducer-set status note (muxspect force-cancel)", () => {
+        const cleared: DocumentNode = {
+            type: "tool",
+            id: "1",
+            tool: "Bash",
+            params: { command: "sleep 600" },
+            status: "canceled",
+            collapsed: true,
+            summary: "⏹ Canceled — cleared via muxspect",
+            statusNote: "cleared via muxspect",
+        };
+
+        expect(buildBtwContextSnapshot([cleared])).toBe("Tool Bash (canceled): 🔧 Bash sleep 600 — cleared via muxspect");
+    });
+
     it("keeps an AskUserQuestion's authored text", () => {
         const answered: DocumentNode = {
             type: "tool",

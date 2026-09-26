@@ -50,6 +50,12 @@ describe("toolHeaderParts", () => {
 });
 
 describe("toolHeaderText", () => {
+    it("appends a reducer-set status note so text consumers keep it", () => {
+        expect(toolHeaderText(node({ tool: "Bash", toolName: "Bash", params: { command: "ls" }, statusNote: "cleared via muxspect" }))).toBe(
+            "🔧 Bash ls — cleared via muxspect",
+        );
+    });
+
     it("joins the parts with single spaces and no status glyph or duration", () => {
         expect(toolHeaderText(node({ toolName: "mcp__agentmux__WhoAmI" }))).toBe("🛠️ agentmux · WhoAmI");
         expect(toolHeaderText(node({ toolName: "WebSearch", params: { query: "solid docs" } }))).toBe("🌐 solid docs");
