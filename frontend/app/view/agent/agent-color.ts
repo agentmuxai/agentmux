@@ -70,19 +70,3 @@ export function dimAgentColor(hex: string): string {
     const hex2 = (n: number) => n.toString(16).padStart(2, "0");
     return `#${hex2(r)}${hex2(g)}${hex2(b)}`;
 }
-
-/** Lightened variant for the Swarm row hover tint
- * (`SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md` §2.2) —
- * mixes each channel toward white by `factor`, the mirror image of
- * `dimAgentColor`'s mix toward black. `0.45` is a starting point for visual
- * tuning, not a measured value. */
-export function lightenAgentColor(hex: string, factor = 0.45): string {
-    if (!isValidAgentColor(hex)) return hex;
-    const channel = (s: string) => parseInt(s, 16);
-    const mix = (c: number) => Math.round(c + (255 - c) * factor);
-    const r = mix(channel(hex.slice(1, 3)));
-    const g = mix(channel(hex.slice(3, 5)));
-    const b = mix(channel(hex.slice(5, 7)));
-    const hex2 = (n: number) => n.toString(16).padStart(2, "0");
-    return `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-}
