@@ -105,13 +105,21 @@
     border-radius: 4px;
     user-select: none;
 
-    // --swarm-agent-hover-bg / --swarm-agent-active-border are set inline per
-    // row from that agent's own resolved pane-tab color (computeBlockActiveBorderColor,
-    // lightened for hover) — see swarm-view.tsx's AgentRow. The var(...,
-    // <default>) fallbacks are what a row without a resolvable color (no
-    // blockId, or a block with no color set) keeps showing.
-    &:hover {
-        background: var(--swarm-agent-hover-bg, var(--highlight-bg));
+    // --swarm-agent-active-border / --swarm-agent-hover-border are set inline
+    // per row from that agent's own pane (swarm-row-colors.ts): the selected
+    // pane-tab colour, and the colour an UNSELECTED pane's border uses. The
+    // var(...) fallbacks are what a row without a resolvable color (no blockId,
+    // or a block with no color set) keeps showing.
+    //
+    // Hover draws the SAME 1px inset outline as selection (--active below), in
+    // the dimmer shade, and no fill. `:not(&--active)` is required:
+    // `.swarm-agent-card:hover` (0,2,0) outranks `.swarm-agent-card--active`
+    // (0,1,0), so without it hovering the selected row would swap its
+    // full-strength border for the dim one.
+    // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part C.
+    &:hover:not(&--active) {
+        box-shadow: inset 0 0 0 1px var(--swarm-agent-hover-border, var(--border-color));
+        border-radius: 0;
     }
 
     &--active {

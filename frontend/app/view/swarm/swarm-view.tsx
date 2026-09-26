@@ -20,8 +20,7 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock } from "@/util/format-time";
 import { focusBlock } from "@/app/util/focus-block";
-import { computeBlockActiveBorderColor } from "@/app/block/blockframe";
-import { lightenAgentColor } from "@/app/view/agent/agent-color";
+import { swarmRowColors } from "./swarm-row-colors";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 
@@ -237,17 +236,13 @@ export function AgentRow({
     // The agent's own pane-tab color — same source PaneChrome's `tabColors`
     // memo reads for the tab underline (hue-aware: an explicit `frame:hue`
     // override wins, else `frame:activebordercolor`), so the Swarm row's
-    // selected border and hover tint always match that agent's actual pane
-    // tab instead of a fixed theme accent
+    // selected border and hover border always match that agent's actual pane
+    // tab (the unselected pane border, for hover) instead of a fixed theme accent
     // (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.1-2.2).
     const blockMeta = createMemo(() =>
         node.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node.blockId))()?.meta : undefined
     );
-    const activeBorderColor = createMemo(() => computeBlockActiveBorderColor(blockMeta()));
-    const hoverTint = createMemo(() => {
-        const base = activeBorderColor();
-        return base ? lightenAgentColor(base) : undefined;
-    });
+    const rowColors = createMemo(() => swarmRowColors(blockMeta()));
     // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
     // below (reagent P1 on PR #2862). Left in the bucket, an agent whose only
     // active work was a promoted Bash/sleep call had `hasChildren() === false`
@@ -305,8 +300,8 @@ export function AgentRow({
                     "swarm-agent-card--active": focusedBlockId() === node.blockId,
                 }}
                 style={{
-                    "--swarm-agent-active-border": activeBorderColor(),
-                    "--swarm-agent-hover-bg": hoverTint(),
+                    "--swarm-agent-active-border": rowColors().active,
+                    "--swarm-agent-hover-border": rowColors().hover,
                 }}
                 // Selecting an agent focuses ITS pane (switching tabs if it's
                 // a background tab in a multi-tab pane — focusBlock already
