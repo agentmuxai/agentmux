@@ -30,7 +30,7 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 
 interface CaptureChange {
     blockId: string;
@@ -58,7 +58,7 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
 
     onMount(() => {
         let dispose: (() => void) | undefined;
-        void listenEvent<CaptureChange>("pane-media-capture-changed", (p) => {
+        void getApi().listen<CaptureChange>("pane-media-capture-changed", (p) => {
             if (!p || typeof p.blockId !== "string") return;
             setCapturing((prev) => {
                 const rest = prev.filter((c) => c.blockId !== p.blockId);
@@ -76,7 +76,7 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
     const doRevoke = async (blockId: string) => {
         setConfirmRevoke(null);
         try {
-            await invokeCommand("pane_media_revoke", { blockId });
+            await getApi().browserPanes.revokeMedia(blockId);
         } catch (e) {
             console.error("[pane-media] revoke failed", e);
         }

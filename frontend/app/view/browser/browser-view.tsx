@@ -3,7 +3,8 @@
 
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { elementDragInFlight } from "@/app/drag/element-drag-state";
-import { invokeCommand } from "@/app/platform/ipc";
+import { hostHas } from "@/app/host/host-caps";
+import { getApi } from "@/app/store/app-api";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
@@ -101,10 +102,23 @@ function BrowserDragHole(): JSX.Element {
  * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md §5 (browser-auth follow-up).
  */
 export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.Element {
+    // A browser pane is a native browser drawn by the host. A host without
+    // them (HostCaps.nativeBrowserPane) gets a notice, never a pane that
+    // issues commands nothing will answer.
     return (
-        <ModalLayer scope="pane">
-            <BrowserViewInner model={props.model} />
-        </ModalLayer>
+        <Show when={hostHas("nativeBrowserPane")} fallback={<BrowserPaneUnavailable />}>
+            <ModalLayer scope="pane">
+                <BrowserViewInner model={props.model} />
+            </ModalLayer>
+        </Show>
+    );
+}
+
+function BrowserPaneUnavailable(): JSX.Element {
+    return (
+        <div class="browser-view browser-pane-unavailable">
+            <p>Browser panes need the AgentMux desktop app.</p>
+        </div>
     );
 }
 
@@ -236,7 +250,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     // aggressively that the trade-off doesn't pay. Explicit
                     // click is the clear user intent.
                     if (rectSync.paneCreated() && !model.closed) {
-                        invokeCommand("browser_pane_focus", { block_id: model.blockId }).catch(() => {});
+                        getApi().browserPanes.focus(model.blockId).catch(() => {});
                     }
                 }}
             >

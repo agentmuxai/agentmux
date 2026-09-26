@@ -21,12 +21,12 @@
 // every existing listener treats that exactly like a real outside click,
 // with no changes needed on their end.
 
-import { listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { onCleanup, onMount } from "solid-js";
 
 export const BrowserPaneOutsideClickBridge = () => {
     onMount(() => {
-        const unsubPromise = listenEvent<{ block_id: string }>("browser-pane-clicked", () => {
+        const unsubPromise = getApi().listen<{ block_id: string }>("browser-pane-clicked", () => {
             // No block_id filtering — ANY pane click counts as "outside" for
             // every currently open dismissible menu, the same way clicking
             // anywhere else non-menu in the app already does.

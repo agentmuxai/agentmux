@@ -34,6 +34,9 @@ vi.mock("@/app/platform/pane-rect-registry", () => ({ registerPaneRect: () => {}
 vi.mock("@/app/platform/pane-anim", () => ({ paneReflowActive: () => false, notifyPaneReflow: () => {} }));
 
 import { usePaneRectSync } from "./use-pane-rect-sync";
+import { installCefWireHost } from "../../../test/cef-wire-host";
+
+installCefWireHost();
 
 // jsdom has no ResizeObserver; the hook only needs observe/disconnect.
 globalThis.ResizeObserver ??= class {

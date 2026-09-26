@@ -27,7 +27,7 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 
 /** Mirrors `cef_media_access_permission_types_t`. */
 const DEVICE_AUDIO_CAPTURE = 1 << 0;
@@ -88,7 +88,7 @@ export function PaneMediaPermissionPrompt(): JSX.Element {
 
     onMount(() => {
         let dispose: (() => void) | undefined;
-        void listenEvent<PermissionRequest>("pane-media-permission-request", (payload) => {
+        void getApi().listen<PermissionRequest>("pane-media-permission-request", (payload) => {
             if (!payload || typeof payload.requestId !== "number") return;
             // One prompt at a time. A second request while one is open would
             // otherwise replace it, and the user's click would land on a
@@ -107,7 +107,7 @@ export function PaneMediaPermissionPrompt(): JSX.Element {
 
     const respond = async (requestId: number, allow: boolean) => {
         try {
-            await invokeCommand("pane_media_permission_respond", { requestId, allow });
+            await getApi().browserPanes.respondMediaPermission(requestId, allow);
         } catch (e) {
             // The host's timeout still denies, so a failed response degrades to
             // denial rather than a stuck page.

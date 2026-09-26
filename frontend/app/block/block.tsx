@@ -20,7 +20,7 @@ import {
     type PaneTabManifest,
 } from "@/app/block/pane-tab-registry";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { createPaneReadiness, type PaneReadinessPhase } from "@/app/store/pane-readiness";
@@ -273,7 +273,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
         // steal focus back to window 1.
         const params = new URLSearchParams(window.location.search);
         const windowLabel = params.get("windowLabel") ?? "main";
-        invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
+        getApi().reclaimWindowFocus(windowLabel).catch(() => {});
     };
 
     // Same routine every pane-selection path uses — see giveBlockFocus().
