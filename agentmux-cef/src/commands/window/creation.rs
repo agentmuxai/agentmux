@@ -355,11 +355,6 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     )
 }
 
-/// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
-/// reserved for agent / backend callers that need a transient auxiliary
-/// top-level window (tool-spawned panels, diff views, etc.). Sub-windows are
-/// hidden from the taskbar via `ITaskbarList::DeleteTab` and close when their
-/// parent full instance closes.
 /// `initial_view` of the credential-approval page (`credential_broker`).
 pub const CREDENTIAL_APPROVAL_VIEW: &str = "credential-approval";
 /// `initial_view` of the memory-adoption approval page (`memory_adoption`).
@@ -374,6 +369,11 @@ pub fn is_approval_view(view: Option<&str>) -> bool {
     matches!(view, Some(CREDENTIAL_APPROVAL_VIEW | MEMORY_ADOPTION_APPROVAL_VIEW))
 }
 
+/// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
+/// reserved for agent / backend callers that need a transient auxiliary
+/// top-level window (tool-spawned panels, diff views, etc.). Sub-windows are
+/// hidden from the taskbar via `ITaskbarList::DeleteTab` and close when their
+/// parent full instance closes.
 pub fn open_subwindow(
     state: &Arc<AppState>,
     parent_instance_id: String,

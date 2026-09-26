@@ -332,10 +332,11 @@ pub struct AppState {
     /// for why step e ≠ delete here.
     pub window_meta: Mutex<HashMap<String, WindowMeta>>,
 
-    /// Labels of windows opened by `open_subwindow` WITH an `initial_view`
-    /// — today only the credential- and memory-adoption approval pages. They
-    /// render that one view, never workspace panes, and the browser API never
-    /// resolves a pane into them (#3681 review). Tracked by label rather than
+    /// Labels of the approval windows: subwindows opened by `open_subwindow`
+    /// with one of the approval views (`commands::window::is_approval_view` —
+    /// the credential- and memory-adoption approval pages). They render that
+    /// one view, never workspace panes, and the browser API never resolves a
+    /// pane into them (#3681 review). Tracked by label rather than
     /// derived from `WindowKind::Subwindow`: floaters are recorded as
     /// `Subwindow` too, and a session restore recreates a subwindow without
     /// its view, as an ordinary pane-hosting window. Removed on close.
