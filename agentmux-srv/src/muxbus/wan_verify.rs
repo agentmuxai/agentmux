@@ -149,7 +149,17 @@ async fn get_json<T: serde::de::DeserializeOwned>(dir: &Directory<'_>, url: &str
                     Err(_) => Fetched::Unavailable,
                 }
             }
-            _ => continue,
+            // Still "couldn't check", but never silently: a directory that
+            // rejects this install's token turned every WAN jekt
+            // `network-claimed` with nothing in the log to say why.
+            Ok(r) => {
+                tracing::warn!(status = %r.status(), "wan verify: key directory refused the lookup");
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "wan verify: key directory unreachable");
+                continue;
+            }
         }
     }
     Fetched::Unavailable
