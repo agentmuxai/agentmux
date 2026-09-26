@@ -14,7 +14,6 @@
  */
 
 import { Show, createSignal, type JSX } from "solid-js";
-import { getApi } from "@/store/global";
 import type { ToolNode } from "../../types";
 import { CompactResult } from "../CompactResult";
 import {
@@ -25,32 +24,7 @@ import {
     type FetchResultData,
 } from "./web-fetch-result";
 import { byName, registerToolRenderer } from "./registry";
-
-function prettyUrl(url: string): string {
-    try {
-        const u = new URL(url);
-        const path = u.pathname === "/" ? "" : u.pathname.replace(/\/$/, "");
-        return `${u.host}${path}`;
-    } catch {
-        return url;
-    }
-}
-
-function hostname(url: string): string {
-    try {
-        return new URL(url).hostname;
-    } catch {
-        return "";
-    }
-}
-
-function openUrl(url: string): void {
-    try {
-        getApi().openExternal(url);
-    } catch {
-        /* best-effort */
-    }
-}
+import { faviconSrc as faviconFor, hostname, openUrl, prettyUrl } from "./url";
 
 export function WebFetchResult(props: { node: ToolNode }): JSX.Element {
     const data = extractFetchResult(props.node.result);
@@ -73,7 +47,7 @@ export function WebFetchResult(props: { node: ToolNode }): JSX.Element {
 function FetchResultView(props: { data: FetchResultData }): JSX.Element {
     const [faviconOk, setFaviconOk] = createSignal(true);
     const host = () => (props.data.url ? hostname(props.data.url) : "");
-    const faviconSrc = () => `https://www.google.com/s2/favicons?domain=${host()}&sz=16`;
+    const faviconSrc = () => faviconFor(host());
     const isJson = () => looksLikeJson(props.data.content);
     const sClass = () =>
         props.data.status != null ? statusClass(props.data.status) : null;

@@ -682,3 +682,63 @@ describe("ToolBlock — header row", () => {
         }
     });
 });
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.1 — a finished WebSearch is
+// expanded by default (history too); a header click collapses it through
+// onToggleCollapse (collapsedNodes), not the pin.
+describe("ToolBlock — content-first (WebSearch)", () => {
+    const search: ToolNode = {
+        type: "tool",
+        id: "ws-1",
+        tool: "Other",
+        toolName: "WebSearch",
+        params: { query: "solid docs" },
+        status: "success",
+        collapsed: true,
+        summary: "🌐 WebSearch solid docs",
+        result: {
+            content:
+                'Web search results for query: "solid docs"\n\nLinks: [{"title":"A","url":"https://a.com"},{"title":"B","url":"https://b.com"}]\n\nSummary.',
+        } as any,
+    };
+    const panel = (c: HTMLElement) => c.querySelector(".agent-tool-panel")!;
+
+    it("is expanded when rendered fresh, without a hold or a pin", () => {
+        const { container } = render(() => <ToolBlock node={search} pinned={false} onTogglePin={() => {}} />);
+        expect(panel(container).classList.contains("agent-tool-panel--flow")).toBe(true);
+    });
+
+    it("is collapsed when the user collapsed it", () => {
+        const { container } = render(() => (
+            <ToolBlock node={search} pinned={false} userCollapsed={true} onTogglePin={() => {}} />
+        ));
+        expect(panel(container).classList.contains("agent-tool-panel--hidden")).toBe(true);
+    });
+
+    it("a header click toggles the collapse, not the pin", () => {
+        const onTogglePin = vi.fn();
+        const onToggleCollapse = vi.fn();
+        const { container } = render(() => (
+            <ToolBlock node={search} pinned={false} onTogglePin={onTogglePin} onToggleCollapse={onToggleCollapse} />
+        ));
+        fireEvent.click(container.querySelector(".agent-tool-summary")!);
+        expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+        expect(onTogglePin).not.toHaveBeenCalled();
+    });
+
+    it("shows the source count as a pill", () => {
+        const { container } = render(() => <ToolBlock node={search} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-result-pill")!.textContent).toBe("2 sources");
+    });
+
+    it("a panel-mode tool still pins on click", () => {
+        const onTogglePin = vi.fn();
+        const onToggleCollapse = vi.fn();
+        const { container } = render(() => (
+            <ToolBlock node={baseTool} pinned={false} onTogglePin={onTogglePin} onToggleCollapse={onToggleCollapse} />
+        ));
+        fireEvent.click(container.querySelector(".agent-tool-summary")!);
+        expect(onTogglePin).toHaveBeenCalledTimes(1);
+        expect(onToggleCollapse).not.toHaveBeenCalled();
+    });
+});

@@ -29,6 +29,7 @@ import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, capText, dropBashwrapStartingChunk, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
+import { startsAtTop } from "./tool-presentation";
 import {
     registerToolRenderer,
     resolveToolRenderer,
@@ -231,8 +232,13 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // - Document-like previews (Read / Write / Edit) that haven't streamed
     //   start DETACHED at the top: the start of a file or diff is where
     //   reading begins. If one does start streaming, it follows.
+    //   Content-first previews (WebSearch, tool-presentation.ts) too: the
+    //   answer is read from its start.
     const initialFollow = (): boolean =>
-        !(DOCUMENT_KINDS.has(props.node.tool) && dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0);
+        !(
+            (DOCUMENT_KINDS.has(props.node.tool) || startsAtTop(props.node)) &&
+            dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0
+        );
     let following = initialFollow();
     // Detached only because of the document-preview default, not by the user.
     let detachedByDefault = !following;

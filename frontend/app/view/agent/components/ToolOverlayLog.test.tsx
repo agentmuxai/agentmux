@@ -639,6 +639,27 @@ describe("ToolOverlayLog — follows the latest output", () => {
         expect(geo.top).toBe(geo.bottom());
     });
 
+    // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.1 — a content-first
+    // preview (WebSearch) reads from its start, like a document.
+    it("a finished WebSearch preview opens at the top", () => {
+        const searchNode: ToolNode = {
+            type: "tool",
+            id: "tc-ws",
+            tool: "Other",
+            toolName: "WebSearch",
+            params: { query: "q" },
+            status: "success",
+            collapsed: false,
+            summary: "WebSearch q",
+            result: { content: 'Web search results for query: "q"\n\nSummary.' } as any,
+        };
+        const { g, geo } = mount(() => searchNode);
+        expect(geo.top).toBe(0);
+        g.scrollHeight = 1200;
+        fireResize();
+        expect(geo.top).toBe(0);
+    });
+
     it("a finished Read preview opens at the top, and a user scroll to its bottom attaches it", () => {
         const readNode: ToolNode = {
             type: "tool",

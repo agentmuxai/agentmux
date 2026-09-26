@@ -22,6 +22,7 @@ import {
     estimateTextHeight,
     estimateUnwrappedTextHeight,
     estimateTool,
+    CONTENT_FIRST_TOOL_ESTIMATE_PX,
     estimateUserMessage,
     STREAMING_CAPABLE,
 } from "./renderers";
@@ -130,6 +131,16 @@ describe("per-kind estimators", () => {
             const state = baseDocState();
             state.pinnedNodes.add("t1");
             expect(estimateTool(tool, state)).toBe(200);
+        });
+
+        // A content-first tool (WebSearch) renders open by default, capped at
+        // the preview height, so a history row must not be laid out at 32 px.
+        it("returns the capped content-first size for a finished WebSearch, 32 px once collapsed", () => {
+            const search: ToolNode = { ...tool, id: "ws", tool: "Other", toolName: "WebSearch", params: {} };
+            expect(estimateTool(search, baseDocState())).toBe(CONTENT_FIRST_TOOL_ESTIMATE_PX);
+            const state = baseDocState();
+            state.collapsedNodes.add("ws");
+            expect(estimateTool(search, state)).toBe(32);
         });
     });
 
