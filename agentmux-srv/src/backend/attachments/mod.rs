@@ -108,6 +108,29 @@ pub struct Service {
     memory: Arc<tokio::sync::Semaphore>,
     /// Cancellation flags of batches still running.
     batches: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Jobs currently processing each id. Identical images processed at
+    /// once share one stored original, so a failing job may only discard it
+    /// when no other job is still using it. Placing an original and the
+    /// discard check both happen under this lock.
+    inflight: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+/// One job's claim on an id in [`Service::inflight`], released on drop.
+struct InflightGuard {
+    map: Arc<Mutex<HashMap<String, usize>>>,
+    id: String,
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        let mut map = self.map.lock().unwrap();
+        if let Some(n) = map.get_mut(&self.id) {
+            *n -= 1;
+            if *n == 0 {
+                map.remove(&self.id);
+            }
+        }
+    }
 }
 
 static SERVICE: OnceLock<Arc<Service>> = OnceLock::new();
@@ -146,6 +169,7 @@ impl Service {
             permits: Arc::new(tokio::sync::Semaphore::new((workers / 2).max(1))),
             memory: Arc::new(tokio::sync::Semaphore::new(DECODE_BUDGET_MIB as usize)),
             batches: Mutex::new(HashMap::new()),
+            inflight: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -302,7 +326,7 @@ impl Service {
         let edge = self.limits().send_max_edge;
         let svc = Arc::clone(self);
         let place_id = id.clone();
-        let (blob, format) = blocking(move || svc.store.place(&tmp, &place_id)).await?;
+        let (blob, format, guard) = blocking(move || svc.place_tracked(&tmp, &place_id)).await?;
         let fp = store::fingerprint(edge);
         if let Some(meta) = self.store.meta(&id, &fp) {
             self.store.touch(&id, &fp);
@@ -320,17 +344,53 @@ impl Service {
         match result {
             Ok(meta) => Ok(meta.to_info(&id, &name)),
             Err(e) => {
-                self.discard_unprocessed(&id).await;
+                self.discard_unprocessed(guard).await;
                 Err(e)
             }
         }
     }
 
-    /// See [`Store::discard_if_unprocessed`].
-    async fn discard_unprocessed(&self, id: &str) {
+    /// [`Store::place`], registering this job as a user of the id first,
+    /// under the same lock the discard check takes. Blocking.
+    fn place_tracked(
+        &self,
+        tmp: &Path,
+        id: &str,
+    ) -> Result<(PathBuf, image::ImageFormat, InflightGuard), process::ProcessError> {
+        let mut map = self.inflight.lock().unwrap();
+        *map.entry(id.to_string()).or_insert(0) += 1;
+        let guard = InflightGuard {
+            map: Arc::clone(&self.inflight),
+            id: id.to_string(),
+        };
+        match self.store.place(tmp, id) {
+            Ok((blob, format)) => {
+                drop(map);
+                Ok((blob, format, guard))
+            }
+            Err(e) => {
+                drop(map);
+                drop(guard);
+                Err(e)
+            }
+        }
+    }
+
+    /// After a failed job: discard the original unless another job for the
+    /// same bytes is still processing it ([`Store::discard_if_unprocessed`]
+    /// also keeps it when any fingerprint has metadata). Consumes the guard.
+    async fn discard_unprocessed(&self, guard: InflightGuard) {
         let store = self.store.clone();
-        let id = id.to_string();
-        let _ = tokio::task::spawn_blocking(move || store.discard_if_unprocessed(&id)).await;
+        let inflight = Arc::clone(&self.inflight);
+        let _ = tokio::task::spawn_blocking(move || {
+            let map = inflight.lock().unwrap();
+            if map.get(&guard.id).copied() == Some(1) {
+                store.discard_if_unprocessed(&guard.id);
+            }
+            drop(map);
+            drop(guard);
+        })
+        .await;
     }
 
     async fn run_batch(
@@ -421,7 +481,7 @@ impl Service {
         );
         let placed =
             blocking(move || svc.copy_and_place(&block, &batch, &it, limits, &flag)).await?;
-        let (id, blob, format) = placed;
+        let (id, blob, format, guard) = placed;
 
         let fp = store::fingerprint(limits.send_max_edge);
         if let Some(meta) = self.store.meta(&id, &fp) {
@@ -435,7 +495,7 @@ impl Service {
         if result.is_err() {
             // A decode failure or a cancel after the original was stored
             // must not leave it behind with no metadata.
-            self.discard_unprocessed(&id).await;
+            self.discard_unprocessed(guard).await;
         }
         result
     }
@@ -500,7 +560,7 @@ impl Service {
         item: &AttachmentPending,
         limits: Limits,
         cancel: &AtomicBool,
-    ) -> Result<(String, PathBuf, image::ImageFormat), process::ProcessError> {
+    ) -> Result<(String, PathBuf, image::ImageFormat, InflightGuard), process::ProcessError> {
         let mut last = Instant::now() - PROGRESS_INTERVAL;
         let copied = self.store.copy_in(Path::new(&item.path), |done| {
             if cancel.load(Ordering::SeqCst) {
@@ -543,8 +603,8 @@ impl Service {
                 message: "Cancelled.".into(),
             });
         }
-        let (blob, format) = self.store.place(&tmp, &id)?;
-        Ok((id, blob, format))
+        let (blob, format, guard) = self.place_tracked(&tmp, &id)?;
+        Ok((id, blob, format, guard))
     }
 
     fn publish<T: Serialize>(&self, block_id: &str, event: &str, data: &T) {
@@ -722,6 +782,29 @@ mod tests {
         data.resize(bytes.max(8), 0);
         std::fs::write(&p, data).unwrap();
         p.to_string_lossy().into_owned()
+    }
+
+    #[tokio::test]
+    async fn a_failing_job_keeps_an_original_another_job_is_still_using() {
+        let d = tempfile::tempdir().unwrap();
+        let svc = Arc::new(Service::new(
+            Store::new(d.path().join("attachments")),
+            Arc::new(Broker::new()),
+            Arc::new(ConfigState::new()),
+        ));
+        // Two identical, undecodable-but-sniffable images in flight at once.
+        let src = touch_file(d.path(), "same.png", 64);
+        let (tmp_a, id, _) = svc.store.copy_in(Path::new(&src), |_| true).unwrap();
+        let (tmp_b, id_b, _) = svc.store.copy_in(Path::new(&src), |_| true).unwrap();
+        assert_eq!(id, id_b);
+        let (blob, _, guard_a) = svc.place_tracked(&tmp_a, &id).unwrap();
+        let (_, _, guard_b) = svc.place_tracked(&tmp_b, &id).unwrap();
+
+        svc.discard_unprocessed(guard_a).await;
+        assert!(blob.is_file(), "job B still needs the shared original");
+        svc.discard_unprocessed(guard_b).await;
+        assert!(!blob.is_file(), "the last failing job cleans it up");
+        assert!(svc.inflight.lock().unwrap().is_empty());
     }
 
     #[test]
