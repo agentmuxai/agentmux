@@ -382,7 +382,7 @@ cef::wrap_task! {
 /// `on_before_close`'s cleanup for an evicted pool window whose close
 /// callback never came, in the order that callback runs it: unregister
 /// (honoring its drain verdict), drop the cached HWND, pool bookkeeping,
-/// window meta, the launcher's close + count report. A no-op when the
+/// the launcher's close + count report, window meta. A no-op when the
 /// callback did run (the label is already unregistered); a callback that
 /// arrives after this finds no label and skips itself.
 #[cfg(target_os = "windows")]
@@ -396,9 +396,9 @@ fn reap_unclosed_evicted_pool_browser(state: &Arc<AppState>, label: &str) {
     crate::ui_tasks::consume_request_drain(state, &out, "evicted_pool_reap");
     state.window_hwnds.lock().remove(label);
     on_pool_window_destroyed(state, label);
-    state.window_meta.lock().remove(label);
     crate::launcher_ipc::report_window_closed(label.to_string());
     crate::launcher_ipc::compute_and_report_host_counts(state);
+    state.window_meta.lock().remove(label);
     tracing::warn!(
         target: "pool:window",
         label = %label,
