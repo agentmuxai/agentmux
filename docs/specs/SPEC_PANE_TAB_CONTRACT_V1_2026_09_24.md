@@ -434,7 +434,20 @@ working throughout through a legacy adapter.
        any object with a `searchAtoms` slot now, not a full `ViewModel`. The
        `setTerminalViewComponent` indirection that broke the model/view
        import cycle is gone: the manifest builds the view directly.
-     - **Agent (next).**
+     - **Agent (implemented, part 2b-3):** `agentPaneTabManifest`
+       (agent-manifest.tsx, keeping the `forge` alias) — keep-alive,
+       full-bleed, `header: "surface"`, `paneZoom`, `splitDropsMeta`. Its
+       model is built from `ctx`: the `blockAtom` its components read is a
+       memo over `ctx.meta` (they only ever read the meta), and its own-block
+       writes — rename, back to the picker, quick launch — go through
+       `ctx.setMeta`. `launchAgentDefinition` can launch into ANOTHER block,
+       so that path still writes by block id. The instance hands the host its
+       title, `rename` (new: the header's editable name), live icon, the
+       Stash button, context menu, voice (Ctrl+Shift+V; the mic itself sits
+       beside the composer, so no `headerMic`), progress mount and focus. The
+       manifest lives in its own module, so the model no longer imports its
+       view to hand the host a `viewComponent`. Still on `legacyAdapter`:
+       `launcher`, `memory`, `identity`, `toolchain` and `settings`.
      - **Terminal and agent hooks (implemented, part 2b-1).**
        Unlike the eight views above, shared code reached INTO these two view
        models through the host, which works only while the host holds the

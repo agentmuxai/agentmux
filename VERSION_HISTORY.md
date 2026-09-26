@@ -1,5 +1,31 @@
 # AgentMux Version History
 
+## 0.57.6 — 2026-09-25
+
+- refactor(panes): the editor and browser are native pane tabs
+- feat(swarm): rows use the agent's own pane-tab color, click to focus instead of collapse
+- feat(agents): closing an agent pane shows what it is stopping — turn, agent, each process — then closes; a failed close stays open to retry
+- feat(tray): the system tray is on by default; if it cannot be shown, closing the last window quits instead of leaving an invisible process
+- memory Claude writes while an agent runs is recorded into the agent's memory record, not only at its next spawn
+- feat(agents): QuitSelf — an agent can end its own session when the user asked it to in this turn; srv checks the turn was the user's and the quote is theirs; anything else warns the user, who has 15 s to keep the agent running (banner, notification, falling chime)
+- at first sighting, a memory file whose content another agent's record already holds is held for adoption instead of adopted
+- Pane drags over browser panes work: the landing ghost shows, a tab dropped on a browser page lands, the page holds a snapshot of itself mid-drag instead of going grey, and the overflow drag gap after the + is 2.5x its width. The browser DOM API now tells apart panes on the same URL.
+- fix(paths): the AgentMux data folder is owner-only on Linux/macOS — created 0700, and an existing install is tightened on its next start (#3682)
+- an agent's memory folders under its earlier accounts can be listed for adoption; adopting is host-only
+- feat(agents): another agent's ClosePane block_id= and FleetBulkStop wait 15 s for the target's user to keep it running
+- fix(agents): launching an agent in your own project no longer wipes your .mcp.json — AgentMux merges its servers in, and writes the file owner-only (#3680)
+- Armory: adopt an agent's memory from its earlier accounts, confirmed in a separate host window
+- feat(agents): ClosePane with no arguments closes only the agent's own tab, and only after the user's 15 s window; use QuitSelf when the user asked
+- an agent's memory folder claims can be listed; releasing one is host-only
+- Armory: release an agent's claim on a memory folder, confirmed in the host window
+- Pane Tab contract: the terminal and agent panes' outside reach-ins (voice, find bar, copy/paste, progress slot, chrome badge and fork tabs, multi-input) go through contract hooks and model registries, ready for both to become native pane tabs. No behavior change.
+- The terminal is a native pane tab (Pane Tab contract Phase 2c): its model reads and writes its own block through the host context, and hands the host its header, voice, find bar and copy/paste through the contract. No behavior change.
+- Global Memory is recorded in AgentMux's own record as it changes (no change to what agents receive)
+- Armory: an isolated channel can bring in Global Memory entries from the main Global Memory or another channel
+- an agent's ABF memory bundle is shared across its channels instead of minted anew in each
+- a Gemini, Qwen or Kimi agent's spawn records which account dir it used
+- memory AgentMux writes (MemoryWrite, the Armory, revert, bundle import) goes straight into the agent's memory record
+
 ## 0.57.5 — 2026-09-25
 
 - feat(agent-pane): full tool call on hover when expanded; closing the last agent tab returns to My Agents; composer takes focus when an agent loads

@@ -189,8 +189,7 @@ mod tests {
     use super::*;
 
     fn shared_store() -> Store {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        Store::open_shared(tmp.path()).unwrap()
+        Store::open_shared(std::path::Path::new(":memory:")).unwrap()
     }
 
     #[test]
