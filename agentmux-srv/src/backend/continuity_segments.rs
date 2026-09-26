@@ -102,6 +102,11 @@ pub(crate) struct Start {
     /// `None`: unknown, or a record written before this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_key: Option<String>,
+    /// The session this spawn resumed with `--fork-session` after
+    /// relocating it from another login of the same identity (spec §4.3).
+    /// Its own id arrives in the segment's `session` event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<String>,
 }
 
 /// One segment, folded from its events.
@@ -250,6 +255,25 @@ pub(crate) enum ResumeGate {
     /// The conversation moved on to `head`, which this spawn can't reach:
     /// resume nothing, so the spawn starts fresh and carries the record.
     Refuse { head: String },
+    /// `head` lives under another login of the same identity, readable at
+    /// `from_config_dir`: copy it in and resume it with `--fork-session`
+    /// (spec §4.3).
+    Relocate { head: String, from_config_dir: String },
+}
+
+/// What the gate weighs about the spawn.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct GateInput<'a> {
+    /// The session the spawn would `--resume`.
+    pub candidate: &'a str,
+    pub head: Option<&'a Head>,
+    /// The spawn's identity key.
+    pub identity: Option<&'a str>,
+    /// An id this controller already saw the CLI reject.
+    pub poisoned: Option<&'a str>,
+    /// The spawn's provider config dir and working dir.
+    pub config_dir: &'a str,
+    pub cwd: &'a str,
 }
 
 /// Where the agent's conversation was last: the newest segment that has a
@@ -260,36 +284,73 @@ pub(crate) struct Head {
     pub identity_key: Option<String>,
     pub config_dir: Option<String>,
     pub provider: String,
+    pub cwd: String,
 }
 
 /// Only the chain head is resumed natively (spec §3 I1), and never across
-/// identities (I2). `head` is the agent's [`chain_head`]; `None` (an agent
-/// from before the segment index, or no readable chain) allows the
+/// identities (I2). `input.head` is the agent's [`chain_head`]; `None` (an
+/// agent from before the segment index, or no readable chain) allows the
 /// candidate, as before the gate existed. A head equal to the poisoned id
 /// allows too: that head is known dead, so the chain has nothing better to
-/// offer than the candidate. `identity` is the spawn's identity key; the
-/// identity check refuses only when both sides are known and differ.
+/// offer than the candidate. The identity check refuses only when both
+/// sides are known and differ.
+///
+/// `reachable_here(sid)`: the session's file is under the spawn's config
+/// dir and cwd. `resumable_at(config_dir, sid)`: a complete session file for
+/// the spawn's cwd exists under that other config dir (§4.3 (4)).
 pub(crate) fn resume_gate(
-    candidate: &str,
-    head: Option<&Head>,
-    identity: Option<&str>,
-    poisoned: Option<&str>,
-    head_reachable: impl FnOnce(&str) -> bool,
+    input: &GateInput<'_>,
+    reachable_here: impl Fn(&str) -> bool,
+    resumable_at: impl Fn(&str, &str) -> bool,
 ) -> ResumeGate {
-    let Some(head) = head else { return ResumeGate::Allow };
-    if Some(head.session_id.as_str()) == poisoned {
+    let Some(head) = input.head else { return ResumeGate::Allow };
+    if Some(head.session_id.as_str()) == input.poisoned {
         return ResumeGate::Allow;
     }
-    let other_identity = matches!((head.identity_key.as_deref(), identity), (Some(h), Some(s)) if h != s);
     let refuse = || ResumeGate::Refuse { head: head.session_id.clone() };
-    if head.session_id == candidate {
-        return if other_identity { refuse() } else { ResumeGate::Allow };
+    if matches!((head.identity_key.as_deref(), input.identity), (Some(h), Some(s)) if h != s) {
+        return refuse();
     }
-    if !other_identity && head_reachable(&head.session_id) {
-        ResumeGate::Redirect { head: head.session_id.clone() }
+    let is_candidate = head.session_id == input.candidate;
+    if reachable_here(&head.session_id) {
+        return if is_candidate { ResumeGate::Allow } else { ResumeGate::Redirect { head: head.session_id.clone() } };
+    }
+    if let Some(from) = relocation_source(head, input) {
+        if resumable_at(from, &head.session_id) {
+            return ResumeGate::Relocate { head: head.session_id.clone(), from_config_dir: from.to_string() };
+        }
+    }
+    // The head is out of reach and can't be relocated. As the candidate, it
+    // goes on to `--resume` as before the gate: the CLI's rejection and the
+    // retry path already handle it. As anything else, nothing is resumed.
+    if is_candidate {
+        ResumeGate::Allow
     } else {
         refuse()
     }
+}
+
+/// The head's config dir when §4.3's metadata preconditions hold: a Claude
+/// session, under another config dir than the spawn's, recorded under the
+/// spawn's own identity (both known, I2), for the same project dir.
+fn relocation_source<'h>(head: &'h Head, input: &GateInput<'_>) -> Option<&'h str> {
+    if !matches!(head.provider.as_str(), "claude" | "claude-code") {
+        return None;
+    }
+    let from = head.config_dir.as_deref()?;
+    if same_dir(from, input.config_dir) {
+        return None;
+    }
+    if head.identity_key.as_deref()? != input.identity? {
+        return None;
+    }
+    let slug = crate::backend::claude_layout::project_dir_name;
+    (slug(&head.cwd) == slug(input.cwd)).then_some(from)
+}
+
+fn same_dir(a: &str, b: &str) -> bool {
+    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    norm(a) == norm(b)
 }
 
 /// Where the agent's conversation was last, read from its chain in `fs`.
@@ -302,6 +363,7 @@ pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<Head> {
             identity_key: s.start.identity_key,
             config_dir: s.start.config_dir,
             provider: s.start.provider,
+            cwd: s.start.cwd,
         })
     })
 }
@@ -358,6 +420,7 @@ mod tests {
             predecessor_segment_id: None,
             lease_epoch: None,
             identity_key: None,
+            forked_from: None,
         }
     }
 
@@ -412,34 +475,51 @@ mod tests {
         Head { session_id: sid.into(), identity_key: identity.map(str::to_string), ..Default::default() }
     }
 
+    /// The gate over a spawn in `C:/cfg/new` for `C:/work`, where `here` are
+    /// the sessions under the spawn's config dir and `elsewhere` the ones
+    /// complete under any other.
+    fn gate(candidate: &str, head: Option<&Head>, identity: Option<&str>, poisoned: Option<&str>, here: &[&str], elsewhere: &[&str]) -> ResumeGate {
+        let input = GateInput { candidate, head, identity, poisoned, config_dir: "C:/cfg/new", cwd: "C:/work" };
+        resume_gate(&input, |sid| here.contains(&sid), |_, sid| elsewhere.contains(&sid))
+    }
+
     #[test]
     fn the_chain_head_itself_is_resumed() {
         let h = head("s2", None);
-        assert_eq!(resume_gate("s2", Some(&h), None, None, |_| panic!("no lookup needed")), ResumeGate::Allow);
+        assert_eq!(gate("s2", Some(&h), None, None, &["s2"], &[]), ResumeGate::Allow);
     }
 
     #[test]
     fn without_a_chain_the_candidate_is_resumed_as_before() {
-        assert_eq!(resume_gate("s1", None, Some("k1"), None, |_| panic!("no lookup needed")), ResumeGate::Allow);
+        assert_eq!(gate("s1", None, Some("k1"), None, &[], &[]), ResumeGate::Allow);
     }
 
     /// The operator's case: the pane holds S1, the conversation moved on to S2.
     #[test]
     fn a_stale_candidate_is_redirected_to_a_reachable_head() {
         let h = head("s2", None);
-        assert_eq!(resume_gate("s1", Some(&h), None, None, |h| h == "s2"), ResumeGate::Redirect { head: "s2".into() });
+        assert_eq!(gate("s1", Some(&h), None, None, &["s1", "s2"], &[]), ResumeGate::Redirect { head: "s2".into() });
     }
 
     #[test]
     fn a_stale_candidate_is_refused_when_the_head_is_out_of_reach() {
         let h = head("s2", None);
-        assert_eq!(resume_gate("s1", Some(&h), None, None, |_| false), ResumeGate::Refuse { head: "s2".into() });
+        assert_eq!(gate("s1", Some(&h), None, None, &["s1"], &[]), ResumeGate::Refuse { head: "s2".into() });
+    }
+
+    /// The head as the candidate but out of reach, and not relocatable: it
+    /// goes to `--resume` as before the gate; the CLI's rejection and the
+    /// retry path handle it.
+    #[test]
+    fn an_unreachable_head_as_the_candidate_is_left_to_the_retry_path() {
+        let h = head("s2", None);
+        assert_eq!(gate("s2", Some(&h), None, None, &[], &[]), ResumeGate::Allow);
     }
 
     #[test]
     fn a_poisoned_head_never_displaces_the_candidate() {
         let h = head("s2", None);
-        assert_eq!(resume_gate("s1", Some(&h), None, Some("s2"), |_| true), ResumeGate::Allow);
+        assert_eq!(gate("s1", Some(&h), None, Some("s2"), &["s2"], &[]), ResumeGate::Allow);
     }
 
     // Identity (spec §3 I2, H3): never resume across identities.
@@ -449,15 +529,15 @@ mod tests {
     #[test]
     fn the_head_under_another_identity_is_not_resumed() {
         let h = head("s2", Some("k-old"));
-        assert_eq!(resume_gate("s2", Some(&h), Some("k-new"), None, |_| true), ResumeGate::Refuse { head: "s2".into() });
-        assert_eq!(resume_gate("s1", Some(&h), Some("k-new"), None, |_| true), ResumeGate::Refuse { head: "s2".into() });
+        assert_eq!(gate("s2", Some(&h), Some("k-new"), None, &["s2"], &[]), ResumeGate::Refuse { head: "s2".into() });
+        assert_eq!(gate("s1", Some(&h), Some("k-new"), None, &["s2"], &[]), ResumeGate::Refuse { head: "s2".into() });
     }
 
     #[test]
     fn the_same_identity_resumes_and_redirects() {
         let h = head("s2", Some("k1"));
-        assert_eq!(resume_gate("s2", Some(&h), Some("k1"), None, |_| true), ResumeGate::Allow);
-        assert_eq!(resume_gate("s1", Some(&h), Some("k1"), None, |_| true), ResumeGate::Redirect { head: "s2".into() });
+        assert_eq!(gate("s2", Some(&h), Some("k1"), None, &["s2"], &[]), ResumeGate::Allow);
+        assert_eq!(gate("s1", Some(&h), Some("k1"), None, &["s2"], &[]), ResumeGate::Redirect { head: "s2".into() });
     }
 
     /// Either side unknown (an older record, an unreadable `.claude.json`):
@@ -466,9 +546,51 @@ mod tests {
     fn an_unknown_identity_on_either_side_changes_nothing() {
         let known = head("s2", Some("k1"));
         let unknown = head("s2", None);
-        assert_eq!(resume_gate("s2", Some(&known), None, None, |_| true), ResumeGate::Allow);
-        assert_eq!(resume_gate("s2", Some(&unknown), Some("k1"), None, |_| true), ResumeGate::Allow);
-        assert_eq!(resume_gate("s1", Some(&known), None, None, |_| true), ResumeGate::Redirect { head: "s2".into() });
+        assert_eq!(gate("s2", Some(&known), None, None, &["s2"], &[]), ResumeGate::Allow);
+        assert_eq!(gate("s2", Some(&unknown), Some("k1"), None, &["s2"], &[]), ResumeGate::Allow);
+        assert_eq!(gate("s1", Some(&known), None, None, &["s2"], &[]), ResumeGate::Redirect { head: "s2".into() });
+    }
+
+    // Relocation (spec §4.3): the head under another login of the same identity.
+
+    fn elsewhere(sid: &str, identity: Option<&str>) -> Head {
+        Head {
+            session_id: sid.into(),
+            identity_key: identity.map(str::to_string),
+            config_dir: Some("C:/cfg/old".into()),
+            provider: "claude".into(),
+            cwd: "C:/work".into(),
+        }
+    }
+
+    /// A rebuild: new login, same person. The pane holds the head, whose file
+    /// is only under the old login.
+    #[test]
+    fn the_head_under_another_login_of_the_same_identity_is_relocated() {
+        let h = elsewhere("s2", Some("k1"));
+        let relocate = ResumeGate::Relocate { head: "s2".into(), from_config_dir: "C:/cfg/old".into() };
+        assert_eq!(gate("s2", Some(&h), Some("k1"), None, &[], &["s2"]), relocate);
+        assert_eq!(gate("s1", Some(&h), Some("k1"), None, &["s1"], &["s2"]), relocate, "a stale candidate too");
+    }
+
+    #[test]
+    fn relocation_needs_every_precondition() {
+        let base = elsewhere("s2", Some("k1"));
+        let not_relocated = |h: &Head, identity: Option<&str>, elsewhere: &[&str]| {
+            !matches!(gate("s1", Some(h), identity, None, &[], elsewhere), ResumeGate::Relocate { .. })
+        };
+        assert!(not_relocated(&base, Some("k1"), &[]), "no complete source file");
+        assert!(not_relocated(&base, None, &["s2"]), "spawn identity unknown");
+        assert!(not_relocated(&Head { identity_key: None, ..base.clone() }, Some("k1"), &["s2"]), "head identity unknown");
+        assert!(not_relocated(&Head { provider: "codex".into(), ..base.clone() }, Some("k1"), &["s2"]), "not Claude");
+        assert!(not_relocated(&Head { config_dir: None, ..base.clone() }, Some("k1"), &["s2"]), "no recorded dir");
+        assert!(not_relocated(&Head { config_dir: Some("c:\\cfg\\new\\".into()), ..base.clone() }, Some("k1"), &["s2"]), "the same dir");
+        assert!(not_relocated(&Head { cwd: "C:/elsewhere".into(), ..base.clone() }, Some("k1"), &["s2"]), "another project");
+        assert_eq!(
+            gate("s1", Some(&Head { identity_key: Some("k2".into()), ..base }), Some("k1"), None, &[], &["s2"]),
+            ResumeGate::Refuse { head: "s2".into() },
+            "another identity is refused outright"
+        );
     }
 
     #[test]

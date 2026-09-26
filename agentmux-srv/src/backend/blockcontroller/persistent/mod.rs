@@ -304,6 +304,11 @@ struct PersistentInner {
     /// generated UUID) will never equal this one, so a stale poison value
     /// is permanently inert rather than something that needs clearing.
     resume_poisoned: Option<String>,
+    /// The copy the resume gate relocated for the next spawn to
+    /// `--resume … --fork-session` from
+    /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.3).
+    /// Taken by that spawn; removed if it ends up resuming nothing.
+    fork_copy: Option<std::path::PathBuf>,
     /// Set when a forced controller resync (a `/model`, `/effort` or
     /// `/permission-mode` change — see `frontend/.../runtime-apply.ts`) lands
     /// while a turn is in flight. The restart is DEFERRED to the end of that
@@ -1256,6 +1261,7 @@ impl PersistentSubprocessController {
                 status_version: 0,
                 session_id: None,
                 resume_poisoned: None,
+                fork_copy: None,
                 restart_when_idle: false,
                 restart_pending: false,
                 stop_pending: false,

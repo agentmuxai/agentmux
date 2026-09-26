@@ -59,6 +59,7 @@ pub mod session_archive;
 pub mod session_backfill;
 pub mod claude_layout;
 pub mod continuity;
+pub mod continuity_relocate;
 pub mod continuity_segments;
 pub mod memory_record;
 pub mod memory_dir_claims;

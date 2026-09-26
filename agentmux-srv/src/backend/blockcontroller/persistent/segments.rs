@@ -50,20 +50,34 @@ impl PersistentSubprocessController {
     /// spawn onto rendered history), before the held-elsewhere check and the
     /// lease, which then apply to whatever id survives. Never fails the spawn:
     /// anything unknown leaves the id as it was.
-    pub(super) fn apply_resume_gate(&self, config: &PersistentSpawnConfig) {
+    ///
+    /// `history_session`: on a first spawn holding no id, the session of the
+    /// history the pane renders when `--resume` can't reach it here. It is a
+    /// candidate for relocation only (a rebuild onto a new login of the same
+    /// identity); any other decision leaves the spawn holding no id, as
+    /// before.
+    pub(super) fn apply_resume_gate(&self, config: &PersistentSpawnConfig, history_session: Option<String>) {
         let gfs = crate::backend::agent_session::global_transcript_store();
-        self.apply_resume_gate_with(config, gfs.map(|g| &**g));
+        self.apply_resume_gate_with(config, gfs.map(|g| &**g), history_session);
     }
 
-    pub(super) fn apply_resume_gate_with(&self, config: &PersistentSpawnConfig, gfs: Option<&FileStore>) {
+    pub(super) fn apply_resume_gate_with(
+        &self,
+        config: &PersistentSpawnConfig,
+        gfs: Option<&FileStore>,
+        history_session: Option<String>,
+    ) {
         if config.resume_flag.is_empty() {
             return;
         }
-        let (candidate, poisoned) = {
+        let (held, poisoned) = {
             let inner = self.inner.lock().unwrap();
             (inner.session_id.clone(), inner.resume_poisoned.clone())
         };
-        let Some(candidate) = candidate else { return };
+        let relocate_only = held.is_none();
+        let Some(candidate) = held.or(history_session).filter(|c| poisoned.as_deref() != Some(c.as_str())) else {
+            return;
+        };
         // Reachability is a file check under the provider's config dir; only
         // Claude's is known. Without one the head can't be checked, so the
         // gate stays out of the way.
@@ -83,12 +97,49 @@ impl PersistentSubprocessController {
         else {
             return;
         };
-        let head = segs::chain_head(gfs, uid.trim());
+        let uid = uid.trim();
+        let cwd = config.working_dir.as_str();
+        // A copy this agent relocated earlier and whose fork never reported an
+        // id (the process died) goes first: left in place, it would look
+        // reachable and be resumed in place, a lasting second file with the
+        // head's id (spec §3 I4).
+        let swept = crate::backend::continuity_relocate::sweep(config_dir, cwd, uid);
+        if swept > 0 {
+            tracing::info!(target: "continuity", block_id = %self.block_id, swept, "resume gate: removed relocated copies a dead spawn left");
+        }
+        let head = segs::chain_head(gfs, uid);
         let identity = crate::identity::account_email::identity_key_from_oauth_dir("claude", config_dir);
-        let decision = segs::resume_gate(&candidate, head.as_ref(), identity.as_deref(), poisoned.as_deref(), |h| {
-            crate::backend::session_backfill::session_is_reachable(config_dir, &config.working_dir, h)
-        });
-        let next = match decision {
+        let input = segs::GateInput {
+            candidate: &candidate,
+            head: head.as_ref(),
+            identity: identity.as_deref(),
+            poisoned: poisoned.as_deref(),
+            config_dir,
+            cwd,
+        };
+        let decision = segs::resume_gate(
+            &input,
+            |sid| crate::backend::session_backfill::session_is_reachable(config_dir, cwd, sid),
+            |dir, sid| {
+                crate::backend::continuity_relocate::source_file(dir, cwd, sid)
+                    .is_some_and(|p| crate::backend::continuity_relocate::is_resumable_file(&p))
+            },
+        );
+        let refuse = |head: &str, why: &str| {
+            tracing::info!(
+                target: "continuity",
+                block_id = %self.block_id,
+                candidate = %candidate,
+                head = %head,
+                why,
+                "resume gate: the conversation is in a session this spawn can't resume; starting fresh with the record"
+            );
+            (None, None)
+        };
+        if relocate_only && !matches!(decision, segs::ResumeGate::Relocate { .. }) {
+            return;
+        }
+        let (next, fork_copy) = match decision {
             segs::ResumeGate::Allow => return,
             segs::ResumeGate::Redirect { head } => {
                 tracing::info!(
@@ -98,27 +149,43 @@ impl PersistentSubprocessController {
                     head = %head,
                     "resume gate: the conversation moved on; resuming the chain head instead"
                 );
-                Some(head)
+                (Some(head), None)
             }
-            segs::ResumeGate::Refuse { head } => {
-                tracing::info!(
-                    target: "continuity",
-                    block_id = %self.block_id,
-                    candidate = %candidate,
-                    head = %head,
-                    "resume gate: the conversation is in a session this spawn can't resume (out of reach, or another identity's); starting fresh with the record"
-                );
-                None
+            segs::ResumeGate::Refuse { head } => refuse(&head, "out of reach, or another identity's"),
+            segs::ResumeGate::Relocate { head, from_config_dir } => {
+                let placed = crate::backend::continuity_relocate::source_file(&from_config_dir, cwd, &head)
+                    .ok_or_else(|| "source gone".to_string())
+                    .and_then(|src| crate::backend::continuity_relocate::relocate(&src, config_dir, cwd, &head, uid));
+                match placed {
+                    Ok(copy) => {
+                        tracing::info!(
+                            target: "continuity",
+                            block_id = %self.block_id,
+                            candidate = %candidate,
+                            head = %head,
+                            from = %from_config_dir,
+                            "resume gate: the conversation is under another login of the same identity; relocated it to fork from"
+                        );
+                        (Some(head), Some(copy))
+                    }
+                    Err(e) => refuse(&head, &format!("relocation failed: {e}")),
+                }
             }
         };
         {
             let mut inner = self.inner.lock().unwrap();
             // Only replace what the gate judged: another path may have moved
             // the id meanwhile.
-            if inner.session_id.as_deref() != Some(candidate.as_str()) {
+            let judged = if relocate_only { None } else { Some(candidate.as_str()) };
+            if inner.session_id.as_deref() != judged {
+                drop(inner);
+                if let Some(copy) = fork_copy {
+                    crate::backend::continuity_relocate::remove(&copy);
+                }
                 return;
             }
             inner.session_id = next.clone();
+            inner.fork_copy = fork_copy;
         }
         core::persist_session_id(&self.block_id, next.as_deref().unwrap_or(""), &self.mstore, &self.event_bus);
     }
@@ -196,6 +263,7 @@ impl PersistentSubprocessController {
         agent_uid: &str,
         config: &PersistentSpawnConfig,
         attempted_resume_sid: Option<&str>,
+        forked_from: Option<&str>,
         carries_packet: bool,
         lease_epoch: Option<u64>,
     ) -> SegmentRef {
@@ -219,6 +287,7 @@ impl PersistentSubprocessController {
             definition_id,
             config_dir,
             identity_key,
+            forked_from: forked_from.map(str::to_string),
             provider,
             provider_session_id: attempted_resume_sid.map(str::to_string),
             cwd: config.working_dir.clone(),
@@ -289,5 +358,40 @@ mod config_dir_tests {
         let e = env(&[("CLAUDE_CONFIG_DIR", "/c"), ("CODEX_HOME", "/x")]);
         assert_eq!(spawn_config_dir("codex", &e).as_deref(), Some("/x"));
         assert_eq!(spawn_config_dir("", &env(&[])), None);
+    }
+}
+
+/// The outcome of a relocated resume (spec §4.3): the fork reports its own
+/// id, which `persistent_resume` reads as the CLI starting fresh. Carrying
+/// the whole conversation into a new id is the resume succeeding.
+pub(super) fn forked_outcome(
+    outcome: persistent_resume::SessionOutcome,
+    forked_from: Option<&str>,
+    attempted_sid: &str,
+    actual_sid: Option<&str>,
+) -> persistent_resume::SessionOutcome {
+    let forked = forked_from == Some(attempted_sid) && actual_sid.is_some_and(|a| a != attempted_sid);
+    if forked {
+        persistent_resume::SessionOutcome::Resumed
+    } else {
+        outcome
+    }
+}
+
+/// Once a relocated resume reports its session: a fork (a new id) never
+/// wrote the copy, so it goes. The same id back means the CLI resumed the
+/// copy in place instead of forking; it is live now, so only its marker
+/// goes, and the duplicate is logged (spec §3 I4).
+pub(super) fn settle_relocated_copy(block_id: &str, copy: &std::path::Path, forked_from: Option<&str>, captured: &str) {
+    if forked_from == Some(captured) {
+        tracing::warn!(
+            target: "continuity",
+            block_id,
+            session_id = captured,
+            "relocated resume did not fork; keeping the copy as the live session"
+        );
+        crate::backend::continuity_relocate::unmark(copy);
+    } else {
+        crate::backend::continuity_relocate::remove(copy);
     }
 }

@@ -147,13 +147,38 @@ pub struct PreflightInput {
 /// The spawn's resume gate (`PersistentSubprocessController::apply_resume_gate`),
 /// mirrored: a candidate that isn't the chain head is redirected to the head
 /// when reachable here, else refused. `None` when the candidate stands.
-fn gate(input: &PreflightInput, candidate: &str, steps: &mut Vec<Step>) -> Option<(Verdict, Option<String>)> {
-    use crate::backend::continuity_segments::{resume_gate, ResumeGate};
+fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mut Vec<Step>) -> Option<(Verdict, Option<String>)> {
+    use crate::backend::continuity_relocate::{is_resumable_file, source_file};
+    use crate::backend::continuity_segments::{resume_gate, GateInput, ResumeGate};
     let t = Instant::now();
-    match resume_gate(candidate, input.chain_head.as_ref(), input.identity_key.as_deref(), None, |h| {
-        session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, h)
-    }) {
+    let gate_input = GateInput {
+        candidate,
+        head: input.chain_head.as_ref(),
+        identity: input.identity_key.as_deref(),
+        poisoned: None,
+        config_dir: &input.config_dir,
+        cwd: &input.working_dir,
+    };
+    let decision = resume_gate(
+        &gate_input,
+        |sid| session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, sid),
+        |dir, sid| source_file(dir, &input.working_dir, sid).is_some_and(|p| is_resumable_file(&p)),
+    );
+    if relocate_only && !matches!(decision, ResumeGate::Relocate { .. }) {
+        return None;
+    }
+    match decision {
         ResumeGate::Allow => None,
+        ResumeGate::Relocate { head, from_config_dir } => {
+            steps.push(step(
+                "chain",
+                "Checking the agent's conversation",
+                true,
+                format!("{head} is under another login of this identity ({from_config_dir}); continuing it there"),
+                t,
+            ));
+            Some((Verdict::Resume, Some(head)))
+        }
         ResumeGate::Redirect { head } => {
             steps.push(step("chain", "Checking the agent's conversation", true, format!("moved on to {head}"), t));
             Some((Verdict::Resume, Some(head)))
@@ -223,7 +248,7 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
             let sid = input.history_session_id.clone();
             if session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, &sid) {
                 steps.push(step("history", "Continuing this pane's conversation", true, sid.clone(), t));
-                if let Some((verdict, sid)) = gate(input, &sid, &mut steps) {
+                if let Some((verdict, sid)) = gate(input, &sid, false, &mut steps) {
                     return finish(verdict, sid, None, steps);
                 }
                 return finish(Verdict::Resume, Some(sid), None, steps);
@@ -235,6 +260,11 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
                 format!("{sid} not under this config dir"),
                 t,
             ));
+            // Relocation only, as the spawn does: a first spawn resumes a
+            // session it can't reach here only by relocating it.
+            if let Some((verdict, sid)) = gate(input, &sid, true, &mut steps) {
+                return finish(verdict, sid, None, steps);
+            }
         }
         // Report what's on disk, but don't let it change the verdict — the
         // spawn only continues the pane's own history, never a disk scan.
@@ -256,7 +286,7 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
         return finish(Verdict::Fresh, None, on_disk, steps);
     }
     steps.push(step("session-id", "Resolving session id", true, input.session_id.clone(), t));
-    if let Some((verdict, sid)) = gate(input, &input.session_id, &mut steps) {
+    if let Some((verdict, sid)) = gate(input, &input.session_id, false, &mut steps) {
         return finish(verdict, sid, None, steps);
     }
 
@@ -523,5 +553,38 @@ mod tests {
         let out = preflight(&i);
         assert_eq!(out.verdict, Verdict::Fresh);
         assert_eq!(out.session_id, None);
+    }
+
+    /// A rebuild onto a new login of the same identity: the head is only
+    /// under the old login, and the spawn will relocate and fork it.
+    #[test]
+    fn a_head_under_another_login_of_the_same_identity_resumes() {
+        let new_login = config_dir_with(WORK_DIR, &[]);
+        let old_login = config_dir_with(WORK_DIR, &[]);
+        let slug = crate::backend::claude_layout::project_dir_name(WORK_DIR);
+        fs::write(old_login.path().join("projects").join(&slug).join("sid-head.jsonl"), "{\"type\":\"user\"}\n").unwrap();
+        let head = crate::backend::continuity_segments::Head {
+            session_id: "sid-head".into(),
+            identity_key: Some("k1".into()),
+            config_dir: Some(old_login.path().to_string_lossy().to_string()),
+            provider: "claude".into(),
+            cwd: WORK_DIR.into(),
+        };
+
+        let mut held = input(new_login.path(), WORK_DIR, "sid-head");
+        held.chain_head = Some(head.clone());
+        held.identity_key = Some("k1".into());
+        let out = preflight(&held);
+        assert_eq!(out.verdict, Verdict::Resume);
+        assert_eq!(out.session_id.as_deref(), Some("sid-head"));
+
+        let mut first = input(new_login.path(), WORK_DIR, "");
+        first.history_session_id = "sid-head".into();
+        first.chain_head = Some(head.clone());
+        first.identity_key = Some("k1".into());
+        assert_eq!(preflight(&first).verdict, Verdict::Resume, "a first spawn relocates its history");
+
+        first.identity_key = Some("k-other".into());
+        assert_eq!(preflight(&first).verdict, Verdict::Fresh, "never across identities");
     }
 }
