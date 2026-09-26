@@ -641,6 +641,22 @@ describe("ToolBlock — header row", () => {
         expect(container.querySelector(".agent-tool-status-note")!.textContent).toBe("cleared via muxspect");
     });
 
+    it("a muxspect-cleared AskUserQuestion shows the note once, inside its authored text", () => {
+        // reducer.ts's force-cancel writes both, for any tool; the authored
+        // summary already carries the note.
+        const cleared: ToolNode = {
+            ...search,
+            toolName: "AskUserQuestion",
+            params: {},
+            status: "canceled",
+            summary: "⏹ Canceled — cleared via muxspect",
+            statusNote: "cleared via muxspect",
+        };
+        const { container } = render(() => <ToolBlock node={cleared} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-status-note")).toBeNull();
+        expect(count(rowText(container), "cleared via muxspect")).toBe(1);
+    });
+
     it("keeps an AskUserQuestion's own authored text", () => {
         const waiting: ToolNode = {
             ...search,

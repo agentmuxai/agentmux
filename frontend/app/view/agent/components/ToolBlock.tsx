@@ -449,7 +449,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                             </span>
                         </Show>
                     </span>
-                    <Show when={props.node.statusNote}>
+                    {/* Composed headers only: an authored summary already
+                        carries the note (the muxspect force-cancel writes
+                        both, for any tool — AskUserQuestion included). */}
+                    <Show when={!authoredSummary() && props.node.statusNote}>
                         <span class="agent-tool-status-note">{props.node.statusNote}</span>
                     </Show>
                     <Show when={props.node.duration}>
