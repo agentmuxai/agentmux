@@ -690,7 +690,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             kind: "create-from-template" as const,
             template,
             originBlockId: props.model.blockId,
-            onCreatedAndLaunch: async (newDefId, accountIdSel, bundleIdSel, name, agentType, modelSel) => {
+            onCreatedAndLaunch: async (newDefId, accountIdSel, bundleIdSel, name, agentType, modelSel, slug) => {
                 // The new definition is user-owned and carries the
                 // template's provider + cmd config. Build an
                 // AgentDefinition stub good enough for the launch flow
@@ -708,13 +708,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     // server-side; the stub MUST match that contract,
                     // otherwise the new agent inherits template-scoped
                     // state (e.g. shared `GH_CONFIG_DIR`, cwd path).
+                    // The slug is the one the backend gave the NEW row —
+                    // deriving it from `name` here can differ (#3573).
                     const stubAgent: AgentDefinition = {
                         ...template,
                         id: newDefId,
                         name,
                         is_seeded: 0,
                         parent_id: template.id,
-                        slug: "",
+                        slug,
                         working_directory: "",
                         // Reflect the runtime the user picked in the
                         // modal, not the template's — the template is
