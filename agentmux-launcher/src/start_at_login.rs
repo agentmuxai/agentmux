@@ -67,19 +67,18 @@ fn reconcile_latest() {
     // burst of changes ends in the last state.
     let Some(setting) = *SEEN.lock().unwrap_or_else(|e| e.into_inner()) else { return };
     let channel = crate::autostart::current_channel();
-    let target = match crate::autostart::stable_target() {
-        Ok(t) => t,
-        Err(e) => {
-            crate::log(&format!("start-at-login: no target to register: {e}"));
-            return;
-        }
-    };
+    // Only a write needs the target. Resolving it must not stand in the way of
+    // turning start-at-login off (ReAgent P1 on #3788).
+    let target = crate::autostart::stable_target();
+    let target_str = target.as_ref().ok().map(|t| t.display().to_string());
     let entry = crate::autostart::read_entry();
-    let target_str = target.display().to_string();
-    let plan = crate::autostart::plan(setting, entry.as_ref(), &channel, &target_str);
+    let plan = crate::autostart::plan(setting, entry.as_ref(), &channel, target_str.as_deref());
     let result = match plan {
         crate::autostart::Plan::Nothing => return,
-        crate::autostart::Plan::Write => crate::autostart::enable(&target, &channel),
+        crate::autostart::Plan::Write => match &target {
+            Ok(t) => crate::autostart::enable(t, &channel),
+            Err(e) => Err(format!("no target to register: {e}")),
+        },
         crate::autostart::Plan::Remove => crate::autostart::disable(),
         crate::autostart::Plan::Adopt => {
             crate::notify::request_start_at_login(true);
@@ -88,7 +87,7 @@ fn reconcile_latest() {
     };
     match result {
         Ok(()) => crate::log(&format!(
-            "start-at-login: {plan:?} (setting={setting:?}, channel={channel}, target={target_str}, was={entry:?})"
+            "start-at-login: {plan:?} (setting={setting:?}, channel={channel}, target={target_str:?}, was={entry:?})"
         )),
         Err(e) => crate::log(&format!("start-at-login: {plan:?} failed: {e}")),
     }

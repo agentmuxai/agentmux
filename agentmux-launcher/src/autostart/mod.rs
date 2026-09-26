@@ -690,6 +690,9 @@ pub enum Plan {
 }
 
 /// Pure decision. `setting` is `app:startatlogin`, `None` when never set.
+/// `target` is `stable_target()`, `None` when it could not be resolved: only
+/// writing needs it, so removing or adopting never waits on it (ReAgent P1 on
+/// #3788).
 ///
 /// - On: write unless the entry already runs `target` for this channel. This
 ///   also re-points an entry after an update or a move, and takes ownership
@@ -697,10 +700,10 @@ pub enum Plan {
 /// - Off: remove only an entry this channel owns. Another build's entry, or
 ///   one from before ownership was recorded, is not this build's to remove.
 /// - Never set: off, except that an unowned (pre-setting) entry is adopted.
-pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target: &str) -> Plan {
+pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target: Option<&str>) -> Plan {
     let owned = |e: &Entry| e.channel.as_deref() == Some(channel);
     match (setting, entry) {
-        (Some(true), Some(e)) if owned(e) && e.target.as_deref() == Some(target) => Plan::Nothing,
+        (Some(true), Some(e)) if owned(e) && target.is_some() && e.target.as_deref() == target => Plan::Nothing,
         (Some(true), _) => Plan::Write,
         (Some(false), Some(e)) if owned(e) => Plan::Remove,
         (None, Some(e)) if e.channel.is_none() => Plan::Adopt,
@@ -938,30 +941,40 @@ mod autostart_tests {
     #[test]
     fn plan_on_writes_unless_the_entry_is_already_ours_and_current() {
         let t = "/home/u/Desktop/AgentMux.AppImage";
-        assert_eq!(plan(Some(true), None, "stable", t), Plan::Write);
-        assert_eq!(plan(Some(true), Some(&entry(t, Some("stable"))), "stable", t), Plan::Nothing);
+        assert_eq!(plan(Some(true), None, "stable", Some(t)), Plan::Write);
+        assert_eq!(plan(Some(true), Some(&entry(t, Some("stable"))), "stable", Some(t)), Plan::Nothing);
         // An update or a move: same owner, old path.
-        assert_eq!(plan(Some(true), Some(&entry("/old/path", Some("stable"))), "stable", t), Plan::Write);
+        assert_eq!(plan(Some(true), Some(&entry("/old/path", Some("stable"))), "stable", Some(t)), Plan::Write);
         // Another build's entry: turning it on here takes it over.
-        assert_eq!(plan(Some(true), Some(&entry(t, Some("local-main-x"))), "stable", t), Plan::Write);
+        assert_eq!(plan(Some(true), Some(&entry(t, Some("local-main-x"))), "stable", Some(t)), Plan::Write);
     }
 
     #[test]
     fn plan_off_removes_only_this_channels_entry() {
         let t = "/opt/agentmux/agentmux";
-        assert_eq!(plan(Some(false), Some(&entry(t, Some("stable"))), "stable", t), Plan::Remove);
-        assert_eq!(plan(Some(false), Some(&entry(t, Some("local-main-x"))), "stable", t), Plan::Nothing);
-        assert_eq!(plan(Some(false), Some(&entry(t, None)), "stable", t), Plan::Nothing);
-        assert_eq!(plan(Some(false), None, "stable", t), Plan::Nothing);
+        assert_eq!(plan(Some(false), Some(&entry(t, Some("stable"))), "stable", Some(t)), Plan::Remove);
+        assert_eq!(plan(Some(false), Some(&entry(t, Some("local-main-x"))), "stable", Some(t)), Plan::Nothing);
+        assert_eq!(plan(Some(false), Some(&entry(t, None)), "stable", Some(t)), Plan::Nothing);
+        assert_eq!(plan(Some(false), None, "stable", Some(t)), Plan::Nothing);
+    }
+
+    /// ReAgent P1 on #3788: an unresolvable target must not block turning it off.
+    #[test]
+    fn plan_needs_the_target_only_to_write() {
+        let mine = entry("/x", Some("stable"));
+        assert_eq!(plan(Some(false), Some(&mine), "stable", None), Plan::Remove);
+        assert_eq!(plan(None, Some(&entry("/x", None)), "stable", None), Plan::Adopt);
+        // On with no target: still a write, which then reports the missing target.
+        assert_eq!(plan(Some(true), Some(&mine), "stable", None), Plan::Write);
     }
 
     /// Off by default, but a user who turned it on with the old toggle keeps it.
     #[test]
     fn plan_never_set_is_off_but_adopts_an_entry_from_before_the_setting() {
         let t = "/x";
-        assert_eq!(plan(None, None, "stable", t), Plan::Nothing);
-        assert_eq!(plan(None, Some(&entry(t, None)), "stable", t), Plan::Adopt);
-        assert_eq!(plan(None, Some(&entry(t, Some("local-main-x"))), "stable", t), Plan::Nothing);
+        assert_eq!(plan(None, None, "stable", Some(t)), Plan::Nothing);
+        assert_eq!(plan(None, Some(&entry(t, None)), "stable", Some(t)), Plan::Adopt);
+        assert_eq!(plan(None, Some(&entry(t, Some("local-main-x"))), "stable", Some(t)), Plan::Nothing);
     }
 
     #[test]
