@@ -23,10 +23,8 @@
 // draft. CRUD goes through the v7 RPC commands
 // (listmemories / upsertmemory / deletememory).
 
-import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import type { Bundle, BundleUpsertInput, BundleValidationReport } from "@/app/store/rpc-api";
@@ -169,37 +167,16 @@ export function draftToWire(d: BundleDraft): BundleUpsertInput {
     };
 }
 
-export class BundleViewModel implements ViewModel {
-    viewType = "memory";
-    blockId: string;
-    nodeModel: BlockNodeModel | null;
-
+/** The bundle editor's state: the list, the selection and the in-flight
+ *  draft, for the context-free `BundleManager`. (The `view: "memory"` pane is
+ *  a native pane tab with no model — `memoryPaneTab`, bundle.tsx.) */
+export class BundleViewModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bundle create/edit/delete made elsewhere refreshes this list without
     // a manual reopen. Same `memories:changed` event GlobalBundleViewModel
     // now also subscribes to; see that model's own comment on why one
     // umbrella event firing a refresh in both tabs is fine, not a bug.
     private unsubChanged: () => void;
-
-    // "layer-group" (not "brain") — matches the Bundles tab icon in the Armory
-    // rail (armory-view.tsx) so the standalone bundle pane and the Armory nav
-    // stay visually consistent; the brain icon is reserved for native memory.
-    viewIcon: Accessor<string> = () => "layer-group";
-    viewName: Accessor<string>;
-    viewText: Accessor<string | HeaderElem[]> = () => "Bundles";
-    noPadding: Accessor<boolean> = () => false;
-
-    get viewComponent(): ViewComponent {
-        return null; // overridden by the barrel via Object.defineProperty
-    }
-
-    blockAtom: Accessor<Block | undefined>;
-    /** The specific agent this memory pane belongs to, if any
-     *  (`meta.agentId`, same field `IdentityPaneViewModel.agentId` /
-     *  `AgentViewModel` read) — closes the DATA GAP documented in
-     *  `bundle-summary.tsx`'s module comment. `undefined` when this block
-     *  was opened without agent context. */
-    agentId: Accessor<string | undefined>;
 
     private _bundles = createSignal<Bundle[]>([]);
     bundlesAtom: Accessor<Bundle[]> = this._bundles[0];
@@ -236,27 +213,7 @@ export class BundleViewModel implements ViewModel {
     /** Memo: the currently-selected Memory row, or null. */
     selectedAtom: Accessor<Bundle | null>;
 
-    // `nodeModel` is optional: when this ViewModel backs a `view: "memory"`
-    // block pane the BlockRegistry passes the real (blockId, nodeModel)
-    // pair; when it backs the context-free <BundleManager/> component
-    // (window modal / extracted manager) there is no block, so both are
-    // absent. The block is used only for the cosmetic header title —
-    // every other code path drives off `bundle_*` RPCs and is
-    // block-independent.
-    constructor(blockId?: string, nodeModel?: BlockNodeModel) {
-        this.blockId = blockId ?? "";
-        this.nodeModel = nodeModel ?? null;
-        this.blockAtom = blockId
-            ? getMuxObjectAtom(makeORef("block", blockId))
-            : () => undefined;
-        this.viewName = createMemo(() => {
-            const block = this.blockAtom();
-            return (block?.meta?.["frame:title"] as string) ?? "Bundles";
-        });
-        this.agentId = createMemo(() => {
-            const block = this.blockAtom();
-            return block?.meta?.["agentId"] as string | undefined;
-        });
+    constructor() {
         this.selectedAtom = createMemo(() => {
             const id = this.selectedIdAtom();
             if (!id) return null;

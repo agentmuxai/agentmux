@@ -14,7 +14,6 @@ import { resolveDrift } from "@/app/view/agent/providers/version-drift";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
-import type { ToolchainViewModel } from "./toolchain-model";
 import "./toolchain-view.scss";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
@@ -114,7 +113,7 @@ let latestFetchedAt = 0;
 
 // ── View component ────────────────────────────────────────────────────────────
 
-export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): JSX.Element {
+export function ToolchainView(): JSX.Element {
     const plat = currentPlatform();
     const [env, setEnv] = createSignal<ToolEnv | null>(null);
     const [showPath, setShowPath] = createSignal(false);

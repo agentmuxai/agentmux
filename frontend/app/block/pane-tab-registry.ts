@@ -34,8 +34,9 @@ export interface PaneTabCapabilities {
     nativeSurface?: boolean;
     /** `"surface"`: an uncolored header keeps the theme's block surface (the
      *  agent pane) instead of the one fixed default header color every other
-     *  pane gets. */
-    header?: "default" | "surface";
+     *  pane gets. `"none"`: the view draws no header of its own (the
+     *  launcher's search box is its top edge). */
+    header?: "default" | "surface" | "none";
     /** The header shows a mic button (the view model's `voiceHandle`), with
      *  this tooltip. A view that takes voice elsewhere (agent: beside its
      *  composer) leaves this out. */

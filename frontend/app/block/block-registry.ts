@@ -13,19 +13,19 @@ import { armoryPaneTab } from "@/app/view/armory/armory";
 import { browserPaneTab } from "@/app/view/browser/browser";
 import { dronePaneTab } from "@/app/view/drone/drone";
 import { editorPaneTab } from "@/app/view/editor/editor";
-import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
-import { LauncherViewModel } from "@/app/view/launcher/launcher";
+import { identityPaneTab } from "@/app/view/identity/identity-pane";
+import { launcherPaneTab } from "@/app/view/launcher/launcher";
 import { mediaPaneTab } from "@/app/view/media/media";
-import { BundleViewModel } from "@/app/view/bundle/bundle";
-import { SettingsViewModel } from "@/app/view/settings/settings";
+import { memoryPaneTab } from "@/app/view/bundle/bundle";
+import { settingsPaneTab } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
-import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
+import { toolchainPaneTab } from "@/app/view/toolchain/toolchain";
 import { wardenPaneTab } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { terminalPaneTab } from "@/view/term/term";
 import { agentPaneTabManifest } from "@/app/view/agent/agent-manifest";
-import { getPaneTab, legacyAdapter, registerPaneTab } from "./pane-tab-registry";
+import { getPaneTab, registerPaneTab } from "./pane-tab-registry";
 
 const builtins = [
     // Keep-alive (term, agent, browser, editor): remounting would lose real
@@ -42,16 +42,16 @@ const builtins = [
     sysinfoPaneTab("sysinfo"),
     sysinfoPaneTab("cpuplot"),
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
-    legacyAdapter("launcher", LauncherViewModel as any),
+    launcherPaneTab, // native — Phase 2c (no header)
     swarmPaneTab, // native — Phase 2c
-    legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
+    memoryPaneTab, // native — Phase 2c
     mediaPaneTab, // native — Phase 2c
-    legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
+    identityPaneTab, // native — Phase 2c
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c
-    legacyAdapter("toolchain", ToolchainViewModel as any),
+    toolchainPaneTab, // native — Phase 2c
     armoryPaneTab, // native — Phase 2c (keeps the "trust" alias)
-    legacyAdapter("settings", SettingsViewModel as any),
+    settingsPaneTab, // native — Phase 2c
 ];
 const unregisterBuiltins = builtins.map(registerPaneTab);
 // A hot reload re-runs this module but not the registry; without this the

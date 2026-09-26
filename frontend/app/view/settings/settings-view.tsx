@@ -66,7 +66,7 @@ const RAIL: { id: SettingsSection; label: string; icon: string }[] = [
 const SEARCH_HIGHLIGHT_MS = 1500;
 const SEARCH_HIGHLIGHT_CLASS = "setting-row--search-highlight";
 
-export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.Element {
+export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     const section = () => props.model.activeSection();
     const setSection = (s: SettingsSection) => props.model.setSection(s);
 

@@ -107,6 +107,15 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.noPadding?.()).toBe(true);
     });
 
+    it("maps the headerless capability", () => {
+        const vm = adaptPaneTabInstance(
+            { ...manifest, capabilities: { header: "none" } },
+            makePaneTabHostContext("b1", {} as any),
+            { component: () => null as any }
+        );
+        expect(vm.noHeader?.()).toBe(true);
+    });
+
     it("maps rename onto the header's editable title", async () => {
         const rename = vi.fn(() => Promise.resolve());
         const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
@@ -194,5 +203,6 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.setProgressBarMount).toBeUndefined();
         expect(vm.blockBg).toBeUndefined();
         expect(vm.setViewName).toBeUndefined();
+        expect(vm.noHeader).toBeUndefined();
     });
 });

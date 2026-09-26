@@ -60,6 +60,7 @@ export function adaptPaneTabInstance(
     if (instance.background) vm.blockBg = instance.background;
     if (manifest.capabilities?.connection) vm.manageConnection = instance.manageConnection ?? (() => true);
     if (manifest.capabilities?.noPadding) vm.noPadding = () => true;
+    if (manifest.capabilities?.header === "none") vm.noHeader = () => true;
     if (instance.voice) vm.voiceHandle = () => instance.voice!();
     // A getter, not a copy: the find bar is created when the tab's view
     // mounts (`useSearch`), after this adapter runs.
