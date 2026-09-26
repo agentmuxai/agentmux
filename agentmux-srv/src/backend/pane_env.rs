@@ -298,8 +298,6 @@ mod spawn_site_coverage {
          "sanitized: provider OAuth CLI, strict policy"),
         ("src/server/identity_auth_spawn.rs", "cli_path", 1,
          "sanitized: provider OAuth CLI, strict policy"),
-        ("src/server/install_handlers.rs", "cmd", 1,
-         "probe: resolve_tool_path, `where`/`which` only, never executes the tool"),
         ("src/server/install_handlers.rs", "if cfg!(windows", 1,
          "sanitized: installer shell, sanitize_external_command"),
         ("src/server/shell_handlers.rs", "&shell", 1,
