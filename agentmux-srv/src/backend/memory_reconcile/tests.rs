@@ -586,7 +586,7 @@ fn a_file_written_after_the_listing_is_not_taken_for_deleted() {
     assert_eq!(f.run().written, 1, "pass P writes new.md here");
     // Pass Q, which listed the folder before P wrote it, reaches new.md.
     let (mut rep, mut dels) = (Report::default(), Vec::new());
-    reconcile_file(&f.fs, UID, &dir, &dir_id, "new.md", &mut rep, &mut dels, true).unwrap();
+    reconcile_file(&f.fs, UID, &dir, &dir_id, "new.md", &mut rep, &mut dels, &mut ShaCache::default(), true).unwrap();
     assert!(dels.is_empty());
     assert_eq!(f.head_body("new.md").as_deref(), Some("made in the other folder"), "no deletion recorded");
     assert_eq!(f.get("new.md").as_deref(), Some("made in the other folder"));
@@ -961,4 +961,43 @@ fn a_removed_conflict_index_line_is_not_added_back() {
 fn a_conflict_on_a_conflict_copy_is_named_after_the_original() {
     assert_eq!(conflict_file_name("notes__conflict_aaaaaaaa.md", "v_bbbbbbbbcccc"), "notes__conflict_bbbbbbbb.md");
     assert_eq!(conflict_file_name("notes.md", "v_bbbbbbbbcccc"), "notes__conflict_bbbbbbbb.md");
+}
+
+/// The pass reads the log once for version hashes, and still finds a
+/// version appended after that (by an earlier file in the same pass).
+#[test]
+fn the_hash_cache_finds_versions_appended_during_the_pass() {
+    let f = fixture();
+    f.put("a.md", "one");
+    f.run();
+    let mut shas = ShaCache::default();
+    let a = record::heads(&f.fs, UID).unwrap().files["a.md"].clone();
+    assert_eq!(shas.sha_of(&f.fs, UID, &a.version).unwrap(), a.sha256);
+    f.change_elsewhere("a.md", Some("two"));
+    let b = record::heads(&f.fs, UID).unwrap().files["a.md"].clone();
+    assert_eq!(shas.sha_of(&f.fs, UID, &b.version).unwrap().as_deref(), Some(record::sha256_hex(b"two").as_str()));
+    assert_eq!(shas.sha_of(&f.fs, UID, "v_nonexistent").unwrap(), None);
+}
+
+/// Timing only (`--ignored`): a pass over a long-lived record — 20 files,
+/// 3,000 log versions.
+#[test]
+#[ignore]
+fn timing_a_pass_over_a_long_record() {
+    let f = fixture();
+    for i in 0..20 {
+        f.put(&format!("f{i}.md"), "v0");
+    }
+    f.run();
+    for n in 1..150 {
+        for i in 0..20 {
+            f.change_elsewhere(&format!("f{i}.md"), Some(&format!("v{n}")));
+        }
+    }
+    for i in 0..20 {
+        f.put(&format!("f{i}.md"), "local change");
+    }
+    let t = Instant::now();
+    let r = f.run();
+    eprintln!("TIMING pass over 3000 versions: {:?} ({r:?})", t.elapsed());
 }
