@@ -241,6 +241,7 @@ impl Service {
         self.store.ensure_derived(id, edge)?;
         let fp = store::fingerprint(edge);
         let found = self.store.file(id, &fp, Kind::Send)?;
+        self.store.mark_sent(id);
         self.store.touch(id, &fp);
         Some(found)
     }
@@ -262,32 +263,36 @@ impl Service {
     ) -> Result<AttachmentInfo, process::ProcessError> {
         let edge = self.limits().send_max_edge;
         let svc = Arc::clone(self);
-        let (blob, format, dims, existing) = blocking(move || {
-            let (blob, format) = svc.store.place(&tmp, &id)?;
-            let fp = store::fingerprint(edge);
-            if let Some(meta) = svc.store.meta(&id, &fp) {
-                svc.store.touch(&id, &fp);
-                return Ok((blob, format, (0, 0), Some((id, meta))));
-            }
-            let dims = process::header_dimensions(&blob)?;
-            Ok((blob, format, dims, None::<(String, store::StoredMeta)>))
-        })
-        .await?;
-        if let Some((id, meta)) = existing {
+        let place_id = id.clone();
+        let (blob, format) = blocking(move || svc.store.place(&tmp, &place_id)).await?;
+        let fp = store::fingerprint(edge);
+        if let Some(meta) = self.store.meta(&id, &fp) {
+            self.store.touch(&id, &fp);
             return Ok(meta.to_info(&id, &name));
         }
-        let id = blob
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
-        let _mem = self.reserve_memory(dims.0, dims.1).await;
-        let svc = Arc::clone(self);
-        blocking(move || {
-            let meta = svc.store.derive_and_save(&id, &blob, format, edge)?;
-            Ok(meta.to_info(&id, &name))
-        })
-        .await
+        let result = async {
+            let blob_for_dims = blob.clone();
+            let (w, h) = blocking(move || process::header_dimensions(&blob_for_dims)).await?;
+            let _mem = self.reserve_memory(w, h).await;
+            let svc = Arc::clone(self);
+            let derive_id = id.clone();
+            blocking(move || svc.store.derive_and_save(&derive_id, &blob, format, edge)).await
+        }
+        .await;
+        match result {
+            Ok(meta) => Ok(meta.to_info(&id, &name)),
+            Err(e) => {
+                self.discard_unprocessed(&id).await;
+                Err(e)
+            }
+        }
+    }
+
+    /// See [`Store::discard_if_unprocessed`].
+    async fn discard_unprocessed(&self, id: &str) {
+        let store = self.store.clone();
+        let id = id.to_string();
+        let _ = tokio::task::spawn_blocking(move || store.discard_if_unprocessed(&id)).await;
     }
 
     async fn run_batch(
@@ -386,6 +391,35 @@ impl Service {
             return Ok(meta.to_info(&id, &item.name));
         }
 
+        let result = self
+            .derive_placed(block_id, batch_id, &item, &id, blob, format, limits, cancel)
+            .await;
+        if result.is_err() {
+            // A decode failure or a cancel after the original was stored
+            // must not leave it behind with no metadata.
+            self.discard_unprocessed(&id).await;
+        }
+        result
+    }
+
+    /// The part of [`Self::run_item`] after the original is in `blobs/`:
+    /// reserve decode memory from the header and derive.
+    #[allow(clippy::too_many_arguments)]
+    async fn derive_placed(
+        self: &Arc<Self>,
+        block_id: &str,
+        batch_id: &str,
+        item: &AttachmentPending,
+        id: &str,
+        blob: PathBuf,
+        format: image::ImageFormat,
+        limits: Limits,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<AttachmentInfo, process::ProcessError> {
+        let cancelled = || process::ProcessError {
+            code: "cancelled",
+            message: "Cancelled.".into(),
+        };
         let blob_for_dims = blob.clone();
         let (w, h) = blocking(move || process::header_dimensions(&blob_for_dims)).await?;
         if cancel.load(Ordering::SeqCst) {
@@ -407,7 +441,7 @@ impl Service {
             },
         );
         let svc = Arc::clone(self);
-        let id2 = id.clone();
+        let id2 = id.to_string();
         let meta = blocking(move || {
             svc.store
                 .derive_and_save(&id2, &blob, format, limits.send_max_edge)
@@ -416,7 +450,7 @@ impl Service {
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
         }
-        Ok(meta.to_info(&id, &item.name))
+        Ok(meta.to_info(id, &item.name))
     }
 
     /// Copy the source into `incoming/` with progress and cancellation, then

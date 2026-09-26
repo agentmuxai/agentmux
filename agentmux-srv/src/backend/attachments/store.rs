@@ -9,6 +9,7 @@
 //! <root>/derived/ab/<sha256>.<fp>.thumb.<ext>
 //! <root>/derived/ab/<sha256>.<fp>.send.<ext>
 //! <root>/derived/ab/<sha256>.<fp>.json   StoredMeta
+//! <root>/derived/ab/<sha256>.sent        marker: sent to an agent at least once
 //! <root>/incoming/<uuid>.part          in-flight copy / upload
 //! ```
 //!
@@ -38,6 +39,10 @@ pub fn fingerprint(send_max_edge: u32) -> String {
 /// `incoming/` files older than this are leftovers from a crash or a
 /// cancelled copy.
 const INCOMING_MAX_AGE: Duration = Duration::from_secs(60 * 60);
+
+/// Attachments never sent to an agent (drafts, abandoned or lost on restart)
+/// are kept at most this long, instead of the full retention window.
+pub const UNSENT_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Hex SHA-256, lowercase. Every public entry point that turns an id into a
 /// path validates it with this first, so an id can never carry a separator.
@@ -225,8 +230,67 @@ impl Store {
             self.meta_path(id, fp),
             self.derived_path(id, fp, &format!("send.{}", meta.send_ext)),
             self.derived_path(id, fp, &format!("thumb.{}", meta.thumb_ext)),
+            self.sent_marker(id),
         ] {
             let _ = set_mtime(&p, now);
+        }
+    }
+
+    fn sent_marker(&self, id: &str) -> PathBuf {
+        self.root
+            .join("derived")
+            .join(Self::shard(id))
+            .join(format!("{id}.sent"))
+    }
+
+    /// Record that an attachment went to an agent, which moves it from the
+    /// 7-day unsent window to the full retention window.
+    pub fn mark_sent(&self, id: &str) {
+        if !is_valid_id(id) {
+            return;
+        }
+        let marker = self.sent_marker(id);
+        if let Some(dir) = marker.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&marker, b"");
+    }
+
+    fn is_sent(&self, id: &str) -> bool {
+        self.sent_marker(id).is_file()
+    }
+
+    /// Remove the original of an attachment that has no metadata under any
+    /// fingerprint, i.e. one whose processing failed after [`Self::place`]
+    /// stored it. Without this, a file that sniffs as an image but won't
+    /// decode would sit in `blobs/` until the retention sweep.
+    pub fn discard_if_unprocessed(&self, id: &str) {
+        if !is_valid_id(id) {
+            return;
+        }
+        let prefix = format!("{id}.");
+        let names = |sub: &str| -> Vec<PathBuf> {
+            std::fs::read_dir(self.root.join(sub).join(Self::shard(id)))
+                .map(|rd| {
+                    rd.filter_map(Result::ok)
+                        .map(|e| e.path())
+                        .filter(|p| {
+                            p.file_name()
+                                .and_then(|n| n.to_str())
+                                .is_some_and(|n| n.starts_with(&prefix))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let processed = names("derived")
+            .iter()
+            .any(|p| p.extension().is_some_and(|e| e == "json"));
+        if processed {
+            return;
+        }
+        for blob in names("blobs") {
+            let _ = std::fs::remove_file(blob);
         }
     }
 
@@ -386,21 +450,40 @@ impl Store {
         self.derive_and_save(id, &blob, format, send_max_edge).ok()
     }
 
-    /// Delete attachment files unused for `retention`, and `incoming/`
-    /// leftovers older than an hour. Returns how many files were removed.
+    /// Delete attachment files unused for `retention` (or for
+    /// [`UNSENT_MAX_AGE`] when the attachment was never sent), and
+    /// `incoming/` leftovers older than an hour. Returns how many files were
+    /// removed.
     pub fn sweep(&self, retention: Duration) -> usize {
         let now = SystemTime::now();
+        let unsent = UNSENT_MAX_AGE.min(retention);
+        let mut sent_cache: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
         let mut removed = 0;
-        for (sub, max_age) in [
-            ("blobs", retention),
-            ("derived", retention),
-            ("incoming", INCOMING_MAX_AGE),
-        ] {
+        for sub in ["blobs", "derived", "incoming"] {
             let dir = self.root.join(sub);
             let Ok(entries) = walk_files(&dir) else {
                 continue;
             };
             for path in entries {
+                let max_age = if sub == "incoming" {
+                    INCOMING_MAX_AGE
+                } else {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    match name.get(..64).filter(|id| is_valid_id(id)) {
+                        Some(id) => {
+                            let sent = *sent_cache
+                                .entry(id.to_string())
+                                .or_insert_with(|| self.is_sent(id));
+                            if sent {
+                                retention
+                            } else {
+                                unsent
+                            }
+                        }
+                        None => retention,
+                    }
+                };
                 let old = std::fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .ok()
@@ -540,6 +623,53 @@ mod tests {
         let src = png(dir.path(), "a.png", 10);
         assert!(s.copy_in(&src, |_| false).is_err());
         assert!(walk_files(&s.root()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_failed_decode_is_discarded_but_a_processed_one_is_kept() {
+        let (dir, s) = store();
+        let bad = png(dir.path(), "bad.png", 1);
+        let bytes = std::fs::read(&bad).unwrap();
+        std::fs::write(&bad, &bytes[..bytes.len() / 3]).unwrap();
+        let (tmp, id, _) = s.copy_in(&bad, |_| true).unwrap();
+        let (blob, format) = s.place(&tmp, &id).unwrap();
+        assert!(s.derive_and_save(&id, &blob, format, 2000).is_err());
+        s.discard_if_unprocessed(&id);
+        assert!(walk_files(&s.root().join("blobs")).unwrap().is_empty());
+
+        let (good, _) = ingest(&s, &png(dir.path(), "good.png", 2)).unwrap();
+        s.discard_if_unprocessed(&good);
+        assert!(s.meta(&good, &fingerprint(2000)).is_some());
+    }
+
+    fn age_all(s: &Store, id: &str, days: u64) {
+        let then = SystemTime::now() - Duration::from_secs(days * 24 * 3600);
+        for p in walk_files(s.root()).unwrap() {
+            if p.to_string_lossy().contains(id) {
+                set_mtime(&p, then).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn never_sent_attachments_go_after_seven_days_sent_ones_after_retention() {
+        let (dir, s) = store();
+        let (draft, _) = ingest(&s, &png(dir.path(), "draft.png", 1)).unwrap();
+        let (sent, _) = ingest(&s, &png(dir.path(), "sent.png", 2)).unwrap();
+        s.mark_sent(&sent);
+        age_all(&s, &draft, 8);
+        age_all(&s, &sent, 8);
+        let thirty = Duration::from_secs(30 * 24 * 3600);
+        assert_eq!(s.sweep(thirty), 4, "the draft's four files go");
+        let fp = fingerprint(2000);
+        assert!(s.meta(&draft, &fp).is_none());
+        assert!(
+            s.meta(&sent, &fp).is_some(),
+            "a sent attachment keeps the full window"
+        );
+        age_all(&s, &sent, 31);
+        assert_eq!(s.sweep(thirty), 5, "four files plus the sent marker");
+        assert!(s.meta(&sent, &fp).is_none());
     }
 
     #[test]
