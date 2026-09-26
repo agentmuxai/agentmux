@@ -83,8 +83,8 @@ export function DispatchCard(props: { node: ToolNode; ctx?: ToolRenderContext })
 
 DispatchCard.displayName = "DispatchCard";
 
-// Registered above the priority-0 Agent/Task/Workflow built-ins in
-// ToolOverlayLog.tsx — wins whenever a confident dispatch match exists;
+// Registered (tool-renderers/index.ts) above the priority-0 Agent/Task/Workflow
+// built-ins in builtins.tsx — wins whenever a confident dispatch match exists;
 // its own internal fallback covers the no-match case, so the priority-0
 // builtins remain reachable only as defense-in-depth if this entry were
 // ever removed.

@@ -7,13 +7,12 @@ import type {
     DocumentState,
     JektMessageNode,
     MarkdownNode,
+    DocumentNode,
     SectionNode,
     ToolNode,
     UserMessageNode,
 } from "../types";
 import {
-    estimateAgentMessage,
-    estimateJektMessage,
     JEKT_EXPANDED_MAX_ESTIMATE_PX,
     estimateMarkdown,
     estimateNode,
@@ -21,11 +20,10 @@ import {
     estimateSection,
     estimateTextHeight,
     estimateUnwrappedTextHeight,
-    estimateTool,
     CONTENT_FIRST_TOOL_ESTIMATE_PX,
-    estimateUserMessage,
     STREAMING_CAPABLE,
 } from "./renderers";
+import { rowDisclosureIn } from "./disclosure";
 
 const baseDocState = (): DocumentState => ({
     collapsedNodes: new Set<string>(),
@@ -124,23 +122,23 @@ describe("per-kind estimators", () => {
         };
 
         it("returns the collapsed size when not pinned", () => {
-            expect(estimateTool(tool, baseDocState())).toBe(32);
+            expect(estimateNode(tool, baseDocState())).toBe(32);
         });
 
         it("returns the expanded size when pinned in DocumentState", () => {
             const state = baseDocState();
             state.pinnedNodes.add("t1");
-            expect(estimateTool(tool, state)).toBe(200);
+            expect(estimateNode(tool, state)).toBe(200);
         });
 
         // A content-first tool (WebSearch) renders open by default, capped at
         // the preview height, so a history row must not be laid out at 32 px.
         it("returns the capped content-first size for a finished WebSearch, 32 px once collapsed", () => {
             const search: ToolNode = { ...tool, id: "ws", tool: "Other", toolName: "WebSearch", params: {} };
-            expect(estimateTool(search, baseDocState())).toBe(CONTENT_FIRST_TOOL_ESTIMATE_PX);
+            expect(estimateNode(search, baseDocState())).toBe(CONTENT_FIRST_TOOL_ESTIMATE_PX);
             const state = baseDocState();
             state.collapsedNodes.add("ws");
-            expect(estimateTool(search, state)).toBe(32);
+            expect(estimateNode(search, state)).toBe(32);
         });
     });
 
@@ -153,13 +151,13 @@ describe("per-kind estimators", () => {
 
         it("uses text-height estimate when not collapsed", () => {
             // 11 chars × 20 = 220 chars → ceil(220/80) = 3 lines × 24 = 72
-            expect(estimateAgentMessage(node, baseDocState())).toBe(72);
+            expect(estimateNode(node, baseDocState())).toBe(72);
         });
 
         it("returns the collapsed size when in collapsedNodes", () => {
             const state = baseDocState();
             state.collapsedNodes.add("am1");
-            expect(estimateAgentMessage(node, state)).toBe(32);
+            expect(estimateNode(node, state)).toBe(32);
         });
     });
 
@@ -169,7 +167,7 @@ describe("per-kind estimators", () => {
         };
 
         it("uses unwrapped (newline-based) estimate for a regular user message", () => {
-            expect(estimateUserMessage(node, baseDocState())).toBe(32); // short → MIN
+            expect(estimateNode(node, baseDocState())).toBe(32); // short → MIN
         });
 
         it("does NOT inflate height for long single-line input (no soft wrap)", () => {
@@ -181,7 +179,7 @@ describe("per-kind estimators", () => {
                 id: "um-url",
                 message: "https://example.com/" + "x".repeat(500),
             };
-            expect(estimateUserMessage(longUrl, baseDocState())).toBe(32); // 1 visual line
+            expect(estimateNode(longUrl, baseDocState())).toBe(32); // 1 visual line
         });
 
         it("scales with explicit newline count", () => {
@@ -190,7 +188,7 @@ describe("per-kind estimators", () => {
                 id: "um-multi",
                 message: "a\nb\nc",
             };
-            expect(estimateUserMessage(multiline, baseDocState())).toBe(72); // 3 × 24
+            expect(estimateNode(multiline, baseDocState())).toBe(72); // 3 × 24
         });
 
         it("returns the collapsed-summary size for an unpinned startup row", () => {
@@ -199,7 +197,7 @@ describe("per-kind estimators", () => {
             // collapsedNodes (renderer ignores collapsedNodes for
             // user_message). Mirror estimateTool.
             const startup: UserMessageNode = { ...node, id: "um-start", isStartup: true };
-            expect(estimateUserMessage(startup, baseDocState())).toBe(32); // collapsed
+            expect(estimateNode(startup, baseDocState())).toBe(32); // collapsed
         });
 
         it("returns the full text-height estimate for a pinned startup row", () => {
@@ -211,7 +209,7 @@ describe("per-kind estimators", () => {
             // assertion below pins the expected behavior; a longer
             // multi-line startup would yield a bigger number via
             // estimateTextHeight.
-            expect(estimateUserMessage(startup, state)).toBe(32);
+            expect(estimateNode(startup, state)).toBe(32);
         });
 
         it("ignores collapsedNodes for user_message (no longer wired)", () => {
@@ -220,7 +218,7 @@ describe("per-kind estimators", () => {
             // Regular user message, collapsedNodes set but not pinned —
             // estimate is still the text-height fall-through, not the
             // collapsed-summary height.
-            expect(estimateUserMessage(node, state)).toBe(32);
+            expect(estimateNode(node, state)).toBe(32);
         });
     });
 });
@@ -248,9 +246,12 @@ describe("estimateNode dispatch", () => {
 
         expect(estimateNode(md, state)).toBe(estimateMarkdown(md));
         expect(estimateNode(sec, state)).toBe(estimateSection(sec));
-        expect(estimateNode(tool, state)).toBe(estimateTool(tool, state));
-        expect(estimateNode(am, state)).toBe(estimateAgentMessage(am, state));
-        expect(estimateNode(um, state)).toBe(estimateUserMessage(um, state));
+        // Every row: the per-state estimate of what rowDisclosure says
+        // (SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26 §2.4).
+        for (const n of [tool, am, um] as DocumentNode[]) {
+            const open = rowDisclosureIn(n, state).open;
+            expect(estimateNode(n, state)).toBe(estimateNodeForState(n, open ? "expanded" : "collapsed", state));
+        }
     });
 });
 
@@ -354,19 +355,19 @@ describe("estimateJektMessage (expanded jekt body is height-capped)", () => {
     });
 
     it("a very long expanded jekt is clamped, not estimated at the text maximum", () => {
-        const est = estimateJektMessage(jekt("x".repeat(50_000)), baseDocState());
+        const est = estimateNode(jekt("x".repeat(50_000)), baseDocState());
         expect(est).toBe(JEKT_EXPANDED_MAX_ESTIMATE_PX);
         expect(est).toBeLessThan(estimateTextHeight("x".repeat(50_000)));
     });
 
     it("a short expanded jekt keeps its natural estimate", () => {
-        expect(estimateJektMessage(jekt("hi"), baseDocState())).toBe(estimateTextHeight("hi"));
+        expect(estimateNode(jekt("hi"), baseDocState())).toBe(estimateTextHeight("hi"));
     });
 
     it("a collapsed jekt is one line", () => {
         const state = baseDocState();
         state.collapsedNodes.add("j1");
-        expect(estimateJektMessage(jekt("x".repeat(50_000)), state)).toBe(32);
+        expect(estimateNode(jekt("x".repeat(50_000)), state)).toBe(32);
     });
 
     it("estimateNodeForState agrees with the clamp when expanded", () => {

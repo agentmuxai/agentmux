@@ -23,7 +23,7 @@ import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
-import { isContentFirstTool } from "../tool-meta/tool-descriptors";
+import { rowDisclosureIn } from "./disclosure";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
@@ -71,21 +71,6 @@ export interface DocumentRowProps {
     dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
 }
 
-// Kinds whose hover-strip surfaces an Expand/Collapse control.
-// `user_message` was here until PR #1020 — UserMessageBlock now owns
-// its own collapse state (via `isStartup` + `documentState.pinnedNodes`,
-// not `collapsedNodes`), so a hover-strip toggle here would have been a
-// no-op control writing dead state. Toggling pin from the strip would
-// also be confusing for normal typed input (which is never collapsible
-// to begin with). Codex P2 on PR #1020.
-const TOGGLEABLE_KINDS: ReadonlySet<DocumentNode["type"]> = new Set([
-    "tool",
-    "shell",
-    "agent_message",
-    "jekt_message",
-    "section",
-]);
-
 export function DocumentRow(props: DocumentRowProps): JSX.Element {
     // Phase 3: per-kind row mount perf probe. markRowMount returns a
     // closer that we invoke after onMount fires (i.e., after the row
@@ -98,14 +83,16 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
         return props.highlightNodeId?.() === props.node().id;
     };
 
-    const canExpand = (): boolean => TOGGLEABLE_KINDS.has(props.node().type);
+    // The `e` key flips the same set the row's own header click does: the
+    // shared rule says which (virtualization/disclosure.ts), or that the row
+    // isn't toggleable at all (normal user input, fixed rows).
+    const toggle = () => rowDisclosureIn(props.node(), props.documentState()).toggle;
+    const canExpand = (): boolean => toggle() !== null;
 
     const onExpand = (): void => {
-        const n = props.node();
-        // A content-first tool collapses (collapsedNodes) instead of pinning,
-        // the same as its header click in ToolBlock.
-        if ((n.type === "tool" && !isContentFirstTool(n)) || n.type === "shell") props.onTogglePin(n.id);
-        else props.onToggleCollapse(n.id);
+        const id = props.node().id;
+        if (toggle() === "pin") props.onTogglePin(id);
+        else if (toggle() === "collapse") props.onToggleCollapse(id);
     };
 
     const handleRowKey = (e: KeyboardEvent): void => {
@@ -230,7 +217,11 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
     return (
         <>
             <Show when={props.node() && props.node().type === "markdown"}>
-                <MarkdownBlock node={props.node() as Extract<DocumentNode, { type: "markdown" }>} />
+                <MarkdownBlock
+                    node={props.node() as Extract<DocumentNode, { type: "markdown" }>}
+                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                    onTogglePin={() => props.onTogglePin(props.node().id)}
+                />
             </Show>
             <Show when={props.node() && props.node().type === "ambient_narration"}>
                 <AmbientNarrationBlock node={props.node() as Extract<DocumentNode, { type: "ambient_narration" }>} />
@@ -276,9 +267,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "section"}>
-                {/* Section header toggles its own collapse on click (the
-                    expand affordance the removed hover strip used to provide);
-                    keyboard "e" on the focused row still toggles too. */}
+                {/* Nothing constructs a section node; the kind is removed in
+                    the follow-up (SPEC_AGENT_PANE_ROW_DISCLOSURE §2.6). The
+                    shared rule already treats it as fixed (no `e` toggle). */}
                 <div
                     ref={setPeekRowEl}
                     class={`agent-section agent-section--toggle level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}
