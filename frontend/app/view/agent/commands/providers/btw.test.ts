@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { SlashCommandContext } from "../types";
+import { buildRegistry } from "../registry";
 import { btwCommand } from "./btw";
 
 function makeCtx(askSideQuestion: (question: string) => Promise<{ requestId: string }>): SlashCommandContext {
@@ -58,5 +59,18 @@ describe("/btw", () => {
         const result = await btwCommand.handler(ctx, "why is the sky blue?");
 
         expect(result).toEqual({ kind: "error", message: "/btw: backend not available" });
+    });
+});
+
+describe("/btw availability", () => {
+    // An AgentMux feature rather than a CLI pass-through, so it is offered on
+    // every provider the backend runs tool-less (side_question.rs).
+    it.each(["claude", "codex", "gemini"])("is offered on %s panes", (id) => {
+        expect(buildRegistry({ id } as any).lookup("btw")).toBeDefined();
+    });
+
+    it("is not offered where the backend has no tool-less turn for the CLI", () => {
+        expect(buildRegistry({ id: "kimi" } as any).lookup("btw")).toBeUndefined();
+        expect(buildRegistry(undefined).lookup("btw")).toBeUndefined();
     });
 });
