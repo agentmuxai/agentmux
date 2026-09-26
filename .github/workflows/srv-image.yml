@@ -1,0 +1,89 @@
+name: Headless srv image
+
+# Builds docker/Dockerfile.srv and smoke-tests the container
+# (docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md, slice 2). Build only; no
+# image is published.
+#
+# Not a required check, so workflow-level `paths:` is fine here (ci-pr.yml bans
+# it only for required workflows, which would sit Pending forever). A full srv
+# release build in Docker takes a while, so it runs only when the image's inputs
+# change, plus on demand.
+
+on:
+  pull_request:
+    paths:
+      - 'docker/Dockerfile.srv'
+      - '.dockerignore'
+      - '.github/workflows/srv-image.yml'
+      - 'agentmux-srv/src/headless.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (linux/amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.srv
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: agentmux-srv:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run -d --name srv agentmux-srv:ci
+          trap 'docker logs srv 2>&1 | tail -40; docker rm -f srv >/dev/null' EXIT
+
+          # Healthy = the image's own HEALTHCHECK (GET / on loopback) passed.
+          for i in $(seq 1 45); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' srv)
+            [ "$status" = healthy ] && break
+            [ "$(docker inspect -f '{{.State.Running}}' srv)" = true ] || { echo "srv exited"; exit 1; }
+            sleep 2
+          done
+          echo "health: $status"
+          [ "$status" = healthy ]
+
+          # srv reports where it wrote the generated key; the key itself is never printed.
+          docker logs srv 2>&1 | grep -q 'auth key written to'
+          key_file=$(docker exec srv sh -c 'find "$HOME/.agentmux" -name srv-auth-key')
+          echo "key file: $key_file"
+          [ "$(docker exec srv stat -c %a "$key_file")" = 600 ]
+
+          # The key is required; loopback only.
+          code() { docker exec srv curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          key=$(docker exec srv cat "$key_file")
+          [ "$(code -H "X-AuthKey: $key" http://127.0.0.1:8190/agentmux/discovery)" = 200 ]
+          [ "$(code http://127.0.0.1:8190/agentmux/discovery)" = 401 ]
+          # Every listening socket is 127.0.0.1 (tcp) or ::1 (tcp6). An explicit
+          # `if`, since `set -e` ignores a failing `! cmd`.
+          docker exec srv cat /proc/net/tcp /proc/net/tcp6 \
+            | awk '$4 == "0A" {print $2}' | tee /tmp/listen
+          [ -s /tmp/listen ]
+          if grep -Ev '^(0100007F|00000000000000000000000001000000):' /tmp/listen; then
+            echo "srv listens beyond loopback"; exit 1
+          fi
+
+          # Runs as the unprivileged user; agents' helpers are on PATH.
+          [ "$(docker exec srv id -un)" = agentmux ]
+          docker exec srv sh -c 'command -v agentmux-mcp && command -v agentmux-bashwrap && command -v node && command -v git'
+
+          # SIGTERM through tini stops srv cleanly.
+          docker stop -t 20 srv
+          [ "$(docker inspect -f '{{.State.ExitCode}}' srv)" = 0 ]
