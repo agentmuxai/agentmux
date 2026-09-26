@@ -130,6 +130,20 @@ pub struct GlobalMemoryDiffResult {
     pub diff: String,
 }
 
+/// `globalmemory:import_sources` — no arguments.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandGlobalMemoryImportSourcesData {}
+
+/// `globalmemory:import` — source `index` of the list `list_id` from
+/// `globalmemory:import_sources`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandGlobalMemoryImportData {
+    pub list_id: String,
+    pub index: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandGlobalMemoryRevertData {
