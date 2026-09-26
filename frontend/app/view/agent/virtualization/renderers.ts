@@ -23,7 +23,7 @@ import type {
     ToolNode,
     UserMessageNode,
 } from "../types";
-import { isContentFirstTool } from "../components/tool-presentation";
+import { isContentFirstTool } from "../tool-meta/tool-descriptors";
 
 export type NodeKind = DocumentNode["type"];
 

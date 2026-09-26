@@ -29,6 +29,7 @@
 import { type JSX } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { ToolNode } from "../types";
+import { TOOL_STATUS } from "../tool-meta/tool-status";
 import { ToolOverlayLog } from "./ToolOverlayLog";
 
 export interface ToolBlockOverlayProps {
@@ -37,16 +38,6 @@ export interface ToolBlockOverlayProps {
      *  see `activity/dispatch-correlation.ts`. */
     dispatchMatch?: AgentDispatch;
 }
-
-const STATUS_LABEL: Record<ToolNode["status"], string> = {
-    running: "running",
-    pending_approval: "awaiting approval",
-    awaiting_answer: "awaiting answer",
-    success: "ok",
-    failed: "failed",
-    denied: "denied",
-    canceled: "canceled",
-};
 
 export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
     <div class="agent-tool-overlay" data-node-id={props.node.id}>
@@ -60,7 +51,7 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
             }}
         >
             <span class="agent-tool-overlay-status-label">
-                {STATUS_LABEL[props.node.status]}
+                {TOOL_STATUS[props.node.status]?.label}
             </span>
         </div>
         <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} />
