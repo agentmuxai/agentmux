@@ -1,5 +1,40 @@
 # AgentMux Version History
 
+## 0.58.0 — 2026-09-26
+
+- Tool rows in the agent pane show the status mark and duration once, a cancelled tool no longer keeps an hourglass, and MCP tools read 'server · Tool'
+- fix(security): compare every caller-supplied secret in constant time
+- WebSearch results in the agent pane show the search answer and its sources, expanded by default (also in history), instead of a collapsed one-line JSON summary
+- fix(security): LAN listeners serve only the LAN-peer routes, not the full API
+- fix(security): refuse /ws upgrades from non-loopback origins
+- Tool results in the agent pane show their text directly: MCP tool output as text (not a type/text table), Agent reports as formatted markdown, Grep matches without an extra click
+- refactor(frontend): host capabilities, a test host, and a ratchet on direct host calls
+- refactor(settings): Settings reaches the host through AppApi; tray rows follow host capabilities
+- App windows no longer fail to start (blank, or the recovery card) when a single request during startup is refused. Startup reads now retry a request that never got a response, a failed object fetch is re-fetched instead of being cached as missing, and a startup failure now auto-recovers (bounded reloads) instead of stopping on the card. The startup card no longer claims the host connection was lost, and a failed startup is no longer logged as loaded successfully.
+- Windows task dev: the host now adopts the launcher's srv instead of starting a second srv on the same data directory. The launcher stamps AGENTMUX_LAUNCHER_PID on Windows too, and a dev host verifies it against its real parent process before trusting the launcher's backend hand-off (as on macOS/Linux).
+- refactor(browser): browser panes reach the host through AppApi.browserPanes; a host without them shows a notice
+- ToolSearch results in the agent pane show the loaded tools as chips, and the Grep count ignores -A/-B/-C context lines
+- refactor(windows): window drag, floating panes and tear-off reach the host through AppApi.windows
+- refactor(frontend): clipboard, file drops, approvals and host info reach the host through AppApi
+- refactor(frontend): startup reaches the host through AppApi; the CEF entry is part of the seam
+- fix(windows): double-clicking a torn-off window's title bar maximizes that window, not main (legacy drag)
+- chore(host): remove 12 unused provider/CLI host commands and the host-side CLI installer
+- fix(agent): the launch-time Node.js check asks srv, where npm actually runs; Claude is no longer exempt
+- fix(srv): tool lookup for prerequisites and installers searches PATH in-process instead of spawning which/where
+- fix(agent): a provider's auth dir is prepared by srv (provider.ensureauthdir), with the same isolation as srv's agent open
+- feat(srv): agentmux-srv --headless runs without the launcher or a desktop host
+- fix(statusbar): the instance panel labels the git hash row "Commit" instead of "Build"
+- Closing the main window (Windows) now hides it immediately, instead of showing its panes being torn down for a moment before it disappears.
+- Closing an agent in one AgentMux instance now frees it for another instance on the same computer. The closed agent could stay in the cloud subscription and keep its cloud lease forever, so reopening it elsewhere said it was running elsewhere; such leftovers are now dropped within 20 seconds. That refusal also now says "on this computer" instead of "on another computer" when the other instance is on the same machine.
+- Take over now works when the other AgentMux instance on this computer holds the agent only through AgentMux cloud (for example after the agent was closed there on an older build): it asks that instance to let go of the cloud hold. When the holder is on another computer, Take over says so instead of doing nothing.
+- Bash tool rows in the agent pane show their exit code again (exit 0 / exit 1)
+- Moving an agent to a new build now continues its real conversation even if the pane restarts right after opening. Before, a restart before the first message made the agent start fresh with a summary, after an "Agent encountered error".
+- A verified WAN jekt from another AgentMux install on the same account no longer stops for operator approval when a keyword marks it sensitive: it is tagged ESCALATE=none, like host- and LAN-verified senders. A revoked install still forces a stop.
+- Agents no longer receive the account's AgentMux cloud login in their environment. Nothing used it, and it let any agent act as the account (including minting a WAN install and sending jekts that verify).
+- A failed WAN key lookup is reported once in the log, with its cause, instead of three times.
+- New: a container image that runs agentmux-srv headless (docker/Dockerfile.srv), listening on loopback only, for use behind a proxy that shares its network namespace.
+- Take over between two AgentMux instances on one computer is reliable when the other instance holds the agent only through AgentMux cloud: the other instance lets go of the cloud lease before answering, the pane's retry is no longer refused by a stale 'running elsewhere' answer, and a lease renewal already under way can't claim the agent straight back.
+
 ## 0.57.8 — 2026-09-26
 
 - Closing the main window no longer flashes "invalid configuration, client or window was not loaded" on the way out. That message is for a window that never loaded; once a window has loaded, losing its record (as closing does) now shows the plain background instead.
