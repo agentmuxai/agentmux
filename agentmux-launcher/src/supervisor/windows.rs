@@ -173,6 +173,13 @@ pub(crate) async fn run_windows(
                 "pipe bind failed (already_running={}): {} pipe={}",
                 already_running, e, pipe_path
             ));
+            if already_running && !crate::autostart::second_instance_opens_window(&std::env::args().collect::<Vec<_>>()) {
+                // A login entry fired while AgentMux is already running: it is
+                // up, which is all a login start asks for. No window
+                // (SPEC_START_WITH_OS_2026_09_25.md §3.6).
+                log("login start: AgentMux is already running — exiting without opening a window");
+                std::process::exit(0);
+            }
             if already_running {
                 match forward_open_new_window(&paths.data_dir, &dir_hash) {
                     Ok(()) => {

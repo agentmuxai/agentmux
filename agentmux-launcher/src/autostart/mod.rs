@@ -75,6 +75,20 @@ pub fn background_requested(args: &[String]) -> bool {
     args.iter().any(|a| a == BACKGROUND_FLAG)
 }
 
+/// Was this process started by a login entry? Every artifact passes
+/// `--background`, and nothing else does.
+pub fn login_start() -> bool {
+    background_requested(&std::env::args().collect::<Vec<_>>())
+}
+
+/// A launcher that finds AgentMux already running forwards `open_new_window`
+/// to it, so a double-click opens a window. A login entry firing while the
+/// user already has AgentMux open must not (`SPEC_START_WITH_OS_2026_09_25.md`
+/// §3.6): it just exits.
+pub fn second_instance_opens_window(args: &[String]) -> bool {
+    !background_requested(args)
+}
+
 /// Environment the host must receive when the launcher was started with
 /// `--background`.
 ///
@@ -933,6 +947,14 @@ mod autostart_tests {
     }
 
     // ── SPEC_START_WITH_OS_2026_09_25 ─────────────────────────────────────
+
+    #[test]
+    fn a_login_start_that_finds_agentmux_running_opens_no_window() {
+        let manual = vec!["agentmux".to_string()];
+        let login = vec!["agentmux".to_string(), BACKGROUND_FLAG.to_string()];
+        assert!(second_instance_opens_window(&manual));
+        assert!(!second_instance_opens_window(&login));
+    }
 
     fn entry(target: &str, channel: Option<&str>) -> Entry {
         Entry { target: Some(target.to_string()), channel: channel.map(str::to_string) }

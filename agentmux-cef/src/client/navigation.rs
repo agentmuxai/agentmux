@@ -468,6 +468,12 @@ fn reveal_top_level_window(
     window: &cef::Window,
     browser: Option<&mut Browser>,
 ) {
+    // Login start: "main" stays hidden until a window is requested
+    // (`crate::start_hidden`). Every first reveal of a top-level window, and
+    // its retries, passes through here.
+    if crate::start_hidden::hold_reveal(state, label) {
+        return;
+    }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if let Some(label) = label {
         // "paint" stage begin — pairs with the stage_end call inside
@@ -540,6 +546,14 @@ fn try_show_top_level_window(state: &std::sync::Arc<crate::state::AppState>, lab
         reveal_top_level_window(state, Some(label), &window, Some(&mut browser));
     }
     true
+}
+
+/// Show a top-level window that loaded but was never revealed (a held login
+/// start, `crate::start_hidden`), retrying on the same CEF Views timing quirk
+/// `ShowWindowRetryTask` exists for. Safe to call off the UI thread.
+pub(crate) fn post_show_top_level_window(state: &std::sync::Arc<crate::state::AppState>, label: &str) {
+    let mut task = ShowWindowRetryTask::new(state.clone(), label.to_string(), SHOW_WINDOW_MAX_RETRIES);
+    post_task(ThreadId::UI, Some(&mut task));
 }
 
 wrap_task! {
