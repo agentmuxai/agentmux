@@ -487,11 +487,13 @@ pub enum TurnRegistration {
 }
 
 /// Builds the full spawn environment for a persistent-controller CLI
-/// process: `cmd:env` base → Layer 3 identity/credential gate → MuxBus
-/// cloud token → the two RESERVED wrapper variables (unconditionally
-/// overwritten — `AGENTMUX_AUTH_KEY`/`AGENTMUX_BLOCKID`) → the two agent-
-/// identity variables and per-agent git identity (all user-overridable via
-/// `cmd:env`) → bundled/user tools PATH.
+/// process: `cmd:env` base → Layer 3 identity/credential gate → the two
+/// RESERVED wrapper variables (unconditionally overwritten —
+/// `AGENTMUX_AUTH_KEY`/`AGENTMUX_BLOCKID`) → the two agent-identity
+/// variables and per-agent git identity (all user-overridable via
+/// `cmd:env`) → bundled/user tools PATH → the reserved guards (`gh_guard`,
+/// `account_login_guard`: no agent gets a human's `gh` login or the
+/// account's cloud login).
 ///
 /// Shared by every real spawn of a persistent-controller CLI — this
 /// function's own logic used to live inline in `run_agent_turn` below, and
@@ -499,7 +501,7 @@ pub enum TurnRegistration {
 /// path (`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md`)
 /// built its own second, independent copy of a SUBSET of this — codex P1 on
 /// PR #3513 found it had already drifted from this one: missing PATH and
-/// MuxBus-token injection entirely, and using `entry().or_insert()` instead
+/// (then) MuxBus-token injection entirely, and using `entry().or_insert()` instead
 /// of an unconditional overwrite for the two reserved wrapper variables
 /// (meaning a stale persisted `cmd:env` value for either would silently
 /// survive across an eager resume, unlike a live message send). One
