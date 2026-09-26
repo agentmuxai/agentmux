@@ -3329,6 +3329,207 @@ mod fleet_tests {
         assert_eq!(result.succeeded, vec![block_id], "a target absent from THIS instance's own registry, but present cross-channel, must succeed via the forward — not fail with NOT_RUNNING");
         assert!(result.failed.is_empty());
     }
+
+    // ── An agent's cross-channel FleetBulkStop asks the target instance's
+    // user (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5) ──────────────────────
+
+    /// A fake other instance: `stop-pending` opens request `remote-req-1`,
+    /// whose status is `status_body`; `/agentmux/agent/stop` is the plain
+    /// forward. `with_pending: false` is an instance that predates the route.
+    async fn spawn_fake_peer(with_pending: bool, status_body: serde_json::Value) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        spawn_slow_fake_peer(with_pending, status_body, 0).await
+    }
+
+    /// `spawn_fake_peer` whose `stop-pending` takes `delay_ms` to answer.
+    async fn spawn_slow_fake_peer(
+        with_pending: bool,
+        status_body: serde_json::Value,
+        delay_ms: u64,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use axum::routing::{get, post};
+        let hits: std::sync::Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+        let (h1, h2, h3) = (hits.clone(), hits.clone(), hits.clone());
+        let mut app = axum::Router::new()
+            .route(
+                "/agentmux/agent/stop",
+                post(move || async move {
+                    h1.lock().unwrap().push("stop".into());
+                    axum::Json(serde_json::json!({ "success": true }))
+                }),
+            )
+            .route(
+                "/api/v1/agent/shutdown/:id",
+                get(move |headers: axum::http::HeaderMap| async move {
+                    let key = headers.get("X-AuthKey").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+                    h2.lock().unwrap().push(format!("status:{key}"));
+                    axum::Json(status_body)
+                }),
+            );
+        if with_pending {
+            app = app.route(
+                "/agentmux/agent/stop-pending",
+                post(move |axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    h3.lock().unwrap().push(format!("stop-pending:{}", body["by"].as_str().unwrap_or("")));
+                    axum::Json(serde_json::json!({
+                        "success": true,
+                        "pending": { "request_id": "remote-req-1", "by": "Korp", "via": "FleetBulkStop", "deadline_ms": 42, "joined": false },
+                    }))
+                }),
+            );
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (url, hits)
+    }
+
+    #[tokio::test]
+    async fn a_cross_channel_target_waits_for_its_own_instance_s_user_and_its_status_is_proxied() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let block_id = format!("blk-xchan-{}", uuid::Uuid::new_v4());
+        let (peer_url, hits) = spawn_fake_peer(true, serde_json::json!({ "request_id": "remote-req-1", "status": "kept_by_user" })).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-x", &peer_url, &block_id, "peer-secret-key");
+        let state = test_state();
+
+        let (now, pending) =
+            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(now.succeeded.is_empty() && now.failed.is_empty(), "nothing is stopped at once");
+        assert_eq!(pending.len(), 1);
+        assert_eq!((pending[0].block_id.as_str(), pending[0].request_id.as_str()), (block_id.as_str(), "remote-req-1"));
+        assert_eq!(hits.lock().unwrap().clone(), vec!["stop-pending:Korp".to_string()], "asked there, never the plain stop");
+
+        // The MCP polls THIS instance; the answer comes from the peer.
+        let resp = crate::server::app_api::pane::handle_shutdown_status(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("remote-req-1".to_string()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["status"], "kept_by_user");
+        assert!(hits.lock().unwrap().contains(&"status:peer-secret-key".to_string()), "with the peer's own key");
+    }
+
+    /// ReAgent P1 on #3824: other instances are asked all at once, so a slow
+    /// one delays neither the rest nor any countdown.
+    #[tokio::test]
+    async fn other_instances_are_asked_at_once_not_one_after_another() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let mut targets = Vec::new();
+        for i in 0..3 {
+            let block_id = format!("blk-xchan-slow-{i}-{}", uuid::Uuid::new_v4());
+            let (peer_url, _) = spawn_slow_fake_peer(true, serde_json::Value::Null, 700).await;
+            write_raw_shared_entry(&shared_dir, &format!("peer-agent-slow-{i}"), &peer_url, &block_id, "k");
+            targets.push(block_id);
+        }
+        let state = test_state();
+
+        let started = std::time::Instant::now();
+        let (_, pending) =
+            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", targets, None, None).await;
+        let took = started.elapsed();
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert_eq!(pending.len(), 3);
+        assert!(took < std::time::Duration::from_millis(1800), "three 700 ms peers asked in parallel, took {took:?}");
+    }
+
+    #[tokio::test]
+    async fn an_instance_that_predates_the_window_is_stopped_at_once_as_before() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let block_id = format!("blk-xchan-old-{}", uuid::Uuid::new_v4());
+        let (peer_url, hits) = spawn_fake_peer(false, serde_json::Value::Null).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-old", &peer_url, &block_id, "peer-secret-key");
+        let state = test_state();
+
+        let (now, pending) =
+            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(pending.is_empty());
+        assert_eq!(now.succeeded, vec![block_id]);
+        assert_eq!(hits.lock().unwrap().clone(), vec!["stop".to_string()]);
+        let entry = state.reactive_handler.get_audit_log(20).into_iter().find(|e| e.block_id == now.succeeded[0]).unwrap();
+        assert!(entry.reason.unwrap_or_default().contains("predates the user override"), "audited as such");
+    }
+
+    /// The target instance's side: its own window, not an immediate stop.
+    #[tokio::test]
+    async fn stop_pending_opens_this_instance_s_window_for_a_block_running_here() {
+        struct Running(String, std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl crate::backend::blockcontroller::Controller for Running {
+            fn start(&self, _: crate::backend::obj::MetaMapType, _: Option<serde_json::Value>, _: bool) -> Result<(), String> {
+                Ok(())
+            }
+            fn stop(&self, _: bool, _: &str) -> Result<(), String> {
+                self.1.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            fn get_runtime_status(&self) -> crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+                crate::backend::blockcontroller::BlockControllerRuntimeStatus { blockid: self.0.clone(), ..Default::default() }
+            }
+            fn send_input(&self, _: crate::backend::blockcontroller::BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+                Ok(())
+            }
+            fn controller_type(&self) -> &str {
+                "stub"
+            }
+            fn block_id(&self) -> &str {
+                &self.0
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+        let state = test_state();
+        let block_id = format!("blk-stop-pending-{}", uuid::Uuid::new_v4());
+        let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        crate::backend::blockcontroller::register_controller(&block_id, std::sync::Arc::new(Running(block_id.clone(), stopped.clone())));
+
+        let resp = super::super::handle_agent_stop_pending_forward(
+            axum::extract::State(state.clone()),
+            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: block_id.clone(), signal: None, by: "Korp".into() }),
+        )
+        .await
+        .into_response();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["success"], true);
+        let request_id = v["pending"]["request_id"].as_str().unwrap().to_string();
+        let here = crate::sagas::pending_shutdown::status(&request_id).unwrap();
+        assert_eq!((here.status, here.by.as_str(), here.via.as_str()), ("pending", "Korp", "FleetBulkStop"));
+        assert!(!stopped.load(std::sync::atomic::Ordering::SeqCst), "not stopped during the window");
+        assert_eq!(crate::sagas::pending_shutdown::keep(&state, &block_id, &request_id), "kept_by_user");
+        crate::backend::blockcontroller::delete_controller(&block_id);
+
+        // Not running here: refused, nothing opened.
+        let resp = super::super::handle_agent_stop_pending_forward(
+            axum::extract::State(state.clone()),
+            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: "nowhere".into(), signal: None, by: "Korp".into() }),
+        )
+        .await
+        .into_response();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["success"], false);
+        assert!(v["error"].as_str().unwrap().starts_with("NOT_RUNNING"));
+    }
 }
 
 /// Regression for reagent P2 on PR #2674 (re-review): a caller supplying

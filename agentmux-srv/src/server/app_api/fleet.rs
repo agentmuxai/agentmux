@@ -174,17 +174,7 @@ pub(crate) async fn forward_stop_to_shared_channel(
     block_id: &str,
     signal: Option<&str>,
 ) -> Option<(String, Result<(), String>)> {
-    let shared_dir = crate::registry::resolve_shared_reactive_dir()?;
-    let entry = crate::backend::reactive::registry::list_all_shared(&shared_dir)
-        .into_iter()
-        .find(|e| e.block_id == block_id)?;
-
-    let is_loopback = entry.local_url.starts_with("http://127.0.0.1")
-        || entry.local_url.starts_with("http://localhost")
-        || entry.local_url.starts_with("http://[::1]");
-    if !is_loopback || entry.local_url == state.local_web_url {
-        return None;
-    }
+    let entry = shared_channel_for(state, block_id)?;
 
     let url = format!("{}/agentmux/agent/stop", entry.local_url);
     let mut req = state.http_client.post(&url).json(&serde_json::json!({
@@ -292,12 +282,100 @@ pub(crate) async fn fleet_bulk_stop_impl(
     result
 }
 
+/// The shared cross-channel registry entry for `block_id` on ANOTHER
+/// instance on this machine: loopback only, never this instance itself.
+fn shared_channel_for(state: &AppState, block_id: &str) -> Option<crate::backend::reactive::registry::AgentEntry> {
+    let shared_dir = crate::registry::resolve_shared_reactive_dir()?;
+    let entry = crate::backend::reactive::registry::list_all_shared(&shared_dir)
+        .into_iter()
+        .find(|e| e.block_id == block_id)?;
+    let is_loopback = entry.local_url.starts_with("http://127.0.0.1")
+        || entry.local_url.starts_with("http://localhost")
+        || entry.local_url.starts_with("http://[::1]");
+    if !is_loopback || entry.local_url == state.local_web_url {
+        return None;
+    }
+    Some(entry)
+}
+
+/// What asking another instance's user came to.
+enum Forwarded {
+    /// That instance opened (or joined) its own override window.
+    Pending(crate::sagas::pending_shutdown::PendingView),
+    /// That instance predates the window: stopped at once, as before.
+    Immediate(Result<(), String>),
+    /// It answered, but couldn't take the request (e.g. not running there).
+    Refused(String),
+}
+
+/// A cross-channel `FleetBulkStop` target: ask ITS instance's user
+/// (`/agentmux/agent/stop-pending`), whose banner, chime and Keep running
+/// are the ones that user sees. The request's status is served from there;
+/// `pending_shutdown::remember_remote` lets this instance proxy it. An
+/// instance without that route (404) gets the plain forward it always did.
+async fn forward_stop_pending(
+    state: &AppState,
+    entry: &crate::backend::reactive::registry::AgentEntry,
+    block_id: &str,
+    by: &str,
+    signal: Option<&str>,
+) -> Forwarded {
+    let url = format!("{}/agentmux/agent/stop-pending", entry.local_url);
+    let mut req = state.http_client.post(&url).json(&serde_json::json!({
+        "block_id": block_id,
+        "signal": signal,
+        "by": by,
+    }));
+    if !entry.auth_key.is_empty() {
+        req = req.header("X-AuthKey", &entry.auth_key);
+    }
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => return Forwarded::Refused(format!("cross-channel forward failed: {e}")),
+    };
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        let outcome = forward_stop_to_shared_channel(state, block_id, signal)
+            .await
+            .map(|(_, o)| o)
+            .unwrap_or_else(|| Err("cross-channel forward: target vanished".to_string()));
+        return Forwarded::Immediate(outcome);
+    }
+    if !resp.status().is_success() {
+        return Forwarded::Refused(format!("cross-channel forward: HTTP {}", resp.status()));
+    }
+    let body: serde_json::Value = match resp.json().await {
+        Ok(b) => b,
+        Err(e) => return Forwarded::Refused(format!("cross-channel forward: response parse failed: {e}")),
+    };
+    if body["success"] != true {
+        return Forwarded::Refused(body["error"].as_str().unwrap_or("cross-channel forward failed").to_string());
+    }
+    let p = &body["pending"];
+    let Some(request_id) = p["request_id"].as_str() else {
+        return Forwarded::Refused("cross-channel forward: no request id".to_string());
+    };
+    crate::sagas::pending_shutdown::remember_remote(request_id, &entry.local_url, &entry.auth_key);
+    Forwarded::Pending(crate::sagas::pending_shutdown::PendingView {
+        request_id: request_id.to_string(),
+        block_id: block_id.to_string(),
+        by: p["by"].as_str().unwrap_or(by).to_string(),
+        target: entry.agent_id.clone(),
+        via: p["via"].as_str().unwrap_or("FleetBulkStop").to_string(),
+        reason: String::new(),
+        deadline_ms: p["deadline_ms"].as_i64().unwrap_or_default(),
+        status: "pending",
+        error: None,
+        joined: p["joined"].as_bool().unwrap_or(false),
+    })
+}
+
 /// `FleetBulkStop` from an agent (the HTTP path; the Swarm UI's own
 /// `fleet.bulk-stop` is the user and stops at once): every target running on
 /// this instance waits for its user's 15 s override, all windows in parallel
-/// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). Targets that aren't
-/// (another channel's, or not running) go through `fleet_bulk_stop_impl` as
-/// before, `staged` included.
+/// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). A target running on
+/// another instance on this machine is asked there, in that instance's own
+/// window (`forward_stop_pending`). Targets running nowhere go through
+/// `fleet_bulk_stop_impl` as before, `staged` included.
 pub(crate) async fn fleet_bulk_stop_with_override(
     state: &AppState,
     by: &str,
@@ -308,7 +386,7 @@ pub(crate) async fn fleet_bulk_stop_with_override(
     let (local, other): (Vec<String>, Vec<String>) = targets
         .into_iter()
         .partition(|b| crate::backend::blockcontroller::get_controller(b).is_some());
-    let pending = local
+    let mut pending: Vec<crate::sagas::pending_shutdown::PendingView> = local
         .iter()
         .map(|block_id| {
             let mut v = crate::sagas::pending_shutdown::request(
@@ -337,11 +415,61 @@ pub(crate) async fn fleet_bulk_stop_with_override(
             v
         })
         .collect();
-    let now = if other.is_empty() {
-        FleetActionResult::default()
-    } else {
-        fleet_bulk_stop_impl(state, other, signal, staged).await
-    };
+    let mut now = FleetActionResult::default();
+    let mut remote_pending = Vec::new();
+    let mut nowhere = Vec::new();
+    // Local windows are open (above); now ask the other instances, all at
+    // once, so one slow peer delays neither the rest nor any countdown
+    // (ReAgent P1 on #3824).
+    let mut forwards = Vec::new();
+    for block_id in other {
+        match shared_channel_for(state, &block_id) {
+            Some(entry) => forwards.push((block_id, entry)),
+            None => nowhere.push(block_id),
+        }
+    }
+    let answers = futures_util::future::join_all(
+        forwards.iter().map(|(block_id, entry)| forward_stop_pending(state, entry, block_id, by, signal)),
+    )
+    .await;
+    for ((block_id, entry), answer) in forwards.into_iter().zip(answers) {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        match answer {
+            Forwarded::Pending(v) => {
+                state.reactive_handler.log_fleet_action_audit(
+                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                    true, None, &v.request_id,
+                    Some(&format!("pending user override on channel {}", entry.channel)),
+                );
+                remote_pending.push(v);
+            }
+            Forwarded::Immediate(outcome) => {
+                let note = format!("channel {} predates the user override: stopped at once", entry.channel);
+                state.reactive_handler.log_fleet_action_audit(
+                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                    outcome.is_ok(), outcome.as_ref().err().map(String::as_str), &request_id, Some(&note),
+                );
+                match outcome {
+                    Ok(()) => now.succeeded.push(block_id),
+                    Err(error) => now.failed.push(FleetActionFailure { id: block_id, error }),
+                }
+            }
+            Forwarded::Refused(error) => {
+                state.reactive_handler.log_fleet_action_audit(
+                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                    false, Some(&error), &request_id, None,
+                );
+                now.failed.push(FleetActionFailure { id: block_id, error });
+            }
+        }
+    }
+    pending.extend(remote_pending);
+    if !nowhere.is_empty() {
+        let rest = fleet_bulk_stop_impl(state, nowhere, signal, staged).await;
+        now.succeeded.extend(rest.succeeded);
+        now.failed.extend(rest.failed);
+        now.aborted_early = rest.aborted_early;
+    }
     (now, pending)
 }
 

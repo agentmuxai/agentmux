@@ -694,6 +694,9 @@ pub fn build_router(state: AppState) -> Router {
         // shared registry). Loopback-only by construction: the caller only
         // ever forwards to a `local_url` it already verified is loopback.
         .route("/agentmux/agent/stop", post(handle_agent_stop_forward))
+        // The same forward, for an agent's FleetBulkStop: this instance's
+        // user gets the 15 s override window (SPEC_AGENT_SELF_QUIT §6.5).
+        .route("/agentmux/agent/stop-pending", post(handle_agent_stop_pending_forward))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
@@ -2294,6 +2297,53 @@ async fn handle_fleet_bulk_stop(
 struct AgentStopForwardRequest {
     block_id: String,
     signal: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct AgentStopPendingForwardRequest {
+    block_id: String,
+    signal: Option<String>,
+    /// The asking agent, as the forwarding instance verified it. Shown on the
+    /// banner; this instance takes it as claimed.
+    #[serde(default)]
+    by: String,
+}
+
+/// `POST /agentmux/agent/stop-pending` — another instance on this machine
+/// forwards an agent's `FleetBulkStop` for a block running HERE: open this
+/// instance's own override window (banner, chime, Keep running) rather than
+/// stopping at once. The caller polls `/api/v1/agent/shutdown/{request_id}`
+/// here. Same trust model and gate as `/agentmux/agent/stop`.
+async fn handle_agent_stop_pending_forward(
+    State(state): State<AppState>,
+    Json(req): Json<AgentStopPendingForwardRequest>,
+) -> impl IntoResponse {
+    if crate::backend::blockcontroller::get_controller(&req.block_id).is_none() {
+        let error = format!("NOT_RUNNING: no controller for block {}", req.block_id);
+        return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
+    }
+    let by = if req.by.trim().is_empty() { "an agent on another AgentMux" } else { req.by.trim() };
+    let v = crate::sagas::pending_shutdown::request(
+        &state,
+        &req.block_id,
+        by,
+        "FleetBulkStop",
+        "",
+        crate::sagas::pending_shutdown::Action::Stop { signal: req.signal },
+    );
+    state.reactive_handler.log_fleet_action_audit(
+        Some(by),
+        &v.target,
+        &req.block_id,
+        "fleet.bulk-stop",
+        true,
+        None,
+        &v.request_id,
+        Some(&format!("{} (forwarded from another channel)", crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop"))),
+    );
+    let mut pending = serde_json::to_value(&v).unwrap_or_default();
+    pending["joined"] = json!(v.joined);
+    (StatusCode::OK, Json(json!({ "success": true, "pending": pending }))).into_response()
 }
 
 /// `POST /agentmux/agent/stop` — the cross-channel bulk-stop forward
