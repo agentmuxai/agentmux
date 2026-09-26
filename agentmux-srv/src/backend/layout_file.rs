@@ -529,9 +529,7 @@ pub fn write_layout_file(path: &Path, doc: &LayoutDoc) -> Result<(), String> {
 }
 
 /// Parse a layout document, refusing another format or a newer version
-/// (spec §3.1). Unknown fields are kept in `extra`. Its production caller is
-/// Phase 2's "Open layout…"; until then it pins the format in tests.
-#[cfg_attr(not(test), allow(dead_code))]
+/// (spec §3.1). Unknown fields are kept in `extra`.
 pub fn parse_layout(json: &str) -> Result<LayoutDoc, String> {
     let doc: LayoutDoc = serde_json::from_str(json).map_err(|e| format!("not a layout file: {e}"))?;
     if doc.format != LAYOUT_FORMAT {
@@ -544,6 +542,373 @@ pub fn parse_layout(json: &str) -> Result<LayoutDoc, String> {
         ));
     }
     Ok(doc)
+}
+
+// ── Apply (spec §3.5, Phase 2) ──
+
+/// Block meta key naming the agent definition a layout's agent pane should
+/// launch. Set on the empty `{view:"agent"}` placeholder the plan creates;
+/// `agent_open::open_agent_into_block` launches into it and clears the key.
+pub const META_LAYOUT_AGENT: &str = "layout:agent";
+
+/// A layout file larger than this is refused unread — real ones are a few KB.
+pub const MAX_LAYOUT_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_TABS: usize = 50;
+const MAX_PANES_PER_TAB: usize = 64;
+const MAX_TREE_DEPTH: usize = 32;
+
+/// Views that need no config to open, beyond their type.
+const PLAIN_VIEWS: &[&str] = &[
+    "swarm", "settings", "help", "drone", "workflows", "warden", "toolchain", "launcher", "memory", "identity",
+];
+
+/// How to turn a file into panes.
+pub struct PlanOptions {
+    /// The user's home dir; `~/…` paths in the file resolve under it.
+    pub home: Option<PathBuf>,
+    /// Start terminal commands. Off unless the file came from this install or
+    /// the user said so in the preview (spec §3.5 "Trust").
+    pub run_commands: bool,
+}
+
+/// One tab ready for `session_restore::replay_tabs`: block metas, and a
+/// tree whose leaves name them by `session_restore::placeholder(i)`.
+#[derive(Debug, Clone)]
+pub struct PlanTab {
+    pub name: String,
+    pub blocks: Vec<Value>,
+    pub rootnode: Option<LayoutNode>,
+    pub focused: String,
+    pub magnified: String,
+    /// One human-readable line per pane tab, for the preview.
+    pub summary: Vec<String>,
+}
+
+/// A layout file turned into panes, plus everything the user should see
+/// before it opens.
+#[derive(Debug, Clone, Default)]
+pub struct ApplyPlan {
+    pub name: String,
+    pub tabs: Vec<PlanTab>,
+    pub active_tab: Option<usize>,
+    /// Terminal commands in the file, whether or not they will run.
+    pub commands: Vec<String>,
+    /// What couldn't be reproduced here, and what was left out.
+    pub notes: Vec<String>,
+}
+
+/// Read and parse a layout file, refusing anything too large to be one.
+pub fn read_layout_file(path: &Path) -> Result<LayoutDoc, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    if meta.len() > MAX_LAYOUT_FILE_BYTES {
+        return Err(format!("{} is too large to be a layout file", path.display()));
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    parse_layout(&text)
+}
+
+/// `~` / `~/x` resolved under `home`; anything else unchanged.
+fn expand_home(path: &str, home: Option<&Path>) -> PathBuf {
+    match (path.strip_prefix('~'), home) {
+        (Some(""), Some(h)) => h.to_path_buf(),
+        (Some(rest), Some(h)) if rest.starts_with(['/', '\\']) => h.join(rest.trim_start_matches(['/', '\\'])),
+        _ => PathBuf::from(path),
+    }
+}
+
+fn cfg_str<'a>(view: &'a LayoutView, key: &str) -> Option<&'a str> {
+    view.config.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// A user agent (not a template) matching the file's slug, else its display
+/// name — only if exactly one matches, so a name shared by two agents never
+/// launches the wrong one.
+fn resolve_agent<'a>(
+    agents: &'a [crate::backend::storage::agents::AgentDefinition],
+    slug: Option<&str>,
+    name: Option<&str>,
+) -> Option<&'a crate::backend::storage::agents::AgentDefinition> {
+    fn unique<'a, T>(mut it: impl Iterator<Item = &'a T>) -> Option<&'a T> {
+        let first = it.next()?;
+        it.next().is_none().then_some(first)
+    }
+    let users = || agents.iter().filter(|a| a.is_seeded == 0);
+    slug.and_then(|s| unique(users().filter(|a| a.slug.eq_ignore_ascii_case(s))))
+        .or_else(|| name.and_then(|n| unique(users().filter(|a| a.name.eq_ignore_ascii_case(n)))))
+}
+
+/// Build the plan. Never touches the store beyond reading agent definitions.
+pub fn plan_from_doc(store: &Store, doc: &LayoutDoc, opts: &PlanOptions) -> ApplyPlan {
+    let agents = store.agent_def_list().unwrap_or_default();
+    let mut plan = ApplyPlan { name: doc.name.clone(), ..Default::default() };
+    let Some(window) = doc.windows.first() else {
+        plan.notes.push("The file has no windows.".to_string());
+        return plan;
+    };
+    if doc.windows.len() > 1 {
+        plan.notes.push(format!("The file has {} windows; only the first is opened.", doc.windows.len()));
+    }
+    if window.tabs.len() > MAX_TABS {
+        plan.notes.push(format!("Only the first {MAX_TABS} of {} tabs are opened.", window.tabs.len()));
+    }
+    for (i, tab) in window.tabs.iter().take(MAX_TABS).enumerate() {
+        let mut builder = PlanBuilder {
+            doc_tab: tab,
+            agents: &agents,
+            opts,
+            blocks: Vec::new(),
+            summary: Vec::new(),
+            node_by_pane: HashMap::new(),
+            panes_used: 0,
+            commands: &mut plan.commands,
+            notes: &mut plan.notes,
+        };
+        let rootnode = tab.root.as_ref().and_then(|root| builder.node(root, 100.0, 0));
+        let (blocks, summary, node_by_pane) = (builder.blocks, builder.summary, builder.node_by_pane);
+        if blocks.is_empty() {
+            plan.notes.push(format!("Tab “{}” has no panes that can be opened, so it is skipped.", tab.name));
+            continue;
+        }
+        if window.active_tab == Some(i) {
+            plan.active_tab = Some(plan.tabs.len());
+        }
+        let node_for = |pane: &Option<String>| pane.as_ref().and_then(|p| node_by_pane.get(p)).cloned().unwrap_or_default();
+        plan.tabs.push(PlanTab {
+            name: tab.name.clone(),
+            blocks,
+            rootnode,
+            focused: node_for(&tab.focused),
+            magnified: node_for(&tab.magnified),
+            summary,
+        });
+    }
+    plan
+}
+
+struct PlanBuilder<'a> {
+    doc_tab: &'a LayoutTab,
+    agents: &'a [crate::backend::storage::agents::AgentDefinition],
+    opts: &'a PlanOptions,
+    blocks: Vec<Value>,
+    summary: Vec<String>,
+    node_by_pane: HashMap<String, String>,
+    panes_used: usize,
+    commands: &'a mut Vec<String>,
+    notes: &'a mut Vec<String>,
+}
+
+impl PlanBuilder<'_> {
+    fn node(&mut self, node: &TreeNode, size: f64, depth: usize) -> Option<LayoutNode> {
+        if depth > MAX_TREE_DEPTH {
+            self.notes.push(format!("Tab “{}” nests too deeply; the rest is skipped.", self.doc_tab.name));
+            return None;
+        }
+        match node {
+            TreeNode::Split { split, children, .. } => {
+                let kids: Vec<LayoutNode> = children
+                    .iter()
+                    .filter_map(|c| self.node(&c.node, c.ratio.clamp(0.0, 1.0) * 100.0, depth + 1))
+                    .collect();
+                match kids.len() {
+                    0 => None,
+                    1 => kids.into_iter().next().map(|mut only| {
+                        only.size = size as f32;
+                        only
+                    }),
+                    _ => Some(LayoutNode {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        flex_direction: if split == "column" {
+                            agentmux_common::layout_types::FlexDirection::Column
+                        } else {
+                            agentmux_common::layout_types::FlexDirection::Row
+                        },
+                        size: size as f32,
+                        children: kids,
+                        ..Default::default()
+                    }),
+                }
+            }
+            TreeNode::Leaf { pane, .. } => {
+                if self.panes_used >= MAX_PANES_PER_TAB {
+                    return None;
+                }
+                let doc_pane = self.doc_tab.panes.get(pane)?;
+                let mut placeholders = Vec::new();
+                for view in &doc_pane.views {
+                    let meta = self.view_meta(view);
+                    placeholders.push(crate::server::service::session_restore::placeholder(self.blocks.len()));
+                    self.blocks.push(meta);
+                }
+                if placeholders.is_empty() {
+                    return None;
+                }
+                self.panes_used += 1;
+                let active = placeholders[doc_pane.active.min(placeholders.len() - 1)].clone();
+                let id = uuid::Uuid::new_v4().to_string();
+                self.node_by_pane.insert(pane.clone(), id.clone());
+                let mut extra = Map::new();
+                if doc_pane.minimized == Some(true) {
+                    extra.insert("minimized".into(), Value::Bool(true));
+                }
+                let multi = placeholders.len() > 1;
+                Some(LayoutNode {
+                    id,
+                    size: size as f32,
+                    data: Some(agentmux_common::layout_types::LayoutNodeData {
+                        block_id: active.clone(),
+                        block_stack: if multi { placeholders } else { Vec::new() },
+                        active_block_id: if multi { active } else { String::new() },
+                        ..Default::default()
+                    }),
+                    extra,
+                    ..Default::default()
+                })
+            }
+        }
+    }
+
+    /// The reverse of the §3.3 allowlist: a fresh pane's meta from a view.
+    fn view_meta(&mut self, view: &LayoutView) -> Value {
+        let home = self.opts.home.as_deref();
+        let mut meta = Map::new();
+        let kind = view.view_type.as_str();
+        match kind {
+            "agent" => {
+                meta.insert("view".into(), "agent".into());
+                let slug = cfg_str(view, "agent");
+                let name = cfg_str(view, "name");
+                let label = name.or(slug).unwrap_or("agent");
+                match resolve_agent(self.agents, slug, name) {
+                    Some(def) => {
+                        meta.insert(META_LAYOUT_AGENT.into(), Value::String(def.id.clone()));
+                        self.summary.push(format!("Agent: {}", def.name));
+                    }
+                    None => {
+                        self.notes.push(format!("There's no agent “{label}” here — its pane opens the agent picker."));
+                        self.summary.push(format!("Agent: {label} (not found — picker)"));
+                    }
+                }
+            }
+            "term" => {
+                meta.insert("view".into(), "term".into());
+                let cwd = cfg_str(view, "cwd").map(|c| expand_home(c, home));
+                let mut where_ = String::new();
+                if let Some(cwd) = cwd {
+                    if cwd.is_dir() {
+                        where_ = format!(" in {}", cwd.display());
+                        meta.insert("cmd:cwd".into(), Value::String(cwd.to_string_lossy().to_string()));
+                    } else {
+                        self.notes.push(format!("Folder {} doesn't exist here — that terminal starts in the default folder.", cwd.display()));
+                    }
+                }
+                let command = cfg_str(view, "command").map(|c| {
+                    let args: Vec<String> = view
+                        .config
+                        .get("args")
+                        .and_then(Value::as_array)
+                        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                        .unwrap_or_default();
+                    (c.to_string(), args)
+                });
+                match command {
+                    Some((cmd, args)) => {
+                        let full = std::iter::once(cmd.clone()).chain(args.iter().cloned()).collect::<Vec<_>>().join(" ");
+                        self.commands.push(full.clone());
+                        if self.opts.run_commands {
+                            meta.insert("controller".into(), "cmd".into());
+                            meta.insert("cmd".into(), Value::String(cmd));
+                            if !args.is_empty() {
+                                meta.insert("cmd:args".into(), Value::Array(args.into_iter().map(Value::String).collect()));
+                            }
+                            self.summary.push(format!("Terminal{where_}: runs `{full}`"));
+                        } else {
+                            meta.insert("controller".into(), "shell".into());
+                            self.summary.push(format!("Terminal{where_} (command not run: `{full}`)"));
+                        }
+                    }
+                    None => {
+                        meta.insert("controller".into(), "shell".into());
+                        self.summary.push(format!("Terminal{where_}"));
+                    }
+                }
+            }
+            "browser" => {
+                meta.insert("view".into(), "browser".into());
+                match cfg_str(view, "url") {
+                    Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
+                        meta.insert("url".into(), Value::String(url.to_string()));
+                        self.summary.push(format!("Browser: {url}"));
+                    }
+                    Some(url) => {
+                        self.notes.push(format!("Skipped a browser address that isn't http(s): {url}"));
+                        self.summary.push("Browser".to_string());
+                    }
+                    None => self.summary.push("Browser".to_string()),
+                }
+            }
+            "editor" | "codeeditor" | "preview" => {
+                meta.insert("view".into(), "editor".into());
+                match cfg_str(view, "file").map(|f| expand_home(f, home)) {
+                    Some(file) => {
+                        if !file.exists() {
+                            self.notes.push(format!("File {} doesn't exist here.", file.display()));
+                        }
+                        self.summary.push(format!("Editor: {}", file.display()));
+                        meta.insert("file".into(), Value::String(file.to_string_lossy().to_string()));
+                    }
+                    None => {
+                        meta.insert("editor:scratch".into(), Value::Bool(true));
+                        self.summary.push("Editor".to_string());
+                    }
+                }
+            }
+            "media" => {
+                meta.insert("view".into(), "media".into());
+                if let Some(path) = cfg_str(view, "path").map(|p| expand_home(p, home)) {
+                    self.summary.push(format!("Media: {}", path.display()));
+                    meta.insert("media:path".into(), Value::String(path.to_string_lossy().to_string()));
+                } else {
+                    self.summary.push("Media".to_string());
+                }
+            }
+            "sysinfo" => {
+                meta.insert("view".into(), "sysinfo".into());
+                if let Some(k) = cfg_str(view, "sysinfo_type") {
+                    meta.insert("sysinfo:type".into(), Value::String(k.to_string()));
+                }
+                self.summary.push("System info".to_string());
+            }
+            "armory" => {
+                meta.insert("view".into(), "armory".into());
+                if let Some(s) = cfg_str(view, "section") {
+                    meta.insert("armory:section".into(), Value::String(s.to_string()));
+                }
+                self.summary.push("Armory".to_string());
+            }
+            k if PLAIN_VIEWS.contains(&k) => {
+                meta.insert("view".into(), Value::String(k.to_string()));
+                self.summary.push(k.to_string());
+            }
+            other => {
+                // Keep the type so the pane's header names it; the body shows
+                // the app's own "no view" placeholder.
+                let shown: String = other.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(40).collect();
+                self.notes.push(format!("Pane type “{shown}” isn't known to this version — it opens as an empty pane."));
+                meta.insert("view".into(), Value::String(shown.clone()));
+                self.summary.push(format!("{shown} (unknown)"));
+            }
+        }
+        Value::Object(meta)
+    }
+}
+
+/// Whether a file counts as trusted (spec §3.5): saved by this install and
+/// sitting in its default layouts folder. Only trusted files start terminal
+/// commands without the user's say-so.
+pub fn is_trusted(doc: &LayoutDoc, path: &Path, own_instance: Option<&str>, layouts_dir: Option<&Path>) -> bool {
+    let saved_here = own_instance.is_some_and(|own| doc.saved_by.instance.as_deref() == Some(own));
+    let in_folder = layouts_dir.is_some_and(|dir| path.parent().is_some_and(|p| p == dir));
+    saved_here && in_folder
 }
 
 #[cfg(test)]

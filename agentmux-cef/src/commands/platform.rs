@@ -1216,6 +1216,31 @@ pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_j
     })
 }
 
+/// Open dialog for a layout file — Phase 2 of
+/// docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.5. Opens in
+/// `~/.agentmux/shared/layouts/`, filtered to layout files. Returns the
+/// chosen absolute path, or `null` on cancel. Reads nothing itself — the
+/// srv's `layout.preview` / `layout.open` do, and they refuse any path not
+/// ending in `.agentmux-layout.json`.
+pub async fn show_open_layout_dialog(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts"));
+    let path = tokio::task::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Open layout")
+            .add_filter("AgentMux layout", &["agentmux-layout.json"]);
+        if let Some(dir) = dir.filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.pick_file()
+    })
+    .await
+    .map_err(|e| format!("show_open_layout_dialog: task join error: {e}"))?;
+    Ok(match path {
+        Some(p) => serde_json::json!(p.to_string_lossy()),
+        None => serde_json::Value::Null,
+    })
+}
+
 #[cfg(test)]
 mod layout_dialog_tests {
     use super::*;

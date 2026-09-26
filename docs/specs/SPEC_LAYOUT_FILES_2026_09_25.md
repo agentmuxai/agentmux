@@ -3,7 +3,9 @@
 **Date:** 2026-09-25
 **Status:** active — Phase 1 ships in PR #3787 (spec: PR #3778): ☰ →
 Layouts → Save layout…, the host Save dialog, `layout.save`,
-`backend/layout_file.rs` and the v1 schema. Phases 2–4 are not started.
+`backend/layout_file.rs` and the v1 schema. Phase 2 (☰ → Layouts → Open
+layout…, adding the file's tabs to the current window, §3.6) is built on
+branch `agent2/layout-open-phase2`. Phases 2b, 3 and 4 are not started.
 Measured against `agentmux` `main` @ `c0268089b`.
 **Trigger:** Repo owner: *"in the hamburger we'd add a new entry 'Layouts' and a
 single submenu: 'Save layout' which would let you save it as a file (you'll
@@ -287,6 +289,37 @@ list (`is_sensitive_message`, `backend/reactive/sanitize.rs`) over every
   raw node, so re-saving doesn't lose it.
 - Fresh OIDs for everything; the file's pane ids never reach the store.
 
+### 3.6 Phase 2 as built (2026-09-25)
+
+☰ → Layouts → **Open layout…** → host Open dialog → `layout.preview` →
+a preview modal → `layout.open`. Where it differs from §3.5, and why:
+
+- **Adds the tabs to the current window; "open in a new window" is not
+  built yet (Phase 2b).** A new window's workspace is created by the
+  frontend's own start-up (`app-init.ts` → `CreateWindow`), so opening a
+  window onto a prepared workspace needs new plumbing through the host and
+  that start-up path. Adding tabs already meets the rule that matters:
+  nothing that's open is replaced.
+- **Rebuild:** `session_restore::replay_tabs` — the restore-on-relaunch
+  replay, factored out so both callers share it — creates the tabs, blocks
+  and trees in the window's workspace.
+- **Agents launch through `agent.open` itself**, into their placeholder
+  pane (`agent_open::open_agent_into_block`), so every check it makes
+  (admission, one live instance per agent, provider, CLI, config files)
+  applies unchanged. The file names the agent by slug (then display name),
+  matched only against user agents (never templates) and only when exactly
+  one matches. An agent that doesn't resolve, or doesn't start, leaves its
+  pane as the agent picker and adds a note. The file's opt-in `resume`
+  reference is not used: `agent.open`'s own session continuity applies.
+- **Trust** is "saved by this install *and* in its layouts folder". Only
+  then do terminal commands start by default; otherwise the preview lists
+  them unticked, with a warning.
+- **Reading an untrusted file:** browser addresses must be http(s); a
+  folder that doesn't exist here is dropped with a note; an unknown pane
+  type opens as an empty pane of that (sanitised) type and carries none of
+  its config; at most 50 tabs, 64 panes per tab, tree depth 32; files over
+  1 MB are refused unread.
+
 ---
 
 ## 4. Where files live
@@ -342,7 +375,8 @@ people it's meant to be shared with.
 | Phase | Ships | Notes |
 |---|---|---|
 | **1** | ☰ → **Layouts** → **Save layout…** (between Opacity and the Settings divider, per the 08-13 spec §5.1). Native Save dialog. `layout.save` RPC writes the file. | exactly the request |
-| 2 | Layouts → **Open layout…**: preview, trust, new window / add as tabs, placeholders, suspended commands | reuses `restore_last_session`'s rebuild |
+| 2 | Layouts → **Open layout…**: preview, trust, add as tabs, placeholders, held commands | built — §3.6 |
+| 2b | "Open in a new window" | needs window-create plumbing (§3.6) |
 | 3 | Named layouts from the default folder listed in the submenu; "Save changes to <name>"; recent list; optional "open at startup" | the 08-13 spec's §5.1 list, file-backed |
 | 4 | Decision-gated: ABF `kind` + `workspace` bundles (layout + referenced agents) | §5.2 |
 | — | Converge the session snapshot and `PresetNode` onto this format | removes two ad-hoc formats; separate PRs |
