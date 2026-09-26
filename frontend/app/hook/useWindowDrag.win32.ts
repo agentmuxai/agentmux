@@ -253,7 +253,9 @@ function installJsDragListener() {
             if (!isInDragRegion(e.target as HTMLElement)) return;
             e.preventDefault();
             dragging = false;
-            getApi().windows.maximize().catch(() => {});
+            // This window, not the host's "main" default (a torn-off window's
+            // double-click used to maximize the main window).
+            getApi().windows.maximize(ownWindowLabel()).catch(() => {});
         },
         true,
     );
