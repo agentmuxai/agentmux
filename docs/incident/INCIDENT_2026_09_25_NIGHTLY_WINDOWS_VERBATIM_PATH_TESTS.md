@@ -1,8 +1,8 @@
 # INCIDENT 2026-09-25 — nightly Windows tests fail on `\\?\` verbatim paths
 
-**Status:** resolved. The failing tests were fixed by #3749 (Agent3, merged
-2026-09-25 14:46 UTC), and every nightly since has passed. The follow-up PR
-that carries this document removes the remaining copies of the same test
+**Status:** implemented. The failing tests were fixed in PR #3749 (Agent3,
+merged 2026-09-25 14:46 UTC), and every nightly since has passed. PR #3857,
+which carries this document, removes the remaining copies of the same test
 pattern (§6). One process gap is still open (§7).
 
 **Severity:** Low. The problem was in tests only; no production code was
