@@ -141,6 +141,11 @@ impl Migration for M0021BackfillAgentBundles {
         }
 
         let bundle_store = resolve_bundle_store(ctx, &mstore);
+        // The agent's bundle recorded by another channel
+        // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6): bound here too
+        // instead of a new one per channel. Best-effort: without the global
+        // store every channel still gets a bundle, as before.
+        let sidecar = crate::backend::agent_bundle_sidecar::open_global();
 
         let defs = mstore
             .agent_def_list()
@@ -152,6 +157,14 @@ impl Migration for M0021BackfillAgentBundles {
 
         for def in defs {
             if !def.memory_id.is_empty() {
+                continue;
+            }
+            use crate::backend::agent_bundle_sidecar as sc;
+            let recorded = sidecar.as_ref().and_then(|fs| sc::get(fs, &def.id).ok().flatten());
+            if let Some(existing) = recorded.filter(|id| matches!(bundle_store.bundle_get(id), Ok(Some(_)))) {
+                mstore
+                    .agent_def_set_memory_id_if_empty(&def.id, &existing)
+                    .map_err(|e| MigrationError(format!("backfill_agent_bundles: bind {}: {}", def.id, e)))?;
                 continue;
             }
             let bundle_id = uuid::Uuid::new_v4().to_string();
@@ -188,6 +201,26 @@ impl Migration for M0021BackfillAgentBundles {
             bundle_store
                 .bundle_upsert(&bundle)
                 .map_err(|e| MigrationError(format!("backfill_agent_bundles: create bundle for {}: {}", def.id, e)))?;
+            // Record it, unless another channel just recorded one first — then
+            // that one is the agent's, and this one goes.
+            let mut bundle_id = bundle_id;
+            if let Some(fs) = sidecar.as_ref() {
+                match sc::claim(fs, &def.id, &bundle_id) {
+                    Ok(winner) if winner != bundle_id && matches!(bundle_store.bundle_get(&winner), Ok(Some(_))) => {
+                        if let Err(e) = bundle_store.bundle_delete(&bundle_id) {
+                            tracing::warn!(
+                                agent_id = %def.id,
+                                bundle_id = %bundle_id,
+                                error = %e,
+                                "backfill_agent_bundles: another channel's bundle won; this duplicate could not be deleted and is left unbound"
+                            );
+                        }
+                        bundle_id = winner;
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(agent_id = %def.id, error = %e, "backfill_agent_bundles: bundle sidecar not recorded"),
+                }
+            }
 
             let applied = mstore
                 .agent_def_set_memory_id_if_empty(&def.id, &bundle_id)
@@ -325,6 +358,32 @@ mod tests {
         };
         mstore.agent_def_insert(&mut def).unwrap();
         def.id
+    }
+
+    /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6: the agent's
+    /// second channel binds the bundle its first recorded, instead of minting
+    /// "Name — ABF (2)" in the same shared store.
+    #[test]
+    fn a_second_channel_binds_the_bundle_the_first_recorded() {
+        with_isolated_home(|_home| {
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
+            let (ch1, ch2) = (tempfile::NamedTempFile::new().unwrap(), tempfile::NamedTempFile::new().unwrap());
+            let (s1, s2) = (Store::open(ch1.path()).unwrap(), Store::open(ch2.path()).unwrap());
+            let id = insert_def(&s1, "RoamingAgent");
+            assert_eq!(insert_def(&s2, "RoamingAgent"), id, "same agent in both channels");
+
+            M0021BackfillAgentBundles.up(&ctx_for(ch1.path(), shared_tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(ch2.path(), shared_tmp.path())).unwrap();
+
+            let b1 = s1.agent_def_get(&id).unwrap().unwrap().memory_id;
+            let b2 = s2.agent_def_get(&id).unwrap().unwrap().memory_id;
+            assert!(!b1.is_empty());
+            assert_eq!(b1, b2, "both channels bind one bundle");
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let abf: Vec<String> =
+                shared.bundle_list().unwrap().into_iter().map(|b| b.name).filter(|n| n.contains("RoamingAgent")).collect();
+            assert_eq!(abf, vec!["RoamingAgent — ABF".to_string()], "no second bundle minted");
+        });
     }
 
     #[test]
