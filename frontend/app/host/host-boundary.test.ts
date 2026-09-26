@@ -8,9 +8,13 @@
  * reading the `__AGENTMUX_IPC_*` globals. Everything else goes through
  * `getApi()`, so the UI runs on any host that implements `AppApi`.
  *
- * PENDING lists the files that still bypass the seam. It is a ratchet: a new
- * file bypassing the seam fails this test, and so does a listed file that no
- * longer does (delete it from the list — the list only shrinks).
+ * The seam is the CEF host implementation plus the CEF entry: code that runs
+ * before `window.api` exists (bootstrap, its log transport) or precisely when
+ * it has failed (the boot-error recovery). A different host has its own entry.
+ *
+ * PENDING held the files still bypassing the seam while slices 1–5 moved them
+ * (it is empty now). It stays as the ratchet's shape: a new file bypassing the
+ * seam fails this test.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -19,25 +23,27 @@ import { describe, expect, it } from "vitest";
 
 const FRONTEND_ROOT = join(__dirname, "..", "..");
 
-/** The CEF host implementation itself: allowed to reach the host directly. */
+/** Allowed to reach the CEF host directly. */
 const SEAM = [
+    // The CEF host implementation of AppApi.
     "app/host/cef-host-commands.ts",
     "app/init/host-detect.ts",
     "app/platform/ipc.ts",
     "cef-init.ts",
     "types/custom.d.ts",
     "util/cef-api.ts",
-];
-
-/** Still bypass the seam. Move each call behind `AppApi`, then remove it here. */
-const PENDING = [
-    "app-init.ts",
-    "app/init/error-display.ts",
-    "app/init/pool.ts",
+    // The CEF entry. bootstrap.ts is index.html's module; it installs the log
+    // pipe and error forwarder before window.api exists, then sets it up.
     "bootstrap.ts",
     "log/error-forwarder.ts",
     "log/log-pipe.ts",
+    // Boot-error recovery: runs when window.api failed, so it cannot use it.
+    // Without CEF's IPC credentials it does nothing.
+    "app/init/error-display.ts",
 ];
+
+/** Files still bypassing the seam. Empty: add nothing here. */
+const PENDING: string[] = [];
 
 // Static `from "…"` and dynamic `import("…")` alike.
 const IPC_MODULE = String.raw`["'](?:@\/app\/platform\/ipc|(?:\.\.?\/)+(?:app\/)?platform\/ipc|\.\/ipc)["']`;

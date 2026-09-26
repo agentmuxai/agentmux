@@ -114,6 +114,15 @@ export const cefWindows: WindowHostApi = {
     clearFloatingRedockHover: async () => {
         await invokeCommand("clear_floating_redock_hover", {});
     },
+    setFloatingRedockTarget: async (windowLabel, blockId, dir) => {
+        await invokeCommand("set_floating_redock_target", { window_label: windowLabel, block_id: blockId, dir });
+    },
+    poolWindowReady: async (windowLabel) => {
+        await invokeCommand("pool_window_ready", { label: windowLabel });
+    },
+    panePoolWindowReady: async (windowLabel) => {
+        await invokeCommand("pane_pool_window_ready", { label: windowLabel });
+    },
     resolveWindowAtCursor: (args) =>
         invokeCommand<{ label: string | null; window_id: string | null }>("resolve_window_at_cursor", args),
 };
