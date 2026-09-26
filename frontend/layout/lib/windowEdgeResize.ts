@@ -26,6 +26,7 @@
 //
 // Spec: docs/specs/SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.
 
+import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
 import { isEffectivelyMinimized } from "./layoutMinimize";
 import { getLayoutModelForStaticTab } from "./layoutModelHooks";
@@ -389,7 +390,7 @@ function onSessionEnd(): void {
  */
 export function installWindowEdgeResizeListener(): void {
     fireAndForget(async () => {
-        const { listenEvent } = await import("@/app/platform/ipc");
+        const listenEvent: AppApi["listen"] = (event, callback) => getApi().listen(event, callback);
         await listenEvent("windowresize:begin", onSessionBegin);
         await listenEvent<{ edge: WindowResizeEdge; shiftHeld: boolean }>("windowresize:tick", onSessionTick);
         await listenEvent("windowresize:end", onSessionEnd);

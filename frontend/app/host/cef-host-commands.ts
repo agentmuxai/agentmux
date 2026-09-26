@@ -84,3 +84,36 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
 export async function cefReclaimWindowFocus(windowLabel: string): Promise<void> {
     await invokeCommand("main_window_focus", { window_label: windowLabel });
 }
+
+/** `AppApi.windows` on CEF. */
+export const cefWindows: WindowHostApi = {
+    startDrag: async (windowLabel) => {
+        await invokeCommand("start_window_drag", { label: windowLabel });
+    },
+    maximize: async (windowLabel) => {
+        await invokeCommand("maximize_window", windowLabel === undefined ? undefined : { label: windowLabel });
+    },
+    getPosition: (windowLabel) => invokeCommand<{ x: number; y: number }>("get_window_position", { label: windowLabel }),
+    setPosition: async (windowLabel, x, y) => {
+        await invokeCommand("set_window_position", { x, y, label: windowLabel });
+    },
+    getRect: (windowLabel) => invokeCommand<HostRect>("get_window_rect", { label: windowLabel }),
+    setRect: async (windowLabel, rect) => {
+        await invokeCommand("set_window_rect", { label: windowLabel, ...rect });
+    },
+    getCursorScreenPoint: () => invokeCommand<{ x: number; y: number }>("get_cursor_point"),
+    getPaneDebugState: () => invokeCommand<Record<string, unknown>>("get_pane_debug_state", {}),
+    openFloatingPane: (args) => invokeCommand<{ window_label: string }>("open_floating_pane_window", args),
+    toggleFloatingMaximize: async (windowLabel, blockId) => {
+        await invokeCommand("toggle_floating_maximize", { label: windowLabel, block_id: blockId });
+    },
+    getFloatingRedockTarget: (windowLabel) =>
+        invokeCommand<{ block_id?: string; dir?: number }>("get_floating_redock_target", { window_label: windowLabel }),
+    updateFloatingRedockHover: (args) =>
+        invokeCommand<{ target_label?: string | null }>("update_floating_redock_hover", args),
+    clearFloatingRedockHover: async () => {
+        await invokeCommand("clear_floating_redock_hover", {});
+    },
+    resolveWindowAtCursor: (args) =>
+        invokeCommand<{ label: string | null; window_id: string | null }>("resolve_window_at_cursor", args),
+};

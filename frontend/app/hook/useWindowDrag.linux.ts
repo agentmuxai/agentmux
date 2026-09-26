@@ -22,7 +22,8 @@
 // associated with the agentmux/7680-... branch).
 // Required Rust IPC: `start_window_drag` -> ui_tasks::post_start_drag.
 
-import { detectHost, invokeCommand } from "@/app/platform/ipc";
+import { hostHas } from "@/app/host/host-caps";
+import { getApi } from "@/app/store/app-api";
 
 let cefDragListenerInstalled = false;
 
@@ -56,7 +57,7 @@ function isInDragRegion(target: HTMLElement | null): boolean {
 }
 
 function installCefDragListener() {
-    if (cefDragListenerInstalled || detectHost() !== "cef") return;
+    if (cefDragListenerInstalled || !hostHas("nativeWindowChrome")) return;
     cefDragListenerInstalled = true;
 
     let pressX = 0;
@@ -96,7 +97,7 @@ function installCefDragListener() {
         // track further motion (would race with Mutter anyway).
         dragInitiated = true;
         pressArmed = false;
-        invokeCommand("start_window_drag", { label: currentWindowLabel() }).catch(() => {
+        getApi().windows.startDrag(currentWindowLabel()).catch(() => {
             dragInitiated = false;
         });
     }, true);
@@ -113,7 +114,7 @@ function installCefDragListener() {
         e.preventDefault();
         pressArmed = false;
         dragInitiated = false;
-        invokeCommand("maximize_window", { label: currentWindowLabel() }).catch(() => {});
+        getApi().windows.maximize(currentWindowLabel()).catch(() => {});
     }, true);
 }
 
@@ -124,7 +125,7 @@ export function useWindowDrag(): { dragProps: Record<string, unknown> } {
     // Linux hosts the marker has no listener attached, so emit no
     // attribute — keeps the element strictly HTCLIENT and avoids any
     // future hook from misinterpreting it.
-    if (detectHost() !== "cef") return { dragProps: {} };
+    if (!hostHas("nativeWindowChrome")) return { dragProps: {} };
     // Tabs/buttons inside the header already have data-drag-region="false"
     // via tabbar.tsx etc., so they opt out individually.
     return { dragProps: { "data-drag-region": true } };

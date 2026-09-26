@@ -24,7 +24,7 @@ import { IconButton, ToggleIconButton } from "@/element/iconbutton";
 import { BlockStatsBadge } from "@/element/blockstats";
 import { MenuButton } from "@/element/menubutton";
 import { MicButton } from "@/app/element/MicButton";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
@@ -295,7 +295,7 @@ function FloatingMaximizeButton(props: { label: string; blockId: string }): JSX.
         icon: "window-maximize",
         title: "Maximize",
         click: () => {
-            invokeCommand("toggle_floating_maximize", { label: props.label, block_id: props.blockId }).catch(
+            getApi().windows.toggleFloatingMaximize(props.label, props.blockId).catch(
                 console.error
             );
         },
@@ -1258,7 +1258,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // so composition/ordering matches every other pane type exactly. See
     // docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md.
     onMount(() => {
-        const unsubPromise = listenEvent<{
+        const unsubPromise = getApi().listen<{
             block_id: string;
             x: number;
             y: number;

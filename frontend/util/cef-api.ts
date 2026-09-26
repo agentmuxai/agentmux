@@ -16,7 +16,7 @@ import {
 } from "@/app/util/menu-position";
 import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { benchMark } from "@/util/startup-bench";
-import { cefBrowserPanes, cefReclaimWindowFocus } from "@/app/host/cef-host-commands";
+import { cefBrowserPanes, cefReclaimWindowFocus, cefWindows } from "@/app/host/cef-host-commands";
 import { CEF_HOST_CAPS } from "@/app/host/host-caps";
 import { isTransientNetworkError, retryTransient } from "@/util/transient-network";
 
@@ -480,6 +480,7 @@ export function buildCefApi(): AppApi {
             await invokeCommand("open_in_editor", { path });
         },
         browserPanes: cefBrowserPanes,
+        windows: cefWindows,
         reclaimWindowFocus: cefReclaimWindowFocus,
 
         // --- Synchronous getters (return cached values) ---
