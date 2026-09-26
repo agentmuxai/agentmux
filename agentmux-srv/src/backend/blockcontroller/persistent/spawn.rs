@@ -543,6 +543,7 @@ impl PersistentSubprocessController {
                 &config,
                 attempted_resume_sid.as_deref(),
                 attempted_resume_sid.as_deref().filter(|_| forked),
+                relocated_copy.is_some(),
                 continuation.is_some(),
                 agent_lease.as_ref().map(|l| l.epoch()),
             )

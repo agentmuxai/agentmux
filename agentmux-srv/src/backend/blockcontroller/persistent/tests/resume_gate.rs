@@ -305,6 +305,31 @@ fn a_leftover_copy_is_swept_and_relocated_afresh() {
     assert!(second.inner.lock().unwrap().fork_copy.is_some(), "relocated again, so it forks again");
 }
 
+/// The 0.57.7 move: the relocated fork's segment is recorded, then the pane
+/// restarts it before it reports an id. That segment must not become the
+/// head, or the next spawn finds the head "here" (the copy, about to be
+/// swept) and resumes a file that is gone instead of relocating again.
+#[test]
+fn a_relocated_fork_killed_before_its_id_is_relocated_again() {
+    let f = fixture(&[]);
+    let key = sign_in(&f, "acc-1", "org-1");
+    let old = other_login("acc-1", "org-1", "s2");
+    segment_in(&f.gfs, "s2", 2_000, Some(&key), Some(&old.path().to_string_lossy()));
+    let first = controller_holding(Some("s2"));
+    first.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert!(first.inner.lock().unwrap().fork_copy.is_some());
+
+    // The spawn records its segment, then dies before the fork reports an id.
+    let mut start = first.segment_start(UID, &f.config, Some("s2"), Some("s2"), true, false, None);
+    start.provider = "claude".into();
+    segs::record_start(&f.gfs, start).unwrap();
+
+    let second = controller_holding(Some("s2"));
+    second.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert_eq!(held(&second).as_deref(), Some("s2"));
+    assert!(second.inner.lock().unwrap().fork_copy.is_some(), "relocated again from the old login");
+}
+
 #[test]
 fn a_fork_reporting_its_own_id_is_the_resume_succeeding() {
     use persistent_resume::SessionOutcome::{Fresh, Resumed};
