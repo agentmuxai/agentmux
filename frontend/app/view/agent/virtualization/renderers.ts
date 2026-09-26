@@ -109,9 +109,22 @@ export function estimateAgentMessage(node: AgentMessageNode, state: DocumentStat
     return estimateTextHeight(node.message);
 }
 
+/**
+ * An expanded jekt's body is capped by CSS (`$transcript-preview-max-height`,
+ * `calc(50vh / 3)` ≈ 233 px on a 1400 px window) and scrolls inside its box,
+ * so a long message no longer needs `TEXT_MAX_ESTIMATE_PX`. An approximation
+ * is enough: the measured height replaces it once the row renders. The extra
+ * ~60 px is the summary and metadata lines around the body.
+ */
+export const JEKT_EXPANDED_MAX_ESTIMATE_PX = 290;
+
+export function estimateExpandedJekt(message: string): number {
+    return Math.min(estimateTextHeight(message), JEKT_EXPANDED_MAX_ESTIMATE_PX);
+}
+
 export function estimateJektMessage(node: JektMessageNode, state: DocumentState): number {
     if (state.collapsedNodes.has(node.id)) return COLLAPSED_MESSAGE_PX;
-    return estimateTextHeight(node.message);
+    return estimateExpandedJekt(node.message);
 }
 
 export function estimateUserMessage(node: UserMessageNode, state: DocumentState): number {
@@ -239,7 +252,7 @@ export function estimateNodeForState(
     switch (node.type) {
         case "tool":              return TOOL_EXPANDED_PX;
         case "agent_message":     return estimateTextHeight(node.message);
-        case "jekt_message":      return estimateTextHeight(node.message);
+        case "jekt_message":      return estimateExpandedJekt(node.message);
         case "user_message":      return estimateUnwrappedTextHeight(node.message);
         case "section":           return SECTION_PX;
         case "markdown":          return estimateTextHeight(node.content);

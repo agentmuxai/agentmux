@@ -3,6 +3,16 @@
 
 @use "../../../mixins.scss";
 
+// Tallest a tool preview or an expanded jekt body gets before it scrolls
+// inside its own box: one third of half the window height (~13 lines on a
+// 1400 px window), relative to window height. Shorter content renders at
+// its natural height. One value for both so they stay "similar" — a change
+// here moves them together. The persistent-shell log is a long-running
+// build/dev log rather than a preview and keeps its own `50vh`.
+// SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §2,
+// SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
+$transcript-preview-max-height: calc(50vh / 3);
+
 // Document-node rendering — markdown / code / diff / bash / message
 // blocks rendered inside the agent conversation. Largest section of
 // the original `agent-view.scss` (~700 lines). Wrapped in
@@ -375,7 +385,7 @@
             // window, was ~41), still relative to window height. Shorter
             // output renders at natural height.
             // SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §2.
-            max-height: calc(50vh / 3);
+            max-height: $transcript-preview-max-height;
             min-height: 0;
             overflow: hidden;
             font-family: var(--fixed-font, monospace);
@@ -1020,6 +1030,15 @@
                 border-radius: 0;
                 margin: 0 0 var(--space-1) 0;
                 white-space: pre-wrap;
+                // A long jekt scrolls inside its own box instead of pushing
+                // the conversation off-screen. Only the body is capped, so the
+                // metadata line (sender / trust / MSGID) below it stays in
+                // view. No `overscroll-behavior` on purpose: the default lets
+                // the wheel chain to `.agent-document` natively at either end
+                // (the tool box needs a JS hand-off only because it sets
+                // `contain`).
+                max-height: $transcript-preview-max-height;
+                overflow-y: auto;
             }
 
             .agent-jekt-meta {
@@ -1046,6 +1065,10 @@
                     background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
                     padding: var(--space-1) var(--space-1-5);
                     margin: var(--space-1) 0 0 0;
+                    // The raw payload repeats the whole message plus the
+                    // marker, so it takes the same cap.
+                    max-height: $transcript-preview-max-height;
+                    overflow-y: auto;
                 }
             }
         }

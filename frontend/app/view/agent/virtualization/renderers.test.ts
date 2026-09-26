@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type {
     AgentMessageNode,
     DocumentState,
+    JektMessageNode,
     MarkdownNode,
     SectionNode,
     ToolNode,
@@ -12,6 +13,8 @@ import type {
 } from "../types";
 import {
     estimateAgentMessage,
+    estimateJektMessage,
+    JEKT_EXPANDED_MAX_ESTIMATE_PX,
     estimateMarkdown,
     estimateNode,
     estimateNodeForState,
@@ -329,5 +332,35 @@ describe("STREAMING_CAPABLE", () => {
         expect(STREAMING_CAPABLE.section).toBe(false);
         expect(STREAMING_CAPABLE.tool).toBe(false);
         expect(STREAMING_CAPABLE.user_message).toBe(false);
+    });
+});
+
+describe("estimateJektMessage (expanded jekt body is height-capped)", () => {
+    const jekt = (message: string): JektMessageNode => ({
+        type: "jekt_message", id: "j1", from: "a", to: "b", message, raw: "",
+        tier: "coord", deliveryTier: "host", trust: "host-verified", msgId: "m",
+        priority: "normal", direction: "incoming", timestamp: 0,
+    });
+
+    it("a very long expanded jekt is clamped, not estimated at the text maximum", () => {
+        const est = estimateJektMessage(jekt("x".repeat(50_000)), baseDocState());
+        expect(est).toBe(JEKT_EXPANDED_MAX_ESTIMATE_PX);
+        expect(est).toBeLessThan(estimateTextHeight("x".repeat(50_000)));
+    });
+
+    it("a short expanded jekt keeps its natural estimate", () => {
+        expect(estimateJektMessage(jekt("hi"), baseDocState())).toBe(estimateTextHeight("hi"));
+    });
+
+    it("a collapsed jekt is one line", () => {
+        const state = baseDocState();
+        state.collapsedNodes.add("j1");
+        expect(estimateJektMessage(jekt("x".repeat(50_000)), state)).toBe(32);
+    });
+
+    it("estimateNodeForState agrees with the clamp when expanded", () => {
+        expect(estimateNodeForState(jekt("x".repeat(50_000)), "expanded", baseDocState())).toBe(
+            JEKT_EXPANDED_MAX_ESTIMATE_PX,
+        );
     });
 });
