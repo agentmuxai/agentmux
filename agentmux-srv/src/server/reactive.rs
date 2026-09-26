@@ -1499,18 +1499,16 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1): carry the
     // sender's WAN signature as signed, but only through the carry gate —
     // any unmet condition relays unsigned, exactly as before.
-    let carried = match crate::muxbus::relay::wan_carry_gate(
+    // The gate's refusal reason rides on the "queued" line below: a
+    // signature that silently fails to ride is otherwise invisible, and the
+    // receiver can't tell it from a sender that never signed.
+    let (carried, unsigned_reason) = match crate::muxbus::relay::wan_carry_gate(
         req,
         state.mstore.wan_identity().as_deref(),
         &crate::backend::reactive::registry::local_channel_id(),
     ) {
-        Ok(carried) => Some(carried),
-        Err(reason) => {
-            if req.wan_sig.is_some() {
-                tracing::debug!(target = %req.target_agent, reason, "cloud relay: WAN signature not carried");
-            }
-            None
-        }
+        Ok(carried) => (Some(carried), ""),
+        Err(reason) => (None, reason),
     };
     let outcome = crate::muxbus::relay::relay_inject(
         &crate::muxbus::relay::rest_base_url(),
@@ -1530,6 +1528,13 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
             tracing::info!(
                 target = %req.target_agent,
                 injection_id = %request_id,
+                signed = carried.is_some(),
+                unsigned_reason,
+                // The cloud gives a row it stored WITH a valid carried tuple
+                // a deterministic `inj-w-` id (agentmux-cloud `wan-keys.ts`
+                // `wanIdempotentInjectionId`); anything else was stored
+                // unsigned, including a tuple it dropped as invalid.
+                cloud_kept_signature = request_id.starts_with("inj-w-"),
                 "cloud relay: queued for WAN delivery"
             );
             echo_jekt_to_sender(
@@ -1570,7 +1575,13 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
             Some(serde_json::to_value(&body).unwrap_or_default())
         }
         crate::muxbus::relay::RelayOutcome::Failed(e) => {
-            tracing::warn!(target = %req.target_agent, error = %e, "cloud relay failed");
+            tracing::warn!(
+                target = %req.target_agent,
+                error = %e,
+                signed = carried.is_some(),
+                unsigned_reason,
+                "cloud relay failed"
+            );
             None
         }
     }

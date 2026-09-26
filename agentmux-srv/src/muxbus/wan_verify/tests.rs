@@ -211,8 +211,54 @@ async fn an_unavailable_directory_is_retried_once_then_none() {
     let w = world();
     let s = stub(Serve::Status(axum::http::StatusCode::SERVICE_UNAVAILABLE), false).await;
     let v = w.verify(&s, &w.row("msg-1", "hello"), "agent2", "hello", NOW).await;
-    assert_eq!(v, WanVerdict::none("wan_key_unavailable"));
+    assert_eq!((v.verified, v.reason), (None, Some("wan_key_unavailable")));
+    assert_eq!(v.detail.as_deref(), Some("directory answered 503 Service Unavailable"));
     assert_eq!(*s.record_hits.lock().unwrap(), 2, "one immediate retry");
+}
+
+#[tokio::test]
+async fn a_directory_refusal_names_its_status() {
+    let w = world();
+    let s = stub(Serve::Status(axum::http::StatusCode::FORBIDDEN), false).await;
+    let v = w.verify(&s, &w.row("msg-1", "hello"), "agent2", "hello", NOW).await;
+    assert_eq!((v.verified, v.reason), (None, Some("wan_key_unavailable")));
+    assert_eq!(v.detail.as_deref(), Some("directory answered 403 Forbidden"));
+}
+
+#[tokio::test]
+async fn an_unparseable_directory_record_says_so() {
+    let w = world();
+    // 200 with `{}`: the route answered, but not with a record.
+    let s = stub(Serve::Status(axum::http::StatusCode::OK), false).await;
+    let v = w.verify(&s, &w.row("msg-1", "hello"), "agent2", "hello", NOW).await;
+    assert_eq!((v.verified, v.reason), (None, Some("wan_key_unavailable")));
+    let detail = v.detail.unwrap_or_default();
+    assert!(detail.starts_with("directory record doesn't parse: "), "{detail}");
+}
+
+#[tokio::test]
+async fn an_unreachable_directory_says_so() {
+    let w = world();
+    // Bind a port, then free it: nothing listens there.
+    let url = {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        format!("http://{}", l.local_addr().unwrap())
+    };
+    let budget = FetchBudget::new(100);
+    let http = reqwest::Client::new();
+    let dir = Directory { base_url: &url, http: &http, token: "tok", budget: &budget };
+    let v = verify(&w.receiver, &w.receiver_instance, "agent2", "camper", &w.row("m", "hello"), "hello", NOW, &dir).await;
+    assert_eq!((v.verified, v.reason), (None, Some("wan_key_unavailable")));
+    let detail = v.detail.unwrap_or_default();
+    assert!(detail.starts_with("directory unreachable: "), "{detail}");
+}
+
+#[test]
+fn a_verdict_that_could_not_start_names_why() {
+    let v = WanVerdict::unchecked("wan_no_local_store", "no wan.db attached");
+    assert_eq!(v.verified, None, "couldn't check is never a forgery");
+    assert_eq!(v.reason, Some("wan_no_local_store"));
+    assert_eq!(v.detail.as_deref(), Some("no wan.db attached"));
 }
 
 #[tokio::test]
@@ -223,7 +269,8 @@ async fn an_exhausted_fetch_budget_is_unavailable() {
     let http = reqwest::Client::new();
     let dir = Directory { base_url: &s.url, http: &http, token: "tok", budget: &budget };
     let v = verify(&w.receiver, &w.receiver_instance, "agent2", "camper", &w.row("m", "hello"), "hello", NOW, &dir).await;
-    assert_eq!(v, WanVerdict::none("wan_key_unavailable"));
+    assert_eq!((v.verified, v.reason), (None, Some("wan_key_unavailable")));
+    assert_eq!(v.detail.as_deref(), Some("directory fetch budget exhausted"));
     assert_eq!(*s.record_hits.lock().unwrap(), 0);
 }
 

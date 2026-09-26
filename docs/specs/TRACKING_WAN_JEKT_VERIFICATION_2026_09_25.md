@@ -16,7 +16,7 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 |---|---|---|---|
 | — | Spec (three adversarial reviews) | #3649 | merged |
 | — | Pure primitives: instance id, key fingerprint, instance-signed certificate, revocation, envelope + freshness checks, cross-language vectors (spec §2.7) | #3727 | merged |
-| C1 | Cloud: carry the eight `wan_*` fields, store the sender account (never returned), `sender_same_account`, idempotent `(account, wan_msg_id)`, key directory + revocation routes with chain checks, `muxbus-agent-wan-keys-<env>` table | agentmux-cloud#91 | merged, **not deployed** |
+| C1 | Cloud: carry the eight `wan_*` fields, store the sender account (never returned), `sender_same_account`, idempotent `(account, wan_msg_id)`, key directory + revocation routes with chain checks, `muxbus-agent-wan-keys-<env>` table | agentmux-cloud#91 | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
 | D1a | Channel-wide `wan.db`, instance key, agent WAN keys moved into it (survive upgrades), instance id as `AGENTMUX_HOST_LABEL`, agent-delete purge reaches `wan.db` | #3734 | merged |
 | D1b | Certify + publish each agent key (`muxbus/wan_publish.rs`), relay carry gate (`relay::wan_carry_gate`) | #3771 | merged |
 | D2 | Verifier (`muxbus/wan_verify.rs`), peer cache, known instances, replay table, `TRUST=wan-verified` marker, tier rules, audit, `wan` grants off | #3775 | merged |
@@ -30,16 +30,21 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 - Every channel mints one instance keypair on first boot; its 26-char id is
   what agents now sign as. Respawned agents get their WAN key from `wan.db`
   (an existing `objects.db` key is imported once).
-- The publisher PUTs each agent's certified key to the cloud directory. Until
-  C1 is deployed the cloud answers 404, so it retries **hourly** and nothing
-  is published.
+- The publisher PUTs each agent's certified key to the cloud directory. C1 is
+  deployed, and keys are published (narko and Area54 logs, 2026-09-26).
 - The relay carries a signature only when the sender is host-verified, signed
   as this instance and channel, verifies under its `wan.db` key, and that key
-  is confirmed published. Until C1 is deployed, nothing is published, so
-  nothing is carried: **every WAN jekt still arrives `TRUST=network-claimed`,
-  exactly as before.**
-- The receiver verifies whatever arrives carried. With nothing carried, it
-  changes nothing yet.
+  is confirmed published. Carrying works: same-account jekts between narko
+  and Area54 get the cloud's `inj-w-` ids, which it gives only to rows stored
+  with a valid carried tuple.
+- The receiver verifies whatever arrives carried. Until #3865 it did so only
+  in the first 15 minutes of each cloud connection: the key lookup used the
+  connection's shared token, loaded once at connect, and a desktop (PKCE)
+  token lives 15 minutes. After that every lookup was a 401, read as
+  `wan_key_unavailable`, and the jekt arrived `TRUST=network-claimed`.
+  #3865 loads a fresh token per lookup; #3866 does the same for the lease and
+  pending-fetch calls. Retro:
+  `docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`.
 
 ## 3. Needs a person
 
@@ -79,6 +84,21 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
   verify. One clock throughout, with a boundary test (#3775).
 - **Record match was case-sensitive for instance and channel**, against
   spec §2.3 — Codex P2 on #3727, fixed there.
+- **After the C1 deploy, receivers mostly verified nothing, and nothing said
+  why** (2026-09-26, `INVESTIGATION_V0_57_6_FRESH_PORTABLE_DEBUG_LOG_2026_09_25.md`
+  §6). The cause was the stale directory token above (#3865, #3866). It was
+  hard to see because every "couldn't check" renders exactly like an
+  unsigned jekt, the carry gate and the verifier logged only at `debug`, and
+  `wan_key_unavailable` covered five different causes. #3865 added a `warn`
+  for a refused or unreachable directory. #3863 adds: the relay's
+  "queued for WAN delivery" line says whether the signature was carried
+  (`signed`, `unsigned_reason`, `cloud_kept_signature`); the receiver logs
+  one `wan verify:` line per WAN jekt at `info`; and the verdict carries a
+  `detail` (the directory's HTTP status, a transport or parse error, or an
+  exhausted budget), which also goes into the injection audit. The
+  receiver's own missing `wan.db` or instance now has a reason too
+  (`wan_no_local_store`, `wan_no_local_instance`) instead of reading as
+  unsigned.
 
 ## 6. Open questions carried from the spec
 

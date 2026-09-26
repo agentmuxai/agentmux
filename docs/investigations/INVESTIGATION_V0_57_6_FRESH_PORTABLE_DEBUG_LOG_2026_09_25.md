@@ -20,7 +20,7 @@ chain on v0.57.5, AgentA), `SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_
 | 3 | "Couldn't resume" banner never goes away on its own | fixed in #3848 |
 | 4 | Agent's file-based memory left behind under the old account | by design — adoption is offered in the Armory; check pending |
 | 5 | Agent processes run at below-normal priority (#3834) | confirmed live |
-| 6 | Jekts between narko and Area54 arrive unsigned (`TRUST=network-claimed`) | open — sender side unconfirmed |
+| 6 | Jekts between narko and Area54 arrive unsigned (`TRUST=network-claimed`) | fixed on `main` (#3865, #3866); diagnostics in #3863; two-machine re-check pending |
 | 7 | Plain `gh` inside an agent is logged out (#3751) | confirmed live |
 
 ---
@@ -161,7 +161,16 @@ same processes under the running 0.57.2 portable (no #3834) are at `Normal`.
 
 ## 6. Jekts between narko and Area54 arrive unsigned
 
-**Status:** open. The receiver side is understood; the sender side is unconfirmed.
+**Status:** root cause found and fixed on `main` (#3865, #3866, Agent2); needs a two-machine re-check.
+
+**Root cause (#3865):** the receiver looked up the sender's key with the cloud connection's shared
+token, loaded once at connect. A desktop (PKCE) token lives 15 minutes and a connection up to 2
+hours, so from minute 15 every `GET /agents/<agent>/wan-key` was a 401, read as
+`wan_key_unavailable`. It fits the data here: narko's connection opened at 06:11:29, and AgentA's
+jekt arrived at 06:28:52, 17 minutes in. #3866 fixes three more calls that used the same token.
+Retro: `docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`. The analysis below,
+written before that landed, narrowed it down to the directory fetch; #3863 makes the cause of any
+future `wan_key_unavailable` visible in the log and the audit.
 
 **Seen:** AgentA's reply (`inj-w-5d8e0efaa0d5d3e98f4127369172e87e`, 06:28:52) arrived as
 `DELIVERY=wan TRUST=network-claimed` with no `SIG=`. A keyword in it forced `TIER=sensitive`, and
@@ -184,21 +193,46 @@ Cross-account verification (W0–W2) is deliberately not built.
   carry-gate condition checkable from outside holds, so the outgoing jekt was *probably* carried
   signed. It can't be confirmed from the log: `wan_carry_gate`'s refusal is logged at `debug` only,
   and a carried send isn't logged at all.
-- Receiver: `wan_peer_records`, `wan_known_instances` and `wan_seen_sigs` are all empty. No incoming
-  WAN jekt has ever arrived carrying a signature, so AgentA's reply was unsigned when it reached
-  the relay, not rejected here.
+- Receiver: `wan_peer_records`, `wan_known_instances` and `wan_seen_sigs` are all empty.
+  (**Corrected below:** this doesn't mean nothing signed arrived. The verifier caches a peer record
+  only after a successful fetch.)
 
-**Candidate causes on the sending side (Area54), not yet checked:** its build predates #3771; AgentA
-was not respawned after D1a, so it signs a hostname and the carry gate drops it; its key isn't
-published; or Area54's muxbus login is a different account, where same-account verification can't
-apply.
+**Area54's side (AgentA, 07:13):** AgentY's jekts arrived there as `TRUST=network-claimed`, no
+`SIG=`, too. Area54 runs v0.57.5 @ `089af6ebe` (includes #3734/#3771/#3775). AgentA's `.mcp.json` has
+`AGENTMUX_WAN_KEY` and `AGENTMUX_HOST_LABEL` = its instance id `m5mfalbsxiwm4oltsas4kjwxli`, and it
+published at 04:37:08, after PKCE login. Both installs are logged in to muxbus as the same account.
+
+**Ruled out:**
+- *Different accounts:* narko's srv log also shows `muxbus: PKCE login succeeded`, same email.
+- *Key rotated under a running agent:* on narko, the public key derived from AgentY's
+  `AGENTMUX_WAN_KEY` equals `wan.db`'s published `agenty` key.
+- *Not carried:* every jekt between the two has an `inj-w-<hash>` id. The cloud assigns that
+  (`wan-keys.ts` `wanIdempotentInjectionId`) only to a row stored with a *valid* carried tuple
+  from an account-bound sender. So both sides signed, and the relay carried and stored the
+  signatures.
+
+**Where it breaks — the receiver's directory fetch.** The injection audit
+(`GET /agentmux/reactive/audit`, in memory) records the verdict for every WAN jekt:
+
+| UTC | From → to | `wan.reason` |
+|---|---|---|
+| 06:28:52 | agenta → agenty | `wan_key_unavailable` |
+| 07:13:07 | agenta → agenty | `wan_key_unavailable` |
+| 13:32–13:39 (5) | opaz → agent2 | `wan_key_unavailable` |
+
+`wan_key_unavailable` comes after `sender_same_account == true` and the envelope check pass: the
+`GET /agents/<agent>/wan-key` lookup failed twice. That covers five different causes that the code
+didn't tell apart: a non-404 HTTP status (the route 403s a token with no account, 429s over 120/min,
+400s a malformed query), a transport error or the 2 s timeout, a 200 that doesn't parse as a
+`WanKeyRecord`, or the local fetch budget running out. Unauthenticated, the route answers 401 in
+about 0.27 s, so it is deployed and reachable. Its response shape matches `WanKeyRecord`.
+
+**Diagnostics (#3863):** the verdict now carries a `detail` naming which of these it was, in the
+audit and in an `info` line per WAN jekt (`wan verify: outcome`). The sender's "queued for WAN
+delivery" line says `signed`, `unsigned_reason` and `cloud_kept_signature`.
 
 **Next:**
-- Ask AgentA what marker AgentY's 06:27 jekt arrived with, and for Area54's build commit, respawn
-  time and publish log line.
-- Log the carry-gate outcome at `info` (signed, or unsigned with the reason). Today a signature
-  that silently fails to ride is invisible.
-- Update the tracking doc's C1 row.
+- After #3863 is in a running build, send one signed jekt each way and read `detail`.
 - `~/.agentmux/agents/CLAUDE.md` still doesn't list `TRUST=wan-verified` (tracking §3.2); it needs
   the operator.
 
