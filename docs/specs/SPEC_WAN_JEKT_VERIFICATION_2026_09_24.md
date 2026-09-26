@@ -537,6 +537,15 @@ first_seen_at, approved_at, revoked_at)`:
   channel protect against MCP tools, not against a same-user process. So
   instance approval should ship enabled only in builds that include that
   fix. Until then every instance stays `new`, and gets no relaxation.
+- **Amended 2026-09-26 (operator decision): a verified `new` instance is
+  trusted too.** The operator wants same-account agents on different
+  machines to act on each other's verified jekts without an operator stop.
+  The premise above — every agent can mint an instance — was removed first:
+  #3881 stopped injecting `MUXBUS_TOKEN` into agent environments, so minting
+  needs the srv's stored login. The accepted residual is a same-user process
+  that reads that login (or a `wan.db`) from disk (§4, open question 5).
+  Approval still exists for the label (`INSTANCE_STATUS=approved`) and
+  revocation still forces sensitive, but neither gates the relaxation now.
 
 **The approval UI and the marker never show a sender-chosen label alone.**
 - The receiver renders `<host_hint>~<first 8 chars of the verified id>`.
@@ -559,9 +568,10 @@ first_seen_at, approved_at, revoked_at)`:
 - `Some(true)` from an **approved** instance joins
   `is_cryptographically_verified` and the `ESCALATE=none` verified-sender
   set.
-- `Some(true)` from a **new** instance is treated as unverified for
-  escalation. That is exactly today's WAN behaviour, but the message is
-  labelled, so the human sees who is asking and can approve.
+- `Some(true)` from a **new** instance joins it too (amended 2026-09-26,
+  above). Before the amendment it was treated as unverified for escalation.
+  The `new` label stays in the marker, so the human still sees which install
+  is speaking.
 - `Some(true)` from a **revoked** instance is treated like `Some(false)`.
   The key is known to be out of its owner's control.
 - `Some(false)` joins the forced-sensitive set.
@@ -754,7 +764,7 @@ revocations (`None`, or delayed revocation). It cannot forge them.
   - the HTTP entry point always gives `None`.
 - **Handler:**
   - approved instance with a keyword → `ESCALATE=none`;
-  - new instance with a keyword → escalates as today;
+  - new instance with a keyword → `ESCALATE=none` (amended 2026-09-26);
   - revoked instance → forced sensitive;
   - a transcript request under `ask` still escalates;
   - `Some(false)` forces sensitive;
