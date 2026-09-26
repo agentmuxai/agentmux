@@ -202,7 +202,7 @@ pub(crate) async fn run_unix(
     // know we are THE instance (a second launch exits inside
     // `bind_socket_with_recovery`), so a second icon cannot appear, and
     // `data_dir`/`dir_hash` — all the actions need to reach the host — are
-    // resolved. Fire-and-forget: `None` when the tray is off (the default),
+    // resolved. Fire-and-forget: `None` when the tray is off,
     // unsupported here, or failed to start; the action loop is a detached
     // thread that only ever forwards over the same authenticated channel a
     // second launch uses.

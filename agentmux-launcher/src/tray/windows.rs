@@ -37,7 +37,10 @@ use std::sync::mpsc;
 
 use super::TrayAction;
 
-/// Spawn the tray thread. Returns the receiver for user actions.
+/// Spawn the tray thread. Returns the receiver for user actions once the icon
+/// has actually been built, not merely once the thread exists: a failed
+/// `build()` must reach `start_if_enabled` so it can drop background mode
+/// (ReAgent P1 on #3785).
 ///
 /// Errors are returned rather than panicking: `start_if_enabled` degrades to
 /// "no tray" on failure, because a cosmetic icon must never take down the
@@ -47,17 +50,24 @@ pub fn spawn(
     dir_hash: String,
 ) -> Result<mpsc::Receiver<TrayAction>, String> {
     let (tx, rx) = mpsc::channel::<TrayAction>();
+    let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
 
     std::thread::Builder::new()
         .name("agentmux-tray".into())
         .spawn(move || {
-            if let Err(e) = run(tx, data_dir, dir_hash) {
+            if let Err(e) = run(tx, data_dir, dir_hash, &ready_tx) {
+                // Ignored by the receiver if the icon was already reported up.
+                let _ = ready_tx.send(Err(e.clone()));
                 crate::log(&format!("tray: thread exiting: {}", e));
             }
         })
         .map_err(|e| format!("spawn tray thread: {}", e))?;
 
-    Ok(rx)
+    match ready_rx.recv_timeout(super::READY_TIMEOUT) {
+        Ok(Ok(())) => Ok(rx),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err("tray icon was not built within the timeout".to_string()),
+    }
 }
 
 /// Custom message telling the tray thread that service reachability changed.
@@ -142,6 +152,7 @@ fn run(
     tx: mpsc::Sender<TrayAction>,
     data_dir: std::path::PathBuf,
     dir_hash: String,
+    ready: &mpsc::Sender<Result<(), String>>,
 ) -> Result<(), String> {
     use muda::MenuEvent;
     use tray_icon::{TrayIconBuilder, TrayIconEvent};
@@ -170,6 +181,7 @@ fn run(
         .with_icon(pick_icon(&nstate))
         .build()
         .map_err(|e| format!("build tray icon: {}", e))?;
+    let _ = ready.send(Ok(()));
 
     // Wake this thread when srv publishes a new notification snapshot.
     unsafe {

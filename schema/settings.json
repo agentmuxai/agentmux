@@ -402,8 +402,8 @@
         },
         "app:runinbackground": {
           "type": "boolean",
-          "default": false,
-          "description": "Keep AgentMux running with a system-tray / menu-bar icon when all windows are closed (background-service mode; implies the tray). Read by agentmux-launcher at startup, so a change applies at the NEXT launch. Env AGENTMUX_BACKGROUND_SERVICE / AGENTMUX_TRAY and the --background flag also enable it. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1."
+          "default": true,
+          "description": "Keep AgentMux running with a system-tray / menu-bar icon when all windows are closed (background-service mode; implies the tray). On by default; if the tray cannot be shown (e.g. Linux without a StatusNotifier host), closing the last window quits instead. Read by agentmux-launcher at startup, so a change applies at the NEXT launch. Env AGENTMUX_BACKGROUND_SERVICE / AGENTMUX_TRAY and the --background flag also enable it. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1."
         },
         "splash:disabled": {
           "type": "boolean",
