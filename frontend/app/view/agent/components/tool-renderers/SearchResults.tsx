@@ -74,7 +74,7 @@ function WebSearchAnswer(props: { parsed: ParsedWebSearch }): JSX.Element {
                 <div class="agent-search-summary">
                     {/* scrollable={false}: this lives inside the virtualized
                         document, which owns the scroll — see renderRead in
-                        ToolOverlayLog.tsx. */}
+                        builtins.tsx. */}
                     <Markdown text={props.parsed.summary!} scrollable={false} />
                 </div>
                 <Show when={groups.length > 0}>

@@ -24,6 +24,7 @@ import type {
     UserMessageNode,
 } from "../types";
 import { isContentFirstTool } from "../tool-meta/tool-descriptors";
+import { rowDisclosureIn } from "./disclosure";
 
 export type NodeKind = DocumentNode["type"];
 
@@ -109,18 +110,6 @@ export function estimateSection(_node: SectionNode): number {
  */
 export const CONTENT_FIRST_TOOL_ESTIMATE_PX = 280;
 
-export function estimateTool(node: ToolNode, state: DocumentState): number {
-    if (isContentFirstTool(node)) {
-        return state.collapsedNodes.has(node.id) ? TOOL_COLLAPSED_PX : CONTENT_FIRST_TOOL_ESTIMATE_PX;
-    }
-    return state.pinnedNodes.has(node.id) ? TOOL_EXPANDED_PX : TOOL_COLLAPSED_PX;
-}
-
-export function estimateAgentMessage(node: AgentMessageNode, state: DocumentState): number {
-    if (state.collapsedNodes.has(node.id)) return COLLAPSED_MESSAGE_PX;
-    return estimateTextHeight(node.message);
-}
-
 /**
  * An expanded jekt's body is capped by CSS (`$transcript-preview-max-height`,
  * `calc(50vh / 3)` ≈ 233 px on a 1400 px window) and scrolls inside its box,
@@ -134,33 +123,8 @@ export function estimateExpandedJekt(message: string): number {
     return Math.min(estimateTextHeight(message), JEKT_EXPANDED_MAX_ESTIMATE_PX);
 }
 
-export function estimateJektMessage(node: JektMessageNode, state: DocumentState): number {
-    if (state.collapsedNodes.has(node.id)) return COLLAPSED_MESSAGE_PX;
-    return estimateExpandedJekt(node.message);
-}
-
-export function estimateUserMessage(node: UserMessageNode, state: DocumentState): number {
-    // Per SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md,
-    // user messages collapse on `isStartup` + `pinnedNodes`, NOT
-    // `collapsedNodes` (which is unused for user_message nodes
-    // post-PR-#1020). Mirror the rule in `estimateTool`: startup
-    // payload is the one-line summary unless pinned.
-    if (node.isStartup && !state.pinnedNodes.has(node.id)) {
-        return COLLAPSED_MESSAGE_PX;
-    }
-    // Use newline-count estimation — user_message <pre> is
-    // `white-space: pre` (no soft wrap), so line count comes
-    // from explicit `\n`. Char-count heuristic from
-    // `estimateTextHeight` would over-estimate long single lines.
-    return estimateUnwrappedTextHeight(node.message);
-}
-
 const SHELL_COLLAPSED_PX = 32;
 const SHELL_EXPANDED_PX = 200;
-
-export function estimateShell(node: ShellNode, state: DocumentState): number {
-    return state.pinnedNodes.has(node.id) ? SHELL_EXPANDED_PX : SHELL_COLLAPSED_PX;
-}
 
 /** Per-kind streaming capability — straightforward map. */
 export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
@@ -197,23 +161,9 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
  * detector.
  */
 export function estimateNode(node: DocumentNode, state: DocumentState): number {
-    switch (node.type) {
-        case "markdown": return estimateMarkdown(node);
-        case "section": return estimateSection(node);
-        case "tool": return estimateTool(node, state);
-        case "agent_message": return estimateAgentMessage(node, state);
-        case "jekt_message": return estimateJektMessage(node, state);
-        case "user_message": return estimateUserMessage(node, state);
-        case "shell": return estimateShell(node, state);
-        case "agent_error":       return 64;
-        case "context_compacted": return 48;
-        case "compaction_started": return 32;
-        case "session_outcome":   return 48;
-        case "day_divider":       return 32;
-        case "history_link":      return 40;
-        case "resume_preflight":  return 56;
-        case "ambient_narration": return estimateTextHeight(node.text);
-    }
+    // The same open/closed answer the rows render and the layout slice uses
+    // (disclosure.ts), not a per-kind copy of it.
+    return estimateNodeForState(node, rowDisclosureIn(node, state).open ? "expanded" : "collapsed", state);
 }
 
 /**
@@ -262,7 +212,9 @@ export function estimateNodeForState(
     }
     // expanded
     switch (node.type) {
-        case "tool":              return TOOL_EXPANDED_PX;
+        // A content-first tool's body is capped at the preview height, like a
+        // jekt's; everything else pinned open uses the generic tool size.
+        case "tool":              return isContentFirstTool(node) ? CONTENT_FIRST_TOOL_ESTIMATE_PX : TOOL_EXPANDED_PX;
         case "agent_message":     return estimateTextHeight(node.message);
         case "jekt_message":      return estimateExpandedJekt(node.message);
         case "user_message":      return estimateUnwrappedTextHeight(node.message);

@@ -51,7 +51,8 @@ import { PeekOverlay } from "./PeekOverlay";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
-import { isContentFirstTool, toolPill } from "../tool-meta/tool-descriptors";
+import { toolPill } from "../tool-meta/tool-descriptors";
+import { rowDisclosure } from "../virtualization/disclosure";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -186,24 +187,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         prevStatus = s;
     });
 
-    // Auto-expand while the tool is actively running (or awaiting approval), and
-    // keep a completed tool expanded while it's held open (props.heldOpen — set
-    // on completion, cleared when the row scrolls off the top). Pin still wins as
-    // an explicit override. `denied`/`canceled` are user-dismissed terminations
-    // (the user already acted on them) and skip the heldOpen hold, collapsing
-    // immediately. `failed` is an agent-caused error, not a dismissal — it holds
-    // open exactly like `success` per the original design doc's own
-    // recommendation (ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md,
-    // "failed: same as success"); the earlier implementation had lumped it in
-    // with denied/canceled, diverging from that call.
-    //
-    // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 and
-    // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md — the 3 s
-    // post-completion timer was replaced by scroll-position-driven collapse.
-    const autoExpanded = (): boolean => {
-        const s = TOOL_STATUS[props.node.status];
-        return s.active || (!s.dismissed && !!props.heldOpen);
-    };
+    // Open or closed comes from the one rule every row and the virtualizer
+    // share (virtualization/disclosure.ts): pinned; auto while running or
+    // awaiting approval, and while held after finishing on screen (not for a
+    // dismissed denied/canceled tool); a finished content-first tool
+    // (WebSearch) open until the user collapses it. The props are this row's
+    // flags from documentState.
+    const disclosure = () =>
+        rowDisclosure(props.node, { pinned: props.pinned, collapsed: props.userCollapsed, held: props.heldOpen });
     // Hover-to-peek was removed in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28
     // — expansion is now driven exclusively by pin + active-state auto-
     // expand. The user-visible "three popups on hover" (browser title
@@ -214,13 +205,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // we hold it open until they leave so a scroll-off collapse can't fold it
     // mid-read.
     const [userHolding, setUserHolding] = createSignal(false);
-    // A finished content-first tool (WebSearch) reads like a message:
-    // expanded by default — in history too — until the user collapses it.
-    // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.1.
-    const contentFirst = () => isContentFirstTool(props.node);
-    const expanded = () =>
-        contentFirst() ? !props.userCollapsed : props.pinned || autoExpanded() || userHolding();
-    const onHeaderClick = () => (contentFirst() ? props.onToggleCollapse?.() : props.onTogglePin());
+    const expanded = () => disclosure().open || userHolding();
+    // The header click flips whichever set the rule says this row uses:
+    // collapsedNodes for an open-by-default (content-first) tool, else the pin.
+    const onHeaderClick = () =>
+        disclosure().toggle === "collapse" ? props.onToggleCollapse?.() : props.onTogglePin();
 
     // Result pill — compact inline summary shown at medium+ pane widths
     // (visible only via CSS container query; always rendered so the
@@ -372,7 +361,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 // than adding a second listener pair, since SolidJS only keeps the
                 // last onMouseEnter/onMouseLeave assigned to a given element.
                 onMouseEnter={() => {
-                    if (!contentFirst() && (props.pinned || autoExpanded())) setUserHolding(true);
+                    // Hold an open, pin-toggled (panel) tool while the mouse is in it.
+                    if (disclosure().open && disclosure().toggle === "pin") setUserHolding(true);
                     handlePeekEnter();
                 }}
                 onMouseLeave={() => {
