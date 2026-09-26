@@ -58,7 +58,7 @@ export function buildConfigFiles(
         const displayName = instanceName || agent.name;
         templateVars["AGENT"] = displayName;
         templateVars["AGENT_DISPLAY"] = displayName;
-        templateVars["AGENT_SLUG"] = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+        templateVars["AGENT_SLUG"] = agent.slug || deriveSlug(agent.name);
         templateVars["WORKING_DIR"] = agent.working_directory || "";
         templateVars["AGENT_ID"] = agent.id;
     }
@@ -143,7 +143,7 @@ export function buildConfigFiles(
     }
 
     // Build .mcp.json: auto-inject AgentMux MCP + merge user-provided config
-    const agentSlug = agent ? (agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")) : undefined;
+    const agentSlug = agent ? (agent.slug || deriveSlug(agent.name)) : undefined;
     const mcpConfig = buildMcpConfig(contentMap["mcp"], agent, instanceName, agentSlug);
     if (mcpConfig) {
         files.push({ path: ".mcp.json", content: mcpConfig });

@@ -252,6 +252,10 @@ export interface CreateFromTemplateRequest {
          *  `agent:runtime` block meta via LaunchOverrides.model. Empty
          *  string when the harness declares no models list. */
         model: string,
+        /** Slug the backend assigned the new row. The launch must use it
+         *  for AGENTMUX_AGENT_ID rather than derive one from `name` — a
+         *  collision suffix or punctuation makes the two differ (#3573). */
+        slug: string,
     ) => Promise<void>;
 }
 
