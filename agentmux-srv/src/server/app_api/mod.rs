@@ -1296,6 +1296,9 @@ pub(crate) fn memory_write_impl<'o>(
     if let Err(e) = state.id_store.agent_native_memory_version_insert(&version_agent_id, filename, content, source, detail, "") {
         tracing::warn!(agent_id, filename, error = %e, "memory.write: version insert failed (non-fatal)");
     }
+    // And into the agent's memory record, likewise first
+    // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
+    crate::backend::memory_reconcile::record_agentmux_write(&version_agent_id, &dir, filename, content.as_bytes(), source, detail);
 
     let dest = dir.join(filename);
     let tmp = dir.join(format!(".{}.{}.tmp", filename, uuid::Uuid::new_v4()));

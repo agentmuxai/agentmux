@@ -229,8 +229,8 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     <button
                         type="button"
                         class="status-bar-popover-mono status-bar-popover-link"
-                        style={{ "font-size": "0.85em", "max-width": "220px", "overflow": "hidden", "text-overflow": "ellipsis" }}
-                        data-tip={`${fileManagerLabel()}: ${props.hostInfo()!.dataDir}`}
+                        style={{ "font-size": "0.85em" }}
+                        data-tip={fileManagerLabel()}
                         onClick={() => void openDataDir()}
                     >
                         {props.hostInfo()!.dataDir}

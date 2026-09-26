@@ -889,3 +889,50 @@ fn the_agents_own_record_is_not_another_agents() {
     let sha = record::sha256_hex(b"idx");
     assert!(record::held_by_other_records(&f.fs, UID, &[sha]).unwrap().is_empty());
 }
+
+// ── AgentMux's own writes (MemoryWrite, the Armory, revert, import) ─────
+
+/// Recorded with its source, so the next spawn doesn't take it for the
+/// provider's; a new file too.
+#[test]
+fn an_agentmux_write_is_recorded_as_itself_and_the_next_spawn_is_quiet() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    let dir = f.dir();
+    assert!(record_agentmux_write_in(&f.fs, UID, &dir, "notes.md", b"v2 from the Armory", "armory-ui", "").unwrap());
+    f.put("notes.md", "v2 from the Armory");
+    assert!(record_agentmux_write_in(&f.fs, UID, &dir, "new.md", b"via MemoryWrite", "agent", "").unwrap());
+    f.put("new.md", "via MemoryWrite");
+    let h = record::history(&f.fs, UID, "notes.md").unwrap();
+    assert_eq!(h.last().unwrap().source, "armory-ui");
+    let r = f.run();
+    assert_eq!((r.captured, r.written, r.conflicts), (0, 0, 0), "{r:?}");
+}
+
+/// The record changed the file elsewhere since this folder was given it:
+/// the write isn't recorded over that; the next spawn keeps both.
+#[test]
+fn an_agentmux_write_over_a_change_from_elsewhere_is_left_to_reconcile() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    f.change_elsewhere("notes.md", Some("from another account"));
+    assert!(!record_agentmux_write_in(&f.fs, UID, &f.dir(), "notes.md", b"edited here", "armory-ui", "").unwrap());
+    f.put("notes.md", "edited here");
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("from another account"));
+    assert_eq!(f.run().conflicts, 1);
+}
+
+/// Only into the agent's own folder: not one it doesn't claim alone, and
+/// not a file the record has but never gave this folder.
+#[test]
+fn an_agentmux_write_outside_the_agents_own_folder_is_not_recorded() {
+    let f = fixture();
+    let elsewhere = tempfile::tempdir().unwrap();
+    assert!(!record_agentmux_write_in(&f.fs, UID, elsewhere.path(), "x.md", b"x", "agent", "").unwrap());
+    f.put("MEMORY.md", "idx");
+    f.run();
+    f.change_elsewhere("only-elsewhere.md", Some("never projected here"));
+    assert!(!record_agentmux_write_in(&f.fs, UID, &f.dir(), "only-elsewhere.md", b"y", "agent", "").unwrap());
+}
