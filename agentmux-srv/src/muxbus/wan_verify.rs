@@ -57,15 +57,25 @@ pub(crate) struct WanVerdict {
     pub verified: Option<bool>,
     pub instance: Option<WanInstanceInfo>,
     pub reason: Option<&'static str>,
+    /// What exactly went wrong behind `reason`, when it has a cause worth
+    /// reading (the directory's HTTP status, a transport or parse error).
+    /// Diagnostics only: logged and audited, never part of the verdict.
+    pub detail: Option<String>,
 }
 
 impl WanVerdict {
     fn none(reason: &'static str) -> Self {
-        Self { verified: None, instance: None, reason: Some(reason) }
+        Self { verified: None, instance: None, reason: Some(reason), detail: None }
+    }
+
+    /// "Couldn't check", with the cause. For the receiver's own setup
+    /// failures too, which happen before [`verify`] can run.
+    pub(crate) fn unchecked(reason: &'static str, detail: impl Into<String>) -> Self {
+        Self { verified: None, instance: None, reason: Some(reason), detail: Some(detail.into()) }
     }
 
     fn failed(reason: &'static str) -> Self {
-        Self { verified: Some(false), instance: None, reason: Some(reason) }
+        Self { verified: Some(false), instance: None, reason: Some(reason), detail: None }
     }
 
     fn from_failure(f: WanCheckFailure) -> Self {
@@ -76,7 +86,7 @@ impl WanVerdict {
             WanCheckFailure::RecordMismatch => "wan_record_mismatch",
             WanCheckFailure::BadSignature => "wan_sig_invalid",
         };
-        Self { verified: f.verdict(), instance: None, reason: Some(reason) }
+        Self { verified: f.verdict(), instance: None, reason: Some(reason), detail: None }
     }
 }
 
@@ -92,7 +102,8 @@ pub(crate) struct Directory<'a> {
 enum Fetched<T> {
     Found(T),
     NotFound,
-    Unavailable,
+    /// Why, for the verdict's `detail`: the last attempt's cause.
+    Unavailable(String),
 }
 
 /// A fixed-window request budget ([`FETCHES_PER_MINUTE`]).
@@ -128,9 +139,10 @@ pub(crate) static GLOBAL_BUDGET: FetchBudget = FetchBudget::new(FETCHES_PER_MINU
 /// One GET with the §2.3 retry rule: an unavailable directory gets one
 /// immediate retry; a 404 is an answer, not a failure.
 async fn get_json<T: serde::de::DeserializeOwned>(dir: &Directory<'_>, url: &str) -> Fetched<T> {
+    let mut cause = String::new();
     for _attempt in 0..2 {
         if !dir.budget.take() {
-            return Fetched::Unavailable;
+            return Fetched::Unavailable("directory fetch budget exhausted".to_string());
         }
         let resp = dir
             .http
@@ -146,35 +158,37 @@ async fn get_json<T: serde::de::DeserializeOwned>(dir: &Directory<'_>, url: &str
                     Ok(v) => Fetched::Found(v),
                     // A 200 we can't parse is the cloud's problem; it can't
                     // be a verification failure on the sender's part.
-                    Err(_) => Fetched::Unavailable,
+                    Err(e) => Fetched::Unavailable(format!("directory record doesn't parse: {e}")),
                 }
             }
             // Still "couldn't check", but never silently: a directory that
             // rejects this install's token turned every WAN jekt
-            // `network-claimed` with nothing in the log to say why.
+            // `network-claimed` with nothing in the log to say why. The
+            // cause also rides on the verdict (`detail`) into the audit.
             Ok(r) => {
                 tracing::warn!(status = %r.status(), "wan verify: key directory refused the lookup");
-                continue;
+                cause = format!("directory answered {}", r.status());
             }
             Err(e) => {
                 tracing::warn!(error = %e, "wan verify: key directory unreachable");
-                continue;
+                // `without_url`: the query names the sender's instance and key.
+                cause = format!("directory unreachable: {}", e.without_url());
             }
         }
     }
-    Fetched::Unavailable
+    Fetched::Unavailable(cause)
 }
 
 async fn fetch_record(dir: &Directory<'_>, carried: &WanCarried<'_>) -> Fetched<WanKeyRecord> {
     let mut url = match reqwest::Url::parse(dir.base_url) {
         Ok(u) => u,
-        Err(_) => return Fetched::Unavailable,
+        Err(e) => return Fetched::Unavailable(format!("bad directory URL: {e}")),
     };
     match url.path_segments_mut() {
         Ok(mut segs) => {
             segs.pop_if_empty().push("agents").push(&carried.source_agent.to_lowercase()).push("wan-key");
         }
-        Err(_) => return Fetched::Unavailable,
+        Err(_) => return Fetched::Unavailable("bad directory URL: cannot be a base".to_string()),
     }
     url.query_pairs_mut()
         .append_pair("instance", &carried.source_host.to_lowercase())
@@ -194,7 +208,7 @@ async fn fetch_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
         Fetched::Found(s) => Some(s.revoked),
         // An older cloud with no such route: not known to be revoked.
         Fetched::NotFound => Some(false),
-        Fetched::Unavailable => None,
+        Fetched::Unavailable(_) => None,
     }
 }
 
@@ -282,7 +296,7 @@ pub(crate) async fn verify(
         _ => match fetch_record(dir, &carried).await {
             Fetched::Found(record) => record,
             Fetched::NotFound => return WanVerdict::none("wan_key_not_found"),
-            Fetched::Unavailable => return WanVerdict::none("wan_key_unavailable"),
+            Fetched::Unavailable(cause) => return WanVerdict::unchecked("wan_key_unavailable", cause),
         },
     };
     if let Err(f) = jekt_sign::verify_wan_against_record(&carried, &record, message) {
@@ -304,6 +318,7 @@ pub(crate) async fn verify(
             status,
         }),
         reason: None,
+        detail: None,
     }
 }
 

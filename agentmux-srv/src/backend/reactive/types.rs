@@ -322,6 +322,10 @@ pub struct InjectionRequest {
     /// `wan_cert_invalid`, …) — audit only, never rendered.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub wan_reason: Option<String>,
+    /// The cause behind `wan_reason`, when there is one to read (e.g.
+    /// `directory answered 403 Forbidden`) — audit only, never rendered.
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub wan_detail: Option<String>,
     /// Server-computed: this jekt's `message` is a `transcript_request`
     /// payload (`agentmux_common::transcript_request::parse_transcript_request`)
     /// — `muxspect` Phase B/C's LAN/WAN conversation-visibility protocol.
@@ -507,6 +511,8 @@ pub struct WanAudit {
     pub status: Option<WanInstanceStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl WanAudit {
@@ -520,6 +526,7 @@ impl WanAudit {
             instance: req.wan_instance.as_ref().map(|i| i.id.clone()),
             status: req.wan_instance.as_ref().map(|i| i.status),
             reason: req.wan_reason.clone(),
+            detail: req.wan_detail.clone(),
         })
     }
 }
