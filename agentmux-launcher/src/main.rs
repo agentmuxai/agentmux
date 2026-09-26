@@ -49,6 +49,9 @@ mod supervisor;
 mod teardown_backstop;
 mod tray;
 mod ui_liveness;
+// Windows-only consumer (supervisor/windows.rs); pure parts are tested everywhere.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod host_hang_dump;
 mod upgrade;
 #[cfg(target_os = "windows")]
 mod splash;

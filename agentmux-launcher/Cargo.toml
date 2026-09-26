@@ -87,6 +87,12 @@ windows-sys = { version = "0.59", features = [
     "Win32_Graphics_Gdi",
     # HKCU AppUserModelId registration for OS toasts (src/notify/windows.rs).
     "Win32_System_Registry",
+    # MiniDumpWriteDump (Win32_System_Diagnostics_Debug) is gated on these
+    # three in windows-sys 0.59 — external hang dump of a wedged host
+    # (src/host_hang_dump.rs; SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14).
+    "Win32_Storage_FileSystem",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
 ] }
 # WinRT toast notifications (src/notify/windows.rs). 0.61 is already in the
 # lockfile via sysinfo; windows-sys has no WinRT projections.
