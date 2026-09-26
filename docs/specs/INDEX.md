@@ -1207,6 +1207,7 @@ section above, do not bulk-restamp them.
 
 | Spec | Title |
 |---|---|
+| [`REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25`](REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md) | Why AgentA Started Blank on the v0.57.5 Build — Incident Report |
 | [`REPORT_JEKT_MIDTURN_INTERRUPT_AUDIT_2026_09_23`](REPORT_JEKT_MIDTURN_INTERRUPT_AUDIT_2026_09_23.md) | REPORT: Can a jekt interrupt an agent mid-turn today? |
 | [`SPEC_BROWSER_PANE_LIFECYCLE`](SPEC_BROWSER_PANE_LIFECYCLE.md) | SPEC: Browser Pane Lifecycle & State Machine |
 | [`cef-drag-window-management`](cef-drag-window-management.md) | Spec: CEF Drag, Drop, and Window Management |
