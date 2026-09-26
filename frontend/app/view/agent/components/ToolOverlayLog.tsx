@@ -30,7 +30,7 @@ import { capChars, createChunkCapper, createSpinnerCollapser, capText, dropBashw
 import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
 import { terminalText } from "./terminal-text";
-import { startsAtTop } from "./tool-presentation";
+import { startsAtTop } from "../tool-meta/tool-descriptors";
 import {
     registerToolRenderer,
     resolveToolRenderer,
@@ -62,9 +62,6 @@ const USER_INPUT_WINDOW_MS = 250;
  *  REATTACH_PX (pane spec §5.5); not 1 px, for fractional positions at
  *  non-100% zoom. */
 const REATTACH_PX = 24;
-/** Coarse tool kinds whose finished preview is a document (file / diff),
- *  read from the top rather than followed at the bottom. */
-const DOCUMENT_KINDS = new Set<string>(["Read", "Write", "Edit"]);
 const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
 
 const KIND_CLASS: Record<string, string> = {
@@ -231,16 +228,12 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     //   trimming head lines. The old rule (any scroll > 40px from the bottom)
     //   detached on all of those.
     // - A user scroll that ends within REATTACH_PX of the bottom re-attaches.
-    // - Document-like previews (Read / Write / Edit) that haven't streamed
-    //   start DETACHED at the top: the start of a file or diff is where
-    //   reading begins. If one does start streaming, it follows.
-    //   Content-first previews (WebSearch, tool-presentation.ts) too: the
-    //   answer is read from its start.
+    // - Previews whose descriptor says `scroll: "top"` (documents: Read /
+    //   Write / Edit; content-first answers: WebSearch) that haven't streamed
+    //   start DETACHED at the top: that's where reading begins. If one does
+    //   start streaming, it follows.
     const initialFollow = (): boolean =>
-        !(
-            (DOCUMENT_KINDS.has(props.node.tool) || startsAtTop(props.node)) &&
-            dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0
-        );
+        !(startsAtTop(props.node) && dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0);
     let following = initialFollow();
     // Detached only because of the document-preview default, not by the user.
     let detachedByDefault = !following;

@@ -23,7 +23,7 @@ import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
-import { isContentFirstTool } from "../components/tool-presentation";
+import { isContentFirstTool } from "../tool-meta/tool-descriptors";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";

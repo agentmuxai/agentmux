@@ -35,7 +35,7 @@
  */
 
 import type { Expansion } from "@/app/store/agent-pane-layout/types";
-import { isContentFirstTool } from "../components/tool-presentation";
+import { isContentFirstTool } from "../tool-meta/tool-descriptors";
 import type { DocumentNode, DocumentState } from "../types";
 
 /** The only `documentState` the mapping depends on — the collapse/pin sets plus

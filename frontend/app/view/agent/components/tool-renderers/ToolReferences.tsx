@@ -13,7 +13,7 @@
 import { For, Show, type JSX } from "solid-js";
 import type { ToolNode } from "../../types";
 import { CompactResult } from "../CompactResult";
-import { mcpDisplayName } from "../tool-header";
+import { mcpDisplayName } from "../../tool-meta/tool-descriptors";
 import { byName, registerToolRenderer } from "./registry";
 
 /** The referenced tool names, or null unless the result is a non-empty array

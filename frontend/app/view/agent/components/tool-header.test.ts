@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 import type { ToolNode } from "../types";
-import { mcpDisplayName, toolHeaderParts, toolHeaderText } from "./tool-header";
+import { mcpDisplayName } from "../tool-meta/tool-descriptors";
+import { toolHeaderParts, toolHeaderText } from "./tool-header";
 
 const node = (over: Partial<ToolNode>): ToolNode => ({
     type: "tool",
