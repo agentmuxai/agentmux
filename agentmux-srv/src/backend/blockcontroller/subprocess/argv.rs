@@ -86,6 +86,128 @@ pub(crate) fn build_side_question_argv(base_one_shot_args: &[String]) -> Vec<Str
     argv
 }
 
+/// Codex features that each add a tool to the model's request. `/btw`
+/// disables every one of them. Checked against the pinned CLI (0.154.0,
+/// `codex features list`) by capturing the request it sends: with these
+/// off, plus `--ignore-user-config` and `web_search="disabled"`, the only
+/// tool left is `request_user_input`, which `exec` mode refuses to run
+/// ("request_user_input is not supported in exec mode").
+const CODEX_TOOL_FEATURES: &[&str] = &[
+    "shell_tool",
+    "unified_exec",
+    "view_image",
+    "multi_agent",
+    "goals",
+    "apps",
+    "plugins",
+    "browser_use",
+    "computer_use",
+    "image_generation",
+    "sleep_tool",
+    "tool_suggest",
+];
+
+/// Build the argv for a `/btw` side question on a Codex pane: a tool-less
+/// `codex exec` turn, built from scratch rather than from the pane's own
+/// argv, which may be the app-server's and always carries
+/// `--dangerously-bypass-approvals-and-sandbox`.
+///
+/// - `--ignore-user-config`: `$CODEX_HOME/config.toml` is where MCP servers
+///   (and so the agentmux tools) come from; an empty `-c mcp_servers={}`
+///   override does NOT remove them. Auth still reads `CODEX_HOME`.
+/// - `--sandbox read-only`, the tool features off, `web_search="disabled"`:
+///   no tool that can act.
+/// - `--ephemeral`: the side question leaves no session file behind.
+/// - `--skip-git-repo-check`: the pane's bypass flag implied it; a
+///   tool-less turn has nothing to protect with it.
+///
+/// `model` is the pane's `-m`/`--model`, if it had one.
+pub(crate) fn build_codex_side_question_argv(model: Option<&str>) -> Vec<String> {
+    let mut argv: Vec<String> = [
+        "exec",
+        "--json",
+        "--ignore-user-config",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    for feature in CODEX_TOOL_FEATURES {
+        argv.push("--disable".to_string());
+        argv.push(feature.to_string());
+    }
+    argv.push("-c".to_string());
+    argv.push("web_search=\"disabled\"".to_string());
+    if let Some(model) = model {
+        argv.push("-m".to_string());
+        argv.push(model.to_string());
+    }
+    // The prompt comes from stdin; `-` stays last.
+    argv.push("-".to_string());
+    argv
+}
+
+/// The Gemini policy that denies every tool, built-in and MCP. Written to
+/// disk for `--policy`. Checked against the pinned CLI (0.60.0) by
+/// capturing its request: with this policy the request declares no tools
+/// at all, even with `--yolo` on.
+pub(crate) const GEMINI_DENY_ALL_TOOLS_POLICY: &str = "\
+[[rule]]
+toolName = \"*\"
+decision = \"deny\"
+priority = 999
+
+[[rule]]
+toolName = \"*\"
+mcpName = \"*\"
+decision = \"deny\"
+priority = 999
+";
+
+/// Build the argv for a `/btw` side question on a Gemini pane: headless
+/// stream-json with `GEMINI_DENY_ALL_TOOLS_POLICY` at `policy_path`, and
+/// approval mode `default` instead of the pane's `--yolo`. No
+/// `--skip-trust`: trusting the folder would load the project's own Gemini
+/// settings, hooks included, so `/btw` gets the same trust as the pane.
+pub(crate) fn build_gemini_side_question_argv(policy_path: &str, model: Option<&str>) -> Vec<String> {
+    let mut argv: Vec<String> = [
+        "--output-format",
+        "stream-json",
+        "--approval-mode",
+        "default",
+        "--policy",
+        policy_path,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(model) = model {
+        argv.push("-m".to_string());
+        argv.push(model.to_string());
+    }
+    // Headless; the prompt comes from stdin.
+    argv.push("-p".to_string());
+    argv.push(String::new());
+    argv
+}
+
+/// The value of `-m` / `--model` (or `--model=<v>`) in `args`, if any.
+pub(crate) fn model_flag_value(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "-m" || arg == "--model" {
+            return it.next().filter(|v| !v.is_empty() && !v.starts_with('-')).cloned();
+        }
+        if let Some(v) = arg.strip_prefix("--model=") {
+            return Some(v.to_string()).filter(|v| !v.is_empty());
+        }
+    }
+    None
+}
+
 fn build_codex_argv(base: &[String], session_id: Option<&str>) -> Result<Vec<String>, String> {
     let exec_index = base
         .iter()
@@ -114,7 +236,10 @@ fn build_codex_argv(base: &[String], session_id: Option<&str>) -> Result<Vec<Str
 
 #[cfg(test)]
 mod tests {
-    use super::{build_side_question_argv, build_turn_argv};
+    use super::{
+        build_codex_side_question_argv, build_gemini_side_question_argv, build_side_question_argv,
+        build_turn_argv, model_flag_value, CODEX_TOOL_FEATURES,
+    };
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
@@ -256,5 +381,47 @@ mod tests {
         assert!(!final_argv.iter().any(|a| a == "--resume"));
         assert!(final_argv.iter().any(|a| a == "--disallowedTools"));
         assert!(final_argv.iter().any(|a| a == "--max-turns"));
+    }
+
+    // ── /btw on Codex and Gemini ─────────────────────────────────────────
+
+    #[test]
+    fn the_codex_side_question_is_tool_less_and_keeps_stdin_last() {
+        let got = build_codex_side_question_argv(Some("gpt-5"));
+        assert_eq!(&got[..2], &strings(&["exec", "--json"])[..]);
+        for flag in ["--ignore-user-config", "--ephemeral", "--skip-git-repo-check"] {
+            assert!(got.iter().any(|a| a == flag), "{flag}");
+        }
+        assert!(got.windows(2).any(|w| w == strings(&["--sandbox", "read-only"])));
+        for feature in CODEX_TOOL_FEATURES {
+            assert!(got.windows(2).any(|w| w[0] == "--disable" && w[1] == *feature), "{feature}");
+        }
+        assert!(got.windows(2).any(|w| w == strings(&["-c", "web_search=\"disabled\""])));
+        assert!(got.windows(2).any(|w| w == strings(&["-m", "gpt-5"])));
+        assert!(!got.iter().any(|a| a.contains("dangerously")));
+        assert_eq!(got.last().map(String::as_str), Some("-"));
+        assert!(!build_codex_side_question_argv(None).iter().any(|a| a == "-m"));
+    }
+
+    #[test]
+    fn the_gemini_side_question_denies_every_tool_without_yolo() {
+        let got = build_gemini_side_question_argv("/data/btw/gemini.toml", Some("gemini-3-pro"));
+        assert!(got.windows(2).any(|w| w == strings(&["--policy", "/data/btw/gemini.toml"])));
+        assert!(got.windows(2).any(|w| w == strings(&["--approval-mode", "default"])));
+        assert!(got.windows(2).any(|w| w == strings(&["--output-format", "stream-json"])));
+        assert!(got.windows(2).any(|w| w == strings(&["-m", "gemini-3-pro"])));
+        for flag in ["--yolo", "-y", "--skip-trust"] {
+            assert!(!got.iter().any(|a| a == flag), "{flag}");
+        }
+        assert_eq!(&got[got.len() - 2..], &strings(&["-p", ""])[..]);
+    }
+
+    #[test]
+    fn the_pane_model_is_read_from_either_flag_spelling() {
+        assert_eq!(model_flag_value(&strings(&["exec", "-m", "o3", "-"])), Some("o3".into()));
+        assert_eq!(model_flag_value(&strings(&["--model", "x"])), Some("x".into()));
+        assert_eq!(model_flag_value(&strings(&["--model=y", "-p", ""])), Some("y".into()));
+        assert_eq!(model_flag_value(&strings(&["-p", "", "--yolo"])), None);
+        assert_eq!(model_flag_value(&strings(&["-m"])), None);
     }
 }
