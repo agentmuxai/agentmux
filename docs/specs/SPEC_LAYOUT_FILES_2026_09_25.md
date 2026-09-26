@@ -5,7 +5,8 @@
 Layouts → Save layout…, the host Save dialog, `layout.save`,
 `backend/layout_file.rs` and the v1 schema. Phase 2 (☰ → Layouts → Open
 layout…, adding the file's tabs to the current window, §3.6) ships in
-PR #3825. Phases 2b, 3 and 4 are not started.
+PR #3825. Phase 2b (open in a new window, the default, §3.6) ships in
+PR #3849. Phases 3 and 4 are not started.
 Measured against `agentmux` `main` @ `c0268089b`.
 **Trigger:** Repo owner: *"in the hamburger we'd add a new entry 'Layouts' and a
 single submenu: 'Save layout' which would let you save it as a file (you'll
@@ -294,12 +295,20 @@ list (`is_sensitive_message`, `backend/reactive/sanitize.rs`) over every
 ☰ → Layouts → **Open layout…** → host Open dialog → `layout.preview` →
 a preview modal → `layout.open`. Where it differs from §3.5, and why:
 
-- **Adds the tabs to the current window; "open in a new window" is not
-  built yet (Phase 2b).** A new window's workspace is created by the
-  frontend's own start-up (`app-init.ts` → `CreateWindow`), so opening a
-  window onto a prepared workspace needs new plumbing through the host and
-  that start-up path. Adding tabs already meets the rule that matters:
-  nothing that's open is replaced.
+- **Where it opens (Phase 2b):** the preview asks, defaulting to **a new
+  window** as above; "Add to this window" is the alternative.
+  - New window: `layout.open { new_window: true }` builds the tabs in a
+    new workspace with no default tab, named after the layout, and returns
+    its id. The frontend then calls the host's
+    `open_new_window { workspace_id }` — the path tear-off and
+    notification click-to-pane already use — and the new window's start-up
+    (`app-init.ts`, `workspaceId` in its URL) attaches to that workspace
+    through `CreateWindow`, so no new host or start-up plumbing was needed.
+  - If the host can't open the window, the frontend deletes the new
+    workspace and reports it, as a failed tear-off does. Nothing is left in
+    a workspace no window shows.
+  - If none of the file's tabs can be built, `layout.open` deletes the
+    empty workspace itself and fails.
 - **Rebuild:** `session_restore::replay_tabs` — the restore-on-relaunch
   replay, factored out so both callers share it — creates the tabs, blocks
   and trees in the window's workspace.
@@ -376,7 +385,7 @@ people it's meant to be shared with.
 |---|---|---|
 | **1** | ☰ → **Layouts** → **Save layout…** (between Opacity and the Settings divider, per the 08-13 spec §5.1). Native Save dialog. `layout.save` RPC writes the file. | exactly the request |
 | 2 | Layouts → **Open layout…**: preview, trust, add as tabs, placeholders, held commands | built — §3.6, PR #3825 |
-| 2b | "Open in a new window" | needs window-create plumbing (§3.6) |
+| 2b | "Open in a new window" (the default) | built — §3.6 |
 | 3 | Named layouts from the default folder listed in the submenu; "Save changes to <name>"; recent list; optional "open at startup" | the 08-13 spec's §5.1 list, file-backed |
 | 4 | Decision-gated: ABF `kind` + `workspace` bundles (layout + referenced agents) | §5.2 |
 | — | Converge the session snapshot and `PresetNode` onto this format | removes two ad-hoc formats; separate PRs |

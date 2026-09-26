@@ -2,6 +2,10 @@
 
 export type LayoutOpenResult = { 
 /**
+ * The workspace the tabs were added to.
+ */
+workspace_id: string, 
+/**
  * The tabs that were created, in order.
  */
 tab_ids: Array<string>, 

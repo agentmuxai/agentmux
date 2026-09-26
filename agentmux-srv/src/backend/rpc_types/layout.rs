@@ -64,23 +64,32 @@ pub struct LayoutPreviewResult {
     pub notes: Vec<String>,
 }
 
-/// Open a layout file's tabs in an existing window (added as new tabs —
-/// nothing that's open is replaced).
+/// Open a layout file's tabs: added as new tabs to an existing window
+/// (nothing that's open is replaced), or into a new workspace for a new
+/// window to show.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandLayoutOpenData {
     pub path: String,
+    /// The window to add the tabs to. Not used with `new_window`.
     pub window_id: String,
     /// Start the file's terminal commands. Defaults to whether the file is
     /// trusted (see `LayoutPreviewResult::trusted`).
     #[serde(default)]
     #[ts(optional)]
     pub run_commands: Option<bool>,
+    /// Build the tabs in a new workspace of their own instead; the caller
+    /// then opens a window onto `LayoutOpenResult::workspace_id`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub new_window: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct LayoutOpenResult {
+    /// The workspace the tabs were added to.
+    pub workspace_id: String,
     /// The tabs that were created, in order.
     pub tab_ids: Vec<String>,
     /// What couldn't be reproduced, including agents that didn't start.
