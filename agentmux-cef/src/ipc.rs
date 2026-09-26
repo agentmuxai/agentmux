@@ -24,6 +24,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use agentmux_common::secret_eq::secret_eq;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
@@ -136,7 +137,7 @@ async fn handle_ipc(
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|token| token == state.ipc_token)
+        .map(|token| secret_eq(token.as_bytes(), state.ipc_token.as_bytes()))
         .unwrap_or(false);
 
     if !authorized {

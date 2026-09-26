@@ -20,6 +20,8 @@
 //! `X-AuthKey`. See `handle_register`'s doc comments for the full threat
 //! model (reagent P0, PR #2662, 2026-08-19).
 
+use agentmux_common::secret_eq::secret_eq;
+
 use crate::backend::service::{WebCallType, WebReturnType};
 
 use super::super::{AppState, HostIpc};
@@ -143,7 +145,7 @@ async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType 
     // accepted as a harmless no-op without needing a liveness probe.
     let mut guard = state.host_ipc.lock().await;
     if let Some(existing) = guard.as_ref() {
-        if existing.port == port && existing.token == token {
+        if existing.port == port && secret_eq(existing.token.as_bytes(), token.as_bytes()) {
             return WebReturnType::success_empty();
         }
 
