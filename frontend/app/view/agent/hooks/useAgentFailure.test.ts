@@ -681,4 +681,43 @@ describe("useAgentFailure — Copy error", () => {
         });
         delete document.execCommand;
     });
+
+    // ReAgent P2 on #3838: copyState is "same class as expanded/retrying" per
+    // useAgentFailure's own doc comment, so a new failure arriving inside the
+    // 2s "Copied" window must not leave that label on the NEW failure's row.
+    it("resets copyState when a new failure event arrives inside the 2s window", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", transient());
+
+            button(ui, "Copy error")!.onClick!(undefined as unknown as MouseEvent);
+            for (let i = 0; i < 6; i++) await Promise.resolve();
+            expect(button(ui, "Copied")).toBeDefined();
+
+            // A second, distinct failure arrives before the 2s reset fires.
+            fire("agentfailure", { code: "overloaded", title: "Overloaded", detail: "529", retryable: true });
+            expect(button(ui, "Copied")).toBeUndefined();
+            expect(button(ui, "Copy error")).toBeDefined();
+            dispose();
+        });
+    });
+
+    it("resets copyState when the row is dismissed", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", transient());
+            button(ui, "Copy error")!.onClick!(undefined as unknown as MouseEvent);
+            for (let i = 0; i < 6; i++) await Promise.resolve();
+            expect(button(ui, "Copied")).toBeDefined();
+
+            const dismiss = ui.row()?.actions.find((a) => a.glyph === "×");
+            dismiss!.onClick!(undefined as unknown as MouseEvent);
+            fire("agentfailure", transient());
+            expect(button(ui, "Copied")).toBeUndefined();
+            expect(button(ui, "Copy error")).toBeDefined();
+            dispose();
+        });
+    });
 });

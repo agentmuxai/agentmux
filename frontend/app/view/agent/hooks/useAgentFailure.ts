@@ -206,12 +206,23 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         setTakeoverArmed(false);
     };
 
+    // ReAgent P2 on #3838: copyState is "same class as expanded/retrying" per
+    // its own doc comment, so it must reset everywhere those do — otherwise
+    // a Copy click on failure A can leave a stale "Copied"/"Copy failed"
+    // label on failure B if B arrives within the 2s window.
+    const resetCopyState = () => {
+        clearTimeout(copyResetTimer);
+        copyResetTimer = undefined;
+        setCopyState("idle");
+    };
+
     const clear = () => {
         cancelCountdown();
         disarmTakeover();
         opts.model.dispatchPane({ type: "FailureCleared" });
         setExpanded(false);
         setRetrying(false);
+        resetCopyState();
     };
 
     // End the failure *episode*: clear the row AND restore the auto-retry
@@ -278,6 +289,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 disarmTakeover();
                 setExpanded(false);
                 setRetrying(false);
+                resetCopyState();
                 // Reducer-side: records state.failure AND unconditionally ends
                 // a still-working turn — see FailureObserved's reducer case.
                 opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
