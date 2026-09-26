@@ -611,6 +611,15 @@ interface AgentComposerStripProps {
      *  address, shortened to 22 characters (`shortenEmail`); the tooltip keeps
      *  it whole. Ignored unless `authStatus` is "authenticated". */
     authEmail?: string;
+    /** Whether this agent has another account to switch to (same provider,
+     *  signed in — `computeAccountBindCandidates`). While signed in, idle, and
+     *  true, the chip is a link that calls `onSwitchAccount`; otherwise it stays
+     *  plain text. SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md. */
+    canSwitchAccount?: boolean;
+    /** Opens the account picker at the click. A switch restarts the agent, so
+     *  the chip only offers it when no turn is running (`loading`) and no
+     *  compaction is in progress (`compacting`). */
+    onSwitchAccount?: (e: MouseEvent) => void;
 
     /** Cumulative cost/tokens/duration for this pane, shown in the
      *  session-stats popover the context reading opens. */
@@ -790,30 +799,54 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // of the resize one (reagent P2, PR #3282). See
                 // docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
                 side: "left",
-                interactive: false,
-                render: () => (
-                    <span
-                        class="agent-composer-strip-auth"
-                        classList={{
-                            "agent-composer-strip-auth--ok": props.authStatus === "authenticated",
-                            "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
-                        }}
-                        title={
-                            props.authStatus === "authenticated"
-                                ? props.authEmail
-                                    ? `Signed in as ${props.authEmail}`
-                                    : "Signed in to this agent's provider"
-                                : "Not signed in — click Log in to continue"
-                        }
-                    >
-                        <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
-                        {props.authStatus === "authenticated"
-                            ? props.authEmail
-                                ? shortenEmail(props.authEmail)
-                                : "Logged in"
-                            : "Not logged in"}
-                    </span>
-                ),
+                // Interactive whenever the chip CAN be a "switch account"
+                // link. Static, not tied to whether it is one right now (idle,
+                // has candidates): the flag feeds edge-priority ordering, and
+                // flipping it with every turn would reorder the strip.
+                interactive: true,
+                render: () => {
+                    const authed = () => props.authStatus === "authenticated";
+                    const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
+                    // A switch restarts the agent (bindAccountToAgent ends in a
+                    // forced controller resync), which would kill a turn or
+                    // compaction in flight.
+                    const busy = () => !!props.loading || props.compacting != null;
+                    const canSwitch = () => authed() && hasOthers() && !busy();
+                    const label = () =>
+                        authed() ? (props.authEmail ? shortenEmail(props.authEmail) : "Logged in") : "Not logged in";
+                    const title = () => {
+                        if (!authed()) return "Not signed in — click Log in to continue";
+                        const base = props.authEmail
+                            ? `Signed in as ${props.authEmail}`
+                            : "Signed in to this agent's provider";
+                        if (!hasOthers()) return base;
+                        return busy()
+                            ? `${base}. Switching accounts restarts the agent — wait for the current turn to finish.`
+                            : `${base}. Click to switch account.`;
+                    };
+                    return (
+                        <span
+                            class="agent-composer-strip-auth"
+                            classList={{
+                                "agent-composer-strip-auth--ok": authed(),
+                                "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
+                            }}
+                            title={title()}
+                        >
+                            <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
+                            <Show when={canSwitch()} fallback={label()}>
+                                <button
+                                    type="button"
+                                    class="agent-composer-strip-auth-link"
+                                    aria-haspopup="menu"
+                                    onClick={(e) => props.onSwitchAccount?.(e)}
+                                >
+                                    {label()}
+                                </button>
+                            </Show>
+                        </span>
+                    );
+                },
             });
         }
 

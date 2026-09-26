@@ -475,6 +475,34 @@
     &--bad { color: var(--error-color); }
 }
 
+// The chip as a "switch account" link (only while signed in, idle, and
+// another account of the same provider exists). A button, not an <a>: it
+// opens a picker, it does not navigate. Dotted underline at rest so it reads
+// as clickable, solid on hover/focus. No chevron — the strip is width-measured.
+// SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A.
+.agent-composer-strip-auth-link {
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+
+    &:hover,
+    &:focus-visible {
+        text-decoration-style: solid;
+    }
+
+    &:focus-visible {
+        outline: 1px solid currentColor;
+        outline-offset: 2px;
+    }
+}
+
 .agent-composer-strip-auth-dot {
     width: 6px;
     height: 6px;
