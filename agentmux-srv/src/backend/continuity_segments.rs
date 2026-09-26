@@ -390,6 +390,22 @@ fn same_dir(a: &str, b: &str) -> bool {
     norm(a) == norm(b)
 }
 
+/// A head whose segment predates `identity_key` (recorded by a build
+/// before #3839) takes the identity from its own config dir's
+/// `.claude.json`, so an agent's first upgrade from such a build can still
+/// relocate (spec §4.1). That file names whoever is signed in there now,
+/// which for an account's own dir is the login the session ran under unless
+/// the dir was since re-logged-into as someone else; a recorded key always
+/// wins. Unreadable (the dir is gone) stays unknown, which never relocates.
+pub(crate) fn with_legacy_identity(mut head: Head) -> Head {
+    if head.identity_key.is_none() {
+        if let Some(dir) = head.config_dir.as_deref() {
+            head.identity_key = crate::identity::account_email::identity_key_from_oauth_dir(&head.provider, dir);
+        }
+    }
+    head
+}
+
 /// Where the agent's conversation was last, read from its chain in `fs`.
 /// `None` when the UID has no chain.
 pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<Head> {
@@ -664,6 +680,40 @@ mod tests {
             Event::End { provider_bytes_end, .. } => assert_eq!(provider_bytes_end, None),
             other => panic!("expected an end event, got {other:?}"),
         }
+    }
+
+    // A head recorded before identity keys existed (spec §4.1).
+
+    fn login_dir(account: &str, org: &str) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join(".claude.json"),
+            format!(r#"{{"oauthAccount":{{"accountUuid":"{account}","organizationUuid":"{org}"}}}}"#),
+        )
+        .unwrap();
+        d
+    }
+
+    #[test]
+    fn a_legacy_head_takes_its_identity_from_its_own_config_dir() {
+        let dir = login_dir("acc-1", "org-1");
+        let path = dir.path().to_string_lossy().to_string();
+        let legacy = Head { config_dir: Some(path.clone()), provider: "claude".into(), ..head("s2", None) };
+        let expected = crate::identity::account_email::identity_key_from_oauth_dir("claude", &path);
+        assert!(expected.is_some());
+        assert_eq!(with_legacy_identity(legacy).identity_key, expected);
+    }
+
+    #[test]
+    fn a_recorded_identity_always_wins_and_an_unreadable_dir_stays_unknown() {
+        let dir = login_dir("acc-1", "org-1");
+        let path = dir.path().to_string_lossy().to_string();
+        let recorded = Head { config_dir: Some(path), provider: "claude".into(), ..head("s2", Some("k-recorded")) };
+        assert_eq!(with_legacy_identity(recorded).identity_key.as_deref(), Some("k-recorded"));
+        let gone = Head { config_dir: Some("/no/such/dir".into()), provider: "claude".into(), ..head("s2", None) };
+        assert_eq!(with_legacy_identity(gone).identity_key, None);
+        let no_dir = Head { provider: "claude".into(), ..head("s2", None) };
+        assert_eq!(with_legacy_identity(no_dir).identity_key, None);
     }
 
     #[test]

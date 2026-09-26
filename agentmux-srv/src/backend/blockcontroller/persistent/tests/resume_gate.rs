@@ -368,3 +368,31 @@ fn a_session_as_agentmux_left_it_is_resumed_in_place() {
     assert_eq!(held(&c).as_deref(), Some("s2"));
     assert!(!c.inner.lock().unwrap().fork_next);
 }
+
+/// An agent's first upgrade from a build before identity keys (#3839): its
+/// head segment has no key, so the key comes from the old login's own
+/// `.claude.json`, and the same person's new login still relocates.
+#[test]
+fn a_head_recorded_before_identity_keys_still_relocates_for_the_same_person() {
+    let f = fixture(&[]);
+    let _key = sign_in(&f, "acc-1", "org-1");
+    let old = other_login("acc-1", "org-1", "s2");
+    segment_in(&f.gfs, "s2", 2_000, None, Some(&old.path().to_string_lossy()));
+    let c = controller_holding(Some("s2"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert_eq!(held(&c).as_deref(), Some("s2"));
+    assert!(c.inner.lock().unwrap().fork_copy.is_some(), "relocated to fork from");
+}
+
+#[test]
+fn a_head_recorded_before_identity_keys_under_another_person_is_not_relocated() {
+    let f = fixture(&[]);
+    let _key = sign_in(&f, "acc-1", "org-team");
+    let old = other_login("acc-1", "org-personal", "s2");
+    segment_in(&f.gfs, "s2", 2_000, None, Some(&old.path().to_string_lossy()));
+    let c = controller_holding(Some("s2"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert_eq!(held(&c), None);
+    assert!(!here(&f, "s2").exists(), "nothing copied");
+}
+

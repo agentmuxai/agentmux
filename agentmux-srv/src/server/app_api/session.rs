@@ -74,6 +74,7 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                         .and_then(|uid| {
                             let gfs = crate::backend::agent_session::global_transcript_store()?;
                             crate::backend::continuity_segments::chain_head(gfs, uid.trim())
+                                .map(crate::backend::continuity_segments::with_legacy_identity)
                         });
                     input.identity_key =
                         crate::identity::account_email::identity_key_from_oauth_dir("claude", &input.config_dir);

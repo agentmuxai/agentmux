@@ -133,6 +133,15 @@ It's recorded on each segment `Start` as `identity_key: Option<String>`
 (`#[serde(default, skip_serializing_if = "Option::is_none")]`, same compatibility pattern as
 `lease_epoch`).
 
+**Heads recorded before identity keys.** A segment recorded by a build before #3839 carries no
+key, and §4.3 requires both keys, so an agent's first upgrade from such a build could never
+relocate. For a head whose segment has no key, the gate reads the key from the head's own
+config dir (`continuity_segments::with_legacy_identity`). That file names whoever is signed in
+there now, which for an account's own dir is the login the session ran under, unless the dir
+was since re-logged-into as someone else. A recorded key always wins, and an unreadable dir
+(a removed channel) stays unknown, which never relocates. This matters only once per agent:
+every segment from #3839 on records its key.
+
 ### 4.2 The gate
 A pure decision in `continuity_segments.rs`, called once in `spawn_process` after the id is
 hydrated and after first-spawn continuation, before `requested_sid` is read. The preflight
