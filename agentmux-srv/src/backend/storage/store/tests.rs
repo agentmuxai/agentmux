@@ -4153,6 +4153,60 @@
             .unwrap());
     }
 
+    /// #3586: recording a launch mirrors the local row, whose session id can
+    /// be older than one another channel has since written to the shared
+    /// registry. The launch must not roll the registry back; a session
+    /// capture (`instance_update_partial` with a session id) still moves it.
+    #[test]
+    fn a_launch_mirror_keeps_the_registrys_newer_session_id() {
+        use crate::backend::storage::InstanceUpdate;
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        store
+            .agent_def_insert(&mut sample_agent("agent-sess", "agent-sess"))
+            .unwrap();
+        let mut inst = make_named_inst("inst-sess", "SessNamed", &agents_root);
+        inst.definition_id = "agent-sess".to_string();
+        inst.session_id = "s-old".to_string();
+        store.instance_create(&inst).unwrap();
+
+        // Another channel resumed the agent and captured a newer session.
+        let mut rec = reg.get("agent-sess").unwrap().unwrap();
+        rec.data.session_id = Some("s-new".to_string());
+        reg.upsert(&rec).unwrap();
+        let session = || reg.get("agent-sess").unwrap().unwrap().data.session_id;
+
+        assert!(store
+            .instance_record_launch("agent-sess", "block-sess", 5_000)
+            .unwrap());
+        assert_eq!(session().as_deref(), Some("s-new"), "a launch");
+        assert_eq!(
+            reg.get("agent-sess").unwrap().unwrap().data.last_launched_at_ms,
+            5_000
+        );
+
+        let mut relaunch = inst.clone();
+        relaunch.session_id = String::new();
+        store.instance_create(&relaunch).unwrap();
+        assert_eq!(session().as_deref(), Some("s-new"), "a session-less fold");
+
+        store
+            .instance_update_partial(
+                "agent-sess",
+                &InstanceUpdate { status: Some("stopped".to_string()), ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(session().as_deref(), Some("s-new"), "a status-only update");
+
+        store
+            .instance_update_partial(
+                "agent-sess",
+                &InstanceUpdate { session_id: Some("s-local".to_string()), ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(session().as_deref(), Some("s-local"), "a session capture");
+    }
+
     /// ReAgent P2 on PR #3262: `registry_def_retire` was the last step in
     /// `instance_delete` still gated on `rows > 0`. Once the dependent purge
     /// and registry sweep went unconditional, that gate left a genuinely
