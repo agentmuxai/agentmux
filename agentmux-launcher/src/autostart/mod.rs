@@ -122,13 +122,14 @@ pub const MACOS_LABEL: &str = "com.agentmux.launcher";
 /// deliberately: the defaults are *true*, which would make a laptop user's
 /// background service silently not start, or die mid-turn on unplug — the
 /// exact "is it actually running?" unreliability WS4 warns about.
-pub fn scheduled_task_xml(exe: &Path) -> String {
+pub fn scheduled_task_xml(exe: &Path, channel: &str) -> String {
     let exe = xml_escape(&exe.display().to_string());
+    let channel = xml_escape(channel);
     format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Starts AgentMux in the background at logon. Created by AgentMux; remove it by turning off auto-start in AgentMux, or with: schtasks /Delete /TN "{id}" /F</Description>
+    <Description>Starts AgentMux in the background at logon. Created by AgentMux; remove it by turning off auto-start in AgentMux, or with: schtasks /Delete /TN "{id}" /F {marker}{channel}]</Description>
     <URI>\{id}</URI>
   </RegistrationInfo>
   <Triggers>
@@ -171,9 +172,15 @@ pub fn scheduled_task_xml(exe: &Path) -> String {
 </Task>
 "#,
         id = AUTOSTART_ID,
-        exe = exe
+        exe = exe,
+        marker = TASK_CHANNEL_MARKER,
+        channel = channel,
     )
 }
+
+/// Marks the owning channel inside the Task's `<Description>`, the only
+/// free-text field Task Scheduler keeps verbatim.
+const TASK_CHANNEL_MARKER: &str = "[agentmux-channel=";
 
 /// macOS LaunchAgent plist.
 ///
@@ -182,8 +189,9 @@ pub fn scheduled_task_xml(exe: &Path) -> String {
 /// so letting `launchd` also restart it would give two supervisors fighting
 /// over the same process — and would make a user-requested Quit from the tray
 /// come straight back, which is worse than useless.
-pub fn launch_agent_plist(exe: &Path) -> String {
+pub fn launch_agent_plist(exe: &Path, channel: &str) -> String {
     let exe = xml_escape(&exe.display().to_string());
+    let channel = xml_escape(channel);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -202,31 +210,90 @@ pub fn launch_agent_plist(exe: &Path) -> String {
     <false/>
     <key>ProcessType</key>
     <string>Interactive</string>
+    <key>{channel_key}</key>
+    <string>{channel}</string>
 </dict>
 </plist>
 "#,
         label = MACOS_LABEL,
-        exe = exe
+        exe = exe,
+        channel_key = PLIST_CHANNEL_KEY,
+        channel = channel,
     )
 }
+
+/// Owning channel, as a plist key launchd ignores.
+const PLIST_CHANNEL_KEY: &str = "AgentMuxChannel";
 
 /// Linux XDG autostart desktop entry.
 ///
 /// `X-GNOME-Autostart-enabled=true` is included because some desktops treat a
 /// missing value as disabled. `Terminal=false` keeps it from spawning a
 /// console window on desktops that honor it.
-pub fn xdg_desktop_entry(exe: &Path) -> String {
+///
+/// `TryExec` makes the entry inert once the target is gone (app removed,
+/// AppImage deleted): the session skips it instead of failing at every login
+/// (`SPEC_START_WITH_OS_2026_09_25.md` §3.1). `X-GNOME-Autostart-Delay` gives
+/// the tray host time to come up first (§3.4). `X-AgentMux-Channel` records
+/// which build owns the entry (§3.5).
+pub fn xdg_desktop_entry(exe: &Path, channel: &str) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=AgentMux\n\
          Comment=Starts AgentMux in the background at login\n\
+         TryExec={try_exec}\n\
          Exec=\"{exe}\" {flag}\n\
          Terminal=false\n\
-         X-GNOME-Autostart-enabled=true\n",
+         X-GNOME-Autostart-enabled=true\n\
+         X-GNOME-Autostart-Delay=10\n\
+         {channel_key}={channel}\n",
+        try_exec = desktop_string_escape(&exe.display().to_string()),
         exe = desktop_exec_escape(exe),
         flag = BACKGROUND_FLAG,
+        channel_key = XDG_CHANNEL_KEY,
+        channel = desktop_string_escape(channel),
     )
+}
+
+/// Owning channel, as a vendor key (`X-` keys are ignored by the session).
+const XDG_CHANNEL_KEY: &str = "X-AgentMux-Channel";
+
+/// Escape a plain desktop-entry string value (`TryExec`, vendor keys), per the
+/// Desktop Entry spec's `\\`, `\n`, `\t`, `\r` escapes. A raw newline would
+/// end the line and let a path inject keys, as `desktop_exec_escape` explains.
+fn desktop_string_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn desktop_string_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('s') => out.push(' '),
+            Some(o) => out.push(o),
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// Escape a path for use inside a **quoted argument** of a desktop entry's
@@ -349,14 +416,14 @@ pub fn is_enabled() -> bool {
 /// Register auto-start for `exe`. Idempotent: re-registering an existing
 /// entry replaces it, which is also how an upgrade repoints the artifact at a
 /// new install path.
-pub fn enable(exe: &Path) -> Result<(), String> {
+pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         // Register from XML — the only way to set LogonType/battery settings;
         // the flag-based `schtasks /Create /SC ONLOGON` form cannot express
         // them. The XML must be UTF-16 per the Task Scheduler schema
         // declaration, so it is written as UTF-16LE with a BOM.
-        let xml = scheduled_task_xml(exe);
+        let xml = scheduled_task_xml(exe, channel);
         let dir = std::env::temp_dir();
         let path = dir.join(format!("agentmux-autostart-{}.xml", std::process::id()));
         let mut bytes: Vec<u8> = vec![0xFF, 0xFE]; // UTF-16LE BOM
@@ -392,9 +459,9 @@ pub fn enable(exe: &Path) -> Result<(), String> {
     {
         let path = artifact_path().ok_or_else(|| "unsupported platform".to_string())?;
         let contents = if cfg!(target_os = "macos") {
-            launch_agent_plist(exe)
+            launch_agent_plist(exe, channel)
         } else {
-            xdg_desktop_entry(exe)
+            xdg_desktop_entry(exe, channel)
         };
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -458,6 +525,189 @@ pub fn disable() -> Result<(), String> {
 /// - `--enable-autostart`  — register, using this executable's own path
 /// - `--disable-autostart` — remove; idempotent, safe to run unconditionally
 /// - `--autostart-status`  — print `enabled` / `disabled`, exit 0 either way
+/// The channel this launcher belongs to, which owns any entry it writes
+/// (`SPEC_START_WITH_OS_2026_09_25.md` §3.5). Resolved the same way as the
+/// data dir; `"unknown"` only if that resolution fails.
+pub fn current_channel() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            let dir = exe.parent()?.to_path_buf();
+            crate::data_dir::resolve_paths(&dir, env!("CARGO_PKG_VERSION")).ok()
+        })
+        .map(|p| p.common.channel)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Env var the Linux AppRun and wrappers set to their own path right before
+/// they exec the launcher.
+const STABLE_EXE_ENV: &str = "AGENTMUX_STABLE_EXE";
+
+static STABLE_EXE: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+
+/// Read `AGENTMUX_STABLE_EXE` and remove it from this process's env, so no
+/// child (host, srv, agent shells, a dev build started from a pane) inherits
+/// a path that belongs to this launch. `APPIMAGE` is not used for the same
+/// reason: the AppImage runtime's copy leaks into every agent shell.
+///
+/// MUST be called from `main` before any thread exists (`remove_var`).
+pub fn take_stable_exe_env() {
+    let value = std::env::var_os(STABLE_EXE_ENV).filter(|v| !v.is_empty());
+    std::env::remove_var(STABLE_EXE_ENV);
+    let _ = STABLE_EXE.set(value);
+}
+
+/// What the login entry should run: something that survives updates
+/// (`SPEC_START_WITH_OS_2026_09_25.md` §3.1), not this process's own path.
+///
+/// 1. `AGENTMUX_STABLE_EXE` as captured by `take_stable_exe_env`: the
+///    AppImage file (set by AppRun), or the deb/rpm/tarball wrapper that sets
+///    the `LD_LIBRARY_PATH` the raw launcher cannot run without.
+/// 2. `current_exe()`: Windows and macOS installs, portable and dev builds.
+pub fn stable_target() -> Result<std::path::PathBuf, String> {
+    stable_target_from(
+        STABLE_EXE.get().cloned().flatten(),
+        std::env::current_exe().map_err(|e| e.to_string()),
+    )
+}
+
+fn stable_target_from(
+    stable: Option<std::ffi::OsString>,
+    current: Result<std::path::PathBuf, String>,
+) -> Result<std::path::PathBuf, String> {
+    match stable.map(std::path::PathBuf::from) {
+        Some(p) if p.is_file() => Ok(p),
+        _ => current,
+    }
+}
+
+/// The login entry as it stands on this machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    /// What it runs, if readable.
+    pub target: Option<String>,
+    /// Which channel wrote it. `None` for an entry from before ownership was
+    /// recorded.
+    pub channel: Option<String>,
+}
+
+/// Read the current entry back from the platform. `None` when there is none.
+pub fn read_entry() -> Option<Entry> {
+    #[cfg(target_os = "windows")]
+    {
+        let out = std::process::Command::new("schtasks")
+            .args(["/Query", "/TN", AUTOSTART_ID, "/XML"])
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        Some(parse_task_xml(&decode_console_output(&out.stdout)))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let text = std::fs::read_to_string(artifact_path()?).ok()?;
+        Some(if cfg!(target_os = "macos") {
+            parse_plist(&text)
+        } else {
+            parse_desktop_entry(&text)
+        })
+    }
+}
+
+/// `schtasks /XML` writes UTF-16LE when its output is redirected.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn decode_console_output(bytes: &[u8]) -> String {
+    let body = bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(bytes);
+    if body.len() >= 2 && body.len() % 2 == 0 && body.iter().skip(1).step_by(2).take(64).all(|b| *b == 0) {
+        let units: Vec<u16> = body.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        return String::from_utf16_lossy(&units);
+    }
+    String::from_utf8_lossy(body).into_owned()
+}
+
+fn between<'a>(s: &'a str, start: &str, end: &str) -> Option<&'a str> {
+    let from = s.find(start)? + start.len();
+    let len = s[from..].find(end)?;
+    Some(&s[from..from + len])
+}
+
+fn xml_unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_task_xml(xml: &str) -> Entry {
+    let target = between(xml, "<Command>", "</Command>")
+        .map(|c| xml_unescape(c.trim()).trim_matches('"').to_string());
+    let channel = between(xml, "<Description>", "</Description>")
+        .and_then(|d| between(d, TASK_CHANNEL_MARKER, "]"))
+        .map(xml_unescape);
+    Entry { target, channel }
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_plist(text: &str) -> Entry {
+    let target = between(text, "<key>ProgramArguments</key>", "</array>")
+        .and_then(|a| between(a, "<string>", "</string>"))
+        .map(xml_unescape);
+    let channel = between(text, &format!("<key>{PLIST_CHANNEL_KEY}</key>"), "</string>")
+        .and_then(|rest| rest.split_once("<string>").map(|(_, v)| xml_unescape(v)));
+    Entry { target, channel }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_desktop_entry(text: &str) -> Entry {
+    let value = |key: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix('=')))
+            .map(desktop_string_unescape)
+    };
+    // `TryExec` is the plain path; an entry from before it existed has none,
+    // reads as "target unknown", and gets rewritten.
+    Entry { target: value("TryExec"), channel: value(XDG_CHANNEL_KEY) }
+}
+
+/// What to do to bring the login entry in line with `app:startatlogin`
+/// (`SPEC_START_WITH_OS_2026_09_25.md` §3.9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Plan {
+    /// Already right, or not ours to touch.
+    Nothing,
+    /// Write (or rewrite) the entry for this channel and target.
+    Write,
+    /// Remove this channel's entry.
+    Remove,
+    /// An entry from before the setting existed, and the setting was never
+    /// set: the user turned start-at-login on with the old toggle, so record
+    /// that as `app:startatlogin = true` instead of removing it.
+    Adopt,
+}
+
+/// Pure decision. `setting` is `app:startatlogin`, `None` when never set.
+///
+/// - On: write unless the entry already runs `target` for this channel. This
+///   also re-points an entry after an update or a move, and takes ownership
+///   from another channel (last enabled wins).
+/// - Off: remove only an entry this channel owns. Another build's entry, or
+///   one from before ownership was recorded, is not this build's to remove.
+/// - Never set: off, except that an unowned (pre-setting) entry is adopted.
+pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target: &str) -> Plan {
+    let owned = |e: &Entry| e.channel.as_deref() == Some(channel);
+    match (setting, entry) {
+        (Some(true), Some(e)) if owned(e) && e.target.as_deref() == Some(target) => Plan::Nothing,
+        (Some(true), _) => Plan::Write,
+        (Some(false), Some(e)) if owned(e) => Plan::Remove,
+        (None, Some(e)) if e.channel.is_none() => Plan::Adopt,
+        _ => Plan::Nothing,
+    }
+}
+
 pub fn handle_cli(args: &[String]) -> bool {
     let has = |v: &str| args.iter().any(|a| a == v);
 
@@ -466,10 +716,8 @@ pub fn handle_cli(args: &[String]) -> bool {
         return true;
     }
     if has("--enable-autostart") {
-        // Register the CURRENT executable, so an install that moved keeps a
-        // correct entry after the user re-runs this.
-        match std::env::current_exe() {
-            Ok(exe) => match enable(&exe) {
+        match stable_target() {
+            Ok(exe) => match enable(&exe, &current_channel()) {
                 Ok(()) => println!("auto-start enabled ({})", exe.display()),
                 Err(e) => {
                     eprintln!("failed to enable auto-start: {}", e);
@@ -477,7 +725,7 @@ pub fn handle_cli(args: &[String]) -> bool {
                 }
             },
             Err(e) => {
-                eprintln!("failed to resolve current executable: {}", e);
+                eprintln!("failed to resolve the auto-start target: {}", e);
                 std::process::exit(1);
             }
         }
@@ -511,7 +759,7 @@ mod autostart_tests {
         // Service: Session-0 isolation means a service can never own a tray
         // icon or show a window. InteractiveToken is what puts it in the
         // user's own session.
-        let xml = scheduled_task_xml(&exe());
+        let xml = scheduled_task_xml(&exe(), "test");
         assert!(xml.contains("<LogonType>InteractiveToken</LogonType>"));
         assert!(
             xml.contains("<RunLevel>LeastPrivilege</RunLevel>"),
@@ -525,7 +773,7 @@ mod autostart_tests {
         // laptop user's "background service" silently fail to start on
         // battery, or die mid-turn on unplug — the unreliable-indicator
         // failure WS4 exists to prevent.
-        let xml = scheduled_task_xml(&exe());
+        let xml = scheduled_task_xml(&exe(), "test");
         assert!(xml.contains("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"));
         assert!(xml.contains("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"));
     }
@@ -534,7 +782,7 @@ mod autostart_tests {
     fn scheduled_task_has_no_execution_time_limit() {
         // PT0S = unlimited. The default is 72 hours, after which Task
         // Scheduler would terminate a long-running background service.
-        let xml = scheduled_task_xml(&exe());
+        let xml = scheduled_task_xml(&exe(), "test");
         assert!(xml.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
     }
 
@@ -543,7 +791,7 @@ mod autostart_tests {
         // Install paths can contain `&` (and on Unix, quotes/angle brackets).
         // Unescaped, that produces XML that Task Scheduler rejects — or worse,
         // silently misparses.
-        let xml = scheduled_task_xml(Path::new(r"C:\Tools & Apps\<agentmux>.exe"));
+        let xml = scheduled_task_xml(Path::new(r"C:\Tools & Apps\<agentmux>.exe"), "test");
         assert!(xml.contains("Tools &amp; Apps"));
         assert!(xml.contains("&lt;agentmux&gt;"));
         assert!(
@@ -557,7 +805,7 @@ mod autostart_tests {
         // KeepAlive=false is deliberate: the launcher owns its own restart
         // policy, and a tray Quit that launchd immediately undid would be
         // worse than having no Quit at all.
-        let plist = launch_agent_plist(Path::new("/Applications/AgentMux.app/Contents/MacOS/agentmux"));
+        let plist = launch_agent_plist(Path::new("/Applications/AgentMux.app/Contents/MacOS/agentmux"), "test");
         assert!(plist.contains("<key>RunAtLoad</key>\n    <true/>"));
         assert!(plist.contains("<key>KeepAlive</key>\n    <false/>"));
         assert!(plist.contains(MACOS_LABEL));
@@ -565,7 +813,7 @@ mod autostart_tests {
 
     #[test]
     fn xdg_entry_is_a_valid_autostart_desktop_file() {
-        let d = xdg_desktop_entry(Path::new("/opt/agentmux/agentmux"));
+        let d = xdg_desktop_entry(Path::new("/opt/agentmux/agentmux"), "test");
         assert!(d.starts_with("[Desktop Entry]\n"));
         assert!(d.contains("Type=Application\n"));
         assert!(d.contains("X-GNOME-Autostart-enabled=true\n"));
@@ -579,7 +827,7 @@ mod autostart_tests {
     fn xdg_entry_cannot_be_injected_with_extra_keys_via_the_path() {
         // A newline in the path would otherwise terminate the Exec= line and
         // let the rest be parsed as further desktop-entry keys.
-        let d = xdg_desktop_entry(Path::new("/opt/x\nHidden=true"));
+        let d = xdg_desktop_entry(Path::new("/opt/x\nHidden=true"), "test");
         assert!(!d.contains("\nHidden=true\n"), "newline must not survive into the file");
     }
 
@@ -610,11 +858,11 @@ mod autostart_tests {
         );
 
         let exe = std::env::current_exe().expect("current_exe");
-        enable(&exe).expect("enable should succeed");
+        enable(&exe, "test").expect("enable should succeed");
         assert!(is_enabled(), "enable() must be observable through the platform");
 
         // Idempotent re-enable (the upgrade path: repoint at a new exe).
-        enable(&exe).expect("re-enable should replace, not fail");
+        enable(&exe, "test").expect("re-enable should replace, not fail");
         assert!(is_enabled());
 
         disable().expect("disable should succeed");
@@ -663,7 +911,7 @@ mod autostart_tests {
     fn exec_escaping_covers_the_desktop_entry_grammar() {
         // Every one of these is legal in a Unix path and each changes how the
         // Exec value tokenizes if left raw.
-        let d = xdg_desktop_entry(Path::new(r#"/opt/a"b\c`d$e%f/agentmux"#));
+        let d = xdg_desktop_entry(Path::new(r#"/opt/a"b\c`d$e%f/agentmux"#), "test");
         assert!(d.contains(r#"\"b"#), "quote must be escaped, not end the argument");
         assert!(d.contains(r"\\c"), "backslash must be escaped");
         assert!(d.contains(r"\`d"), "backtick must be escaped");
@@ -676,8 +924,102 @@ mod autostart_tests {
         // All three must start the app in background mode; a plain launch
         // would pop a window in the user's face at every login, which is the
         // opposite of what auto-start is for.
-        assert!(scheduled_task_xml(&exe()).contains("--background"));
-        assert!(launch_agent_plist(&exe()).contains("<string>--background</string>"));
-        assert!(xdg_desktop_entry(&exe()).contains("--background"));
+        assert!(scheduled_task_xml(&exe(), "test").contains("--background"));
+        assert!(launch_agent_plist(&exe(), "test").contains("<string>--background</string>"));
+        assert!(xdg_desktop_entry(&exe(), "test").contains("--background"));
+    }
+
+    // ── SPEC_START_WITH_OS_2026_09_25 ─────────────────────────────────────
+
+    fn entry(target: &str, channel: Option<&str>) -> Entry {
+        Entry { target: Some(target.to_string()), channel: channel.map(str::to_string) }
+    }
+
+    #[test]
+    fn plan_on_writes_unless_the_entry_is_already_ours_and_current() {
+        let t = "/home/u/Desktop/AgentMux.AppImage";
+        assert_eq!(plan(Some(true), None, "stable", t), Plan::Write);
+        assert_eq!(plan(Some(true), Some(&entry(t, Some("stable"))), "stable", t), Plan::Nothing);
+        // An update or a move: same owner, old path.
+        assert_eq!(plan(Some(true), Some(&entry("/old/path", Some("stable"))), "stable", t), Plan::Write);
+        // Another build's entry: turning it on here takes it over.
+        assert_eq!(plan(Some(true), Some(&entry(t, Some("local-main-x"))), "stable", t), Plan::Write);
+    }
+
+    #[test]
+    fn plan_off_removes_only_this_channels_entry() {
+        let t = "/opt/agentmux/agentmux";
+        assert_eq!(plan(Some(false), Some(&entry(t, Some("stable"))), "stable", t), Plan::Remove);
+        assert_eq!(plan(Some(false), Some(&entry(t, Some("local-main-x"))), "stable", t), Plan::Nothing);
+        assert_eq!(plan(Some(false), Some(&entry(t, None)), "stable", t), Plan::Nothing);
+        assert_eq!(plan(Some(false), None, "stable", t), Plan::Nothing);
+    }
+
+    /// Off by default, but a user who turned it on with the old toggle keeps it.
+    #[test]
+    fn plan_never_set_is_off_but_adopts_an_entry_from_before_the_setting() {
+        let t = "/x";
+        assert_eq!(plan(None, None, "stable", t), Plan::Nothing);
+        assert_eq!(plan(None, Some(&entry(t, None)), "stable", t), Plan::Adopt);
+        assert_eq!(plan(None, Some(&entry(t, Some("local-main-x"))), "stable", t), Plan::Nothing);
+    }
+
+    #[test]
+    fn every_artifact_reads_back_its_own_target_and_channel() {
+        let exe = Path::new("/home/u/My Apps/Agent&Mux.AppImage");
+        let want = Entry { target: Some(exe.display().to_string()), channel: Some("local-main-b28b7a".into()) };
+        assert_eq!(parse_desktop_entry(&xdg_desktop_entry(exe, "local-main-b28b7a")), want);
+        assert_eq!(parse_plist(&launch_agent_plist(exe, "local-main-b28b7a")), want);
+        let win = Path::new(r"C:\Users\u\AppData\Local\Programs\AgentMux & Co\agentmux.exe");
+        assert_eq!(
+            parse_task_xml(&scheduled_task_xml(win, "stable")),
+            Entry { target: Some(win.display().to_string()), channel: Some("stable".into()) }
+        );
+    }
+
+    /// An entry written before ownership existed has no channel and no TryExec.
+    #[test]
+    fn a_pre_ownership_desktop_entry_reads_as_unowned_with_no_target() {
+        let old = "[Desktop Entry]\nType=Application\nExec=\"/x/agentmux-launcher\" --background\n";
+        assert_eq!(parse_desktop_entry(old), Entry { target: None, channel: None });
+    }
+
+    #[test]
+    fn the_desktop_entry_goes_inert_without_its_target_and_waits_for_the_session() {
+        let d = xdg_desktop_entry(Path::new("/opt/agentmux/agentmux"), "stable");
+        assert!(d.contains("\nTryExec=/opt/agentmux/agentmux\n"), "{d}");
+        assert!(d.contains("\nX-GNOME-Autostart-Delay=10\n"), "{d}");
+        assert!(d.contains("\nX-AgentMux-Channel=stable\n"), "{d}");
+    }
+
+    #[test]
+    fn try_exec_cannot_be_used_to_inject_keys() {
+        let d = xdg_desktop_entry(Path::new("/opt/x\nHidden=true"), "stable");
+        assert!(!d.lines().any(|l| l == "Hidden=true"), "{d}");
+    }
+
+    #[test]
+    fn schtasks_utf16_output_is_decoded() {
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in "<Command>\"C:\\a.exe\"</Command>".encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        assert_eq!(decode_console_output(&bytes), "<Command>\"C:\\a.exe\"</Command>");
+        assert_eq!(decode_console_output(b"plain"), "plain");
+    }
+
+    #[test]
+    fn the_stable_target_prefers_the_wrapper_path_then_this_exe() {
+        let dir = std::env::temp_dir().join(format!("agentmux-stable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wrapper = dir.join("agentmux");
+        std::fs::write(&wrapper, "").unwrap();
+        let cur = || Ok(PathBuf::from("/cache/agentmux-launcher"));
+
+        assert_eq!(stable_target_from(Some(wrapper.clone().into()), cur()), Ok(wrapper.clone()));
+        // A value pointing nowhere is skipped, not written.
+        assert_eq!(stable_target_from(Some(dir.join("gone").into()), cur()), cur());
+        assert_eq!(stable_target_from(None, cur()), cur());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

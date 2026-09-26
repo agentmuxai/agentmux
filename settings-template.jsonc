@@ -54,6 +54,9 @@
     // last window closes. Applies at the NEXT launch: the launcher reads this
     // before the app itself is running.
     // "app:runinbackground":      true,
+    // Start at login (off by default). Same switch as the tray menu's
+    // "Start at login".
+    // "app:startatlogin":         false,
     // "app:globalhotkey":         "",
     // "app:defaultnewblock":      "",
     // "app:showoverlayblocknums": false,

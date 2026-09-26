@@ -1,12 +1,15 @@
 # SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates
 
 **Date:** 2026-09-25
-**Status:** proposed — design only; nothing here is built. Phases in §6.
+**Status:** active — the one-property switch (§3.9) and most of Phase 1 ship with this doc in PR #3788; the rest is not started. See §6.
 **Author:** Maricon
 **Trigger:** Repo owner: *"we also want to design a robust 'start with OS' feature."*
 **Builds on:** `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §4 (mechanism choice per platform, WS2)
 and §6 (consent rules); `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md` §4.1 (the Settings toggle).
 **Related:** PR #3785 (tray on by default; a tray that cannot start drops background mode).
+**Owner decisions (2026-09-25):** start at login is **off by default**, with no first-run prompt. It is
+controlled from a Settings toggle **and** a check item in the tray's right-click menu, and both control
+the **same reactive property** (§3.9).
 
 ---
 
@@ -27,9 +30,11 @@ format:
 5. **It can be seen, repaired and removed.** Settings shows whether the entry is present **and valid**
    (target exists), where it points, and which build owns it, with Repair and Disable. Uninstalling the
    app leaves no entry that errors at every login.
-6. **No elevation, no silent enabling.** Per-user mechanisms only. It stays opt-in (§7 Q1).
+6. **No elevation, no silent enabling.** Per-user mechanisms only. Off by default (§4).
+7. **One switch, shown twice.** The Settings toggle and the tray menu's check item are the same
+   property, so they can never disagree (§3.9).
 
-## 2. What exists today
+## 2. What existed before this spec
 
 `agentmux-launcher/src/autostart/mod.rs` registers an entry with `current_exe()` and `--background`.
 It can be driven through `--enable-autostart`, `--disable-autostart` and `--autostart-status`, and the
@@ -65,41 +70,37 @@ everywhere.
 
 ### 3.1 A stable launch target per package format
 
-The entry must point at something that survives updates. The launcher must not guess the package kind
-from its own path. The **wrapper or AppRun that started it says so** in two env vars, set before
-`exec`: `AGENTMUX_PACKAGE_KIND` and `AGENTMUX_STABLE_EXE`. `autostart::stable_target()` uses them and
-falls back to `current_exe()` only for kinds with no wrapper (Windows, macOS).
+The entry must point at something that survives updates, and the launcher must not guess it from its
+own path. The **wrapper or AppRun that started it says so**: each sets `AGENTMUX_STABLE_EXE` to its
+own path right before `exec`. The launcher reads it once at startup and **removes it from its env**
+(`autostart::take_stable_exe_env`), so no child (host, srv, an agent shell, a dev build started from a
+pane) inherits a path that belongs to this launch. `$APPIMAGE` is deliberately not read directly: the
+AppImage runtime's copy leaks into every agent shell, so a dev build run from a pane would register the
+installed AppImage. `autostart::stable_target()` falls back to `current_exe()` when the variable is
+absent or names a missing file.
 
 | Kind | Stable target the entry runs | Who provides it |
 |---|---|---|
-| AppImage | `~/.local/share/agentmux/bin/agentmux`, a symlink to the **current `$APPIMAGE`** | AppRun refreshes it on every launch, next to the existing `install-linux-desktop.sh "$APPIMAGE"` call (`linux-apprun.sh:45-51`). Only when the channel owns autostart (§3.5), so a dev AppImage run once does not steal it. |
-| deb / rpm | `/usr/bin/agentmux` (the wrapper that sets `LD_LIBRARY_PATH`) | The packages already install it |
-| tarball | `<extract dir>/agentmux` wrapper | Already shipped |
-| macOS | The `.app` bundle, registered with `SMAppService` (§3.7). A LaunchAgent fallback points at `Contents/MacOS/agentmux-launcher` inside the bundle's current location. | The bundle |
-| Windows (Inno) | `{autopf}\AgentMux\agentmux.exe` (stable per-user install path) | The installer |
-| Windows (MSIX) | The package's `StartupTask` (§3.7). No task is written. | The manifest |
-| Windows portable / dev | `current_exe()`, marked **movable**: Settings says a move breaks it, and self-heal (§3.2) fixes it on the next manual start. | — |
+| AppImage | The AppImage file itself (`$APPIMAGE`, e.g. `~/Desktop/AgentMux_<ver>.AppImage`) | AppRun exports it (`scripts/linux-apprun.sh`). A newer AppImage re-points the entry on its first start (§3.9), so deleting the old file after that is safe. |
+| deb / rpm | `/usr/bin/agentmux` (the wrapper that sets `LD_LIBRARY_PATH`) | The wrapper exports it |
+| tarball | `<extract dir>/agentmux.sh` | The script exports it |
+| macOS | `current_exe()` inside the `.app` for now; `SMAppService` later (§3.7) | — |
+| Windows (Inno) | `current_exe()`, i.e. `{autopf}\AgentMux\agentmux.exe` (stable per-user install path) | — |
+| Windows (MSIX) | The package's `StartupTask` (§3.7, not built) | The manifest |
+| Windows portable / dev | `current_exe()`; a move is fixed on the next start (§3.9) | — |
 
 **Linux `TryExec=`.** The XDG entry gains `TryExec=<stable target>`. Per the Desktop Entry spec the
 session ignores an entry whose `TryExec` is missing or not executable, so removing the app (or deleting
-the AppImage the symlink points to) makes the entry **inert instead of erroring at every login**. This
+the AppImage it names) makes the entry **inert instead of erroring at every login**. This
 closes G6 on Linux without root touching per-user files.
 
 ### 3.2 Self-heal on every launch
 
-At every launcher start, after winning the single-instance lock and only in the channel that owns the
-entry, the launcher checks the entry against `stable_target()`:
-
-| Entry | Stable target valid | Action |
-|---|---|---|
-| absent | — | nothing (opt-in; never re-enable) |
-| points at the stable target | yes | nothing |
-| points elsewhere (old version, moved) | yes | **rewrite** it; log `autostart: re-pointed <old> → <new>` |
-| any | no | leave it; Settings shows **Broken** with Repair |
-
-Rewriting only what is already enabled is the difference between self-healing and silently enabling.
-A pure `autostart::heal_decision(entry, target, owner, this_channel) -> Heal` keeps the table
-unit-testable.
+Self-heal is the reconcile of §3.9 running on every launcher start. When srv sends the settings on
+connect, the launcher compares the entry with `stable_target()` and this channel. It rewrites an entry
+that points at an old version or a moved file. It rewrites only while the setting is **on**, so it can
+never enable anything by itself. A target that no longer exists is handled by `TryExec` on Linux; a
+Broken/Repair status in Settings is Phase 3.
 
 ### 3.3 Start quietly: no first window when the tray is up
 
@@ -139,8 +140,10 @@ Channels are separate installs that share one login, so one entry, with the owne
   `<Description>`).
 - Enabling from a build **takes ownership** (last enable wins). Settings in every other build shows
   "Start at login is on for *<channel>*", with a button to switch it to this build.
-- Self-heal (§3.2) and the AppImage symlink refresh (§3.1) run only in the owning channel.
-- Disabling from a non-owning build asks first ("This turns off start-at-login for *<channel>*").
+- Turning the setting **off** removes only an entry this channel owns; another build's entry is left
+  alone (built: `autostart::plan`).
+- Not built yet: showing the owning channel in Settings, and asking before a non-owning build turns it
+  off.
 
 This keeps the existing single artifact name, so `disable()` still finds it, while fixing G5.
 
@@ -167,26 +170,74 @@ forwarding** `open_new_window`. A manual second launch keeps forwarding, as toda
 
 `--autostart-status` gains `--json` and returns
 `{ state: "off" | "on" | "broken" | "needs_approval", target, owner_channel, this_channel, movable }`,
-where `broken` means the entry exists but its target does not. Settings renders that status, not a
-boolean, with **Repair** (re-enable to `stable_target()`) and **Disable**. The tray menu gets a
-**Start at login** check item that reads and sets the same state.
+where `broken` means the entry exists but its target does not. Settings will render that status next
+to the switch, with **Repair** (re-apply the setting). Until then, Settings reads the plain
+`--autostart-status` after each change, and says so when the setting is on but nothing is registered.
+
+### 3.9 One property, two switches, one login entry (built)
+
+`app:startatlogin` (bool, **default `false`**) is the single source of truth. srv stores and
+broadcasts it like every other setting.
+
+```
+ Settings toggle ── setconfig ──┐                        ┌─> Settings toggle (reactive)
+                                ├─> srv (settings.json) ─┼─> launcher: tray check item
+ tray check item ── setconfig ──┘   broadcast "config"   └─> launcher: reconcile the OS login entry
+   (via the launcher's srv session)
+```
+
+- **Settings:** the toggle reads and writes `app:startatlogin`, the same way the tray toggle above it
+  works (`notifications-section.tsx`). It no longer asks the launcher to enable anything, and the
+  host's `set_autostart` command is removed. `autostart_status` stays, read-only.
+- **Tray:** a **Start at login** check item between *New Window* and *Quit* on Windows, macOS and Linux
+  (`tray::menu_model`). Clicking it sends `setconfig {"app:startatlogin": !current}` over the launcher's
+  existing srv session (`notify::request_start_at_login`), the same path the tray's "pause
+  notifications" uses. The item shows the value srv last broadcast and is disabled until the first one
+  arrives, so it never guesses. It does not flip itself: the check mark changes when srv's broadcast
+  comes back.
+- **The launcher applies it** (`start_at_login::observe`). srv sends the full config on connect and
+  after every change. The launcher acts only when this key changes: it redraws the tray and reconciles
+  the login entry on a worker thread, using `autostart::plan` (pure, unit-tested):
+
+| `app:startatlogin` | Entry on the machine | Action |
+|---|---|---|
+| on | this channel's, running `stable_target()` | nothing |
+| on | absent, another channel's, or an old or moved target | write it for this channel (takes ownership, re-points) |
+| off | this channel's | remove it |
+| off | another channel's, or one from before ownership was recorded | nothing |
+| never set | one from before ownership was recorded | **adopt**: set `app:startatlogin = true`, since the user turned it on with the old toggle |
+| never set | anything else | nothing (off by default) |
+
+- **Where it runs:** the launcher's srv session now starts on macOS too, with the no-op notification
+  presenter, because it carries this setting. Nothing reconciles while AgentMux is not running; the
+  next start applies whatever the setting says.
+- **CLI verbs** (`--enable-autostart`, `--disable-autostart`, `--autostart-status`) stay as low-level
+  tools for uninstallers and debugging. `--enable-autostart` now writes the stable target and this
+  channel. The setting wins at the next start: an entry this channel owns but that the setting says is
+  off gets removed then.
 
 ## 4. Consent and defaults
 
-- Start-at-login stays **opt-in and off by default**, separate from the tray (which #3785 turns on by
-  default). The tray spec's §6 reasoning still applies: this makes a process start without the user
-  doing anything. Whether to offer it once on first run is §7 Q1.
-- Nothing enables it implicitly: not an installer, not an update, not self-heal (§3.2 only re-points an
-  entry that already exists).
-- Every artifact is removable by `--disable-autostart`, and on Linux it becomes inert when the app is
-  gone (`TryExec`).
+- Start at login is **off by default**, with **no first-run prompt** (owner decision, 2026-09-25). It is
+  separate from the tray, which #3785 turns on by default.
+- Nothing enables it implicitly: not an installer, not an update, not self-heal. The one exception is
+  adopting an entry the user already created with the old toggle (§3.9), which keeps their choice
+  rather than making a new one.
+- Either switch turns it off, and `--disable-autostart` removes the entry. On Linux the entry becomes
+  inert when the app is gone (`TryExec`).
 
 ## 5. Testing
 
-- **Pure, in CI:** artifact generation per platform (existing tests plus `TryExec`, the delay key, the
-  channel key); `stable_target()` for each `AGENTMUX_PACKAGE_KIND`; `heal_decision` over the whole §3.2
-  table; the second-instance decision (§3.6) for background vs manual; the start-hidden decision (§3.3)
-  over `{--background, tray up}`.
+- **Pure, in CI (built):**
+  - every artifact reads back its own target and channel;
+  - `TryExec`, the delay key and the channel key are present and cannot be injected;
+  - `stable_target` prefers the wrapper path and skips a missing one;
+  - `plan` covers the whole §3.9 table;
+  - the tray's check item mirrors the setting and is disabled while the value is unknown;
+  - the launcher parses `app:startatlogin` out of srv's config broadcast;
+  - the Settings toggle is off by default, writes the key, and reports a failed registration.
+- **Pure, in CI (later phases):** the second-instance decision (§3.6) for background vs manual launch;
+  the start-hidden decision (§3.3) over `{--background, tray up}`.
 - **Launcher integration:** a fake StatusNotifier watcher that appears after a delay (a
   `dbus-daemon --session` in the test), asserting the tray starts and the host gets
   `AGENTMUX_START_HIDDEN`; and that one that never appears yields a window and no background mode.
@@ -196,21 +247,23 @@ boolean, with **Repair** (re-enable to `stable_target()`) and **Disable**. The t
 
 ## 6. Phases
 
-| Phase | Content | Fixes |
-|---|---|---|
-| 1 | Linux: `AGENTMUX_PACKAGE_KIND`/`AGENTMUX_STABLE_EXE` from AppRun and the wrappers, the AppImage symlink, `TryExec`, the delay key; self-heal (§3.2); `--background` second instance exits quietly (§3.6) | G1, G4, G6 (Linux), G8 |
-| 2 | Start hidden when the tray is up (§3.3); the Linux watcher wait (§3.4); Explorer-restart icon re-add | G2, G3 |
-| 3 | Owner channel (§3.5) and status JSON, Settings status and Repair, tray menu item (§3.8) | G5, G9 |
-| 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | G6 (Windows), G7 |
+| Phase | Content | State | Fixes |
+|---|---|---|---|
+| 0 | One property, two switches (§3.9): `app:startatlogin` off by default, Settings toggle, tray check item on all three platforms, launcher reconcile with channel ownership | **Built** (PR #3788) | G5, G9 (partly) |
+| 1 | Linux stable target via `AGENTMUX_STABLE_EXE` from AppRun and the wrappers; `TryExec` and the delay key; self-heal (§3.2) | **Built** (PR #3788) | G1, G4, G6 (Linux) |
+| 1b | `--background` second instance exits quietly (§3.6) | Not started | G8 |
+| 2 | Start hidden when the tray is up (§3.3); the Linux watcher wait (§3.4); Explorer-restart icon re-add | Not started | G2, G3 |
+| 3 | Status JSON; Settings status with owner and Repair (§3.8) | Not started | G9 |
+| 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | Not started | G6 (Windows), G7 |
 
-Phase 1 comes first because G1 is a present-day bug on the platform the owner uses. Phase 4 needs
-signing and packaging work that cannot be verified on the Linux dev host.
+Phase 4 needs signing and packaging work that cannot be verified on the Linux dev host. Until Phase 2
+lands, a login start opens a normal window (G2), so the Settings copy no longer promises "tray only".
 
 ## 7. Open questions for the owner
 
 | # | Question | Recommendation |
 |---|---|---|
-| 1 | Keep start-at-login off by default, or offer it once on first run? | Offer once on first run (a single dismissible prompt), stay off unless accepted. |
+| 1 | Keep start-at-login off by default, or offer it once on first run? | **Decided 2026-09-25: off by default, no prompt.** A Settings toggle and a tray check item on one property (§3.9). |
 | 2 | Should `local-*` dev builds be allowed to own start-at-login? | Yes, but with the owner shown (§3.5), since the owner runs dev builds as their main app. |
 | 3 | Linux: add a `systemd --user` option for restart-on-crash? | Not now. The launcher already supervises its children, and lingering past logout is a separate decision (tray spec §4). |
 | 4 | macOS: is dropping the version from the release bundle id acceptable? It is required for `SMAppService` and also changes how macOS treats updates (one app, not many). | Yes, for the release channel only. |
@@ -230,4 +283,8 @@ signing and packaging work that cannot be verified on the Linux dev host.
 | deb/rpm/tarball wrappers | `scripts/build-deb-linux.sh`, `scripts/build-rpm-linux.sh`, `scripts/build-tarball-linux.sh` |
 | macOS bundle id | `scripts/package-macos.sh` |
 | Windows installers | `packaging/windows/agentmux.iss`, `packaging/msix/AppxManifest.xml.template` |
-| Settings toggle | `frontend/app/view/settings/sections/notifications-section.tsx`, `agentmux-cef/src/commands/autostart.rs` |
+| Settings toggle | `frontend/app/view/settings/sections/notifications-section.tsx`, `agentmux-cef/src/commands/autostart.rs` (status only) |
+| The property, tray redraw, reconcile | `agentmux-launcher/src/start_at_login.rs`, `autostart::plan` |
+| Tray check item | `agentmux-launcher/src/tray/mod.rs` (`menu_model`), `tray/{linux,windows,macos}.rs` |
+| srv session (config in, setconfig out) | `agentmux-launcher/src/notify/mod.rs` |
+| Setting declaration | `schema/settings.json`, `settings-template.jsonc`, `frontend/types/srv-types.d.ts` |

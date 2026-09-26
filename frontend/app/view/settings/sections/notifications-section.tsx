@@ -6,7 +6,7 @@
 // from Settings instead of env vars only, and surface auto-start as its own,
 // separate toggle (tray spec §7.4 — the two decisions stay independent).
 
-import { createResource, createSignal, Show, type JSX } from "solid-js";
+import { createResource, Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -28,9 +28,9 @@ export const NOTIFICATIONS_SETTINGS = {
     autostart: {
         id: "notifications.autostart",
         label: "Start at login",
-        description: "Start AgentMux in the background (tray only, no window) when you log in.",
+        description: "Start AgentMux when you log in. The tray icon's menu has the same switch.",
         section: "notifications",
-        keywords: ["auto start", "autostart", "launch at login", "startup", "run at boot", "login items"],
+        keywords: ["auto start", "autostart", "launch at login", "startup", "run at boot", "login items", "app:startatlogin"],
     },
     osEnabled: {
         id: "notifications.os_enabled",
@@ -125,7 +125,11 @@ export const NOTIFICATIONS_SETTINGS = {
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
+/** Whether the launcher can manage a login entry, and whether one is registered. */
 type AutostartStatus = { available: boolean; enabled: boolean };
+
+/** Time for the launcher to apply a change before the registration is re-read. */
+const AUTOSTART_SETTLE_MS = 2000;
 
 async function fetchAutostart(): Promise<AutostartStatus> {
     try {
@@ -141,17 +145,29 @@ async function fetchAutostart(): Promise<AutostartStatus> {
 
 export function NotificationsSection(): JSX.Element {
     const s = () => settingsAtom() ?? ({} as any);
-    const [autostart, { mutate }] = createResource(fetchAutostart);
-    const [autostartError, setAutostartError] = createSignal<string | null>(null);
-
-    const toggleAutostart = async (enabled: boolean) => {
-        setAutostartError(null);
-        try {
-            const { invokeCommand } = await import("@/app/platform/ipc");
-            mutate((await invokeCommand("set_autostart", { enabled })) as AutostartStatus);
-        } catch (e) {
-            setAutostartError(String(e));
+    // One property, two switches: this toggle and the tray menu's check item
+    // both write `app:startatlogin`, and the launcher applies it to the OS login
+    // entry (SPEC_START_WITH_OS_2026_09_25.md §3.9). Off by default.
+    const startAtLogin = () => (s()["app:startatlogin"] as boolean | undefined) ?? false;
+    // The registration is read back after every change (and once on open), only
+    // to report availability and a failed registration. The source is wrapped
+    // in an object because a `false` source would stop the resource fetching.
+    let autostartFetched = false;
+    const [autostart] = createResource(
+        () => ({ on: startAtLogin() }),
+        async () => {
+            if (autostartFetched) await new Promise((r) => setTimeout(r, AUTOSTART_SETTLE_MS));
+            autostartFetched = true;
+            return fetchAutostart();
+        },
+    );
+    const autostartDescription = () => {
+        const st = autostart();
+        if (st?.available === false) return "Unavailable in this build (not started by the AgentMux launcher).";
+        if (startAtLogin() && st && !autostart.loading && !st.enabled) {
+            return "On, but not registered with the system yet. If this persists, see the launcher log.";
         }
+        return NOTIFICATIONS_SETTINGS.autostart.description;
     };
 
     const osOn = () => (s()["notify:os:enabled"] as boolean | undefined) ?? true;
@@ -275,14 +291,13 @@ export function NotificationsSection(): JSX.Element {
             <SettingRow
                 id={NOTIFICATIONS_SETTINGS.autostart.id}
                 label={NOTIFICATIONS_SETTINGS.autostart.label}
-                description={
-                    autostart()?.available === false
-                        ? "Unavailable in this build (not started by the AgentMux launcher)."
-                        : (autostartError() ?? NOTIFICATIONS_SETTINGS.autostart.description)
-                }
+                description={autostartDescription()}
                 control={
-                    <Show when={autostart()?.available} fallback={<ToggleControl checked={false} onChange={() => {}} />}>
-                        <ToggleControl checked={!!autostart()?.enabled} onChange={(v) => void toggleAutostart(v)} />
+                    <Show
+                        when={autostart()?.available !== false}
+                        fallback={<ToggleControl checked={false} onChange={() => {}} />}
+                    >
+                        <ToggleControl checked={startAtLogin()} onChange={(v) => set("app:startatlogin", v)} />
                     </Show>
                 }
             />
