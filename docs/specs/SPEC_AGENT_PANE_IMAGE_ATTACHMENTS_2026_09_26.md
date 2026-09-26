@@ -192,10 +192,10 @@ Location: `get_mux_data_dir()/attachments/` (per channel, like other srv data; `
 ```
 attachments/
   blobs/ab/abcdef…(sha256).png        original bytes, content-addressed, read-only
-  derived/ab/abcdef….thumb.webp       256 px long edge, for tiles and transcript
-  derived/ab/abcdef….send.png|jpg     what the agent gets (§6.4)
+  derived/ab/abcdef….<fp>.thumb.jpg|png   256 px long edge, for tiles and transcript
+  derived/ab/abcdef….<fp>.send.png|jpg    what the agent gets (§6.4)
   incoming/<uuid>.<ext>               in-flight paste/upload, renamed into blobs/ when hashed
-  derived/ab/abcdef….json             dimensions, formats and sizes of the three files
+  derived/ab/abcdef….<fp>.json            dimensions, formats and sizes of the three files
 ```
 
 - **Content addressing:** duplicates within and across prompts cost nothing, and the ID in every API is the hex SHA-256. IDs are validated as 64 hex chars before any path join.
@@ -204,7 +204,9 @@ attachments/
 
 ### 6.4 Processing pipeline (srv, Rust)
 
-Runs on a bounded blocking pool (`max(1, cores/2)` workers) so 128 files don't starve the server.
+Runs on blocking threads under **two** limits: a CPU limit (`max(1, cores/2)` jobs) so 128 files don't starve the server, and a **memory budget** (2 GB of estimated decode memory). Before decoding, each job reads the image header and reserves `width × height × 8` bytes (the decoded RGBA frame plus one working copy) from the budget; a job larger than the whole budget reserves all of it and runs alone. A CPU-count limit alone would let several highly compressed 200-megapixel images, each ~800 MB decoded, run at once.
+
+**Derived files are keyed by a transform fingerprint** `<fp>` = pipeline version + send edge (e.g. `v1-e2000`), not by the original's hash alone, because their bytes depend on `attachments:sendmaxedge` and the encoder. Changing the setting makes the old derived files unused (the sweep removes them); the next use of that attachment re-derives from the stored original.
 
 1. **Copy + hash:** stream the source into `incoming/`, computing SHA-256 on the fly (`sha2`, already a dependency). If the blob already exists, skip the copy. Progress events by bytes.
 2. **Sniff by magic bytes**, not extension (catches HEIC named `.jpg`).
@@ -214,12 +216,12 @@ Runs on a bounded blocking pool (`max(1, cores/2)` workers) so 128 files don't s
 6. **Send-copy:** long edge ≤ **2000 px** (fits Anthropic's many-image rule, OpenAI, Gemini), metadata stripped (EXIF, including GPS, never leaves the machine). PNG when the source has alpha or looks like a screenshot (PNG source, ≤ 256 distinct colors in a sample); otherwise JPEG quality 85. Re-encode down to ≤ **5 MB** if needed (Bedrock/Vertex cap). If the original already satisfies every rule and has no metadata, the send-copy is a hard link to it.
 7. Emit `attachment:ready` with `{id, name, mime, bytes, width, height, send_bytes, send_width, send_height, thumb_url}`.
 
-Cancel drops queued jobs and deletes `incoming/` files for that batch; blobs already stored stay (another draft may use the same bytes) and the sweep handles them.
+Cancel sets a per-batch flag that **running jobs check too**: between copy chunks (the copy stops and its `incoming/` file is closed, then deleted, so Windows can remove it), before waiting on the memory budget, and before decoding. A decode already in progress finishes (it can't be interrupted) but its result is reported as cancelled, not ready. Queued jobs report cancelled without starting. Blobs already stored stay (another draft may use the same bytes) and the sweep handles them.
 
 ### 6.5 Events and serving
 
 - Progress travels on the existing event bus as `attachment:progress` `{batch_id, id?, done_bytes, total_bytes, done_files, total_files}`, throttled to ~10 per second per batch, and `attachment:ready` / `attachment:failed`.
-- Thumbnails and send-copies are served by a new `GET /api/v1/attachments/<id>/(thumb|send|original)` with `X-AuthKey`, returning `image/*` with a long cache header (content is immutable by hash). The frontend fetches to a blob URL (the Media pane's pattern) and revokes it when the tile unmounts.
+- Thumbnails and send-copies are served by a new `GET /api/v1/attachments/<id>/(thumb|send|original)` with `X-AuthKey`, returning `image/*` with `Cache-Control: no-cache` and an `ETag` of `<id>-<fp>`: the original is immutable by hash, but thumb and send-copy change when the fingerprint does, so they must not be cached forever under the same URL. The frontend fetches to a blob URL (the Media pane's pattern) and revokes it when the tile unmounts.
 
 ### 6.6 Protocol and provider delivery
 
