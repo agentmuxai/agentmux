@@ -1,6 +1,6 @@
 # SPEC: one resume gate, and native continuation across logins of the same identity
 
-**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key, no resume across identities) in #3839; Phase 3 (same-identity relocation + fork) is this change; Phase 4 not started. See §7.
+**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key, no resume across identities) in #3839; Phase 3 (same-identity relocation + fork) in #3841; Phase 4 not started. See §7.
 **Date:** 2026-09-25
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at operator request
 **Related:** `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` (§4.1 segments, §4.2 the rung
