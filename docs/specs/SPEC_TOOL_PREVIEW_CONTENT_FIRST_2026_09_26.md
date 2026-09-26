@@ -1,7 +1,7 @@
 # Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row
 
 **Date:** 2026-09-26
-**Status:** active — §3.2 (header row) implemented in #3871; §3.1, §3.3 and §3.4 (WebSearch content-first) in the second PR; §3.5 and §3.6 (text bodies, content blocks) in the third; §3.7 proposed
+**Status:** active — §3.2 (header row) implemented in #3871; §3.1, §3.3 and §3.4 (WebSearch content-first) in the second PR; §3.5 and §3.6 (text bodies, content blocks) in the third; §3.7 ToolSearch in the fourth (TodoWrite and ExitPlanMode deferred, not observed)
 **Scope:** agent pane tool previews (`frontend/app/view/agent/`)
 **Verified against:** `main` @ `6b5c2b59b`, which includes #3861 (the jekt
 height cap)
@@ -349,7 +349,8 @@ Grep (F4):
   `output_mode` (`grep-result.ts`, formats captured from live calls):
   `Found N files` → "N files" (the default, `files_with_matches`); the
   `count` trailer's total → "N matches"; `content` lines, minus `--`
-  separators and the pagination notice → "N matches"; `No files found` /
+  separators, the pagination notice and `path-N-text` context lines →
+  "N matches"; `No files found` /
   `No matches found` → zero. Counting every line read 3 files as "4 matches"
   (Opaz P1 on #3877).
 - Grep and Glob text bodies read from the head (a result list); other text
@@ -379,13 +380,16 @@ Effects:
 
 ### 3.7 Params-carried content (F7, F8, F6) — lower priority
 
-- **TodoWrite:** a checklist from `params.todos`, with ☐ / ◐ / ☑ glyphs.
-  Content-first.
-- **ExitPlanMode:** `<Markdown text={params.plan}>`. Content-first.
-- **ToolSearch:** the loaded tool names as chips (the same chip style as §3.4),
-  not a table.
-
-Verify the F7 and F8 shapes with a live call first.
+- **ToolSearch (F6), implemented in the fourth PR:** the loaded tool names as
+  chips (`ToolReferences.tsx`, the same chip style as §3.4), MCP names as
+  `server · Tool`, not a `type | tool_name` table.
+- **TodoWrite (F7) and ExitPlanMode (F8): deferred, not observed.** Neither
+  appears in the 600 most recent Claude Code transcripts on this machine
+  (checked 2026-09-26): the current tool set here has no TodoWrite, and
+  ExitPlanMode only exists in plan mode. Per this spec's own "verify first"
+  rule, a renderer waits for a real payload. The proposals stand: a checklist
+  from `params.todos` (☐ / ◐ / ☑) and `<Markdown text={params.plan}>`, both
+  content-first.
 
 ## 4. Which tools get `presentation: "content"`
 
