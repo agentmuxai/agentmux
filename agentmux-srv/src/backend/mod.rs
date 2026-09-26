@@ -75,6 +75,7 @@ pub mod transcript_backfill;
 pub mod blocking;
 pub mod gh_guard;
 pub mod pane_env;
+pub mod posix_shell;
 pub mod shellintegration;
 pub mod sysinfo;
 pub mod storage;

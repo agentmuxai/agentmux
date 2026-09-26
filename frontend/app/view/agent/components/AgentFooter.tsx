@@ -23,6 +23,7 @@ import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
 import { SlashAutocomplete } from "./SlashAutocomplete";
+import { isBangCommand } from "../bang-command";
 
 function pickThinkingPhrase(_exclude?: string): string {
     return "Working";
@@ -632,7 +633,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         writeComposerValue(text);
         const pos = caret === "start" ? 0 : text.length;
         textareaRef.setSelectionRange(pos, pos);
-        setIsBangCmd(text.startsWith("!"));
+        setIsBangCmd(isBangCommand(text));
         updateAutocomplete();
         props.onTyping?.();
     };
@@ -679,7 +680,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // already independently closed by isComposerEmptyRef below, not by
         // clearing meta on every first keystroke.
         updateAutocomplete();
-        setIsBangCmd(textareaRef?.value.startsWith("!") ?? false);
+        setIsBangCmd(isBangCommand(textareaRef?.value ?? ""));
         const cb = props.onTyping;
         if (!cb) {
             markEnd("agent-keystroke", "done");
@@ -720,7 +721,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         const draft = composerDrafts.get(draftBlockId);
         if (draft) {
             textareaRef.value = draft;
-            setIsBangCmd(draft.startsWith("!"));
+            setIsBangCmd(isBangCommand(draft));
             updateAutocomplete();
         }
     });
