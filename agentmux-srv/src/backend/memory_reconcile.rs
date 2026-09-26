@@ -452,7 +452,6 @@ fn adopt_baseline(
     Ok(())
 }
 
-/// The content `version` of `name` holds, from the log.
 /// Versions' content hashes for one pass, read from the log once — not
 /// once per file, which made a pass quadratic in the log's length. A
 /// version appended during the pass is found by reading it again.
