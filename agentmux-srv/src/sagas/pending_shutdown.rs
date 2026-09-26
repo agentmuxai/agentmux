@@ -124,6 +124,35 @@ struct Entry {
 
 static ENTRIES: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
 
+/// A request opened on another AgentMux instance on this machine (a
+/// cross-channel `FleetBulkStop` target, whose user is asked there): where
+/// its status lives. `status` for these is proxied (see `remote_for`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteRequest {
+    pub local_url: String,
+    pub auth_key: String,
+    remembered_at_ms: i64,
+}
+
+static REMOTE: LazyLock<Mutex<HashMap<String, RemoteRequest>>> = LazyLock::new(Default::default);
+
+/// Remember that `request_id` lives on the instance at `local_url`.
+pub fn remember_remote(request_id: &str, local_url: &str, auth_key: &str) {
+    let now = now_ms();
+    let mut map = REMOTE.lock().unwrap_or_else(|e| e.into_inner());
+    // Long after any window has settled, like finished local requests.
+    map.retain(|_, r| now - r.remembered_at_ms < KEEP_FINISHED_MS + OVERRIDE_WINDOW.as_millis() as i64);
+    map.insert(
+        request_id.to_string(),
+        RemoteRequest { local_url: local_url.to_string(), auth_key: auth_key.to_string(), remembered_at_ms: now },
+    );
+}
+
+/// The instance a forwarded request lives on, if it is one.
+pub fn remote_for(request_id: &str) -> Option<RemoteRequest> {
+    REMOTE.lock().unwrap_or_else(|e| e.into_inner()).get(request_id).cloned()
+}
+
 fn now_ms() -> i64 {
     agentmux_common::time::now_ms()
 }
