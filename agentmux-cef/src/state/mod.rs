@@ -947,6 +947,18 @@ impl AppState {
     /// Callers emitting JS-injected host events must use this (or
     /// `emit_event_to_window`) so a hostile page in one pane can't observe events
     /// meant for the host frontend.
+    /// True if `label` is a `WindowKind::Subwindow` — today only the
+    /// credential- and memory-adoption approval windows (`open_subwindow`).
+    /// The browser API excludes these from Path-2 pane resolution by kind,
+    /// so an agent's UI tools can never reach an approval page even if its
+    /// DOM changed (#3681 review).
+    pub fn is_subwindow(&self, label: &str) -> bool {
+        self.window_meta
+            .lock()
+            .get(label)
+            .is_some_and(|m| m.kind == WindowKind::Subwindow)
+    }
+
     pub fn list_top_level_browsers(&self) -> Vec<(String, Browser)> {
         self.host_state
             .lock()

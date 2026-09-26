@@ -85,15 +85,22 @@ impl PendingCalls {
         (id, rx)
     }
 
-    /// Route one raw DevTools message. Returns true if it was the reply to a
-    /// call of ours (consumed), false for events or anyone else's replies.
-    fn deliver(&mut self, message: &[u8]) -> bool {
+    /// Route one raw DevTools message that `browser_id`'s observer received.
+    /// Returns true if it was the reply to a call of ours ON THAT BROWSER
+    /// (consumed), false for events, anyone else's replies, or an id that
+    /// belongs to a call on a different browser — so a second DevTools sender
+    /// or an id overlap can never complete the wrong call (Opaz's review of
+    /// #3832).
+    fn deliver(&mut self, browser_id: i32, message: &[u8]) -> bool {
         let Ok(msg) = serde_json::from_slice::<Value>(message) else {
             return false;
         };
         let Some(id) = msg.get("id").and_then(Value::as_i64).and_then(|i| i32::try_from(i).ok()) else {
             return false;
         };
+        if self.calls.get(&id).map(|c| c.browser_id) != Some(browser_id) {
+            return false;
+        }
         let Some(call) = self.calls.remove(&id) else {
             return false;
         };
@@ -153,11 +160,11 @@ wrap_dev_tools_message_observer! {
     impl DevToolsMessageObserver {
         fn on_dev_tools_message(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             message: Option<&[u8]>,
         ) -> ::std::os::raw::c_int {
-            match message {
-                Some(m) if PENDING.lock().deliver(m) => 1,
+            match (browser, message) {
+                (Some(b), Some(m)) if PENDING.lock().deliver(b.identifier(), m) => 1,
                 _ => 0,
             }
         }
@@ -174,6 +181,11 @@ wrap_task! {
     struct SendTask {
         state: Arc<AppState>,
         label: String,
+        // The browser the call was registered against. The label is looked
+        // up again here, on the UI thread; if it now names a different
+        // browser (the pane was re-created in between), fail fast rather
+        // than send to the new one (Opaz's review of #3832).
+        browser_id: i32,
         id: i32,
         message: String,
     }
@@ -189,6 +201,13 @@ wrap_task! {
                 return;
             };
             let browser_id = browser.identifier();
+            if browser_id != self.browser_id {
+                PENDING.lock().fail(
+                    self.id,
+                    &format!("browser {:?} was re-created before the call was sent", self.label),
+                );
+                return;
+            }
             OBSERVERS.with(|observers| {
                 let mut observers = observers.borrow_mut();
                 if !observers.contains_key(&browser_id) {
@@ -249,7 +268,7 @@ impl CdpSession {
         };
         let (id, rx) = PENDING.lock().register(browser_id, method);
         let message = json!({ "id": id, "method": method, "params": params }).to_string();
-        let mut task = SendTask::new(self.state.clone(), self.label.clone(), id, message);
+        let mut task = SendTask::new(self.state.clone(), self.label.clone(), browser_id, id, message);
         if post_task(ThreadId::UI, Some(&mut task)) == 0 {
             PENDING.lock().forget(id);
             return Err(format!("CDP {method}: could not post to the CEF UI thread"));
@@ -281,7 +300,7 @@ mod tests {
     fn a_reply_completes_its_own_call_with_the_result() {
         let mut p = PendingCalls::default();
         let (id, mut rx) = p.register(7, "Runtime.evaluate");
-        assert!(p.deliver(&reply(id, r#""result":{"result":{"value":42}}"#)));
+        assert!(p.deliver(7, &reply(id, r#""result":{"result":{"value":42}}"#)));
         assert_eq!(rx.try_recv().unwrap().unwrap()["result"]["value"], 42);
         assert!(p.calls.is_empty());
     }
@@ -290,7 +309,7 @@ mod tests {
     fn an_error_reply_fails_the_call_naming_the_method() {
         let mut p = PendingCalls::default();
         let (id, mut rx) = p.register(7, "Page.navigate");
-        assert!(p.deliver(&reply(id, r#""error":{"code":-32000,"message":"Cannot navigate"}"#)));
+        assert!(p.deliver(7, &reply(id, r#""error":{"code":-32000,"message":"Cannot navigate"}"#)));
         let err = rx.try_recv().unwrap().unwrap_err();
         assert_eq!(err, "CDP Page.navigate error: Cannot navigate");
     }
@@ -299,11 +318,20 @@ mod tests {
     fn events_unknown_ids_and_garbage_are_left_alone() {
         let mut p = PendingCalls::default();
         let (id, mut rx) = p.register(7, "Runtime.evaluate");
-        assert!(!p.deliver(br#"{"method":"Page.loadEventFired","params":{}}"#));
-        assert!(!p.deliver(&reply(id + 1000, r#""result":{}"#)));
-        assert!(!p.deliver(b"not json"));
+        assert!(!p.deliver(7, br#"{"method":"Page.loadEventFired","params":{}}"#));
+        assert!(!p.deliver(7, &reply(id + 1000, r#""result":{}"#)));
+        assert!(!p.deliver(7, b"not json"));
         assert!(rx.try_recv().is_err(), "still waiting");
         assert_eq!(p.calls.len(), 1);
+    }
+
+    #[test]
+    fn a_reply_seen_by_a_different_browser_never_completes_the_call() {
+        let mut p = PendingCalls::default();
+        let (id, mut rx) = p.register(7, "Runtime.evaluate");
+        assert!(!p.deliver(8, &reply(id, r#""result":{}"#)), "browser 8's observer must not consume browser 7's call");
+        assert!(rx.try_recv().is_err(), "still waiting");
+        assert!(p.deliver(7, &reply(id, r#""result":{}"#)), "its own browser's reply still completes it");
     }
 
     #[test]
@@ -322,7 +350,7 @@ mod tests {
         let mut p = PendingCalls::default();
         let (id, _rx) = p.register(7, "Runtime.evaluate");
         p.forget(id);
-        assert!(!p.deliver(&reply(id, r#""result":{}"#)));
+        assert!(!p.deliver(7, &reply(id, r#""result":{}"#)));
     }
 
     #[test]

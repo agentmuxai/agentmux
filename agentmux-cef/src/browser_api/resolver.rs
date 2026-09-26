@@ -85,11 +85,10 @@ impl TargetCache {
 
         // Path 2: which top-level window's page holds this block? Labels
         // only — `Browser` handles aren't Send and aren't needed here.
-        let windows: Vec<String> = state
-            .list_top_level_browsers()
-            .into_iter()
-            .map(|(label, _)| label)
-            .collect();
+        let windows = path2_candidates(
+            state.list_top_level_browsers().into_iter().map(|(label, _)| label),
+            |label| state.is_subwindow(label),
+        );
         let cached = self.last_window.lock().get(block_id).cloned();
         let expr = block_probe_expr(block_id);
         let label = find_window_holding(block_id, &windows, cached.as_deref(), |label| {
@@ -148,6 +147,17 @@ where
          (probed {} windows)",
         windows.len()
     ))
+}
+
+/// Top-level windows a Path-2 block may live in: every app window and
+/// floater except approval subwindows, excluded by KIND so an approval page
+/// is structurally unreachable rather than merely lacking a matching
+/// `[data-blockid]` (Opaz's review of #3832).
+fn path2_candidates(
+    top_level: impl IntoIterator<Item = String>,
+    is_subwindow: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    top_level.into_iter().filter(|label| !is_subwindow(label)).collect()
 }
 
 /// `windows` with `cached` moved to the front — only if it is still open.
@@ -230,6 +240,16 @@ mod tests {
             .unwrap_err();
         assert!(err.starts_with("UNKNOWN_BLOCK_ID"), "{err}");
         assert!(err.contains("ghost") && err.contains("probed 1 windows"), "{err}");
+    }
+
+    #[test]
+    fn approval_subwindows_are_never_path2_candidates() {
+        let subwindows = ["window-approval-1"];
+        let got = path2_candidates(
+            labels(&["main", "window-approval-1", "floating-1"]),
+            |l| subwindows.contains(&l),
+        );
+        assert_eq!(got, labels(&["main", "floating-1"]));
     }
 
     #[test]
