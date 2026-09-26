@@ -768,6 +768,7 @@ describe("agent document reducer", () => {
             const t = r.state.nodes.find((n) => n.id === "t1") as ToolNode;
             expect(t.status).toBe("canceled");
             expect(t.summary).toBe("⏹ Canceled — cleared via muxspect");
+            expect(t.statusNote).toBe("cleared via muxspect");
             expect(r.events[0]).toEqual({ type: "tool-force-canceled", nodeId: "t1" });
         });
 

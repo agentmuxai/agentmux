@@ -588,3 +588,97 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
         expect(container.querySelector(".agent-user-message")).toBeNull();
     });
 });
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.2 — the header row is
+// composed from the node's fields at render time, so nothing shows twice and
+// the status glyph always matches the node's current status.
+describe("ToolBlock — header row", () => {
+    const rowText = (container: HTMLElement): string =>
+        container.querySelector(".agent-tool-summary")!.textContent ?? "";
+    const count = (s: string, sub: string): number => s.split(sub).length - 1;
+
+    const search: ToolNode = {
+        type: "tool",
+        id: "ws-1",
+        tool: "Other",
+        toolName: "WebSearch",
+        params: { query: "solid docs" },
+        status: "success",
+        collapsed: true,
+        // What the parser used to bake: icon, name, detail AND a status glyph.
+        summary: "🌐 WebSearch solid docs ✓",
+    };
+
+    it("shows the status glyph once, not again inside the baked summary", () => {
+        const { container } = render(() => <ToolBlock node={search} pinned={false} onTogglePin={() => {}} />);
+        expect(count(rowText(container), "✓")).toBe(1);
+        expect(container.querySelector(".agent-tool-name")!.textContent).toBe("🌐 solid docs");
+    });
+
+    it("tracks a status the reducer set without touching the summary", () => {
+        // reducer.ts's orphan cancel spreads the node: summary still says ⏳.
+        const canceled: ToolNode = { ...search, status: "canceled", summary: "🌐 WebSearch solid docs ⏳" };
+        const { container } = render(() => <ToolBlock node={canceled} pinned={false} onTogglePin={() => {}} />);
+        expect(rowText(container)).toContain("⏹");
+        expect(rowText(container)).not.toContain("⏳");
+    });
+
+    it("shows the duration once", () => {
+        const timed: ToolNode = { ...search, duration: 1.25, summary: "🌐 WebSearch solid docs (1.3s) ✓" };
+        const { container } = render(() => <ToolBlock node={timed} pinned={false} onTogglePin={() => {}} />);
+        expect(count(rowText(container), "(1.3s)")).toBe(1);
+    });
+
+    it("names an MCP tool `server · Tool`", () => {
+        const mcp: ToolNode = { ...search, toolName: "mcp__agentmux__WhoAmI", params: {}, summary: "x" };
+        const { container } = render(() => <ToolBlock node={mcp} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-name")!.textContent).toBe("🛠️ agentmux · WhoAmI");
+    });
+
+    it("shows a reducer-written note next to the composed header", () => {
+        const cleared: ToolNode = { ...search, status: "canceled", statusNote: "cleared via muxspect" };
+        const { container } = render(() => <ToolBlock node={cleared} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-status-note")!.textContent).toBe("cleared via muxspect");
+    });
+
+    it("a muxspect-cleared AskUserQuestion shows the note once, inside its authored text", () => {
+        // reducer.ts's force-cancel writes both, for any tool; the authored
+        // summary already carries the note.
+        const cleared: ToolNode = {
+            ...search,
+            toolName: "AskUserQuestion",
+            params: {},
+            status: "canceled",
+            summary: "⏹ Canceled — cleared via muxspect",
+            statusNote: "cleared via muxspect",
+        };
+        const { container } = render(() => <ToolBlock node={cleared} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-status-note")).toBeNull();
+        expect(count(rowText(container), "cleared via muxspect")).toBe(1);
+    });
+
+    it("keeps an AskUserQuestion's own authored text", () => {
+        const waiting: ToolNode = {
+            ...search,
+            toolName: "AskUserQuestion",
+            params: {},
+            status: "awaiting_answer",
+            summary: "❓ Waiting for your answer",
+        };
+        const { container } = render(() => <ToolBlock node={waiting} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-name")!.textContent).toBe("❓ Waiting for your answer");
+    });
+
+    it("peek tooltip shows a WebSearch query (read by raw tool name)", () => {
+        vi.useFakeTimers();
+        try {
+            const { container } = render(() => <ToolBlock node={search} pinned={false} onTogglePin={() => {}} />);
+            fireEvent.mouseEnter(container.querySelector(".agent-tool-block")!);
+            vi.advanceTimersByTime(100);
+            const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
+            expect(tip?.textContent).toBe("solid docs");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
