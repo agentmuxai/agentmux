@@ -16,6 +16,7 @@ import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { TerminalOutput } from "./TerminalOutput";
 import { terminalText } from "./terminal-text";
+import { compactSummaryFor, rendersFileList, textReadOrder } from "../tool-meta/tool-descriptors";
 
 interface CompactResultProps {
     tool: string;
@@ -24,68 +25,15 @@ interface CompactResultProps {
 }
 
 /**
- * Extract a compact, human-readable summary from a tool result.
+ * One-line summary of a STRUCTURED result: StructuredResult only runs when
+ * `terminalText` found no string body, so strings, `content` and `output`
+ * never reach here. Per-tool summaries come from the tool's descriptor
+ * (`compactSummary`); anything else summarizes its keys.
  */
-function summarize(tool: string, params: Record<string, any>, result: any): string {
+function summarize(tool: string, result: any): string {
     if (result == null) return "No output";
-    if (typeof result === "string") {
-        return result.length > 120 ? result.slice(0, 120) + "..." : result;
-    }
-
-    // Tool-specific compact summaries
-    switch (tool) {
-        case "Grep": {
-            // { matches: [...] } or { content: "..." } or raw string output
-            if (Array.isArray(result.matches)) {
-                const n = result.matches.length;
-                return `${n} match${n === 1 ? "" : "es"} found`;
-            }
-            if (result.content && typeof result.content === "string") {
-                const lines = result.content.split("\n").filter((l: string) => l.trim());
-                return `${lines.length} result line${lines.length === 1 ? "" : "s"}`;
-            }
-            break;
-        }
-        case "Glob": {
-            if (Array.isArray(result.files)) {
-                const n = result.files.length;
-                const preview = result.files.slice(0, 3).map(shortPath).join(", ");
-                return n <= 3 ? preview : `${preview} (+${n - 3} more)`;
-            }
-            break;
-        }
-        case "Agent": {
-            if (result.content && typeof result.content === "string") {
-                const trimmed = result.content.trim();
-                return trimmed.length > 150 ? trimmed.slice(0, 150) + "..." : trimmed;
-            }
-            break;
-        }
-        case "Task": {
-            if (result.status) return `Status: ${result.status}`;
-            break;
-        }
-        case "Workflow": {
-            if (result.status) return `Status: ${result.status}`;
-            if (result.content && typeof result.content === "string") {
-                const trimmed = result.content.trim();
-                return trimmed.length > 150 ? trimmed.slice(0, 150) + "..." : trimmed;
-            }
-            break;
-        }
-    }
-
-    // Generic: extract known content fields
-    if (result.content && typeof result.content === "string") {
-        const trimmed = result.content.trim();
-        return trimmed.length > 120 ? trimmed.slice(0, 120) + "..." : trimmed;
-    }
-    if (result.output && typeof result.output === "string") {
-        const trimmed = result.output.trim();
-        return trimmed.length > 120 ? trimmed.slice(0, 120) + "..." : trimmed;
-    }
-
-    // Fallback: count keys
+    const own = compactSummaryFor(tool, result);
+    if (own != null) return own;
     const keys = Object.keys(result);
     if (keys.length === 0) return "Empty result";
     if (keys.length <= 3) {
@@ -101,11 +49,6 @@ function compactValue(val: any): string {
     if (Array.isArray(val)) return `[${val.length} items]`;
     if (typeof val === "object") return `{${Object.keys(val).length} keys}`;
     return String(val);
-}
-
-function shortPath(p: string): string {
-    const parts = p.replace(/\\/g, "/").split("/");
-    return parts.length <= 2 ? p : ".../" + parts.slice(-2).join("/");
 }
 
 export const CompactResult = (props: CompactResultProps): JSX.Element => {
@@ -126,7 +69,7 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
     // search result list (Grep / Glob) reads from its first line; other
     // text (logs, command output) from its latest.
     const termText = () => terminalText(props.result);
-    const readFrom = (): "head" | "tail" => (props.tool === "Grep" || props.tool === "Glob" ? "head" : "tail");
+    const readFrom = (): "head" | "tail" => textReadOrder(props.tool);
     return (
         <Show
             when={termText() == null}
@@ -147,9 +90,9 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
 };
 
 function StructuredResult(props: CompactResultProps): JSX.Element {
-    const [expanded, setExpanded] = createSignal(props.tool === "Glob");
+    const [expanded, setExpanded] = createSignal(rendersFileList(props.tool));
 
-    const summary = () => summarize(props.tool, props.params, props.result);
+    const summary = () => summarize(props.tool, props.result);
     const fullJson = () => (props.result != null ? JSON.stringify(props.result, null, 2) : "");
     // Expandable when there's more to show than the one-line summary.
     const hasDetail = () => fullJson().length > summary().length + 10;
@@ -171,7 +114,7 @@ function StructuredResult(props: CompactResultProps): JSX.Element {
                 <span class="agent-tool-compact-text">{summary()}</span>
             </div>
             <Show when={expanded()}>
-                {props.tool === "Glob" && Array.isArray(props.result?.files)
+                {rendersFileList(props.tool) && Array.isArray(props.result?.files)
                     ? (() => {
                         const files: string[] = props.result.files;
                         const visible = files.slice(0, MAX_TOOL_OUTPUT_LINES);
