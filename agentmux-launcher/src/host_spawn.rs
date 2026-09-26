@@ -84,6 +84,12 @@ pub(crate) fn spawn_host_supervised(
         .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
         .env("AGENTMUX_HOST_REG_SECRET", &srv.host_reg_secret)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
+        // Parent-identity stamp, as on Unix: lets a dev-build host verify
+        // this hand-off is from its real parent THIS run and adopt our srv.
+        // Without it a Windows `task dev` host ignored the env hand-off and
+        // spawned a second srv on the same data dir (#3868 follow-up). See
+        // agentmux-cef/src/lib.rs::launcher_is_genuine_parent.
+        .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
         .envs(host_env.iter().cloned())
         // Auto-start (issue #2977 WS2): translate the launcher's own
         // `--background` flag into the env the HOST actually reads. The flag
