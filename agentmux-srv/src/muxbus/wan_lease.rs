@@ -187,6 +187,16 @@ pub(crate) fn note_not_holder_since(agent_id: &str, body: &serde_json::Value, st
     Some(desc)
 }
 
+/// Whether this instance currently records `agent_id`'s lease as held.
+pub(crate) fn is_held(agent_id: &str) -> bool {
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).get(&key(agent_id)).is_some_and(|e| e.held)
+}
+
+#[cfg(test)]
+pub(crate) fn mark_held_for_test(agent_id: &str) {
+    record(agent_id, &Outcome::Held);
+}
+
 /// Note a 409 `not_holder` the relay returned on a pending pull or an ack.
 pub(crate) fn note_not_holder(agent_id: &str, body: &serde_json::Value) -> String {
     let desc = body.get("held_by").map(describe_holder).unwrap_or_default();

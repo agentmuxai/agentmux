@@ -226,12 +226,23 @@ impl CloudSubscriber {
         token: impl std::future::Future<Output = String>,
     ) -> RelayRelease {
         let key = agent_id.to_lowercase();
-        {
+        let was_subscribed = {
             let mut agents = self.agents.lock().unwrap();
-            if !agents.remove(&key) {
-                return RelayRelease::NotSubscribed;
+            let removed = agents.remove(&key);
+            if removed {
+                let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key.clone()));
             }
-            let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key.clone()));
+            removed
+        };
+        // Not subscribed is not "no lease" (Codex P1 on #3908): a stopped
+        // pane's exit may already have unsubscribed it and queued a release
+        // that runs detached. Release here too — idempotent, and under the
+        // per-agent op lock, so this also waits for a release in flight.
+        let held = super::wan_lease::is_held(&key);
+        if !was_subscribed && !held {
+            // Wait out a release already in flight; nothing is held here.
+            super::wan_lease::release(base, &key, "", &reqwest::Client::new(), || true).await;
+            return RelayRelease::NotSubscribed;
         }
         let token = token.await;
         let still_gone = || !self.agents.lock().unwrap().contains(&key);
@@ -1529,6 +1540,21 @@ mod tests {
 
     // ReAgent P2 on #3908: "not subscribed" (e.g. no relay) must not read
     // as "re-added, lease kept".
+    // Codex P1 on #3908: the stopped pane's own exit may already have
+    // unsubscribed the agent and queued RemoveAgent, whose release runs
+    // detached. "Not in the set" is not "no lease": release it here too
+    // (idempotently) and answer only once it's gone.
+    #[tokio::test]
+    async fn a_take_over_release_still_releases_a_lease_the_exit_left_behind() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        crate::muxbus::wan_lease::mark_held_for_test(&agent);
+        let (sub, mut rx) = test_subscriber(&[]);
+        let outcome = sub.release_now(&agent, "http://127.0.0.1:9", async { String::new() }).await;
+        assert_eq!(outcome, super::RelayRelease::Released);
+        assert!(!crate::muxbus::wan_lease::is_held(&agent), "the lease is let go before answering");
+        assert!(rx.try_recv().is_err(), "no second RemoveAgent");
+    }
+
     #[tokio::test]
     async fn a_take_over_release_of_an_unsubscribed_agent_says_so() {
         let (sub, _rx) = test_subscriber(&[]);
