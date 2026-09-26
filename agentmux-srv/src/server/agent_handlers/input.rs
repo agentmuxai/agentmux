@@ -537,10 +537,8 @@ pub(crate) async fn build_persistent_spawn_env(
     )
     .await?;
 
-    // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN if
-    // the user has authenticated via muxbus.login. No-op if no credentials
-    // are stored. Auto-refreshes if token is nearly expired.
-    crate::server::muxbus_handlers::inject_muxbus_env(&id_store, &mut env_vars).await;
+    // No MuxBus account login here: agents reach the cloud through the srv,
+    // which uses its own stored login (see `account_login_guard`).
 
     // Streaming-bash wrapper auth + discovery
     // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
@@ -572,8 +570,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // muxbus -- MCP tool routing, native memory, shell OSC titling, jekt
     // auto-registration, etc; see this repo's CLAUDE.md Naming Conventions
     // table). MUXBUS_AGENT_ID mirrors the same value so muxbus-client picks
-    // it up under the MUXBUS_* prefix it already checks first (alongside
-    // MUXBUS_TOKEN/MUXBUS_COGNITO_DOMAIN injected above) -- this does NOT
+    // it up under the MUXBUS_* prefix it already checks first -- this does NOT
     // make MUXBUS_AGENT_ID a second source of truth for agent identity
     // app-wide, it's scoped to this one muxbus hand-off point (ARCH-002,
     // 2026-07-28 architecture analyst report). Only set if not already
@@ -677,10 +674,12 @@ pub(crate) async fn build_persistent_spawn_env(
             env_vars.insert("PATH".to_string(), new_path);
         }
     }
-    // Plain `gh` must not act as a human's gh login (see `gh_guard`). Last, so
-    // nothing above — a persisted `cmd:env`, an identity binding — can set it
-    // back: this is a reserved variable, not a default.
+    // Plain `gh` must not act as a human's gh login (see `gh_guard`), and no
+    // agent holds the account's cloud login (see `account_login_guard`). Last,
+    // so nothing above — a persisted `cmd:env`, an identity binding — can set
+    // them back: these are reserved variables, not defaults.
     crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
+    crate::backend::account_login_guard::strip_account_login(&mut env_vars);
 
     Ok(env_vars)
 }
