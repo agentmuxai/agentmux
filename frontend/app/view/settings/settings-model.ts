@@ -40,15 +40,9 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     advanced: "Advanced",
 };
 
-export class SettingsViewModel implements ViewModel {
-    viewType = "settings";
-    blockId: string;
-    nodeModel: BlockNodeModel;
-
-    viewIcon = () => "cog";
-    // wired in settings.tsx to avoid circular import
-    declare viewComponent: ViewComponent<SettingsViewModel>;
-
+/** The settings pane's state behind its native pane tab (`settingsPaneTab`,
+ *  settings.tsx): the open section and the search query. */
+export class SettingsViewModel {
     activeSection: () => SettingsSection;
     setSection: (s: SettingsSection) => void;
     viewName: () => string;
@@ -60,9 +54,7 @@ export class SettingsViewModel implements ViewModel {
     query: () => string;
     setQuery: (q: string) => void;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.blockId = blockId;
-        this.nodeModel = nodeModel;
+    constructor() {
         const [section, setSection] = createSignal<SettingsSection>("appearance");
         this.activeSection = section;
         this.setSection = setSection;

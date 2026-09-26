@@ -10,6 +10,7 @@ import type { SignalAtom } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
+import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 
 function sortByDisplayOrder(
     wmap: { [key: string]: WidgetConfigType } | null | undefined
@@ -22,13 +23,9 @@ function sortByDisplayOrder(
 
 type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
 
-export class LauncherViewModel implements ViewModel {
+/** The launcher's state behind its native pane tab (`launcherPaneTab`). */
+export class LauncherViewModel {
     blockId: string;
-    viewType = "launcher";
-    viewIcon: SignalAtom<string>;
-    viewName: SignalAtom<string>;
-    viewComponent = LauncherView;
-    noHeader: SignalAtom<boolean>;
     searchTerm: SignalAtom<string>;
     selectedIndex: SignalAtom<number>;
     containerSize: SignalAtom<{ width: number; height: number }>;
@@ -47,9 +44,6 @@ export class LauncherViewModel implements ViewModel {
 
     constructor(blockId: string) {
         this.blockId = blockId;
-        this.viewIcon = createSignalAtom("shapes");
-        this.viewName = createSignalAtom("Widget Launcher");
-        this.noHeader = createSignalAtom(true);
         this.searchTerm = createSignalAtom("");
         this.selectedIndex = createSignalAtom(0);
         this.containerSize = createSignalAtom({ width: 0, height: 0 });
@@ -182,7 +176,7 @@ export class LauncherViewModel implements ViewModel {
     }
 }
 
-function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element {
+function LauncherView(props: { model: LauncherViewModel }): JSX.Element {
     const model = props.model;
     const searchTerm = model.searchTerm;
     const selectedIndex = model.selectedIndex;
@@ -352,3 +346,22 @@ function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element
         </div>
     );
 }
+
+/** The widget launcher as a native pane tab (Pane Tab contract Phase 2c). It
+ *  draws no header of its own: its search box is its top edge. */
+export const launcherPaneTab: PaneTabManifest = {
+    apiVersion: 1,
+    view: "launcher",
+    label: "Launcher",
+    icon: "shapes",
+    capabilities: { header: "none" },
+    create: (ctx) => {
+        const model = new LauncherViewModel(ctx.blockId);
+        return {
+            component: () => <LauncherView model={model} />,
+            liveTitle: () => ({ text: "Widget Launcher" }),
+            focus: () => model.giveFocus(),
+            onKeyDown: (e) => model.keyDownHandler(e),
+        };
+    },
+};

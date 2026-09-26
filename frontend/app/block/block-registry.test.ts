@@ -32,22 +32,22 @@ const OLD_LABELS: Record<string, string> = {
 // — its header always showed sysinfo's chart icon; only its tab pill didn't.
 // Warden and Armory likewise always showed their own icon in the header
 // (`shield-halved`, `vault`) but not in their pills; Armory had no label.
-const NEW_ICONS: Record<string, string> = { cpuplot: "chart-line", warden: "shield-halved", armory: "vault" };
-const NEW_LABELS: Record<string, string> = { cpuplot: "Sysinfo", armory: "Armory" };
+// So did the last five legacy views, whose pills fell back to "square" and
+// three of them to their lowercase view name.
+const NEW_ICONS: Record<string, string> = {
+    cpuplot: "chart-line", warden: "shield-halved", armory: "vault",
+    launcher: "shapes", memory: "layer-group", identity: "user", toolchain: "wrench", settings: "cog",
+};
+const NEW_LABELS: Record<string, string> = {
+    cpuplot: "Sysinfo", armory: "Armory", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
+};
 
 describe("built-in pane tabs (block-registry.ts)", () => {
-    // Native views (create(ctx), Phase 2b) have no ViewModel class.
-    const NATIVE = ["help", "sysinfo", "cpuplot", "swarm", "drone", "warden", "armory", "media", "editor", "browser", "term", "agent"];
-
+    // Every built-in is native (create(ctx), Phase 2c): no ViewModel class.
     it("registers an instance factory for every view the old map had", () => {
         for (const view of VIEWS) {
-            const m = getPaneTab(view)!;
-            if (NATIVE.includes(view)) {
-                expect(m.create, view).toBeTypeOf("function");
-                expect(getBlockViewClass(view), view).toBeUndefined();
-            } else {
-                expect(getBlockViewClass(view), view).toBeTypeOf("function");
-            }
+            expect(getPaneTab(view)!.create, view).toBeTypeOf("function");
+            expect(getBlockViewClass(view), view).toBeUndefined();
         }
         expect(getPaneTab("cpuplot")?.capabilities).toEqual(getPaneTab("sysinfo")?.capabilities);
     });
@@ -74,8 +74,10 @@ describe("built-in pane tabs (block-registry.ts)", () => {
     // exactly the view types those checks named declare it.
     it("declares exactly the capabilities the old view-name checks encoded", () => {
         const holders = (key: string) => VIEWS.filter((v) => paneTabCapability(v, key as any) != null).sort();
-        expect(holders("header")).toEqual(["agent"]);
+        expect(holders("header")).toEqual(["agent", "launcher"]);
         expect(paneTabCapability("agent", "header")).toBe("surface");
+        // The launcher's old `noHeader`.
+        expect(paneTabCapability("launcher", "header")).toBe("none");
         expect(holders("headerMic")).toEqual(["term"]);
         expect(paneTabCapability("term", "headerMic")?.title).toBe("Speak into this terminal (Ctrl+Shift+V)");
         expect(holders("statsBadgeSetting")).toEqual(["term"]);
