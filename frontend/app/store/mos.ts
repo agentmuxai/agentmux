@@ -5,8 +5,9 @@
 
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { getWebServerEndpoint } from "@/util/endpoints";
+import { getWebServerEndpoint, isWebServerEndpointSet } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
+import { retryTransient } from "@/util/transient-network";
 import { type SignalAtom, fireAndForget } from "@/util/util";
 import { batch, createSignal, getOwner, onCleanup } from "solid-js";
 import { ObjectService } from "./services";
@@ -24,6 +25,10 @@ type MuxObjectDataItemType<T extends MuxObj> = {
 // Each cached MuxObject holds a SolidJS signal instead of a Jotai atom.
 type MuxObjectValue<T extends MuxObj> = {
     pendingPromise: Promise<T> | null;
+    // The last fetch failed without a definitive answer (network error, no
+    // endpoint yet). The value is unknown, not null: the next explicit load
+    // re-fetches into this same entry. See #3868.
+    fetchFailed: boolean;
     // signal getter & setter pair
     getData: () => MuxObjectDataItemType<T>;
     setData: (v: MuxObjectDataItemType<T>) => void;
@@ -61,8 +66,18 @@ function makeORef(otype: string, oid: string): string {
     return `${otype}:${oid}`;
 }
 
+/** Rejection for a backend call made before the CEF bootstrap has set the
+ *  backend address. Nothing is sent; callers may retry once it is set. */
+class BackendEndpointNotSetError extends Error {
+    constructor(methodName: string) {
+        super(`${methodName}: backend endpoint not set yet`);
+        this.name = "BackendEndpointNotSetError";
+    }
+}
+
+// A read, so safe to retry when the request never got a response (#3868).
 function GetObject<T>(oref: string): Promise<T> {
-    return callBackendService("object", "GetObject", [oref], true);
+    return retryTransient(() => callBackendService("object", "GetObject", [oref], true));
 }
 
 function debugLogBackendCall(methodName: string, durationStr: string, args: any[]) {
@@ -93,6 +108,11 @@ function mpsSubscribeToObject(oref: string): () => void {
 }
 
 function callBackendService(service: string, method: string, args: any[], noUIContext?: boolean): Promise<any> {
+    // Module-init reads (window-identity memos, activity polls) can run before
+    // the bootstrap sets the endpoint. Don't send them to "http://null".
+    if (!isWebServerEndpointSet()) {
+        return Promise.reject(new BackendEndpointNotSetError(`${service}.${method}`));
+    }
     const startTs = Date.now();
     let uiContext: UIContext = null;
     if (!noUIContext && globalThis.window != null && window.globalAtoms) {
@@ -151,12 +171,26 @@ const defaultHoldTime = 5000;
 
 function createMuxValueObject<T extends MuxObj>(oref: string, shouldFetch: boolean): MuxObjectValue<T> {
     const [getData, setData] = createSignal<MuxObjectDataItemType<T>>({ value: null, loading: true });
-    const wov: MuxObjectValue<T> = { pendingPromise: null, getData, setData, refCount: 0, holdTime: Date.now() + 5000 };
+    const wov: MuxObjectValue<T> = {
+        pendingPromise: null,
+        fetchFailed: false,
+        getData,
+        setData,
+        refCount: 0,
+        holdTime: Date.now() + 5000,
+    };
     if (!shouldFetch) return wov;
+    startFetch(wov, oref);
+    return wov;
+}
 
+/** Fetch `oref` into `wov` — the same entry, so existing subscribers of its
+ *  signal see the result. Returns the fetch promise (rejects on failure). */
+function startFetch<T extends MuxObj>(wov: MuxObjectValue<T>, oref: string): Promise<T> {
     const startTs = Date.now();
     const localPromise = GetObject<T>(oref);
     wov.pendingPromise = localPromise;
+    wov.fetchFailed = false;
     localPromise.then((val) => {
         if (wov.pendingPromise !== localPromise) return;
         const [otype, oid] = splitORef(oref);
@@ -168,6 +202,7 @@ function createMuxValueObject<T extends MuxObj>(oref: string, shouldFetch: boole
         wov.setData({ value: val, loading: false });
         console.log("MuxObj resolved", oref, Date.now() - startTs + "ms");
     }).catch((err) => {
+        if (wov.pendingPromise !== localPromise) return;
         wov.pendingPromise = null;
         // A backend "not found" rejection (get_object_by_oref's
         // `Err(format!("not found: {}", oref_str))`, object_helpers.rs) is a
@@ -175,15 +210,19 @@ function createMuxValueObject<T extends MuxObj>(oref: string, shouldFetch: boole
         // callers checking getMuxObjectLoadingAtom (e.g. swarm-model.ts's
         // hasRenderableBlock) can actually distinguish "confirmed absent"
         // from "still fetching" instead of this oref staying stuck at
-        // loading:true forever (reagentx P1 on #2438, second pass). Any
-        // OTHER error (network blip, endpoint not yet set at module init)
-        // keeps the prior behavior: leave loading as-is, caller can retry
-        // via getMuxObjectValue when ready.
+        // loading:true forever (reagentx P1 on #2438, second pass).
         if (err instanceof Error && err.message.includes("not found: " + oref)) {
             wov.setData({ value: null, loading: false });
+            return;
         }
+        // Any OTHER error (network failure after retries, endpoint not set
+        // yet) says nothing about the object. Leave loading as-is and mark
+        // the entry so loadAndPinMuxObject re-fetches instead of returning
+        // this null as if it were the answer — that null is what aborted
+        // initMux with "did not load" in #3868.
+        wov.fetchFailed = true;
     });
-    return wov;
+    return localPromise;
 }
 
 function getMuxObjectValue<T extends MuxObj>(oref: string, createIfMissing = true): MuxObjectValue<T> {
@@ -302,6 +341,7 @@ function loadAndPinMuxObject<T extends MuxObj>(oref: string): Promise<T> {
     const wov = getMuxObjectValue<T>(oref);
     wov.refCount++;
     if (wov.pendingPromise == null) {
+        if (wov.fetchFailed) return startFetch(wov, oref);
         const dataValue = wov.getData();
         return Promise.resolve(dataValue.value);
     }
@@ -327,6 +367,7 @@ function updateMuxObject(update: MuxObjUpdate) {
         console.log("MuxObj updated", oref);
         wov.setData({ value: update.obj, loading: false });
     }
+    wov.fetchFailed = false;
     wov.holdTime = Date.now() + defaultHoldTime;
 }
 
