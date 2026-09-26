@@ -24,11 +24,9 @@ import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
 import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { wardenPaneTab } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
-import { TermViewModel } from "@/view/term/term";
+import { terminalPaneTab } from "@/view/term/term";
 import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "@/app/view/agent/agent-pane-tab";
 import { buildAgentPaneChromeModel } from "@/app/view/agent/agent-view";
-import { buildTermPaneChromeModel } from "@/view/term/term";
-import { termPaneTab } from "@/view/term/term-pane-tab";
 import { getPaneTab, legacyAdapter, registerPaneTab } from "./pane-tab-registry";
 
 const builtins = [
@@ -37,22 +35,7 @@ const builtins = [
     // (scroll, form input), the editor's cursor and undo. Agent per
     // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md; browser and editor per the
     // repo owner's decision, SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
-    legacyAdapter("term", TermViewModel as any, {
-        label: "Terminal",
-        icon: "terminal",
-        lifecycle: "keepAlive",
-        capabilities: {
-            headerMic: { title: "Speak into this terminal (Ctrl+Shift+V)" },
-            statsBadgeSetting: "term:showstatsbadge",
-            hueBorder: true,
-            paneZoom: {},
-            acceptsInput: true,
-            shellKeys: true,
-            sharesCwd: true,
-        },
-        tab: termPaneTab,
-        chrome: buildTermPaneChromeModel,
-    }),
+    terminalPaneTab, // native — Phase 2c (keep-alive)
     // "forge" was folded into the agent pane in v0.33.197.
     legacyAdapter("agent", AgentViewModel as any, {
         label: "Agent",
