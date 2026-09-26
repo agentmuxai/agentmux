@@ -9,7 +9,7 @@ import { initLogPipe } from "./log/log-pipe";
 import { initErrorForwarder } from "./log/error-forwarder";
 import { setupCefApi } from "./cef-init";
 import { initApp } from "./app-init";
-import { tryAutoRecover, clearStartupReloadCount } from "./app/init/error-display";
+import { tryAutoRecover, clearStartupReloadCount, StartupFailureHandled } from "./app/init/error-display";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -187,6 +187,12 @@ async function bootstrap() {
             clearStartupReloadCount();
             window.removeEventListener("keydown", startupReloadKeyHandler, true);
         } catch (initError) {
+            if (initError instanceof StartupFailureHandled) {
+                // A reload is scheduled or the recovery card is up. Not a
+                // success: keep the reload budget, and don't recover twice.
+                log("ERROR", "❌ Window startup failed:", initError.message);
+                return;
+            }
             log("ERROR", "Failed in initApp:", initError);
             log("ERROR", "Init error name:", (initError as Error)?.name);
             log("ERROR", "Init error message:", (initError as Error)?.message);

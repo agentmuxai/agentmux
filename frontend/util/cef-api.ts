@@ -17,6 +17,7 @@ import {
 import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { benchMark } from "@/util/startup-bench";
 import { CEF_HOST_CAPS } from "@/app/host/host-caps";
+import { isTransientNetworkError, retryTransient } from "@/util/transient-network";
 
 // Cache for "synchronous" values that are fetched once at startup.
 let cachedValues: {
@@ -49,10 +50,18 @@ export async function initCefApi(): Promise<void> {
     let backendEndpoints: { ws: string; web: string };
 
     try {
-        backendEndpoints = await invokeCommand<{ ws: string; web: string }>("get_backend_endpoints");
+        // Read-only, so a request that never got a response is retried (#3868:
+        // one refused loopback connect here left the window blank for the full
+        // 30 s event wait below, because backend-ready had fired long before).
+        backendEndpoints = await retryTransient(() =>
+            invokeCommand<{ ws: string; web: string }>("get_backend_endpoints")
+        );
         console.log("[cef-api] Backend already ready:", backendEndpoints);
         benchMark("backend-endpoints-cached");
     } catch (e) {
+        // Still unreachable after retries: not a "not ready yet" answer, so
+        // don't wait for an event — fail fast into bootstrap's auto-recover.
+        if (isTransientNetworkError(e)) throw e;
         benchMark("backend-wait-start");
         console.log("[cef-api] Backend not ready yet, waiting for backend-ready event...");
         backendEndpoints = await new Promise<{ ws: string; web: string }>((resolve, reject) => {
@@ -91,17 +100,19 @@ export async function initCefApi(): Promise<void> {
         zoomFactor,
         aboutDetails,
     ] = await Promise.all([
-        invokeCommand<string>("get_auth_key"),
-        invokeCommand<boolean>("get_is_dev"),
-        invokeCommand<string>("get_platform"),
-        invokeCommand<string>("get_user_name"),
-        invokeCommand<string>("get_host_name"),
-        invokeCommand<string>("get_data_dir"),
-        invokeCommand<string>("get_config_dir"),
-        invokeCommand<string>("get_user_home_dir"),
-        invokeCommand<string>("get_docsite_url"),
-        invokeCommand<number>("get_zoom_factor"),
-        invokeCommand<AboutModalDetails>("get_about_modal_details"),
+        // All read-only getters — safe to retry a request that never got a
+        // response (#3868).
+        retryTransient(() => invokeCommand<string>("get_auth_key")),
+        retryTransient(() => invokeCommand<boolean>("get_is_dev")),
+        retryTransient(() => invokeCommand<string>("get_platform")),
+        retryTransient(() => invokeCommand<string>("get_user_name")),
+        retryTransient(() => invokeCommand<string>("get_host_name")),
+        retryTransient(() => invokeCommand<string>("get_data_dir")),
+        retryTransient(() => invokeCommand<string>("get_config_dir")),
+        retryTransient(() => invokeCommand<string>("get_user_home_dir")),
+        retryTransient(() => invokeCommand<string>("get_docsite_url")),
+        retryTransient(() => invokeCommand<number>("get_zoom_factor")),
+        retryTransient(() => invokeCommand<AboutModalDetails>("get_about_modal_details")),
     ]);
     benchMark("invoke-batch-done");
 

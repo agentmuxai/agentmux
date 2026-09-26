@@ -10,4 +10,8 @@ const WSServerEndpointVarName = "WAVE_SERVER_WS_ENDPOINT";
 // so lazy() would cache "http://null" if called too early.
 export const getWebServerEndpoint = () => `http://${getEnv(WebServerEndpointVarName)}`;
 
+/** False until the CEF bootstrap has set the backend address — before that,
+ *  getWebServerEndpoint() returns "http://null". */
+export const isWebServerEndpointSet = () => !!getEnv(WebServerEndpointVarName);
+
 export const getWSServerEndpoint = () => `ws://${getEnv(WSServerEndpointVarName)}`;
