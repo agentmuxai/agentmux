@@ -21,6 +21,30 @@ use crate::backend::storage::identities::{IdentityAccount, SecretRef};
 /// whose own config (`~/.claude.json`) is outside it, so the `.claude.json`
 /// inside may name a user no longer signed in.
 pub fn email_from_oauth_dir(provider: &str, dir: &str) -> Option<String> {
+    let account = oauth_account(provider, dir)?;
+    let email = account.get("emailAddress")?.as_str()?.trim();
+    (!email.is_empty()).then(|| email.to_string())
+}
+
+/// The Anthropic identity a Claude config dir is signed in as: a short hash
+/// of `oauthAccount.accountUuid` and `oauthAccount.organizationUuid`
+/// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.1).
+/// Not the email: one email can belong to several organizations, a
+/// personal one and a Team one, and a session from one isn't the other's.
+/// Hashed because it goes into a log every srv on the host shares. `None`
+/// on the same terms as [`email_from_oauth_dir`], or when either id is
+/// missing.
+pub fn identity_key_from_oauth_dir(provider: &str, dir: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let account = oauth_account(provider, dir)?;
+    let id = |k: &str| account.get(k)?.as_str().map(str::trim).filter(|v| !v.is_empty());
+    let (account_uuid, org_uuid) = (id("accountUuid")?, id("organizationUuid")?);
+    let digest = Sha256::digest(format!("claude\0{account_uuid}\0{org_uuid}").as_bytes());
+    Some(hex::encode(digest)[..16].to_string())
+}
+
+/// `oauthAccount` from the `.claude.json` Claude writes into `dir`.
+fn oauth_account(provider: &str, dir: &str) -> Option<serde_json::Value> {
     if !matches!(provider, "claude" | "claude-code") || dir.is_empty() {
         return None;
     }
@@ -29,9 +53,8 @@ pub fn email_from_oauth_dir(provider: &str, dir: &str) -> Option<String> {
         return None;
     }
     let raw = std::fs::read_to_string(std::path::Path::new(dir).join(".claude.json")).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    let email = json.get("oauthAccount")?.get("emailAddress")?.as_str()?.trim();
-    (!email.is_empty()).then(|| email.to_string())
+    let mut json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    Some(json.get_mut("oauthAccount")?.take())
 }
 
 /// Set `account.context.email` from its config dir when that differs from
@@ -93,6 +116,41 @@ mod tests {
         let empty = dir_with(r#"{"oauthAccount":{"emailAddress":""}}"#);
         assert_eq!(email_from_oauth_dir("claude", empty.path().to_str().unwrap()), None);
         assert_eq!(email_from_oauth_dir("claude", "/no/such/dir"), None);
+    }
+
+    #[test]
+    fn the_identity_key_is_the_account_and_organization_not_the_email() {
+        let personal = dir_with(r#"{"oauthAccount":{"emailAddress":"me@example.com","accountUuid":"acc-1","organizationUuid":"org-personal"}}"#);
+        let team = dir_with(r#"{"oauthAccount":{"emailAddress":"me@example.com","accountUuid":"acc-1","organizationUuid":"org-team"}}"#);
+        let relogin = dir_with(r#"{"oauthAccount":{"emailAddress":"renamed@example.com","accountUuid":"acc-1","organizationUuid":"org-personal"}}"#);
+        let key = |d: &tempfile::TempDir| identity_key_from_oauth_dir("claude", d.path().to_str().unwrap());
+
+        let k = key(&personal).expect("a key");
+        assert_eq!(k.len(), 16);
+        assert!(!k.contains("acc-1") && !k.contains("org-personal"), "hashed, not the raw ids");
+        assert_eq!(key(&relogin).as_deref(), Some(k.as_str()), "same account + org: same identity, whatever the email");
+        assert_ne!(key(&team).as_deref(), Some(k.as_str()), "same email, other org: another identity");
+        assert_eq!(
+            identity_key_from_oauth_dir("claude-code", personal.path().to_str().unwrap()).as_deref(),
+            Some(k.as_str())
+        );
+    }
+
+    #[test]
+    fn no_identity_key_without_both_ids() {
+        for json in [
+            r#"{"oauthAccount":{"emailAddress":"me@example.com","accountUuid":"acc-1"}}"#,
+            r#"{"oauthAccount":{"organizationUuid":"org-1"}}"#,
+            r#"{"oauthAccount":{"accountUuid":" ","organizationUuid":"org-1"}}"#,
+            r#"{}"#,
+            "not json",
+        ] {
+            let d = dir_with(json);
+            assert_eq!(identity_key_from_oauth_dir("claude", d.path().to_str().unwrap()), None, "{json}");
+        }
+        let d = dir_with(r#"{"oauthAccount":{"accountUuid":"acc-1","organizationUuid":"org-1"}}"#);
+        assert_eq!(identity_key_from_oauth_dir("codex", d.path().to_str().unwrap()), None);
+        assert_eq!(identity_key_from_oauth_dir("claude", "/no/such/dir"), None);
     }
 
     #[test]

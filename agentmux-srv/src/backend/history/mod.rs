@@ -735,6 +735,7 @@ mod agent_record_search_tests {
                 continuity_rung: crate::backend::continuity_segments::Rung::Fresh,
                 predecessor_segment_id: None,
                 lease_epoch: None,
+                identity_key: None,
             },
         )
         .unwrap();
