@@ -62,7 +62,7 @@ pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
 /// directly instead. See that module's comments.
 pub fn resolve_shared_store_path() -> Option<std::path::PathBuf> {
     if agentmux_common::isolated_auth_enabled() {
-        if let Ok(instance_dir) = std::env::var("AGENTMUX_INSTANCE_DIR") {
+        if let Some(instance_dir) = std::env::var_os("AGENTMUX_INSTANCE_DIR") {
             if !instance_dir.is_empty() {
                 return Some(std::path::PathBuf::from(instance_dir).join("identity-store.db"));
             }
@@ -131,7 +131,8 @@ pub fn resolve_identity_store_path() -> Option<std::path::PathBuf> {
 /// must call this directly rather than deriving it from
 /// `resolve_shared_store_path()`, which DOES vary with isolation.
 pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
-    if let Ok(s) = std::env::var("AGENTMUX_HOME_OVERRIDE") {
+    // `var_os` throughout: a path that isn't valid UTF-8 must not read as unset.
+    if let Some(s) = std::env::var_os("AGENTMUX_HOME_OVERRIDE") {
         if !s.is_empty() {
             // Consistent with data_paths everywhere else: the override is the
             // ~/.agentmux root, with the shared dir at root/shared. (reagent
@@ -139,7 +140,7 @@ pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
             return Some(PathBuf::from(s).join("shared"));
         }
     }
-    if let Ok(s) = std::env::var("AGENTMUX_SHARED_DIR") {
+    if let Some(s) = std::env::var_os("AGENTMUX_SHARED_DIR") {
         if !s.is_empty() {
             return Some(PathBuf::from(s));
         }

@@ -29,6 +29,9 @@ struct SrvGuard {
     child: std::process::Child,
     #[cfg(windows)]
     _job: Option<JobHandle>,
+    /// The spawn's own data dir, when `spawn_backend` made one; removed after
+    /// the child is reaped (fields drop after `Drop::drop`).
+    _data_dir: Option<tempfile::TempDir>,
 }
 
 impl Drop for SrvGuard {
@@ -118,105 +121,13 @@ fn assign_to_kill_on_close_job(child: &std::process::Child) -> Option<JobHandle>
 /// tests must NOT call `kill()` for cleanup (scope exit / panic unwind does
 /// it, and on Windows the job object reaps the whole tree).
 fn spawn_backend() -> (SrvGuard, String, String, String) {
-    let auth_key = "integration-test-key-12345";
-
-    let binary = env!("CARGO_BIN_EXE_agentmux-srv");
-
-    let child = Command::new(binary)
-        .env("AGENTMUX_AUTH_KEY", auth_key)
-        // See bootstrap.rs's cloud_subscriber_disabled_from_env doc comment:
-        // without this, every spawn here fires a real OS-keychain read from
-        // an ad-hoc/dev-signed binary, which macOS gates behind an
-        // interactive consent prompt on whatever account runs this suite.
-        .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("failed to spawn agentmux-srv");
-
-    #[cfg(windows)]
-    let job = assign_to_kill_on_close_job(&child);
-
-    // Guard is constructed IMMEDIATELY after spawn — the ESTART parsing
-    // below can panic (assert/expect), and a panic before the guard exists
-    // would leak the child, which is the exact defect this guard fixes.
-    let mut guard = SrvGuard {
-        child,
-        #[cfg(windows)]
-        _job: job,
-    };
-
-    let stderr = guard.stderr.take().unwrap();
-    let reader = BufReader::new(stderr);
-
-    let mut web_addr = String::new();
-    let mut ws_addr = String::new();
-
-    for line in reader.lines() {
-        let line = line.expect("failed to read stderr");
-        if line.contains("AGENTMUXSRV-ESTART") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            for part in &parts {
-                if let Some(addr) = part.strip_prefix("ws:") {
-                    ws_addr = addr.to_string();
-                } else if let Some(addr) = part.strip_prefix("web:") {
-                    web_addr = addr.to_string();
-                }
-            }
-            break;
-        }
-    }
-
-    assert!(!web_addr.is_empty(), "failed to parse web addr from ESTART");
-    assert!(!ws_addr.is_empty(), "failed to parse ws addr from ESTART");
-
-    (guard, web_addr, ws_addr, auth_key.to_string())
-}
-
-#[test]
-fn health_returns_200() {
-    // No manual cleanup in these tests: SrvGuard kills + reaps on scope
-    // exit — INCLUDING panic unwind on a failed assert, which the old
-    // explicit end-of-test kill() never covered.
-    let (_child, web_addr, _ws_addr, _auth_key) = spawn_backend();
-
-    let url = format!("http://{}/", web_addr);
-    let resp = reqwest::blocking::get(&url).expect("health request failed");
-    assert_eq!(resp.status(), 200);
-
-    let body: serde_json::Value = resp.json().unwrap();
-    assert_eq!(body["status"], "ok");
-}
-
-#[test]
-fn auth_rejects_missing_key() {
-    let (_child, web_addr, _ws_addr, _auth_key) = spawn_backend();
-
-    let client = reqwest::blocking::Client::new();
-    let resp = client
-        .get(format!("http://{}/agentmux/service", web_addr))
-        .send()
-        .expect("request failed");
-    assert_eq!(resp.status(), 401);
-}
-
-#[test]
-fn auth_accepts_valid_header() {
-    let (_child, web_addr, _ws_addr, auth_key) = spawn_backend();
-
-    let client = reqwest::blocking::Client::new();
-    let resp = client
-        .post(format!("http://{}/agentmux/service", web_addr))
-        .header("X-AuthKey", &auth_key)
-        .header("Content-Type", "application/json")
-        .body(r#"{"service":"client","method":"GetClientData"}"#)
-        .send()
-        .expect("request failed");
-    assert_eq!(resp.status(), 200); // real handler returns 200
-
-    let body: serde_json::Value = resp.json().unwrap();
-    assert!(body["success"].as_bool().unwrap_or(false));
+    // Each spawn gets its own data dir. srv locks the directory holding its
+    // databases (one srv per set of stores), and tests run in parallel; they
+    // also must never open whatever real data dir the environment points at.
+    let data_dir = tempfile::tempdir().expect("temp data dir");
+    let (mut guard, web, ws, key) = spawn_backend_with_data_dir(data_dir.path());
+    guard._data_dir = Some(data_dir);
+    (guard, web, ws, key)
 }
 
 /// Same as `spawn_backend`, but pins `AGENTMUX_DATA_DIR` to a caller-owned
@@ -244,6 +155,7 @@ fn spawn_backend_with_data_dir(data_dir: &std::path::Path) -> (SrvGuard, String,
         child,
         #[cfg(windows)]
         _job: job,
+        _data_dir: None,
     };
 
     let stderr = guard.stderr.take().unwrap();

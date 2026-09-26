@@ -2,18 +2,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[command(name = "agentmux-srv", about = "AgentMux Rust backend server")]
 pub struct CliArgs {
     /// Path to wave data directory (overrides AGENTMUX_DATA_HOME)
     #[arg(long = "wavedata")]
-    pub wavedata: Option<String>,
+    pub wavedata: Option<PathBuf>,
 
     /// Instance identifier (used for multi-version coexistence)
     #[arg(long = "instance", default_value = "default")]
     pub instance: String,
+
+    /// Run without a launcher or desktop host (container, server, CI).
+    /// Read early by `headless::prepare_env`; see
+    /// docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md.
+    #[arg(long = "headless")]
+    pub headless: bool,
+
+    /// Headless: read the auth key from this file instead of generating one.
+    #[arg(long = "auth-key-file")]
+    pub auth_key_file: Option<PathBuf>,
+
+    /// Headless: fixed loopback port for the web listener (default: OS-chosen).
+    #[arg(long = "web-port")]
+    pub web_port: Option<u16>,
+
+    /// Headless: fixed loopback port for the websocket listener (default: OS-chosen).
+    #[arg(long = "ws-port")]
+    pub ws_port: Option<u16>,
 
     #[command(subcommand)]
     pub command: Option<SrvCommand>,
@@ -73,8 +93,11 @@ pub struct Config {
     /// itself (`agentmux-cef/src/sidecar.rs::spawn_backend`, which
     /// generates it alongside its own `auth_key`).
     pub host_reg_secret: Option<String>,
-    pub data_home: String,
-    pub config_home: String,
+    /// Empty when unset. Paths stay `PathBuf` (read with `var_os`) so a home
+    /// directory that isn't valid UTF-8 still reaches the stores intact
+    /// (Codex P2 on #3893).
+    pub data_home: PathBuf,
+    pub config_home: PathBuf,
     pub app_path: String,
     #[allow(dead_code)]
     pub is_dev: bool,
@@ -103,13 +126,17 @@ impl Config {
         // names (`AGENTMUX_DATA_HOME`, `AGENTMUX_CONFIG_HOME`) are no
         // longer set — no fallback (symmetry; partial-rollout isn't a
         // supported scenario per spec §3.4 "no migration").
+        // An empty `--wavedata ""` counts as absent, as it does for the lock
+        // headless takes (`headless::effective_data_dir`) — otherwise the lock
+        // and the stores would pick different directories (Codex P2 on #3893).
         let data_home = args
             .wavedata
             .clone()
-            .or_else(|| std::env::var("AGENTMUX_DATA_DIR").ok())
+            .filter(|p| !p.as_os_str().is_empty())
+            .or_else(|| std::env::var_os("AGENTMUX_DATA_DIR").map(PathBuf::from))
             .unwrap_or_default();
 
-        let config_home = std::env::var("AGENTMUX_CONFIG_DIR").unwrap_or_default();
+        let config_home = std::env::var_os("AGENTMUX_CONFIG_DIR").map(PathBuf::from).unwrap_or_default();
         let app_path = std::env::var("AGENTMUX_APP_PATH").unwrap_or_default();
         // is_dev is now derived from AGENTMUX_RUNTIME_MODE (the
         // canonical env var emitted by the unified DataPaths layer).
@@ -193,7 +220,7 @@ mod tests {
     fn missing_auth_key_errors() {
         let _lock = lock();
         clear_env();
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("AGENTMUX_AUTH_KEY"));
@@ -204,7 +231,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         clear_env();
@@ -217,13 +244,26 @@ mod tests {
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-12345");
         std::env::set_var("AGENTMUX_DATA_DIR", "/from/env");
         let args = CliArgs {
-            wavedata: Some("/from/cli".to_string()),
+            wavedata: Some("/from/cli".into()),
             instance: "default".to_string(),
             command: None,
+            ..Default::default()
         };
         let config = Config::from_env_and_args(&args).unwrap();
-        assert_eq!(config.data_home, "/from/cli");
+        assert_eq!(config.data_home, PathBuf::from("/from/cli"));
         assert!(std::env::var("AGENTMUX_AUTH_KEY").is_err());
+        clear_env();
+    }
+
+    #[test]
+    fn empty_cli_wavedata_counts_as_absent() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-empty-wavedata");
+        std::env::set_var("AGENTMUX_DATA_DIR", "/from/env");
+        let args = CliArgs { wavedata: Some(PathBuf::new()), ..Default::default() };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.data_home, PathBuf::from("/from/env"));
         clear_env();
     }
 
@@ -236,12 +276,33 @@ mod tests {
         std::env::set_var("AGENTMUX_CONFIG_DIR", "/config");
         std::env::set_var("AGENTMUX_APP_PATH", "/app");
         std::env::set_var("AGENTMUX_RUNTIME_MODE", "dev:main");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
-        assert_eq!(config.data_home, "/data");
-        assert_eq!(config.config_home, "/config");
+        assert_eq!(config.data_home, PathBuf::from("/data"));
+        assert_eq!(config.config_home, PathBuf::from("/config"));
         assert_eq!(config.app_path, "/app");
         assert!(config.is_dev);
+        clear_env();
+    }
+
+    /// A data or config dir that isn't valid UTF-8 (a Unix home with such a
+    /// name) is kept byte for byte, not dropped: `std::env::var` would call it
+    /// absent, and the stores would open under the default root instead.
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_dirs_are_kept() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let _lock = lock();
+        clear_env();
+        let data = OsStr::from_bytes(b"/home/caf\xe9/data");
+        let conf = OsStr::from_bytes(b"/home/caf\xe9/config");
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-non-utf8");
+        std::env::set_var("AGENTMUX_DATA_DIR", data);
+        std::env::set_var("AGENTMUX_CONFIG_DIR", conf);
+        let config = Config::from_env_and_args(&CliArgs::default()).unwrap();
+        assert_eq!(config.data_home.as_os_str(), data);
+        assert_eq!(config.config_home.as_os_str(), conf);
         clear_env();
     }
 
@@ -250,7 +311,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-1");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.host_reg_secret, None);
         clear_env();
@@ -262,7 +323,7 @@ mod tests {
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-2");
         std::env::set_var("AGENTMUX_HOST_REG_SECRET", "the-shared-secret");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.host_reg_secret, Some("the-shared-secret".to_string()));
         assert!(std::env::var("AGENTMUX_HOST_REG_SECRET").is_err());
@@ -274,7 +335,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert!(!config.lan_key.is_empty());
         assert_ne!(
@@ -289,7 +350,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let first = Config::from_env_and_args(&args).unwrap().lan_key;
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
         let second = Config::from_env_and_args(&args).unwrap().lan_key;

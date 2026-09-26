@@ -9,6 +9,7 @@ mod bootstrap;
 mod broker;
 mod config;
 mod event_log;
+mod headless;
 mod identity;
 mod migrations;
 mod persist;
@@ -40,8 +41,23 @@ async fn main() {
         return;
     }
 
-    // 0. Start parent process watcher BEFORE tokio runtime does real work (Linux/macOS only).
-    bootstrap::install_process_watchers();
+    // 0. Headless (no launcher/host): prepare the env the launcher would have
+    //    provided, and don't tie srv's life to a parent or stdin. Otherwise start
+    //    the parent process watcher BEFORE tokio runtime does real work
+    //    (Linux/macOS only). docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md.
+    let headless = headless::requested();
+    if headless {
+        match headless::prepare_env() {
+            Ok(Some(key_file)) => eprintln!("agentmux-srv --headless: auth key written to {}", key_file.display()),
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("agentmux-srv --headless: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        bootstrap::install_process_watchers();
+    }
 
     // 0b. Attach out-of-process crash dump handler (Windows only).
     //     _crash_guard must stay alive — dropping it uninstalls the VEH handler.
@@ -224,7 +240,7 @@ async fn main() {
     let ws_server = axum::serve(net.ws_listener, router);
 
     // 8 & 9. Spawn stdin watch thread + SIGINT/SIGTERM handler (graceful shutdown).
-    let stdin_token = bootstrap::install_shutdown_handlers();
+    let stdin_token = bootstrap::install_shutdown_handlers(!headless);
 
     // Periodic WAL checkpoint — prevents unbounded WAL file growth during
     // long-running sessions.

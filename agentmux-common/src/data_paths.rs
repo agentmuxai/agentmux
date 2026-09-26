@@ -1017,8 +1017,9 @@ pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
 /// (`<root>/channels/<channel>/data`), not the root. The similar names are
 /// exactly why srv ended up with a second resolver.
 pub fn agentmux_root() -> Result<PathBuf, String> {
+    // `var_os`: a root that isn't valid UTF-8 must not read as unset.
     for var in ["AGENTMUX_HOME_OVERRIDE", "AGENTMUX_DATA_HOME"] {
-        if let Ok(s) = std::env::var(var) {
+        if let Some(s) = std::env::var_os(var) {
             if !s.is_empty() {
                 return Ok(PathBuf::from(s));
             }

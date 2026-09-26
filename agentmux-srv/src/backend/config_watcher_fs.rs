@@ -43,12 +43,12 @@ use super::wconfig::{self, ConfigState, SettingsType};
 ///    which is what makes this the genuinely shared, cross-channel file.
 /// 4. `~/.agentmux` (legacy fallback — `AGENTMUX_CONFIG_HOME` unset)
 pub fn resolve_settings_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("AGENTMUX_SETTINGS_DIR") {
+    if let Some(dir) = std::env::var_os("AGENTMUX_SETTINGS_DIR") {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
     }
-    if let Ok(dir) = std::env::var("AGENTMUX_CONFIG_HOME") {
+    if let Some(dir) = std::env::var_os("AGENTMUX_CONFIG_HOME") {
         if !dir.is_empty() {
             let path = PathBuf::from(&dir);
             if agentmux_common::isolated_settings_enabled() {
