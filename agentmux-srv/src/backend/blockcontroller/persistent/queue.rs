@@ -658,13 +658,21 @@ impl PersistentSubprocessController {
     pub(super) fn persist_message_to_blockfile(&self, json_str: &str) {
         let global_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         let line_with_newline = format!("{json_str}\n");
-        super::super::shell::persist_user_line(
-            self.broker.as_deref(),
-            &self.block_id,
-            line_with_newline.as_bytes(),
-            self.filestore.as_ref(),
-            global_zone.as_deref(),
-        );
+        // Two SQLite write transactions (the block's store and the host-global
+        // transcript store every instance writes to), each allowed to wait out
+        // a 5s busy timeout. The async callers (run_agent_turn, agent.send)
+        // reach this on a runtime worker; inline, that worker stops polling
+        // the I/O driver and srv stops answering sockets for the duration.
+        // Synchronous on purpose — messages must persist in delivery order.
+        crate::backend::blocking::off_async_worker(|| {
+            super::super::shell::persist_user_line(
+                self.broker.as_deref(),
+                &self.block_id,
+                line_with_newline.as_bytes(),
+                self.filestore.as_ref(),
+                global_zone.as_deref(),
+            )
+        });
     }
 
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {

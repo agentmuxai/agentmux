@@ -240,7 +240,14 @@ pub fn spawn_poller(registry: Arc<AgentProcessRegistry>) {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            registry.poll_and_emit();
+            // Per-process OS queries for every tracked block plus a
+            // system-wide process snapshot, under two mutexes — never on an
+            // async worker (see `backend::blocking`). Awaited, so still one
+            // pass at a time.
+            let registry = Arc::clone(&registry);
+            if let Err(e) = tokio::task::spawn_blocking(move || registry.poll_and_emit()).await {
+                tracing::warn!(error = %e, "[process-tracker] poll task failed");
+            }
         }
     });
 }

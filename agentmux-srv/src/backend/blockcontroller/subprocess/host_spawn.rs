@@ -484,7 +484,13 @@ impl SubprocessController {
                     if turn_done_renew.load(Ordering::SeqCst) {
                         break;
                     }
-                    if let Err(e) = store.renew(&lease) {
+                    // Blocking OS file lock + fsync'd write: off the async
+                    // worker (see `backend::blocking`).
+                    let (s, l) = (Arc::clone(&store), lease.clone());
+                    let renewed = tokio::task::spawn_blocking(move || s.renew(&l).map_err(|e| e.to_string()))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("renew task failed: {e}")));
+                    if let Err(e) = renewed {
                         // Lost the lease to a TTL reclaim mid-turn — log and
                         // let the turn finish naturally rather than killing
                         // it. Force-killing on lost renewal is deliberately
@@ -709,7 +715,9 @@ impl SubprocessController {
             // Release the lease (if any), then the run lock — mirrors
             // the ordering in the spawn-failure closure above.
             if let (Some(store), Some(lease)) = (&lease_store_wait, &claimed_lease_wait) {
-                if let Err(e) = store.release(lease) {
+                // Synchronous: the release must land before run_lock drops
+                // below and a queued turn claims its own lease.
+                if let Err(e) = crate::backend::blocking::off_async_worker(|| store.release(lease)) {
                     tracing::warn!(
                         block_id = %block_id_wait,
                         instance_id = %lease.instance_id(),
