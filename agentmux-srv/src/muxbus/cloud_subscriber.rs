@@ -192,21 +192,21 @@ impl CloudSubscriber {
     }
 
     /// Unsubscribe `agent_id` if no live block holds it (`is_live`), and
-    /// say whether it did. Removes first and checks after: a respawn that
-    /// registers while this runs either still finds the key (its
-    /// `add_agent` sends nothing) — then the check here sees it live and
-    /// puts the key back — or finds it gone and re-adds it itself. Checking
-    /// first and removing after could drop a live agent (Codex P2, #3897).
-    /// `is_live` must not take the `agents` lock.
+    /// say whether it did. The check, the removal and the `RemoveAgent`
+    /// send all happen under the `agents` lock, which `add_agent` also
+    /// takes: a respawn either registered first (the check sees it live and
+    /// nothing is dropped) or its `add_agent` waits, then finds the key gone
+    /// and queues `AddAgent` after this `RemoveAgent` — the WS loop applies
+    /// them in order and it ends subscribed (Codex P2 ×2 on #3897).
+    /// `is_live` must not take the `agents` lock; it may take the reactive
+    /// handler's (which never takes this one).
     pub fn drop_if_orphaned(&self, agent_id: &str, is_live: impl Fn(&str) -> bool) -> bool {
         let key = agent_id.to_lowercase();
-        if !self.agents.lock().unwrap().remove(&key) {
+        let mut agents = self.agents.lock().unwrap();
+        if !agents.contains(&key) || is_live(&key) {
             return false;
         }
-        if is_live(&key) {
-            self.agents.lock().unwrap().insert(key);
-            return false;
-        }
+        agents.remove(&key);
         let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
         true
     }
@@ -1403,6 +1403,35 @@ mod tests {
         assert!(!sub.drop_if_orphaned("Opaz", |_| true));
         assert!(sub.agents.lock().unwrap().contains("opaz"), "still subscribed");
         assert!(rx.try_recv().is_err(), "no RemoveAgent sent");
+    }
+
+    // Codex P2 (second pass) on #3897: a respawn registering after the
+    // re-check but before RemoveAgent is sent would queue AddAgent first,
+    // and the WS loop would process the stale removal last. An add_agent
+    // racing a drop must queue after it.
+    #[test]
+    fn an_add_racing_a_drop_is_queued_after_the_removal() {
+        let (sub, mut rx) = test_subscriber(&["opaz"]);
+        let sub = std::sync::Arc::new(sub);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
+        let adder = {
+            let sub = sub.clone();
+            std::thread::spawn(move || {
+                entered_rx.recv().unwrap();
+                sub.add_agent("Opaz");
+            })
+        };
+        let dropped = sub.drop_if_orphaned("Opaz", |_| {
+            // The respawn starts registering while liveness is checked.
+            entered_tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            false
+        });
+        adder.join().unwrap();
+        assert!(dropped);
+        assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::RemoveAgent(k)) if k == "opaz"), "removal first");
+        assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::AddAgent(k)) if k == "opaz"), "then the re-add");
+        assert!(sub.agents.lock().unwrap().contains("opaz"), "and it ends subscribed");
     }
 
     #[test]
