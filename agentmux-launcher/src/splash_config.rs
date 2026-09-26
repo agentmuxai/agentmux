@@ -16,6 +16,12 @@ pub fn splash_disabled() -> bool {
     if let Some(forced) = env_override() {
         return forced; // env is authoritative (Some(true)=disable, Some(false)=force-on)
     }
+    // A login start is quiet: no window, so no splash either
+    // (SPEC_START_WITH_OS_2026_09_25.md §3.3). On macOS this also routes the
+    // start through the headless AppKit pump the menu-bar item needs.
+    if crate::autostart::login_start() {
+        return true;
+    }
     // Best-effort settings.json read. Wrapped so a resolver panic/IO error can
     // never take down launcher startup — on any failure we keep the splash.
     std::panic::catch_unwind(|| {
