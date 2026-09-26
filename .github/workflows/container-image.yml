@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       claude_version:
-        # Keep in sync with the Claude pin in agentmux-srv/src/backend/providers.rs,
-        # agentmux-cef/src/commands/providers.rs, and
-        # frontend/app/view/agent/providers/index.ts — enforced by
+        # Keep in sync with the Claude pin in agentmux-srv/src/backend/providers.rs
+        # and frontend/app/view/agent/providers/catalog.ts — enforced by
         # frontend/app/view/agent/providers/pin-consistency.test.ts.
         description: 'Claude Code version to pin (empty = latest)'
         required: false

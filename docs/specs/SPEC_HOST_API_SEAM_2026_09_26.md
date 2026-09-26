@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** active — Slices 1–4 merged (PRs #3878, #3879, #3882, #3886); slice 5a in PR #3887 and slice 5b in PR #3888. When both merge, every file outside the seam reaches the host through `AppApi`.
+**Status:** implemented — all slices merged: PRs #3878 (1), #3879 (2), #3882 (3), #3886 (4), #3887 (5a), #3888 (5b). Every file outside the seam reaches the host through `AppApi`; the ratchet's PENDING list is empty.
 **Author:** Maricon
 
 ---

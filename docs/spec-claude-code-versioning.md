@@ -11,14 +11,13 @@ installing whatever `@anthropic-ai/claude-code@latest` resolved to at image buil
 time. This meant two builds triggered minutes apart could embed different Claude Code
 versions, breaking reproducibility and making regressions harder to bisect.
 
-## Version pins (five matching-string locations, plus one curated label — six sync points total)
+## Version pins (four matching-string locations, plus one curated label — five sync points total)
 
 | File | Location | Purpose |
 |------|----------|---------|
 | `docker/Dockerfile.agent-agentmux` line 36 | `ARG CLAUDE_VERSION=2.1.280` | Fallback for local `docker build` without passing the arg |
 | `.github/workflows/container-image.yml` line 16 | `default: '2.1.280'` | Default used when CI is triggered via `workflow_dispatch` without an explicit version input |
 | `agentmux-srv/src/backend/providers.rs` | `pinned_version: "2.1.280"` (CLAUDE static) | Version the backend sidecar installs |
-| `agentmux-cef/src/commands/providers.rs` | `const CLAUDE_VERSION: &str = "2.1.280"` | Version the host installer installs |
 | `frontend/app/view/agent/providers/catalog.ts` (re-exported via `./index`) | `pinnedVersion: "2.1.280"` (PROVIDERS.claude) | Version surfaced in the UI. Corrected 2026-08-27 — this file used to be a single `providers/index.ts`, split into `types.ts`/`catalog.ts`/`model-overlay.ts` for readability; the pin moved with it but this doc wasn't updated at the time. |
 | `frontend/app/view/agent/providers/catalog.ts` (same object) | `models: [{ value: "opus", label: "Opus 5.5", ... }]` | The curated UI label for the `opus` family alias — **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
 
@@ -27,14 +26,15 @@ The CI workflow's "Resolve Claude Code version" step (`id: claude_ver`) has a sp
 - Input empty or `"latest"` → resolve via `npm view @anthropic-ai/claude-code version` at build time
 
 `frontend/app/view/agent/providers/pin-consistency.test.ts` enforces agreement
-across the **five matching-version-string** locations (the first five rows
+across the **four matching-version-string** locations (the first four rows
 above), including the Dockerfile `ARG` — added 2026-08-27, closing a gap this
 doc itself had warned about (in this same paragraph) for over a month without
-it becoming a test. It does **not**, and structurally cannot, check the sixth
-row (the model `label`) — that's not a version string to compare, it's a
+it becoming a test. (A fifth, the CEF host's own installer pin, was removed on
+2026-09-26 with that unused installer.) It does **not**, and structurally
+cannot, check the fifth row (the model `label`) — that's not a version string to compare, it's a
 semantic claim about upstream state; see `SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`
 §3.3 for the open question of whether/how to make that check less manual too.
-All five version pins must still be updated together, and the test only
+All four version pins must still be updated together, and the test only
 catches a *mismatch* — not a location someone forgot to touch at all. (That
 drift-in-a-warning — plus this doc having separately drifted on the frontend
 file path, plus this exact paragraph ALSO originally mis-stated "all six" as
@@ -51,16 +51,15 @@ introducing a version of the same imprecision.)
 2. In `docker/Dockerfile.agent-agentmux`: update `ARG CLAUDE_VERSION=<new>`
 3. In `.github/workflows/container-image.yml`: update `default: '<new>'`
 4. In `agentmux-srv/src/backend/providers.rs`: update the CLAUDE static's `pinned_version`
-5. In `agentmux-cef/src/commands/providers.rs`: update `CLAUDE_VERSION`
-6. In `frontend/app/view/agent/providers/catalog.ts`: update `PROVIDERS.claude.pinnedVersion`
-7. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
+5. In `frontend/app/view/agent/providers/catalog.ts`: update `PROVIDERS.claude.pinnedVersion`
+6. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
    matches what the pinned CLI currently resolves that alias to (e.g. `opus` → "Opus 5")
    — a label can go stale even when the alias `value` itself never changes.
-8. Run `pin-consistency.test.ts` to confirm the five version pins agree
+7. Run `pin-consistency.test.ts` to confirm the four version pins agree
    (includes the Dockerfile `ARG` as of 2026-08-27; does not check the label
-   from step 7 — that one's on you).
-9. Open a PR and merge it.
-10. To publish the image, either:
+   from step 6 — that one's on you).
+8. Open a PR and merge it.
+9. To publish the image, either:
     - **Push a `v*` git tag** (e.g. `git tag v0.50.0 && git push origin v0.50.0`) — this triggers the workflow automatically and publishes both the semver tag and `:latest`.
     - **Manually dispatch** the `Container Agent Image` workflow — this builds and pushes a `dispatch-<sha>` tag only; `:latest` is *not* updated by a manual dispatch.
 
