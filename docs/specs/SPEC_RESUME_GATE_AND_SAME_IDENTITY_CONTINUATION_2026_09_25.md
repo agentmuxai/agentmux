@@ -1,6 +1,6 @@
 # SPEC: one resume gate, and native continuation across logins of the same identity
 
-**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key, no resume across identities) in #3839; Phase 3 (same-identity relocation + fork) in #3841; Phase 4 not started. See §7.
+**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key, no resume across identities) in #3839; Phase 3 (same-identity relocation + fork) in #3841; Phase 4 (fork a session continued outside AgentMux) is this change. Remaining: the pane-facing wording for a fork (§4.4). See §7.
 **Date:** 2026-09-25
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at operator request
 **Related:** `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` (§4.1 segments, §4.2 the rung
@@ -205,11 +205,23 @@ The segment records `forked_from: Option<String>` (the head id). The rung stays 
 enum change, so older builds can still fold the log.
 
 ### 4.4 Fork when the file changed outside AgentMux (H4)
-Each segment's `End` records `provider_bytes_end`, the size of the provider session file when
-the process went away. At the gate, if the head's file is now larger than that and no later
-segment accounts for it, the conversation continued outside AgentMux. Resume with
-`--fork-session`, so the external branch is never appended to by a second writer, and emit the
-outcome line with `continued_externally: true` so the pane can say so.
+Each segment's `End` records `provider_bytes_end`: the size of the provider session file when
+the process went away, found from the segment's own record (config dir, cwd, session id;
+Claude only). At the gate, if the head is reachable here and its file is now larger than
+that, the conversation continued outside AgentMux (the head is the newest segment with that
+session, so no later AgentMux segment accounts for the growth). The gate answers **Fork**: the
+spawn resumes the head with `--fork-session`, so the external branch is never appended to by
+a second writer. The fork carries the external turns too, since it resumes from the file as
+it is now. An unknown size (an older record, a segment whose srv died before recording its
+end) never forks.
+
+Disclosure: the fork's new id is reported as `resumed` (as for §4.3), the gate logs the fork
+under target `continuity`, and the segment records `forked_from`. The pane-facing wording
+("continued outside AgentMux") is a follow-up; the session-outcome line keeps its current
+shape.
+
+A false positive, meaning a file that grew for some other reason, costs one unnecessary
+fork: the conversation is intact, and the copy of its history under a new id takes disk space.
 
 ### 4.5 The ladder, end to end
 1. **Native.** Allow or Redirect, same dir, same identity.

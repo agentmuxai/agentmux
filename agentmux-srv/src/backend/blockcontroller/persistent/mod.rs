@@ -309,6 +309,9 @@ struct PersistentInner {
     /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.3).
     /// Taken by that spawn; removed if it ends up resuming nothing.
     fork_copy: Option<std::path::PathBuf>,
+    /// The next spawn resumes with `--fork-session` (a relocation, or a
+    /// session that grew outside AgentMux, spec §4.4). Taken by that spawn.
+    fork_next: bool,
     /// Set when a forced controller resync (a `/model`, `/effort` or
     /// `/permission-mode` change — see `frontend/.../runtime-apply.ts`) lands
     /// while a turn is in flight. The restart is DEFERRED to the end of that
@@ -1262,6 +1265,7 @@ impl PersistentSubprocessController {
                 session_id: None,
                 resume_poisoned: None,
                 fork_copy: None,
+                fork_next: false,
                 restart_when_idle: false,
                 restart_pending: false,
                 stop_pending: false,

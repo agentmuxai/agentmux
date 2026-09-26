@@ -119,7 +119,7 @@ impl PersistentSubprocessController {
         };
         let decision = segs::resume_gate(
             &input,
-            |sid| crate::backend::session_backfill::session_is_reachable(config_dir, cwd, sid),
+            |sid| provider_file_size(config_dir, cwd, sid),
             |dir, sid| {
                 crate::backend::continuity_relocate::source_file(dir, cwd, sid)
                     .is_some_and(|p| crate::backend::continuity_relocate::is_resumable_file(&p))
@@ -134,13 +134,23 @@ impl PersistentSubprocessController {
                 why,
                 "resume gate: the conversation is in a session this spawn can't resume; starting fresh with the record"
             );
-            (None, None)
+            (None, None, false)
         };
         if relocate_only && !matches!(decision, segs::ResumeGate::Relocate { .. }) {
             return;
         }
-        let (next, fork_copy) = match decision {
+        let (next, fork_copy, fork) = match decision {
             segs::ResumeGate::Allow => return,
+            segs::ResumeGate::Fork { head } => {
+                tracing::info!(
+                    target: "continuity",
+                    block_id = %self.block_id,
+                    candidate = %candidate,
+                    head = %head,
+                    "resume gate: the session grew after AgentMux last saw it (continued outside AgentMux); forking it"
+                );
+                (Some(head), None, true)
+            }
             segs::ResumeGate::Redirect { head } => {
                 tracing::info!(
                     target: "continuity",
@@ -149,7 +159,7 @@ impl PersistentSubprocessController {
                     head = %head,
                     "resume gate: the conversation moved on; resuming the chain head instead"
                 );
-                (Some(head), None)
+                (Some(head), None, false)
             }
             segs::ResumeGate::Refuse { head } => refuse(&head, "out of reach, or another identity's"),
             segs::ResumeGate::Relocate { head, from_config_dir } => {
@@ -166,7 +176,7 @@ impl PersistentSubprocessController {
                             from = %from_config_dir,
                             "resume gate: the conversation is under another login of the same identity; relocated it to fork from"
                         );
-                        (Some(head), Some(copy))
+                        (Some(head), Some(copy), true)
                     }
                     Err(e) => refuse(&head, &format!("relocation failed: {e}")),
                 }
@@ -186,6 +196,7 @@ impl PersistentSubprocessController {
             }
             inner.session_id = next.clone();
             inner.fork_copy = fork_copy;
+            inner.fork_next = fork;
         }
         core::persist_session_id(&self.block_id, next.as_deref().unwrap_or(""), &self.mstore, &self.event_bus);
     }
@@ -326,11 +337,31 @@ pub(super) fn record_segment_session(segment: &SegmentRef, provider_session_id: 
 }
 
 /// The segment's process went away. `zone` is its global transcript zone.
+/// Size of the Claude session file `sid` for `cwd` under `config_dir`;
+/// `None` when it isn't there.
+fn provider_file_size(config_dir: &str, cwd: &str, sid: &str) -> Option<u64> {
+    let path = crate::backend::session_backfill::session_file_path(config_dir, cwd, sid)?;
+    std::fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.len())
+}
+
+/// The provider session file's size for segment `id`, from what its own
+/// record says about where it ran (spec §4.4). Claude only.
+fn provider_bytes_for_segment(gfs: &FileStore, uid: &str, id: &str) -> Option<i64> {
+    let segment = segs::segments(gfs, uid).into_iter().find(|s| s.start.segment_id == id)?;
+    let start = segment.start;
+    if !matches!(start.provider.as_str(), "claude" | "claude-code") {
+        return None;
+    }
+    let size = provider_file_size(start.config_dir.as_deref()?, &start.cwd, start.provider_session_id.as_deref()?)?;
+    i64::try_from(size).ok()
+}
+
 pub(super) fn record_segment_end(segment: &SegmentRef, reason: segs::EndReason, zone: Option<&str>) {
     let (Some((uid, id)), Some(gfs)) = (segment, crate::backend::agent_session::global_transcript_store()) else {
         return;
     };
-    if let Err(e) = segs::record_end(gfs, uid, id, reason, zone.and_then(zone_size), now_ms()) {
+    let provider_bytes = provider_bytes_for_segment(gfs, uid, id);
+    if let Err(e) = segs::record_end_with_provider_bytes(gfs, uid, id, reason, zone.and_then(zone_size), provider_bytes, now_ms()) {
         tracing::warn!(segment_id = %id, error = %e, "continuity: segment end not recorded");
     } else {
         tracing::info!(segment_id = %id, reason = ?reason, "continuity: segment ended");

@@ -336,3 +336,35 @@ fn the_copy_goes_once_the_fork_has_its_own_id() {
     assert!(src.exists(), "the original is never touched");
 }
 
+
+// ── Continued outside AgentMux (spec §4.4) ──
+
+/// Record a segment for `sid` that ended with the provider file at `bytes`.
+fn ended_segment(gfs: &FileStore, sid: &str, at: i64, bytes: i64) {
+    segment(gfs, sid, at);
+    let id = segs::segments(gfs, UID).last().unwrap().start.segment_id.clone();
+    segs::record_end_with_provider_bytes(gfs, UID, &id, segs::EndReason::Exited, None, Some(bytes), at + 10).unwrap();
+}
+
+/// The fixture writes each session as 3 bytes (`{}` + newline).
+#[test]
+fn a_session_that_grew_after_its_segment_ended_is_forked() {
+    let f = fixture(&["s2"]);
+    ended_segment(&f.gfs, "s2", 2_000, 1);
+    let c = controller_holding(Some("s2"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert_eq!(held(&c).as_deref(), Some("s2"));
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.fork_next, "resumed as a fork");
+    assert!(inner.fork_copy.is_none(), "nothing to copy: it is here");
+}
+
+#[test]
+fn a_session_as_agentmux_left_it_is_resumed_in_place() {
+    let f = fixture(&["s2"]);
+    ended_segment(&f.gfs, "s2", 2_000, 3);
+    let c = controller_holding(Some("s2"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert_eq!(held(&c).as_deref(), Some("s2"));
+    assert!(!c.inner.lock().unwrap().fork_next);
+}

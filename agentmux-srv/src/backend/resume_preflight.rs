@@ -161,7 +161,12 @@ fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mu
     };
     let decision = resume_gate(
         &gate_input,
-        |sid| session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, sid),
+        |sid| {
+            session_backfill::session_file_path(&input.config_dir, &input.working_dir, sid)
+                .and_then(|p| std::fs::metadata(p).ok())
+                .filter(|m| m.is_file())
+                .map(|m| m.len())
+        },
         |dir, sid| source_file(dir, &input.working_dir, sid).is_some_and(|p| is_resumable_file(&p)),
     );
     if relocate_only && !matches!(decision, ResumeGate::Relocate { .. }) {
@@ -169,6 +174,16 @@ fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mu
     }
     match decision {
         ResumeGate::Allow => None,
+        ResumeGate::Fork { head } => {
+            steps.push(step(
+                "chain",
+                "Checking the agent's conversation",
+                true,
+                format!("{head} continued outside AgentMux; continuing it as a fork"),
+                t,
+            ));
+            Some((Verdict::Resume, Some(head)))
+        }
         ResumeGate::Relocate { head, from_config_dir } => {
             steps.push(step(
                 "chain",
@@ -569,6 +584,7 @@ mod tests {
             config_dir: Some(old_login.path().to_string_lossy().to_string()),
             provider: "claude".into(),
             cwd: WORK_DIR.into(),
+            provider_bytes_end: None,
         };
 
         let mut held = input(new_login.path(), WORK_DIR, "sid-head");
