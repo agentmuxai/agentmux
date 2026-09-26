@@ -2558,14 +2558,41 @@ impl Store {
     /// exact row (keeping `session_id` live as the CLI emits it — see
     /// `persist_session_id` /
     /// SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.1) have
-    /// the right id to pass to `instance_update_partial`. Most recently
-    /// updated row wins if a block was somehow reused.
+    /// the right id to pass to `instance_update_partial`.
+    ///
+    /// When a pane is reused, several rows can name the block. The one the
+    /// pane runs is the block's own `agentId` (or legacy `agent:id`), while
+    /// its latest launch is still this block; otherwise the most recent
+    /// *launch* (`started_at`). Never the most recently *updated* row: a
+    /// rename or definition edit bumps `updated_at`, and a session id then
+    /// landed on the renamed agent instead of the one running (#3580).
     pub fn instance_get_by_block_id(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
+        let shown = self
+            .get::<crate::backend::obj::Block>(block_id)?
+            .and_then(|b| {
+                b.meta
+                    .get("agentId")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| b.meta.get("agent:id").and_then(|v| v.as_str()))
+                    .map(str::to_string)
+            })
+            .filter(|id| !id.is_empty());
         let conn = self.conn.lock().unwrap();
+        if let Some(agent_id) = shown {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {INSTANCE_COLUMNS} FROM db_agents
+                 WHERE id = ?1 AND last_block_id = ?2 AND is_template = 0"
+            ))?;
+            match stmt.query_row(params![agent_id, block_id], map_instance_row) {
+                Ok(a) => return Ok(Some(a)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
         let mut stmt = conn.prepare(&format!(
             "SELECT {INSTANCE_COLUMNS} FROM db_agents
              WHERE last_block_id = ?1 AND is_template = 0
-             ORDER BY updated_at DESC
+             ORDER BY started_at DESC, updated_at DESC, id DESC
              LIMIT 1"
         ))?;
         match stmt.query_row(params![block_id], map_instance_row) {
