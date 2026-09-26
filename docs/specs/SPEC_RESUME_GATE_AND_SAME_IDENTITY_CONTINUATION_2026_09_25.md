@@ -1,6 +1,6 @@
 # SPEC: one resume gate, and native continuation across logins of the same identity
 
-**Status:** active — Phase 1 (the chain-head resume gate, spawn + preflight) ships with this Status change; Phases 2–4 not started. See §7.
+**Status:** active — Phase 1 (the chain-head resume gate, spawn + preflight) in #3833; Phases 2–4 not started. See §7.
 **Date:** 2026-09-25
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at operator request
 **Related:** `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` (§4.1 segments, §4.2 the rung
