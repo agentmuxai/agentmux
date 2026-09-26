@@ -891,10 +891,23 @@ pub async fn run_agent_turn(
             .as_any()
             .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
             .is_some();
-        let inline_max = if is_persistent { svc.limits().claude_inline_max } else { 0 };
+        let limits = svc.limits();
+        let inline_max = if is_persistent { limits.claude_inline_max } else { 0 };
+        // Claude Code keeps every inline image in its own session transcript,
+        // so inline bytes are budgeted per session too (spec §6.6). A new
+        // session has no id yet; its first turn counts against the block.
+        let session_key = {
+            let sid = crate::backend::obj::meta_get_string(&block.meta, "agent:sessionid", "");
+            if sid.is_empty() { format!("block:{block_id}") } else { format!("session:{sid}") }
+        };
         let prepared = tokio::task::spawn_blocking(move || {
-            let (found, missing) = crate::backend::attachments::prompt::resolve(&svc, &attachments);
-            crate::backend::attachments::prompt::prepare(&found, &missing, inline_max)
+            use crate::backend::attachments::prompt;
+            let used = svc.store().session_inline_bytes(&session_key);
+            let budget = limits.claude_session_inline_bytes.saturating_sub(used);
+            let (found, missing) = prompt::resolve(&svc, &attachments);
+            let prepared = prompt::prepare(&found, &missing, inline_max, budget);
+            svc.store().add_session_inline_bytes(&session_key, prompt::inline_bytes(&prepared.inline));
+            prepared
         })
         .await
         .map_err(|e| format!("attachments: {e}"))?;

@@ -11,6 +11,7 @@
 //! <root>/derived/ab/<sha256>.<fp>.json   StoredMeta
 //! <root>/derived/ab/<sha256>.sent        marker: sent to an agent at least once
 //! <root>/incoming/<uuid>.part          in-flight copy / upload
+//! <root>/sessions/<sha256(key)>.json     base64 inlined into one Claude session
 //! ```
 //!
 //! `<fp>` is the transform fingerprint ([`fingerprint`]): derived bytes
@@ -128,10 +129,41 @@ impl Store {
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.root)?;
         let _ = agentmux_common::data_paths::ensure_owner_only_dir(&self.root);
-        for sub in ["blobs", "derived", "incoming"] {
+        for sub in ["blobs", "derived", "incoming", "sessions"] {
             std::fs::create_dir_all(self.root.join(sub))?;
         }
         Ok(())
+    }
+
+    fn session_path(&self, key: &str) -> PathBuf {
+        let hashed = hex::encode(Sha256::digest(key.as_bytes()));
+        self.root.join("sessions").join(format!("{hashed}.json"))
+    }
+
+    /// Base64 bytes already inlined into the Claude session `key`. Kept on
+    /// disk so a restart doesn't reset it: Claude Code stores every inline
+    /// image in its own session transcript, and this is what bounds that.
+    pub fn session_inline_bytes(&self, key: &str) -> u64 {
+        std::fs::read_to_string(self.session_path(key))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v.get("bytes").and_then(|b| b.as_u64()))
+            .unwrap_or(0)
+    }
+
+    pub fn add_session_inline_bytes(&self, key: &str, bytes: u64) {
+        if bytes == 0 {
+            return;
+        }
+        let total = self.session_inline_bytes(key).saturating_add(bytes);
+        let path = self.session_path(key);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = write_atomic(
+            &path,
+            serde_json::json!({ "bytes": total }).to_string().as_bytes(),
+        );
     }
 
     fn shard(id: &str) -> &str {
@@ -464,7 +496,7 @@ impl Store {
         let mut sent_cache: std::collections::HashMap<String, bool> =
             std::collections::HashMap::new();
         let mut removed = 0;
-        for sub in ["blobs", "derived", "incoming"] {
+        for sub in ["blobs", "derived", "incoming", "sessions"] {
             let dir = self.root.join(sub);
             let Ok(entries) = walk_files(&dir) else {
                 continue;
@@ -472,6 +504,9 @@ impl Store {
             for path in entries {
                 let max_age = if sub == "incoming" {
                     INCOMING_MAX_AGE
+                } else if sub == "sessions" {
+                    // Session counters are named by a hash, not an id.
+                    retention
                 } else {
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                     match name.get(..64).filter(|id| is_valid_id(id)) {
@@ -644,6 +679,26 @@ mod tests {
         let (good, _) = ingest(&s, &png(dir.path(), "good.png", 2)).unwrap();
         s.discard_if_unprocessed(&good);
         assert!(s.meta(&good, &fingerprint(2000)).is_some());
+    }
+
+    #[test]
+    fn session_inline_bytes_accumulate_and_persist() {
+        let (_dir, s) = store();
+        assert_eq!(s.session_inline_bytes("sess-1"), 0);
+        s.add_session_inline_bytes("sess-1", 1000);
+        s.add_session_inline_bytes("sess-1", 500);
+        assert_eq!(s.session_inline_bytes("sess-1"), 1500);
+        assert_eq!(s.session_inline_bytes("sess-2"), 0);
+        // A fresh Store over the same root sees it (a restart).
+        let again = Store::new(s.root().to_path_buf());
+        assert_eq!(again.session_inline_bytes("sess-1"), 1500);
+        // Kept for the full retention window, not the 7-day unsent one.
+        let then = SystemTime::now() - Duration::from_secs(8 * 24 * 3600);
+        for p in walk_files(&s.root().join("sessions")).unwrap() {
+            set_mtime(&p, then).unwrap();
+        }
+        assert_eq!(s.sweep(Duration::from_secs(30 * 24 * 3600)), 0);
+        assert_eq!(s.session_inline_bytes("sess-1"), 1500);
     }
 
     fn age_all(s: &Store, id: &str, days: u64) {
