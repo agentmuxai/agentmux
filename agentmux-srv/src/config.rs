@@ -4,7 +4,7 @@
 
 use clap::{Parser, Subcommand};
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[command(name = "agentmux-srv", about = "AgentMux Rust backend server")]
 pub struct CliArgs {
     /// Path to wave data directory (overrides AGENTMUX_DATA_HOME)
@@ -14,6 +14,24 @@ pub struct CliArgs {
     /// Instance identifier (used for multi-version coexistence)
     #[arg(long = "instance", default_value = "default")]
     pub instance: String,
+
+    /// Run without a launcher or desktop host (container, server, CI).
+    /// Read early by `headless::prepare_env`; see
+    /// docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md.
+    #[arg(long = "headless")]
+    pub headless: bool,
+
+    /// Headless: read the auth key from this file instead of generating one.
+    #[arg(long = "auth-key-file")]
+    pub auth_key_file: Option<String>,
+
+    /// Headless: fixed loopback port for the web listener (default: OS-chosen).
+    #[arg(long = "web-port")]
+    pub web_port: Option<u16>,
+
+    /// Headless: fixed loopback port for the websocket listener (default: OS-chosen).
+    #[arg(long = "ws-port")]
+    pub ws_port: Option<u16>,
 
     #[command(subcommand)]
     pub command: Option<SrvCommand>,
@@ -193,7 +211,7 @@ mod tests {
     fn missing_auth_key_errors() {
         let _lock = lock();
         clear_env();
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("AGENTMUX_AUTH_KEY"));
@@ -204,7 +222,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         clear_env();
@@ -220,6 +238,7 @@ mod tests {
             wavedata: Some("/from/cli".to_string()),
             instance: "default".to_string(),
             command: None,
+            ..Default::default()
         };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.data_home, "/from/cli");
@@ -236,7 +255,7 @@ mod tests {
         std::env::set_var("AGENTMUX_CONFIG_DIR", "/config");
         std::env::set_var("AGENTMUX_APP_PATH", "/app");
         std::env::set_var("AGENTMUX_RUNTIME_MODE", "dev:main");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.data_home, "/data");
         assert_eq!(config.config_home, "/config");
@@ -250,7 +269,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-1");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.host_reg_secret, None);
         clear_env();
@@ -262,7 +281,7 @@ mod tests {
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-2");
         std::env::set_var("AGENTMUX_HOST_REG_SECRET", "the-shared-secret");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.host_reg_secret, Some("the-shared-secret".to_string()));
         assert!(std::env::var("AGENTMUX_HOST_REG_SECRET").is_err());
@@ -274,7 +293,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert!(!config.lan_key.is_empty());
         assert_ne!(
@@ -289,7 +308,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
-        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
         let first = Config::from_env_and_args(&args).unwrap().lan_key;
         std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
         let second = Config::from_env_and_args(&args).unwrap().lan_key;

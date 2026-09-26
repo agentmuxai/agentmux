@@ -1572,13 +1572,16 @@ pub async fn bind_listeners_and_network(
     // gates only the three LAN-forwarding routes (`lan_or_full_auth_middleware`)
     // — not the full auth_key previously broadcast here, which gated the entire
     // API surface (see Config::lan_key's doc comment).
-    let bind_addr = backend::lan_listeners::STARTUP_BIND_ADDR;
-    let web_listener = TcpListener::bind(bind_addr)
+    // Loopback, OS-chosen ports — or the fixed ports headless mode was given
+    // (`--web-port` / `--ws-port`, SPEC_SRV_HEADLESS_MODE_2026_09_26.md).
+    let web_bind = crate::headless::loopback_bind_addr("AGENTMUX_SRV_WEB_PORT");
+    let ws_bind = crate::headless::loopback_bind_addr("AGENTMUX_SRV_WS_PORT");
+    let web_listener = TcpListener::bind(&web_bind)
         .await
-        .expect("failed to bind web listener");
-    let ws_listener = TcpListener::bind(bind_addr)
+        .unwrap_or_else(|e| panic!("failed to bind web listener on {web_bind}: {e}"));
+    let ws_listener = TcpListener::bind(&ws_bind)
         .await
-        .expect("failed to bind ws listener");
+        .unwrap_or_else(|e| panic!("failed to bind ws listener on {ws_bind}: {e}"));
 
     let web_addr = web_listener.local_addr().unwrap();
     let ws_addr = ws_listener.local_addr().unwrap();
@@ -2028,30 +2031,34 @@ pub fn emit_estart(ws_port: u16, web_port: u16, version: &str, build_time: &str,
 /// stdinReadWatch) and the SIGINT/SIGTERM handler. Both cancel the returned
 /// token, which the WAL checkpoint loop and the final server select! also
 /// watch for graceful shutdown.
-pub fn install_shutdown_handlers() -> tokio_util::sync::CancellationToken {
-    // 8. Spawn stdin watch thread (exit on EOF — matching Go's stdinReadWatch)
+pub fn install_shutdown_handlers(watch_stdin: bool) -> tokio_util::sync::CancellationToken {
+    // 8. Spawn stdin watch thread (exit on EOF — matching Go's stdinReadWatch).
+    //    Not in headless mode: nothing owns srv's stdin there (a container's
+    //    is /dev/null), so EOF would mean "shut down now".
     let stdin_token = tokio_util::sync::CancellationToken::new();
     let stdin_shutdown = stdin_token.clone();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut stdin = std::io::stdin().lock();
-        let mut buf = [0u8; 1024];
-        loop {
-            match stdin.read(&mut buf) {
-                Ok(0) => {
-                    eprintln!("stdin closed, shutting down");
-                    stdin_shutdown.cancel();
-                    break;
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("stdin read error: {}, shutting down", e);
-                    stdin_shutdown.cancel();
-                    break;
+    if watch_stdin {
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut stdin = std::io::stdin().lock();
+            let mut buf = [0u8; 1024];
+            loop {
+                match stdin.read(&mut buf) {
+                    Ok(0) => {
+                        eprintln!("stdin closed, shutting down");
+                        stdin_shutdown.cancel();
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("stdin read error: {}, shutting down", e);
+                        stdin_shutdown.cancel();
+                        break;
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 
     // 9. Spawn signal handler (SIGINT/SIGTERM → graceful shutdown)
     let signal_token = stdin_token.clone();

@@ -212,18 +212,22 @@ pub struct MuxLock {
 impl MuxLock {
     /// Acquire an exclusive lock on the AgentMux lock file.
     /// Returns error if another instance is already running.
-    #[cfg(unix)]
     pub fn acquire() -> Result<Self, String> {
+        Self::acquire_at(&get_mux_lock_file())
+    }
+
+    /// Acquire an exclusive lock on `lock_path` (created if missing).
+    #[cfg(unix)]
+    pub fn acquire_at(lock_path: &Path) -> Result<Self, String> {
         use std::os::unix::io::AsRawFd;
 
-        let lock_path = get_mux_lock_file();
         ensure_dir(lock_path.parent().unwrap_or(Path::new("/")))?;
 
         let file = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
-            .open(&lock_path)
+            .open(lock_path)
             .map_err(|e| format!("cannot open lock file {}: {}", lock_path.display(), e))?;
 
         let fd = file.as_raw_fd();
@@ -235,17 +239,16 @@ impl MuxLock {
         Ok(MuxLock { file })
     }
 
-    /// Non-Unix fallback: just check the file can be created.
+    /// Non-Unix fallback: just check the file can be created (no exclusion).
     #[cfg(not(unix))]
-    pub fn acquire() -> Result<Self, String> {
-        let lock_path = get_mux_lock_file();
+    pub fn acquire_at(lock_path: &Path) -> Result<Self, String> {
         ensure_dir(lock_path.parent().unwrap_or(Path::new("/")))?;
 
         let file = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(&lock_path)
+            .open(lock_path)
             .map_err(|e| format!("cannot open lock file {}: {}", lock_path.display(), e))?;
 
         Ok(MuxLock { file })
