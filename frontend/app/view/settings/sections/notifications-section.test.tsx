@@ -14,12 +14,17 @@
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setConfig = vi.fn();
 const notifyTest = vi.fn();
 const invokeCommand = vi.fn();
 let settings: Record<string, unknown> = {};
+// Reading this inside the mocked atom makes it reactive, like the real one:
+// `bump()` stands in for a settings broadcast replacing the whole object.
+const [settingsVersion, setSettingsVersion] = createSignal(0);
+const bump = () => setSettingsVersion((v) => v + 1);
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -28,7 +33,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/global", () => ({ settingsAtom: () => settings }));
+vi.mock("@/app/store/global", () => ({ settingsAtom: () => (settingsVersion(), { ...settings }) }));
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: (...args: unknown[]) => invokeCommand(...args),
 }));
@@ -98,6 +103,29 @@ describe("Notifications & Tray — start at login", () => {
         invokeCommand.mockResolvedValue({ available: true, enabled: false });
         render(() => <NotificationsSection />);
         await waitFor(() => expect(screen.getByText(/not registered with the system yet/)).toBeTruthy());
+    });
+
+    it("re-reads the registration only when start at login itself changes", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            invokeCommand.mockResolvedValue({ available: true, enabled: false });
+            render(() => <NotificationsSection />);
+            await waitFor(() => expect(invokeCommand).toHaveBeenCalledTimes(1));
+
+            // An unrelated setting changes: the atom is replaced, nothing re-reads.
+            settings = { "term:fontsize": 13 };
+            bump();
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(invokeCommand).toHaveBeenCalledTimes(1);
+
+            // This setting changes: one re-read, after the settle delay.
+            settings = { "term:fontsize": 13, "app:startatlogin": true };
+            bump();
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(invokeCommand).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("renders as unavailable when the host can't reach the launcher", async () => {

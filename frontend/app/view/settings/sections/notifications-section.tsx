@@ -6,7 +6,7 @@
 // from Settings instead of env vars only, and surface auto-start as its own,
 // separate toggle (tray spec §7.4 — the two decisions stay independent).
 
-import { createResource, Show, type JSX } from "solid-js";
+import { createMemo, createResource, Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -148,7 +148,10 @@ export function NotificationsSection(): JSX.Element {
     // One property, two switches: this toggle and the tray menu's check item
     // both write `app:startatlogin`, and the launcher applies it to the OS login
     // entry (SPEC_START_WITH_OS_2026_09_25.md §3.9). Off by default.
-    const startAtLogin = () => (s()["app:startatlogin"] as boolean | undefined) ?? false;
+    // A memo, because `settingsAtom` is replaced on every settings broadcast:
+    // it notifies only when this key's value actually changes (ReAgent P1 on
+    // #3788), so an unrelated setting never re-reads the registration.
+    const startAtLogin = createMemo(() => (s()["app:startatlogin"] as boolean | undefined) ?? false);
     // The registration is read back after every change (and once on open), only
     // to report availability and a failed registration. The source is wrapped
     // in an object because a `false` source would stop the resource fetching.
