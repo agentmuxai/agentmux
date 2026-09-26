@@ -1,7 +1,7 @@
 # SPEC: "invalid configuration" flashes during a normal window close
 
 **Date:** 2026-09-22
-**Status:** implemented — reproduced under instrumentation on 2026-09-26 (§7); trigger traced end to end (§8); fix (§9) implemented and verified live (§12).
+**Status:** implemented (PR #3860) — reproduced under instrumentation on 2026-09-26 (§7); trigger traced end to end (§8); fix (§9) implemented and verified live (§12).
 **Reported by:** user, closing a `task dev` instance normally — "for a brief second it said something like *invalid configuration…*"
 **Severity:** cosmetic, but alarming — a successful, user-initiated action briefly renders an error screen.
 **Revised:** 2026-09-26 by Clamk (§7–§11), at the repo owner's request ("when I close agentmux, I get an 'invalid configuration…' in white text on the background, after the panes are torn down"). §1–§6 are Manoz's original analysis; the reproduction confirms it.
