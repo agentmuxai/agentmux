@@ -889,12 +889,12 @@ pub async fn endpoint_for_channel(channel: &str) -> Option<HolderEndpoint> {
         .map(|e| HolderEndpoint { channel: e.channel, local_url: e.local_url, auth_key: e.auth_key })
 }
 
-/// Ask the holder's srv to stop running `uid` so this instance can take it
-/// (`POST /agentmux/agent/release`). `Err` is user-facing.
 /// How long a release request may take to be answered (see
 /// [`request_release`]).
 const RELEASE_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Ask the holder's srv to stop running `uid` so this instance can take it
+/// (`POST /agentmux/agent/release`). `Err` is user-facing.
 pub async fn request_release(holder: &HolderEndpoint, uid: &str, agent: &str) -> Result<(), String> {
     let me = claimant_info();
     let mut req = PROBE_CLIENT

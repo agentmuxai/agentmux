@@ -211,6 +211,29 @@ impl CloudSubscriber {
         true
     }
 
+    /// [`release_agent_now`]'s body, with the relay and token injectable.
+    /// The removal and its `RemoveAgent` are queued together under the
+    /// `agents` lock, like [`Self::remove_agent`] — so an agent re-added
+    /// while the release is awaited queues `AddAgent` after it and ends
+    /// subscribed (ReAgent P1 on #3899). The awaited release then runs
+    /// under `wan_lease`'s per-agent lock, serialized with the RemoveAgent
+    /// arm's own: when this returns, whichever of the two ran has finished,
+    /// and neither releases an agent that was subscribed again.
+    async fn release_now(&self, agent_id: &str, base: &str, token: impl std::future::Future<Output = String>) -> bool {
+        let key = agent_id.to_lowercase();
+        {
+            let mut agents = self.agents.lock().unwrap();
+            if !agents.remove(&key) {
+                return false;
+            }
+            let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key.clone()));
+        }
+        let token = token.await;
+        let still_gone = || !self.agents.lock().unwrap().contains(&key);
+        super::wan_lease::release(base, &key, &token, &reqwest::Client::new(), still_gone).await;
+        true
+    }
+
     /// Called after muxbus.login completes — trigger a fresh WS connection
     /// with the newly stored token.
     pub fn reload_token(&self) {
@@ -1285,17 +1308,7 @@ fn orphaned_subscriptions(registered: &[String], is_live: impl Fn(&str) -> bool)
 /// wasn't subscribed. `id_store` is where muxbus credentials live.
 pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> bool {
     let Some(sub) = get_global_subscriber() else { return false };
-    let key = agent.to_lowercase();
-    // Out of the set first, so a lease tick can't renew it meanwhile.
-    if !sub.agents.lock().unwrap().remove(&key) {
-        return false;
-    }
-    let token = shared_token_now(id_store, "").await;
-    let still_gone = || !sub.agents.lock().unwrap().contains(&key);
-    super::wan_lease::release(&super::relay::rest_base_url(), &key, &token, &reqwest::Client::new(), still_gone).await;
-    // Unsubscribe the WebSocket; the arm's own release finds nothing left.
-    let _ = sub.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
-    true
+    sub.release_now(agent, &super::relay::rest_base_url(), shared_token_now(id_store, "")).await
 }
 
 /// [`fresh_shared_token`] against the broker and `mstore` (the store muxbus
@@ -1451,6 +1464,28 @@ mod tests {
         });
         adder.join().unwrap();
         assert!(dropped);
+        assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::RemoveAgent(k)) if k == "opaz"), "removal first");
+        assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::AddAgent(k)) if k == "opaz"), "then the re-add");
+        assert!(sub.agents.lock().unwrap().contains("opaz"), "and it ends subscribed");
+    }
+
+    // ReAgent P1 (second pass) on #3899: a Take over release sent its
+    // RemoveAgent only after the relay round trip, so an agent re-added in
+    // that window queued AddAgent first and was then unsubscribed. The
+    // removal must be queued with the set change, before any await.
+    #[tokio::test]
+    async fn a_take_over_release_queues_its_removal_before_a_re_add() {
+        let (sub, mut rx) = test_subscriber(&["opaz"]);
+        let sub = std::sync::Arc::new(sub);
+        let re_adder = sub.clone();
+        let released = sub
+            .release_now("Opaz", "http://127.0.0.1:9", async move {
+                // The agent is reopened while the fresh token is fetched.
+                re_adder.add_agent("Opaz");
+                String::new()
+            })
+            .await;
+        assert!(released);
         assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::RemoveAgent(k)) if k == "opaz"), "removal first");
         assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::AddAgent(k)) if k == "opaz"), "then the re-add");
         assert!(sub.agents.lock().unwrap().contains("opaz"), "and it ends subscribed");
