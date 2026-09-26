@@ -8,13 +8,10 @@
  * `npm install -g <npmPackage>` before it exists at all (`NODE_PREREQ`/
  * `NPM_PREREQ`, catalog.ts).
  *
- * Node/npm are ALSO checked separately at launch time by
- * `check_nodejs_available` (`checkNodejsForProvider`, agent-launch-env.ts)
- * — that's a narrower, PATH-mismatch-prone secondary check (it probes the
- * CEF host's own PATH, not the enriched PATH the actual npm spawn runs
- * with in the srv sidecar), not the primary gate. Declaring Node/npm here
- * routes providers through the correctly-PATH-sourced backend check
- * instead (tracking issue #2940).
+ * Node/npm are ALSO checked at launch time by `checkNodejsForProvider`
+ * (agent-launch-env.ts), through the same srv `resolve.prereqs` command —
+ * a secondary check (e.g. Node removed after install), not the primary gate
+ * (tracking issue #2940).
  *
  * Probed pre-launch via the `resolve_prereqs` RPC. Missing prereqs
  * open the `AgentPrereqModal` with platform-aware install links.

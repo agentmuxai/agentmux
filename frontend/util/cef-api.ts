@@ -799,9 +799,6 @@ export function buildCefApi(): AppApi {
         setProviderAuth: async (provider: string, token: string) => {
             await invokeCommand("set_provider_auth", { provider, token });
         },
-        checkNodejsAvailable: async () => {
-            return await invokeCommand<NodejsStatus>("check_nodejs_available");
-        },
         ensureAuthDir: async (providerId: string) => {
             return await invokeCommand<string>("ensure_auth_dir", { providerId });
         },
