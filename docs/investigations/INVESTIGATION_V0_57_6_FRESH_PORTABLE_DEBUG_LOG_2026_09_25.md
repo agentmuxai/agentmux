@@ -20,7 +20,7 @@ chain on v0.57.5, AgentA), `SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_
 | 3 | "Couldn't resume" banner never goes away on its own | fixed in #3848 |
 | 4 | Agent's file-based memory left behind under the old account | by design — adoption is offered in the Armory; check pending |
 | 5 | Agent processes run at below-normal priority (#3834) | confirmed live |
-| 6 | Jekts between narko and Area54 arrive unsigned (`TRUST=network-claimed`) | open — receiver's key lookup fails; diagnostics in #3858 |
+| 6 | Jekts between narko and Area54 arrive unsigned (`TRUST=network-claimed`) | open — receiver's key lookup fails; diagnostics in #3863 |
 | 7 | Plain `gh` inside an agent is logged out (#3751) | confirmed live |
 
 ---
@@ -162,7 +162,7 @@ same processes under the running 0.57.2 portable (no #3834) are at `Normal`.
 ## 6. Jekts between narko and Area54 arrive unsigned
 
 **Status:** open. Signing and carrying work on both sides. The receiver's directory fetch fails
-(`wan_key_unavailable`), cause not yet known. Logging that names it is in #3858.
+(`wan_key_unavailable`), cause not yet known. Logging that names it is in #3863.
 
 **Seen:** AgentA's reply (`inj-w-5d8e0efaa0d5d3e98f4127369172e87e`, 06:28:52) arrived as
 `DELIVERY=wan TRUST=network-claimed` with no `SIG=`. A keyword in it forced `TIER=sensitive`, and
@@ -219,12 +219,12 @@ didn't tell apart: a non-404 HTTP status (the route 403s a token with no account
 `WanKeyRecord`, or the local fetch budget running out. Unauthenticated, the route answers 401 in
 about 0.27 s, so it is deployed and reachable. Its response shape matches `WanKeyRecord`.
 
-**Diagnostics (#3858):** the verdict now carries a `detail` naming which of these it was, in the
+**Diagnostics (#3863):** the verdict now carries a `detail` naming which of these it was, in the
 audit and in an `info` line per WAN jekt (`wan verify: outcome`). The sender's "queued for WAN
 delivery" line says `signed`, `unsigned_reason` and `cloud_kept_signature`.
 
 **Next:**
-- After #3858 is in a running build, send one signed jekt each way and read `detail`.
+- After #3863 is in a running build, send one signed jekt each way and read `detail`.
 - `~/.agentmux/agents/CLAUDE.md` still doesn't list `TRUST=wan-verified` (tracking §3.2); it needs
   the operator.
 
