@@ -1,7 +1,7 @@
 # Spec: One descriptor per tool (agent pane)
 
 **Date:** 2026-09-26
-**Status:** active — PR 1 (descriptors, status table) implemented in #3901; PRs 2–3 proposed
+**Status:** active — PR 1 (descriptors, status table) implemented in #3901, PR 2 (pills, CompactResult facts) in #3902; PR 3 proposed
 **Scope:** `frontend/app/view/agent/` — tool rows, tool previews, the activity row
 **Verified against:** `main` @ `ba9abe92f` (after #3871, #3874, #3877, #3883)
 **Source:** `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`
@@ -60,6 +60,7 @@ the migration:
 | `computer` | The header gains its `command` as detail |
 | WebSearch, WebFetch | The Activity Dock title is the query / host+path, not the tool name |
 | Agent, Workflow, WebFetch | The working row's argument is the description / title / host+path (previously none) |
+| Bash (PR 2) | The exit pill appears for real Claude runs. Its own regex, `/<exited\s+(\d+)>/`, never matched bashwrap's `<exited N in Ts>`, so the pill was always missing. It now shares `BashOutputViewer`'s parser (`tool-meta/bash-exit.ts`) |
 
 ## 2. Design
 
@@ -97,8 +98,8 @@ interface ToolDescriptor {
     readFrom?: "head" | "tail";
     /** CompactResult one-liner for a structured result. */
     compactSummary?: (params: Record<string, any>, result: any) => string | null;
-    /** CompactResult's structured body starts expanded (Glob's file list). */
-    compactStartsExpanded?: boolean;
+    /** A structured result's `files` renders as a file list, open by default (Glob). */
+    compactFileList?: boolean;
 }
 ```
 
@@ -134,7 +135,7 @@ Thin helpers on top of it are what callers actually use: `toolIcon(node)`,
 | `SELF_DESCRIBING`, `mcpDisplayName` | `label` on the web descriptors and on the `mcp__` prefix descriptor |
 | `CONTENT_FIRST`, `DOCUMENT_KINDS` | `presentation: "content"` and `scroll: "top"` on WebSearch; `scroll: "top"` on Read, Write and Edit. `components/tool-presentation.ts` goes |
 | `resultPill()` switch | A `pill` on Bash (exit code, including the `<exited N>` parse), Glob, Grep (`grepResultCount`), Write, Edit and WebSearch. The Agent/Task/Workflow dispatch pill stays in `ToolBlock`, because it needs the ordinal-matched `dispatchMatch` (context the descriptor doesn't have) |
-| `summarize()` switch, the Glob/Grep checks in `CompactResult` | `compactSummary`, `readFrom`, `compactStartsExpanded` |
+| `summarize()` switch, the Glob/Grep checks in `CompactResult` | `compactSummary`, `readFrom`, `compactFileList`. The switch's string / `content` / `output` branches (including Agent's and Workflow's) are dropped: since #3877 a string body never reaches the structured summary |
 | `STATUS_ICON`, `STATUS_LABEL`, `toolActivityStatus`, `isActive`, `isFailTerminal` | One `TOOL_STATUS` table in `tool-meta/tool-status.ts`: `{ icon, label, activity, active, dismissed }` per status (report A3) |
 | `knownTools` in `normalizeToolName` | Unchanged. The coarse kind is the renderer layer's business and `ToolNode.tool`'s type; descriptors never read it |
 
@@ -166,7 +167,7 @@ Thin helpers on top of it are what callers actually use: `toolIcon(node)`,
    row), content-first, scroll, and status. Each old function is deleted as its
    last caller moves; none is kept as a wrapper.
 2. **PR 2: pills and CompactResult facts.** Covers `pill`, `compactSummary`,
-   `readFrom` and `compactStartsExpanded`.
+   `readFrom` and `compactFileList`, plus the shared Bash exit parser.
 3. **PR 3: explicit renderer registration.** Covers `builtins.tsx`,
    `registerToolRenderers()`, the end of the import cycle, and the end of the
    side-effect imports.

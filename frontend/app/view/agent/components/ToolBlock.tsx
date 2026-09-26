@@ -45,15 +45,13 @@ import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
-import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteResult } from "../types";
+import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
-import { grepResultCount } from "./grep-result";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
-import { isContentFirstTool } from "../tool-meta/tool-descriptors";
-import { extractSearchResults, extractWebSearch } from "./tool-renderers/search-results";
+import { isContentFirstTool, toolPill } from "../tool-meta/tool-descriptors";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -251,65 +249,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             return s === "success" ? { label: "done", variant: "agent" } : null;
         }
 
-        if (s === "running" || s === "pending_approval" || !props.node.result) return null;
-        const r = props.node.result as any;
-        const name = props.node.toolName ?? props.node.tool;
-        if (name === "WebSearch" || name === "web_search") {
-            const n = extractWebSearch(r)?.links.length ?? extractSearchResults(r)?.length;
-            return n ? { label: `${n} source${n === 1 ? "" : "s"}`, variant: "sources" } : null;
-        }
-        switch (props.node.tool) {
-            case "Bash": {
-                const br = r as BashResult;
-                let code = br.exitCode;
-                // Claude provider encodes exit code in stdout as "<exited N>" (claude-translator.ts:263)
-                // rather than populating exitCode on the result object.
-                if (typeof code !== "number" && typeof br.stdout === "string") {
-                    const m = br.stdout.match(/<exited\s+(\d+)>/);
-                    if (m) code = parseInt(m[1], 10);
-                }
-                if (typeof code === "number") {
-                    return code === 0
-                        ? { label: "exit 0", variant: "exit-ok" }
-                        : { label: `exit ${code}`, variant: "exit-err" };
-                }
-                return null;
-            }
-            case "Glob": {
-                const n = (r as GlobResult).files?.length;
-                if (typeof n === "number") {
-                    return { label: `${n} file${n === 1 ? "" : "s"}`, variant: "files" };
-                }
-                return null;
-            }
-            case "Grep": {
-                // A structured provider result has `matches`; Claude Code's is
-                // text whose shape depends on output_mode (grep-result.ts).
-                const matches = (r as GrepResult).matches?.length;
-                if (typeof matches === "number") {
-                    return { label: `${matches} match${matches === 1 ? "" : "es"}`, variant: "matches" };
-                }
-                if (typeof r.content !== "string") return null;
-                const { n, noun } = grepResultCount(r.content);
-                return noun === "file"
-                    ? { label: `${n} file${n === 1 ? "" : "s"}`, variant: "files" }
-                    : { label: `${n} match${n === 1 ? "" : "es"}`, variant: "matches" };
-            }
-            case "Write": {
-                const b = (r as WriteResult).bytesWritten;
-                return typeof b === "number"
-                    ? { label: `${b}b`, variant: "written" }
-                    : { label: "written", variant: "written" };
-            }
-            case "Edit": {
-                const n = (r as EditResult).linesChanged;
-                return typeof n === "number"
-                    ? { label: `${n} line${n === 1 ? "" : "s"}`, variant: "edited" }
-                    : { label: "edited", variant: "edited" };
-            }
-            default:
-                return null;
-        }
+        if (TOOL_STATUS[s].active || !props.node.result) return null;
+        return toolPill(props.node);
     };
 
     // Two render modes — `flow` when the panel is visible (auto-expand

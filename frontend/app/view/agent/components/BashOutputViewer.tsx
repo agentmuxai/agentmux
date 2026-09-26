@@ -11,30 +11,15 @@ import type { BashParams, BashResult } from "../types";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { parseExitPrefix } from "../tool-meta/bash-exit";
 
 interface BashOutputViewerProps {
     params: BashParams;
     result?: BashResult;
 }
 
-// `agentmux-bashwrap` prepends every captured bash run with a single
-// line like `<exited 0 in 0.60s>` (or `<exited 1 in 1.23s>` on
-// failure). It's the only durable carrier of the exit code through
-// Claude's tool_use_result, which doesn't include an `exitCode`
-// field. We strip the prefix when rendering stdout and use it as
-// the fallback exit-code source when the result didn't carry one
-// natively.
-const EXIT_PREFIX_RE = /^<exited (-?\d+) in [\d.]+s>\n?/;
-
-function parseExitPrefix(s: string | undefined): {
-    exit: number | undefined;
-    body: string;
-} {
-    if (!s) return { exit: undefined, body: "" };
-    const m = s.match(EXIT_PREFIX_RE);
-    if (!m) return { exit: undefined, body: s };
-    return { exit: parseInt(m[1], 10), body: s.slice(m[0].length) };
-}
+// The `<exited N in Ts>` prefix bashwrap injects, and its parser, live in
+// tool-meta/bash-exit.ts (shared with the row's exit pill).
 
 export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX.Element => {
     // Tool result may come back as either the structured BashResult
