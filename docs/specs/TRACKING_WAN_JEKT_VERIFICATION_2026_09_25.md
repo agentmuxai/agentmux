@@ -21,7 +21,8 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 | D1b | Certify + publish each agent key (`muxbus/wan_publish.rs`), relay carry gate (`relay::wan_carry_gate`) | #3771 | merged |
 | D2 | Verifier (`muxbus/wan_verify.rs`), peer cache, known instances, replay table, `TRUST=wan-verified` marker, tier rules, audit, `wan` grants off | #3775 | merged |
 | — | Agent jekt policy (`~/.agentmux/agents/CLAUDE.md`) gains `TRUST=wan-verified` | — | **needs the operator** (§3) |
-| — | Host-gated instance approval window | — | **held** for GHSA-6726-q276-g6f6 (§4) |
+| — | Trust a verified `new` same-account instance (`ESCALATE=none`), after agents stop holding the account login (#3881) — operator decision 2026-09-26, spec §2.6 amendment | this PR | open |
+| — | Host-gated instance approval window | — | **held** for GHSA-6726-q276-g6f6 (§4); since 2026-09-26 approval only sets the label, it no longer gates the stop |
 | — | Instance retirement from the desktop | — | not started (§4) |
 | — | End-to-end run across two machines (spec §5) | — | **blocked on the C1 deploy** |
 
