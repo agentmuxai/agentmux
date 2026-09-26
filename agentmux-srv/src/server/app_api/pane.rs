@@ -535,15 +535,33 @@ pub(crate) fn pending_body(p: &crate::sagas::pending_shutdown::PendingView) -> s
 /// user's override stands (§6.5): `pending`, `kept_by_user`, `proceeding`,
 /// `shut_down`, `superseded` or `failed`.
 pub(crate) async fn handle_shutdown_status(
+    axum::extract::State(state): axum::extract::State<AppState>,
     axum::extract::Path(request_id): axum::extract::Path<String>,
 ) -> impl axum::response::IntoResponse {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use axum::Json;
-    match crate::sagas::pending_shutdown::status(&request_id) {
-        Some(v) => (StatusCode::OK, Json(serde_json::to_value(v).unwrap_or_default())).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({ "error": "no such shutdown request" }))).into_response(),
+    if let Some(v) = crate::sagas::pending_shutdown::status(&request_id) {
+        return (StatusCode::OK, Json(serde_json::to_value(v).unwrap_or_default())).into_response();
     }
+    // Asked on another instance on this machine (a cross-channel
+    // FleetBulkStop target): that instance holds the answer.
+    if let Some(remote) = crate::sagas::pending_shutdown::remote_for(&request_id) {
+        let url = format!("{}/api/v1/agent/shutdown/{request_id}", remote.local_url.trim_end_matches('/'));
+        let mut req = state.http_client.get(&url);
+        if !remote.auth_key.is_empty() {
+            req = req.header("X-AuthKey", &remote.auth_key);
+        }
+        return match req.send().await {
+            Ok(r) => {
+                let code = StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                let body: serde_json::Value = r.json().await.unwrap_or_default();
+                (code, Json(body)).into_response()
+            }
+            Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("its AgentMux instance: {e}") }))).into_response(),
+        };
+    }
+    (StatusCode::NOT_FOUND, Json(json!({ "error": "no such shutdown request" }))).into_response()
 }
 
 pub(crate) async fn handle_close_pane(
