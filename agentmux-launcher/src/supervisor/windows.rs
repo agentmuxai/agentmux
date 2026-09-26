@@ -719,7 +719,7 @@ pub(crate) async fn run_windows(
                 }
                 let misses = crate::ui_liveness::consecutive_misses();
                 if hang_dump_latch.observe(misses) {
-                    match (host_child.id(), crate::host_hang_dump::dump_dir()) {
+                    match (host_child.id(), crate::host_hang_dump::dump_dir(&dir_hash)) {
                         (Some(pid), Some(dir)) => {
                             log(&format!(
                                 "[host-hang] UI thread missed {} consecutive probes — writing a minidump of host pid {} to {}",
