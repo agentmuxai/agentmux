@@ -50,6 +50,7 @@ export function adaptPaneTabInstance(
         vm.viewName = () => title().text;
         vm.viewNameIsPlaceholder = () => title().placeholder === true;
     }
+    if (instance.rename) vm.setViewName = (name) => instance.rename!(name);
     if (instance.liveFavicon) vm.viewFaviconUrl = instance.liveFavicon;
     if (instance.headerIcon) vm.viewIcon = instance.headerIcon;
     if (instance.headerText) vm.viewText = instance.headerText;
