@@ -538,8 +538,15 @@ pub fn fence_agent_named(agent_name: &str, where_: &str) -> bool {
     true
 }
 
+/// Where the relay says the holder is: "on another computer (computer X, …)",
+/// or "on this computer (channel Y, vZ)" for another instance on this host
+/// (charlie, 2026-09-26: a same-host holder was called "another computer").
 fn wan_place(where_: &str) -> String {
-    if where_.is_empty() { String::new() } else { format!(" ({where_})") }
+    if crate::muxbus::wan_lease::holder_on_this_computer(where_) {
+        let rest = where_.trim_start_matches("this computer").trim_start_matches(", ");
+        return if rest.is_empty() { "on this computer".to_string() } else { format!("on this computer ({rest})") };
+    }
+    if where_.is_empty() { "on another computer".to_string() } else { format!("on another computer ({where_})") }
 }
 
 /// The refusal when the relay says another instance runs the agent. Carries
@@ -547,7 +554,7 @@ fn wan_place(where_: &str) -> String {
 pub fn wan_denied_message(agent: &str, where_: &str) -> String {
     let agent = if agent.is_empty() { "This agent" } else { agent };
     format!(
-        "{agent} is already running in another AgentMux instance on another computer{}, according to AgentMux cloud. \
+        "{agent} is already running in another AgentMux instance {}, according to AgentMux cloud. \
          Close it there, then try again — an agent can only run in one place at a time.",
         wan_place(where_)
     )
@@ -556,7 +563,7 @@ pub fn wan_denied_message(agent: &str, where_: &str) -> String {
 fn wan_lost_message(agent: &str, where_: &str) -> String {
     let agent = if agent.is_empty() { "This agent" } else { agent };
     format!(
-        "{agent} was taken over by another AgentMux instance on another computer{}, according to AgentMux cloud, which \
+        "{agent} was taken over by another AgentMux instance {}, according to AgentMux cloud, which \
          had it first. It will not start another turn here.",
         wan_place(where_)
     )
@@ -1181,6 +1188,19 @@ mod tests {
             crate::agents::failure::classify(None, None, &m, None).code,
             crate::agents::failure::FailureClass::LiveElsewhere
         );
+    }
+
+    #[test]
+    fn a_wan_refusal_from_this_computer_says_so() {
+        let where_ = "this computer, channel local-main-x, v0.57.6";
+        let m = wan_denied_message("Opaz", where_);
+        assert!(m.contains("on this computer (channel local-main-x, v0.57.6)"), "{m}");
+        assert!(!m.contains("another computer"), "{m}");
+        assert!(is_admission_refusal(&m), "{m}");
+        let lost = wan_lost_message("Opaz", where_);
+        assert!(lost.contains("on this computer (channel local-main-x, v0.57.6)"), "{lost}");
+        assert!(!lost.contains("another computer"), "{lost}");
+        assert!(is_admission_refusal(&lost), "{lost}");
     }
 
     #[test]
