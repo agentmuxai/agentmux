@@ -71,6 +71,7 @@ pub mod agent_bundle_sidecar;
 pub mod continuity_state;
 pub mod shellexec;
 pub mod transcript_backfill;
+pub mod blocking;
 pub mod gh_guard;
 pub mod pane_env;
 pub mod shellintegration;

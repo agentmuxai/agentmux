@@ -161,6 +161,13 @@ impl EventBus {
                 return;
             }
         };
+        self.send_value_to_conn_lane(conn_id, data, lane);
+    }
+
+    /// [`Self::send_to_conn_lane`] for an event already built as the wire
+    /// `Value` — for callers that would otherwise serialize a payload into a
+    /// `WSEventType` and have it serialized a second time here.
+    pub fn send_value_to_conn_lane(&self, conn_id: &str, data: serde_json::Value, lane: Lane) {
         let watches = self.watches.lock().unwrap();
         if let Some(watch) = watches.get(conn_id) {
             Self::try_send_lane(conn_id, watch.sender(lane), data);
@@ -214,6 +221,11 @@ impl EventBus {
                 return;
             }
         };
+        self.broadcast_value_lane(data, lane);
+    }
+
+    /// [`Self::broadcast_event_lane`] for an already-built wire `Value`.
+    pub fn broadcast_value_lane(&self, data: serde_json::Value, lane: Lane) {
         let watches = self.watches.lock().unwrap();
         for (conn_id, watch) in watches.iter() {
             Self::try_send_lane(conn_id, watch.sender(lane), data.clone());
@@ -296,24 +308,45 @@ impl WpsClient for EventBusBridge {
             EVENT_SYS_INFO | EVENT_BLOCK_STATS => Lane::Background,
             _ => Lane::Priority,
         };
-        // Wrap as RPC eventrecv message (format expected by frontend)
-        let ws_event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(serde_json::json!({
-                "command": "eventrecv",
-                "data": event
-            })),
+        // Wrap as RPC eventrecv message (format expected by frontend).
+        //
+        // Serialized exactly once. This runs under the MPS broker's lock, on
+        // every publish, and the payload can be a large transcript chunk;
+        // building a `WSEventType` and handing it to `send_to_conn_lane`
+        // serialized the payload into a `Value` and then deep-copied that
+        // `Value` again. Same wire shape as `WSEventType` (empty `oref`
+        // skipped) — pinned by `rpc_eventrecv_value_matches_wsevent_shape`.
+        let Some(data) = rpc_eventrecv_value(&event) else {
+            return;
         };
         // Route to the specific connection that subscribed. Broadcast is used
         // only for legacy callers that pass "ws-main" (none remain after the
         // per-conn-id fix), so this always takes the targeted path in practice.
         if route_id == "ws-main" {
-            self.event_bus.broadcast_event_lane(&ws_event, lane);
+            self.event_bus.broadcast_value_lane(data, lane);
         } else {
-            self.event_bus.send_to_conn_lane(route_id, &ws_event, lane);
+            self.event_bus.send_value_to_conn_lane(route_id, data, lane);
         }
     }
+}
+
+/// The `rpc`/`eventrecv` WS envelope for `event`, built with a single
+/// serialization of the payload. See `EventBusBridge::send_event`.
+fn rpc_eventrecv_value(event: &MuxEvent) -> Option<serde_json::Value> {
+    let payload = match serde_json::to_value(event) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("cannot marshal event: {}", e);
+            return None;
+        }
+    };
+    let mut inner = serde_json::Map::new();
+    inner.insert("command".to_string(), serde_json::Value::String("eventrecv".to_string()));
+    inner.insert("data".to_string(), payload);
+    let mut outer = serde_json::Map::new();
+    outer.insert("eventtype".to_string(), serde_json::Value::String(WS_EVENT_RPC.to_string()));
+    outer.insert("data".to_string(), serde_json::Value::Object(inner));
+    Some(serde_json::Value::Object(outer))
 }
 
 // ====================================================================
@@ -508,5 +541,45 @@ mod tests {
         assert!(json.contains("\"eventtype\":\"test\""));
         // Empty oref should be omitted
         assert!(!json.contains("\"oref\""));
+    }
+
+    /// `send_event` now builds the wire value directly instead of going through
+    /// `WSEventType`; the frontend must see byte-for-byte the same shape.
+    #[test]
+    fn rpc_eventrecv_value_matches_wsevent_shape() {
+        let event = MuxEvent {
+            event: "blockfile".to_string(),
+            scopes: vec!["block:abc".to_string()],
+            sender: String::new(),
+            persist: 0,
+            data: Some(serde_json::json!({ "data64": "aGVsbG8=", "n": 3 })),
+        };
+        let old = serde_json::to_value(WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(serde_json::json!({ "command": "eventrecv", "data": event })),
+        })
+        .unwrap();
+        assert_eq!(rpc_eventrecv_value(&event).unwrap(), old);
+    }
+
+    #[test]
+    fn send_event_delivers_the_eventrecv_envelope_to_the_subscribed_conn() {
+        let bus = Arc::new(EventBus::new());
+        let mut rx = bus.register_ws("conn-1", "tab-1");
+        let bridge = EventBusBridge::new(Arc::clone(&bus));
+        let event = MuxEvent {
+            event: "blockfile".to_string(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 0,
+            data: Some(serde_json::json!({ "k": "v" })),
+        };
+        bridge.send_event("conn-1", event.clone());
+        let got = rx.priority.try_recv().expect("delivered on the priority lane");
+        assert_eq!(got, rpc_eventrecv_value(&event).unwrap());
+        assert_eq!(got["eventtype"], "rpc");
+        assert_eq!(got["data"]["command"], "eventrecv");
+        assert_eq!(got["data"]["data"]["data"]["k"], "v");
     }
 }
