@@ -163,17 +163,13 @@ async fn get_json<T: serde::de::DeserializeOwned>(dir: &Directory<'_>, url: &str
             }
             // Still "couldn't check", but never silently: a directory that
             // rejects this install's token turned every WAN jekt
-            // `network-claimed` with nothing in the log to say why. The
-            // cause also rides on the verdict (`detail`) into the audit.
-            Ok(r) => {
-                tracing::warn!(status = %r.status(), "wan verify: key directory refused the lookup");
-                cause = format!("directory answered {}", r.status());
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "wan verify: key directory unreachable");
-                // `without_url`: the query names the sender's instance and key.
-                cause = format!("directory unreachable: {}", e.without_url());
-            }
+            // `network-claimed` with nothing in the log to say why. The cause
+            // is returned, not logged per attempt: the caller logs it once
+            // (`cloud_subscriber`'s "wan verify: outcome" at `warn`,
+            // `fetch_revoked` below) and the verdict carries it to the audit.
+            Ok(r) => cause = format!("directory answered {}", r.status()),
+            // `without_url`: the query names the sender's instance and key.
+            Err(e) => cause = format!("directory unreachable: {}", e.without_url()),
         }
     }
     Fetched::Unavailable(cause)
@@ -208,7 +204,11 @@ async fn fetch_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
         Fetched::Found(s) => Some(s.revoked),
         // An older cloud with no such route: not known to be revoked.
         Fetched::NotFound => Some(false),
-        Fetched::Unavailable(_) => None,
+        // No verdict carries this one, so it is the only place to say it.
+        Fetched::Unavailable(cause) => {
+            tracing::warn!(instance_id, cause = %cause, "wan verify: revocation check couldn't reach the directory");
+            None
+        }
     }
 }
 

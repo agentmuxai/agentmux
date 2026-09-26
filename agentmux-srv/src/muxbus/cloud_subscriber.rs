@@ -1086,13 +1086,26 @@ async fn sync_agent_reactive(
                 (wan_verdict.verified, wan_verdict.reason.unwrap_or(""), wan_verdict.detail.as_deref().unwrap_or(""));
             if verified == Some(false) {
                 tracing::warn!(injection_id = %inj.id, source = ?inj.source_agent, reason, "wan verify: signature FAILED");
+            } else if !detail.is_empty() {
+                // A check that couldn't run for a known cause (directory
+                // refused or unreachable, no local store): the one line that
+                // reports it, at `warn` — `wan_verify::get_json` no longer
+                // logs each attempt.
+                tracing::warn!(
+                    injection_id = %inj.id,
+                    source = ?inj.source_agent,
+                    verified = ?verified,
+                    reason,
+                    detail,
+                    same_account = ?inj.sender_same_account,
+                    "wan verify: outcome"
+                );
             } else {
                 tracing::info!(
                     injection_id = %inj.id,
                     source = ?inj.source_agent,
                     verified = ?verified,
                     reason,
-                    detail,
                     same_account = ?inj.sender_same_account,
                     "wan verify: outcome"
                 );
