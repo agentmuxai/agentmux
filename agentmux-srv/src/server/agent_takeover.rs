@@ -213,15 +213,21 @@ pub(super) async fn handle_agent_release(State(state): State<AppState>, Json(req
         agent_admission::hold_after_handover(&uid, &to);
     }
     if !agent.is_empty() {
-        if crate::muxbus::cloud_subscriber::release_agent_now(&state.id_store, agent).await {
-            tracing::info!(agent = %agent, was_live, "agent_admission.takeover: released the relay subscription and lease");
-            if !was_live {
-                released += 1;
+        use crate::muxbus::cloud_subscriber::RelayRelease;
+        match crate::muxbus::cloud_subscriber::release_agent_now(&state.id_store, agent).await {
+            RelayRelease::Released => {
+                tracing::info!(agent = %agent, was_live, "agent_admission.takeover: released the relay subscription and lease");
+                if !was_live {
+                    released += 1;
+                }
             }
-        } else if was_live {
             // Re-added despite the hold (a turn already past admission): the
             // relay lease stays here, so the requester's retry would be fenced.
-            tracing::warn!(agent = %agent, "agent_admission.takeover: the agent was re-added while releasing — relay lease kept");
+            RelayRelease::Kept => {
+                tracing::warn!(agent = %agent, "agent_admission.takeover: the agent was re-added while releasing — relay lease kept");
+            }
+            // No relay subscription (or no relay at all): nothing to release.
+            RelayRelease::NotSubscribed => {}
         }
     }
     if released == 0 && hand_over {

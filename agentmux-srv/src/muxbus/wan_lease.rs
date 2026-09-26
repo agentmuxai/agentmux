@@ -173,16 +173,18 @@ fn record(agent_id: &str, outcome: &Outcome) {
 /// holder letting go (Codex P1 on #3908). Pulls and acks don't take the op
 /// lock, so ordering by start time is what keeps them from restoring it.
 pub(crate) fn note_not_holder_since(agent_id: &str, body: &serde_json::Value, started: Instant) -> Option<String> {
-    let stale = STATE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&key(agent_id))
-        .and_then(|e| e.forgotten_at)
-        .is_some_and(|at| at > started);
-    if stale {
+    let desc = body.get("held_by").map(describe_holder).unwrap_or_default();
+    // Check and write under one STATE lock (ReAgent P1 on #3908): with
+    // two, a forget_elsewhere in between would be overwritten.
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let e = state.entry(key(agent_id)).or_default();
+    if e.forgotten_at.is_some_and(|at| at > started) {
         return None;
     }
-    Some(note_not_holder(agent_id, body))
+    e.held = false;
+    e.last_ok = None;
+    e.elsewhere = Some((desc.clone(), Instant::now()));
+    Some(desc)
 }
 
 /// Note a 409 `not_holder` the relay returned on a pending pull or an ack.
