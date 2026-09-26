@@ -85,11 +85,10 @@ impl TargetCache {
 
         // Path 2: which top-level window's page holds this block? Labels
         // only — `Browser` handles aren't Send and aren't needed here.
-        let windows: Vec<String> = state
-            .list_top_level_browsers()
-            .into_iter()
-            .map(|(label, _)| label)
-            .collect();
+        let windows = path2_candidates(state.top_level_labels().into_iter().map(|label| WindowCandidate {
+            is_approval_window: state.is_approval_window(&label),
+            label,
+        }));
         let cached = self.last_window.lock().get(block_id).cloned();
         let expr = block_probe_expr(block_id);
         let label = find_window_holding(block_id, &windows, cached.as_deref(), |label| {
@@ -148,6 +147,28 @@ where
          (probed {} windows)",
         windows.len()
     ))
+}
+
+/// A top-level browser as Path 2 sees it.
+struct WindowCandidate {
+    label: String,
+    /// Opened as an approval page (`AppState::approval_windows`).
+    is_approval_window: bool,
+}
+
+/// Windows a Path-2 block may live in: every app window and floater except
+/// the approval windows, excluded by identity so an approval page is
+/// structurally unreachable rather than merely lacking a matching
+/// `[data-blockid]` (Opaz's review of #3832). Not by
+/// `WindowKind::Subwindow`: floaters are recorded as `Subwindow` too, and a
+/// session restore recreates a subwindow without its view as an ordinary
+/// pane-hosting window — excluding by kind made both unreachable.
+fn path2_candidates(windows: impl IntoIterator<Item = WindowCandidate>) -> Vec<String> {
+    windows
+        .into_iter()
+        .filter(|w| !w.is_approval_window)
+        .map(|w| w.label)
+        .collect()
 }
 
 /// `windows` with `cached` moved to the front — only if it is still open.
@@ -230,6 +251,38 @@ mod tests {
             .unwrap_err();
         assert!(err.starts_with("UNKNOWN_BLOCK_ID"), "{err}");
         assert!(err.contains("ghost") && err.contains("probed 1 windows"), "{err}");
+    }
+
+    fn window(label: &str, is_approval_window: bool) -> WindowCandidate {
+        WindowCandidate {
+            label: label.to_string(),
+            is_approval_window,
+        }
+    }
+
+    #[test]
+    fn approval_windows_are_never_path2_candidates() {
+        let got = path2_candidates([
+            window("main", false),
+            window("window-approval-1", true),
+            window("window-2", false),
+        ]);
+        assert_eq!(got, labels(&["main", "window-2"]));
+    }
+
+    #[test]
+    fn floaters_and_restored_windows_stay_candidates() {
+        // Both carry WindowKind::Subwindow meta (floaters by a Phase-1
+        // stopgap; a restored subwindow because reproject keeps the kind but
+        // not the view) yet host workspace panes. Only a window actually
+        // opened as an approval page is excluded (Opaz, P1 on #3843).
+        let got = path2_candidates([
+            window("main", false),
+            window("floating-1", false),
+            window("window-restored", false),
+            window("window-approval-1", true),
+        ]);
+        assert_eq!(got, labels(&["main", "floating-1", "window-restored"]));
     }
 
     #[test]

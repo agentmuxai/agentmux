@@ -395,7 +395,7 @@ pub fn open_subwindow(
             "open_subwindow: unknown or non-full-instance parent label={parent_instance_id}"
         ));
     }
-    open_window_with_kind(
+    let opened = open_window_with_kind(
         state,
         crate::state::WindowKind::Subwindow,
         Some(parent_instance_id),
@@ -403,7 +403,18 @@ pub fn open_subwindow(
         initial_meta,
         None,
         false,
-    )
+    )?;
+    // A subwindow opened WITH a view (the credential / memory-adoption
+    // approval pages) renders only that view. Record it so the browser API
+    // never resolves a pane into it (#3681 review) — by label, because
+    // neither WindowKind::Subwindow (floaters carry it too) nor the page's
+    // DOM is a structural guarantee.
+    if initial_view.is_some() {
+        if let Some(label) = opened.as_str() {
+            state.approval_windows.lock().insert(label.to_string());
+        }
+    }
+    Ok(opened)
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 2 — `pub(crate)` (was private) so the reproject
