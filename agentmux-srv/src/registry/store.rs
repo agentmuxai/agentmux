@@ -105,16 +105,26 @@ impl Registry {
     /// triage). Skipping is `Ok(())`: SQLite remains authoritative.
     pub fn upsert(&self, rec: &NamedAgentRecord) -> Result<(), RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        self.upsert_unlocked(rec)
+        self.upsert_unlocked(rec, SessionWrite::Overwrite)
+    }
+
+    /// [`Self::upsert`], except a `session_id` the record already holds
+    /// wins over `rec`'s. For a mirror that didn't capture a session — a
+    /// launch — whose local row may carry an older session id than the one
+    /// another channel has since written here (#3586). A record without a
+    /// session id still takes `rec`'s.
+    pub fn upsert_keeping_session(&self, rec: &NamedAgentRecord) -> Result<(), RegistryError> {
+        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.upsert_unlocked(rec, SessionWrite::KeepExisting)
     }
 
     /// [`Self::upsert`] without taking `write_lock`, for callers already
     /// holding it. `write_lock` is a plain `Mutex` — re-entering it from a
     /// locked section would deadlock, not nest.
-    fn upsert_unlocked(&self, rec: &NamedAgentRecord) -> Result<(), RegistryError> {
+    fn upsert_unlocked(&self, rec: &NamedAgentRecord, session: SessionWrite) -> Result<(), RegistryError> {
         let path = self.active_path(&rec.data.instance_id);
         let bytes = match std::fs::read(&path) {
-            Ok(existing) => match merge_for_write(&existing, rec)? {
+            Ok(existing) => match merge_for_write(&existing, rec, session)? {
                 Some(b) => b,
                 None => return Ok(()),
             },
@@ -165,7 +175,7 @@ impl Registry {
                 continue;
             }
             rec.data.instance_name = instance_name.to_string();
-            self.upsert_unlocked(&rec)?;
+            self.upsert_unlocked(&rec, SessionWrite::Overwrite)?;
             renamed += 1;
         }
         Ok(renamed)
@@ -435,9 +445,17 @@ fn to_pretty(rec: &NamedAgentRecord) -> Result<Vec<u8>, serde_json::Error> {
 /// JSON, missing `schema_version`, or `schema_version` above
 /// `MAX_SUPPORTED_SCHEMA`). The caller treats `None` as a skip and
 /// leaves the on-disk file intact.
+/// Whether an upsert may replace the record's `session_id`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionWrite {
+    Overwrite,
+    KeepExisting,
+}
+
 fn merge_for_write(
     existing: &[u8],
     rec: &NamedAgentRecord,
+    session: SessionWrite,
 ) -> Result<Option<Vec<u8>>, RegistryError> {
     let on_disk: Value = match serde_json::from_slice(existing) {
         Ok(v) => v,
@@ -474,8 +492,18 @@ fn merge_for_write(
             return Ok(None);
         }
     }
+    let mut updates = serde_json::to_value(rec)?;
+    let held_session = on_disk
+        .get("data")
+        .and_then(|d| d.get("session_id"))
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.is_empty());
+    if session == SessionWrite::KeepExisting && held_session {
+        if let Some(data) = updates.get_mut("data").and_then(Value::as_object_mut) {
+            data.remove("session_id");
+        }
+    }
     let mut merged = on_disk;
-    let updates = serde_json::to_value(rec)?;
     merge_known(&mut merged, &updates);
     let mut bytes = serde_json::to_vec_pretty(&merged)?;
     bytes.push(b'\n');

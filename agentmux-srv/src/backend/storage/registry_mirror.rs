@@ -133,9 +133,14 @@ impl Store {
     /// - hidden = false → unretire (no-op if not retired) then
     ///   upsert. Net: file in `active/<id>.json`, no orphan retired.
     ///
+    /// `wrote_session` says whether the caller's own write set the row's
+    /// `session_id`. When it didn't (a launch), the row's session id may be
+    /// older than one another channel has since mirrored, so a session id
+    /// the registry already holds is kept (#3586).
+    ///
     /// Failures are logged, never propagated: SQLite remains
     /// authoritative.
-    pub(super) fn registry_upsert_if_named(&self, inst: &AgentInstance) {
+    pub(super) fn registry_upsert_if_named(&self, inst: &AgentInstance, wrote_session: bool) {
         // Mirror filter: only registers named rows. Pre-Option-E this
         // also excluded continuation rows (parent_instance_id != '')
         // so the registry-sourced read path wouldn't surface chained
@@ -196,7 +201,12 @@ impl Store {
             );
         }
 
-        if let Err(e) = reg.upsert(&rec) {
+        let upserted = if wrote_session {
+            reg.upsert(&rec)
+        } else {
+            reg.upsert_keeping_session(&rec)
+        };
+        if let Err(e) = upserted {
             tracing::warn!(
                 instance_id = %inst.id,
                 error = %e,
