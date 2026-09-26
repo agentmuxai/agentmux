@@ -19,8 +19,7 @@
 //! held, the unattended period goes into the WS4 audit log, like a period with
 //! every window closed.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::state::AppState;
 
@@ -30,18 +29,31 @@ pub const ENV: &str = "AGENTMUX_START_HIDDEN";
 /// The label of the window a hidden start holds back.
 pub const HELD_LABEL: &str = "main";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hold {
+    /// "main" is held. `reveal_skipped`: its first reveal was attempted and
+    /// skipped, so a release must reveal it; otherwise the load path still
+    /// will.
+    Held { reveal_skipped: bool },
+    Released,
+}
+
 /// Hold state. Starts held when the env var was set at process start.
+///
+/// One lock over both facts (held, and whether a reveal was skipped), not two
+/// atomics: the load path (UI thread) and a request (IPC thread) race, and
+/// with separate flags a release could decide "the load path will show it"
+/// while the load path decided "held, skip it", leaving "main" hidden for
+/// good (ReAgent P1 on #3854). Under one lock exactly one side shows it.
 #[derive(Debug)]
 pub struct StartHidden {
-    held: AtomicBool,
-    /// A reveal of "main" was attempted and skipped. Tells `release` whether
-    /// it must reveal now, or whether the normal load path still will.
-    reveal_skipped: AtomicBool,
+    hold: Mutex<Hold>,
 }
 
 impl StartHidden {
     pub fn new(held: bool) -> Self {
-        Self { held: AtomicBool::new(held), reveal_skipped: AtomicBool::new(false) }
+        let hold = if held { Hold::Held { reveal_skipped: false } } else { Hold::Released };
+        Self { hold: Mutex::new(hold) }
     }
 
     pub fn from_env() -> Self {
@@ -52,24 +64,47 @@ impl StartHidden {
     /// time. `Skip::Yes` = do not show it; `first` marks the first skipped
     /// attempt (retries are skipped too), which starts the audit period.
     pub fn should_skip_reveal(&self, label: Option<&str>) -> Skip {
-        if label != Some(HELD_LABEL) || !self.held.load(Ordering::SeqCst) {
+        self.should_skip_reveal_then(label, || {})
+    }
+
+    /// `should_skip_reveal`, running `on_first_skip` under the hold lock, so
+    /// the audit entry it writes cannot be reordered against `release_then`'s.
+    fn should_skip_reveal_then(&self, label: Option<&str>, on_first_skip: impl FnOnce()) -> Skip {
+        if label != Some(HELD_LABEL) {
             return Skip::No;
         }
-        let first = !self.reveal_skipped.swap(true, Ordering::SeqCst);
-        Skip::Yes { first }
+        let mut hold = self.hold.lock().unwrap_or_else(|e| e.into_inner());
+        match *hold {
+            Hold::Released => Skip::No,
+            Hold::Held { reveal_skipped } => {
+                *hold = Hold::Held { reveal_skipped: true };
+                if !reveal_skipped {
+                    on_first_skip();
+                }
+                Skip::Yes { first: !reveal_skipped }
+            }
+        }
     }
 
     /// Release the hold. Returns what the caller must do.
     pub fn release(&self) -> Release {
-        if !self.held.swap(false, Ordering::SeqCst) {
-            return Release::NotHeld;
-        }
-        if self.reveal_skipped.load(Ordering::SeqCst) {
-            Release::RevealNow
-        } else {
-            // "main" has not reached its first reveal yet; the normal load
-            // path will show it now that the hold is gone.
-            Release::LoadWillReveal
+        self.release_then(|| {})
+    }
+
+    /// `release`, running `on_reveal` under the hold lock when it returns
+    /// `RevealNow` (see `should_skip_reveal_then`).
+    fn release_then(&self, on_reveal: impl FnOnce()) -> Release {
+        let mut hold = self.hold.lock().unwrap_or_else(|e| e.into_inner());
+        let was = std::mem::replace(&mut *hold, Hold::Released);
+        match was {
+            Hold::Released => Release::NotHeld,
+            Hold::Held { reveal_skipped: true } => {
+                on_reveal();
+                Release::RevealNow
+            }
+            // "main" has not reached its first reveal yet; it now will, and
+            // will find the hold gone.
+            Hold::Held { reveal_skipped: false } => Release::LoadWillReveal,
         }
     }
 }
@@ -92,30 +127,24 @@ pub enum Release {
 
 /// Hook for the reveal path. `true` = do not show this window.
 pub fn hold_reveal(state: &Arc<AppState>, label: Option<&str>) -> bool {
-    match state.start_hidden.should_skip_reveal(label) {
-        Skip::No => false,
-        Skip::Yes { first } => {
-            if first {
-                tracing::info!(
-                    target: "startup-paint",
-                    "[start-hidden] login start: \"main\" loaded but held hidden until a window is requested"
-                );
-                record_attention(state, true);
-            }
-            true
-        }
-    }
+    let skip = state.start_hidden.should_skip_reveal_then(label, || {
+        tracing::info!(
+            target: "startup-paint",
+            "[start-hidden] login start: \"main\" loaded but held hidden until a window is requested"
+        );
+        record_attention(state, true);
+    });
+    matches!(skip, Skip::Yes { .. })
 }
 
 /// Release the hold if there is one, showing "main" if it is ready.
 /// Returns `true` when the caller's request was satisfied by that (so it must
 /// not open another window).
 pub fn release_for_request(state: &Arc<AppState>, why: &str) -> bool {
-    match state.start_hidden.release() {
+    match state.start_hidden.release_then(|| record_attention(state, false)) {
         Release::NotHeld => false,
         Release::RevealNow => {
             tracing::info!(target: "startup-paint", why, "[start-hidden] revealing held \"main\"");
-            record_attention(state, false);
             crate::client::navigation::post_show_top_level_window(state, HELD_LABEL);
             true
         }
@@ -127,8 +156,10 @@ pub fn release_for_request(state: &Arc<AppState>, why: &str) -> bool {
 }
 
 /// Record the start or end of the held (unattended) period in the WS4 audit
-/// log. Sent under `host_state`, like `host_dispatch`'s own transitions, so it
-/// cannot be reordered against them.
+/// log. Called under the hold lock (so a skip and a release are logged in the
+/// order they happened) and sent under `host_state`, like `host_dispatch`'s own
+/// transitions, so it cannot be reordered against them either. Lock order is
+/// hold → `host_state`; nothing takes the hold while holding `host_state`.
 fn record_attention(state: &Arc<AppState>, unattended: bool) {
     let _order = state.host_state.lock();
     if let Some(tx) = state.background_audit_tx.get() {
@@ -179,5 +210,26 @@ mod tests {
         let s = StartHidden::new(true);
         assert_eq!(s.release(), Release::LoadWillReveal);
         assert_eq!(s.should_skip_reveal(Some("main")), Skip::No, "the load path shows it normally");
+    }
+
+    /// ReAgent P1 on #3854: a release racing the load path's first reveal must
+    /// end with exactly one of them showing "main", never neither.
+    #[test]
+    fn a_release_racing_the_load_path_always_shows_main_exactly_once() {
+        for _ in 0..2000 {
+            let s = std::sync::Arc::new(StartHidden::new(true));
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let (s1, b1) = (s.clone(), barrier.clone());
+            let load = std::thread::spawn(move || {
+                b1.wait();
+                s1.should_skip_reveal(Some("main"))
+            });
+            barrier.wait();
+            let release = s.release();
+            let skip = load.join().unwrap();
+            let load_shows = skip == Skip::No;
+            let release_shows = release == Release::RevealNow;
+            assert!(load_shows ^ release_shows, "skip={skip:?} release={release:?}");
+        }
     }
 }
