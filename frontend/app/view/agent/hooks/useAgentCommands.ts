@@ -38,6 +38,7 @@ import { paneBusyForInput } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
+import { parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
 import type { DocumentNode } from "../types";
 import type { LogFn } from "./useAgentControllerStatus";
@@ -1021,9 +1022,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
         };
 
-        if (trimmed.startsWith("!")) {
+        const bangCommand = parseBangCommand(trimmed);
+        if (bangCommand !== null) {
             try {
-                await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext(wasAlreadyWorking));
+                await dispatchBangCommand(bangCommand, opts.blockId, buildCommandContext(wasAlreadyWorking));
             } finally {
                 // TurnStart was dispatched by handleSendMessage before sendMessage
                 // was called. Reset it so the pane returns to Idle instead of waiting
@@ -1878,7 +1880,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
 
 /**
  * Run a shell command in the agent's working directory via the `shellexec`
- * RPC and surface stdout/stderr in the launch log.
+ * RPC and surface stdout/stderr in the shell drawer (system-tagged log lines
+ * are written into its terminal — see agent-view.tsx's `log`).
  *
  * Called when the user prefixes a composer message with `!`. The blockId is
  * passed explicitly (rather than via ctx) because ctx.blockId is a string and

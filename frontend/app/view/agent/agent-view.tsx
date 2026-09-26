@@ -83,6 +83,7 @@ import {
 } from "./activity/tool-adapter";
 import { paneBusyForInput } from "./working-indicator";
 import { quickForkAgent } from "./quick-fork";
+import { isBangCommand } from "./bang-command";
 import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
 import { agentModels } from "./agent-models";
@@ -164,6 +165,11 @@ import { useAgentStream } from "./useAgentStream";
 // below) reuses the same visual timing so the two fades feel like one brand
 // moment rather than two differently-tuned animations back to back.
 const PICKER_FADE_OUT_MS = 200;
+
+// Shell drawer's height until the user drags it (then `term:shellheight`
+// wins). 80% of the drawers' shared 220px default — the shell opens on its
+// own for every `!cmd`, so it should take less of the transcript by default.
+const SHELL_DRAWER_DEFAULT_HEIGHT = 176;
 
 const ANSI_SEQUENCE_RE = new RegExp(
     "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
@@ -1841,7 +1847,7 @@ const AgentPresentationView = ({
         // `log`/`handleShellTermReady` above). Auto-open the details drawer so
         // the shell — and thus the output — is immediately visible; without
         // this the user sees no feedback if the drawer is closed.
-        if (message.trim().startsWith("!")) {
+        if (isBangCommand(message)) {
             paneModel.dispatchPane({ type: "DetailsExpand" }, "user");
         }
         // Capture working state BEFORE TurnStart so PendingMessageQueued can
@@ -2939,6 +2945,7 @@ const AgentPresentationView = ({
                         <ResizableDetailsDrawer
                             blockId={model.blockId}
                             persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
+                            defaultHeight={SHELL_DRAWER_DEFAULT_HEIGHT}
                         >
                             {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
                                 real xterm+PTY terminal, spawned lazily on first
