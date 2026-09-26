@@ -88,12 +88,13 @@ path; add no new backend calls.
 **Wiring** (follow `useAgentFailure`'s `bindCandidates` + `onBindAccount(e)` convention so the strip stays
 presentational)
 
-- `AgentComposerStrip` gains two optional props:
-  `switchAccountCandidates?: { id: string; name: string }[]` and `onSwitchAccount?: (e: MouseEvent) => void`.
-- `agent-view.tsx` passes `bindCandidates().map(a => ({ id: a.id, name: accountLabel(a) }))` and a new
-  `onSwitchAccount`. To avoid a second copy of the menu code, extract the "build the picker and show it"
-  half of `onBindAccount` into one helper, called by `onBindAccount` (which keeps its one-candidate
-  shortcut) and by `onSwitchAccount` (which never shortcuts).
+- `AgentComposerStrip` gains two optional props: `canSwitchAccount?: boolean` (is there another account to
+  switch to) and `onSwitchAccount?: (e: MouseEvent) => void`. A boolean, not the candidate list: the strip
+  only needs to know whether to show the link, and the picker is built in `agent-view.tsx`.
+- `agent-view.tsx` passes `bindCandidates().length > 0` and a new `onSwitchAccount`. The decision "bind now,
+  or pick?" and the menu rows are extracted into `failure/account-picker.ts` (`planBind`,
+  `accountPickerItems`), shared by `onBindAccount` (`"adopt"`: a lone candidate binds at once) and
+  `onSwitchAccount` (`"switch"`: always a picker), so the difference is unit-tested.
 - `interactive: false` becomes `interactive: true` on the `auth` slot. It is now clickable, and the strip
   orders interactive slots to the outer edge (`orderKeysForEdgePriority`).
 
