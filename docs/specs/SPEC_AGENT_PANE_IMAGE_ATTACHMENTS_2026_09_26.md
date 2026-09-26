@@ -137,7 +137,7 @@ Every attachment goes through the pipeline in §6.4 (hash, decode, thumbnail, se
 ### 5.6 Pasting
 
 - **Ctrl/Cmd+V in the composer:** if the clipboard holds image data or a file list, attach them and paste any text normally. Image and text in one paste (e.g. copied from a web page) gives both.
-- **Right-click → Paste:** runs the same code path through the native bridge (§6.2), since a menu click has no `paste` event. This also fixes text paste from the menu, which appears broken today (§1).
+- **Right-click → Paste:** a menu click has no `paste` event and no browser-default insertion, so this path does both halves itself: the native bridge (§6.2) returns the clipboard's **text and** its images/files together, the text is inserted at the selection with `execCommand("insertText")` (the one API that records the edit in Chromium's native undo; `setRangeText` + an `input` event if it returns `false`), and the images go to the attachment pipeline. This also fixes text paste from the menu, which appears broken today (§1).
 - **Pasted screenshots get a readable name:** `Pasted image 2026-09-26 14.03.12.png`.
 - **Nothing pasteable:** if Ctrl+V finds no text and no image, show "Nothing to paste. The clipboard is empty or holds a format AgentMux can't read." Windows screenshot tools are the known source of this.
 
@@ -178,7 +178,7 @@ A 1 GB batch must not pass through the V8 heap, the JSON RPC channel (2 MB axum 
 | Source | How | Bytes cross the renderer? |
 |---|---|---|
 | Drop (CEF) | Existing `consume_drag_paths` → new srv RPC `attachments.ingest` with `{paths}` | No |
-| Ctrl+V, right-click Paste (CEF) | New CEF IPC `read_clipboard_attachments` → returns `{paths}` for a file list (Windows `CF_HDROP`, macOS `NSFilenamesPboardType`, Linux `text/uri-list`), or writes clipboard image data (Windows PNG/`CF_DIBV5`, macOS PNG/TIFF, Linux `image/png` via `wl-paste`/`xclip -t`) to `<store>/incoming/<uuid>.png` and returns that path → `attachments.ingest` | No |
+| Ctrl+V, right-click Paste (CEF) | New CEF IPC `read_clipboard_attachments` → returns `{text, paths}`: `text` is the clipboard's plain text (empty if none), used only by right-click Paste; `paths` is a file list (Windows `CF_HDROP`, macOS `NSFilenamesPboardType`, Linux `text/uri-list`), or writes clipboard image data (Windows PNG/`CF_DIBV5`, macOS PNG/TIFF, Linux `image/png` via `wl-paste`/`xclip -t`) to `<store>/incoming/<uuid>.png` and returns that path → `attachments.ingest` | No |
 | Ctrl+V fallback (native read returned nothing but the `paste` event has `clipboardData.files`), and the non-CEF dev host | `fetch(POST /api/v1/attachments/upload, body: file)` per file, streamed | Blob only, never an ArrayBuffer |
 
 For Ctrl+V the composer's `onPaste` handler reads `clipboardData.files` / image items **synchronously** and **never calls `preventDefault()`**. A textarea's default paste only ever inserts text, so letting it run is exactly right for the text part: the browser inserts it with its own selection handling and native undo, and nothing has to re-insert it (no `execCommand`). The handler only adds what the default paste ignores: it hands the image files (or, for a copied file list, the native reader's paths) to the attachment pipeline. A paste with images and no text inserts nothing into the textarea, which is also the default.
@@ -192,7 +192,7 @@ Location: `get_mux_data_dir()/attachments/` (per channel, like other srv data; `
 ```
 attachments/
   blobs/ab/abcdef…(sha256).png        original bytes, content-addressed, read-only
-  derived/ab/abcdef….<fp>.thumb.jpg|png   256 px long edge, for tiles and transcript
+  derived/ab/abcdef….<fp>.thumb.jpg|png   256 px long edge, for tiles and transcript (step 5)
   derived/ab/abcdef….<fp>.send.png|jpg    what the agent gets (§6.4)
   incoming/<uuid>.<ext>               in-flight paste/upload, renamed into blobs/ when hashed
   derived/ab/abcdef….<fp>.json            dimensions, formats and sizes of the three files
@@ -212,7 +212,7 @@ Runs on blocking threads. **Decode memory is capped** by a 2 GB budget: before d
 2. **Sniff by magic bytes**, not extension (catches HEIC named `.jpg`).
 3. **Header-only dimension check** before decode; reject past 16384 px per side / 200 MP.
 4. **Decode** with the `image` crate (new dependency: PNG, JPEG, GIF, WebP, BMP, TIFF) and apply EXIF orientation. SVG via `resvg` (new dependency) at 2000 px long edge.
-5. **Thumbnail:** 256 px long edge, WebP.
+5. **Thumbnail:** 256 px long edge, JPEG quality 80, or PNG when the image has real transparency. (WebP would be smaller, but the `image` crate only encodes lossless WebP, which is larger than JPEG for photos.)
 6. **Send-copy:** long edge ≤ **2000 px** (fits Anthropic's many-image rule, OpenAI, Gemini), metadata stripped (EXIF, including GPS, never leaves the machine). PNG when the source has alpha or looks like a screenshot (PNG source, ≤ 256 distinct colors in a sample); otherwise JPEG quality 85. Re-encode down to ≤ **5 MB** if needed (Bedrock/Vertex cap). If the original already satisfies every rule and has no metadata, the send-copy is a hard link to it.
 7. Emit `attachment:ready` with `{id, name, mime, bytes, width, height, send_bytes, send_width, send_height, thumb_url}`.
 
@@ -235,7 +235,7 @@ The backend resolves each ID to its send-copy path, then per provider:
 
 | Provider | Delivery |
 |---|---|
-| Claude (persistent stream-json) | **Hybrid.** The first images whose base64 fits a budget (default: up to 20 images and 20 MB base64) go as `image` content blocks, in order, before the text block. **All** images are also listed in a text preamble with their paths (`Attached images (read with the Read tool if not shown above): 1. /…/abc….png (screenshot.png) …`). This keeps the request under the 32 MB API cap and keeps Claude Code's own JSONL from ballooning, while every image stays reachable. |
+| Claude (persistent stream-json) | **Hybrid, within two budgets.** Images go as `image` content blocks, in order, before the text block, while they fit **both** a per-message budget (up to 20 images and 20 MB base64) **and a per-session budget** (50 MB base64 across the whole Claude session, `attachments:claudesessioninlinemb`). The session budget matters because Claude Code keeps every inline image in its own session transcript, which AgentMux doesn't control: a per-message cap alone would let a long session with many image turns grow that file without bound, the startup-crash case in §2. The count is kept on disk per Claude session id under `<store>/sessions/`, so a restart doesn't reset it. Past either budget, images are sent by path only. **All** images are also listed in a text preamble with their paths (`<attached_images>` … `1. screenshot.png — /…/abc….send.png` …), so every image stays reachable. |
 | Claude (container mode) | Send-copies are copied into the container at `/tmp/agentmux-attachments/<id>.<ext>` with the existing tar upload (`backend/container.rs:730-775`); paths in the preamble use those. |
 | Codex App Server | One `localImage {path}` input per image, then the text input. |
 | Codex subprocess (`exec`) | `-i <path>` per image on the turn's argv, plus the numbered path list in text. |
@@ -260,7 +260,8 @@ The numbering in every preamble matches the tile badges (§5.1).
 | `attachments:maxfiles` | `128` | Per prompt. |
 | `attachments:maxtotalmb` | `1024` | Per prompt, originals. Per-file cap equals this. |
 | `attachments:sendmaxedge` | `2000` | Long edge of the send-copy. |
-| `attachments:claudeinlinemax` | `20` | Max images sent as inline blocks to Claude (0 = paths only). |
+| `attachments:claudeinlinemax` | `20` | Max images sent as inline blocks to Claude in one message (0 = paths only). |
+| `attachments:claudesessioninlinemb` | `50` | Max base64 inlined across one Claude session; after that, paths only. |
 | `attachments:retentiondays` | `30` | Days since last use before an attachment's files are deleted. |
 
 Existing `dnd:enabled` still gates drop as a whole; `dnd:agentinserttoken` now applies only to non-image files.
