@@ -45,6 +45,7 @@ vi.mock("@/app/store/rpc-api", () => {
             definition_id: "new-def",
             identity_id: "",
             memory_id: "",
+            slug: "new-def-slug",
         }),
         // Phase 2 (Q2 Decision Y) — hide templates.
         AgentDefHideCommand: vi.fn().mockResolvedValue({ ok: true }),
@@ -410,13 +411,16 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         // + override carry the user's picks rather than silently falling
         // back (reagent P2 on #1576; model threading added #2594 follow-
         // up work).
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "container", "opus");
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "container", "opus", "mary-2");
         expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [stubAgent, overrides] = model.launchAgentDefinition.mock.calls[0];
         expect(stubAgent.id).toBe("new-def-id");
         expect(stubAgent.name).toBe("Mary");
         expect(stubAgent.is_seeded).toBe(0);
         expect(stubAgent.parent_id).toBe("tpl-claude");
+        // #3573: the slug the backend assigned the new row, not one
+        // derived from the name ("Mary" would give "mary").
+        expect(stubAgent.slug).toBe("mary-2");
         // The chosen runtime is threaded onto both the stub definition
         // and the launch override (not read from the template's type).
         expect(stubAgent.agent_type).toBe("container");
@@ -446,12 +450,12 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
         const req = modalLayerOpen.mock.calls[0][0];
 
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus");
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus", "mary");
         expect(await screen.findByText("Launch aborted")).toBeTruthy();
         expect(screen.getByText(/db locked/)).toBeTruthy();
         expect(model.launchError).toBeNull();
 
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus");
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus", "mary");
         await waitFor(() => expect(screen.queryByText("Launch aborted")).toBeNull());
     });
 
@@ -463,7 +467,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
 
         const req = modalLayerOpen.mock.calls[0][0];
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "");
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "", "mary");
         const [, overrides] = model.launchAgentDefinition.mock.calls[0];
         expect(overrides.model).toBeUndefined();
     });

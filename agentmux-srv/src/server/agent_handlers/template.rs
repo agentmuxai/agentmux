@@ -254,6 +254,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     definition_id: new_def.id.clone(),
                     identity_id: cmd.identity_id.unwrap_or_default(),
                     memory_id: cmd.memory_id.unwrap_or_default(),
+                    slug: new_def.slug.clone(),
                 };
                 tracing::info!(
                     template_id = %cmd.template_id,

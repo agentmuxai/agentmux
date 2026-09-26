@@ -362,6 +362,11 @@ pub struct AgentDefCreateFromTemplateResult {
     /// re-thread these — they flow through to the launch overrides.
     pub identity_id: String,
     pub memory_id: String,
+    /// The slug `agent_def_insert` assigned to the new row (derived from
+    /// the name, then collision-suffixed). The launch uses it for
+    /// `AGENTMUX_AGENT_ID` — a slug derived again on the frontend can name
+    /// a different agent, or none (#3573).
+    pub slug: String,
 }
 
 /// Request for `agentdefhide` / `agentdefunhide`. Phase 2 of the
