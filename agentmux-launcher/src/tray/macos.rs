@@ -127,6 +127,10 @@ struct Live {
     running: bool,
     /// Whether the placement line has been logged (see `drain`).
     placed_logged: bool,
+    /// The "Start at login" check item, and the `(checked, enabled)` it last
+    /// showed. `drain` keeps it equal to `start_at_login::current()`.
+    login_item: Option<muda::CheckMenuItem>,
+    login_shown: Option<(bool, bool)>,
 }
 
 thread_local! {
@@ -173,18 +177,29 @@ pub fn pump_tick() {
 
 /// Build the menu and status item. Main thread only.
 fn create(req: Request) -> Result<Live, String> {
-    use muda::{Menu, MenuItem as MudaItem};
+    use muda::{CheckMenuItem, Menu, MenuItem as MudaItem};
     use tray_icon::TrayIconBuilder;
 
     // Start from the REAL state, not an assumption: the request is queued
     // before `srv`/`host` are spawned, so hard-coding "running" would make
     // the icon lie for the whole startup window. Same rule as Windows.
     let running = super::service_reachable(&req.data_dir, &req.dir_hash);
-    let model = super::menu_model(running);
+    let model = super::menu_model(running, crate::start_at_login::current());
     let menu = Menu::new();
     let mut items: Vec<(muda::MenuId, TrayAction)> = Vec::new();
     let mut open_item: Option<MudaItem> = None;
+    let mut login_item: Option<CheckMenuItem> = None;
+    let mut login_shown: Option<(bool, bool)> = None;
     for entry in &model {
+        if let Some(check) = entry.check {
+            let item = CheckMenuItem::new(&entry.label, check.enabled, check.checked, None);
+            items.push((item.id().clone(), entry.action));
+            menu.append(&item)
+                .map_err(|e| format!("append menu item {:?}: {}", entry.label, e))?;
+            login_shown = Some((check.checked, check.enabled));
+            login_item = Some(item);
+            continue;
+        }
         let item = MudaItem::new(&entry.label, true, None);
         items.push((item.id().clone(), entry.action));
         menu.append(&item)
@@ -244,6 +259,8 @@ fn create(req: Request) -> Result<Live, String> {
         status_rx,
         running,
         placed_logged: false,
+        login_item,
+        login_shown,
     })
 }
 
@@ -280,7 +297,7 @@ impl Live {
             let _ = self.tray.set_tooltip(Some(super::tooltip(now)));
             // Reuse the shared model so the label wording stays in one place
             // (and stays covered by `tray_model_tests`).
-            if let Some(entry) = super::menu_model(now)
+            if let Some(entry) = super::menu_model(now, None)
                 .into_iter()
                 .find(|e| e.action == TrayAction::OpenWindow)
             {
@@ -297,9 +314,25 @@ impl Live {
 
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
             if let Some(action) = self.items.iter().find(|(id, _)| *id == ev.id).map(|(_, a)| *a) {
+                if action == TrayAction::ToggleStartAtLogin {
+                    // The check item flips its own mark on click. Resync it to
+                    // the setting; srv's broadcast then shows the new value.
+                    self.login_shown = None;
+                }
                 if self.tx.send(action).is_err() {
                     return false;
                 }
+            }
+        }
+
+        // `app:startatlogin` changed (from Settings or from this menu).
+        if let Some(item) = &self.login_item {
+            let cur = crate::start_at_login::current();
+            let want = (cur.unwrap_or(false), cur.is_some());
+            if self.login_shown != Some(want) {
+                item.set_checked(want.0);
+                item.set_enabled(want.1);
+                self.login_shown = Some(want);
             }
         }
 

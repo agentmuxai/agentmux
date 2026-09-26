@@ -52,6 +52,8 @@ cat > "$STAGEDIR/AgentMux/agentmux.sh" <<'LAUNCH'
 #!/usr/bin/env bash
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export LD_LIBRARY_PATH="$DIR/usr/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# A start-at-login entry must run this script, not the raw launcher.
+export AGENTMUX_STABLE_EXE="$DIR/agentmux.sh"
 exec "$DIR/usr/bin/agentmux-launcher" "$@"
 LAUNCH
 chmod +x "$STAGEDIR/AgentMux/agentmux.sh"

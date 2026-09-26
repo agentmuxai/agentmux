@@ -99,7 +99,7 @@ fn build_menu(
     nstate: &super::notify_menu::NotifyTrayState,
 ) -> Result<(muda::Menu, Vec<(muda::MenuId, Act)>), String> {
     use super::notify_menu::NotifyMenuEntry;
-    use muda::{Menu, MenuItem as MudaItem, PredefinedMenuItem, Submenu};
+    use muda::{CheckMenuItem, Menu, MenuItem as MudaItem, PredefinedMenuItem, Submenu};
 
     let menu = Menu::new();
     let mut ids: Vec<(muda::MenuId, Act)> = Vec::new();
@@ -126,10 +126,20 @@ fn build_menu(
             }
         }
     }
-    for entry in super::menu_model(running) {
-        let item = MudaItem::new(&entry.label, true, None);
-        ids.push((item.id().clone(), Act::Tray(entry.action)));
-        menu.append(&item).map_err(|e| format!("append menu item {:?}: {}", entry.label, e))?;
+    for entry in super::menu_model(running, crate::start_at_login::current()) {
+        let appended = match entry.check {
+            Some(check) => {
+                let item = CheckMenuItem::new(&entry.label, check.enabled, check.checked, None);
+                ids.push((item.id().clone(), Act::Tray(entry.action)));
+                menu.append(&item)
+            }
+            None => {
+                let item = MudaItem::new(&entry.label, true, None);
+                ids.push((item.id().clone(), Act::Tray(entry.action)));
+                menu.append(&item)
+            }
+        };
+        appended.map_err(|e| format!("append menu item {:?}: {}", entry.label, e))?;
     }
     Ok((menu, ids))
 }

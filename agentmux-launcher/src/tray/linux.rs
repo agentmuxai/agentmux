@@ -17,7 +17,7 @@
 use std::sync::mpsc;
 
 use ksni::blocking::TrayMethods;
-use ksni::menu::{MenuItem, StandardItem, SubMenu};
+use ksni::menu::{CheckmarkItem, MenuItem, StandardItem, SubMenu};
 
 use super::notify_menu::{self, NotifyMenuEntry, NotifyTrayState};
 use super::TrayAction;
@@ -26,6 +26,8 @@ struct AgentMuxTray {
     tx: mpsc::Sender<TrayAction>,
     running: bool,
     nstate: NotifyTrayState,
+    /// `app:startatlogin`, refreshed with the notification state.
+    start_at_login: Option<bool>,
 }
 
 fn now_ms() -> i64 {
@@ -110,18 +112,22 @@ impl ksni::Tray for AgentMuxTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let mut items = notify_items(notify_menu::menu(&self.nstate, now_ms()));
-        for entry in super::menu_model(self.running) {
+        for entry in super::menu_model(self.running, self.start_at_login) {
             let action = entry.action;
-            items.push(
-                StandardItem {
+            let activate = Box::new(move |t: &mut AgentMuxTray| {
+                let _ = t.tx.send(action);
+            });
+            items.push(match entry.check {
+                Some(check) => CheckmarkItem {
                     label: sni_label(&entry.label),
-                    activate: Box::new(move |t: &mut AgentMuxTray| {
-                        let _ = t.tx.send(action);
-                    }),
+                    enabled: check.enabled,
+                    checked: check.checked,
+                    activate,
                     ..Default::default()
                 }
                 .into(),
-            );
+                None => StandardItem { label: sni_label(&entry.label), activate, ..Default::default() }.into(),
+            });
         }
         items
     }
@@ -171,7 +177,12 @@ pub fn spawn(data_dir: std::path::PathBuf, dir_hash: String) -> Result<mpsc::Rec
     std::thread::Builder::new()
         .name("agentmux-tray".into())
         .spawn(move || {
-            let tray = AgentMuxTray { tx, running, nstate: notify_menu::get() };
+            let tray = AgentMuxTray {
+                tx,
+                running,
+                nstate: notify_menu::get(),
+                start_at_login: crate::start_at_login::current(),
+            };
             let handle = match tray.spawn() {
                 Ok(h) => h,
                 Err(e) => {
@@ -182,7 +193,10 @@ pub fn spawn(data_dir: std::path::PathBuf, dir_hash: String) -> Result<mpsc::Rec
             let _ = ready_tx.send(Ok(()));
             while let Ok(u) = urx.recv() {
                 let applied = match u {
-                    Update::Notify => handle.update(|t: &mut AgentMuxTray| t.nstate = notify_menu::get()),
+                    Update::Notify => handle.update(|t: &mut AgentMuxTray| {
+                        t.nstate = notify_menu::get();
+                        t.start_at_login = crate::start_at_login::current();
+                    }),
                     Update::Running(r) => handle.update(|t: &mut AgentMuxTray| t.running = r),
                 };
                 if applied.is_none() {

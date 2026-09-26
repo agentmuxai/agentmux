@@ -85,6 +85,9 @@ mkdir -p "$PKGROOT/usr/bin"
 cat > "$PKGROOT/usr/bin/agentmux" <<'WRAP'
 #!/usr/bin/env bash
 export LD_LIBRARY_PATH="/opt/agentmux/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# A start-at-login entry must run this wrapper, not the raw launcher (which
+# cannot find libcef.so without the line above).
+export AGENTMUX_STABLE_EXE=/usr/bin/agentmux
 exec /opt/agentmux/bin/agentmux-launcher "$@"
 WRAP
 chmod +x "$PKGROOT/usr/bin/agentmux"

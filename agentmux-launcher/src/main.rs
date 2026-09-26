@@ -40,6 +40,7 @@ mod mem_supervisor;
 // Windows and Linux supervisors; macOS has no backend yet (§6.2).
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 mod notify;
+mod start_at_login;
 mod other_instances;
 mod reducer;
 mod saga;
@@ -122,6 +123,8 @@ fn main() {
     // instance. Gives an uninstaller a callable removal path, which is what
     // Workstream 4 requires.
     {
+        // Before anything reads it, and before any child could inherit it.
+        autostart::take_stable_exe_env();
         let args: Vec<String> = std::env::args().collect();
         if autostart::handle_cli(&args) {
             return;

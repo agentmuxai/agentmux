@@ -233,7 +233,6 @@ async fn route_command(
         // _SYSTEM_2026_09_24 Phase 4).
         "set_taskbar_attention" => commands::taskbar_attention::set_taskbar_attention(state, args),
         "autostart_status" => commands::autostart::autostart_status().await,
-        "set_autostart" => commands::autostart::set_autostart(args).await,
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
         "background_audit_take" => crate::background_audit::background_audit_take(state),

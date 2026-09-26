@@ -66,6 +66,8 @@ pub enum UserAction {
     Dismissed(String),
     /// Set `notify:pause:until` (epoch ms; 0 = resume).
     SetPause(i64),
+    /// Set `app:startatlogin` (the tray's check item; `start_at_login`).
+    SetStartAtLogin(bool),
 }
 
 /// A platform notification surface.
@@ -198,6 +200,13 @@ pub fn tray_request(action: crate::tray::notify_menu::NotifyMenuAction) {
     let _ = actions().0.send(ua);
 }
 
+/// Write `app:startatlogin` through srv, like any settings change, so the
+/// Settings page and the OS login entry follow it (`start_at_login`). Queues
+/// until the session is up.
+pub fn request_start_at_login(on: bool) {
+    let _ = actions().0.send(UserAction::SetStartAtLogin(on));
+}
+
 /// Launcher is exiting: remove our toasts from the notification center.
 pub fn shutdown() {
     if let Some(h) = HANDLE.get() {
@@ -222,6 +231,8 @@ pub enum Frame {
     Show(Notification),
     Retract(String),
     State(crate::tray::notify_menu::NotifyTrayState),
+    /// A full-config broadcast: the value of `app:startatlogin` (`None` = unset).
+    StartAtLogin(Option<bool>),
     Response { reqid: String, ack: AckResponse },
     Other,
 }
@@ -299,6 +310,12 @@ pub fn parse_frame(text: &str) -> Frame {
             .get("data")
             .and_then(|d| serde_json::from_value(d.clone()).ok())
             .map(Frame::State)
+            .unwrap_or(Frame::Other),
+        Some("config") => ev
+            .get("data")
+            .and_then(|d| d.get("fullconfig"))
+            .and_then(|c| c.get("settings"))
+            .map(|s| Frame::StartAtLogin(s.get(crate::start_at_login::SETTINGS_KEY).and_then(|v| v.as_bool())))
             .unwrap_or(Frame::Other),
         Some("notification:retract") => ev
             .get("data")
@@ -409,6 +426,13 @@ async fn session(
                         }
                         continue;
                     }
+                    UserAction::SetStartAtLogin(on) => {
+                        let msg = rpc("setconfig", Some(&uuid::Uuid::new_v4().to_string()), serde_json::json!({ crate::start_at_login::SETTINGS_KEY: on }));
+                        if let Err(e) = write.send(Message::Text(msg.into())).await {
+                            return SessionEnd::Closed(format!("send setconfig: {e}"));
+                        }
+                        continue;
+                    }
                 };
                 let reqid = uuid::Uuid::new_v4().to_string();
                 if clicked {
@@ -430,6 +454,7 @@ async fn session(
                     Frame::Show(n) => presenter.show(&n),
                     Frame::Retract(tag) => presenter.retract(&tag),
                     Frame::State(state) => crate::tray::notify_menu::set(state),
+                    Frame::StartAtLogin(v) => crate::start_at_login::observe(v),
                     Frame::Response { reqid, ack } => {
                         if pending_clicks.remove(&reqid) {
                             let plan = click_plan(&ack);
@@ -607,6 +632,12 @@ mod tests {
         }
         let cfg = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"config","data":{}}}}"#;
         assert_eq!(parse_frame(cfg), Frame::Other);
+        let with = |settings: &str| {
+            format!(r#"{{"eventtype":"rpc","data":{{"command":"eventrecv","data":{{"event":"config","data":{{"fullconfig":{{"settings":{settings}}}}}}}}}}}"#)
+        };
+        assert_eq!(parse_frame(&with(r#"{"app:startatlogin":true}"#)), Frame::StartAtLogin(Some(true)));
+        assert_eq!(parse_frame(&with(r#"{"app:startatlogin":false}"#)), Frame::StartAtLogin(Some(false)));
+        assert_eq!(parse_frame(&with(r#"{"term:fontsize":12}"#)), Frame::StartAtLogin(None));
         assert_eq!(parse_frame(r#"{"type":"ping","stime":1}"#), Frame::Other);
         assert_eq!(parse_frame("garbage"), Frame::Other);
     }

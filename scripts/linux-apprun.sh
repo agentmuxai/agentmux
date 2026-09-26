@@ -53,6 +53,12 @@ run_normally() {
     # libcef.so + EGL/GLESv2 sit in usr/bin alongside agentmux-cef. Binary
     # is built without RPATH so we set LD_LIBRARY_PATH explicitly.
     export LD_LIBRARY_PATH="$this_dir/usr/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    # What a start-at-login entry should run: the AppImage file itself, not
+    # this extract-cache dir (pruned on update). The launcher reads this once
+    # and removes it from its env (SPEC_START_WITH_OS_2026_09_25.md §3.1).
+    if [ -n "$APPIMAGE" ]; then
+        export AGENTMUX_STABLE_EXE="$APPIMAGE"
+    fi
     exec "$this_dir/usr/bin/agentmux-launcher" "$@"
 }
 

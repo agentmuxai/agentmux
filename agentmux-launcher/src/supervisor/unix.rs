@@ -362,8 +362,10 @@ pub(crate) async fn run_unix(
     };
 
     // OS notification presenter (Linux: freedesktop notifications over D-Bus).
-    // macOS has no backend yet (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §6.2).
-    #[cfg(target_os = "linux")]
+    // macOS has no toast backend yet (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24
+    // §6.2) and gets the no-op presenter, but still needs the srv session: it
+    // carries `app:startatlogin` to the menu-bar item and the LaunchAgent
+    // (SPEC_START_WITH_OS_2026_09_25 §3.9).
     crate::notify::start(&srv_result.ws_endpoint, &srv_result.auth_key, paths.data_dir.clone(), dir_hash.clone(), state.clone());
 
     // CRITICAL (same rationale as run_windows): take srv's stdin out of

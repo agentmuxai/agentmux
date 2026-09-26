@@ -89,13 +89,16 @@ pub enum TrayAction {
     /// "Quit AgentMux" — a genuine, user-intended full shutdown, distinct from
     /// closing the last window while background-service mode is on.
     Quit,
+    /// The "Start at login" check item: flips `app:startatlogin`
+    /// (`crate::start_at_login`). Handled in the launcher, not the host.
+    ToggleStartAtLogin,
 }
 
 impl TrayAction {
-    /// The host IPC command this action forwards. Kept next to the enum so
-    /// every backend maps the same way.
-    pub fn host_cmd(self) -> &'static str {
-        match self {
+    /// The host IPC command this action forwards, if it goes to the host at
+    /// all. Kept next to the enum so every backend maps the same way.
+    pub fn host_cmd(self) -> Option<&'static str> {
+        Some(match self {
             // Exactly the path a second launch / the macOS reopen delegate
             // uses — see design doc §7.5.1.
             TrayAction::OpenWindow => "open_new_window",
@@ -104,7 +107,8 @@ impl TrayAction {
             // launcher instead would leak srv rows and resurrect ghost windows
             // on next launch.
             TrayAction::Quit => "quit_app",
-        }
+            TrayAction::ToggleStartAtLogin => return None,
+        })
     }
 }
 
@@ -200,7 +204,10 @@ pub fn spawn_action_loop(
         .name("agentmux-tray-actions".into())
         .spawn(move || {
             while let Ok(action) = rx.recv() {
-                forward_tray_cmd(&data_dir, &dir_hash, action.host_cmd());
+                match action.host_cmd() {
+                    Some(cmd) => forward_tray_cmd(&data_dir, &dir_hash, cmd),
+                    None => crate::start_at_login::toggle(),
+                }
             }
             crate::log("tray: action loop ended");
         })
@@ -214,19 +221,33 @@ pub fn spawn_action_loop(
 pub struct MenuItem {
     pub label: String,
     pub action: TrayAction,
+    /// `Some` for a check item.
+    pub check: Option<Check>,
+}
+
+/// A check item's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Check {
+    pub checked: bool,
+    /// False until the value is known; clicking an unknown state would guess.
+    pub enabled: bool,
 }
 
 /// The tray menu, as data.
 ///
 /// Deliberately tiny. The spec's §2 rejects a native OS menu as the *panel*
 /// ("too limited for agent chat" — that is Workstream 3, a real CEF window),
-/// so this menu is only a launcher: open a window, or quit. Anything richer
-/// belongs in the panel, not here.
+/// so this menu is only a launcher: open a window, start at login, or quit.
+/// Anything richer belongs in the panel, not here.
 ///
 /// `running` drives the first item's label so the icon doubles as an honest
 /// status readout, which Workstream 4 requires of it ("the tray icon itself
 /// must be a reliable 'is it actually running' indicator").
-pub fn menu_model(running: bool) -> Vec<MenuItem> {
+///
+/// `start_at_login` is `app:startatlogin` as srv last reported it (`None`
+/// until known), shown as a check item. The Settings toggle writes the same
+/// setting, so the two always agree (`SPEC_START_WITH_OS_2026_09_25.md` §3.9).
+pub fn menu_model(running: bool, start_at_login: Option<bool>) -> Vec<MenuItem> {
     vec![
         MenuItem {
             // "New Window" rather than "Open AgentMux": the icon's presence
@@ -240,10 +261,20 @@ pub fn menu_model(running: bool) -> Vec<MenuItem> {
                 "Start AgentMux".to_string()
             },
             action: TrayAction::OpenWindow,
+            check: None,
+        },
+        MenuItem {
+            label: "Start at login".to_string(),
+            action: TrayAction::ToggleStartAtLogin,
+            check: Some(Check {
+                checked: start_at_login.unwrap_or(false),
+                enabled: start_at_login.is_some(),
+            }),
         },
         MenuItem {
             label: "Quit AgentMux".to_string(),
             action: TrayAction::Quit,
+            check: None,
         },
     ]
 }
@@ -342,22 +373,34 @@ mod tray_model_tests {
     }
 
     #[test]
-    fn menu_offers_new_window_and_quit_in_that_order() {
-        // Two items, deliberately. The panel entry was removed: `open_panel`
-        // still exists as a host IPC command (issue #2977 WS3, PR #3002), it
-        // is simply not reachable from the tray for now.
-        let m = menu_model(true);
-        assert_eq!(m.len(), 2, "menu is deliberately minimal");
+    fn menu_offers_new_window_start_at_login_and_quit_in_that_order() {
+        // The panel entry was removed: `open_panel` still exists as a host IPC
+        // command (issue #2977 WS3, PR #3002), it is simply not reachable from
+        // the tray for now. Start at login is the one setting here, because it
+        // is about the tray's own process (SPEC_START_WITH_OS §3.9).
+        let m = menu_model(true, Some(false));
+        assert_eq!(m.len(), 3, "menu is deliberately minimal");
         assert_eq!(m[0].action, TrayAction::OpenWindow);
-        assert_eq!(m[1].action, TrayAction::Quit);
+        assert_eq!(m[1].action, TrayAction::ToggleStartAtLogin);
+        assert_eq!(m[2].action, TrayAction::Quit);
+    }
+
+    #[test]
+    fn start_at_login_is_a_check_item_that_mirrors_the_setting() {
+        let item = |v| menu_model(true, v).into_iter().find(|i| i.action == TrayAction::ToggleStartAtLogin).unwrap();
+        assert_eq!(item(Some(true)).check, Some(Check { checked: true, enabled: true }));
+        assert_eq!(item(Some(false)).check, Some(Check { checked: false, enabled: true }));
+        // Not reported by srv yet: shown unchecked and disabled, never guessed.
+        assert_eq!(item(None).check, Some(Check { checked: false, enabled: false }));
+        assert!(menu_model(true, None).iter().filter(|i| i.action != TrayAction::ToggleStartAtLogin).all(|i| i.check.is_none()));
     }
 
     #[test]
     fn menu_and_tooltip_report_running_state_honestly() {
         // WS4: the icon must be a reliable "is it actually running"
         // indicator, so both surfaces have to change with the state.
-        assert_eq!(menu_model(true)[0].label, "New Window");
-        assert_eq!(menu_model(false)[0].label, "Start AgentMux");
+        assert_eq!(menu_model(true, Some(false))[0].label, "New Window");
+        assert_eq!(menu_model(false, Some(false))[0].label, "Start AgentMux");
         assert!(tooltip(true).contains("running in the background"));
         assert!(tooltip(false).contains("not running"));
     }
@@ -367,8 +410,9 @@ mod tray_model_tests {
         // Both are pre-existing host IPC verbs: `open_new_window` is the
         // second-launch / reopen path, `quit_app` the graceful drain. The
         // tray must not grow a third way to do either.
-        assert_eq!(TrayAction::OpenWindow.host_cmd(), "open_new_window");
-        assert_eq!(TrayAction::Quit.host_cmd(), "quit_app");
+        assert_eq!(TrayAction::OpenWindow.host_cmd(), Some("open_new_window"));
+        assert_eq!(TrayAction::Quit.host_cmd(), Some("quit_app"));
+        assert_eq!(TrayAction::ToggleStartAtLogin.host_cmd(), None, "handled in the launcher");
     }
 
     #[test]
@@ -378,7 +422,7 @@ mod tray_model_tests {
         // that `running` reads false.
         for running in [true, false] {
             assert!(
-                menu_model(running).iter().any(|i| i.action == TrayAction::Quit),
+                menu_model(running, None).iter().any(|i| i.action == TrayAction::Quit),
                 "quit missing when running={}",
                 running
             );
