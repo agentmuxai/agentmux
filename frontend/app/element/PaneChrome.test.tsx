@@ -159,13 +159,14 @@ vi.mock("@/layout/lib/layoutNode", () => ({
 
 import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
-import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import type { PaneTabDescriptor } from "./pane-tab-model";
 
 // A test view type whose manifest carries only a pane-tab descriptor.
 const unregisterTestTabs: (() => void)[] = [];
 function registerPaneTabDescriptor(view: string, tab: PaneTabDescriptor): void {
-    unregisterTestTabs.push(registerPaneTab(legacyAdapter(view, class {} as any, { tab })));
+    unregisterTestTabs.push(registerPaneTab(stubPaneTab(view, { tab })));
 }
 afterEach(() => {
     while (unregisterTestTabs.length) unregisterTestTabs.pop()!();
@@ -472,7 +473,7 @@ describe("renderPaneChromeShell — header tail color", () => {
         // Agent's uncolored header keeps the theme surface — its manifest's
         // `header: "surface"` capability (Pane Tab contract Phase 5).
         unregisterTestTabs.push(
-            registerPaneTab(legacyAdapter("agent", class {} as any, { capabilities: { header: "surface" } }))
+            registerPaneTab(stubPaneTab("agent", { capabilities: { header: "surface" } }))
         );
         setObjectValue("block:b1", { meta: { view: "agent" } });
         setObjectValue("block:b2", { meta: { view: "term" } });
@@ -611,7 +612,7 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
     /** Registers a view type whose manifest contributes `model`, and makes b1
      *  (the active tab) that view type, keeping any meta a test already set. */
     function renderWithModel(model: any, stack = ["b1", "b2"], nodeOverrides: Record<string, any> = {}) {
-        unregisterTestTabs.push(registerPaneTab(legacyAdapter("test-chrome", class {} as any, { chrome: () => model })));
+        unregisterTestTabs.push(registerPaneTab(stubPaneTab("test-chrome", { chrome: () => model })));
         setObjectValue("block:b1", { meta: { ...(signalFor("block:b1")[0]()?.meta ?? {}), view: "test-chrome" } });
         mockLayoutModel = fakeLayoutModel(stack);
         const nodeModel = fakeNodeModel(nodeOverrides);
@@ -693,9 +694,9 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
     // it used to be the pane's FIRST tab's, forever.
     it("reads the chrome model of the active tab's view type, and keeps the content's DOM node", () => {
         unregisterTestTabs.push(
-            registerPaneTab(legacyAdapter("plain-view", class {} as any)),
+            registerPaneTab(stubPaneTab("plain-view")),
             registerPaneTab(
-                legacyAdapter("decorated-view", class {} as any, {
+                stubPaneTab("decorated-view", {
                     chrome: () => ({ rootClass: "decorated", bodyClass: "decorated-body" }),
                 })
             )
@@ -724,8 +725,8 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
     it("builds a view type's chrome model once per pane, however often the tabs switch", () => {
         const build = vi.fn(() => ({ rootClass: "x" }));
         unregisterTestTabs.push(
-            registerPaneTab(legacyAdapter("once-view", class {} as any, { chrome: build })),
-            registerPaneTab(legacyAdapter("other-view", class {} as any))
+            registerPaneTab(stubPaneTab("once-view", { chrome: build })),
+            registerPaneTab(stubPaneTab("other-view"))
         );
         setObjectValue("block:b1", { meta: { view: "once-view" } });
         setObjectValue("block:b2", { meta: { view: "other-view" } });

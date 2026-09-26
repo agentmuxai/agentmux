@@ -41,7 +41,6 @@ describe("sysinfoPaneTab", () => {
             const m = sysinfoPaneTab(view);
             expect(m.view).toBe(view);
             expect(m.create).toBeTypeOf("function");
-            expect(m.viewModelClass).toBeUndefined();
             expect(m.capabilities?.connection).toBe(true);
             expect(m.label).toBe("Sysinfo");
             expect(m.icon).toBe("chart-line");

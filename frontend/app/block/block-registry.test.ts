@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { getBlockViewClass } from "./block-registry";
+import "./block-registry";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "./pane-tab-registry";
 
@@ -43,11 +43,9 @@ const NEW_LABELS: Record<string, string> = {
 };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
-    // Every built-in is native (create(ctx), Phase 2c): no ViewModel class.
     it("registers an instance factory for every view the old map had", () => {
         for (const view of VIEWS) {
             expect(getPaneTab(view)!.create, view).toBeTypeOf("function");
-            expect(getBlockViewClass(view), view).toBeUndefined();
         }
         expect(getPaneTab("cpuplot")?.capabilities).toEqual(getPaneTab("sysinfo")?.capabilities);
     });

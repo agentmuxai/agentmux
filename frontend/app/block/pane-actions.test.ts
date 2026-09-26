@@ -27,11 +27,12 @@ vi.mock("@/app/window/action-widgets-config", () => ({
 vi.mock("@/util/clipboard", () => ({ readText: vi.fn(), writeText: vi.fn() }));
 
 import { buildPaneContextMenu, type PaneMenuSection } from "./pane-actions";
-import { legacyAdapter, registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab } from "./pane-tab-registry";
+import { stubPaneTab } from "./pane-tab-test-utils";
 
 // Paste is offered for a view that declares `acceptsInput` (Pane Tab contract
 // Phase 5) — as block-registry.ts declares it for the terminal.
-registerPaneTab(legacyAdapter("term", class {} as any, { capabilities: { acceptsInput: true } }));
+registerPaneTab(stubPaneTab("term", { capabilities: { acceptsInput: true } }));
 
 const termBlock = { oid: "b1", meta: { view: "term" } } as unknown as Block;
 const agentBlock = { oid: "b2", meta: { view: "agent" } } as unknown as Block;
