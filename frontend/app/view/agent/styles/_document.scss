@@ -148,13 +148,7 @@
     // The per-row hover strip (timestamp + expand toggle) was removed
     // (SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15). Expand/collapse now lives on
     // each surface's own header (tool/shell/message) + the row's keyboard
-    // handler; sections get a clickable header below.
-
-    // Section headers are collapsible — clicking the header toggles the
-    // section (the affordance the hover strip used to carry).
-    .agent-section--toggle {
-        cursor: var(--cursor-interactive, pointer);
-    }
+    // handler.
 
     // === Virtualization (Phase 2 redesign) ===
     // (overflow-anchor lives on .agent-document above — the actual

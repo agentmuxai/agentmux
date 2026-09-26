@@ -38,7 +38,6 @@ import type {
     DocumentState,
     HistoryLinkNode,
     MemoryReinjectionNode,
-    SectionNode,
     SessionOutcomeNode,
     ToolNode,
 } from "../types";
@@ -383,7 +382,7 @@ describe("DocumentRow — memory_reinjection node", () => {
 /**
  * DocumentRow — peek tooltip for the inline node kinds
  * (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25). These six kinds
- * (section/agent_error/context_compacted/compaction_started/day_divider/
+ * (agent_error/context_compacted/compaction_started/day_divider/
  * session_outcome) render inline in DocumentNodeBody rather than through
  * their own dedicated component, and previously had NO peek at all.
  * history_link is the one deliberate exception — no timestamp/content field
@@ -397,25 +396,6 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
     };
 
     afterEach(() => vi.useRealTimers());
-
-    it("section: shows time + estimate(title) on hover", () => {
-        vi.useFakeTimers();
-        const node: SectionNode = {
-            type: "section",
-            id: "sec-1",
-            level: 1,
-            title: "Deploy pipeline",
-            collapsible: true,
-            collapsed: false,
-            timestamp: Date.now() - 65_000,
-        };
-        const { container } = renderRow(node);
-        hover(container, ".agent-section");
-        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
-        expect(metaLines.length).toBe(2);
-        expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
-        expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
-    });
 
     it("agent_error: shows only the estimate line — no timestamp field exists on this node", () => {
         vi.useFakeTimers();

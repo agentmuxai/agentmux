@@ -7,7 +7,6 @@ import type {
     AgentMessageNode,
     DocumentNode,
     MarkdownNode,
-    SectionNode,
     ToolNode,
     UserMessageNode,
 } from "../types";
@@ -31,9 +30,6 @@ const agentMsg = (id: string): AgentMessageNode => ({
 });
 const userMsg = (id: string, isStartup = false): UserMessageNode => ({
     type: "user_message", id, message: "hi", timestamp: 0, isStartup,
-});
-const section = (id: string, collapsed: boolean): SectionNode => ({
-    type: "section", id, level: 1, title: "t", collapsible: true, collapsed,
 });
 const markdown = (id: string, canceled = false): MarkdownNode => ({
     type: "markdown", id, content: "c", metadata: canceled ? { canceled: true } : undefined,
@@ -79,13 +75,6 @@ describe("currentExpansion — parity with the per-kind expansion rules", () => 
             expect(currentExpansion(userMsg("u", true), inputs())).toEqual({ open: false });
             expect(currentExpansion(userMsg("u", true), inputs(["u"]))).toEqual({ open: false }); // collapsedNodes irrelevant
             expect(currentExpansion(userMsg("u", true), inputs([], ["u"]))).toEqual({ open: true, via: "pin" });
-        });
-    });
-
-    describe("section", () => {
-        it("tracks the node.collapsed flag", () => {
-            expect(currentExpansion(section("s", false), inputs())).toEqual({ open: true, via: "default" });
-            expect(currentExpansion(section("s", true), inputs())).toEqual({ open: false });
         });
     });
 

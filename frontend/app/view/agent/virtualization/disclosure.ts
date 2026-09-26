@@ -92,9 +92,6 @@ export function rowDisclosure(node: DocumentNode, f: RowFlags): Disclosure {
             // Canceled thinking is collapsed by default; the user can open it.
             return node.metadata?.canceled ? pinnable(f) : FIXED_OPEN;
 
-        case "section":
-            return node.collapsed ? CLOSED(null) : FIXED_OPEN;
-
         case "agent_error":
         case "context_compacted":
         case "compaction_started":
