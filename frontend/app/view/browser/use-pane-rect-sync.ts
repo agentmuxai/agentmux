@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
@@ -146,10 +146,7 @@ export function usePaneRectSync(params: {
             return;
         }
         lastSentRect = rect;
-        invokeCommand("browser_pane_resize", {
-            block_id: model.blockId,
-            ...rect,
-        }).catch(() => {});
+        getApi().browserPanes.resize(model.blockId, rect).catch(() => {});
         // Keep the overlay-clip short-circuit registry in sync with the
         // host's actual HWND rect. Cheap (two property reads + a Map write).
         registerPaneRect(model.blockId, paneRectCss());
@@ -193,16 +190,11 @@ export function usePaneRectSync(params: {
         nativePaneOwners.set(model.blockId, token);
         try {
             diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
-            await invokeCommand("browser_pane_create", {
-                block_id: model.blockId,
-                url: url || "about:blank",
-                window_label: windowLabel,
-                ...paneRect(),
-            });
+            await getApi().browserPanes.create(model.blockId, url || "about:blank", windowLabel, paneRect());
             if (disposed) {
                 if (releaseNativePane(model.blockId, token)) {
                     diag(`createPane finished after unmount — closing the orphan`);
-                    invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+                    getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
                 } else {
                     diag(`createPane finished after unmount — a newer mount owns the page, leaving it open`);
                 }
@@ -276,7 +268,7 @@ export function usePaneRectSync(params: {
         // that haven't reached the backend yet get no-op'd there instead of
         // racing a mid-destruction HWND. See SPEC_BROWSER_PANE_LIFECYCLE.md §5.
         if (paneCreated() && releaseNativePane(model.blockId, ownerToken)) {
-            invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+            getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
         } else if (paneCreated()) {
             diag(`view-unmount — a newer mount owns the page, leaving it open`);
         }

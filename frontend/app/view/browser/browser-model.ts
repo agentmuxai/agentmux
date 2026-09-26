@@ -6,7 +6,7 @@
 // native CefBrowserView for sites that block iframes.
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     type BrowserPaneCommand,
@@ -368,7 +368,7 @@ export class BrowserViewModel {
         // mismatched block_id is observable in muxlog — silent drops
         // were the main blind spot when chasing the favicon/title
         // regression on 2026-05-18.
-        void listenEvent<{ block_id: string; title: string }>(
+        void getApi().listen<{ block_id: string; title: string }>(
             "browser-pane-title-change",
             (payload) => {
                 const matched = payload.block_id === this.blockId;
@@ -387,7 +387,7 @@ export class BrowserViewModel {
         });
 
         // Subscribe to real favicon URLs fired by CEF's on_favicon_urlchange.
-        void listenEvent<{ block_id: string; urls: string[] }>(
+        void getApi().listen<{ block_id: string; urls: string[] }>(
             "browser-pane-favicon-urls",
             (payload) => {
                 const matched = payload.block_id === this.blockId;
@@ -413,7 +413,7 @@ export class BrowserViewModel {
         // the user clicked any link inside the pane. See
         // docs/specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md (unrelated but
         // adjacent) and the nav-state wiring added alongside this PR.
-        void listenEvent<{
+        void getApi().listen<{
             block_id: string;
             url: string;
             can_go_back?: boolean;
@@ -503,7 +503,7 @@ export class BrowserViewModel {
         // handler (see `pane/hwnd.rs`) using a HWND→block_id map registered
         // at pane creation. We drive refocusNode so the layout marks this
         // block as focused (blue border + keyboard shortcut target).
-        void listenEvent<{ block_id: string }>("browser-pane-clicked", (payload) => {
+        void getApi().listen<{ block_id: string }>("browser-pane-clicked", (payload) => {
             if (this.closed) {
                 this.diag(`post-close-event-dropped name=browser-pane-clicked`);
                 return;
@@ -598,7 +598,7 @@ export class BrowserViewModel {
         // enabled/disabled state came from `can_go_back` in the nav-state
         // event, so if we got here the browser has somewhere to go.
         this._dispatch({ type: "LoadStarted" }, "goBack");
-        invokeCommand("browser_pane_go_back", { block_id: this.blockId }).catch(() => {});
+        getApi().browserPanes.goBack(this.blockId).catch(() => {});
     }
 
     goForward(): void {
@@ -606,7 +606,7 @@ export class BrowserViewModel {
         if (this.closed) return;
         this.cancelPendingLoadingHide();
         this._dispatch({ type: "LoadStarted" }, "goForward");
-        invokeCommand("browser_pane_go_forward", { block_id: this.blockId }).catch(() => {});
+        getApi().browserPanes.goForward(this.blockId).catch(() => {});
     }
 
     reload(): void {
@@ -657,7 +657,7 @@ export class BrowserViewModel {
                 // reload() either -- it invokes the backend command
                 // directly, which this now matches.
                 click: () => {
-                    invokeCommand("browser_pane_reload", { block_id: this.blockId }).catch(() => {});
+                    getApi().browserPanes.reload(this.blockId).catch(() => {});
                 },
             },
         ];
@@ -671,19 +671,19 @@ export class BrowserViewModel {
             if (browserCtx.isEditable && browserCtx.selectionText) {
                 editItems.push({
                     label: "Cut",
-                    click: () => { invokeCommand("browser_pane_cut", { block_id: this.blockId }).catch(() => {}); },
+                    click: () => { getApi().browserPanes.cut(this.blockId).catch(() => {}); },
                 });
             }
             if (browserCtx.selectionText) {
                 editItems.push({
                     label: "Copy",
-                    click: () => { invokeCommand("browser_pane_copy", { block_id: this.blockId }).catch(() => {}); },
+                    click: () => { getApi().browserPanes.copy(this.blockId).catch(() => {}); },
                 });
             }
             if (browserCtx.isEditable) {
                 editItems.push({
                     label: "Paste",
-                    click: () => { invokeCommand("browser_pane_paste", { block_id: this.blockId }).catch(() => {}); },
+                    click: () => { getApi().browserPanes.paste(this.blockId).catch(() => {}); },
                 });
             }
             items.push({ type: "separator" }, ...editItems);
@@ -701,22 +701,20 @@ export class BrowserViewModel {
             { type: "separator" },
             {
                 label: "Print",
-                click: () => { invokeCommand("browser_pane_print", { block_id: this.blockId }).catch(() => {}); },
+                click: () => { getApi().browserPanes.print(this.blockId).catch(() => {}); },
             },
             {
                 label: "View Page Source",
                 click: () => {
-                    invokeCommand("browser_pane_view_source", { block_id: this.blockId }).catch(() => {});
+                    getApi().browserPanes.viewSource(this.blockId).catch(() => {});
                 },
             },
             {
                 label: "Inspect Element",
                 click: () => {
-                    invokeCommand("browser_pane_inspect_element", {
-                        block_id: this.blockId,
-                        x: browserCtx?.x ?? 0,
-                        y: browserCtx?.y ?? 0,
-                    }).catch(() => {});
+                    getApi()
+                        .browserPanes.inspectElement(this.blockId, browserCtx?.x ?? 0, browserCtx?.y ?? 0)
+                        .catch(() => {});
                 },
             },
         );
@@ -740,7 +738,7 @@ export class BrowserViewModel {
         // own main_window_focus IPC comes from block.tsx's handleChildFocus.
         // Here: the user wants the embedded page -- tell the host to move
         // Windows-level keyboard focus to the pane's HWND.
-        invokeCommand("browser_pane_focus", { block_id: this.blockId }).catch(() => {});
+        getApi().browserPanes.focus(this.blockId).catch(() => {});
         return true;
     }
 

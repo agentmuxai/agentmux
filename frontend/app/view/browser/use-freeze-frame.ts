@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { invokeBrowserApi } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 
@@ -71,11 +71,8 @@ export function useFreezeFrame(params: {
         // payload much smaller. Capture latency directly gates how long
         // flushClip defers the airspace hide, which in turn is how long the
         // menu's over-pane portion stays covered by the live pane.
-        const p = invokeBrowserApi<{ png_base64: string }>("screenshot", {
-            block_id: model.blockId,
-            format: "jpeg",
-            quality: 80,
-        })
+        const p = getApi()
+            .browserPanes.screenshot(model.blockId, { format: "jpeg", quality: 80 })
             .then(
                 (data) =>
                     new Promise<void>((resolve) => {

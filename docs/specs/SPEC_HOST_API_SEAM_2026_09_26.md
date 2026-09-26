@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** active — Slice 1 (capabilities, test host, boundary ratchet) ships in PR #3878 and slice 2 (Settings) in PR #3879. Slices 3–5 remain (§5).
+**Status:** active — Slice 1 (capabilities, test host, boundary ratchet) ships in PR #3878, slice 2 (Settings) in PR #3879, slice 3 (browser panes) in PR #3882. Slices 4–5 remain (§5).
 **Author:** Maricon
 
 ---
@@ -89,7 +89,7 @@ Moving the CEF implementation into `frontend/app/host/cef/`, or splitting the fr
 |---|---|---|
 | **1** | `HostCaps` + `getHostCaps()`, test host, boundary ratchet, this spec | 47 |
 | **2** | Settings: `getAutostartStatus()` and `openSettingsFileInEditor()` on `AppApi` (also used by the command palette); the System tray rows guarded by `tray` and `autostart` | 44 |
-| 3 | Browser panes: the 27 `browser_pane_*` calls behind a browser-pane group on `AppApi`; pane type guarded by `nativeBrowserPane` | ↓ |
+| **3** | Browser panes: `AppApi.browserPanes` (one method per `browser_pane_*` / `pane_media_*` command, plus the screenshot browser API) and `reclaimWindowFocus()`. Events through `AppApi.listen`, now generic. The CEF implementation lives in `app/host/cef-host-commands.ts` (seam). A host without `nativeBrowserPane` shows a notice in a browser pane | 32 |
 | 4 | Window drag, position and focus, tear-off, floating panes (`nativeWindowChrome`, `tearOff`, `multiWindow`) | ↓ |
 | 5 | The remainder: logging, clipboard, drag-and-drop, approvals, startup (`bootstrap.ts`, `app-init.ts`) | 0 |
 

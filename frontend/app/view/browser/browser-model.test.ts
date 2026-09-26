@@ -58,6 +58,9 @@ import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { setFullConfigAtom } from "@/store/config-signals";
 import { BrowserViewModel } from "./browser-model";
+import { installCefWireHost } from "../../../test/cef-wire-host";
+
+installCefWireHost();
 
 /** Retrieves the handler the model registered for a given event name via
  *  `listenEvent(name, handler)`, so tests can invoke it directly with a

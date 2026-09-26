@@ -121,6 +121,50 @@ declare global {
         nativeWindowChrome: boolean;
     };
 
+    /** A rectangle in CSS pixels. */
+    type HostRect = { x: number; y: number; width: number; height: number };
+
+    /**
+     * Browser panes: native browsers the host draws over a placeholder in the
+     * page. Only meaningful when `HostCaps.nativeBrowserPane` is true.
+     * Events (`browser-pane-*`, `pane-media-*`) arrive through `AppApi.listen`.
+     */
+    type BrowserPaneHostApi = {
+        create(blockId: string, url: string, windowLabel: string, rect: HostRect): Promise<void>;
+        resize(blockId: string, rect: HostRect): Promise<void>;
+        close(blockId: string, windowLabel: string): Promise<void>;
+        navigate(blockId: string, url: string): Promise<void>;
+        goBack(blockId: string): Promise<void>;
+        goForward(blockId: string): Promise<void>;
+        reload(blockId: string): Promise<void>;
+        focus(blockId: string): Promise<void>;
+        cut(blockId: string): Promise<void>;
+        copy(blockId: string): Promise<void>;
+        paste(blockId: string): Promise<void>;
+        print(blockId: string): Promise<void>;
+        viewSource(blockId: string): Promise<void>;
+        inspectElement(blockId: string, x: number, y: number): Promise<void>;
+        /** A still of the page, e.g. to show while the native pane is hidden. */
+        screenshot(blockId: string, opts: { format: "jpeg" | "png"; quality?: number }): Promise<{ png_base64: string }>;
+        /** Answer an HTTP auth challenge (`browser-pane-auth-request`). */
+        authSubmit(requestId: string, username: string, password: string): Promise<void>;
+        authCancel(requestId: string): Promise<void>;
+        authSave(creds: {
+            blockId: string;
+            origin: string;
+            realm: string;
+            isProxy: boolean;
+            username: string;
+            password: string;
+        }): Promise<void>;
+        /** Regions of this window where app UI overlaps native panes, so the host clips them. */
+        setOverlayClip(rects: { x: number; y: number; w: number; h: number }[], windowLabel: string): Promise<void>;
+        /** Answer a camera/microphone request (`pane-media-permission-request`). */
+        respondMediaPermission(requestId: number, allow: boolean): Promise<void>;
+        /** Stop a pane's camera/microphone capture. */
+        revokeMedia(blockId: string): Promise<void>;
+    };
+
     /** Whether the host can manage an OS login entry, and whether one is registered. */
     type AutostartStatus = { available: boolean; enabled: boolean };
 
@@ -131,6 +175,10 @@ declare global {
         getAutostartStatus(): Promise<AutostartStatus>;
         /** Create the settings file if it is missing, and open it for editing. */
         openSettingsFileInEditor(): Promise<void>;
+        /** Browser panes (see `BrowserPaneHostApi`). */
+        browserPanes: BrowserPaneHostApi;
+        /** Take OS keyboard focus back from a native browser pane to this window's page. */
+        reclaimWindowFocus(windowLabel: string): Promise<void>;
         getAuthKey(): string;
         getIsDev(): boolean;
         getCursorPoint: () => { x: number; y: number };
@@ -271,7 +319,7 @@ declare global {
             loginArgs: string[],
             authEnv: Record<string, string>
         ) => Promise<{ opened: boolean }>;
-        listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
+        listen: <T = any>(event: string, callback: (payload: T) => void) => Promise<() => void>;
         startCrossDrag: (
             dragType: "pane" | "tab",
             sourceWindow: string,

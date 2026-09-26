@@ -15,7 +15,7 @@
 //
 // See `BROWSER_PANE_Z_ORDER_FOCUS_REPORT.md` Issue 1 for the full diagnosis.
 
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { anyPaneIntersects, paneCount } from "@/app/platform/pane-rect-registry";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 
@@ -201,9 +201,7 @@ async function flushClip(): Promise<void> {
             new Promise((resolve) => setTimeout(resolve, FREEZE_WAIT_CAP_MS)),
         ]);
     }
-    invokeCommand("browser_panes_set_overlay_clip", { rects: rectsToSend, window_label }).catch(
-        () => {},
-    );
+    getApi().browserPanes.setOverlayClip(rectsToSend, window_label).catch(() => {});
 }
 
 /**
