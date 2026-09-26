@@ -560,6 +560,23 @@ fn panes_missing_from_the_map_are_skipped_and_a_tab_with_none_left_is_noted() {
 }
 
 #[test]
+fn a_dangling_or_empty_pane_is_dropped_with_a_note_naming_it() {
+    let home = tempfile::tempdir().unwrap();
+    let doc = doc_with_tab(
+        json!({ "p1": { "views": [{ "type": "sysinfo" }] }, "hollow": { "views": [] } }),
+        json!({ "split": "row", "children": [
+            { "ratio": 0.4, "node": { "pane": "p1" } },
+            { "ratio": 0.3, "node": { "pane": "ghost" } },
+            { "ratio": 0.3, "node": { "pane": "hollow" } }
+        ] }),
+    );
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    assert_eq!(plan.tabs[0].blocks.len(), 1);
+    assert!(plan.notes.iter().any(|n| n.contains("“ghost”")), "{:?}", plan.notes);
+    assert!(plan.notes.iter().any(|n| n.contains("“hollow”")), "{:?}", plan.notes);
+}
+
+#[test]
 fn panes_past_the_per_tab_limit_are_dropped_with_one_note() {
     let home = tempfile::tempdir().unwrap();
     let count = MAX_PANES_PER_TAB + 2;

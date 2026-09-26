@@ -755,15 +755,20 @@ impl PlanBuilder<'_> {
                     self.note_once(Truncated::Panes);
                     return None;
                 }
-                let doc_pane = self.doc_tab.panes.get(pane)?;
+                let tab = &self.doc_tab.name;
+                let Some(doc_pane) = self.doc_tab.panes.get(pane) else {
+                    self.notes.push(format!("Tab “{tab}” refers to a pane “{pane}” the file doesn't define; it's left out."));
+                    return None;
+                };
+                if doc_pane.views.is_empty() {
+                    self.notes.push(format!("Pane “{pane}” in tab “{tab}” has nothing to show; it's left out."));
+                    return None;
+                }
                 let mut placeholders = Vec::new();
                 for view in &doc_pane.views {
                     let meta = self.view_meta(view);
                     placeholders.push(crate::server::service::session_restore::placeholder(self.blocks.len()));
                     self.blocks.push(meta);
-                }
-                if placeholders.is_empty() {
-                    return None;
                 }
                 self.panes_used += 1;
                 let active = placeholders[doc_pane.active.min(placeholders.len() - 1)].clone();
