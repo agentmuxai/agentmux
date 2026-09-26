@@ -286,16 +286,6 @@ export function startsAtTop(node: Pick<ToolNode, "tool" | "toolName">): boolean 
     return nodeFact(node, "scroll") === "top";
 }
 
-/**
- * Resolve by the raw name, then by the coarse kind: a raw name the table
- * doesn't know (only the catch-all matches it) still gets its kind's fact.
- */
-function nodeFact<K extends Fact>(node: Pick<ToolNode, "tool" | "toolName">, key: K): NonNullable<ToolDescriptor[K]> {
-    const name = toolNameOf(node);
-    const own = resolveFact(TOOL_DESCRIPTORS.filter((d) => !isCatchAll(d)), name, key);
-    return (own ?? fact(node.tool, key)) as NonNullable<ToolDescriptor[K]>;
-}
-
 /** The header pill for a finished tool; the Agent/Task/Workflow dispatch pill
  *  stays in ToolBlock, which has the live dispatch match. */
 export function toolPill(node: ToolNode): Pill | null {
