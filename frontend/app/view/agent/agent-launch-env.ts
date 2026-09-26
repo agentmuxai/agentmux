@@ -17,51 +17,29 @@ import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 /**
- * Check if Node.js is available for a provider actually installed via
+ * Check that Node.js and npm are available for a provider installed via
  * `npm install -g <npmPackage>` (AgentInstallModal -> install.start ->
- * agentmux-srv's install_handlers.rs) — which today is every provider
- * except kimi (pip-based, `npmPackage: ""`).
+ * agentmux-srv's install_handlers.rs) — every provider except kimi
+ * (pip-based, `npmPackage: ""`).
  *
- * **The `claude` exemption below is a workaround for a real PATH mismatch,
- * not a claim Claude doesn't need Node.** This check's probe
- * (`getApi().checkNodejsAvailable()`) runs in the CEF host process's own
- * PATH. The actual npm install/spawn runs in the agentmux-srv sidecar,
- * whose PATH is separately reconstructed from the user's login shell
- * (`agentmux-cef/src/sidecar.rs`, `resolve_login_path`) specifically so it
- * can find Homebrew/nvm-installed Node on macOS — the host process does
- * NOT get that same enrichment. So this check can genuinely disagree with
- * reality on those setups: report "Node.js is not installed" when the
- * process that actually spawns npm can find it fine.
+ * Asks srv (`resolve.prereqs`), the process that actually runs npm, with the
+ * PATH it runs npm with (reconstructed from the user's login shell, so
+ * Homebrew/nvm installs on macOS are found). This used to probe the CEF
+ * host's own PATH (`checkNodejsAvailable`), which lacks that enrichment and
+ * could report "Node.js is not installed" when npm would work; Claude was
+ * exempted to dodge that false negative (Codex P1, PR #2947). Probing where
+ * npm runs removes the mismatch, and with it the exemption.
  *
- * This function used to hardcode `providerId === "claude"` as a skip for a
- * DIFFERENT, wrong reason (the stale belief that Claude installs via its
- * own standalone script rather than npm — it doesn't; AgentInstallModal
- * always uses `npmPackage`). An earlier revision of this fix removed the
- * skip on that basis, which fixed the wrong reasoning but reintroduced
- * this PATH-mismatch bug for Claude specifically: a previously-exempt
- * provider could now hit a false-negative launch block on affected macOS
- * setups (Codex review finding, PR #2947). Every OTHER npm-based provider
- * was already exposed to this same pre-existing PATH-mismatch bug before
- * this change (never exempted) — extending the derivation to them isn't
- * new risk, just not-yet-fixed. Claude is kept exempt here, with an
- * accurate reason this time, until `checkNodejsAvailable()` itself is
- * fixed to probe the same enriched PATH the sidecar spawns with.
- *
- * The actual reported bug this whole change addresses — a fresh machine
- * with no Node.js at all crashing on first launch — is fixed independently
- * by `catalog.ts`'s `NODE_PREREQ`/`NPM_PREREQ`, which route through
- * `resolve.prereqs`, a backend (srv) check that already uses the correct,
- * enriched PATH. This function is a secondary, launch-time check (covers
- * e.g. Node being removed between install and launch); it was never the
- * primary fix.
+ * `catalog.ts`'s `NODE_PREREQ`/`NPM_PREREQ` gate installs through the same
+ * command; this is the launch-time check (e.g. Node removed after install).
  */
 export async function checkNodejsForProvider(provider: Pick<ProviderDefinition, "id" | "npmPackage">): Promise<string | null> {
-    if (provider.id === "claude") return null; // see note above — PATH-mismatch workaround, not "doesn't need Node"
     if (!provider.npmPackage) return null; // not npm-installed (e.g. kimi, via pip)
     try {
-        const status = await getApi().checkNodejsAvailable();
-        if (!status.available || !status.npm_available) {
-            const missing = !status.available ? "Node.js" : "npm";
+        const { results } = await RpcApi.ResolvePrereqsCommand(TabRpcClient, { tools: ["node", "npm"] });
+        const found = (tool: string) => results?.find((r) => r.tool === tool)?.found ?? false;
+        if (!found("node") || !found("npm")) {
+            const missing = !found("node") ? "Node.js" : "npm";
             return `${missing} is not installed. Install Node.js from https://nodejs.org/ (LTS recommended).`;
         }
         return null;
