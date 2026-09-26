@@ -80,6 +80,22 @@ pub(crate) fn holder_on_this_computer(desc: &str) -> bool {
 
 const THIS_COMPUTER: &str = "this computer";
 
+/// The channel of another instance on this computer that, per a recent
+/// relay answer, holds `agent` — what Take over needs to find it.
+pub(crate) fn held_on_this_computer_by(agent: &str) -> Option<String> {
+    let desc = held_elsewhere(agent)?;
+    if !holder_on_this_computer(&desc) {
+        return None;
+    }
+    desc.split(", ").find_map(|part| part.strip_prefix("channel ")).map(str::to_string)
+}
+
+/// Where the holder is when a recent relay answer put `agent` on another
+/// computer (a [`describe_holder`] description), else `None`.
+pub(crate) fn held_on_another_computer(agent: &str) -> Option<String> {
+    held_elsewhere(agent).filter(|desc| !desc.is_empty() && !holder_on_this_computer(desc))
+}
+
 /// Describe the relay's `held_by` for a refusal: "computer X, channel Y, vZ".
 pub(crate) fn describe_holder(held_by: &serde_json::Value) -> String {
     let field = |k: &str| held_by.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -236,6 +252,24 @@ mod tests {
         assert_eq!(describe_holder(&held_by), "this computer, channel local-main-x, v0.57.6");
         assert!(holder_on_this_computer(&describe_holder(&held_by)));
         assert!(!holder_on_this_computer("computer desk, channel stable, v0.58.0"));
+    }
+
+    // Take over needs the channel of a same-computer holder the relay
+    // reported, to find that instance and ask it to let go.
+    #[test]
+    fn a_same_computer_holder_gives_take_over_its_channel() {
+        let here = crate::backend::reactive::registry::local_host_label();
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        note_not_holder(&agent, &serde_json::json!({ "held_by": { "host": here, "channel": "local-main-x", "version": "0.57.6" } }));
+        assert_eq!(held_on_this_computer_by(&agent).as_deref(), Some("local-main-x"));
+        assert_eq!(held_on_another_computer(&agent), None);
+
+        let other = format!("agent-{}", uuid::Uuid::new_v4());
+        note_not_holder(&other, &serde_json::json!({ "held_by": { "host": "desk", "channel": "stable" } }));
+        assert_eq!(held_on_this_computer_by(&other), None);
+        assert_eq!(held_on_another_computer(&other).as_deref(), Some("computer desk, channel stable"));
+
+        assert_eq!(held_on_this_computer_by("never-seen"), None);
     }
 
     #[test]

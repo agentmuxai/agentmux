@@ -862,19 +862,8 @@ pub async fn locate_holder(store: Option<Arc<LeaseStore>>, uid: &str, own_boot_i
             .and_then(|r| r.ok())
             .flatten();
         if let Some(holder) = holder.filter(|h| !h.channel.is_empty()) {
-            let shared = crate::registry::resolve_shared_reactive_dir()?;
-            let channel = holder.channel.clone();
-            let entries = tokio::task::spawn_blocking(move || {
-                crate::backend::reactive::registry::list_all_shared(&shared)
-            })
-            .await
-            .ok()?;
-            if let Some(e) = entries.into_iter().find(|e| {
-                e.channel == channel
-                    && !e.local_url.is_empty()
-                    && crate::backend::reactive::registry::pid_alive(e.pid)
-            }) {
-                return Some(HolderEndpoint { channel: e.channel, local_url: e.local_url, auth_key: e.auth_key });
+            if let Some(endpoint) = endpoint_for_channel(&holder.channel).await {
+                return Some(endpoint);
             }
         }
     }
@@ -885,6 +874,21 @@ pub async fn locate_holder(store: Option<Arc<LeaseStore>>, uid: &str, own_boot_i
     })
 }
 
+/// The running instance on this computer in `channel`, from the host-global
+/// shared registry — how Take over reaches a holder it knows by channel
+/// (from the local lease file, or from the relay's holder record).
+pub async fn endpoint_for_channel(channel: &str) -> Option<HolderEndpoint> {
+    let shared = crate::registry::resolve_shared_reactive_dir()?;
+    let channel = channel.to_string();
+    let entries = tokio::task::spawn_blocking(move || crate::backend::reactive::registry::list_all_shared(&shared))
+        .await
+        .ok()?;
+    entries
+        .into_iter()
+        .find(|e| e.channel == channel && !e.local_url.is_empty() && crate::backend::reactive::registry::pid_alive(e.pid))
+        .map(|e| HolderEndpoint { channel: e.channel, local_url: e.local_url, auth_key: e.auth_key })
+}
+
 /// Ask the holder's srv to stop running `uid` so this instance can take it
 /// (`POST /agentmux/agent/release`). `Err` is user-facing.
 pub async fn request_release(holder: &HolderEndpoint, uid: &str, agent: &str) -> Result<(), String> {
@@ -893,6 +897,10 @@ pub async fn request_release(holder: &HolderEndpoint, uid: &str, agent: &str) ->
         .post(format!("{}/agentmux/agent/release", holder.local_url))
         .json(&serde_json::json!({
             "uid": uid,
+            // Lets the holder drop a relay subscription that outlived the
+            // agent's panes (it knows the agent by name there). Older holders
+            // ignore it.
+            "agent": agent,
             "requested_by_channel": me.channel,
             "requested_by_version": me.version,
         }));

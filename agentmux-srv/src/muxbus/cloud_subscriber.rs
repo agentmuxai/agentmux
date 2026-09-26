@@ -1276,6 +1276,24 @@ fn orphaned_subscriptions(registered: &[String], is_live: impl Fn(&str) -> bool)
     registered.iter().filter(|a| !is_live(a)).cloned().collect()
 }
 
+/// Drop `agent` from the relay subscription and release its WAN lease,
+/// awaiting the release (the `RemoveAgent` arm's is fire-and-forget) — for a
+/// Take over, whose requester claims the lease right after. `false` if it
+/// wasn't subscribed. `id_store` is where muxbus credentials live.
+pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> bool {
+    let Some(sub) = get_global_subscriber() else { return false };
+    let key = agent.to_lowercase();
+    // Out of the set first, so a lease tick can't renew it meanwhile.
+    if !sub.agents.lock().unwrap().remove(&key) {
+        return false;
+    }
+    let token = shared_token_now(id_store, "").await;
+    super::wan_lease::release(&super::relay::rest_base_url(), &key, &token, &reqwest::Client::new()).await;
+    // Unsubscribe the WebSocket; the arm's own release finds nothing left.
+    let _ = sub.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
+    true
+}
+
 /// [`fresh_shared_token`] against the broker and `mstore` (the store muxbus
 /// credentials live in — `CloudSubscriber::init_global`'s `id_store`).
 async fn shared_token_now(mstore: &Arc<Store>, connection_token: &str) -> String {

@@ -66,9 +66,31 @@ pub(super) async fn handle_agent_takeover(
     // The user is deliberately taking the agent (back) here.
     agent_admission::clear_handover_hold(&uid);
     let store = agent_admission::lease_store_for(state.mstore.shared_agent_registry());
-    let Some(holder) = agent_admission::locate_holder(store.clone(), &uid, &state.boot_id).await else {
-        // Nobody else runs it (any more): nothing to take over.
-        return (StatusCode::OK, Json(json!({ "ok": true, "released": false }))).into_response();
+    let holder = match agent_admission::locate_holder(store.clone(), &uid, &state.boot_id).await {
+        Some(holder) => holder,
+        // No local lease or running instance: the relay may still name a
+        // holder (its WAN lease outlives a closed pane on an older build).
+        None => match wan_takeover_target(&name) {
+            // Nobody else runs it (any more): nothing to take over.
+            WanTarget::NoHolder => {
+                return (StatusCode::OK, Json(json!({ "ok": true, "released": false }))).into_response();
+            }
+            WanTarget::OtherComputer(where_) => {
+                return (StatusCode::CONFLICT, Json(json!({ "error": other_computer_error(&name, &where_) })))
+                    .into_response();
+            }
+            WanTarget::ThisComputer(channel) => match agent_admission::endpoint_for_channel(&channel).await {
+                Some(holder) => holder,
+                None => {
+                    let agent = if name.is_empty() { "this agent" } else { name.as_str() };
+                    let error = format!(
+                        "AgentMux cloud says the instance on this computer in channel {channel} holds {agent}, \
+                         but that instance isn't running. Its hold ends within a minute; try again then."
+                    );
+                    return (StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response();
+                }
+            },
+        },
     };
     tracing::info!(
         uid = %uid,
@@ -116,6 +138,10 @@ pub(super) async fn handle_agent_holding(
 #[derive(Debug, Deserialize)]
 pub(super) struct ReleaseRequest {
     uid: String,
+    /// The agent's name, from requesters that send it: lets this srv drop a
+    /// relay subscription (and WAN lease) that outlived the agent's panes.
+    #[serde(default)]
+    agent: String,
     #[serde(default)]
     requested_by_channel: String,
     #[serde(default)]
@@ -165,6 +191,18 @@ pub(super) async fn handle_agent_release(State(state): State<AppState>, Json(req
         );
         surface_failure(&state, &block.oid, &reason);
     }
+    // No pane runs it here, but the relay may still see this srv as the
+    // holder: a subscription that outlived its panes (charlie, 2026-09-26)
+    // renews the WAN lease every tick. Let go of it now, and before
+    // answering, so the requester's retry can claim the lease.
+    let agent = req.agent.trim();
+    if !agent.is_empty()
+        && !crate::backend::reactive::handler::get_global_handler().has_live_name(agent)
+        && crate::muxbus::cloud_subscriber::release_agent_now(&state.id_store, agent).await
+    {
+        tracing::info!(agent = %agent, "agent_admission.takeover: released a relay subscription no pane held");
+        released += 1;
+    }
     if released > 0 {
         agent_admission::hold_after_handover(&uid, &to);
     }
@@ -200,6 +238,39 @@ fn surface_failure(state: &AppState, block_id: &str, message: &str) {
     });
 }
 
+/// Who holds `agent` per the relay, when no local lease or running
+/// instance does. Charlie 2026-09-26: a same-computer instance (another
+/// channel) held only the relay lease, and Take over looked nowhere else,
+/// answered `released: false`, and the pane was refused again.
+#[derive(Debug, PartialEq, Eq)]
+enum WanTarget {
+    NoHolder,
+    /// Another instance on this computer, by channel.
+    ThisComputer(String),
+    /// Another computer, as described by the relay's holder record.
+    OtherComputer(String),
+}
+
+fn wan_takeover_target(agent: &str) -> WanTarget {
+    if let Some(channel) = crate::muxbus::wan_lease::held_on_this_computer_by(agent) {
+        return WanTarget::ThisComputer(channel);
+    }
+    match crate::muxbus::wan_lease::held_on_another_computer(agent) {
+        Some(where_) => WanTarget::OtherComputer(where_),
+        None => WanTarget::NoHolder,
+    }
+}
+
+/// Take over reaches instances on this computer only.
+fn other_computer_error(agent: &str, where_: &str) -> String {
+    let agent = if agent.is_empty() { "this agent" } else { agent };
+    format!(
+        "{agent} is running on another computer ({where_}), according to AgentMux cloud. \
+         Take over only works between AgentMux instances on this computer. \
+         Close {agent} there, then try again."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,5 +291,30 @@ mod tests {
         let f = crate::agents::failure::classify(None, None, reason, None);
         assert_eq!(f.code, crate::agents::failure::FailureClass::LiveElsewhere);
         assert_eq!(f.title, "Taken over by another AgentMux instance");
+    }
+
+    // Charlie 2026-09-26: the relay said 0.57.6 on the same computer held
+    // Opaz, but Take over only looked at the local lease file and running
+    // instances, found nobody, answered `released: false` and did nothing.
+    #[test]
+    fn take_over_follows_a_relay_holder_on_this_computer() {
+        let here = crate::backend::reactive::registry::local_host_label();
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        crate::muxbus::wan_lease::note_not_holder(
+            &agent,
+            &serde_json::json!({ "held_by": { "host": here, "channel": "local-main-x", "version": "0.57.6" } }),
+        );
+        assert_eq!(wan_takeover_target(&agent), WanTarget::ThisComputer("local-main-x".into()));
+    }
+
+    #[test]
+    fn take_over_says_why_it_cannot_reach_another_computer() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        crate::muxbus::wan_lease::note_not_holder(&agent, &serde_json::json!({ "held_by": { "host": "desk", "channel": "stable" } }));
+        let WanTarget::OtherComputer(where_) = wan_takeover_target(&agent) else { panic!("expected another computer") };
+        let m = other_computer_error("Opaz", &where_);
+        assert!(m.contains("another computer (computer desk, channel stable)"), "{m}");
+        assert!(m.contains("Close Opaz there"), "{m}");
+        assert_eq!(wan_takeover_target("never-seen"), WanTarget::NoHolder);
     }
 }
