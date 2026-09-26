@@ -346,12 +346,27 @@ fn a_fork_reporting_its_own_id_is_the_resume_succeeding() {
 #[test]
 fn a_relocated_resume_kept_in_place_is_settled_once_a_result_proves_it() {
     use super::super::segments::kept_relocated_id;
-    assert!(kept_relocated_id(false, true, true, Some("s2"), "s2"));
-    assert!(!kept_relocated_id(false, false, true, Some("s2"), "s2"), "an init frame echoes the attempted id before a failure");
-    assert!(!kept_relocated_id(true, true, true, Some("s2"), "s2"), "adopted: the capture path settles it");
-    assert!(!kept_relocated_id(false, true, false, Some("s2"), "s2"), "already settled, or a same-dir fork with no copy");
-    assert!(!kept_relocated_id(false, true, true, Some("s2"), "s3"), "a fork: its new id is adopted");
-    assert!(!kept_relocated_id(false, true, true, None, "s2"), "not a fork");
+    assert!(kept_relocated_id(false, true, true, true, Some("s2"), "s2"));
+    assert!(!kept_relocated_id(false, false, true, true, Some("s2"), "s2"), "an init frame echoes the attempted id before a failure");
+    assert!(!kept_relocated_id(true, true, true, true, Some("s2"), "s2"), "adopted: the capture path settles it");
+    assert!(!kept_relocated_id(false, true, false, true, Some("s2"), "s2"), "a superseded generation");
+    assert!(!kept_relocated_id(false, true, true, false, Some("s2"), "s2"), "already settled, or a same-dir fork with no copy");
+    assert!(!kept_relocated_id(false, true, true, true, Some("s2"), "s3"), "a fork: its new id is adopted");
+    assert!(!kept_relocated_id(false, true, true, true, None, "s2"), "not a fork");
+}
+
+/// Codex P1 on #3907 (round 2): only the current generation, still holding
+/// the id, may settle a kept-in-place resume.
+#[test]
+fn only_the_current_generation_holding_the_id_holds_the_session() {
+    let c = controller_holding(Some("s2"));
+    let mut inner = c.inner.lock().unwrap();
+    let now = inner.spawn_generation;
+    assert!(inner.holds_current_session("s2", now));
+    assert!(!inner.holds_current_session("s2", now.wrapping_sub(1)), "superseded by a replacement spawn");
+    assert!(!inner.holds_current_session("s3", now), "the controller holds another id");
+    inner.resume_poisoned = Some("s2".into());
+    assert!(!inner.holds_current_session("s2", now), "known dead");
 }
 
 #[test]

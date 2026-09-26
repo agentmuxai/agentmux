@@ -1060,11 +1060,11 @@ impl PersistentSubprocessController {
                             // See PersistentInner::try_capture_session_id — refuses
                             // to (re-)adopt an id the stderr reader (above) already
                             // confirmed unreachable, whichever task wins the race.
-                            let (should_capture, capture_effects) = inner_read.lock().unwrap().try_capture_session_id(
-                                &sid_string,
-                                my_generation_read,
-                                is_confirmed_success,
-                            );
+                            let (should_capture, capture_effects, holds_current) = {
+                                let mut inner = inner_read.lock().unwrap();
+                                let (adopted, effects) = inner.try_capture_session_id(&sid_string, my_generation_read, is_confirmed_success);
+                                (adopted, effects, inner.holds_current_session(&sid_string, my_generation_read))
+                            };
                             if should_capture {
                                 tracing::info!(
                                     block_id = %block_id_read,
@@ -1076,6 +1076,7 @@ impl PersistentSubprocessController {
                             let kept_relocated_id = super::segments::kept_relocated_id(
                                 should_capture,
                                 is_confirmed_success,
+                                holds_current,
                                 relocated_copy_read.is_some(),
                                 forked_from_read.as_deref(),
                                 &sid_string,

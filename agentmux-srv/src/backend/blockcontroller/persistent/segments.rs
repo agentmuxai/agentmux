@@ -434,8 +434,17 @@ pub(super) fn forked_outcome(
 /// (an earlier frame echoes the attempted id even when the resume goes on to
 /// fail). Left unsettled, the segment would hold no session (a relocated
 /// Start records none) and the next spawn would sweep the live copy.
-pub(super) fn kept_relocated_id(adopted: bool, confirmed: bool, has_copy: bool, forked_from: Option<&str>, captured: &str) -> bool {
-    !adopted && confirmed && has_copy && forked_from == Some(captured)
+/// `holds_current`: the reader's generation is still current and holds the
+/// id; a superseded one's copy path may already be the replacement's.
+pub(super) fn kept_relocated_id(
+    adopted: bool,
+    confirmed: bool,
+    holds_current: bool,
+    has_copy: bool,
+    forked_from: Option<&str>,
+    captured: &str,
+) -> bool {
+    !adopted && confirmed && holds_current && has_copy && forked_from == Some(captured)
 }
 
 /// Once a relocated resume reports its session: a fork (a new id) never
