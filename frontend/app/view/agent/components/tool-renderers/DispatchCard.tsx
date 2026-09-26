@@ -21,9 +21,10 @@ import { renderAgent, renderTask, renderWorkflow } from "../ToolOverlayLog";
 import { byKind, registerToolRenderer, type ToolRenderContext } from "./registry";
 
 // No-match fallback must reproduce the SAME per-kind rendering the
-// priority-0 builtins give every OTHER Agent/Task/Workflow call (description
-// shown while running, CompactResult only once a result exists) — not a bare
-// CompactResult, which loses both (reagent/codex P1 on PR #2676; hits the
+// priority-0 builtins give every OTHER Agent/Task/Workflow call (the report as
+// markdown, no-result gating) — not a bare CompactResult, which loses both
+// (reagent/codex P1 on PR #2676, when the body also carried the description,
+// now in the row header; hits the
 // Agent History tab unconditionally, since correlation is designed to never
 // match there).
 function renderFallback(node: ToolNode): JSX.Element {

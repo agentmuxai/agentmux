@@ -49,6 +49,7 @@ import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteRes
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
+import { grepResultCount } from "./grep-result";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { isContentFirstTool } from "./tool-presentation";
 import { extractSearchResults, extractWebSearch } from "./tool-renderers/search-results";
@@ -295,11 +296,17 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 return null;
             }
             case "Grep": {
-                const n = (r as GrepResult).matches?.length;
-                if (typeof n === "number") {
-                    return { label: `${n} match${n === 1 ? "" : "es"}`, variant: "matches" };
+                // A structured provider result has `matches`; Claude Code's is
+                // text whose shape depends on output_mode (grep-result.ts).
+                const matches = (r as GrepResult).matches?.length;
+                if (typeof matches === "number") {
+                    return { label: `${matches} match${matches === 1 ? "" : "es"}`, variant: "matches" };
                 }
-                return null;
+                if (typeof r.content !== "string") return null;
+                const { n, noun } = grepResultCount(r.content);
+                return noun === "file"
+                    ? { label: `${n} file${n === 1 ? "" : "s"}`, variant: "files" }
+                    : { label: `${n} match${n === 1 ? "" : "es"}`, variant: "matches" };
             }
             case "Write": {
                 const b = (r as WriteResult).bytesWritten;
