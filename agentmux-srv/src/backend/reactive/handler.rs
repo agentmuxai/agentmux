@@ -580,6 +580,14 @@ impl Handler {
         }
     }
 
+    /// Does any live block hold `name` (case-insensitive, like the cloud
+    /// subscription's keys)? An exit's own nonce check can't answer this:
+    /// it reports `false` both when a newer spawn owns the registration and
+    /// when nobody holds it any more.
+    pub fn has_live_name(&self, name: &str) -> bool {
+        !self.live_blocks_for_key(&name.to_lowercase()).is_empty()
+    }
+
     /// Is `block_id` alive per the liveness probe? `None` probe = live.
     fn is_live(&self, block_id: &str) -> bool {
         self.block_liveness
@@ -2156,6 +2164,11 @@ impl ReactiveHandler {
 
     pub fn get_agent(&self, agent_id: &str) -> Option<AgentRegistration> {
         self.inner.lock().unwrap().get_agent(agent_id).cloned()
+    }
+
+    /// See the inner [`Handler::has_live_name`].
+    pub fn has_live_name(&self, name: &str) -> bool {
+        self.inner.lock().unwrap().has_live_name(name)
     }
 
     /// See the inner [`Handler::lookup_by_name`] (identity M2).
