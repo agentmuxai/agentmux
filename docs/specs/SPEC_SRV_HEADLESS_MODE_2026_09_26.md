@@ -56,6 +56,11 @@ Runs before logging is initialized, so the log dir comes from the paths it resol
    The root follows the usual rules: `AGENTMUX_HOME_OVERRIDE`, then `AGENTMUX_DATA_HOME`, then `~/.agentmux`. If the env is already set, it is used as is.
 
    **Then `AGENTMUX_HOME_OVERRIDE` is removed.** Every path is explicit in the env now, as the launcher leaves it, and srv resolves its stores from the exported data dir. Left set, the override would win in `agentmux_root()`, and every version's databases would open at the override root.
+
+   **Root-relative paths match the desktop app.** `open_stores_and_migrate` sets `AGENTMUX_DATA_HOME` to the data dir for every srv, and a launcher-started srv never has `AGENTMUX_HOME_OVERRIDE`. So `DataPaths::from_env().home_dir` is the data dir in a normal desktop run, and root-relative paths such as CLI installs (`<home_dir>/instances/…`) resolve under it.
+   - **Observed on a desktop install:** `~/.agentmux/channels/<ch>/versions/<v>/data/instances/…`, with no root-level `~/.agentmux/instances`.
+   - Removing the override makes headless srv resolve exactly the same way. Keeping it would put a headless srv's CLIs somewhere a desktop srv on the same data would not look.
+   - Whether `home_dir` should be the true root for every srv is a separate, pre-existing question, **out of scope here**.
 2. **Lock:** `base::acquire_data_dir_lock` takes an exclusive lock on `srv.lock` **in the directory holding the databases**, held for the process lifetime. That directory is `--wavedata` when given (the precedence `Config` applies), otherwise the resolved data dir.
    - **Every srv takes this same lock**, launcher-, host- or headless-started: bootstrap takes it before opening stores. So no two servers share a set of databases, however each was started.
    - Headless takes it early, before writing anything. The call is idempotent within a process, so bootstrap's later call is a no-op.
