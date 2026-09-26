@@ -18,7 +18,7 @@
  * that specific action urgent.
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import {
     archiveSession,
@@ -99,18 +99,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
 
                 {/* ── Resume-failed disclosure (continuity guarantee §4.2) ── */}
                 <Show when={resumeFailed(() => props.blockAtom())}>
-                    <div class="agent-resume-failed-banner">
-                        <span class="agent-resume-failed-label">
-                            Couldn't resume the previous conversation — started a new one.
-                        </span>
-                        <button
-                            class="agent-session-btn agent-session-btn-dismiss"
-                            onClick={() => void dismiss("session:resume_failed")}
-                            title="Dismiss this notice"
-                        >
-                            Dismiss
-                        </button>
-                    </div>
+                    <ResumeFailedBanner onDismiss={() => void dismiss("session:resume_failed")} />
                 </Show>
 
                 {/* ── Large session warning (4.1 graceful degradation) ── */}
@@ -173,3 +162,46 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
 };
 
 AgentSessionNotices.displayName = "AgentSessionNotices";
+
+/** Seconds the failed-resume banner stays up before dismissing itself. */
+const RESUME_FAILED_AUTO_DISMISS_S = 15;
+
+/**
+ * The failed-resume banner dismisses itself after a visible countdown: it's a
+ * one-time disclosure, and the transcript's own session-outcome divider keeps
+ * the permanent record. Dismissing (either way) clears the flag, same as the
+ * button always did. Mounted by the `Show` above, so a fresh failure gets a
+ * fresh countdown.
+ */
+const ResumeFailedBanner = (props: { onDismiss: () => void }): JSX.Element => {
+    const [remaining, setRemaining] = createSignal(RESUME_FAILED_AUTO_DISMISS_S);
+    let done = false;
+    const finish = () => {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        props.onDismiss();
+    };
+    const timer = setInterval(() => {
+        const next = remaining() - 1;
+        setRemaining(next);
+        if (next <= 0) finish();
+    }, 1000);
+    onCleanup(() => clearInterval(timer));
+
+    return (
+        <div class="agent-resume-failed-banner">
+            <span class="agent-resume-failed-label">
+                Couldn't resume the previous conversation — started a new one.
+            </span>
+            <span class="agent-resume-failed-countdown">{remaining()}s</span>
+            <button
+                class="agent-session-btn agent-session-btn-dismiss"
+                onClick={finish}
+                title="Dismiss this notice"
+            >
+                Dismiss
+            </button>
+        </div>
+    );
+};
