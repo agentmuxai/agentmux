@@ -278,7 +278,9 @@ involved.
 3. **Agents hold the account's everyday credentials.** Every agent gets
    the user's cloud access token (`MUXBUS_TOKEN`,
    `server/muxbus_handlers.rs:339`) and the srv's `AGENTMUX_AUTH_KEY`,
-   which reaches every `/ws` RPC.
+   which reaches every `/ws` RPC. (Update 2026-09-26: #3881 stopped
+   injecting `MUXBUS_TOKEN`. A same-user agent can still read the srv's
+   stored login from disk, so the human-only paths below still apply.)
    - So anything that grants access, links identities, or sets trust needs
      a **human-only path**: a separate login client plus a consent page on
      the relay (§2.2), or a CEF-host window behind the host secret (§2.5,

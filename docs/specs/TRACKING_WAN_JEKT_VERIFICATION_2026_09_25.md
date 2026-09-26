@@ -104,8 +104,9 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 
 ## 6. Open questions carried from the spec
 
-- §6.4 — stop injecting `MUXBUS_TOKEN` into agent environments (would make
-  instance minting srv-only).
+- §6.4 — stop injecting `MUXBUS_TOKEN` into agent environments: **done in
+  #3881**, step 1 of trusting same-account verified installs without an
+  operator stop (operator decision, 2026-09-26).
 - §6.5 — keep the instance key out of agents' reach (OS keychain / separate
   user); today a copied `wan.db` lets its holder speak as that instance until
   it is retired.
