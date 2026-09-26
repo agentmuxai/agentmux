@@ -8,7 +8,6 @@ import type {
     JektMessageNode,
     MarkdownNode,
     DocumentNode,
-    SectionNode,
     ToolNode,
     UserMessageNode,
 } from "../types";
@@ -17,7 +16,6 @@ import {
     estimateMarkdown,
     estimateNode,
     estimateNodeForState,
-    estimateSection,
     estimateTextHeight,
     estimateUnwrappedTextHeight,
     CONTENT_FIRST_TOOL_ESTIMATE_PX,
@@ -102,16 +100,6 @@ describe("per-kind estimators", () => {
         it("uses estimateTextHeight on the content", () => {
             const node: MarkdownNode = { type: "markdown", id: "m1", content: "a".repeat(160) };
             expect(estimateMarkdown(node)).toBe(48);
-        });
-    });
-
-    describe("estimateSection", () => {
-        it("returns the fixed section size", () => {
-            const node: SectionNode = {
-                type: "section", id: "s1", level: 1, title: "Heading",
-                collapsible: false, collapsed: false,
-            };
-            expect(estimateSection(node)).toBe(48);
         });
     });
 
@@ -227,10 +215,6 @@ describe("estimateNode dispatch", () => {
     it("dispatches to the correct per-kind estimator", () => {
         const state = baseDocState();
         const md: MarkdownNode = { type: "markdown", id: "m1", content: "" };
-        const sec: SectionNode = {
-            type: "section", id: "s1", level: 1, title: "T",
-            collapsible: false, collapsed: false,
-        };
         const tool: ToolNode = {
             type: "tool", id: "t1", tool: "Read", params: { file_path: "x" },
             status: "success", collapsed: true, summary: "Read x",
@@ -245,7 +229,6 @@ describe("estimateNode dispatch", () => {
         };
 
         expect(estimateNode(md, state)).toBe(estimateMarkdown(md));
-        expect(estimateNode(sec, state)).toBe(estimateSection(sec));
         // Every row: the per-state estimate of what rowDisclosure says
         // (SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26 §2.4).
         for (const n of [tool, am, um] as DocumentNode[]) {
@@ -275,15 +258,6 @@ describe("estimateNodeForState (Phase 2 — INV-3 per-state estimates)", () => {
         };
         expect(estimateNodeForState(node, "collapsed", state)).toBe(32);
         // 160 chars → 2 lines × 24 = 48
-        expect(estimateNodeForState(node, "expanded", state)).toBe(48);
-    });
-
-    it("section: both states → same fixed height (no in-flow difference)", () => {
-        const node: SectionNode = {
-            type: "section", id: "s1", level: 1, title: "H",
-            collapsible: false, collapsed: false,
-        };
-        expect(estimateNodeForState(node, "collapsed", state)).toBe(48);
         expect(estimateNodeForState(node, "expanded", state)).toBe(48);
     });
 
@@ -341,7 +315,6 @@ describe("STREAMING_CAPABLE", () => {
     });
 
     it("flags everything else as non-streaming", () => {
-        expect(STREAMING_CAPABLE.section).toBe(false);
         expect(STREAMING_CAPABLE.tool).toBe(false);
         expect(STREAMING_CAPABLE.user_message).toBe(false);
     });

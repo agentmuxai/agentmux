@@ -18,7 +18,6 @@ import type {
     DocumentState,
     JektMessageNode,
     MarkdownNode,
-    SectionNode,
     ShellNode,
     ToolNode,
     UserMessageNode,
@@ -84,7 +83,6 @@ export function estimateUnwrappedTextHeight(
 // flags any kind whose p50 actual diverges > 30% from estimate.
 const TOOL_COLLAPSED_PX = 32;
 const TOOL_EXPANDED_PX = 200;
-const SECTION_PX = 48;
 const COLLAPSED_MESSAGE_PX = 32;
 
 // ── Per-kind estimator functions ────────────────────────────────────────────
@@ -96,10 +94,6 @@ const COLLAPSED_MESSAGE_PX = 32;
 
 export function estimateMarkdown(node: MarkdownNode): number {
     return estimateTextHeight(node.content);
-}
-
-export function estimateSection(_node: SectionNode): number {
-    return SECTION_PX;
 }
 
 /**
@@ -130,7 +124,6 @@ const SHELL_EXPANDED_PX = 200;
 export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     markdown: true,
     agent_message: true,
-    section: false,
     tool: false,
     user_message: false,
     shell: false,
@@ -193,7 +186,6 @@ export function estimateNodeForState(
                 return node.isStartup
                     ? COLLAPSED_MESSAGE_PX
                     : estimateUnwrappedTextHeight(node.message);
-            case "section":       return SECTION_PX;
             case "markdown":
                 // Canceled-thinking collapses; normal markdown stays full.
                 return node.metadata?.canceled
@@ -218,7 +210,6 @@ export function estimateNodeForState(
         case "agent_message":     return estimateTextHeight(node.message);
         case "jekt_message":      return estimateExpandedJekt(node.message);
         case "user_message":      return estimateUnwrappedTextHeight(node.message);
-        case "section":           return SECTION_PX;
         case "markdown":          return estimateTextHeight(node.content);
         case "shell":             return SHELL_EXPANDED_PX;
         case "agent_error":       return 64;

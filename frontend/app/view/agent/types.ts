@@ -55,7 +55,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
+export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
 
 /**
  * Raw markdown text block
@@ -85,19 +85,6 @@ export interface MarkdownNode {
          *  canceled. Optional; primarily for future audit/tooltip. */
         canceledAt?: number;
     };
-}
-
-/**
- * Section heading (H1, H2, H3)
- */
-export interface SectionNode {
-    type: "section";
-    id: string;
-    level: 1 | 2 | 3; // H1, H2, H3
-    title: string;
-    collapsible: boolean;
-    collapsed: boolean;
-    timestamp?: number; // Unix ms
 }
 
 /**

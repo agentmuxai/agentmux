@@ -266,50 +266,6 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
-            <Show when={props.node() && props.node().type === "section"}>
-                {/* Nothing constructs a section node; the kind is removed in
-                    the follow-up (SPEC_AGENT_PANE_ROW_DISCLOSURE §2.6). The
-                    shared rule already treats it as fixed (no `e` toggle). */}
-                <div
-                    ref={setPeekRowEl}
-                    class={`agent-section agent-section--toggle level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}
-                    onClick={() => props.onToggleCollapse(props.node().id)}
-                    onMouseEnter={handlePeekEnter}
-                    onMouseLeave={handlePeekLeave}
-                >
-                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 1}>
-                        <h1>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h1>
-                    </Show>
-                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 2}>
-                        <h2>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h2>
-                    </Show>
-                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 3}>
-                        <h3>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h3>
-                    </Show>
-                    {(() => {
-                        const n = props.node() as Extract<DocumentNode, { type: "section" }>;
-                        const timeText = createMemo(() => {
-                            if (!isPeeking() || n.timestamp == null) return null;
-                            peekTick();
-                            return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
-                        });
-                        const estimateText = createMemo(() => {
-                            const count = estimateTokenCount(n.title);
-                            return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
-                        });
-                        return (
-                            <PeekOverlay show={isPeeking() && (timeText() != null || estimateText() != null)} rowEl={peekRowEl}>
-                                <Show when={timeText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
-                                </Show>
-                                <Show when={estimateText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{estimateText()}</div>
-                                </Show>
-                            </PeekOverlay>
-                        );
-                    })()}
-                </div>
-            </Show>
             <Show when={props.node() && props.node().type === "agent_error"}>
                 <div
                     class="agent-error-block"
