@@ -47,11 +47,24 @@ impl HangDumpLatch {
     }
 }
 
-/// `%LOCALAPPDATA%\CrashDumps\agentmux-host-hang` — kept apart from crash
-/// dumps: a hang dump and a crash dump mean different things to triage.
-pub fn dump_dir() -> Option<PathBuf> {
+/// `%LOCALAPPDATA%\CrashDumps\agentmux-host-hang\<instance_key>` — kept
+/// apart from crash dumps (a hang dump and a crash dump mean different things
+/// to triage), and one folder per instance (`instance_key` = the launcher's
+/// data-dir hash) so pruning never deletes another running instance's
+/// evidence (ReAgent P2 on #3913).
+pub fn dump_dir(instance_key: &str) -> Option<PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA")?;
-    Some(PathBuf::from(base).join("CrashDumps").join("agentmux-host-hang"))
+    dump_dir_under(Path::new(&base), instance_key)
+}
+
+/// `dump_dir` with an explicit base. `None` for a key that isn't a single
+/// plain path component — it is joined onto a path.
+pub fn dump_dir_under(base: &Path, instance_key: &str) -> Option<PathBuf> {
+    let plain = !instance_key.is_empty()
+        && instance_key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    plain.then(|| base.join("CrashDumps").join("agentmux-host-hang").join(instance_key))
 }
 
 /// Sortable by name: zero-padded timestamp first.
@@ -171,6 +184,27 @@ mod tests {
         assert!(!l.observe(0), "a reply resets misses to 0");
         assert!(!l.observe(1));
         assert!(l.observe(2), "a new hang gets its own dump");
+    }
+
+    #[test]
+    fn each_instance_gets_its_own_dump_folder() {
+        let base = Path::new("base");
+        let a = dump_dir_under(base, "0123456789abcdef").unwrap();
+        let b = dump_dir_under(base, "fedcba9876543210").unwrap();
+        assert_ne!(a, b, "pruning in one must not touch the other");
+        assert_eq!(
+            a,
+            base.join("CrashDumps").join("agentmux-host-hang").join("0123456789abcdef")
+        );
+    }
+
+    #[test]
+    fn a_key_that_is_not_a_plain_component_is_rejected() {
+        let base = Path::new("base");
+        assert!(dump_dir_under(base, "").is_none());
+        assert!(dump_dir_under(base, "..").is_none());
+        assert!(dump_dir_under(base, "a/b").is_none());
+        assert!(dump_dir_under(base, "a\\b").is_none());
     }
 
     #[test]
