@@ -33,7 +33,7 @@ pub async fn query(
         );
     }
 
-    // Resolve block_id → CDP target id.
+    // Resolve block_id → the browser whose page holds it.
     let resolved = match state
         .browser_api
         .target_cache
@@ -44,17 +44,8 @@ pub async fn query(
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
 
-    // Open the CDP WebSocket for that target.
-    let debug_port = *state.debug_port.lock();
-    let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{}", resolved.target_id);
-    let mut cdp = match CdpSession::connect(&ws_url).await {
-        Ok(s) => s,
-        Err(e) => {
-            // Target might be stale (pane closed underneath us).
-            state.browser_api.target_cache.forget(&req.block_id);
-            return ok_body(ApiResponse::err(format!("CDP connect: {e}")));
-        }
-    };
+    // In-process CDP session on that browser (see `super::cdp`).
+    let mut cdp = CdpSession::attach(&state, &resolved.label);
 
     // Inject the helper (idempotent — it guards on `window.__amq_query`).
     let helper = include_str!("scripts/query.js");
@@ -903,34 +894,13 @@ async fn open_cdp_for_block(
     state: &Arc<AppState>,
     block_id: &str,
 ) -> Result<(CdpSession, bool), String> {
-    let debug_port = *state.debug_port.lock();
-    // Two attempts: the cached target id goes stale whenever the pane's
-    // CDP target rotates (navigation-driven process swap, etc. — nothing
-    // proactively calls `forget`), and failing the caller's request just
-    // to self-heal the NEXT one made every first call after a navigation
-    // error out. Attempt 1 uses the cache; on connect failure, forget the
-    // stale entry and attempt 2 re-resolves from a fresh `/json` probe.
-    let mut last_err = String::new();
-    for attempt in 0..2 {
-        let resolved = state
-            .browser_api
-            .target_cache
-            .resolve(state, block_id)
-            .await?;
-        let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{}", resolved.target_id);
-        match CdpSession::connect(&ws_url).await {
-            Ok(session) => return Ok((session, resolved.scope_to_block)),
-            Err(e) => {
-                state.browser_api.target_cache.forget(block_id);
-                last_err = format!("CDP connect: {e}");
-                tracing::debug!(
-                    block_id, target = resolved.target_id.as_str(), attempt, error = %last_err,
-                    "[browser-api] CDP connect failed — dropped cached target"
-                );
-            }
-        }
-    }
-    Err(last_err)
+    // No connect step, so nothing can go stale between resolve and use: the
+    // session addresses the browser by its host-state label, and a
+    // navigation-driven renderer swap keeps the same `Browser`. (The old
+    // socket client re-resolved on connect failure because `/json` target
+    // ids rotated on such swaps.)
+    let resolved = state.browser_api.target_cache.resolve(state, block_id).await?;
+    Ok((CdpSession::attach(state, &resolved.label), resolved.scope_to_block))
 }
 
 /// Rejects `eval`/`navigate`/`back`/`forward`/`reload` against a Path-2

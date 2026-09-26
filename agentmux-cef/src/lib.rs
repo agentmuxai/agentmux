@@ -15,6 +15,7 @@ mod app;
 mod background_audit;
 mod browser_api;
 mod browser_panes;
+mod cdp_port;
 mod client;
 mod commands;
 mod dev_authfile;
@@ -850,20 +851,38 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // conventional port (9223 dev / 9222 release) for muscle memory; fall back to
     // an OS-assigned free port. Store the ACTUAL port so `browser_api` targets
     // it. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §2.
-    let preferred: u16 = if is_dev { 9223 } else { 9222 };
-    let debug_port: u16 = {
-        use std::net::TcpListener;
-        if TcpListener::bind(("127.0.0.1", preferred)).is_ok() {
-            preferred
-        } else {
-            TcpListener::bind(("127.0.0.1", 0))
-                .and_then(|l| l.local_addr())
-                .map(|a| a.port())
-                .unwrap_or(preferred)
+    //
+    // Off entirely in release builds unless AGENTMUX_CDP_PORT opts in
+    // (#3681): the server is unauthenticated on a loopback every local user
+    // shares, and nothing in the app needs it — the browser API is in-process
+    // now. `debug_port == 0` means "no server"; CEF treats a 0
+    // `remote_debugging_port` the same way. See `cdp_port`.
+    let requested = cdp_port::requested_cdp_port(
+        is_dev,
+        std::env::var(cdp_port::CDP_PORT_ENV).ok().as_deref(),
+    );
+    let debug_port: u16 = match requested {
+        None => 0,
+        Some(preferred) => {
+            use std::net::TcpListener;
+            if TcpListener::bind(("127.0.0.1", preferred)).is_ok() {
+                preferred
+            } else {
+                TcpListener::bind(("127.0.0.1", 0))
+                    .and_then(|l| l.local_addr())
+                    .map(|a| a.port())
+                    .unwrap_or(preferred)
+            }
         }
     };
     *app_state.debug_port.lock() = debug_port;
-    tracing::info!("CEF remote-debugging port: {} (preferred {})", debug_port, preferred);
+    match requested {
+        Some(preferred) => tracing::info!("CEF remote-debugging port: {} (preferred {})", debug_port, preferred),
+        None => tracing::info!(
+            "CEF remote-debugging server off (set {}=<port> to enable it)",
+            cdp_port::CDP_PORT_ENV
+        ),
+    }
 
     // Resolved BEFORE authkey.dev is written, so the file can publish it.
     // Tooling used to hardcode 9222/9223, which silently targets whichever

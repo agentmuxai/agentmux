@@ -275,6 +275,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17`](SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md) | SPEC — Browser pane: stop the loading-brain flicker / page-hide flashing |
 | [`SPEC_BROWSER_PANE_START_PAGE_2026_09_16`](SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md) | SPEC — Browser pane: "Set as Start Page" in the bookmarks menu |
 | [`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) | SPEC — Browser pane: replace Chromium's native right-click menu with the app's own |
+| [`SPEC_CEF_CDP_IN_PROCESS_AND_DEBUG_PORT_OPT_IN_2026_09_25`](SPEC_CEF_CDP_IN_PROCESS_AND_DEBUG_PORT_OPT_IN_2026_09_25.md) | SPEC: Browser API over in-process CDP; the CEF debug port is opt-in in release builds |
 | [`SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) | Spec: CEF proprietary codec support (H.264/AAC) across Windows/macOS/Linux |
 | [`SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27`](SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md) | Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF) |
 | [`SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22`](SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md) | SPEC — Own the `cef-dll-sys` binding fork: `agentmuxai/cef-rs` |
