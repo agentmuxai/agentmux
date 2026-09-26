@@ -4173,3 +4173,30 @@ async fn test_invisible_character_cannot_hide_a_sensitive_keyword() {
     let payload = String::from_utf8_lossy(&calls[1].1);
     assert!(payload.contains("the password"), "{payload}");
 }
+
+/// Charlie 2026-09-26: a spawn's exit found no registration at all for its
+/// block (`unregister_block_if_nonce` → false, silently), read that as "a
+/// newer spawn owns it" and left the agent in the cloud subscription, whose
+/// lease tick then held its WAN lease forever. `has_live_name` is the check
+/// that tells "nobody holds it" apart from "someone newer does".
+#[test]
+fn test_handler_has_live_name_tells_nobody_from_a_newer_holder() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent_with_nonce("Opaz", "block1", None, 1, None)
+        .unwrap();
+    assert!(handler.has_live_name("opaz"), "case-insensitive, like the subscription");
+    assert!(handler.has_live_name("Opaz"));
+
+    handler.unregister_block("block1");
+    assert!(
+        !handler.unregister_block_if_nonce("block1", 1),
+        "an exit that finds no registration reports false"
+    );
+    assert!(!handler.has_live_name("opaz"), "…and nobody holds the name");
+
+    handler
+        .register_agent_with_nonce("Opaz", "block2", None, 2, None)
+        .unwrap();
+    assert!(handler.has_live_name("opaz"), "a newer holder is seen");
+}

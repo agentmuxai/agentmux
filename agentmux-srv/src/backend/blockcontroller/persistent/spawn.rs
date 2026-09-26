@@ -1642,9 +1642,20 @@ impl PersistentSubprocessController {
                             // in-memory registration's outcome above stands
                             // in: if a newer spawn already re-registered,
                             // its cloud subscription must survive too.
-                            if registration_was_ours {
+                            // …but a registration already gone reads `false`
+                            // too; then nobody holds the agent and it must go,
+                            // or its WAN lease is renewed forever.
+                            // `drop_if_orphaned` re-checks after removing, so a
+                            // respawn registering meanwhile keeps its entry
+                            // (Codex P2 on #3897).
+                            let handler = crate::backend::reactive::get_global_handler();
+                            let still_held = handler.has_live_name(agent_id);
+                            if crate::muxbus::cloud_subscriber::drop_cloud_subscription_on_exit(
+                                registration_was_ours,
+                                still_held,
+                            ) {
                                 if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                                    sub.remove_agent(agent_id);
+                                    sub.drop_if_orphaned(agent_id, |a| handler.has_live_name(a));
                                 }
                             }
                         }
@@ -2102,9 +2113,20 @@ impl PersistentSubprocessController {
                             // in-memory registration's outcome above stands
                             // in: if a newer spawn already re-registered,
                             // its cloud subscription must survive too.
-                            if registration_was_ours {
+                            // …but a registration already gone reads `false`
+                            // too; then nobody holds the agent and it must go,
+                            // or its WAN lease is renewed forever.
+                            // `drop_if_orphaned` re-checks after removing, so a
+                            // respawn registering meanwhile keeps its entry
+                            // (Codex P2 on #3897).
+                            let handler = crate::backend::reactive::get_global_handler();
+                            let still_held = handler.has_live_name(agent_id);
+                            if crate::muxbus::cloud_subscriber::drop_cloud_subscription_on_exit(
+                                registration_was_ours,
+                                still_held,
+                            ) {
                                 if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                                    sub.remove_agent(agent_id);
+                                    sub.drop_if_orphaned(agent_id, |a| handler.has_live_name(a));
                                 }
                             }
                         }

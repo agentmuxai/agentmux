@@ -72,13 +72,27 @@ pub(crate) fn held_elsewhere(agent: &str) -> Option<String> {
     (at.elapsed() < HELD_ELSEWHERE_FRESH).then_some(desc)
 }
 
+/// Is a [`describe_holder`] description about this computer (another
+/// AgentMux instance on the same host, e.g. a second channel)?
+pub(crate) fn holder_on_this_computer(desc: &str) -> bool {
+    desc == THIS_COMPUTER || desc.starts_with("this computer, ")
+}
+
+const THIS_COMPUTER: &str = "this computer";
+
 /// Describe the relay's `held_by` for a refusal: "computer X, channel Y, vZ".
 pub(crate) fn describe_holder(held_by: &serde_json::Value) -> String {
     let field = |k: &str| held_by.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let mut parts = Vec::new();
     let host = field("host");
     if !host.is_empty() {
-        parts.push(format!("computer {host}"));
+        // The relay only knows the holder's host label; the same label as
+        // ours is another instance here, not another computer.
+        if host.eq_ignore_ascii_case(&crate::backend::reactive::registry::local_host_label()) {
+            parts.push(THIS_COMPUTER.to_string());
+        } else {
+            parts.push(format!("computer {host}"));
+        }
     }
     let channel = field("channel");
     if !channel.is_empty() {
@@ -211,6 +225,17 @@ mod tests {
         let held_by = serde_json::json!({ "host": "desk", "channel": "stable", "version": "0.58.0", "acquired_at": 1 });
         assert_eq!(describe_holder(&held_by), "computer desk, channel stable, v0.58.0");
         assert_eq!(describe_holder(&serde_json::Value::Null), "");
+    }
+
+    // Charlie 2026-09-26: 0.57.6 and a 0.57.7 build on the same computer;
+    // the refusal said "on another computer" about its own host.
+    #[test]
+    fn a_holder_on_this_computer_is_described_as_this_computer() {
+        let here = crate::backend::reactive::registry::local_host_label();
+        let held_by = serde_json::json!({ "host": here, "channel": "local-main-x", "version": "0.57.6" });
+        assert_eq!(describe_holder(&held_by), "this computer, channel local-main-x, v0.57.6");
+        assert!(holder_on_this_computer(&describe_holder(&held_by)));
+        assert!(!holder_on_this_computer("computer desk, channel stable, v0.58.0"));
     }
 
     #[test]
