@@ -784,7 +784,7 @@ pub(super) fn packet_history_tail(
 
 /// The agent's global transcript zone, when this pane would render it:
 /// agent-anchored and not archived.
-fn global_prior_zone(mstore: Option<&Store>, block_id: &str) -> Option<String> {
+pub(super) fn global_prior_zone(mstore: Option<&Store>, block_id: &str) -> Option<String> {
     let block = mstore?.must_get::<crate::backend::obj::Block>(block_id).ok()?;
     let archived = block
         .meta

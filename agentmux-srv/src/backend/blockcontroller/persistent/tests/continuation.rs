@@ -274,3 +274,65 @@ fn a_transcript_longer_than_the_tail_window_still_resolves() {
     let c = controller_with(&f.fs);
     assert_eq!(c.find_continuation_session_id(&f.config).as_deref(), Some(LIVE_SID));
 }
+
+// ── which conversations the packet may draw on ──────────────────────────
+
+/// A block in an in-memory store, anchored to an agent unless `agent_id` is
+/// `None`, archived when `archived_at` is set.
+fn store_with_block(agent_id: Option<&str>, archived_at: Option<i64>) -> crate::backend::storage::store::Store {
+    let mstore = crate::backend::storage::store::Store::open_in_memory().unwrap();
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".to_string(), serde_json::json!("agent"));
+    if let Some(id) = agent_id {
+        meta.insert("agentId".to_string(), serde_json::json!(id));
+    }
+    if let Some(at) = archived_at {
+        meta.insert(crate::backend::session_archive::META_SESSION_ARCHIVED_AT.to_string(), serde_json::json!(at));
+    }
+    let mut block = crate::backend::obj::Block {
+        oid: "block".to_string(),
+        parentoref: String::new(),
+        version: 1,
+        runtimeopts: None,
+        stickers: None,
+        meta,
+        subblockids: None,
+    };
+    mstore.insert(&mut block).expect("insert block");
+    mstore
+}
+
+/// The zone a pane draws its history from is the agent's, unless the pane is
+/// not anchored to an agent or its conversation was archived.
+#[test]
+fn a_pane_draws_on_its_agents_zone_unless_it_is_unanchored_or_archived() {
+    use super::super::resume_retry::global_prior_zone;
+    let anchored = store_with_block(Some("d76da857"), None);
+    assert_eq!(global_prior_zone(Some(&anchored), "block").as_deref(), Some(AGENT_ZONE));
+    assert_eq!(global_prior_zone(Some(&store_with_block(None, None)), "block"), None);
+    assert_eq!(global_prior_zone(Some(&store_with_block(Some("d76da857"), Some(1_790_000_000_000))), "block"), None);
+    assert_eq!(global_prior_zone(None, "block"), None);
+}
+
+/// Every explicit "start fresh" archives the conversation. The record still
+/// holds it (the zone is not cleared for other channels), so the archive
+/// flag is the only thing keeping a conversation the user walked away from
+/// out of the next session's first message. The record is now the packet's
+/// primary source, so this is the rule to pin.
+#[test]
+fn an_archived_conversation_is_not_carried_into_a_fresh_session() {
+    use super::super::resume_retry::global_prior_zone;
+    let local = FileStore::open_in_memory().unwrap();
+    write_pane_transcript(&local, &stream(&settled_rejected_resume()));
+    let global = FileStore::open_in_memory().unwrap();
+    write_agent_zone(&global, &stream(&[r#"{"type":"user","message":{"role":"user","content":"a conversation the user archived"}}"#]));
+
+    let live = store_with_block(Some("d76da857"), None);
+    let zone = global_prior_zone(Some(&live), "block");
+    let packet = packet_from(&local, zone.as_deref().map(|z| (&global, z))).expect("the live conversation is carried");
+    assert!(packet.contains("a conversation the user archived"), "{packet}");
+
+    let archived = store_with_block(Some("d76da857"), Some(1_790_000_000_000));
+    let zone = global_prior_zone(Some(&archived), "block");
+    assert_eq!(packet_from(&local, zone.as_deref().map(|z| (&global, z))), None);
+}
