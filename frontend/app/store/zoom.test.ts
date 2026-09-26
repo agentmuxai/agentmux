@@ -60,12 +60,13 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // Which views take part in pane zoom is their manifest's `paneZoom`
 // capability (Pane Tab contract Phase 5); declared here as block-registry.ts
 // declares it for the built-ins.
-import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 for (const view of ["term", "agent", "swarm", "armory", "warden"]) {
-    registerPaneTab(legacyAdapter(view, class {} as any, { capabilities: { paneZoom: {} } }));
+    registerPaneTab(stubPaneTab(view, { capabilities: { paneZoom: {} } }));
 }
-registerPaneTab(legacyAdapter("editor", class {} as any, { capabilities: { paneZoom: { baseFontSize: 13 } } }));
-registerPaneTab(legacyAdapter("browser", class {} as any));
+registerPaneTab(stubPaneTab("editor", { capabilities: { paneZoom: { baseFontSize: 13 } } }));
+registerPaneTab(stubPaneTab("browser"));
 
 import { zoomAllPanesIn, zoomAllPanesOut, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
 

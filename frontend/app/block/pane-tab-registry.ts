@@ -151,13 +151,9 @@ export interface PaneTabManifest {
      *  per pane, in the chrome's own reactive scope, the first time a tab of
      *  this view type is active there; `anchorBlockId` is that tab. */
     chrome?: (anchorBlockId: string, nodeModel: NodeModel) => PaneChromeModel;
-    /** Native instance factory (Phase 2b). Called by the host in the
-     *  instance's own reactive root. Exactly one of `create` and
-     *  `viewModelClass`. */
-    create?(ctx: PaneTabHostContext): PaneTabInstance;
-    /** Legacy instance factory: an existing ViewModel class (`legacyAdapter`).
-     *  Replaced by `create` as views migrate. */
-    viewModelClass?: ViewModelClass;
+    /** The instance factory. Called by the host in the instance's own
+     *  reactive root (host rule 8). */
+    create(ctx: PaneTabHostContext): PaneTabInstance;
 }
 
 const manifests = new Map<string, PaneTabManifest>();
@@ -167,8 +163,9 @@ const aliasToView = new Map<string, string>();
  *  view or one of its aliases is already taken — a silent overwrite would let
  *  two widgets fight over the same blocks. */
 export function registerPaneTab(manifest: PaneTabManifest): () => void {
-    if ((manifest.create == null) === (manifest.viewModelClass == null)) {
-        throw new Error(`pane tab "${manifest.view}" needs exactly one of create and viewModelClass`);
+    // Checked at runtime too: a widget's manifest is plain JS.
+    if (typeof manifest.create !== "function") {
+        throw new Error(`pane tab "${manifest.view}" needs create(ctx)`);
     }
     const names = [manifest.view, ...(manifest.aliases ?? [])];
     for (const name of names) {
@@ -184,36 +181,6 @@ export function registerPaneTab(manifest: PaneTabManifest): () => void {
         for (const alias of manifest.aliases ?? []) {
             if (aliasToView.get(alias) === manifest.view) aliasToView.delete(alias);
         }
-    };
-}
-
-/** A manifest for an existing ViewModel class, so views register unchanged. */
-export function legacyAdapter(
-    view: string,
-    viewModelClass: ViewModelClass,
-    opts: {
-        label?: string;
-        icon?: string;
-        aliases?: string[];
-        lifecycle?: PaneTabCapabilities["lifecycle"];
-        capabilities?: Omit<PaneTabCapabilities, "lifecycle">;
-        tab?: PaneTabDescriptor;
-        chrome?: PaneTabManifest["chrome"];
-    } = {}
-): PaneTabManifest {
-    return {
-        apiVersion: 1,
-        view,
-        aliases: opts.aliases,
-        label: opts.label ?? view,
-        icon: opts.icon ?? "square",
-        capabilities:
-            opts.lifecycle || opts.capabilities
-                ? { ...opts.capabilities, ...(opts.lifecycle ? { lifecycle: opts.lifecycle } : {}) }
-                : undefined,
-        tab: opts.tab,
-        chrome: opts.chrome,
-        viewModelClass,
     };
 }
 

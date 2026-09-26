@@ -512,8 +512,6 @@ declare global {
     // A SolidJS function component
     declare type ViewComponent<T extends ViewModel = ViewModel> = (props: ViewComponentProps<T>) => JSX.Element;
 
-    type ViewModelClass = new (blockId: string, nodeModel: BlockNodeModel) => ViewModel;
-
     /**
      * What a view type can override or add on the ONE shared pane chrome
      * (`renderPaneChrome`, PaneChrome.tsx). Every field is optional:

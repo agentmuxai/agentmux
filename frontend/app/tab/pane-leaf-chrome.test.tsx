@@ -18,7 +18,8 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
-import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 
 // Module-level, reset in afterEach — read by the mocked Block below (via a
 // live binding, not a snapshot: the factory body runs lazily on every
@@ -50,7 +51,7 @@ let lastChromeNodeModel: NodeModel | null = null;
 // the real term/agent/browser/editor manifests.
 for (const view of ["agent", "term", "browser", "editor", "help", "sysinfo", "settings", "toolchain", "swarm"]) {
     const keepAlive = ["agent", "term", "browser", "editor"].includes(view);
-    registerPaneTab(legacyAdapter(view, class {} as any, keepAlive ? { lifecycle: "keepAlive" } : {}));
+    registerPaneTab(stubPaneTab(view, keepAlive ? { lifecycle: "keepAlive" } : {}));
 }
 vi.mock("@/app/element/PaneChrome", () => ({
     renderPaneChromeShell: (_nodeModel: NodeModel, content: JSX.Element) => (

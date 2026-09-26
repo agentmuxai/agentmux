@@ -66,7 +66,8 @@ function validate(exported: unknown, entry: WidgetConfigType, view: string): Pan
     }
     if (m.view !== view) return `it declares view "${String(m.view)}", widgets.json opens "${view}"`;
     if (typeof m.create !== "function") return "it has no create(ctx)";
-    if (m.viewModelClass != null) return "a widget can't supply a ViewModel class";
+    // The pre-contract class path is gone; say so rather than ignore it.
+    if ((m as { viewModelClass?: unknown }).viewModelClass != null) return "a widget can't supply a ViewModel class";
     return {
         ...(m as PaneTabManifest),
         label: typeof m.label === "string" && m.label ? m.label : entry.label || view,
