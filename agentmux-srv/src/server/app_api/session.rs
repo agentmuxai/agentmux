@@ -62,6 +62,20 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                             )
                             .unwrap_or_default();
                     }
+                    // The head of the agent's chain, for the spawn's resume
+                    // gate. The UID comes from the pane's agent row, as the
+                    // spawn env's does (`persisted_agent_identity`).
+                    input.chain_head_session_id = mstore
+                        .instance_get_active_for_block(&block_id)
+                        .ok()
+                        .flatten()
+                        .map(|instance| instance.id)
+                        .filter(|uid| !uid.trim().is_empty())
+                        .and_then(|uid| {
+                            let gfs = crate::backend::agent_session::global_transcript_store()?;
+                            crate::backend::continuity_segments::chain_head(gfs, uid.trim())
+                        })
+                        .unwrap_or_default();
                     crate::backend::resume_preflight::preflight(&input)
                 })
                 .await
@@ -156,6 +170,7 @@ fn preflight_input_from_meta(
         working_dir: obj::meta_get_string(meta, "cmd:cwd", ""),
         config_dir,
         history_session_id: String::new(),
+        chain_head_session_id: String::new(),
     }
 }
 
