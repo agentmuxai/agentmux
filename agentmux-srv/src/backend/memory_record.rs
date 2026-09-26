@@ -119,6 +119,10 @@ pub(crate) struct Heads {
     /// still holds it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub held: BTreeMap<String, BTreeMap<String, String>>,
+    /// `__conflict_` files MEMORY.md has been given a line for, so a line
+    /// someone removes on purpose isn't added back.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub indexed_conflicts: std::collections::BTreeSet<String>,
     /// Fields a newer build added, kept when this build rewrites the file.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -399,6 +403,23 @@ pub(crate) fn hold_for_adoption(fs: &FileStore, agent_uid: &str, dir_id: &str, f
             per_dir.insert(file.clone(), sha.clone());
         }
         write_heads(z, &heads)
+    })
+}
+
+/// Remember that MEMORY.md has had a line for each of `files`.
+pub(crate) fn mark_conflicts_indexed(fs: &FileStore, agent_uid: &str, files: &[String]) -> Result<(), StoreError> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let zone = zone_or_err(agent_uid)?;
+    fs.zone_txn(&zone, |z| {
+        let mut heads = read_heads(z.read(HEADS_FILE)?)?;
+        let before = heads.indexed_conflicts.len();
+        heads.indexed_conflicts.extend(files.iter().cloned());
+        if heads.indexed_conflicts.len() != before {
+            write_heads(z, &heads)?;
+        }
+        Ok(())
     })
 }
 

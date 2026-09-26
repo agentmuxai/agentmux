@@ -107,6 +107,16 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.noPadding?.()).toBe(true);
     });
 
+    it("maps rename onto the header's editable title", async () => {
+        const rename = vi.fn(() => Promise.resolve());
+        const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
+            component: () => null as any,
+            rename,
+        });
+        await vm.setViewName?.("Posa");
+        expect(rename).toHaveBeenCalledWith("Posa");
+    });
+
     it("maps a live header icon", () => {
         const icon = { elemtype: "iconbutton", icon: "file-code" } as any;
         const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
@@ -183,5 +193,6 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.paste).toBeUndefined();
         expect(vm.setProgressBarMount).toBeUndefined();
         expect(vm.blockBg).toBeUndefined();
+        expect(vm.setViewName).toBeUndefined();
     });
 });

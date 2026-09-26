@@ -9,7 +9,6 @@
 // reproduce the tables they replace exactly; a view with none there keeps
 // the defaults (its name, a square).
 
-import { AgentViewModel } from "@/app/view/agent";
 import { armoryPaneTab } from "@/app/view/armory/armory";
 import { browserPaneTab } from "@/app/view/browser/browser";
 import { dronePaneTab } from "@/app/view/drone/drone";
@@ -25,8 +24,7 @@ import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { wardenPaneTab } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { terminalPaneTab } from "@/view/term/term";
-import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "@/app/view/agent/agent-pane-tab";
-import { buildAgentPaneChromeModel } from "@/app/view/agent/agent-view";
+import { agentPaneTabManifest } from "@/app/view/agent/agent-manifest";
 import { getPaneTab, legacyAdapter, registerPaneTab } from "./pane-tab-registry";
 
 const builtins = [
@@ -36,16 +34,7 @@ const builtins = [
     // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md; browser and editor per the
     // repo owner's decision, SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
     terminalPaneTab, // native — Phase 2c (keep-alive)
-    // "forge" was folded into the agent pane in v0.33.197.
-    legacyAdapter("agent", AgentViewModel as any, {
-        label: "Agent",
-        icon: "sparkles",
-        aliases: ["forge"],
-        lifecycle: "keepAlive",
-        capabilities: { header: "surface", paneZoom: {}, splitDropsMeta: AGENT_SPLIT_DROPPED_META },
-        tab: agentPaneTab,
-        chrome: buildAgentPaneChromeModel,
-    }),
+    agentPaneTabManifest, // native — Phase 2c (keep-alive)
     browserPaneTab, // native — Phase 2c (keep-alive, native surface)
     editorPaneTab, // native — Phase 2c (keep-alive, zoom base 13)
     // Native (create(ctx)) — Phase 2c. "cpuplot" is the same view under an

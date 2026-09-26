@@ -190,19 +190,19 @@ impl PersistentSubprocessController {
     /// continuation packet for a process that starts without it
     /// (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
     pub(super) fn continuation_packet(&self) -> Option<String> {
-        let (tail, starts_mid_line) = pane_history_tail(
+        let zone = global_prior_zone(self.mstore.as_deref(), &self.block_id);
+        let gfs = crate::backend::agent_session::global_transcript_store();
+        let global = zone.as_deref().zip(gfs.map(|g| &**g)).map(|(z, g)| (g, z));
+        let (tail, starts_mid_line) = packet_history_tail(
             self.filestore.as_deref(),
-            self.mstore.as_deref(),
             &self.block_id,
+            global,
             crate::backend::continuity::PACKET_TAIL_BYTES,
         )?;
         // The agent's running summary, kept beside its global transcript
         // (`continuity_state.rs`). Missing for panes that aren't anchored to
         // an agent, or until the first update has run.
-        let state = global_prior_zone(self.mstore.as_deref(), &self.block_id).and_then(|zone| {
-            let gfs = crate::backend::agent_session::global_transcript_store()?;
-            crate::backend::continuity_state::latest_state(gfs, &zone)
-        });
+        let state = global.and_then(|(g, z)| crate::backend::continuity_state::latest_state(g, z));
         crate::backend::continuity::build_continuation_packet(
             &tail,
             starts_mid_line,
@@ -759,6 +759,27 @@ pub(crate) fn pane_history_tail(
     let zone = global_prior_zone(mstore, block_id)?;
     let gfs = crate::backend::agent_session::global_transcript_store()?;
     read_transcript_tail(gfs, &zone, crate::backend::agent_session::OUTPUT_FILE, max_bytes)
+}
+
+/// The transcript a continuation packet is built from: the agent's global
+/// zone when the pane has one, else the pane's own transcript.
+///
+/// Deliberately NOT [`pane_history_tail`]'s local-first order. The zone
+/// mirrors every append to the pane file, so it holds everything the pane
+/// does, plus the conversation from earlier channels and builds. On a new
+/// channel the pane file is created by a rejected resume's own settlement
+/// (the session-outcome line and the CLI's error result), and reading it
+/// first built no packet at all while the global record held the whole
+/// conversation (REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md §4).
+pub(super) fn packet_history_tail(
+    filestore: Option<&FileStore>,
+    block_id: &str,
+    global: Option<(&FileStore, &str)>,
+    max_bytes: i64,
+) -> Option<(Vec<u8>, bool)> {
+    global
+        .and_then(|(gfs, zone)| read_transcript_tail(gfs, zone, crate::backend::agent_session::OUTPUT_FILE, max_bytes))
+        .or_else(|| filestore.and_then(|fs| read_transcript_tail(fs, block_id, PERSISTENT_OUTPUT_SUBJECT, max_bytes)))
 }
 
 /// The agent's global transcript zone, when this pane would render it:

@@ -173,6 +173,93 @@ fn no_config_dir_means_nothing_to_check_reachability_against() {
     assert_eq!(c.find_continuation_session_id(&f.config), None);
 }
 
+// ── the continuation packet's source ────────────────────────────────────
+
+const AGENT_ZONE: &str = "agent:d76da857:current";
+
+/// What a new channel's pane file holds when a rejected `--resume` settles:
+/// AgentMux's own disclosure line and the CLI's error result. No turns.
+fn settled_rejected_resume() -> [&'static str; 2] {
+    [
+        r#"{"type":"system","subtype":"agentmux_session_outcome","outcome":"fresh","continued":true,"attempted_sid":"49cc350c","actual_sid":null}"#,
+        r#"{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"49cc350c"}"#,
+    ]
+}
+
+fn write_agent_zone(fs: &FileStore, data: &[u8]) {
+    let name = crate::backend::agent_session::OUTPUT_FILE;
+    fs.make_file(AGENT_ZONE, name, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.write_file(AGENT_ZONE, name, data).unwrap();
+}
+
+fn packet_from(local: &FileStore, global: Option<(&FileStore, &str)>) -> Option<String> {
+    let (tail, mid) = super::super::resume_retry::packet_history_tail(
+        Some(local),
+        "block",
+        global,
+        crate::backend::continuity::PACKET_TAIL_BYTES,
+    )?;
+    crate::backend::continuity::build_continuation_packet(&tail, mid, None)
+}
+
+/// The 2026-09-25 incident (REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md
+/// §4): on a new channel the pane file is created by the settlement's own
+/// lines, which must not hide the agent's record of the conversation.
+#[test]
+fn a_new_channels_pane_file_does_not_hide_the_agents_record() {
+    let local = FileStore::open_in_memory().unwrap();
+    write_pane_transcript(&local, &stream(&settled_rejected_resume()));
+    let global = FileStore::open_in_memory().unwrap();
+    let [outcome, error] = settled_rejected_resume();
+    let history = [
+        r#"{"type":"user","message":{"role":"user","content":"make the history pane open at the latest turn"}}"#,
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}}"#,
+        outcome,
+        error,
+    ];
+    write_agent_zone(&global, &stream(&history));
+
+    let packet = packet_from(&local, Some((&global, AGENT_ZONE))).expect("the agent's record is carried");
+    assert!(packet.contains("make the history pane open at the latest turn"), "{packet}");
+}
+
+/// A first message already echoed into the new pane file is still not the
+/// conversation: the record must come from the agent's zone, not from it.
+#[test]
+fn a_lone_new_message_in_the_pane_file_does_not_replace_the_agents_record() {
+    let local = FileStore::open_in_memory().unwrap();
+    let [outcome, error] = settled_rejected_resume();
+    let echoed = r#"{"type":"user","message":{"role":"user","content":"u there"}}"#;
+    write_pane_transcript(&local, &stream(&[outcome, error, echoed]));
+    let global = FileStore::open_in_memory().unwrap();
+    let prior = r#"{"type":"user","message":{"role":"user","content":"earlier request"}}"#;
+    write_agent_zone(&global, &stream(&[prior, outcome, error, echoed]));
+
+    let packet = packet_from(&local, Some((&global, AGENT_ZONE))).expect("a packet");
+    assert!(packet.contains("earlier request"), "{packet}");
+}
+
+/// A pane not anchored to an agent has no zone; its own transcript is the
+/// whole record.
+#[test]
+fn without_an_agent_zone_the_packet_reads_the_panes_own_transcript() {
+    let local = FileStore::open_in_memory().unwrap();
+    let ask = r#"{"type":"user","message":{"role":"user","content":"pane-only request"}}"#;
+    write_pane_transcript(&local, &stream(&[ask]));
+    let packet = packet_from(&local, None).expect("a packet");
+    assert!(packet.contains("pane-only request"), "{packet}");
+}
+
+#[test]
+fn an_empty_agent_zone_falls_back_to_the_panes_own_transcript() {
+    let local = FileStore::open_in_memory().unwrap();
+    let ask = r#"{"type":"user","message":{"role":"user","content":"pane-only request"}}"#;
+    write_pane_transcript(&local, &stream(&[ask]));
+    let global = FileStore::open_in_memory().unwrap();
+    let packet = packet_from(&local, Some((&global, AGENT_ZONE))).expect("a packet");
+    assert!(packet.contains("pane-only request"), "{packet}");
+}
+
 /// Only the tail is read, so a long transcript whose id appears early and
 /// then again near the end still resolves.
 #[test]
