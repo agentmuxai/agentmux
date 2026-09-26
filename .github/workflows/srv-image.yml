@@ -7,8 +7,8 @@ name: Headless srv image
 # Not a required check, so workflow-level `paths:` is fine here (ci-pr.yml bans
 # it only for required workflows, which would sit Pending forever). It runs when
 # anything the image is built from changes: the crates it compiles (and
-# agentmux-common, which they share), the workspace manifests and lockfile, the
-# repo-root files srv embeds, and the Docker inputs. Plus on demand.
+# agentmux-common, which they share), the workspace manifests, lockfile and Cargo
+# config, the repo-root files srv embeds, and the Docker inputs. Plus on demand.
 
 on:
   pull_request:
@@ -18,6 +18,7 @@ on:
       - '.github/workflows/srv-image.yml'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.cargo/**'
       - '*/Cargo.toml'
       - 'agentmux-srv/**'
       - 'agentmux-common/**'
@@ -70,7 +71,9 @@ jobs:
           [ "$status" = healthy ]
 
           # srv reports where it wrote the generated key; the key itself is never printed.
-          docker logs srv 2>&1 | grep -q 'auth key written to'
+          # Captured first: `docker logs | grep -q` would SIGPIPE docker under pipefail.
+          logs=$(docker logs srv 2>&1)
+          grep 'auth key written to' <<<"$logs"
           key_file=$(docker exec srv sh -c 'find "$HOME/.agentmux" -name srv-auth-key')
           echo "key file: $key_file"
           [ "$(docker exec srv stat -c %a "$key_file")" = 600 ]
