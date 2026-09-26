@@ -14,6 +14,33 @@ fn drop_background_if_no_tray(cmd: &mut tokio::process::Command, tray_unavailabl
     }
 }
 
+/// Tell the host to hold its "main" window hidden, or make sure it is not
+/// told so by an inherited env.
+fn set_start_hidden(cmd: &mut tokio::process::Command) {
+    if start_hidden(crate::autostart::login_start(), crate::tray::unavailable()) {
+        cmd.env("AGENTMUX_START_HIDDEN", "1");
+    } else {
+        cmd.env_remove("AGENTMUX_START_HIDDEN");
+    }
+}
+
+/// Set once the first host has been spawned, hidden or not.
+static FIRST_HOST_SPAWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Should this host hold its "main" window hidden
+/// (`SPEC_START_WITH_OS_2026_09_25.md` §3.3)? Only for a login start, only when
+/// the tray is up (no tray means a normal window, never an invisible process),
+/// and only for the first host: a host restarted after a crash must come back
+/// visible, since the user may already have been using it.
+fn start_hidden(login_start: bool, tray_unavailable: bool) -> bool {
+    let first = !FIRST_HOST_SPAWNED.swap(true, std::sync::atomic::Ordering::SeqCst);
+    start_hidden_decision(login_start, tray_unavailable, first)
+}
+
+fn start_hidden_decision(login_start: bool, tray_unavailable: bool, first_host: bool) -> bool {
+    login_start && !tray_unavailable && first_host
+}
+
 /// Spawn the CEF host suspended, assign it to the launcher's Job Object, and
 /// resume it. Returns the running child, or `None` if any step failed — the
 /// caller decides (fatal on first launch, give-up on a restart). `splash_event`
@@ -91,6 +118,7 @@ pub(crate) fn spawn_host_supervised(
         .creation_flags(CREATE_SUSPENDED)
         .kill_on_drop(false); // J0 handles cleanup.
     drop_background_if_no_tray(&mut host_cmd, crate::tray::unavailable());
+    set_start_hidden(&mut host_cmd);
     if let Some(dir) = host_runtime_dir {
         host_cmd.env("AGENTMUX_HOME", dir);
     }
@@ -202,6 +230,7 @@ pub(crate) fn spawn_host_unix(
         // its Job Object.
         .process_group(0);
     drop_background_if_no_tray(&mut host_cmd, crate::tray::unavailable());
+    set_start_hidden(&mut host_cmd);
     if disable_gpu {
         host_cmd.arg("--disable-gpu");
     }
@@ -538,5 +567,13 @@ mod tray_fallback_tests {
         let env = host_env(false, &["agentmux".to_string()]);
         assert_eq!(env.len(), 2, "{env:?}");
         assert!(env.iter().all(|(_, v)| v.is_some()), "{env:?}");
+    }
+
+    #[test]
+    fn only_the_first_host_of_a_login_start_with_a_tray_starts_hidden() {
+        assert!(super::start_hidden_decision(true, false, true));
+        assert!(!super::start_hidden_decision(false, false, true), "a manual start shows its window");
+        assert!(!super::start_hidden_decision(true, true, true), "no tray: a window, never an invisible process");
+        assert!(!super::start_hidden_decision(true, false, false), "a restarted host comes back visible");
     }
 }

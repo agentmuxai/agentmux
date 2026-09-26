@@ -332,10 +332,11 @@ pub struct AppState {
     /// for why step e ≠ delete here.
     pub window_meta: Mutex<HashMap<String, WindowMeta>>,
 
-    /// Labels of windows opened by `open_subwindow` WITH an `initial_view`
-    /// — today only the credential- and memory-adoption approval pages. They
-    /// render that one view, never workspace panes, and the browser API never
-    /// resolves a pane into them (#3681 review). Tracked by label rather than
+    /// Labels of the approval windows: subwindows opened by `open_subwindow`
+    /// with one of the approval views (`commands::window::is_approval_view` —
+    /// the credential- and memory-adoption approval pages). They render that
+    /// one view, never workspace panes, and the browser API never resolves a
+    /// pane into them (#3681 review). Tracked by label rather than
     /// derived from `WindowKind::Subwindow`: floaters are recorded as
     /// `Subwindow` too, and a session restore recreates a subwindow without
     /// its view, as an ordinary pane-hosting window. Removed on close.
@@ -693,6 +694,10 @@ pub struct AppState {
     /// plus an unbounded `send` is allocation-free and never blocks.
     pub background_audit_tx:
         std::sync::OnceLock<std::sync::mpsc::Sender<crate::background_audit::AuditEntry>>,
+
+    /// Login start: hold "main" hidden until a window is requested
+    /// (`crate::start_hidden`).
+    pub start_hidden: crate::start_hidden::StartHidden,
 }
 
 impl Default for AppState {
@@ -783,6 +788,7 @@ impl Default for AppState {
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
             background_audit: Mutex::new(crate::background_audit::BackgroundAudit::default()),
             background_audit_tx: std::sync::OnceLock::new(),
+            start_hidden: crate::start_hidden::StartHidden::from_env(),
             promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }

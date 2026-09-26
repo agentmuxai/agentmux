@@ -1,7 +1,7 @@
 # SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates
 
 **Date:** 2026-09-25
-**Status:** active — the one-property switch (§3.9) and most of Phase 1 ship with this doc in PR #3788; the rest is not started. See §6.
+**Status:** active — Phases 0, 1 (#3788), 1b and 2 are built; Phases 3 and 4 are not started. See §6.
 **Author:** Maricon
 **Trigger:** Repo owner: *"we also want to design a robust 'start with OS' feature."*
 **Builds on:** `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §4 (mechanism choice per platform, WS2)
@@ -102,33 +102,55 @@ that points at an old version or a moved file. It rewrites only while the settin
 never enable anything by itself. A target that no longer exists is handled by `TryExec` on Linux; a
 Broken/Repair status in Settings is Phase 3.
 
-### 3.3 Start quietly: no first window when the tray is up
+### 3.3 Start quietly: "main" loads hidden when the tray is up (built)
 
-New host env `AGENTMUX_START_HIDDEN`, set by the launcher only when **both** hold:
+The launcher sets host env `AGENTMUX_START_HIDDEN` only when **all** of these hold
+(`host_spawn::start_hidden_decision`):
 
-- it was started with `--background` (a login start, never a manual one), and
-- the tray started (`!tray::unavailable()`, from #3785).
+- it was started with `--background` (a login start, never a manual one);
+- the tray started (`!tray::unavailable()`, from #3785), so there is always an icon to reach it from;
+- this is the **first** host it spawns. A host restarted after a crash comes back visible, because the
+  user may already have been using it.
 
-With it, `on_context_initialized` skips `window_create_top_level`; the host still initializes and
-reports to the launcher. The tray's "Open AgentMux" (already wired as `open_new_window`) creates the
-first window. Without it (manual launch, or no tray) the host opens a window as today. **No tray means
-a window**, never a hidden process (§1 item 3).
+**The "main" window is still created and loaded**; only its first reveal is held
+(`agentmux-cef/src/start_hidden.rs`, hooked into `reveal_top_level_window`, the path every first reveal
+and its retries take). The first design here, skipping `window_create_top_level` entirely, was
+rejected after mapping what depends on "main":
 
-The launcher's orphan and watchdog logic already tolerate zero windows in background mode
-(`reducer/window.rs:259`, `cef/wrr/win_event.rs:416`), so a host with no windows from the start is the
-same state as "user closed the last window".
+- the frontend's session restore and the host's multi-window reproject run only from "main";
+- agents start only when a pane mounts in a window (`ControllerResync`), so with no window no agent
+  would run at login, which defeats the point;
+- the window pool starts when "main" registers;
+- `open_new_window` with zero live browsers cannot create a window (it clones its CEF client from an
+  existing one), and the first window would have been force-labelled "main" with a mismatched queue
+  entry.
+
+A hidden "main" avoids all of these: the app is exactly as it would be after a normal start, just not
+on screen.
+
+**The first request for a window shows "main"** instead of opening a second, blank one:
+`open_new_window` (tray *New Window*, a relaunch, the macOS Dock with no visible window) and focusing
+"main" (a notification click, the Dock). If "main" has not finished loading yet, the hold is released
+and its normal load path shows it. Later requests open windows as usual.
+
+**Audit (WS4):** the held period is recorded in the background audit log like a period with every
+window closed (`WentUnattended` on the first held reveal, `Observed` when it is shown), under the same
+lock as the reducer's own transitions.
+
+**Splash:** a login start skips the splash (`splash_config::splash_disabled`); on macOS that also
+routes the start through the headless AppKit pump the menu-bar item needs. **No tray means a window**,
+never a hidden process (§1 item 3).
 
 ### 3.4 Login readiness
 
-- **Linux tray:** in `--background` mode only, the tray start waits for the StatusNotifier watcher
-  instead of failing after 5 s. It watches D-Bus `NameOwnerChanged` for `org.kde.StatusNotifierWatcher`
-  and gives up after **45 s**. The host spawn waits for that decision, since it needs
-  `tray::unavailable()` to choose between hidden and windowed (§3.3). A manual start keeps the 5 s
-  bound. Nobody is looking at a login start, and a late-but-correct tray beats a wrong window.
-- **XDG entry:** add `X-GNOME-Autostart-Delay=10`, the Linux equivalent of the Windows 30 s delay.
-- **Windows:** keep the Task's 30 s delay. Also re-add the icon when Explorer restarts (the
-  `TaskbarCreated` broadcast); otherwise an Explorer crash makes the resident process invisible, which
-  breaks the WS4 rule. Verify `tray-icon` does this; if not, add it.
+- **Linux tray (built):** a login start retries the `ksni` tray start once a second for up to **45 s**
+  (`tray::LOGIN_TRAY_WAIT`) while no StatusNotifier host is registered; any other start fails fast
+  (5 s). The host spawn waits for that outcome, since it needs `tray::unavailable()` to choose between
+  hidden and windowed (§3.3). Nobody is looking at a login start, and a late-but-correct tray beats a
+  window nobody asked for.
+- **XDG entry (built):** `X-GNOME-Autostart-Delay=10`, the Linux equivalent of the Windows 30 s delay.
+- **Windows:** keep the Task's 30 s delay. Re-adding the icon when Explorer restarts is already done by
+  `tray-icon` (0.24), which re-registers on the `TaskbarCreated` broadcast; nothing to add.
 - **macOS:** the menu bar is up before login items run; no wait needed.
 
 ### 3.5 One owner, recorded in the entry
@@ -147,11 +169,13 @@ Channels are separate installs that share one login, so one entry, with the owne
 
 This keeps the existing single artifact name, so `disable()` still finds it, while fixing G5.
 
-### 3.6 A login start never opens a second instance or a window
+### 3.6 A login start never opens a second instance or a window (built)
 
 When a launcher started with `--background` loses the single-instance race, it **exits 0 without
 forwarding** `open_new_window`. A manual second launch keeps forwarding, as today. Same change in
-`supervisor/windows.rs` and `second_instance.rs`, driven by `autostart::background_requested(args)`.
+`supervisor/windows.rs` and `second_instance.rs` (`forward_for_second_instance`), driven by
+`autostart::second_instance_opens_window(args)`. The macOS reopen handler, which is a user asking for a
+window, is unchanged.
 
 ### 3.7 Platform-native registration where one exists
 
@@ -251,13 +275,13 @@ broadcasts it like every other setting.
 |---|---|---|---|
 | 0 | One property, two switches (§3.9): `app:startatlogin` off by default, Settings toggle, tray check item on all three platforms, launcher reconcile with channel ownership | **Built** (PR #3788) | G5, G9 (partly) |
 | 1 | Linux stable target via `AGENTMUX_STABLE_EXE` from AppRun and the wrappers; `TryExec` and the delay key; self-heal (§3.2) | **Built** (PR #3788) | G1, G4, G6 (Linux) |
-| 1b | `--background` second instance exits quietly (§3.6) | Not started | G8 |
-| 2 | Start hidden when the tray is up (§3.3); the Linux watcher wait (§3.4); Explorer-restart icon re-add | Not started | G2, G3 |
+| 1b | `--background` second instance exits quietly (§3.6) | **Built** (Phase 2 PR) | G8 |
+| 2 | Start hidden when the tray is up (§3.3); the Linux watcher wait (§3.4); Explorer-restart icon re-add (already in `tray-icon`) | **Built** (Phase 2 PR) | G2, G3 |
 | 3 | Status JSON; Settings status with owner and Repair (§3.8) | Not started | G9 |
 | 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | Not started | G6 (Windows), G7 |
 
-Phase 4 needs signing and packaging work that cannot be verified on the Linux dev host. Until Phase 2
-lands, a login start opens a normal window (G2), so the Settings copy no longer promises "tray only".
+Phase 4 needs signing and packaging work that cannot be verified on the Linux dev host. With Phase 2
+in, the Settings copy says again that a login start opens in the tray, without a window.
 
 ## 7. Open questions for the owner
 

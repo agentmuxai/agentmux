@@ -1,5 +1,36 @@
 # AgentMux Version History
 
+## 0.57.7 — 2026-09-26
+
+- a fresh session on a new build or channel gets the agent's record of the conversation, instead of nothing
+- srv tests no longer leave ~258 SQLite -wal/-shm files in the temp dir per run
+- fix(cef): the CEF debug port no longer accepts CDP connections from any web origin — only its own DevTools inspector (#3681, step 1)
+- The agent pane is a native pane tab (Pane Tab contract Phase 2c): its model reads and writes its own block through the host context, and the header's editable name goes through the contract's new rename. No behavior change.
+- memory: a removed conflict index line stays removed, and conflict copies aren't stacked
+- fix(agents): QuitSelf, ClosePane and FleetBulkStop learn whether the user kept the agent (the status route 404'd)
+- feat(agents): an agent's FleetBulkStop of an agent on another AgentMux instance on this machine waits for that instance's user, too
+- feat(start-at-login): one switch in Settings and in the tray menu, off by default; the login entry follows it and survives updates
+- The launcher, memory, identity, toolchain and settings panes are native pane tabs, completing Pane Tab contract Phase 2c: every built-in view is native. Their tab pills now show the icons their headers always had, and the memory pane no longer loads every bundle it never showed.
+- an agent pane never resumes a stale session: only the latest session of the agent's conversation is resumed, else the pane starts fresh with the agent's record
+- Pane Tab contract: every pane tab is built by create(ctx); the pre-contract ViewModel class path is removed. No behavior change.
+- fix(cef): the browser API drives CDP in-process, and release builds no longer run the unauthenticated CEF debug port unless AGENTMUX_CDP_PORT opts in (#3681)
+- the GlobalMemoryWrite tool says which Global Memory a write lands in
+- an agent never resumes a conversation recorded under a different Anthropic account or organization; each spawn records which identity it ran as
+- feat(errors): every error surface can be copied — foundations, redaction, and the six highest-traffic surfaces (P1)
+- after a rebuild and a new login as the same person, an agent continues its actual conversation (a native fork of the last session) instead of starting over from a summary
+- after a pane is reused, its session id no longer lands on another agent that was renamed
+- a conversation that was continued outside AgentMux (e.g. claude --resume in a terminal) is resumed as a fork instead of being appended to by a second writer
+- A launch no longer rolls an agent's shared session id back to an older one
+- fix(cef): browser-API CDP hardening from review — replies are matched to their own browser, a re-created pane fails fast, and approval subwindows are excluded from pane lookup by kind
+- An agent created from a template runs under its own slug, not one guessed from its name
+- fix(armory,packaging): the Bundles tooltip no longer promises ABF export, and the portable README no longer lists a keybindings.json nothing reads
+- an agent's first upgrade from a build before identity keys still continues its conversation across a new login of the same person
+- fix(cef): only the credential and memory-adoption approval pages are hidden from the browser API, not any window opened with a view
+- /btw side questions now work on Codex and Gemini agents too
+- feat(start-at-login): a login start opens in the tray without a window, and never opens a second one
+- Agent pane: `!cmd` shell commands work on Windows again. An AgentMux launched from the Start menu or Explorer failed every `!cmd` with "shellexec: spawn failed" (Git Bash's `sh` is now located instead of assumed to be on PATH), and once `sh` was found every command hung until the 5-minute timeout (the shell no longer inherits the server's stdin). Also: `  !cmd` with leading spaces is highlighted like `!cmd`, and the shell drawer opens at 80% of its previous default height.
+- Fix a phantom second window in the status bar: when memory pressure trimmed a warm pool window that had been used as a real window and closed, it stayed registered with no window behind it. It is now unregistered directly.
+
 ## 0.57.6 — 2026-09-25
 
 - refactor(panes): the editor and browser are native pane tabs

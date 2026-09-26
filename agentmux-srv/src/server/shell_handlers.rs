@@ -76,7 +76,8 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Invoked by the `!cmd` prefix in the agent pane composer.
     //
     // Host agents:      sh -c <cmd> in the agent's working directory (all platforms;
-    //                   Git Bash provides sh on Windows).
+    //                   Git Bash provides sh on Windows, located by
+    //                   backend::posix_shell).
     // Container agents: docker exec <container> sh -c <cmd> via bollard.
     //                   The host cmd:cwd is not valid inside the container — the
     //                   command runs in the container's own working directory.
@@ -262,8 +263,13 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Use sh -c on all platforms: agents run in a bash environment
                 // (Git Bash on Windows, sh on Unix) so Unix commands like ls/pwd/grep
                 // work consistently. cmd /C would exit 1 for any non-Windows command.
+                // On Windows `sh` is located rather than assumed to be on PATH —
+                // an Explorer-launched build's PATH has only Git\cmd, which has
+                // no sh.exe. See backend::posix_shell.
+                let shell = crate::backend::posix_shell::resolve_posix_shell()
+                    .map_err(|e| format!("shellexec: {e}"))?;
                 let mut proc = {
-                    let mut c = tokio::process::Command::new("sh");
+                    let mut c = tokio::process::Command::new(&shell);
                     c.args(["-c", &cmd.command]);
                     // shellexec runs arbitrary agent-supplied commands and, per
                     // the note below, fires on every MCP Shell tool call — so a
@@ -284,6 +290,15 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     c
                 };
+                // stdin MUST NOT be inherited. srv's own stdin is the
+                // launcher's lifeline pipe, with a thread parked in a blocking
+                // read on it (bootstrap::install_shutdown_handlers). Git Bash's
+                // MSYS runtime queries its inherited stdin at startup, and on
+                // Windows that query waits behind srv's pending read — forever,
+                // so every `!cmd` hung until the 300s timeout, `!echo hi`
+                // included. A one-shot command has no input anyway; null gives
+                // `!cat` an EOF instead of a read on srv's lifeline.
+                proc.stdin(std::process::Stdio::null());
                 proc.stdout(std::process::Stdio::piped());
                 proc.stderr(std::process::Stdio::piped());
                 // kill_on_drop: when the timeout fires the Child future is
@@ -305,7 +320,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 let mut child = proc.spawn()
-                    .map_err(|e| format!("shellexec: spawn failed: {e}"))?;
+                    .map_err(|e| format!("shellexec: spawn failed ({}): {e}", shell.display()))?;
 
                 // Capture the PID before taking stdout/stderr (id() requires
                 // the Child to still have its stdio handles on some platforms).
