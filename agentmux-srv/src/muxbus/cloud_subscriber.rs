@@ -595,11 +595,14 @@ async fn connect_and_run(
                     Some(CtrlMsg::RemoveAgent(id)) => {
                         // The agent went away here: let another instance have it.
                         {
-                            let (id, base, token, http, mstore) =
-                                (id.clone(), base.to_string(), token.to_string(), http.clone(), mstore.clone());
+                            let (id, base, token, http, mstore, agents) =
+                                (id.clone(), base.to_string(), token.to_string(), http.clone(), mstore.clone(), agents.clone());
                             tokio::spawn(async move {
                                 let token = shared_token_now(&mstore, &token).await;
-                                super::wan_lease::release(&base, &id, &token, &http).await
+                                // Skip if it was subscribed again meanwhile: its
+                                // fresh claim must not be released (Codex P2, #3897).
+                                let still_gone = || !agents.lock().unwrap().contains(&id);
+                                super::wan_lease::release(&base, &id, &token, &http, still_gone).await
                             });
                         }
                         let msg = serde_json::to_string(&ClientMsg::SubscribeRemove { agents: vec![id] })
@@ -1288,7 +1291,8 @@ pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> boo
         return false;
     }
     let token = shared_token_now(id_store, "").await;
-    super::wan_lease::release(&super::relay::rest_base_url(), &key, &token, &reqwest::Client::new()).await;
+    let still_gone = || !sub.agents.lock().unwrap().contains(&key);
+    super::wan_lease::release(&super::relay::rest_base_url(), &key, &token, &reqwest::Client::new(), still_gone).await;
     // Unsubscribe the WebSocket; the arm's own release finds nothing left.
     let _ = sub.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
     true
