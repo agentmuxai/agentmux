@@ -6412,3 +6412,75 @@ async fn a_target_running_under_another_name_is_delivered_by_uid_not_held() {
     let err = v["error"].as_str().unwrap_or("");
     assert!(!err.starts_with("agent not found"), "delivered to the UID's block: {v}");
 }
+
+// The LAN listeners (`backend::lan_listeners`) serve `build_routers().lan`,
+// not the full router: a LAN peer only ever calls the lan-key routes, so
+// nothing that requires the full `auth_key` is reachable off-host.
+
+fn lan_router() -> Router {
+    build_routers(test_state()).lan
+}
+
+#[tokio::test]
+async fn lan_router_serves_health() {
+    let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+    let resp = lan_router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn lan_router_serves_the_lan_forwarding_routes() {
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = lan_router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/agentmux/reactive/inject")
+        .header("X-AuthKey", "test-lan-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            serde_json::json!({"target_agent": "nonexistent", "message": "hi"}).to_string(),
+        ))
+        .unwrap();
+    let resp = lan_router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+/// Even the full key reaches nothing else over the LAN: the routes are not
+/// there at all (404), so the LAN side has no full-key surface to probe.
+#[tokio::test]
+async fn lan_router_does_not_serve_full_key_routes() {
+    for (method, uri) in [
+        (Method::POST, "/agentmux/service"),
+        (Method::GET, "/ws"),
+        (Method::GET, "/agentmux/discovery"),
+        (Method::GET, "/agentmux/stream-local-file?path=/etc/hostname"),
+    ] {
+        let req = Request::builder()
+            .method(method.clone())
+            .uri(uri)
+            .header("X-AuthKey", "test-secret-key")
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"service":"client","method":"GetClientData"}"#))
+            .unwrap();
+        let resp = lan_router().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{method} {uri} must not be served on LAN");
+    }
+}
+
+#[tokio::test]
+async fn full_router_still_serves_full_key_routes() {
+    let req = Request::builder()
+        .uri("/agentmux/discovery")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_routers(test_state()).full.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
