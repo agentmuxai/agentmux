@@ -5092,3 +5092,67 @@
             "a deleted agent must not come back through the registry overlay",
         );
     }
+
+/// #3580: after pane reuse, a session id captured on the pane goes to the
+/// agent the pane runs — not to another agent whose row also names the
+/// block and was bumped by a rename.
+#[cfg(test)]
+mod instance_by_block_3580 {
+    use super::*;
+
+    fn agent_on_block(store: &Store, id: &str, block: &str, started_at: i64, updated_at: i64) {
+        let mut a = sample_agent(id, id);
+        store.agent_def_insert(&mut a).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE db_agents SET last_block_id = ?1, started_at = ?2, updated_at = ?3 WHERE id = ?4",
+                rusqlite::params![block, started_at, updated_at, id],
+            )
+            .unwrap();
+    }
+
+    fn block_showing(store: &Store, block: &str, agent_id: &str) {
+        let mut b = crate::backend::obj::Block {
+            oid: block.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!(agent_id));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut b).unwrap();
+    }
+
+    #[test]
+    fn a_renamed_agent_no_longer_takes_the_pane_from_the_one_running() {
+        let store = Store::open_in_memory().unwrap();
+        // A ran here first; then B was launched in the same pane; then A
+        // was renamed, bumping its updated_at past B's.
+        agent_on_block(&store, "agent-a", "blk", 100, 900);
+        agent_on_block(&store, "agent-b", "blk", 200, 300);
+        assert_eq!(store.instance_get_by_block_id("blk").unwrap().unwrap().id, "agent-b", "latest launch, not latest update");
+    }
+
+    #[test]
+    fn the_block_s_own_agent_wins_while_its_latest_launch_is_this_block() {
+        let store = Store::open_in_memory().unwrap();
+        agent_on_block(&store, "agent-a", "blk", 100, 100);
+        agent_on_block(&store, "agent-b", "blk", 200, 200);
+        block_showing(&store, "blk", "agent-a");
+        assert_eq!(store.instance_get_by_block_id("blk").unwrap().unwrap().id, "agent-a");
+        // If the block names an agent whose latest launch moved elsewhere,
+        // fall back to this block's latest launch.
+        block_showing(&store, "blk2", "agent-a");
+        agent_on_block(&store, "agent-c", "blk2", 50, 50);
+        assert_eq!(store.instance_get_by_block_id("blk2").unwrap().unwrap().id, "agent-c");
+    }
+}
