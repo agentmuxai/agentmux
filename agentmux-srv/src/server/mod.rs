@@ -326,7 +326,13 @@ pub fn build_router(state: AppState) -> Router {
 
 /// Build both routers with all routes, auth middleware, and CORS.
 pub fn build_routers(state: AppState) -> SrvRouters {
-    // CORS: reflect only loopback origins.
+    build_routers_with(state, crate::headless::frontend_dir())
+}
+
+/// [`build_routers`], with the frontend directory passed in (headless
+/// `--frontend-dir`, or `None`).
+pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::path::Path>) -> SrvRouters {
+    // CORS: reflect only loopback origins, plus any headless `--allowed-origin`.
     //
     // Before the 2026-05-11 security audit (C3) this allowed any origin
     // (matching the historical Go pkg/web/web.go). That made every web
@@ -345,7 +351,7 @@ pub fn build_routers(state: AppState) -> SrvRouters {
     use tower_http::cors::AllowOrigin;
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _req| {
-            origin.to_str().is_ok_and(is_loopback_origin)
+            origin.to_str().is_ok_and(is_allowed_origin)
         }))
         .allow_methods(Any)
         .allow_headers(vec![
@@ -750,8 +756,17 @@ pub fn build_routers(state: AppState) -> SrvRouters {
             auth_middleware,
         ));
 
-    // Health endpoint (no auth)
-    let health = Router::new().route("/", get(health_handler));
+    // Health endpoint (no auth). `/health` always; `/` too, except on the
+    // full router when headless `--frontend-dir` serves the frontend there
+    // (`with_frontend`). The LAN router's health never changes.
+    let health = Router::new()
+        .route("/", get(health_handler))
+        .route("/health", get(health_handler));
+    let full_health = if frontend_dir.is_some() {
+        Router::new().route("/health", get(health_handler))
+    } else {
+        health.clone()
+    };
 
     // WhatsApp Cloud API webhook receiver (no auth). Meta's servers call
     // these directly and cannot supply the X-AuthKey header auth_middleware
@@ -798,15 +813,30 @@ pub fn build_routers(state: AppState) -> SrvRouters {
         .with_state(state.clone());
 
     let full = Router::new()
-        .merge(health)
+        .merge(full_health)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
-        .merge(authed_routes)
-        .layer(version_header)
-        .layer(cors)
-        .with_state(state);
+        .merge(authed_routes);
+    // Before the layers: `Router::layer` wraps only the routes and fallback
+    // that exist when it's called, so a fallback added afterwards would skip
+    // CORS and the version header (ReAgent P1 on #3900).
+    let full = match frontend_dir {
+        Some(dir) => with_frontend(full, dir),
+        None => full,
+    };
+    let full = full.layer(version_header).layer(cors).with_state(state);
 
     SrvRouters { full, lan }
+}
+
+/// Serve the built frontend in `dir` for every path no route claims, `/`
+/// included. Unauthenticated, like the CEF host's static server: the bundle
+/// holds no secrets, and srv's key still guards every API route. Unknown
+/// paths get `index.html`. Full router only; the LAN router never serves it.
+fn with_frontend(router: Router<AppState>, dir: &std::path::Path) -> Router<AppState> {
+    use tower_http::services::{ServeDir, ServeFile};
+    let index = ServeFile::new(dir.join("index.html"));
+    router.fallback_service(ServeDir::new(dir).fallback(index))
 }
 
 // ---- Health ----
@@ -3077,10 +3107,18 @@ async fn handle_window_focus(
 
 // ---- Origin checks ----
 
+/// A loopback origin ([`is_loopback_origin`]), or one a headless srv was
+/// told to accept with `--allowed-origin` (a reverse proxy's public origin).
+/// Used by CORS and by [`ws_origin_guard`].
+pub(crate) fn is_allowed_origin(origin: &str) -> bool {
+    is_loopback_origin(origin) || crate::headless::is_extra_allowed_origin(origin)
+}
+
 /// `http://127.0.0.1` or `http://localhost`, optionally with a numeric
-/// port: the only origins srv's own frontend is ever served from (the CEF
-/// host's loopback server, or the Vite dev server). Used by CORS and by
-/// [`ws_origin_guard`].
+/// port: where the desktop frontend is served from (the CEF host's loopback
+/// server, or the Vite dev server). A headless srv behind a reverse proxy can
+/// also accept the proxy's origin; see [`is_allowed_origin`], which CORS and
+/// [`ws_origin_guard`] use.
 pub(crate) fn is_loopback_origin(origin: &str) -> bool {
     ["http://127.0.0.1", "http://localhost"].iter().any(|host| {
         origin.strip_prefix(host).is_some_and(|rest| {
@@ -3092,7 +3130,8 @@ pub(crate) fn is_loopback_origin(origin: &str) -> bool {
     })
 }
 
-/// Refuse a WebSocket upgrade that carries a non-loopback `Origin`.
+/// Refuse a WebSocket upgrade whose `Origin` is neither loopback nor allowed
+/// by `--allowed-origin` ([`is_allowed_origin`]).
 ///
 /// CORS does not apply to WebSocket upgrades, so without this any web page
 /// holding the auth key could open `/ws` (cross-site WebSocket hijacking).
@@ -3103,8 +3142,8 @@ pub(crate) fn is_loopback_origin(origin: &str) -> bool {
 async fn ws_origin_guard(req: Request<Body>, next: Next) -> Response {
     let origin = req.headers().get(header::ORIGIN).map(|v| v.to_str().unwrap_or(""));
     match origin {
-        Some(o) if !is_loopback_origin(o) => {
-            tracing::warn!(origin = %o, "refused /ws upgrade from a non-loopback origin");
+        Some(o) if !is_allowed_origin(o) => {
+            tracing::warn!(origin = %o, "refused /ws upgrade from an origin that isn't allowed");
             (StatusCode::FORBIDDEN, Json(json!({"error": "origin not allowed"}))).into_response()
         }
         _ => next.run(req).await,
