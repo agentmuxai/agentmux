@@ -505,7 +505,7 @@ fn a_repository_root_and_its_worktree_leave_their_shared_folder_alone() {
 fn a_subdirectory_agent_shares_the_repository_roots_folder() {
     let f = fixture();
     let base = tempfile::tempdir().unwrap();
-    let repo = base.path().canonicalize().unwrap().join("solo");
+    let repo = crate::backend::claude_layout::real_path(base.path()).join("solo");
     std::fs::create_dir_all(repo.join("sub")).unwrap();
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     let cfg = f.cfg();
@@ -621,7 +621,7 @@ fn a_second_pass_while_one_runs_skips() {
 fn an_agent_in_another_channel_sharing_the_folder_keeps_it_shared() {
     let f = fixture();
     let base = tempfile::tempdir().unwrap();
-    let repo = base.path().canonicalize().unwrap().join("solo");
+    let repo = crate::backend::claude_layout::real_path(base.path()).join("solo");
     std::fs::create_dir_all(repo.join("sub")).unwrap();
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     let (root_s, sub_s, cfg) = (repo.to_string_lossy().into_owned(), repo.join("sub").to_string_lossy().into_owned(), f.cfg());
