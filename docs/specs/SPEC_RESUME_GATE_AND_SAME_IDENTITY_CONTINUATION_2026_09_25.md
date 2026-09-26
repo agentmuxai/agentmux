@@ -194,7 +194,7 @@ Preconditions, all required. Any failure means **Refuse** (fresh + packet):
 
 Action:
 1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>`, write the marker
-   `<dest>.jsonl.agentmux-relocated` (owner UID, source path, size), then rename to
+   `<dest>.jsonl.<token>.agentmux-relocated` (owner UID, source path, size), then rename to
    `<dest>.jsonl`. The CLI never sees a partial file (H5), and never sees a copy without its
    marker, so a crash can't leave an unmarked duplicate (I4).
 2. Spawn with `--resume <head> --fork-session`. The original stays untouched (I3), and the new
@@ -222,6 +222,12 @@ Without it, the head stays the source segment, and the next spawn relocates agai
 same-id case of step 3 is settled on its own once a result frame confirms the resume, since
 capture never adopts an id the controller already holds: the id is recorded on the segment
 and the copy's marker goes.
+
+Each relocation's marker has its own name (`<sid>.jsonl.<token>.agentmux-relocated`), and
+the spawn holds that marker. Settling (step 3) deletes the spawn's own marker first, and
+touches the copy or records the session only if that succeeded. A superseded spawn's
+late settle therefore can't unmark or remove a replacement's copy placed at the same path
+after a sweep. Markers from before tokens (`<sid>.jsonl.agentmux-relocated`) still sweep.
 
 ### 4.4 Fork when the file changed outside AgentMux (H4)
 Each segment's `End` records `provider_bytes_end`: the size of the provider session file when

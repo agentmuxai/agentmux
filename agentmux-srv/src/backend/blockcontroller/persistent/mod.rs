@@ -308,7 +308,7 @@ struct PersistentInner {
     /// `--resume … --fork-session` from
     /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.3).
     /// Taken by that spawn; removed if it ends up resuming nothing.
-    fork_copy: Option<std::path::PathBuf>,
+    fork_copy: Option<crate::backend::continuity_relocate::Relocated>,
     /// The next spawn resumes with `--fork-session` (a relocation, or a
     /// session that grew outside AgentMux, spec §4.4). Taken by that spawn.
     fork_next: bool,

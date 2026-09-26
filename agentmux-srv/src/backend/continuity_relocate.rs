@@ -15,6 +15,8 @@
 //! other agent's copy is touched. The marker is written before the copy
 //! takes its real name: a copy is never visible to the CLI without one, so
 //! a crash can't leave a lasting second file with the head's id (spec §3 I4).
+//! Each marker's name carries a token of its own, so a relocation settles
+//! only its own copy, never a later one placed at the same path.
 
 use std::path::{Path, PathBuf};
 
@@ -77,11 +79,21 @@ pub(crate) fn is_resumable_file(path: &Path) -> bool {
         .is_some_and(|l| serde_json::from_str::<serde_json::Value>(l).is_ok())
 }
 
+/// A copy [`relocate`] placed, with the marker that makes it this
+/// relocation's. Each relocation's marker has its own name, so holding one
+/// is ownership: once a sweep has taken it (and a later relocation placed a
+/// new copy at the same path, under a new marker), settling through the old
+/// handle finds its marker gone and touches nothing (codex P1 on #3907).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Relocated {
+    pub copy: PathBuf,
+    marker: PathBuf,
+}
+
 /// Copy `src` in as session `sid` for `cwd` under `dest_config_dir`, marked
 /// as `owner_uid`'s. Refuses when the destination already exists: an
 /// existing file with the head's id is never overwritten (spec §4.3 (5)).
-/// Returns the copy's path.
-pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, owner_uid: &str) -> Result<PathBuf, String> {
+pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, owner_uid: &str) -> Result<Relocated, String> {
     let dest = session_file_path(dest_config_dir, cwd, sid).ok_or("no destination path")?;
     if dest.exists() {
         return Err(format!("{} already exists", dest.display()));
@@ -90,7 +102,7 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let tmp = dir.join(format!("{sid}.jsonl{TMP_INFIX}{owner_uid}"));
     let bytes = std::fs::copy(src, &tmp).map_err(|e| format!("copy {}: {e}", src.display()))?;
-    let marker = marker_for(&dest);
+    let marker = marker_for(&dest, &uuid::Uuid::new_v4().simple().to_string());
     let record = serde_json::json!({ "owner_uid": owner_uid, "source": src.to_string_lossy(), "bytes": bytes });
     let placed = std::fs::write(&marker, record.to_string())
         .map_err(|e| format!("marker {}: {e}", marker.display()))
@@ -100,24 +112,41 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
         let _ = std::fs::remove_file(&marker);
         return Err(e);
     }
-    Ok(dest)
+    Ok(Relocated { copy: dest, marker })
 }
 
-/// Remove a copy [`relocate`] placed, and its marker.
-pub(crate) fn remove(copy: &Path) {
-    for p in [copy.to_path_buf(), marker_for(copy)] {
-        if let Err(e) = std::fs::remove_file(&p) {
+/// Remove a copy [`relocate`] placed, and its marker, if it is still this
+/// relocation's. The marker goes first: only a relocation that still held
+/// it removes the copy. Returns whether it did.
+pub(crate) fn remove(r: &Relocated) -> bool {
+    if !unmark(r) {
+        return false;
+    }
+    remove_file(&r.copy);
+    true
+}
+
+/// Drop a copy's marker only, keeping the copy: the CLI resumed it in place,
+/// so it is a live session now and no sweep may remove it. Returns whether
+/// the copy was still this relocation's.
+pub(crate) fn unmark(r: &Relocated) -> bool {
+    match std::fs::remove_file(&r.marker) {
+        Ok(()) => true,
+        Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(target: "continuity", path = %p.display(), error = %e, "relocated copy: remove failed");
+                tracing::warn!(target: "continuity", path = %r.marker.display(), error = %e, "relocated copy: unmark failed");
             }
+            false
         }
     }
 }
 
-/// Drop a copy's marker only, keeping the copy: the CLI resumed it in place,
-/// so it is a live session now and no sweep may remove it.
-pub(crate) fn unmark(copy: &Path) {
-    let _ = std::fs::remove_file(marker_for(copy));
+fn remove_file(p: &Path) {
+    if let Err(e) = std::fs::remove_file(p) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(target: "continuity", path = %p.display(), error = %e, "relocated copy: remove failed");
+        }
+    }
 }
 
 /// Remove every copy `owner_uid` left in `cwd`'s project dir under
@@ -135,13 +164,13 @@ pub(crate) fn sweep(config_dir: &str, cwd: &str, owner_uid: &str) -> usize {
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.ends_with(&tmp_suffix) {
             let _ = std::fs::remove_file(entry.path());
-        } else if let Some(copy_name) = name.strip_suffix(MARKER_SUFFIX) {
+        } else if let Some(copy_name) = name.strip_suffix(MARKER_SUFFIX).map(copy_name_of) {
             let owner = std::fs::read_to_string(entry.path())
                 .ok()
                 .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
                 .and_then(|v| v.get("owner_uid").and_then(|o| o.as_str()).map(str::to_string));
             if owner.as_deref() == Some(owner_uid) {
-                remove(&dir.join(copy_name));
+                remove(&Relocated { copy: dir.join(copy_name), marker: entry.path() });
                 removed += 1;
             }
         }
@@ -149,10 +178,22 @@ pub(crate) fn sweep(config_dir: &str, cwd: &str, owner_uid: &str) -> usize {
     removed
 }
 
-fn marker_for(copy: &Path) -> PathBuf {
+/// `<copy>.<token>.agentmux-relocated`: the token makes each relocation's
+/// marker its own.
+fn marker_for(copy: &Path, token: &str) -> PathBuf {
     let mut name = copy.file_name().map(|n| n.to_os_string()).unwrap_or_default();
-    name.push(MARKER_SUFFIX);
+    name.push(format!(".{token}{MARKER_SUFFIX}"));
     copy.with_file_name(name)
+}
+
+/// The copy a marker (its name without the suffix) is for. A marker from
+/// before tokens is `<sid>.jsonl.agentmux-relocated`.
+fn copy_name_of(stem: &str) -> &str {
+    if stem.ends_with(".jsonl") {
+        stem
+    } else {
+        stem.rsplit_once('.').map_or(stem, |(copy, _token)| copy)
+    }
 }
 
 #[cfg(test)]
@@ -192,12 +233,12 @@ mod tests {
     fn relocation_copies_marks_and_never_touches_the_original() {
         let (from, to) = (cfg(), cfg());
         let src = write_session(from.path(), "head", "{\"turn\":1}\n");
-        let copy = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
-        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "{\"turn\":1}\n");
-        assert_eq!(copy, session_file_path(&s(to.path()), CWD, "head").unwrap());
-        assert!(marker_for(&copy).is_file(), "a copy is never unmarked");
+        let r = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
+        assert_eq!(std::fs::read_to_string(&r.copy).unwrap(), "{\"turn\":1}\n");
+        assert_eq!(r.copy, session_file_path(&s(to.path()), CWD, "head").unwrap());
+        assert!(r.marker.is_file(), "a copy is never unmarked");
         assert_eq!(std::fs::read_to_string(&src).unwrap(), "{\"turn\":1}\n");
-        let leftovers: Vec<_> = std::fs::read_dir(copy.parent().unwrap())
+        let leftovers: Vec<_> = std::fs::read_dir(r.copy.parent().unwrap())
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().contains(TMP_INFIX))
@@ -212,27 +253,59 @@ mod tests {
         let existing = write_session(to.path(), "head", "{\"mine\":true}\n");
         assert!(relocate(&src, &s(to.path()), CWD, "head", "uid-1").is_err());
         assert_eq!(std::fs::read_to_string(&existing).unwrap(), "{\"mine\":true}\n");
-        assert!(!marker_for(&existing).exists());
+        let markers = std::fs::read_dir(existing.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(MARKER_SUFFIX))
+            .count();
+        assert_eq!(markers, 0);
     }
 
     #[test]
     fn remove_takes_the_copy_and_its_marker() {
         let (from, to) = (cfg(), cfg());
         let src = write_session(from.path(), "head", "{}\n");
-        let copy = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
-        remove(&copy);
-        assert!(!copy.exists() && !marker_for(&copy).exists());
-        remove(&copy); // gone already: quiet
+        let r = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
+        assert!(remove(&r));
+        assert!(!r.copy.exists() && !r.marker.exists());
+        assert!(!remove(&r), "gone already: quiet, and not this relocation's any more");
+    }
+
+    /// A replacement spawn swept this relocation's copy and placed its own at
+    /// the same path: the old handle settles nothing (codex P1 on #3907).
+    #[test]
+    fn a_stale_handle_never_touches_a_later_relocation_at_the_same_path() {
+        let (from, to) = (cfg(), cfg());
+        let src = write_session(from.path(), "head", "{}\n");
+        let old = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
+        assert_eq!(sweep(&s(to.path()), CWD, "uid-1"), 1);
+        let new = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
+        assert_eq!(old.copy, new.copy);
+
+        assert!(!unmark(&old));
+        assert!(!remove(&old));
+        assert!(new.copy.exists() && new.marker.exists(), "the replacement's copy is still its own");
+        assert!(unmark(&new));
+    }
+
+    #[test]
+    fn a_marker_from_before_tokens_is_still_swept() {
+        let to = cfg();
+        let copy = write_session(to.path(), "head", "{}\n");
+        let legacy = copy.with_file_name(format!("head.jsonl{MARKER_SUFFIX}"));
+        std::fs::write(&legacy, r#"{"owner_uid":"uid-1"}"#).unwrap();
+        assert_eq!(sweep(&s(to.path()), CWD, "uid-1"), 1);
+        assert!(!copy.exists() && !legacy.exists());
     }
 
     #[test]
     fn an_unmarked_copy_is_a_live_session_no_sweep_touches() {
         let (from, to) = (cfg(), cfg());
         let src = write_session(from.path(), "head", "{}\n");
-        let copy = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
-        unmark(&copy);
+        let r = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
+        assert!(unmark(&r));
         assert_eq!(sweep(&s(to.path()), CWD, "uid-1"), 0);
-        assert!(copy.exists());
+        assert!(r.copy.exists());
     }
 
     #[test]
@@ -243,13 +316,13 @@ mod tests {
         let src2 = write_session(from.path(), "other", "{}\n");
         let theirs = relocate(&src2, &s(to.path()), CWD, "other", "uid-2").unwrap();
         let ordinary = write_session(to.path(), "ordinary", "{}\n");
-        let half_made = mine.parent().unwrap().join(format!("x.jsonl{TMP_INFIX}uid-1"));
+        let half_made = mine.copy.parent().unwrap().join(format!("x.jsonl{TMP_INFIX}uid-1"));
         std::fs::write(&half_made, "{}").unwrap();
 
         assert_eq!(sweep(&s(to.path()), CWD, "uid-1"), 1);
-        assert!(!mine.exists() && !marker_for(&mine).exists());
+        assert!(!mine.copy.exists() && !mine.marker.exists());
         assert!(!half_made.exists());
-        assert!(theirs.exists() && marker_for(&theirs).exists(), "another agent's copy stays");
+        assert!(theirs.copy.exists() && theirs.marker.exists(), "another agent's copy stays");
         assert!(ordinary.exists(), "an ordinary session stays");
         assert_eq!(sweep(&s(to.path()), CWD, "uid-1"), 0);
         assert_eq!(sweep("/no/such/dir", CWD, "uid-1"), 0);
