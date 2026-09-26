@@ -480,7 +480,13 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
 
         // Get client data (reuse existing client)
         let t = performance.now();
-        const clientData = await withTimeout(ClientService.GetClientData(), RPC_TIMEOUT, "GetClientData");
+        // Reads retry a request that never got a response (#3868), as in
+        // initHostMux; CreateWindow below is a write and does not.
+        const clientData = await withTimeout(
+            retryTransient(() => ClientService.GetClientData()),
+            RPC_TIMEOUT,
+            "GetClientData"
+        );
         tlog("GetClientData", t);
 
         // If this window was opened for a tear-off, the workspace ID is in the URL.
@@ -525,7 +531,11 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
 
         // Get the workspace that was auto-created with the window
         t = performance.now();
-        const workspace = await withTimeout(WorkspaceService.GetWorkspace(newWindow.workspaceid), RPC_TIMEOUT, "GetWorkspace");
+        const workspace = await withTimeout(
+            retryTransient(() => WorkspaceService.GetWorkspace(newWindow.workspaceid)),
+            RPC_TIMEOUT,
+            "GetWorkspace"
+        );
         tlog("GetWorkspace", t);
         if (!workspace) {
             throw new Error("Workspace not created with new window");
@@ -574,6 +584,11 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         console.error("[initHostNewWindow] Initialization failed:", described);
         try { getApi().sendLog(`[initHostNewWindow] Error: ${formatDescribedError(described)}`); } catch {}
         showStartupError("New window: " + formatDescribedError(described));
+        // Card, not failStartup's auto-reload: pool and pane-pool renderers are
+        // promoted in place by host events, and reloading one after promotion
+        // is not verified to bring it back. But it is still a failed startup —
+        // throw so bootstrap doesn't log success or reset the reload budget.
+        throw new StartupFailureHandled("New window: " + formatDescribedError(described));
     }
 }
 
