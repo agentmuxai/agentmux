@@ -35,6 +35,16 @@ pub struct CliArgs {
     #[arg(long = "ws-port")]
     pub ws_port: Option<u16>,
 
+    /// Headless: serve the built frontend (a directory holding index.html)
+    /// at `/`; health stays at `/health`.
+    #[arg(long = "frontend-dir")]
+    pub frontend_dir: Option<PathBuf>,
+
+    /// Headless: also accept this browser origin (e.g. https://app.example.com)
+    /// for CORS and the /ws check, beside loopback. Repeatable.
+    #[arg(long = "allowed-origin")]
+    pub allowed_origins: Vec<String>,
+
     #[command(subcommand)]
     pub command: Option<SrvCommand>,
 }
