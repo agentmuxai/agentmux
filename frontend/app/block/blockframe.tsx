@@ -50,6 +50,7 @@ import {
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
+import { redactSecrets } from "@/app/errors/redact";
 
 const NumActiveConnColors = 8;
 
@@ -916,7 +917,8 @@ function ConnStatusOverlay({
         if (showError()) {
             errTexts.push(`error: ${connStatus()?.error}`);
         }
-        const textToCopy = errTexts.join("\n");
+        // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
+        const textToCopy = redactSecrets(errTexts.join("\n"));
         await clipboardWriteText(textToCopy);
     };
 

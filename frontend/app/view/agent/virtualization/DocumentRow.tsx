@@ -31,6 +31,9 @@ import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
+import { showCopyContextMenu } from "@/app/store/contextmenu";
+import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
+import { formatErrorReport } from "@/app/errors/error-report";
 
 export interface DocumentRowProps {
     /**
@@ -312,7 +315,23 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 </div>
             </Show>
             <Show when={props.node() && props.node().type === "agent_error"}>
-                <div class="agent-error-block" ref={setPeekRowEl} onMouseEnter={handlePeekEnter} onMouseLeave={handlePeekLeave}>
+                <div
+                    class="agent-error-block"
+                    ref={setPeekRowEl}
+                    onMouseEnter={handlePeekEnter}
+                    onMouseLeave={handlePeekLeave}
+                    // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3 —
+                    // this row is the only thing with something to copy;
+                    // the pane's own generic selection-copy menu never fires
+                    // here since nothing is selected on right-click.
+                    onContextMenu={(e) => {
+                        const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
+                        showCopyContextMenu(
+                            [{ label: "Copy error", value: formatErrorReport({ title: n.code > 0 ? `HTTP ${n.code}` : "Error", message: n.message }) }],
+                            e
+                        );
+                    }}
+                >
                     <span class="agent-error-code">
                         {(() => {
                             const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
@@ -353,6 +372,16 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             Login Again →
                         </button>
                     </Show>
+                    {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3 —
+                        icon at the row's end, shown on hover/focus. */}
+                    <CopyErrorButton
+                        variant="icon"
+                        className="agent-error-copy"
+                        report={() => {
+                            const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
+                            return formatErrorReport({ title: n.code > 0 ? `HTTP ${n.code}` : "Error", message: n.message });
+                        }}
+                    />
                     {(() => {
                         // No timestamp field exists on AgentErrorNode — estimate only,
                         // same "no time line" shape ToolBlock/MarkdownBlock use for an

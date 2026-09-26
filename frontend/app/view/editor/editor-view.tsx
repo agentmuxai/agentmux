@@ -27,6 +27,7 @@ import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
 import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
 import { installHintFor, isLspSupportedLanguage } from "./lsp/install-hints";
+import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
 
@@ -956,7 +957,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                         <code class="editor-lsp-banner-cmd">{hint!.install}</code>
                                         <button
                                             class="editor-lsp-banner-copy"
-                                            onClick={() => copyToClipboard(hint!.install)}
+                                            // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
+                                            onClick={() => copyToClipboard(redactSecrets(hint!.install))}
                                             title="Copy install command"
                                         >
                                             Copy

@@ -237,3 +237,51 @@ describe("BlockErrorBoundary — reset / reload pane", () => {
         expect(screen.getByTestId("healthy-recovered")).toBeInTheDocument();
     });
 });
+
+/**
+ * Copy-on-highlight — SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §4.2/§5.
+ * `invokeCommandMock` (already mocked above for `fe_log_structured`) is what
+ * `@/util/clipboard`'s `writeText` sits on top of, so no separate clipboard
+ * mock is needed — asserting the "write_clipboard" call is asserting the
+ * actual text that reached the transport.
+ */
+describe("BlockErrorBoundary — copy-on-highlight", () => {
+    it("redacts the selected text before it reaches the clipboard transport", async () => {
+        const BlockErrorBoundary = await loadBoundary();
+        render(() => (
+            <BlockErrorBoundary blockId="abcdef1234" viewType="agent">
+                <Boom message="kaboom" />
+            </BlockErrorBoundary>
+        ));
+        const fallback = screen.getByTestId("block-error-fallback");
+
+        const selected = "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123";
+        vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => selected } as unknown as Selection);
+
+        fallback.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const writeClipboardCall = invokeCommandMock.mock.calls.find((c) => c[0] === "write_clipboard");
+        expect(writeClipboardCall).toBeDefined();
+        const copied = (writeClipboardCall![1] as { text: string }).text;
+        expect(copied).not.toContain("ghp_abcdef");
+        expect(copied).toContain("[redacted");
+    });
+
+    it("does nothing when there is no selection", async () => {
+        const BlockErrorBoundary = await loadBoundary();
+        render(() => (
+            <BlockErrorBoundary blockId="abcdef1234" viewType="agent">
+                <Boom message="kaboom" />
+            </BlockErrorBoundary>
+        ));
+        const fallback = screen.getByTestId("block-error-fallback");
+        vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => "" } as unknown as Selection);
+
+        fallback.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        await Promise.resolve();
+
+        expect(invokeCommandMock.mock.calls.find((c) => c[0] === "write_clipboard")).toBeUndefined();
+    });
+});

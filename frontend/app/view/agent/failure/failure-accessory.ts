@@ -43,6 +43,9 @@ export interface FailureActions {
     newSession: () => void;
     /** Toggle the expanded stderr-tail body. */
     toggleDetails: () => void;
+    /** Copy this failure as an error report (title, meta, detail, stderr
+     *  tail) — SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 1/2. */
+    copyError: () => void;
     /** Clear the failure (dismiss the row). */
     dismiss: () => void;
     /**
@@ -89,6 +92,11 @@ export interface FailureViewState {
     takeoverArmed?: boolean;
     /** `live_elsewhere`: the takeover request is in flight (disables the button). */
     takingOver?: boolean;
+    /** Transient feedback for the Copy error action — mirrors
+     *  `<CopyErrorButton>`'s own idle/copied/failed states, since a
+     *  `PaneRowAction` has no feedback mechanism of its own. Defaults to
+     *  "idle". */
+    copyState?: "idle" | "copied" | "failed";
 }
 
 /** Per-class sigil. */
@@ -259,6 +267,16 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             actions.push({ ...retry, label: "Retry" });
             break;
     }
+
+    // Copy error — SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surfaces 1/2.
+    // Placement rule §4.4.1: next to the primary action, before "Details".
+    const copyState = view.copyState ?? "idle";
+    actions.push({
+        glyph: copyState === "copied" ? "✓" : copyState === "failed" ? "⚠" : "⧉",
+        label: copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : f.stderrTail ? "Copy details" : "Copy error",
+        title: "Copy this error for a bug report",
+        onClick: on.copyError,
+    });
 
     // Offer the expander whenever there's expandable content. The body always
     // carries `detail` (the explanation), so classes with no stderr tail (auth,

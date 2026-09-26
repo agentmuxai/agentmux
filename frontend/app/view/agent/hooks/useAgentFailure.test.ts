@@ -46,6 +46,8 @@ vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${
 vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
 }));
+const writeTextMock = vi.fn();
+vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
 
 import { jitteredBackoffSeconds, TAKEOVER_CONFIRM_MS, useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
 
@@ -621,6 +623,100 @@ describe("useAgentFailure — Take over (live_elsewhere)", () => {
             expect(ui.row()?.title).toBe("Could not take over");
             expect(ui.row()?.detail).toContain("too old to hand it over");
             expect(button(ui, "Take over")).toBeDefined();
+            dispose();
+        });
+    });
+});
+
+/** SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surfaces 1/2. */
+describe("useAgentFailure — Copy error", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        writeTextMock.mockReset();
+        writeTextMock.mockResolvedValue(undefined);
+    });
+
+    const button = (ui: UseAgentFailureResult, label: string) => (ui.row()?.actions ?? []).find((a) => a.label === label);
+
+    it("copies title, meta and detail/stderr, redacted, and shows Copied", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", {
+                code: "unknown_non_zero",
+                title: "Agent run failed",
+                detail: "The agent exited with a non-zero status.",
+                exitCode: 1,
+                retryable: false,
+                stderrTail: "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123",
+            } satisfies AgentFailure);
+
+            button(ui, "Copy details")!.onClick!(undefined as unknown as MouseEvent);
+            for (let i = 0; i < 6; i++) await Promise.resolve();
+
+            expect(writeTextMock).toHaveBeenCalledOnce();
+            const copied = writeTextMock.mock.calls[0][0] as string;
+            expect(copied).toContain("AgentMux error: Agent run failed");
+            expect(copied).toContain("exit 1");
+            expect(copied).toContain("The agent exited with a non-zero status.");
+            expect(copied).not.toContain("ghp_abcdef");
+            expect(copied).toContain("[redacted");
+            expect(button(ui, "Copied")).toBeDefined();
+            dispose();
+        });
+    });
+
+    it("shows Copy failed when every transport fails", async () => {
+        writeTextMock.mockRejectedValue(new Error("no bridge"));
+        document.execCommand = vi.fn().mockReturnValue(false);
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", transient());
+            button(ui, "Copy error")!.onClick!(undefined as unknown as MouseEvent);
+            for (let i = 0; i < 6; i++) await Promise.resolve();
+            expect(button(ui, "Copy failed")).toBeDefined();
+            dispose();
+        });
+        delete document.execCommand;
+    });
+
+    // ReAgent P2 on #3838: copyState is "same class as expanded/retrying" per
+    // useAgentFailure's own doc comment, so a new failure arriving inside the
+    // 2s "Copied" window must not leave that label on the NEW failure's row.
+    it("resets copyState when a new failure event arrives inside the 2s window", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", transient());
+
+            button(ui, "Copy error")!.onClick!(undefined as unknown as MouseEvent);
+            for (let i = 0; i < 6; i++) await Promise.resolve();
+            expect(button(ui, "Copied")).toBeDefined();
+
+            // A second, distinct failure arrives before the 2s reset fires.
+            fire("agentfailure", { code: "overloaded", title: "Overloaded", detail: "529", retryable: true });
+            expect(button(ui, "Copied")).toBeUndefined();
+            expect(button(ui, "Copy error")).toBeDefined();
+            dispose();
+        });
+    });
+
+    it("resets copyState when the row is dismissed", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", transient());
+            button(ui, "Copy error")!.onClick!(undefined as unknown as MouseEvent);
+            for (let i = 0; i < 6; i++) await Promise.resolve();
+            expect(button(ui, "Copied")).toBeDefined();
+
+            const dismiss = ui.row()?.actions.find((a) => a.glyph === "×");
+            dismiss!.onClick!(undefined as unknown as MouseEvent);
+            fire("agentfailure", transient());
+            expect(button(ui, "Copied")).toBeUndefined();
+            expect(button(ui, "Copy error")).toBeDefined();
             dispose();
         });
     });
