@@ -5,8 +5,10 @@
  * /btw <question> — a faithful recreation of Claude Code CLI's own native
  * `/btw`: ask a tool-less, context-aware side question in an ephemeral
  * floating overlay (`components/BtwOverlay.tsx`) without touching this
- * pane's own live turn or transcript. Claude-CLI-specific (registered in
- * `providers/claude.ts`'s `CLAUDE_COMMANDS`, not the global registry).
+ * pane's own live turn or transcript. AgentMux's own, so it isn't limited
+ * to Claude: registered for the Claude, Codex and Gemini providers
+ * (`providers/index.ts`) — the backend runs each tool-less on the pane's
+ * own CLI.
  *
  * The handler itself is thin — `ctx.askSideQuestion` both fires the
  * backend request AND opens the overlay (see that field's doc comment in

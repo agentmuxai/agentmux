@@ -13,6 +13,8 @@ use serde_json::Value;
 use super::types::AgentEvent;
 
 pub mod claude;
+pub mod codex;
+pub mod gemini;
 
 /// A streaming translator: feeds raw provider frames as parsed JSON
 /// values and emits zero-or-more `AgentEvent`s per frame.

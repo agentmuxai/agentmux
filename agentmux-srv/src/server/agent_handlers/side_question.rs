@@ -52,6 +52,18 @@
 //!     what the source pane is. A `/btw` from a container agent's pane
 //!     therefore answers from the HOST's view of the provider CLI.
 //!
+//! ## Providers
+//!
+//! `/btw` is an AgentMux feature, not a pass-through to a CLI's own, so it
+//! runs on Claude, Codex and Gemini panes alike ([`BtwProvider`], from the
+//! source pane's `agentProvider`). Each gets its own tool-less one-shot
+//! argv — `build_side_question_argv`, `build_codex_side_question_argv`,
+//! `build_gemini_side_question_argv` — and its own answer translator. The
+//! turn being tool-less on every provider is what keeps a side question
+//! outside the agent identity system: it can't call the agentmux tools,
+//! so it never acts as the pane's agent (#3579). Other providers are
+//! refused with an error chunk.
+//!
 //! ## Output contract
 //!
 //! The turn's own stdout is written to the THROWAWAY block's own
@@ -61,12 +73,12 @@
 //! is ever subscribed to it, and the block + its persisted history are
 //! deleted as soon as the turn ends.
 //!
-//! Instead, this module polls that file for newly-appended stream-json
-//! lines (there is no in-process "call me back on new bytes" primitive in
-//! this codebase — `reactive::progress_watcher` polls the same way for the
-//! same reason), translates each line through the SAME `ClaudeTranslator`
-//! the drone Agent block runner uses (`agents/translator/claude.rs`), and
-//! republishes one `mps::EVENT_BTW_ANSWER_CHUNK` per translated
+//! Instead, this module polls that file for newly-appended JSON lines
+//! (there is no in-process "call me back on new bytes" primitive in this
+//! codebase — `reactive::progress_watcher` polls the same way for the same
+//! reason), translates each line through the provider's translator
+//! (`agents/translator/` — for Claude, the SAME `ClaudeTranslator` the
+//! drone Agent block runner uses), and republishes one `mps::EVENT_BTW_ANSWER_CHUNK` per translated
 //! `AgentEvent` — scoped to the SOURCE pane's block id (`block_id` in the
 //! request) plus the minted `request_id`, never the throwaway block's own
 //! scope. A final chunk carries `"done": true`.
@@ -77,10 +89,15 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::agents::translator::claude::ClaudeTranslator;
-use crate::agents::translator::Translator as _;
+use crate::agents::translator::codex::CodexTranslator;
+use crate::agents::translator::gemini::GeminiTranslator;
+use crate::agents::translator::Translator;
 use crate::agents::types::AgentEvent;
 use crate::backend::blockcontroller;
-use crate::backend::blockcontroller::subprocess::argv::build_side_question_argv;
+use crate::backend::blockcontroller::subprocess::argv::{
+    build_codex_side_question_argv, build_gemini_side_question_argv, build_side_question_argv,
+    model_flag_value, GEMINI_DENY_ALL_TOOLS_POLICY,
+};
 use crate::backend::mps;
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -179,11 +196,74 @@ fn build_prompt(context_snapshot: &str, question: &str) -> String {
     }
 }
 
+/// The CLI a `/btw` runs on — the source pane's. See the module doc's
+/// "Providers" section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BtwProvider {
+    Claude,
+    Codex,
+    Gemini,
+}
+
+impl BtwProvider {
+    /// From the source pane's `agentProvider`. A pane without one is a
+    /// Claude pane — the only kind `/btw` served before the others.
+    fn of(source_meta: &MetaMapType) -> Result<Self, String> {
+        match crate::backend::obj::meta_get_string(source_meta, "agentProvider", "").as_str() {
+            "" | "claude" => Ok(Self::Claude),
+            "codex" => Ok(Self::Codex),
+            "gemini" => Ok(Self::Gemini),
+            other => Err(format!("/btw isn't available for {other} agents")),
+        }
+    }
+
+    fn cli_command(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+        }
+    }
+
+    fn translator(self) -> Box<dyn Translator> {
+        match self {
+            Self::Claude => Box::new(ClaudeTranslator::new()),
+            Self::Codex => Box::new(CodexTranslator::new()),
+            Self::Gemini => Box::new(GeminiTranslator::new()),
+        }
+    }
+}
+
+/// Write [`GEMINI_DENY_ALL_TOOLS_POLICY`] where `--policy` can read it, and
+/// return its path. Under the AgentMux data dir rather than a shared temp
+/// dir, where another local user could swap in a permissive policy.
+/// Written to a temp file and renamed, so a concurrent `/btw` never reads
+/// a half-written policy.
+fn ensure_gemini_policy() -> Result<String, String> {
+    ensure_gemini_policy_in(&crate::backend::base::get_mux_data_dir().join("btw"))
+}
+
+fn ensure_gemini_policy_in(dir: &std::path::Path) -> Result<String, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("btw: create {}: {e}", dir.display()))?;
+    let path = dir.join("gemini-deny-all-tools.toml");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(GEMINI_DENY_ALL_TOOLS_POLICY) {
+        let tmp = dir.join(format!(".gemini-deny-all-tools.{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, GEMINI_DENY_ALL_TOOLS_POLICY)
+            .and_then(|()| std::fs::rename(&tmp, &path))
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                format!("btw: write {}: {e}", path.display())
+            })?;
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Build the throwaway block's meta from the source block's — its one-shot
-/// CLI config plus the `/btw`-specific argv additions, minus every
-/// agent-identity-shaped key. Pure and unit-testable; see the module doc
+/// CLI config with `provider`'s tool-less `/btw` argv, minus every
+/// agent-identity-shaped key. `gemini_policy` is the deny-all policy path
+/// (read only for Gemini). Pure and unit-testable; see the module doc
 /// comment for the exclusion rationale.
-fn build_throwaway_meta(source_meta: &MetaMapType) -> MetaMapType {
+fn build_throwaway_meta(source_meta: &MetaMapType, provider: BtwProvider, gemini_policy: &str) -> MetaMapType {
     let mut meta = MetaMapType::new();
     for key in COPIED_META_KEYS {
         if let Some(v) = source_meta.get(*key) {
@@ -191,21 +271,29 @@ fn build_throwaway_meta(source_meta: &MetaMapType) -> MetaMapType {
         }
     }
     if meta.get("cmd").is_none() {
-        meta.insert("cmd".to_string(), Value::String("claude".to_string()));
+        meta.insert("cmd".to_string(), Value::String(provider.cli_command().to_string()));
     }
 
-    let base_args: Vec<String> = match source_meta.get("cmd:args") {
-        Some(Value::Array(arr)) => arr
-            .iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect(),
-        _ => vec![
-            "-p".to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-        ],
+    let source_args: Option<Vec<String>> = match source_meta.get("cmd:args") {
+        Some(Value::Array(arr)) => Some(
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+        ),
+        _ => None,
     };
-    let cli_args = build_side_question_argv(&base_args);
+    let model = source_args.as_deref().and_then(model_flag_value);
+    let cli_args = match provider {
+        BtwProvider::Claude => build_side_question_argv(&source_args.unwrap_or_else(|| {
+            vec![
+                "-p".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+            ]
+        })),
+        BtwProvider::Codex => build_codex_side_question_argv(model.as_deref()),
+        BtwProvider::Gemini => build_gemini_side_question_argv(gemini_policy, model.as_deref()),
+    };
     meta.insert(
         "cmd:args".to_string(),
         Value::Array(cli_args.into_iter().map(Value::String).collect()),
@@ -230,13 +318,18 @@ async fn spawn_throwaway_turn(
     boot_id: &Arc<str>,
     source_block_id: &str,
     prompt: String,
-) -> Result<String, String> {
+) -> Result<(String, BtwProvider), String> {
     let source: Block = mstore
         .get(source_block_id)
         .map_err(|e| format!("btw: load source block: {e}"))?
         .ok_or_else(|| format!("btw: source block {source_block_id} not found"))?;
 
-    let meta = build_throwaway_meta(&source.meta);
+    let provider = BtwProvider::of(&source.meta)?;
+    let gemini_policy = match provider {
+        BtwProvider::Gemini => ensure_gemini_policy()?,
+        _ => String::new(),
+    };
+    let meta = build_throwaway_meta(&source.meta, provider, &gemini_policy);
 
     let block_id = uuid::Uuid::new_v4().to_string();
     let mut block = Block {
@@ -282,7 +375,7 @@ async fn spawn_throwaway_turn(
         // Fall through — see this function's own doc comment.
     }
 
-    Ok(block_id)
+    Ok((block_id, provider))
 }
 
 /// Drive one `/btw` request end to end: spawn the throwaway turn, drain +
@@ -301,7 +394,7 @@ async fn run_side_question(
     let scope = btw_scope(&source_block_id, &request_id);
     let prompt = build_prompt(&context_snapshot, &question);
 
-    let throwaway_block_id = match spawn_throwaway_turn(
+    let (throwaway_block_id, provider) = match spawn_throwaway_turn(
         &deps,
         &mstore,
         &boot_id,
@@ -310,7 +403,7 @@ async fn run_side_question(
     )
     .await
     {
-        Ok(id) => id,
+        Ok(spawned) => spawned,
         Err(e) => {
             publish_chunk(
                 &broker,
@@ -327,6 +420,7 @@ async fn run_side_question(
     drain_and_publish(
         &broker,
         &filestore,
+        provider.translator(),
         &scope,
         &source_block_id,
         &request_id,
@@ -364,12 +458,12 @@ fn cleanup_throwaway_block(mstore: &Arc<Store>, broker: &mps::Broker, throwaway_
 async fn drain_and_publish(
     broker: &mps::Broker,
     filestore: &FileStore,
+    mut translator: Box<dyn Translator>,
     scope: &str,
     source_block_id: &str,
     request_id: &str,
     throwaway_block_id: &str,
 ) {
-    let mut translator = ClaudeTranslator::new();
     let mut offset: i64 = 0;
     let deadline = tokio::time::Instant::now() + MAX_WAIT;
 
@@ -521,7 +615,7 @@ mod tests {
         source.insert("agentMode".to_string(), Value::String("container".to_string()));
         source.insert("agent:sessionid".to_string(), Value::String("sid-1".to_string()));
 
-        let got = build_throwaway_meta(&source);
+        let got = build_throwaway_meta(&source, BtwProvider::Claude, "");
 
         assert!(!got.contains_key("agentId"));
         assert!(!got.contains_key("agentName"));
@@ -542,7 +636,7 @@ mod tests {
                     .collect(),
             ),
         );
-        let got = build_throwaway_meta(&source);
+        let got = build_throwaway_meta(&source, BtwProvider::Claude, "");
         let args: Vec<String> = match got.get("cmd:args") {
             Some(Value::Array(arr)) => arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
             other => panic!("expected cmd:args array, got {other:?}"),
@@ -555,9 +649,77 @@ mod tests {
     #[test]
     fn throwaway_meta_defaults_cmd_and_args_when_source_has_none() {
         let source = MetaMapType::new();
-        let got = build_throwaway_meta(&source);
+        let got = build_throwaway_meta(&source, BtwProvider::Claude, "");
         assert_eq!(got.get("cmd"), Some(&Value::String("claude".to_string())));
         assert!(got.contains_key("cmd:args"));
+    }
+
+    fn args_of(meta: &MetaMapType) -> Vec<String> {
+        match meta.get("cmd:args") {
+            Some(Value::Array(arr)) => arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+            other => panic!("expected cmd:args array, got {other:?}"),
+        }
+    }
+
+    fn pane(provider: &str, cmd: &str, args: &[&str]) -> MetaMapType {
+        let mut source = MetaMapType::new();
+        source.insert("agentProvider".to_string(), Value::String(provider.to_string()));
+        source.insert("cmd".to_string(), Value::String(cmd.to_string()));
+        source.insert(
+            "cmd:args".to_string(),
+            Value::Array(strings(args).into_iter().map(Value::String).collect()),
+        );
+        source.insert("agentId".to_string(), Value::String("inst-1".to_string()));
+        source
+    }
+
+    #[test]
+    fn the_provider_comes_from_the_source_pane() {
+        assert_eq!(BtwProvider::of(&MetaMapType::new()), Ok(BtwProvider::Claude));
+        assert_eq!(BtwProvider::of(&pane("claude", "claude", &[])), Ok(BtwProvider::Claude));
+        assert_eq!(BtwProvider::of(&pane("codex", "codex", &[])), Ok(BtwProvider::Codex));
+        assert_eq!(BtwProvider::of(&pane("gemini", "gemini", &[])), Ok(BtwProvider::Gemini));
+        let err = BtwProvider::of(&pane("kimi", "kimi", &[])).unwrap_err();
+        assert!(err.contains("kimi"), "{err}");
+    }
+
+    /// A Codex pane's own argv (here the app-server's) is replaced, not
+    /// extended: the side question is a tool-less `exec` on the pane's CLI
+    /// and model, without the pane's sandbox bypass.
+    #[test]
+    fn a_codex_pane_gets_a_tool_less_exec_on_its_own_model() {
+        let source = pane("codex", "/opt/codex", &["app-server", "--listen", "stdio://", "-m", "gpt-5"]);
+        let got = build_throwaway_meta(&source, BtwProvider::Codex, "");
+        assert_eq!(got.get("cmd"), Some(&Value::String("/opt/codex".to_string())));
+        assert!(!got.contains_key("agentId"));
+        let args = args_of(&got);
+        assert_eq!(&args[..2], &strings(&["exec", "--json"])[..]);
+        assert!(args.iter().any(|a| a == "--ignore-user-config"));
+        assert!(args.windows(2).any(|w| w == strings(&["-m", "gpt-5"])));
+        assert!(!args.iter().any(|a| a == "app-server" || a.contains("dangerously")));
+    }
+
+    #[test]
+    fn a_gemini_pane_gets_the_deny_all_policy_instead_of_yolo() {
+        let source = pane("gemini", "gemini", &["--output-format", "stream-json", "--yolo", "-p", "", "-m", "gemini-3-pro"]);
+        let got = build_throwaway_meta(&source, BtwProvider::Gemini, "/data/btw/policy.toml");
+        let args = args_of(&got);
+        assert!(args.windows(2).any(|w| w == strings(&["--policy", "/data/btw/policy.toml"])));
+        assert!(args.windows(2).any(|w| w == strings(&["-m", "gemini-3-pro"])));
+        assert!(!args.iter().any(|a| a == "--yolo"));
+    }
+
+    #[test]
+    fn the_gemini_policy_file_holds_the_deny_all_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("btw");
+        let path = ensure_gemini_policy_in(&dir).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), GEMINI_DENY_ALL_TOOLS_POLICY);
+        // A tampered policy is put back; no temp files are left behind.
+        std::fs::write(&path, "[[rule]]\ntoolName = \"*\"\ndecision = \"allow\"\n").unwrap();
+        assert_eq!(ensure_gemini_policy_in(&dir).unwrap(), path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), GEMINI_DENY_ALL_TOOLS_POLICY);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     }
 
     // ── Integration: the RPC handler itself must not block ─────────────
