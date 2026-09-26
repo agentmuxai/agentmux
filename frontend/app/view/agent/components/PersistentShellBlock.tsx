@@ -24,6 +24,7 @@ import { PeekOverlay } from "./PeekOverlay";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode, ToolLogChunk } from "../types";
+import { rowDisclosure } from "../virtualization/disclosure";
 
 interface PersistentShellBlockProps {
     node: ShellNode;
@@ -67,7 +68,8 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
         }
     });
 
-    const expanded = () => props.pinned;
+    // Pin-to-expand only (virtualization/disclosure.ts).
+    const expanded = () => rowDisclosure(props.node, { pinned: props.pinned }).open;
 
     // Peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25).
     // Suppressed once expanded — the full command is already visible in the

@@ -1,7 +1,7 @@
 # Spec: One open/closed model for agent-pane rows
 
 **Date:** 2026-09-26
-**Status:** proposed
+**Status:** active — PR 1 (reader, writer, estimates, canceled thinking) implemented in the PR stacked on #3904; PR 2 (remove `section`) proposed
 **Scope:** `frontend/app/view/agent/` — how every transcript row decides whether
 it is open, how the user toggles it, and how the virtualizer estimates it
 **Verified against:** `main` @ `ba9abe92f`
@@ -70,37 +70,41 @@ Two defects fall out of that table:
 
 ```ts
 // virtualization/disclosure.ts (new)
+interface RowFlags { pinned?: boolean; collapsed?: boolean; held?: boolean }
 interface Disclosure {
     open: boolean;
-    /** Why: default for the kind, auto (active tool / held after finishing),
-     *  or the user (pin / collapse). */
-    via: "default" | "auto" | "user";
-    /** Whether the user can toggle it (header click, `e` key). */
-    toggleable: boolean;
+    /** Why it's open: the layout slice's Expansion.via ("default" when closed). */
+    via: "default" | "auto" | "pin";
+    /** What a header click or the `e` key flips: pinnedNodes, collapsedNodes, or nothing. */
+    toggle: "pin" | "collapse" | null;
 }
-function rowDisclosure(node: DocumentNode, state: DisclosureInputs): Disclosure;
+function rowDisclosure(node: DocumentNode, flags: RowFlags): Disclosure;
+function rowDisclosureIn(node: DocumentNode, state: DisclosureInputs): Disclosure; // flags from the sets
 ```
 
 - `rowDisclosure` holds the whole of §1's table in one `switch`. Tool
-  presentation comes from the descriptor (`isContentFirstTool`).
+  presentation comes from the descriptor (`isContentFirstTool`), and tool
+  status from `TOOL_STATUS` (a `dismissed` tool never holds open).
+- It takes a node and its **flags**, not the whole state, so each component
+  calls it with the flags it already receives as props (`pinned`,
+  `heldOpen`, `userCollapsed`), and no component keeps its own rule. The
+  prop names and the ~40 existing ToolBlock tests stay as they are. The
+  virtualizer calls `rowDisclosureIn`, which derives the flags from the sets.
 - `currentExpansion()` becomes a two-line adapter over it (the layout slice's
   `Expansion` shape is unchanged).
-- Every component receives `open: boolean` and `onToggle: () => void` from
-  `DocumentRow`, instead of today's per-component mix of `pinned`, `collapsed`,
-  `userCollapsed` and `heldOpen`.
 
 ### 2.2 One writer
 
-```ts
-function toggleDisclosure(node: DocumentNode, state: DocumentState): DocumentState;
-```
-
-It knows which set records the user's choice for each row type: `pinnedNodes`
-when the default is closed, and `collapsedNodes` when the default is open. It
-returns the new state (a no-op for non-toggleable rows). `AgentDocumentView`
-exposes one `toggleRow(id)` in place of `toggleCollapse` + `togglePin`, and
-`DocumentRow`'s `onExpand` and `TOGGLEABLE_KINDS` are replaced by
-`rowDisclosure(…).toggleable` + `toggleRow`.
+- `toggle` in the result says which set the row's toggle flips: `pinnedNodes`
+  when the default is closed, `collapsedNodes` when it's open, or nothing.
+  `ToolBlock`'s header click and `DocumentRow`'s `e` key both route through it
+  (to the existing `onTogglePin` / `onToggleCollapse` callbacks), which
+  replaces `TOGGLEABLE_KINDS` and the tool/shell special case.
+- `toggleDisclosure(node, state)` is the same thing as a pure state transform,
+  for tests and any future caller that holds the state directly.
+- Effect on the `e` key: it now also toggles a startup payload and a canceled
+  thought (both already click-toggleable), and no longer targets the dead
+  `section` kind. Normal user input stays non-toggleable, per #1020's intent.
 
 ### 2.3 Storage stays
 
@@ -135,6 +139,13 @@ expanded branch, which the layout slice uses. Today it's only in
 history WebSearch at the 200 px generic tool estimate.
 
 ### 2.5 The component-local cases
+
+**Found by the parity test and fixed:** a canceled or denied tool enters
+`expandedTools` on its active → inactive transition. `ToolBlock` rendered it
+closed (a dismissed tool skips the hold), but `currentExpansion` reported it
+open, so the layout slice sized it as expanded. The shared rule applies the
+dismissed check for both.
+
 
 - **`ToolBlock.userHolding`** (keeps an auto-open tool open while the mouse is
   inside it, so a scroll-off release can't fold it mid-read) stays local. It's
@@ -194,10 +205,12 @@ already guards the switch statements, so the compiler finds every site.
 
 ## 6. Acceptance
 
-- One function answers "is this row open" (`rowDisclosure`), and one performs
-  "toggle this row" (`toggleDisclosure`). No component computes its own open
-  state from the sets.
+- One function answers "is this row open" (`rowDisclosure`), and its
+  `toggle` field says what a toggle flips. No component, the keyboard, the
+  layout slice or the estimator keeps its own copy of either rule.
 - `estimateNode` contains no open/closed logic.
-- `TOGGLEABLE_KINDS`, `toggleCollapse`/`togglePin` as separate props, and
-  `MarkdownBlock`'s local expand signal no longer exist.
-- No `section` node type.
+- `TOGGLEABLE_KINDS`, `ToolBlock`'s `autoExpanded` / content-first branch, and
+  `MarkdownBlock`'s local expand signal no longer exist. (The `onTogglePin` /
+  `onToggleCollapse` callbacks stay: they're the two storage sets' writers,
+  and the rule picks between them.)
+- No `section` node type (PR 2).

@@ -15,9 +15,14 @@ import { useNodePeek } from "../hooks/useNodePeek";
 import { useAgentDormant } from "../agent-dormancy";
 import type { MarkdownNode } from "../types";
 import { PeekOverlay } from "./PeekOverlay";
+import { rowDisclosure } from "../virtualization/disclosure";
 
 interface MarkdownBlockProps {
     node: MarkdownNode;
+    /** Canceled thinking only: the user opened it (`documentState.pinnedNodes`). */
+    pinned?: boolean;
+    /** Canceled thinking only: toggle `pinned` (the header click). */
+    onTogglePin?: () => void;
 }
 
 // During streaming the message content grows ~60x/s. Re-parsing the whole
@@ -47,7 +52,10 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     // content. Spec:
     // `docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md`.
     const isCanceled = (): boolean => props.node.metadata?.canceled === true;
-    const [expanded, setExpanded] = createSignal(false);
+    // Open state lives in documentState (pinnedNodes) like every other row,
+    // not a local signal, so the layout slice sees it
+    // (SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26 §2.5).
+    const expanded = (): boolean => rowDisclosure(props.node, { pinned: props.pinned }).open;
 
     // Throttled view of the streaming content + whether it is still streaming.
     // A settled/static message renders fully (highlighted) immediately; a
@@ -186,7 +194,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                 <button
                     type="button"
                     class="markdown-canceled-header"
-                    onClick={() => setExpanded((v) => !v)}
+                    onClick={() => props.onTogglePin?.()}
                     aria-expanded={expanded()}
                 >
                     <span class="markdown-canceled-icon" aria-hidden="true">⏹</span>

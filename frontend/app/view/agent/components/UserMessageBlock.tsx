@@ -52,6 +52,7 @@ import { PEEK_ENTER_DELAY_MS } from "./hover-anchor";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 import { PeekOverlay } from "./PeekOverlay";
+import { rowDisclosure } from "../virtualization/disclosure";
 
 interface UserMessageBlockProps {
     node: UserMessageNode;
@@ -102,8 +103,9 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     // Only the startup variant is collapsible. Regular input is
     // always fully visible — hover/pin are no-ops there.
     const collapsible = (): boolean => props.node.isStartup === true;
-    const expanded = (): boolean =>
-        !collapsible() || props.pinned || hovering();
+    // In flow per the shared rule (virtualization/disclosure.ts): normal
+    // input always, a startup payload when pinned. Hover adds the overlay.
+    const expanded = (): boolean => rowDisclosure(props.node, { pinned: props.pinned }).open || hovering();
 
     /** Render mode for the body:
      *
