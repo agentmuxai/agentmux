@@ -1,7 +1,7 @@
 # SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host
 
 **Date:** 2026-09-26
-**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893; slice 2 (§3.4: container image) in PR #3898. Slice 4 (§3.5: frontend serving + allowed origins) is in review in PR #3900. Slice 3 (headless secret backend) remains.
+**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893; slice 2 (§3.4: container image) in PR #3898; slice 4 (§3.5: frontend serving + allowed origins) in PR #3900. Slice 3 (§3.6: secrets without a keychain) is in review.
 **Author:** Maricon
 
 ---
@@ -32,7 +32,7 @@ So srv can't be a container entrypoint, a system service, or a CI fixture withou
 **Non-goals (this slice):**
 - Listening on anything but loopback. Remote access is a reverse proxy's job, with TLS and its own authentication, in front of a loopback srv (§5).
 - Serving the frontend.
-- A keychain replacement (§5).
+- A keychain replacement (slice 3, §3.6).
 
 ## 3. Design
 
@@ -118,13 +118,38 @@ For a browser client that reaches srv through a reverse proxy on one public orig
   - a CORS preflight reflects `https://app.example.test` and not `https://evil.test`;
   - `--allowed-origin https://app.example.test/ui` and a `--frontend-dir` without `index.html` both exit 1, writing nothing.
 
+### 3.6 Secrets without a keychain (slice 3)
+
+srv keeps every secret through `identity::secret_store`: Armory API keys, OAuth accounts, MuxBus credentials, browser-pane logins and the dormant model-catalog token. Nothing else touches the keychain. It now has two backends, chosen once at startup:
+
+| Backend | Used by | Where |
+|---|---|---|
+| **OS keychain** | the desktop app (unchanged); headless with `--secret-store keychain` | macOS Keychain, Windows Credential Manager, Linux Secret Service |
+| **File store** | **headless, by default** | `<shared dir>/secrets/` (`~/.agentmux/shared/secrets/`): one per machine, like the keychain, not per version |
+
+- **File store layout:** one file per entry. Each file is named by the SHA-256 of the entry's key, so no id or hostname reaches a file name and no key can escape the directory.
+  - The directory is `0700`, and is tightened if it already existed wider. Files are `0600`.
+  - Writes go through a fresh temp file and a rename, so a reader never sees a partial secret.
+  - A missing entry reads as absent, and deleting one is idempotent, as with the keychain.
+- **Not encrypted by srv.** Protection is file permissions plus the volume's own encryption. A key stored beside the files would add nothing, and a machine-derived key means nothing in a container. That matches what CLIs do without a keychain (gh, the AWS CLI, Docker, Claude Code's own credentials file on Linux). Encryption with a key supplied from outside, such as a mounted secret, is a possible follow-up.
+- **`SecretRef::Keychain { service, account }`** keeps its name and now means "an entry in srv's secret store". Secrets written by a headless srv live in its file store, and the refs in the database point there. There is no silent fallback between backends: a missing entry is an error.
+- **Cloud subscriber:** headless still turns it off by default. A server doesn't connect to the AgentMux relay on its own. That was originally about the keychain; with the file store it's the only reason.
+- **Startup log:** `backend directories initialized` carries `secret_store="file"` or `"keychain"`.
+- **Live check** (headless, `AGENTMUX_HOST_REG_SECRET` set so the credential service accepts calls):
+  - `credential.Save` succeeds and `Lookup` finds it;
+  - `shared/secrets` is mode `700` and holds one file, mode `600`;
+  - the password appears nowhere else under the home;
+  - after a restart, `Lookup` still finds it;
+  - `Delete` removes the file;
+  - `--secret-store keychain` logs `secret_store="keychain"`.
+
 ## 4. Slices
 
 | Slice | Content |
 |---|---|
 | **1** | §3: `--headless`, `prepare_env`, per-channel lock, auth-key file, fixed loopback ports, no stdin/parent watchers, cloud subscriber off by default |
 | **2** | §3.4: `docker/Dockerfile.srv` and its CI smoke test |
-| 3 | A secret backend for machines without an OS keychain (the file-backed fallback `secret_store.rs` already lists as a follow-up), so Armory keys, MuxBus credentials and OAuth accounts work headless |
+| **3** | §3.6: a file-backed secret store, headless by default (`--secret-store keychain` to opt out) |
 | **4** | §3.5: `--frontend-dir` serves the built frontend (health at `/health`); `--allowed-origin` for CORS and the `/ws` check |
 
 ## 5. Security notes
@@ -132,7 +157,7 @@ For a browser client that reaches srv through a reverse proxy on one public orig
 - **The auth key grants everything srv can do,** shell creation included. Every agent srv spawns also holds it (`pane_env.rs`). Headless mode doesn't widen that; it only changes who creates the key.
 - **srv stays on loopback.** To use it from another machine, put it behind a reverse proxy that terminates TLS and authenticates users, and have the proxy send the key. Don't publish srv's ports directly.
 - **Windows:** `MuxLock` does not exclude on non-Unix platforms (it only checks the file can be created), so goal 4 holds on Linux and macOS only.
-- **Keychain-backed features fail** until slice 3 lands. Reads fail fast with an error; writes can hang if a D-Bus session exists without a secret agent.
+- **Secrets:** headless keeps them in the file store (§3.6), protected by file permissions. With `--secret-store keychain` on a machine without a working Secret Service, reads fail fast with an error and writes can hang if a D-Bus session exists without a secret agent.
 
 ## 6. Testing (slice 1)
 
