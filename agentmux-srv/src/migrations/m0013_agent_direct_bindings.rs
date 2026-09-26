@@ -61,8 +61,7 @@ mod tests {
     fn shared_store() -> Store {
         // A shared-schema store built on a temp file (open_shared needs a
         // real path; :memory: would be re-created per connection).
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        Store::open_shared(tmp.path()).unwrap()
+        Store::open_shared(std::path::Path::new(":memory:")).unwrap()
     }
 
     fn channel_store() -> Store {
