@@ -1,7 +1,7 @@
 # SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host
 
 **Date:** 2026-09-26
-**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893; slice 2 (§3.4: container image) in PR #3898; slice 4 (§3.5: frontend serving + allowed origins) in PR #3900. Slice 3 (§3.6: secrets without a keychain) is in review.
+**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893; slice 2 (§3.4: container image) in PR #3898; slice 4 (§3.5: frontend serving + allowed origins) in PR #3900. Slice 3 (§3.6: secrets without a keychain) is in review in PR #3915.
 **Author:** Maricon
 
 ---
