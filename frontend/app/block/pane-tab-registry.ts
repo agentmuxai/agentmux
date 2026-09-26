@@ -89,6 +89,8 @@ export interface PaneTabInstance {
     component: (props: { ctx: PaneTabHostContext }) => JSX.Element;
     /** Live title; `placeholder: true` while it is only a stand-in. */
     liveTitle?: Accessor<{ text: string; placeholder?: boolean }>;
+    /** Makes the header's title editable; called with the new name. */
+    rename?(name: string): Promise<void>;
     liveFavicon?: Accessor<string>;
     /** The header's icon when it depends on state or is clickable (the
      *  editor's file-type icon); the manifest's `icon` otherwise. */
