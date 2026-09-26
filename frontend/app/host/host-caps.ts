@@ -4,8 +4,6 @@
 // Host capabilities (`HostCaps`, declared in types/custom.d.ts).
 // docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md
 
-import { getApi } from "@/app/store/app-api";
-
 /** The CEF desktop host: every capability. */
 export const CEF_HOST_CAPS: Readonly<HostCaps> = Object.freeze({
     multiWindow: true,
@@ -34,7 +32,7 @@ export const NO_HOST_CAPS: Readonly<HostCaps> = Object.freeze({
     nativeWindowChrome: false,
 });
 
-/** Does the current host have `cap`? */
+/** Does the current host have `cap`? No host at all (window.api not yet set) has nothing. */
 export function hostHas(cap: keyof HostCaps): boolean {
-    return getApi().getHostCaps()[cap];
+    return window.api?.getHostCaps?.()[cap] ?? false;
 }

@@ -165,6 +165,43 @@ declare global {
         revokeMedia(blockId: string): Promise<void>;
     };
 
+    /**
+     * Native windows: drag, maximize, position, floating panes and redock.
+     * Only meaningful with `HostCaps.nativeWindowChrome` / `tearOff` /
+     * `multiWindow`. Events (`windowresize:*`, `tearoff:*`, `tabdrag:*`)
+     * arrive through `AppApi.listen`.
+     */
+    type WindowHostApi = {
+        /** Hand a mouse-down on the title area to the OS as a window drag. */
+        startDrag(windowLabel: string): Promise<void>;
+        /** Toggle maximize. Without a label the host targets "main". */
+        maximize(windowLabel?: string): Promise<void>;
+        getPosition(windowLabel: string): Promise<{ x: number; y: number }>;
+        setPosition(windowLabel: string, x: number, y: number): Promise<void>;
+        getRect(windowLabel: string): Promise<HostRect>;
+        setRect(windowLabel: string, rect: HostRect): Promise<void>;
+        /** The cursor in screen coordinates. */
+        getCursorScreenPoint(): Promise<{ x: number; y: number }>;
+        /** Host-side pane state, for tear-off diagnostics. */
+        getPaneDebugState(): Promise<Record<string, unknown>>;
+        /** Tear a pane off into its own floating window (payload: pane_id, workspace_id, x, y, …). */
+        openFloatingPane(args: Record<string, unknown>): Promise<{ window_label: string }>;
+        toggleFloatingMaximize(windowLabel: string, blockId: string): Promise<void>;
+        /** Where a floating pane dragged over `windowLabel` would re-dock. */
+        getFloatingRedockTarget(windowLabel: string): Promise<{ block_id?: string; dir?: number }>;
+        updateFloatingRedockHover(args: {
+            source_label: string;
+            x: number;
+            y: number;
+        }): Promise<{ target_label?: string | null }>;
+        clearFloatingRedockHover(): Promise<void>;
+        resolveWindowAtCursor(args: {
+            x: number;
+            y: number;
+            exclude_label: string;
+        }): Promise<{ label: string | null; window_id: string | null }>;
+    };
+
     /** Whether the host can manage an OS login entry, and whether one is registered. */
     type AutostartStatus = { available: boolean; enabled: boolean };
 
@@ -177,6 +214,8 @@ declare global {
         openSettingsFileInEditor(): Promise<void>;
         /** Browser panes (see `BrowserPaneHostApi`). */
         browserPanes: BrowserPaneHostApi;
+        /** Native windows (see `WindowHostApi`). */
+        windows: WindowHostApi;
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         getAuthKey(): string;

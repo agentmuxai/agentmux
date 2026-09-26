@@ -24,6 +24,10 @@ const { svc, invokeCommand, removeMovedBlock, api, measureMotherResize, state } 
         completeCrossDrag: vi.fn(),
         cancelCrossDrag: vi.fn(),
         releaseDragCapture: vi.fn(),
+        // The real CEF mapping, over the IPC mock, so the wire assertions stand.
+        windows: {
+            openFloatingPane: (args: Record<string, unknown>) => invokeCommand("open_floating_pane_window", args),
+        },
     },
     measureMotherResize: vi.fn(),
     state: { model: null as unknown },
