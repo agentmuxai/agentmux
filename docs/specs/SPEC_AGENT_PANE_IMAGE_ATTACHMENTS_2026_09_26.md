@@ -204,7 +204,7 @@ attachments/
 
 ### 6.4 Processing pipeline (srv, Rust)
 
-Runs on blocking threads under **two** limits: a CPU limit (`max(1, cores/2)` jobs) so 128 files don't starve the server, and a **memory budget** (2 GB of estimated decode memory). Before decoding, each job reads the image header and reserves `width × height × 8` bytes (the decoded RGBA frame plus one working copy) from the budget; a job larger than the whole budget reserves all of it and runs alone. A CPU-count limit alone would let several highly compressed 200-megapixel images run at once: each is ~800 MB as a decoded RGBA frame, so ~1.6 GB reserved with its working copy, which means one such image runs alone.
+Runs on blocking threads. **Decode memory is capped** by a 2 GB budget: before decoding, each job reads the image header and reserves width × height × 8 bytes (the decoded RGBA frame plus one working copy). The aggregate of all running decodes therefore never exceeds 2 GB; a 200-megapixel image reserves ~1.6 GB and runs alone, and a job bigger than the whole budget reserves all of it. Separately, at most `max(1, cores/2)` jobs run at once, so 128 files don't starve the server of CPU.
 
 **Derived files are keyed by a transform fingerprint** `<fp>` = pipeline version + send edge (e.g. `v1-e2000`), not by the original's hash alone, because their bytes depend on `attachments:sendmaxedge` and the encoder. Changing the setting makes the old derived files unused (the sweep removes them); the next use of that attachment re-derives from the stored original.
 
