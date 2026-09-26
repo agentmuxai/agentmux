@@ -55,9 +55,16 @@ pub(super) async fn handle_attachment_file(
     let lookup_svc = svc.clone();
     let lookup_id = id.clone();
     let found = tokio::task::spawn_blocking(move || {
+        let store = lookup_svc.store();
+        if kind == Kind::Original {
+            // The original is served straight from blobs/: it must not
+            // depend on the derive pipeline succeeding.
+            let (path, format) = store.find_blob(&lookup_id)?;
+            return Some((path, attachments::process::mime_of(format).to_string()));
+        }
         // Re-derives when the fingerprint changed since the upload.
-        lookup_svc.store().ensure_derived(&lookup_id, edge)?;
-        lookup_svc.store().file(&lookup_id, &fp, kind)
+        store.ensure_derived(&lookup_id, edge)?;
+        store.file(&lookup_id, &fp, kind)
     })
     .await
     .ok()
@@ -65,7 +72,13 @@ pub(super) async fn handle_attachment_file(
     let Some((path, mime)) = found else {
         return error(StatusCode::NOT_FOUND, "attachment not found");
     };
-    let etag = format!("\"{id}-{}\"", attachments::store::fingerprint(edge));
+    // The original never changes for an id; derived files change with the
+    // fingerprint.
+    let etag = if kind == Kind::Original {
+        format!("\"{id}\"")
+    } else {
+        format!("\"{id}-{}\"", attachments::store::fingerprint(edge))
+    };
     if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())

@@ -422,8 +422,9 @@ impl Store {
     }
 
     /// [`Self::place`] then derive, reusing derived files when they exist.
-    /// The convenience path for uploads and tests; the batch pipeline calls
-    /// the two steps separately so it can reserve decode memory in between.
+    /// Test convenience: the service calls the two steps separately so it
+    /// can reserve decode memory in between.
+    #[cfg(test)]
     pub fn commit(
         &self,
         incoming: &Path,
