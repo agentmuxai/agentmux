@@ -267,9 +267,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "section"}>
-                {/* Section header toggles its own collapse on click (the
-                    expand affordance the removed hover strip used to provide);
-                    keyboard "e" on the focused row still toggles too. */}
+                {/* Nothing constructs a section node; the kind is removed in
+                    the follow-up (SPEC_AGENT_PANE_ROW_DISCLOSURE §2.6). The
+                    shared rule already treats it as fixed (no `e` toggle). */}
                 <div
                     ref={setPeekRowEl}
                     class={`agent-section agent-section--toggle level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}
