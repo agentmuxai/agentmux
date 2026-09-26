@@ -151,6 +151,18 @@ impl Store {
             .unwrap_or(0)
     }
 
+    /// Fold the counter kept under `from` into `to` and remove `from`. A new
+    /// Claude session has no id on its first turn, so that turn is counted
+    /// under a per-block key; once the id is known it belongs to the session.
+    pub fn adopt_session_inline_bytes(&self, from: &str, to: &str) {
+        let carried = self.session_inline_bytes(from);
+        if carried == 0 {
+            return;
+        }
+        self.add_session_inline_bytes(to, carried);
+        let _ = std::fs::remove_file(self.session_path(from));
+    }
+
     pub fn add_session_inline_bytes(&self, key: &str, bytes: u64) {
         if bytes == 0 {
             return;
@@ -692,6 +704,21 @@ mod tests {
         // A fresh Store over the same root sees it (a restart).
         let again = Store::new(s.root().to_path_buf());
         assert_eq!(again.session_inline_bytes("sess-1"), 1500);
+        // A first turn counted before the session had an id carries over.
+        s.add_session_inline_bytes("block:b1:new", 700);
+        s.adopt_session_inline_bytes("block:b1:new", "sess-1");
+        assert_eq!(s.session_inline_bytes("sess-1"), 2200);
+        assert_eq!(
+            s.session_inline_bytes("block:b1:new"),
+            0,
+            "moved, not copied"
+        );
+        s.adopt_session_inline_bytes("block:b1:new", "sess-1");
+        assert_eq!(
+            s.session_inline_bytes("sess-1"),
+            2200,
+            "adopting twice adds nothing"
+        );
         // Kept for the full retention window, not the 7-day unsent one.
         let then = SystemTime::now() - Duration::from_secs(8 * 24 * 3600);
         for p in walk_files(&s.root().join("sessions")).unwrap() {
