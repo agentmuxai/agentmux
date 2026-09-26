@@ -372,6 +372,12 @@
             flex: 1 1 auto;
             min-width: 0;
         }
+
+        .agent-resume-failed-countdown {
+            flex: 0 0 auto;
+            font-variant-numeric: tabular-nums;
+            color: var(--secondary-text-color);
+        }
     }
 
     .agent-large-session-banner {

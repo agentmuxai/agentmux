@@ -66,6 +66,50 @@ describe("AgentSessionNotices", () => {
         expect(screen.getByText(/Couldn't resume the previous conversation/i)).toBeInTheDocument();
     });
 
+    describe("failed-resume auto-dismiss", () => {
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it("counts down from 15s and clears the flag when it reaches zero", async () => {
+            vi.useFakeTimers();
+            render(() => (
+                <AgentSessionNotices blockId="b1" blockAtom={block({ "session:resume_failed": true })} providerId="claude" />
+            ));
+            expect(screen.getByText("15s")).toBeInTheDocument();
+
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(screen.getByText("14s")).toBeInTheDocument();
+
+            await vi.advanceTimersByTimeAsync(13_000);
+            expect(screen.getByText("1s")).toBeInTheDocument();
+            expect(clearSessionFlag).not.toHaveBeenCalled();
+
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(clearSessionFlag).toHaveBeenCalledTimes(1);
+            expect(clearSessionFlag).toHaveBeenCalledWith("b1", "session:resume_failed");
+        });
+
+        it("still dismisses immediately on click", async () => {
+            render(() => (
+                <AgentSessionNotices blockId="b1" blockAtom={block({ "session:resume_failed": true })} providerId="claude" />
+            ));
+            await userEvent.click(screen.getByRole("button", { name: /Dismiss/ }));
+            await waitFor(() => expect(clearSessionFlag).toHaveBeenCalledWith("b1", "session:resume_failed"));
+        });
+
+        it("stops counting once the banner unmounts", async () => {
+            vi.useFakeTimers();
+            const { unmount } = render(() => (
+                <AgentSessionNotices blockId="b1" blockAtom={block({ "session:resume_failed": true })} providerId="claude" />
+            ));
+            await vi.advanceTimersByTimeAsync(5000);
+            unmount();
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(clearSessionFlag).not.toHaveBeenCalled();
+        });
+    });
+
     it("warns with an Archive action once the session passes the large threshold", async () => {
         render(() => (
             <AgentSessionNotices blockId="b1" blockAtom={block({ "session:line_count": 500_000 })} providerId="claude" />

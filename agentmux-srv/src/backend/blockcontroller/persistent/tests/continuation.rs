@@ -260,6 +260,87 @@ fn an_empty_agent_zone_falls_back_to_the_panes_own_transcript() {
     assert!(packet.contains("pane-only request"), "{packet}");
 }
 
+// ── carrying the packet retracts the failed-resume banner ───────────────
+
+/// A real UUID: `update_object_meta` parses the block's ORef, and a bare
+/// word like "block" fails that parse, so the retract would silently no-op.
+const BANNER_BLOCK: &str = "5a1e0b7e-0d15-4c1a-9e55-b4d6e2f0c0de";
+
+fn banner_controller(store: &Arc<Store>, fs: Arc<FileStore>) -> PersistentSubprocessController {
+    PersistentSubprocessController::new(
+        "tab".to_string(),
+        BANNER_BLOCK.to_string(),
+        None,
+        None,
+        Some(store.clone()),
+        Some(fs),
+    )
+}
+
+fn store_with_resume_failed(block_id: &str) -> Arc<Store> {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let mut block = crate::backend::obj::Block {
+        oid: block_id.to_string(),
+        parentoref: String::new(),
+        version: 1,
+        runtimeopts: None,
+        stickers: None,
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert(
+                crate::backend::blockcontroller::session_recovery::META_SESSION_RESUME_FAILED.to_string(),
+                serde_json::json!(true),
+            );
+            m
+        },
+        subblockids: None,
+    };
+    store.insert(&mut block).unwrap();
+    store
+}
+
+fn resume_failed_is_set(store: &Store, block_id: &str) -> bool {
+    let block: crate::backend::obj::Block = store.get(block_id).unwrap().unwrap();
+    block
+        .meta
+        .get(crate::backend::blockcontroller::session_recovery::META_SESSION_RESUME_FAILED)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// The 2026-09-25 fresh-portable launch: `--resume` was rejected under the
+/// new config dir, the retry carried AgentMux's record into a fresh session,
+/// and the pane still said "Couldn't resume … started a new one" — while the
+/// agent was in fact continuing the conversation.
+#[test]
+fn carrying_the_record_retracts_the_failed_resume_banner() {
+    let store = store_with_resume_failed(BANNER_BLOCK);
+    let fs = Arc::new(FileStore::open_in_memory().unwrap());
+    fs.make_file(BANNER_BLOCK, PERSISTENT_OUTPUT_SUBJECT, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.write_file(
+        BANNER_BLOCK,
+        PERSISTENT_OUTPUT_SUBJECT,
+        &stream(&[r#"{"type":"user","message":{"role":"user","content":"earlier request"}}"#]),
+    )
+    .unwrap();
+    let c = banner_controller(&store, fs);
+
+    let packet = c.carry_continuation().expect("the pane's record is carried");
+    assert!(packet.contains("earlier request"), "{packet}");
+    assert!(!resume_failed_is_set(&store, BANNER_BLOCK), "banner must be retracted once the record is carried");
+}
+
+/// With nothing to carry the new session really does start blank, so the
+/// banner is telling the truth and stays.
+#[test]
+fn nothing_to_carry_leaves_the_failed_resume_banner() {
+    let store = store_with_resume_failed(BANNER_BLOCK);
+    let c = banner_controller(&store, Arc::new(FileStore::open_in_memory().unwrap()));
+
+    assert_eq!(c.carry_continuation(), None);
+    assert!(resume_failed_is_set(&store, BANNER_BLOCK));
+}
+
 /// Only the tail is read, so a long transcript whose id appears early and
 /// then again near the end still resolves.
 #[test]

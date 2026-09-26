@@ -361,14 +361,7 @@ impl PersistentSubprocessController {
             // don't fail"), and its retry needs the record as much as a
             // first spawn does. The disclosure above stays first-spawn-only;
             // the retry path emits its own.
-            continuation = self.continuation_packet();
-            if let Some(ref packet) = continuation {
-                tracing::info!(
-                    block_id = %self.block_id,
-                    packet_chars = packet.len(),
-                    "continuity: carrying AgentMux's record of the conversation into the fresh session"
-                );
-            }
+            continuation = self.carry_continuation();
         }
         // After the packet is built, so the disclosure can say whether this
         // fresh session was given the record ("continued") or not.

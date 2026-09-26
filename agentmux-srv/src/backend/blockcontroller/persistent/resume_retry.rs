@@ -213,6 +213,28 @@ impl PersistentSubprocessController {
         )
     }
 
+    /// The continuation packet a fresh spawn onto prior history carries, or
+    /// `None` when there is no record to give it.
+    ///
+    /// Carrying one also retracts the "Couldn't resume the previous
+    /// conversation — started a new one" banner a rejected `--resume` raised
+    /// on the previous generation: the conversation wasn't lost, this session
+    /// continues it from AgentMux's record. Same reasoning as the `Resumed`
+    /// retract in the stdout reader — the banner must not contradict the
+    /// "continued" outcome the pane shows.
+    pub(super) fn carry_continuation(&self) -> Option<String> {
+        let packet = self.continuation_packet()?;
+        tracing::info!(
+            block_id = %self.block_id,
+            packet_chars = packet.len(),
+            "continuity: carrying AgentMux's record of the conversation into the fresh session"
+        );
+        if let Some(ref store) = self.mstore {
+            super::super::session_recovery::clear_resume_failed(store, &self.event_bus, &self.block_id);
+        }
+        Some(packet)
+    }
+
     /// After a confirmed-stale `--resume` failure, try to recover a REAL
     /// session instead of giving up and starting blank
     /// (`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`).
