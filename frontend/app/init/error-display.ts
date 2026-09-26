@@ -38,6 +38,15 @@
  *        docs/specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md
  */
 
+// Plain functions, not JSX — this card renders before Solid ever mounts (the
+// host bridge that failed is a prerequisite for the app framework too), so
+// `<CopyErrorButton>` itself can't be used here. `copyErrorReport` is its
+// transport half, callable standalone; `formatErrorReport` builds the same
+// text every other surface copies. SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md
+// surface 4 — transport="dom" since the IPC bridge is exactly what's down.
+import { copyErrorReport } from "@/app/errors/CopyErrorButton";
+import { formatErrorReport } from "@/app/errors/error-report";
+
 const RELOAD_KEY = "amux-startup-recover-reloads";
 const MAX_RELOADS = 3;
 // Set once the manual "Restore" has tried the in-place credentialed re-navigate.
@@ -323,7 +332,26 @@ export function showStartupError(message: string): void {
         void doRestore();
     };
 
-    row.append(restore);
+    // "Copy details" next to Restore (§5 row 4) — stays reachable regardless
+    // of whether "Technical details" below is expanded (§4.4 rule 2).
+    const copyBtn = document.createElement("button");
+    copyBtn.textContent = "Copy details";
+    copyBtn.style.cssText =
+        "padding:9px 18px;border-radius:7px;border:1px solid rgba(255,255,255,0.15);font-size:13px;font-weight:600;" +
+        "background:transparent;color:rgba(255,255,255,0.8);";
+    copyBtn.onclick = () => {
+        copyBtn.disabled = true;
+        const report = formatErrorReport({ title: title.textContent || "AgentMux connection lost", details: message });
+        void copyErrorReport(report, "dom").then((ok) => {
+            copyBtn.textContent = ok ? "Copied ✓" : "Copy failed";
+            copyBtn.disabled = false;
+            setTimeout(() => {
+                copyBtn.textContent = "Copy details";
+            }, 2000);
+        });
+    };
+
+    row.append(restore, copyBtn);
     card.appendChild(row);
 
     const details = document.createElement("details");

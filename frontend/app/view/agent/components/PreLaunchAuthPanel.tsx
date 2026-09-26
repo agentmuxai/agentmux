@@ -22,6 +22,8 @@
 
 import { Button } from "@/element/button";
 import { translateError } from "@/app/errors/translate";
+import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
+import { formatErrorReport } from "@/app/errors/error-report";
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -816,6 +818,8 @@ const FailedBanner = (p: {
         <Button onClick={() => p.onRetry()} disabled={!p.canRetry}>
             Try again
         </Button>
+        {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 5. */}
+        <CopyErrorButton report={() => formatErrorReport({ title: "Auth failed", message: p.state.error || "unknown error" })} />
     </div>
 );
 

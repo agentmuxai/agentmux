@@ -47,6 +47,8 @@ import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
+import { copyErrorReport } from "@/app/errors/CopyErrorButton";
+import { formatErrorReport } from "@/app/errors/error-report";
 
 /** How long an armed Take over waits for its confirming click. */
 export const TAKEOVER_CONFIRM_MS = 5000;
@@ -174,6 +176,11 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     const [takeoverArmed, setTakeoverArmed] = createSignal(false);
     const [takingOver, setTakingOver] = createSignal(false);
     let disarmTimer: ReturnType<typeof setTimeout> | undefined;
+    // Copy error (SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surfaces 1/2) —
+    // view-local feedback, same class as `expanded`/`retrying`: presentation
+    // timing nothing else needs to agree on.
+    const [copyState, setCopyState] = createSignal<"idle" | "copied" | "failed">("idle");
+    let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
 
     let countdown: ReturnType<typeof setInterval> | undefined;
     let autoRetries = 0;
@@ -304,8 +311,33 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             unsubTurnEnded();
             cancelCountdown();
             disarmTakeover();
+            clearTimeout(copyResetTimer);
         });
     });
+
+    const copyError = () => {
+        const pf = opts.failure();
+        if (!pf) return;
+        const f = pf.data;
+        const metaParts: string[] = [f.code];
+        if (f.signal != null) metaParts.push(`signal ${f.signal}`);
+        else if (f.exitCode != null) metaParts.push(`exit ${f.exitCode}`);
+        if (f.retryable) metaParts.push("retryable");
+        const detailParts: string[] = [];
+        if (f.detail) detailParts.push(f.detail);
+        if (f.stderrTail) detailParts.push(f.stderrTail);
+        const report = formatErrorReport({
+            title: f.title || "Agent run failed",
+            message: metaParts.join(" · "),
+            where: `Agent failure · pane ${opts.blockId.slice(0, 8)}`,
+            details: detailParts.length > 0 ? detailParts.join("\n\n") : undefined,
+        });
+        clearTimeout(copyResetTimer);
+        void copyErrorReport(report).then((ok) => {
+            setCopyState(ok ? "copied" : "failed");
+            copyResetTimer = setTimeout(() => setCopyState("idle"), 2000);
+        });
+    };
 
     // Reset the budget when `state.failure` clears WITHOUT this hook having
     // initiated the clear itself — i.e. the user composed and sent a
@@ -388,9 +420,11 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 bindCandidates: opts.bindCandidates?.(),
                 takeoverArmed: takeoverArmed(),
                 takingOver: takingOver(),
+                copyState: copyState(),
             },
             {
                 retry: doRetry,
+                copyError,
                 // Forwarded the SAME `turnAttempted` the row was built from, so
                 // the button's label and its relogin() argument can never
                 // disagree about which case this is (a never-started agent must

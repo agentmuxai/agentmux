@@ -11,11 +11,22 @@
  * errors have no in-place fix.
  */
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+    writeText: vi.fn((_text: string) => Promise.resolve()),
+    showContextMenu: vi.fn((_oid: unknown, _menu: { label: string; id: string }[], _position: unknown) => {}),
+}));
+vi.mock("@/util/clipboard", () => ({ writeText: mocks.writeText, readText: () => Promise.resolve("") }));
+vi.mock("@/app/store/global", async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    getApi: () => ({ showContextMenu: mocks.showContextMenu }),
+}));
+
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import { DocumentRow } from "./DocumentRow";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type {
@@ -161,6 +172,39 @@ describe("DocumentRow — inline auth-error CTA", () => {
     it("renders NO CTA when onAgentErrorLogin is not provided, even for a 401", () => {
         renderRow(errorNode(401), undefined);
         expect(screen.queryByRole("button", { name: /Login Again/i })).toBeNull();
+    });
+});
+
+/** SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3. */
+describe("DocumentRow — agent_error copy", () => {
+    afterEach(() => vi.clearAllMocks());
+
+    it("the hover-icon button copies a redacted formatted report", async () => {
+        const { container } = renderRow(errorNode(401, "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123"));
+        const btn = container.querySelector<HTMLButtonElement>(".agent-error-copy .copy-error-button-icon");
+        expect(btn).not.toBeNull();
+        fireEvent.click(btn!);
+        await waitFor(() => expect(mocks.writeText).toHaveBeenCalled());
+        const copied = mocks.writeText.mock.calls[0][0] as string;
+        expect(copied).toContain("AgentMux error: HTTP 401");
+        expect(copied).not.toContain("ghp_abcdef");
+        expect(copied).toContain("[redacted");
+    });
+
+    it("right-click offers a Copy error context-menu entry that copies the same report", async () => {
+        const { container } = renderRow(errorNode(500, "Internal error"));
+        const block = container.querySelector(".agent-error-block")!;
+        const e = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+        block.dispatchEvent(e);
+
+        expect(mocks.showContextMenu).toHaveBeenCalledOnce();
+        const menu = mocks.showContextMenu.mock.calls[0][1] as { label: string; id: string }[];
+        const item = menu.find((i) => i.label === "Copy error");
+        expect(item).toBeDefined();
+
+        ContextMenuModel.handleContextMenuClick(item!.id);
+        await waitFor(() => expect(mocks.writeText).toHaveBeenCalled());
+        expect(mocks.writeText.mock.calls[0][0]).toContain("AgentMux error: HTTP 500");
     });
 });
 

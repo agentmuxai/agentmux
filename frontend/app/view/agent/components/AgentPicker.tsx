@@ -31,6 +31,8 @@
  */
 
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
+import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
+import { formatErrorReport } from "@/app/errors/error-report";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
@@ -1080,6 +1082,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                     <div class="nodejs-notice-title">Launch aborted</div>
                                     <div class="nodejs-notice-text">{launchError()}</div>
                                 </div>
+                                {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 6 — no existing action row here, so an inline icon. */}
+                                <CopyErrorButton
+                                    variant="icon"
+                                    className="agent-nodejs-notice-copy"
+                                    report={() => formatErrorReport({ title: "Launch aborted", message: launchError() ?? "" })}
+                                />
                             </div>
                         </Show>
                         <Show when={nodejsError()}>

@@ -7,6 +7,7 @@
 //! the first user message carries AgentMux's own record of the conversation,
 //! so the model continues instead of starting blind.
 
+use agentmux_common::redact::redact_secrets;
 use serde_json::Value;
 
 /// How much of the pane's transcript to read. Streaming deltas are ~90% of
@@ -352,60 +353,13 @@ pub(crate) fn prefix_user_message(line: &str, packet: &str) -> Option<String> {
     Some(v.to_string())
 }
 
-const SECRET_PREFIXES: &[&str] = &[
-    "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "sk-", "xoxa-", "xoxb-", "xoxo-", "xoxp-", "xoxr-", "xoxs-",
-    "AKIA",
-];
-
-/// Blanks credential-shaped tokens and PEM private keys before history is
-/// replayed into a model (§4.7). Deliberately shape-based: it errs toward
-/// redacting a long token that merely looks like a secret.
-pub(crate) fn redact_secrets(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    loop {
-        let hit = SECRET_PREFIXES
-            .iter()
-            .filter_map(|p| rest.find(p).map(|i| (i, *p)))
-            .min_by_key(|(i, p)| (*i, std::cmp::Reverse(p.len())));
-        let Some((at, prefix)) = hit else {
-            out.push_str(rest);
-            break;
-        };
-        let after = &rest[at + prefix.len()..];
-        let body = after
-            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
-            .unwrap_or(after.len());
-        out.push_str(&rest[..at]);
-        if body >= 16 {
-            out.push_str("[redacted secret]");
-        } else {
-            out.push_str(&rest[at..at + prefix.len() + body]);
-        }
-        rest = &after[body..];
-    }
-    redact_private_keys(&out)
-}
-
-fn redact_private_keys(text: &str) -> String {
-    let mut out = text.to_string();
-    let mut from = 0;
-    while let Some(found) = out[from..].find("-----BEGIN") {
-        let start = from + found;
-        let header_end = out[start..].find('\n').map_or(out.len(), |i| start + i);
-        if !out[start..header_end].contains("PRIVATE KEY") {
-            from = header_end;
-            continue;
-        }
-        let end = out[start..]
-            .find("-----END")
-            .and_then(|i| out[start + i..].find("KEY-----").map(|j| start + i + j + "KEY-----".len()))
-            .unwrap_or(out.len());
-        out.replace_range(start..end, "[redacted private key]");
-        from = start + "[redacted private key]".len();
-    }
-    out
-}
+// Redaction itself (credential prefixes, private keys, and — since
+// SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §4.5 — headers, key=value pairs,
+// URL userinfo, JWTs and AWS secret keys) lives in `agentmux_common::redact`,
+// shared with every other formatter that puts error/log text on the
+// clipboard. `redact_secrets` blanks all of that before history is replayed
+// into a model (§4.7). Its own tests, and the shared vectors it's checked
+// against, live with the implementation in `agentmux-common/src/redact.rs`.
 
 #[cfg(test)]
 mod tests {
@@ -597,29 +551,12 @@ mod tests {
         assert!(p.contains("[redacted secret]") && p.contains("[redacted private key]"));
     }
 
-    /// ReAgent P0 on #3643: a certificate ahead of a private key must not
-    /// end the scan and let the key through.
-    #[test]
-    fn a_private_key_after_a_certificate_is_still_redacted() {
-        let text = "-----BEGIN CERTIFICATE-----\nMIIBcert\n-----END CERTIFICATE-----\n\
-                    -----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----\ndone";
-        let out = redact_private_keys(text);
-        assert!(out.contains("MIIBcert"), "a certificate is public: {out}");
-        assert!(!out.contains("MIIEsecret"), "{out}");
-        assert!(out.contains("[redacted private key]") && out.ends_with("done"));
-    }
-
-    #[test]
-    fn every_slack_token_family_is_redacted() {
-        for prefix in ["xoxa-", "xoxb-", "xoxo-", "xoxp-", "xoxr-", "xoxs-"] {
-            let token = format!("{prefix}1234567890-abcdefghijklmnop");
-            assert_eq!(redact_secrets(&format!("t {token} t")), "t [redacted secret] t", "{prefix}");
-        }
-    }
-
     /// ReAgent P1 on #3673: `cap` keeps the first two thirds of a long turn.
     /// A secret straddling that cut must not survive as a fragment too short
-    /// to recognize, so redaction runs before the cut.
+    /// to recognize, so redaction runs before the cut. (The redactor's own
+    /// unit tests, including this same straddling case in isolation, moved
+    /// to `agentmux-common/src/redact.rs`; this one stays because it tests
+    /// *this module's* cap-after-redact ordering, not the redactor itself.)
     #[test]
     fn a_secret_straddling_a_turn_cut_is_still_redacted() {
         let head = TURN_CAP_CHARS * 2 / 3 - 6;
@@ -627,11 +564,6 @@ mod tests {
         let p = packet(&[user(&long), say("ok")]);
         assert!(!p.contains("ghp_ab"), "a fragment of the token leaked");
         assert!(p.contains("[redacted"), "{}", &p[..200]);
-    }
-
-    #[test]
-    fn ordinary_words_that_share_a_prefix_survive_redaction() {
-        assert_eq!(redact_secrets("a task-list and a desk-lamp"), "a task-list and a desk-lamp");
     }
 
     #[test]

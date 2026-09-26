@@ -1887,6 +1887,24 @@
             background: color-mix(in srgb, var(--error-color) 15%, transparent);
         }
     }
+
+    // Copy icon — hover/focus-reveal, at the row's end (SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3).
+    .agent-error-copy {
+        flex-shrink: 0;
+        margin-left: auto;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+    }
+
+    &:hover .agent-error-copy,
+    &:focus-within .agent-error-copy {
+        opacity: 0.75;
+    }
+
+    .agent-error-copy:hover,
+    .agent-error-copy:focus-visible {
+        opacity: 1;
+    }
 }
 
 .agent-context-compacted {

@@ -1,0 +1,89 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.copy-error-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.copy-error-button-action {
+    appearance: none;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    background: transparent;
+    color: var(--secondary-text-color);
+    border-radius: 4px;
+    font-size: 12px;
+    padding: 3px 8px;
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+        background: var(--highlight-bg);
+    }
+
+    &.is-copied {
+        color: var(--success-color);
+        border-color: var(--success-color);
+    }
+
+    &.is-failed {
+        color: var(--error-color);
+        border-color: var(--error-color);
+    }
+}
+
+.copy-error-button-icon {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+    }
+
+    &.is-copied i {
+        color: var(--success-color);
+    }
+
+    &.is-failed i {
+        color: var(--error-color);
+    }
+}
+
+// Total-failure fallback: the report text stays visible and selected, with
+// an explicit hint, so the user is never left with nothing to work with.
+.copy-error-button-fallback {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.copy-error-button-fallback-text {
+    width: 1px;
+    height: 1.4em;
+    min-width: 120px;
+    resize: none;
+    font-size: 11px;
+    padding: 2px 4px;
+    color: var(--main-text-color);
+    background: var(--highlight-bg);
+    border: 1px solid var(--error-color);
+    border-radius: 3px;
+}
+
+.copy-error-button-fallback-hint {
+    font-size: 11px;
+    color: var(--error-color);
+    white-space: nowrap;
+}

@@ -1,0 +1,93 @@
+[
+    {
+        "name": "authorization-bearer",
+        "input": "Authorization: Bearer abc.def.ghi",
+        "expected": "Authorization: [redacted]"
+    },
+    {
+        "name": "authorization-basic",
+        "input": "Authorization: Basic dXNlcjpwYXNz",
+        "expected": "Authorization: [redacted]"
+    },
+    {
+        "name": "proxy-authorization-lowercase",
+        "input": "proxy-authorization: Token xyz",
+        "expected": "proxy-authorization: [redacted]"
+    },
+    {
+        "name": "x-api-key-header",
+        "input": "x-api-key: abc123",
+        "expected": "x-api-key: [redacted]"
+    },
+    {
+        "name": "cookie-header",
+        "input": "Cookie: session=abc123",
+        "expected": "Cookie: [redacted]"
+    },
+    {
+        "name": "set-cookie-header",
+        "input": "Set-Cookie: session=abc123; Path=/",
+        "expected": "Set-Cookie: [redacted]"
+    },
+    {
+        "name": "password-equals-value",
+        "input": "password=hunter2",
+        "expected": "password=[redacted]"
+    },
+    {
+        "name": "password-colon-value",
+        "input": "password: hunter2",
+        "expected": "password: [redacted]"
+    },
+    {
+        "name": "json-password",
+        "input": "{\"password\": \"hunter2\"}",
+        "expected": "{\"password\": \"[redacted]\"}"
+    },
+    {
+        "name": "client-secret",
+        "input": "client_secret=abc123",
+        "expected": "client_secret=[redacted]"
+    },
+    {
+        "name": "credential-key",
+        "input": "credential=abc123",
+        "expected": "credential=[redacted]"
+    },
+    {
+        "name": "url-userinfo-password",
+        "input": "fetch https://alice:hunter2@example.com/path?q=1",
+        "expected": "fetch https://alice:[redacted]@example.com/path?q=1"
+    },
+    {
+        "name": "jwt",
+        "input": "token is eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U end",
+        "expected": "token is [redacted] end"
+    },
+    {
+        "name": "aws-secret-access-key",
+        "input": "aws_secret_access_key=ABCDEFGHIJabcdefghij1234567890ABCDEFGHIJ",
+        "expected": "aws_secret_access_key=[redacted]"
+    },
+    {
+        "name": "github-pat",
+        "input": "use ghp_abcdefghijklmnopqrstuvwxyz0123 now",
+        "expected": "use [redacted secret] now"
+    },
+    {
+        "name": "private-key",
+        "input": "-----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----",
+        "expected": "[redacted private key]"
+    },
+    {
+        "name": "ordinary-words-sharing-a-prefix-are-not-redacted",
+        "input": "a task-list and a desk-lamp",
+        "expected": "a task-list and a desk-lamp"
+    },
+    {
+        "name": "a-key-name-containing-token-is-redacted-by-design",
+        "input": "tokenizer=gpt2",
+        "expected": "tokenizer=[redacted]",
+        "note": "§4.5 says 'key contains ... token', not 'equals' — a deliberate false positive, not a bug."
+    }
+]

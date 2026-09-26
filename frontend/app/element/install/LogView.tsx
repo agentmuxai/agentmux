@@ -21,6 +21,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, type JSX } from "solid-js";
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 
 import { parseAnsi } from "./ansi";
@@ -164,18 +165,23 @@ export const LogView = (props: LogViewProps): JSX.Element => {
             onContextMenu={(e) => {
                 e.preventDefault();
                 const sel = window.getSelection()?.toString() ?? "";
+                // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the
+                // redacted path. This log is install diagnostic output, not
+                // an ordinary text view (editor/terminal/chat code block) —
+                // the spec's "a user's own selection isn't redacted" carve-out
+                // is scoped to those, not this surface.
                 ContextMenuModel.showContextMenu(
                     [
                         {
                             label: "Copy",
                             enabled: sel.length > 0,
-                            click: () => void clipboardWriteText(sel).catch((err) => console.log("clipboard write failed", err)),
+                            click: () => void clipboardWriteText(redactSecrets(sel)).catch((err) => console.log("clipboard write failed", err)),
                         },
                         {
                             label: "Copy All",
                             enabled: props.lines().length > 0,
                             click: () =>
-                                void clipboardWriteText(props.copyAllText()).catch((err) =>
+                                void clipboardWriteText(redactSecrets(props.copyAllText())).catch((err) =>
                                     console.log("clipboard write failed", err),
                                 ),
                         },

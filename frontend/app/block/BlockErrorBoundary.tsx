@@ -25,7 +25,7 @@
 import { invokeCommand } from "@/app/platform/ipc";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "@/log/source-map-resolver";
 import { getTrail } from "@/log/render-trail";
-import { writeText as ipcWriteText } from "@/util/clipboard";
+import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { ErrorBoundary as SolidErrorBoundary, createSignal, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -157,27 +157,27 @@ function BlockErrorFallback(props: {
 
     // Copy-on-highlight: when the user releases the mouse with a non-empty
     // selection inside the error pane, copy to clipboard and show a brief
-    // "Copied" tooltip near the cursor. Uses execCommand as primary path
-    // (synchronous, no permission issues in CEF) with IPC writeText fallback.
+    // "Copied" tooltip near the cursor.
+    //
+    // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §4.2/§5 — moved to the shared
+    // redacted transport. This used to call execCommand("copy") directly on
+    // the live DOM selection (no explicit string, so nothing could be
+    // redacted), falling back to IPC only on failure. copyErrorReport
+    // redacts the captured text first, then tries IPC before its own
+    // controlled-textarea execCommand fallback — the inverted, #2535-verified
+    // order §4.2 specifies, replacing this file's old (reversed) one.
     const handleMouseUp = (e: MouseEvent): void => {
         const sel = window.getSelection();
         const raw = sel?.toString() ?? "";
         const text = raw.trim();
         if (!text) return;
         const pos = { x: e.clientX, y: e.clientY };
-        const show = (): void => {
+        void copyErrorReport(raw).then((ok) => {
+            if (!ok) return;
             if (fadeTimer) clearTimeout(fadeTimer);
             setCopiedPos(pos);
             fadeTimer = setTimeout(() => setCopiedPos(null), 1500);
-        };
-        // execCommand is synchronous and works reliably in CEF within a user gesture.
-        try {
-            const ok = document.execCommand("copy");
-            if (ok) { show(); return; }
-        } catch (_) { /* fall through */ }
-        // Fallback: route through CEF IPC (navigator.clipboard is blocked in CEF).
-        // Use raw (untrimmed) to match what execCommand would have copied.
-        void ipcWriteText(raw).then(show).catch(() => {});
+        });
     };
 
     return (
