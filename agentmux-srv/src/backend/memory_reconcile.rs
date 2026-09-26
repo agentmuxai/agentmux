@@ -841,6 +841,63 @@ pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path, settl
     result
 }
 
+/// An AgentMux write to an agent's memory — MemoryWrite, the Armory editor,
+/// a revert, a bundle import — recorded before the file is written
+/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1), so the next spawn
+/// doesn't take it for the provider's, and it follows the agent at once.
+///
+/// Only into the agent's own folder (a claim it holds alone), on the version
+/// that folder holds: if the record changed the file elsewhere since, nothing
+/// is recorded and the next spawn's reconcile keeps both. Never fails the
+/// write: an error is logged, and a later capture records the file.
+pub(crate) fn record_agentmux_write(uid: &str, dir: &Path, file: &str, body: &[u8], source: &str, source_detail: &str) {
+    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return };
+    if let Err(e) = record_agentmux_write_in(fs, uid, dir, file, body, source, source_detail) {
+        tracing::warn!(uid, file, error = %e, "memory record: AgentMux write not recorded; a later capture records it");
+    }
+}
+
+/// [`record_agentmux_write`] against `fs`. Returns whether it was recorded.
+pub(crate) fn record_agentmux_write_in(
+    fs: &FileStore,
+    uid: &str,
+    dir: &Path,
+    file: &str,
+    body: &[u8],
+    source: &str,
+    source_detail: &str,
+) -> Result<bool, StoreError> {
+    if record::validate_file(file).is_err() || !claims::held_exclusively(fs, uid, dir)? {
+        return Ok(false);
+    }
+    let dir_id = claims::dir_id(dir);
+    let heads = record::heads(fs, uid)?;
+    let projected = projected_version(&heads, &dir_id, file);
+    let head = heads.files.get(file).map(|h| h.version.clone());
+    // What this write replaces here: what this folder was last given. A
+    // file the record has but never projected here is left to reconcile.
+    let expected = match (&projected, &head) {
+        (Some(p), _) => Some(p.clone()),
+        (None, None) => None,
+        (None, Some(_)) => return Ok(false),
+    };
+    let outcome = record::append_version(
+        fs,
+        uid,
+        NewVersion {
+            file,
+            body: Some(body),
+            expected_parent: expected.as_deref(),
+            merged_parent: None,
+            conflicts_with: None,
+            source,
+            source_detail,
+            project_to: Some(&dir_id),
+        },
+    )?;
+    Ok(matches!(outcome, AppendOutcome::Appended(_) | AppendOutcome::Unchanged(_)))
+}
+
 /// `<stem>__conflict_<short>.md`, the stem cut so the whole name stays
 /// within `validate_filename`'s 200-character stem.
 pub(crate) fn conflict_file_name(name: &str, version: &str) -> String {
