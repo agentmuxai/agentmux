@@ -4,9 +4,8 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ToolNode } from "../../types";
+import { registerToolRenderers } from ".";
 import { resolveToolRenderer } from "./registry";
-// Registers the built-ins (the catch-all) alongside ToolReferences' own entry.
-import "../ToolOverlayLog";
 import { ToolReferences } from "./ToolReferences";
 
 afterEach(() => cleanup());
@@ -48,6 +47,7 @@ describe("ToolReferences", () => {
     });
 
     it("is registered for ToolSearch by name", () => {
+        registerToolRenderers();
         const r = resolveToolRenderer(node([{ type: "tool_reference", tool_name: "WebSearch" }]))!;
         const { container } = render(() => r(node([{ type: "tool_reference", tool_name: "WebSearch" }])));
         expect(container.querySelector(".agent-tool-reference")).not.toBeNull();

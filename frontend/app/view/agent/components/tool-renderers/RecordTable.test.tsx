@@ -4,6 +4,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { RecordTable } from "./RecordTable";
+import { registerToolRenderers } from ".";
 import { resolveToolRenderer } from "./registry";
 import type { ToolNode } from "../../types";
 
@@ -41,6 +42,7 @@ describe("RecordTable", () => {
     });
 
     it("is registered by shape for an unknown tool's record list", () => {
+        registerToolRenderers();
         // Importing this module registered shape:record-table at priority -1
         // (above the JSON catch-all). An unknown tool with a record list routes
         // here rather than the JSON default.
