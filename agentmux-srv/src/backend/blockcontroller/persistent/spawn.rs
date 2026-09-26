@@ -161,16 +161,21 @@ impl PersistentSubprocessController {
         // (spec §4.3): the copy it placed, which the fork reads and never
         // writes.
         let mut relocated_copy: Option<std::path::PathBuf> = None;
+        // This spawn resumes with `--fork-session` (relocated, or the session
+        // grew outside AgentMux, spec §4.4).
+        let mut forked = false;
         {
             let mut inner = self.inner.lock().unwrap();
             let fork_copy = inner.fork_copy.take();
+            let fork_next = std::mem::take(&mut inner.fork_next);
             if let Some(sid) = inner.session_id.clone() {
                 if !config.resume_flag.is_empty() {
                     spawn_args.push(config.resume_flag.clone());
                     spawn_args.push(sid.clone());
-                    if fork_copy.is_some() {
+                    if fork_copy.is_some() || fork_next {
                         spawn_args.push("--fork-session".to_string());
                         relocated_copy = fork_copy.clone();
+                        forked = true;
                     }
                     attempted_resume_sid = Some(sid);
                 }
@@ -544,7 +549,7 @@ impl PersistentSubprocessController {
                 uid,
                 &config,
                 attempted_resume_sid.as_deref(),
-                relocated_copy.as_ref().and(attempted_resume_sid.as_deref()),
+                attempted_resume_sid.as_deref().filter(|_| forked),
                 continuation.is_some(),
                 agent_lease.as_ref().map(|l| l.epoch()),
             )
@@ -554,7 +559,7 @@ impl PersistentSubprocessController {
         let segment_wait = segment;
         // A relocated resume's copy, removed once the fork reports its id.
         let mut relocated_copy_read = relocated_copy.clone();
-        let forked_from_read = relocated_copy.as_ref().and(attempted_resume_sid.clone());
+        let forked_from_read = attempted_resume_sid.clone().filter(|_| forked);
         // Defaults to this spawn's own nonce; overridden below if
         // registration is skipped (reagent P1 on PR #3084 — see the `Err`
         // arm just below for why `my_registration_nonce` alone is wrong
