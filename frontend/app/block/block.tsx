@@ -7,6 +7,10 @@ import {
     BlockProps,
     FullBlockProps,
 } from "@/app/block/blocktypes";
+// For its side effect: registers every built-in pane tab. Nothing else
+// imports it, so without this no built-in view would be registered and every
+// pane would render "No View Component" (block-registry.load.test.ts).
+import "@/app/block/block-registry";
 import { adaptPaneTabInstance, makePaneTabHostContext } from "@/app/block/pane-tab-host";
 import {
     getPaneTab,
