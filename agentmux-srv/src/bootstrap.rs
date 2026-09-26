@@ -1272,10 +1272,10 @@ pub fn spawn_background_subsystems(
     // one exists to solve. Skipping this eager call is also NOT permanent
     // for the process's lifetime on an isolated channel: `muxbus.login`
     // lazily initializes the subscriber the moment the user explicitly
-    // logs in (see `muxbus_handlers.rs`), and `muxbus.status`/
-    // `inject_muxbus_env` gate on subscriber presence rather than
-    // re-deriving this same channel check, so they start working
-    // immediately after that login with no restart required.
+    // logs in (see `muxbus_handlers.rs`), and `muxbus.status` gates on
+    // subscriber presence rather than re-deriving this same channel check,
+    // so it starts working immediately after that login with no restart
+    // required.
     let muxbus_reason = agentmux_common::isolated_muxbus_reconnect_reason();
     if cloud_subscriber_disabled_from_env() {
         tracing::info!("cloud_subscriber: init_global skipped (AGENTMUX_DISABLE_CLOUD_SUBSCRIBER)");

@@ -689,6 +689,7 @@ impl AcpController {
             );
         }
         crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
+        crate::backend::account_login_guard::strip_account_login(&mut env_vars);
         env_vars
     }
 }
@@ -958,6 +959,21 @@ mod tests {
             std::path::PathBuf::from(&env["GH_CONFIG_DIR"]),
             crate::backend::gh_guard::guard_config_home().join("gh-acpy")
         );
+    }
+
+    /// No agent env carries the account's cloud login, even from a
+    /// `cmd:env` persisted before `account_login_guard` existed.
+    #[test]
+    fn an_acp_spawn_env_never_carries_the_account_login() {
+        let mut meta = super::super::super::obj::MetaMapType::new();
+        meta.insert(
+            "cmd:env".to_string(),
+            serde_json::json!({"MUXBUS_TOKEN": "eyJ.stale", "MUXBUS_COGNITO_DOMAIN": "https://auth.example", "AGENTMUX_AGENT_SLUG": "acpy"}),
+        );
+        let ctrl = AcpController::new("tab".to_string(), "block-acp-login".to_string(), None, None, None, None);
+        let env = ctrl.spawn_env(&meta);
+        assert!(!env.contains_key("MUXBUS_TOKEN"), "{env:?}");
+        assert!(!env.contains_key("MUXBUS_COGNITO_DOMAIN"), "{env:?}");
     }
 
     #[test]

@@ -213,10 +213,10 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // `muxbus_load()` here hit Keychain within a minute of launch
                 // on a fresh local build regardless of the boot-time and
                 // agent-spawn fixes elsewhere in this PR, defeating the whole
-                // point of it. Same subscriber-presence gate as
-                // `inject_muxbus_env` (see that function's doc comment for
-                // why presence, not the static channel flag, is the right
-                // signal): before any MuxBus session has ever been
+                // point of it. Gated on subscriber presence, not the static
+                // channel flag: on an isolated channel the subscriber only
+                // starts at an explicit `muxbus.login`, so presence is what
+                // says a session exists. Before any MuxBus session has ever been
                 // established on this process, report "not connected"
                 // without touching the keychain at all — identical to the
                 // real Ok(None) response below, just without the read.
@@ -294,75 +294,6 @@ fn clear_wan_peer_cache() {
         if let Err(e) = wan.peer_cache_clear() {
             tracing::warn!(error = %e, "wan identity: could not clear the peer-record cache");
         }
-    }
-}
-
-/// Inject MUXBUS_TOKEN into spawn env if credentials are stored and valid.
-/// Token refresh is async — this path just injects whatever is currently stored.
-/// Agents should re-spawn after the user refreshes via muxbus.login if the token expires.
-///
-/// `async` (not sync) and `spawn_blocking` internally — reagent P1 on #2260:
-/// muxbus_load does a synchronous OS-keychain read, which can hang on a
-/// slow/unresponsive Secret Service D-Bus daemon (headless Linux) and must
-/// not stall the caller's tokio worker thread.
-///
-/// Skipped when `muxbus::cloud_subscriber::get_global_subscriber()` is
-/// `None` — i.e. before ANY MuxBus session has ever been established on
-/// this process (reagentx P0/P1 on PR #3248, round 2). This call site
-/// runs on EVERY agent spawn, not just MuxBus-related ones — without
-/// this gate, the automatic `muxbus_load()` here would still prompt for
-/// Keychain consent on a fresh local build the moment ANY agent is
-/// opened, even after the startup-reconnect prompt was already fixed
-/// (see docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md).
-///
-/// Deliberately checks subscriber presence rather than re-deriving
-/// `isolated_muxbus_reconnect_enabled()` here: on `stable`/`dev-*`
-/// channels the subscriber is always initialized at boot, so this is
-/// equivalent there — but on an isolated local-package channel, the
-/// subscriber starts `None` and only becomes `Some` the moment the user
-/// explicitly completes `muxbus.login` (which lazily initializes it,
-/// see that handler). Gating on the channel flag directly would have
-/// kept this injection dead for the rest of the process's life even
-/// after a real, successful login — the user would need to fully
-/// restart the app to see it take effect. Gating on subscriber presence
-/// means injection starts working on the very next agent spawn after
-/// login, same session, no restart.
-pub async fn inject_muxbus_env(
-    mstore: &Arc<crate::backend::storage::store::Store>,
-    env_vars: &mut std::collections::HashMap<String, String>,
-) {
-    if crate::muxbus::cloud_subscriber::get_global_subscriber().is_none() {
-        return;
-    }
-    let load_store = mstore.clone();
-    let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load()).await;
-    let creds = match load_result {
-        Ok(Ok(Some(c))) => c,
-        Ok(Ok(None)) => return,
-        Ok(Err(e)) => {
-            tracing::warn!(error = %e, "muxbus inject: failed to load credentials");
-            return;
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "muxbus inject: load task panicked");
-            return;
-        }
-    };
-
-    if creds.access_token.is_empty() {
-        return;
-    }
-
-    if creds.is_valid() {
-        env_vars.insert("MUXBUS_TOKEN".to_string(), creds.access_token.clone());
-        env_vars.insert("MUXBUS_COGNITO_DOMAIN".to_string(), creds.cognito_domain.clone());
-        tracing::debug!(email = creds.user_email, "muxbus: injected MUXBUS_TOKEN into spawn env");
-    } else {
-        tracing::warn!(
-            email = creds.user_email,
-            expires_at = creds.expires_at,
-            "muxbus: token expired, skipping injection — user should reconnect via muxbus.login"
-        );
     }
 }
 
