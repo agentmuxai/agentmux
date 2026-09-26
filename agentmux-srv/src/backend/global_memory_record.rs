@@ -104,6 +104,10 @@ pub(crate) struct EntryHead {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Heads {
+    /// The scope this record is for, as written — its zone name is a hash
+    /// when the channel id has characters a zone name can't.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope: String,
     #[serde(default)]
     pub entries: BTreeMap<String, EntryHead>,
     #[serde(default)]
@@ -214,6 +218,7 @@ pub(crate) fn sync_entry(fs: &FileStore, store: &Store, scope: &str, id: &str, s
         z.append_lines(LOG_FILE, &line(&Event::Entry(v.clone()))?)?;
         let extra = head.map(|h| h.extra.clone()).unwrap_or_default();
         heads.entries.insert(id.to_string(), EntryHead { version: v.version, sha256: sha, name, is_system, extra });
+        heads.scope = scope.to_string();
         z.put(HEADS_FILE, &serde_json::to_vec(&heads).map_err(|e| StoreError::Other(e.to_string()))?)?;
         Ok(true)
     })
@@ -229,6 +234,7 @@ pub(crate) fn sync_order(fs: &FileStore, store: &Store, scope: &str) -> Result<b
         }
         z.append_lines(LOG_FILE, &line(&Event::Order { ids: ids.clone(), at_ms: agentmux_common::time::now_ms() })?)?;
         heads.order = ids.clone();
+        heads.scope = scope.to_string();
         z.put(HEADS_FILE, &serde_json::to_vec(&heads).map_err(|e| StoreError::Other(e.to_string()))?)?;
         Ok(true)
     })
@@ -310,8 +316,9 @@ const IMPORT_LIST_TTL: std::time::Duration = std::time::Duration::from_secs(30 *
 
 /// The live, non-system entries of the record in `zone` that `store` doesn't
 /// have as Global Memory, in that record's order.
-fn missing_from(fs: &FileStore, store: &Store, zone: &str) -> Result<Vec<(String, EntryHead)>, StoreError> {
+fn missing_from(fs: &FileStore, store: &Store, zone: &str) -> Result<(String, Vec<(String, EntryHead)>), StoreError> {
     let heads = read_heads(fs.read_files_consistent(zone, &[HEADS_FILE])?.pop().flatten())?;
+    let label = if heads.scope.is_empty() { zone.trim_start_matches("global-memory:").to_string() } else { heads.scope.clone() };
     let mut ids: Vec<String> = heads.order.iter().filter(|id| heads.entries.contains_key(*id)).cloned().collect();
     ids.extend(heads.entries.keys().filter(|id| !heads.order.contains(id)).cloned());
     let mut out = Vec::new();
@@ -325,7 +332,7 @@ fn missing_from(fs: &FileStore, store: &Store, zone: &str) -> Result<Vec<(String
         }
         out.push((id, h.clone()));
     }
-    Ok(out)
+    Ok((label, out))
 }
 
 /// The other scopes this channel could import Global Memory from, under a
@@ -339,11 +346,10 @@ pub(crate) fn import_sources_in(fs: &FileStore, store: &Store, own_scope: &str) 
             fs.get_all_zone_ids()?.into_iter().filter(|z| z.starts_with("global-memory:") && *z != own_zone).collect();
         all.sort_by_key(|z| (z != "global-memory:shared", z.clone()));
         for z in all {
-            let missing = missing_from(fs, store, &z)?;
+            let (scope, missing) = missing_from(fs, store, &z)?;
             if missing.is_empty() {
                 continue;
             }
-            let scope = z.trim_start_matches("global-memory:").to_string();
             sources.push(ImportSource {
                 index: sources.len(),
                 scope: scope.clone(),
@@ -378,7 +384,7 @@ pub(crate) fn import(fs: &FileStore, store: &Store, list_id: &str, index: usize)
     };
     let mut report = ImportReport::default();
     let mut next_order = store.bundle_list_global()?.iter().map(|b| b.sort_order).max().unwrap_or(0) + 1;
-    for (id, head) in missing_from(fs, store, &zone)? {
+    for (id, head) in missing_from(fs, store, &zone)?.1 {
         let Some(sha) = head.sha256.as_deref() else { continue };
         let Some(bytes) = fs.read_files_consistent(&zone, &[&format!("blob/{sha}")])?.pop().flatten() else { continue };
         let Ok(b) = serde_json::from_slice::<Body>(&bytes) else { continue };

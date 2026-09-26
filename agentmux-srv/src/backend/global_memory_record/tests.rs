@@ -188,3 +188,20 @@ fn a_shared_channel_is_offered_nothing() {
     assert!(import_sources_in(&fs, &channel, "shared").unwrap().sources.is_empty());
     assert_eq!(import_sources_in(&fs, &channel, "channel:test").unwrap().sources.len(), 2, "shared first, then channel:other");
 }
+
+/// A channel id a zone name can't hold is hashed into the zone name; the
+/// record keeps the real scope, so it's shown and attributed by name
+/// (ReAgent P2 on #3811).
+#[test]
+fn a_hashed_scope_is_shown_and_attributed_by_its_real_name() {
+    let fs = FileStore::open_in_memory().unwrap();
+    let other = Store::open_in_memory().unwrap();
+    other.bundle_upsert(&bundle("g-x", "X", "x", true)).unwrap();
+    sync_all(&fs, &other, "channel:my test/channel").unwrap();
+    assert!(zone("channel:my test/channel").starts_with("global-memory:h"));
+    let channel = Store::open_in_memory().unwrap();
+    let offer = import_sources_in(&fs, &channel, "channel:here").unwrap();
+    assert_eq!(offer.sources[0].scope, "channel:my test/channel");
+    import(&fs, &channel, &offer.list_id, 0).unwrap();
+    assert_eq!(channel.bundle_version_list("g-x").unwrap()[0].source_detail, "from channel:my test/channel");
+}
