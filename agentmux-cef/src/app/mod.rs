@@ -890,9 +890,20 @@ wrap_app! {
                 // debugging server) to open its own WebSocket connection back
                 // to that same server.  Without this flag Chromium 107+ blocks
                 // cross-origin WebSocket upgrades to the debug port.
-                let ro_key = CefString::from("remote-allow-origins");
-                let ro_val = CefString::from("*");
-                cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
+                //
+                // Only that server's own origins, not `*` (issue #3681): `*`
+                // let a page from ANY origin — a site in a browser pane, or in
+                // the user's own browser — open a CDP WebSocket to this port.
+                // Clients that send no `Origin` header (the in-process
+                // `browser_api`, Node/Rust CDP tooling) are unaffected:
+                // Chromium only checks the header when it is present.
+                if process_type.is_none() {
+                    if let Some(origins) = remote_allow_origins(*self.state.debug_port.lock()) {
+                        let ro_key = CefString::from("remote-allow-origins");
+                        let ro_val = CefString::from(origins.as_str());
+                        cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
+                    }
+                }
 
                 // Skip Chrome features that add startup latency with no
                 // user-visible benefit in this app.
@@ -1169,6 +1180,43 @@ fn is_media_permission_switch(token: &str) -> bool {
 /// would be no guard at all.
 pub(crate) const MEDIA_PERMISSION_SWITCHES: &[&str] =
     &["enable-media-stream", "use-fake-ui-for-media-stream"];
+
+/// Value for `--remote-allow-origins`: the debug server's own origins only,
+/// so its bundled DevTools inspector (`http://127.0.0.1:<port>/devtools/…`)
+/// can still open a WebSocket back to it, while a page from any other origin
+/// cannot (#3681). `None` when no debug server was set up (port 0), in which
+/// case the switch is left off entirely.
+fn remote_allow_origins(debug_port: u16) -> Option<String> {
+    (debug_port != 0).then(|| format!("http://127.0.0.1:{debug_port},http://localhost:{debug_port}"))
+}
+
+#[cfg(test)]
+mod remote_allow_origins_tests {
+    use super::remote_allow_origins;
+
+    #[test]
+    fn allows_only_the_debug_servers_own_origins() {
+        assert_eq!(
+            remote_allow_origins(9222).as_deref(),
+            Some("http://127.0.0.1:9222,http://localhost:9222")
+        );
+    }
+
+    #[test]
+    fn follows_the_port_actually_bound() {
+        // lib.rs falls back to an OS-assigned port when 9222/9223 is taken.
+        assert_eq!(
+            remote_allow_origins(51913).as_deref(),
+            Some("http://127.0.0.1:51913,http://localhost:51913")
+        );
+    }
+
+    #[test]
+    fn never_the_wildcard_and_nothing_without_a_port() {
+        assert_eq!(remote_allow_origins(0), None);
+        assert!(!remote_allow_origins(9223).unwrap().contains('*'));
+    }
+}
 
 #[cfg(test)]
 mod media_switch_guard_tests {
