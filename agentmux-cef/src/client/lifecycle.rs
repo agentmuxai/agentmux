@@ -1207,6 +1207,7 @@ impl AgentMuxHandler {
             .and_then(|lbl| self.state.window_meta(lbl));
         if let Some(lbl) = label.as_deref() {
             self.state.window_meta.lock().remove(lbl);
+            self.state.approval_windows.lock().remove(lbl);
         }
         if let Some(meta) = &closing_meta {
             if meta.kind == WindowKind::FullInstance {
