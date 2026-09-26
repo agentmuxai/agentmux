@@ -22,6 +22,7 @@ fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
         status_version: 0,
         session_id: session_id.map(str::to_string),
         resume_poisoned: None,
+        fork_copy: None,
         restart_when_idle: false,
         restart_pending: false,
         stop_pending: false,

@@ -1,6 +1,6 @@
 # SPEC: one resume gate, and native continuation across logins of the same identity
 
-**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key on segments, no resume across identities) in #3839; Phases 3–4 not started. See §7.
+**Status:** active — Phase 1 (the chain-head resume gate) shipped in #3833; Phase 2 (identity key, no resume across identities) in #3839; Phase 3 (same-identity relocation + fork) is this change; Phase 4 not started. See §7.
 **Date:** 2026-09-25
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at operator request
 **Related:** `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` (§4.1 segments, §4.2 the rung
@@ -146,13 +146,19 @@ dir, cwd and identity key, and the poisoned id. Decision:
 | No `--resume` support, no candidate, no agent UID, or the chain can't be read | **Allow** (today's behaviour; I6, H8) |
 | No head in the chain (only legacy or current segments) | **Allow** (H8) |
 | Head is the poisoned id | **Allow** (no better information than today) |
-| Candidate == head | **Allow**, then the identity check below |
-| Candidate != head, head is reachable in this config dir + cwd | **Redirect** to the head (H1) |
-| Candidate != head, head is not reachable here | **Relocate**, if §4.3's preconditions hold; else **Refuse** |
+| Head's identity and the spawn's both known and different | **Refuse** (H3) |
+| Head reachable in this config dir + cwd | **Allow** if it is the candidate, else **Redirect** to it (H1) |
+| Head not reachable here, §4.3's preconditions hold | **Relocate** |
+| Head not reachable here, not relocatable, head == candidate | **Allow**: `--resume` goes ahead as before the gate, and the CLI's rejection and the retry path handle it |
+| Head not reachable here, not relocatable, head != candidate | **Refuse** |
 
-Identity check on Allow or Redirect (Phase 2): if the resumed session's segment has an
-identity key, the spawn has one, and they differ, then **Refuse** (H3). A same-dir mismatch
+The identity check (Phase 2) runs before any of the reachability rows. A same-dir mismatch
 means the folder was re-logged-into as someone else.
+
+**A first spawn holding no id** offers the gate the session of the history the pane renders
+when `--resume` can't reach it here (`find_continuation_session_id` found nothing). It is a
+candidate for **Relocate** only: any other decision leaves the spawn holding no id, exactly
+as before. This is the rebuild case where the new pane or block carries no session id.
 
 **Refuse** clears the candidate (`inner.session_id = None`, `persist_session_id("")`). The
 existing no-`--resume` path then applies: fresh + continuation packet, rung `Virtualized` when
@@ -167,20 +173,31 @@ Preconditions, all required. Any failure means **Refuse** (fresh + packet):
 1. The head segment's provider is Claude, as is the spawn's.
 2. The head segment's `config_dir` is set and differs from the spawn's.
 3. `identity_key(head segment) == identity_key(spawn)`, both `Some` (I2).
-4. `<head config_dir>/projects/<cwd-slug>/<head>.jsonl` is a readable, non-empty file whose
-   last line parses as JSON (H5, which catches a truncated file).
-5. `<spawn config_dir>/projects/<cwd-slug>/<head>.jsonl` does **not** exist (never overwrite).
+4. The head segment's cwd maps to the same project dir as the spawn's
+   (`claude_layout::project_dir_name`).
+5. `<head config_dir>/projects/<cwd-slug>/<head>.jsonl` is a readable, non-empty file whose
+   last record parses as JSON (H5, which catches a truncated file). When the channel-local
+   dir is gone (a cleaned-up build channel), the same path under the login's always-global
+   `shared/identities/<id>/…` is used instead.
+6. `<spawn config_dir>/projects/<cwd-slug>/<head>.jsonl` does **not** exist (never overwrite).
+   Before checking, the spawn sweeps its own leftover copies (step 4 below); left in place,
+   a leftover would look reachable and be resumed in place without a fork.
 
 Action:
-1. Copy to `<dest>.jsonl.agentmux-tmp`, then rename to `<dest>.jsonl`. The copy is atomic,
-   so the CLI never sees a partial file (H5). Write a marker `<dest>.jsonl.agentmux-relocated`
-   holding the source path and size.
+1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>`, write the marker
+   `<dest>.jsonl.agentmux-relocated` (owner UID, source path, size), then rename to
+   `<dest>.jsonl`. The CLI never sees a partial file (H5), and never sees a copy without its
+   marker, so a crash can't leave an unmarked duplicate (I4).
 2. Spawn with `--resume <head> --fork-session`. The original stays untouched (I3), and the new
    id is captured by the existing adoption path.
 3. When the new id is captured, record it on the segment (`session` event), delete the copy
    and its marker (I4), and emit outcome `resumed` with `actual_sid` = the new id.
-4. At the next spawn, delete any copy that still has its marker (the process died before
-   step 3).
+   `persistent_resume` reads a captured id that differs from the attempted one as the CLI
+   starting fresh, so the spawn maps that outcome back to `resumed` for a relocated resume.
+   If the CLI reports the *same* id (it resumed the copy in place instead of forking), the
+   copy is the live session: only its marker goes, and the duplicate is logged.
+4. At the next spawn of the same agent, delete any copy whose marker names that agent (the
+   process died before step 3). Other agents' copies are never touched.
 5. If the CLI rejects the fork (H6), the existing stderr poison + retry path runs with the
    copy's id poisoned. The retry is fresh + packet, and the copy is cleaned up by step 4.
 
