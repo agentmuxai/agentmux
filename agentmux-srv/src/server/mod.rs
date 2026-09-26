@@ -345,11 +345,7 @@ pub fn build_routers(state: AppState) -> SrvRouters {
     use tower_http::cors::AllowOrigin;
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _req| {
-            let Ok(s) = origin.to_str() else { return false };
-            s.starts_with("http://127.0.0.1:")
-                || s.starts_with("http://localhost:")
-                || s == "http://127.0.0.1"
-                || s == "http://localhost"
+            origin.to_str().is_ok_and(is_loopback_origin)
         }))
         .allow_methods(Any)
         .allow_headers(vec![
@@ -480,7 +476,10 @@ pub fn build_routers(state: AppState) -> SrvRouters {
         .route("/api/bus/agents", get(messagebus::handle_list_agents));
 
     let authed_routes = Router::new()
-        .route("/ws", get(websocket::handle_ws))
+        .route(
+            "/ws",
+            get(websocket::handle_ws).route_layer(middleware::from_fn(ws_origin_guard)),
+        )
         .route("/agentmux/service", post(service::handle_service))
         .route("/agentmux/file", get(files::handle_mux_file))
         .route("/agentmux/stream-file", get(stub_501))
@@ -3072,6 +3071,42 @@ async fn handle_window_focus(
         args: vec![json!(window_id)],
     };
     finish_name_call(&state, call, json!({ "success": true, "window_id": window_id })).await
+}
+
+// ---- Origin checks ----
+
+/// `http://127.0.0.1` or `http://localhost`, optionally with a numeric
+/// port: the only origins srv's own frontend is ever served from (the CEF
+/// host's loopback server, or the Vite dev server). Used by CORS and by
+/// [`ws_origin_guard`].
+pub(crate) fn is_loopback_origin(origin: &str) -> bool {
+    ["http://127.0.0.1", "http://localhost"].iter().any(|host| {
+        origin.strip_prefix(host).is_some_and(|rest| {
+            rest.is_empty()
+                || rest
+                    .strip_prefix(':')
+                    .is_some_and(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
+        })
+    })
+}
+
+/// Refuse a WebSocket upgrade that carries a non-loopback `Origin`.
+///
+/// CORS does not apply to WebSocket upgrades, so without this any web page
+/// holding the auth key could open `/ws` (cross-site WebSocket hijacking).
+/// The key is not sent automatically the way a cookie would be, so this is
+/// defense in depth rather than a fix for a reachable attack. Browsers always
+/// send `Origin` on an upgrade; srv's native clients (launcher, agentmux-mcp)
+/// send none, so a missing header is allowed.
+async fn ws_origin_guard(req: Request<Body>, next: Next) -> Response {
+    let origin = req.headers().get(header::ORIGIN).map(|v| v.to_str().unwrap_or(""));
+    match origin {
+        Some(o) if !is_loopback_origin(o) => {
+            tracing::warn!(origin = %o, "refused /ws upgrade from a non-loopback origin");
+            (StatusCode::FORBIDDEN, Json(json!({"error": "origin not allowed"}))).into_response()
+        }
+        _ => next.run(req).await,
+    }
 }
 
 // ---- Auth Middleware ----
