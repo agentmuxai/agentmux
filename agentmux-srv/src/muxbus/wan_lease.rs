@@ -85,7 +85,12 @@ pub(crate) fn held_elsewhere(agent: &str) -> Option<String> {
 /// Drop a cached "held elsewhere" answer for `agent` — after a Take over
 /// freed it, so the retried turn isn't refused from the cache for up to
 /// [`HELD_ELSEWHERE_FRESH`] (Codex P1 on #3899).
-pub(crate) fn forget_elsewhere(agent: &str) {
+pub(crate) async fn forget_elsewhere(agent: &str) {
+    // Under the per-agent op lock: a lease check already in flight records
+    // its answer first, so a late pre-release 409 can't restore the
+    // refusal after it was forgotten (Codex P2 on #3903).
+    let op = op_lock(agent);
+    let _op = op.lock().await;
     if let Some(e) = STATE.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key(agent)) {
         e.elsewhere = None;
     }
@@ -285,13 +290,32 @@ mod tests {
 
     // Codex P1 on #3899: after a successful Take over the requester's own
     // cached refusal still refused the retried turn for up to 90 s.
-    #[test]
-    fn forgetting_a_refusal_lets_the_next_turn_through() {
+    #[tokio::test]
+    async fn forgetting_a_refusal_lets_the_next_turn_through() {
         let agent = format!("agent-{}", uuid::Uuid::new_v4());
         note_not_holder(&agent, &serde_json::json!({ "held_by": { "host": "desk" } }));
         assert!(held_elsewhere(&agent).is_some());
-        forget_elsewhere(&agent.to_uppercase());
+        forget_elsewhere(&agent.to_uppercase()).await;
         assert_eq!(held_elsewhere(&agent), None);
+    }
+
+    // Codex P2 on #3903: a lease check already in flight could record a
+    // delayed pre-release 409 after the refusal was forgotten, restoring it
+    // for another 90 s. Forgetting waits for it.
+    #[tokio::test]
+    async fn forgetting_a_refusal_waits_for_a_lease_check_in_flight() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        let lock = op_lock(&agent);
+        let check = lock.lock().await;
+        let a = agent.clone();
+        let forget = tokio::spawn(async move { forget_elsewhere(&a).await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!forget.is_finished(), "forgetting waits for the check");
+        // The in-flight check lands its (stale) 409.
+        note_not_holder(&agent, &serde_json::json!({ "held_by": { "host": "desk" } }));
+        drop(check);
+        tokio::time::timeout(Duration::from_secs(5), forget).await.unwrap().unwrap();
+        assert_eq!(held_elsewhere(&agent), None, "the stale refusal is gone");
     }
 
     // Codex P2 on #3899: a lease tick that snapshotted the agent before a
