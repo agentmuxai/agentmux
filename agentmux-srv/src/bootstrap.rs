@@ -514,6 +514,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         db_dir = %base::get_mux_db_dir().display(),
         app_path = %config.app_path,
         instance_id = %config.instance_id,
+        secret_store = crate::identity::secret_store::backend_name(),
         "backend directories initialized"
     );
 
