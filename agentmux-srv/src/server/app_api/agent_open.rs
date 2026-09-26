@@ -491,11 +491,6 @@ async fn open_agent_inner(
                 // `instances/v0.55.29/cli/claude/...` while this reported it
                 // missing at `.agentmux/0.55.29/cli/claude/...`.
                 let version = env!("CARGO_PKG_VERSION");
-                // Still used below for the auth/config dirs, which have their
-                // own (separate, working) layout — left alone here.
-                let home = std::env::var("HOME")
-                    .or_else(|_| std::env::var("USERPROFILE"))
-                    .map_err(|_| "cannot determine home directory".to_string())?;
                 let paths = agentmux_common::DataPaths::from_env()
                     .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
                 let provider_dir = paths
