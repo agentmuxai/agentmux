@@ -15,17 +15,29 @@ chain on v0.57.5, AgentA), `SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_
 
 | # | Finding | Status |
 |---|---|---|
-| 1 | AgentY opened with "Agent encountered an error" | open — cause known, fix not started |
-| 2 | "Couldn't resume" banner shown although the summary was carried | fixed on `agenty/resume-banner-countdown` |
-| 3 | "Couldn't resume" banner never goes away on its own | fixed on `agenty/resume-banner-countdown` |
-| 4 | Agent's file-based memory left behind under the old account | open — worked around by hand |
+| 1 | AgentY opened with "Agent encountered an error" | lost conversation fixed on `main` (#3833–#3844); pane message still open |
+| 2 | "Couldn't resume" banner shown although the summary was carried | fixed in #3848 |
+| 3 | "Couldn't resume" banner never goes away on its own | fixed in #3848 |
+| 4 | Agent's file-based memory left behind under the old account | by design — adoption is offered in the Armory; check pending |
 | 5 | Agent processes run at below-normal priority (#3834) | confirmed live |
+| 6 | Jekts between narko and Area54 arrive unsigned (`TRUST=network-claimed`) | open — sender side unconfirmed |
+| 7 | Plain `gh` inside an agent is logged out (#3751) | confirmed live |
 
 ---
 
 ## 1. "Agent encountered an error" on first open
 
-**Status:** open — cause known, fix not started.
+**Status:** the lost conversation is fixed on `main` after this build; the pane message is open.
+
+**Update (AgentA, verified against GitHub):** #3833 (one resume gate), #3839 (identity key =
+hash of `accountUuid` + `organizationUuid`), #3841 (continue across logins of the same identity) and
+#3844 (fork a session continued outside AgentMux, `535175d94`) all merged between 05:16 and 05:52 UTC,
+after `f4b9f8d18`. On a build from `535175d94` or later, signing in again with the same Anthropic
+identity resumes the real conversation instead of falling back to the packet; a different identity
+still gets the packet. Design: `SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md`.
+AgentA is adding a fallback for segments recorded before #3839 (no identity key), which otherwise
+can't relocate on an agent's first upgrade from such a build. Option (b) below, the pane message, is
+not being worked on by anyone.
 
 **Seen:** opening AgentY in the new build showed "Agent encountered an error" in the pane.
 
@@ -61,7 +73,7 @@ again, and the pane doesn't say that signing in is the fix. The log does
 
 ## 2. "Couldn't resume" banner shown although the summary was carried
 
-**Status:** fixed on branch `agenty/resume-banner-countdown`.
+**Status:** fixed in #3848 (`32bc9bfb8`).
 
 **Seen:** after signing in, the composer showed "Couldn't resume the previous conversation — started a
 new one", but the agent had in fact been given AgentMux's record of the conversation and continued
@@ -92,9 +104,14 @@ banner stays.
 **Note:** the banner can still appear briefly, between the rejection and the retry carrying the
 packet (about 4 s here). Finding 3's countdown covers that window.
 
+**Review notes (AgentA, non-blocking):** the retract is optimistic. It fires when the packet is
+built, not on proof that the new session used it, so if the fresh process dies before its first
+turn the banner is gone although nothing continued. The pane's `continued` flag is decided on the
+same basis (`fresh_spawn_would_continue`), so the two stay consistent. A comment saying so would help.
+
 ## 3. "Couldn't resume" banner never goes away on its own
 
-**Status:** fixed on branch `agenty/resume-banner-countdown`.
+**Status:** fixed in #3848 (`32bc9bfb8`).
 
 **Asked for:** a 15-second countdown that dismisses the banner automatically, with the countdown
 visible and no extra label, keeping the Dismiss button.
@@ -107,9 +124,20 @@ with the banner, and a new failure mounts a new banner with a fresh countdown.
 **Tests:** `AgentSessionNotices.test.tsx` — counts down and clears at zero, Dismiss still works
 immediately, and no clear fires after unmount.
 
+**Review note (AgentA, non-blocking):** when no packet is carried, the banner is telling the truth
+(the conversation really started blank), and after 15 s only the transcript's session-outcome
+divider still says so. Alternative: auto-dismiss only the retractable case. Left for the operator.
+
 ## 4. Agent's file-based memory left behind under the old account
 
-**Status:** open — worked around by hand for AgentY.
+**Status:** by design — adoption is offered in the Armory; whether it was offered here is not yet
+checked.
+
+**Update:** this is the area of #3721 / #3797 / #3804 (`SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md`
+§2.1.4). The agent's own live folder is adopted automatically; folders under its earlier accounts
+are only *offered*, under Armory → Memory → Personal ("Earlier memory found under N other
+accounts"), and adopting needs a human's confirmation in a separate host window. The check is
+whether that offer appeared for AgentY. The hand copy below predates it.
 
 **Seen:** the new session's memory dir
 (`channels/local-main-b28b7a-4a884b76/identities/d4e75dcb…/claude/projects/…agenty-0629j/memory/`)
@@ -131,8 +159,59 @@ The srv log shows `[process-tracker] job CPU priority set below_normal=True` at 
 `Get-Process` shows this build's `agentmux-mcp` and `agentmux-bashwrap` at `BelowNormal`. The
 same processes under the running 0.57.2 portable (no #3834) are at `Normal`.
 
+## 6. Jekts between narko and Area54 arrive unsigned
+
+**Status:** open. The receiver side is understood; the sender side is unconfirmed.
+
+**Seen:** AgentA's reply (`inj-w-5d8e0efaa0d5d3e98f4127369172e87e`, 06:28:52) arrived as
+`DELIVERY=wan TRUST=network-claimed` with no `SIG=`. A keyword in it forced `TIER=sensitive`, and
+being unverified made that `ESCALATE=required`, so it stopped for the operator. Its content was
+later corroborated independently: AgentA's review on #3848 (`agenta-workflow`, 06:28:28) says the
+same thing.
+
+**What exists:** same-account WAN signing (W3-S, issue #2586's WAN half) is on `main`: #3734 (D1a),
+#3771 (D1b, publish + carry gate), #3775 (D2, verifier, `TRUST=wan-verified`). Tracking:
+`docs/specs/TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md`. That doc says C1 (agentmux-cloud#91) is
+"merged, **not deployed**", which is stale. `deploy.yml` ran successfully at 2026-09-25 21:00 UTC,
+and `https://muxbus.agentmux.ai/api/health` now reports `1.10.0` (the doc's bar is `1.9.0`).
+Cross-account verification (W0–W2) is deliberately not built.
+
+**This instance (narko, `pqkksqckrolze5wvcs6rqeic4e`):**
+- `wan.db` is attached, and AgentY's key was published at 06:11:29 (`wan publish: agent keys
+  published`), 16 min before AgentY's 06:27:26 jekt to AgentA.
+- AgentY's `.mcp.json` carries `AGENTMUX_WAN_KEY`, `AGENTMUX_HOST_LABEL` = this instance id, and
+  `AGENTMUX_CHANNEL` = `local-main-b28b7a-4a884b76`, which is also srv's `local_channel_id()`. Every
+  carry-gate condition checkable from outside holds, so the outgoing jekt was *probably* carried
+  signed. It can't be confirmed from the log: `wan_carry_gate`'s refusal is logged at `debug` only,
+  and a carried send isn't logged at all.
+- Receiver: `wan_peer_records`, `wan_known_instances` and `wan_seen_sigs` are all empty. No incoming
+  WAN jekt has ever arrived carrying a signature, so AgentA's reply was unsigned when it reached
+  the relay, not rejected here.
+
+**Candidate causes on the sending side (Area54), not yet checked:** its build predates #3771; AgentA
+was not respawned after D1a, so it signs a hostname and the carry gate drops it; its key isn't
+published; or Area54's muxbus login is a different account, where same-account verification can't
+apply.
+
+**Next:**
+- Ask AgentA what marker AgentY's 06:27 jekt arrived with, and for Area54's build commit, respawn
+  time and publish log line.
+- Log the carry-gate outcome at `info` (signed, or unsigned with the reason). Today a signature
+  that silently fails to ride is invisible.
+- Update the tracking doc's C1 row.
+- `~/.agentmux/agents/CLAUDE.md` still doesn't list `TRUST=wan-verified` (tracking §3.2); it needs
+  the operator.
+
+## 7. Plain `gh` inside an agent is logged out (#3751)
+
+**Status:** confirmed live on this build.
+
+In AgentY's shell, `gh pr view` fails with "To get started with GitHub CLI, please run: gh auth
+login". `GH_CONFIG_DIR` points at `channels/local-main-b28b7a-4a884b76/config/gh-agenty`, which has
+no `hosts.yml`. `gh-agent` works (`agenty as agenty-workflow[bot]`).
+
 ## Still to check on this build
 
 - #3837: the "responding slowly" banner and stuck-only recycle, under real load.
 - #3826: srv stays responsive while agents build.
-- #3719 ambient narration inline, #3751 plain-`gh` guard.
+- #3719: ambient narration inline.
