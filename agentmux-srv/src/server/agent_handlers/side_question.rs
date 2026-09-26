@@ -364,6 +364,7 @@ async fn spawn_throwaway_turn(
         None,
         TurnRegistration::Skip,
         crate::backend::blockcontroller::health::TurnOrigin::System,
+        Vec::new(),
     )
     .await
     {

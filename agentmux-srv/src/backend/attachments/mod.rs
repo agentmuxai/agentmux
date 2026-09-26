@@ -7,6 +7,7 @@
 //! docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.
 
 pub mod process;
+pub mod prompt;
 pub mod store;
 
 use std::collections::HashMap;
@@ -59,6 +60,8 @@ pub struct Limits {
     pub max_total_bytes: u64,
     pub send_max_edge: u32,
     pub retention: Duration,
+    /// Images Claude gets inline (the rest by path only). 0 = paths only.
+    pub claude_inline_max: usize,
 }
 
 impl Default for Limits {
@@ -68,6 +71,7 @@ impl Default for Limits {
             max_total_bytes: DEFAULT_MAX_TOTAL_MB * 1024 * 1024,
             send_max_edge: DEFAULT_SEND_MAX_EDGE,
             retention: Duration::from_secs(DEFAULT_RETENTION_DAYS * 24 * 3600),
+            claude_inline_max: prompt::DEFAULT_INLINE_MAX_COUNT,
         }
     }
 }
@@ -94,6 +98,13 @@ impl Limits {
             retention: num("attachments:retentiondays")
                 .map(|n| Duration::from_secs((n * 24.0 * 3600.0) as u64))
                 .unwrap_or(d.retention),
+            // 0 is meaningful here (paths only), so not `num`.
+            claude_inline_max: extra
+                .get("attachments:claudeinlinemax")
+                .and_then(|v| v.as_f64())
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .map(|n| (n as usize).min(100))
+                .unwrap_or(d.claude_inline_max),
         }
     }
 }
@@ -148,8 +159,8 @@ pub fn init(broker: Arc<Broker>, config: Arc<ConfigState>) -> Arc<Service> {
         .clone()
 }
 
-// Used by prompt delivery (next PR in the stack), which has no AppState.
-#[allow(dead_code)]
+/// The service when it has been initialised (by the RPC or HTTP layer).
+/// Prompt delivery uses this: it has no `AppState` to initialise from.
 pub fn get() -> Option<Arc<Service>> {
     SERVICE.get().cloned()
 }
@@ -288,7 +299,6 @@ impl Service {
     /// Resolve an id to the send-copy path and MIME type for delivery,
     /// marking it used. Doesn't decode: call [`Self::ensure_derived`] first
     /// so a stale fingerprint is re-derived under the limits.
-    #[allow(dead_code)] // used by prompt delivery (next PR in the stack)
     pub fn send_path(&self, id: &str) -> Option<(PathBuf, String)> {
         let fp = store::fingerprint(self.limits().send_max_edge);
         let found = self.store.file(id, &fp, Kind::Send)?;
@@ -923,5 +933,12 @@ mod tests {
         assert_eq!(l.max_total_bytes, 50 * 1024 * 1024);
         assert_eq!(l.send_max_edge, 8000);
         assert_eq!(l.retention, Limits::default().retention);
+        assert_eq!(l.claude_inline_max, prompt::DEFAULT_INLINE_MAX_COUNT);
+        extra.insert("attachments:claudeinlinemax".into(), serde_json::json!(0));
+        assert_eq!(
+            Limits::from_settings(&extra).claude_inline_max,
+            0,
+            "0 means paths only"
+        );
     }
 }
