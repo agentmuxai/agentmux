@@ -1044,10 +1044,18 @@ async fn sync_agent_reactive(
             (Some(wan), Some(_)) => match wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()) {
                 Ok(own) => {
                     let base_url = crate::muxbus::relay::rest_base_url();
+                    let dir_token = wan_directory_token(
+                        || async {
+                            let scheduler = crate::broker::get_global()?;
+                            load_valid_token(mstore, &scheduler).await
+                        },
+                        token,
+                    )
+                    .await;
                     let dir = crate::muxbus::wan_verify::Directory {
                         base_url: &base_url,
                         http,
-                        token,
+                        token: &dir_token,
                         budget: &crate::muxbus::wan_verify::GLOBAL_BUDGET,
                     };
                     crate::muxbus::wan_verify::verify(
@@ -1156,6 +1164,22 @@ async fn sync_agent_reactive(
     AgentSyncOutcome::Ok
 }
 
+/// The token for the W3-S key directory (`wan_verify`): the shared account
+/// token, loaded fresh (`fresh`), the same way `wan_publish` and
+/// `relay::relay_token` load theirs. Not the connection's `token`: that one is
+/// loaded once at connect, a desktop (PKCE) access token lives 15 minutes and
+/// a connection up to 2 hours, so after minute 15 every lookup was a 401 read
+/// as "couldn't check" — every same-account WAN jekt arrived
+/// `network-claimed`. The connection's token is only the fallback when no
+/// fresh one can be loaded.
+async fn wan_directory_token<F, Fut>(fresh: F, connection_token: &str) -> String
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Option<String>>,
+{
+    fresh().await.unwrap_or_else(|| connection_token.to_string())
+}
+
 /// Load a valid (non-expired) access token via the broker, refreshing first
 /// if the stored credential is missing/stale. Returns None if no credentials
 /// are stored, the token is expired and refresh fails, or the refresh_token
@@ -1227,6 +1251,23 @@ mod tests {
     use crate::muxbus::pkce::RefreshTokenError;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
+
+    // W3-S: the connection's token is loaded once at connect, and a desktop
+    // (PKCE) access token lives 15 min while a connection lasts up to 2 h.
+    // Handing it to the key directory made every lookup after minute 15 a
+    // 401, read as "couldn't check" — every same-account WAN jekt arrived
+    // `network-claimed`. The directory must get a freshly loaded token.
+    #[tokio::test]
+    async fn the_key_directory_gets_a_fresh_token_not_the_connections() {
+        let token = super::wan_directory_token(|| async { Some("fresh".to_string()) }, "stale-connection-token").await;
+        assert_eq!(token, "fresh");
+    }
+
+    #[tokio::test]
+    async fn the_key_directory_falls_back_to_the_connections_token() {
+        let token = super::wan_directory_token(|| async { None }, "connection-token").await;
+        assert_eq!(token, "connection-token");
+    }
 
     // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 — a
     // checkAgentBinding rejection (403) must trigger the exact same
