@@ -195,9 +195,9 @@ fn normalize_origin(origin: &str) -> Result<String, String> {
     let lower = origin.trim().to_ascii_lowercase();
     let lower = lower.strip_suffix('/').unwrap_or(&lower);
     let (scheme, rest) = lower.split_once("://").ok_or("expected scheme://host[:port]")?;
-    let default_port = match scheme {
-        "http" => "80",
-        "https" => "443",
+    let default_port: u16 = match scheme {
+        "http" => 80,
+        "https" => 443,
         _ => return Err("scheme must be http or https".into()),
     };
     // Bracketed IPv6 hosts contain ':', so split the port off after `]`.
@@ -212,13 +212,18 @@ fn normalize_origin(origin: &str) -> Result<String, String> {
     if !host_ok {
         return Err("expected scheme://host[:port], with no path, user or query".into());
     }
-    match port {
-        None => Ok(format!("{scheme}://{host}")),
-        Some(p) if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) || p.parse::<u16>().is_err() => {
-            Err("port must be a number from 0 to 65535".into())
+    // Numeric, as browsers serialize it: `:0443` is the default port and
+    // `:08443` is `:8443` (Codex P2 on #3900).
+    let port = match port {
+        None => None,
+        Some(p) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => {
+            Some(p.parse::<u16>().map_err(|_| "port must be a number from 0 to 65535")?)
         }
-        Some(p) if p == default_port => Ok(format!("{scheme}://{host}")),
-        Some(p) => Ok(format!("{scheme}://{host}:{p}")),
+        Some(_) => return Err("port must be a number from 0 to 65535".into()),
+    };
+    match port {
+        Some(p) if p != default_port => Ok(format!("{scheme}://{host}:{p}")),
+        _ => Ok(format!("{scheme}://{host}")),
     }
 }
 
@@ -354,6 +359,8 @@ mod tests {
         assert_eq!(n("http://app.example.com:80").unwrap(), "http://app.example.com");
         assert_eq!(n("https://app.example.com:8443").unwrap(), "https://app.example.com:8443");
         assert_eq!(n("http://[::1]:8190").unwrap(), "http://[::1]:8190");
+        assert_eq!(n("https://app.example.com:0443").unwrap(), "https://app.example.com");
+        assert_eq!(n("https://app.example.com:08443").unwrap(), "https://app.example.com:8443");
         for bad in [
             "app.example.com",
             "ftp://app.example.com",
