@@ -25,7 +25,6 @@ describe("editorPaneTab", () => {
     it("is native, kept alive, zooms from 13px, full-bleed", () => {
         expect(editorPaneTab.view).toBe("editor");
         expect(editorPaneTab.create).toBeTypeOf("function");
-        expect(editorPaneTab.viewModelClass).toBeUndefined();
         expect(editorPaneTab.capabilities).toEqual({ lifecycle: "keepAlive", paneZoom: { baseFontSize: 13 }, noPadding: true });
     });
 

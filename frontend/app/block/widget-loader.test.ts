@@ -91,7 +91,6 @@ describe("loadWidgets", () => {
         const m = getPaneTab("ext:hello")!;
         expect(m.label).toBe("Hello");
         expect(m.create).toBeTypeOf("function");
-        expect(m.viewModelClass).toBeUndefined();
     });
 
     it("the sample runs through the host context only", async () => {

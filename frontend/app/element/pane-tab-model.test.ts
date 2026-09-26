@@ -16,11 +16,12 @@ vi.mock("@/app/store/global", () => ({
     },
 }));
 
-import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import { createPaneTabMemory, describePaneTab, prunePaneTabMemory } from "./pane-tab-model";
 
 // The built-in view icon a tab falls back to comes from the view's manifest.
-registerPaneTab(legacyAdapter("sysinfo", class {} as any, { label: "Sysinfo", icon: "chart-line" }));
+registerPaneTab(stubPaneTab("sysinfo", { label: "Sysinfo", icon: "chart-line" }));
 
 const iconFor = (view: string, meta: Record<string, unknown> = {}) =>
     describePaneTab({ blockId: `b-${view}`, view, meta: { view, ...meta }, ordinal: 1, liveViewModel: null }).icon;

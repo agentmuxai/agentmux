@@ -50,10 +50,9 @@ describe("basenameOf", () => {
 
 // Media as a native pane tab (Pane Tab contract Phase 2c).
 describe("mediaPaneTab", () => {
-    it("is native, with no ViewModel class", () => {
+    it("is a native pane tab", () => {
         expect(mediaPaneTab.view).toBe("media");
         expect(mediaPaneTab.create).toBeTypeOf("function");
-        expect(mediaPaneTab.viewModelClass).toBeUndefined();
     });
 
     it("titles the pane with the picked file's name, or Media before one is picked", () => {

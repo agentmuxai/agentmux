@@ -64,7 +64,6 @@ describe("HelpView zoom", () => {
         expect(helpPaneTab.label).toBe("Help");
         expect(helpPaneTab.icon).toBe("circle-question");
         expect(helpPaneTab.create).toBeTypeOf("function");
-        expect(helpPaneTab.viewModelClass).toBeUndefined();
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {

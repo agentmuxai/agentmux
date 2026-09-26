@@ -57,7 +57,3 @@ const unregisterBuiltins = builtins.map(registerPaneTab);
 // A hot reload re-runs this module but not the registry; without this the
 // re-registration would throw "already registered".
 import.meta.hot?.dispose(() => unregisterBuiltins.forEach((unregister) => unregister()));
-
-export function getBlockViewClass(viewType: string): ViewModelClass | undefined {
-    return getPaneTab(viewType)?.viewModelClass;
-}

@@ -463,10 +463,14 @@ working throughout through a legacy adapter.
        section. Their pills show the icons their headers always did
        (`shapes`, `layer-group`, `user`, `wrench`, `cog`) and proper labels
        instead of the old fallback square and lowercase view names.
-       Nothing but tests uses `legacyAdapter` now (the widget loader
-       already rejects a class-based widget), so the class path
-       (`viewModelClass`, `makeViewModel`'s class branch) is dead code;
-       removing it is the follow-up.
+     - **The class path is gone (part 2b-5).** With no built-in on it and
+       the widget loader already rejecting a class-based widget, `create`
+       is required: `viewModelClass`, `legacyAdapter`, `getBlockViewClass`,
+       the global `ViewModelClass` type and `makeViewModel`'s class branch
+       are removed (`registerPaneTab` still checks `create` at runtime, since
+       a widget's manifest is plain JS). An unregistered view still gets the
+       default ViewModel. Tests that only need a view type registered use
+       `stubPaneTab` (`pane-tab-test-utils.ts`).
      - **Terminal and agent hooks (implemented, part 2b-1).**
        Unlike the eight views above, shared code reached INTO these two view
        models through the host, which works only while the host holds the

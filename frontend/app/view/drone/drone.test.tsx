@@ -22,7 +22,6 @@ describe("dronePaneTab", () => {
         expect(dronePaneTab.view).toBe("drone");
         expect(dronePaneTab.aliases).toEqual(["workflows"]);
         expect(dronePaneTab.create).toBeTypeOf("function");
-        expect(dronePaneTab.viewModelClass).toBeUndefined();
         expect(dronePaneTab.capabilities).toEqual({ noPadding: true });
     });
 

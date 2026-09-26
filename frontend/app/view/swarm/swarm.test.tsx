@@ -20,7 +20,6 @@ describe("swarmPaneTab", () => {
     it("is native, full-bleed, and takes part in pane zoom", () => {
         expect(swarmPaneTab.view).toBe("swarm");
         expect(swarmPaneTab.create).toBeTypeOf("function");
-        expect(swarmPaneTab.viewModelClass).toBeUndefined();
         expect(swarmPaneTab.capabilities).toEqual({ paneZoom: {}, noPadding: true });
     });
 

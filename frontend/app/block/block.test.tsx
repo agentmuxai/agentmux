@@ -11,17 +11,17 @@
  * was the preview's own raw leaf model — permanently missing
  * `paneChromeHoisted`, so `noHeader()` stayed stuck `false` and the real
  * pane showed a double header forever. Fixed by never letting a preview
- * mount touch the shared registry at all — it always gets its own private
- * ViewModel. This test asserts that invariant directly: whichever mount's
- * effect runs first, the REAL mount's ViewModel always ends up holding the
- * REAL mount's own nodeModel, never the preview's.
+ * mount touch the shared registry at all. Every view is a native pane tab
+ * now (its instance gets a host context, not the nodeModel), so these tests
+ * assert the same invariant through the context: whichever mount's effect
+ * runs first, the one live instance is bound to the REAL mount.
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { createMemo, createSignal, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
-import { registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab, type PaneTabHostContext } from "./pane-tab-registry";
 
 const blockMetaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: { view?: string } }>>>();
 function setBlockView(blockId: string, view: string | undefined) {
@@ -62,44 +62,40 @@ vi.mock("@/store/global", () => ({
     },
 }));
 
-// Records every ViewModel this test's fake view class constructs, so a test
-// can inspect which nodeModel instance ended up cached on which mount's vm —
-// the exact thing the bug got wrong.
-const constructedViewModels: { blockId: string; nodeModel: NodeModel }[] = [];
-class TestAgentViewModel {
-    viewType = "agent";
-    blockId: string;
-    nodeModel: NodeModel;
-    viewComponent = null;
-    noHeader = () => (this.nodeModel as any)?.paneChromeHoisted?.() === true;
-    viewName = () => `live name of ${this.blockId}`;
-    disposed = false;
-    constructor(blockId: string, nodeModel: NodeModel) {
-        this.blockId = blockId;
-        this.nodeModel = nodeModel;
-        constructedViewModels.push({ blockId, nodeModel });
-    }
-    dispose() {
-        this.disposed = true;
-    }
-}
-// Mirrors what SysinfoViewModel (and most view models) do in their
-// constructor: create a memo over the block's meta, and read the block
-// directly while building (sysinfo's loadInitialData -> numPoints()).
+// Records every instance this test's "agent" view creates, with the host
+// context it was given, so a test can check which mount it is bound to.
+const constructedViewModels: { blockId: string; ctx: PaneTabHostContext; disposed: boolean }[] = [];
+registerPaneTab({
+    apiVersion: 1,
+    view: "agent",
+    label: "Agent",
+    icon: "a",
+    create: (ctx) => {
+        const rec = { blockId: ctx.blockId, ctx, disposed: false };
+        constructedViewModels.push(rec);
+        return {
+            component: () => null as any,
+            liveTitle: () => ({ text: `live name of ${ctx.blockId}` }),
+            dispose: () => (rec.disposed = true),
+        };
+    },
+});
+// Mirrors what the sysinfo view does when it's created: a memo over the
+// block's meta, and a direct read of it while building (sysinfo's
+// loadInitialData -> numPoints()). The plot type is the pane's title.
 const memoVmDisposals: string[] = [];
-class TestMemoViewModel {
-    viewType = "memo";
-    blockId: string;
-    viewComponent = null;
-    plotType: () => string | undefined;
-    constructor(blockId: string, _nodeModel: NodeModel) {
-        this.blockId = blockId;
-        const blockAtom = blockMetaSignals.get(blockId)![0] as () => { meta?: Record<string, unknown> };
-        void blockAtom()?.meta?.["plot"];
-        this.plotType = createMemo(() => blockAtom()?.meta?.["plot"] as string | undefined);
-        onCleanup(() => memoVmDisposals.push(blockId));
-    }
-}
+registerPaneTab({
+    apiVersion: 1,
+    view: "memo",
+    label: "Memo",
+    icon: "m",
+    create: (ctx) => {
+        void ctx.meta()?.["plot"];
+        const plotType = createMemo(() => ctx.meta()?.["plot"] as string | undefined);
+        onCleanup(() => memoVmDisposals.push(ctx.blockId));
+        return { component: () => null as any, liveTitle: () => ({ text: plotType() ?? "" }) };
+    },
+});
 // The one visibility signal (Phase 3), per block, driven by the tests.
 const visibilitySignals = new Map<string, ReturnType<typeof createSignal<"active" | "dormant" | "windowHidden">>>();
 function visibilityOf(id: string) {
@@ -148,10 +144,8 @@ registerPaneTab({
         return { component: () => null as any, liveTitle: () => ({ text: `native ${ctx.blockId}` }), dispose: () => (rec.disposed = true) };
     },
 });
-vi.mock("@/app/block/block-registry", () => ({
-    getBlockViewClass: (view: string) =>
-        view === "agent" ? TestAgentViewModel : view === "memo" ? TestMemoViewModel : null,
-}));
+// The built-ins are not registered here; each test view registers itself.
+vi.mock("@/app/block/block-registry", () => ({}));
 
 // The ViewModel each preview mount handed its BlockFrame, by blockId.
 const previewViewModels = new Map<string, any>();
@@ -242,13 +236,13 @@ describe("Block — a ViewModel's own reactive state outlives meta changes", () 
         setMeta("m1", { view: "memo", plot: "CPU" });
         const Block = await loadBlock();
         render(() => <Block nodeModel={makeNodeModel({ blockId: "m1" })} preview={false} />);
-        const vm = (registry.get("m1") as { viewModel: TestMemoViewModel }).viewModel;
-        expect(vm.plotType()).toBe("CPU");
+        const vm = (registry.get("m1") as { viewModel: ViewModel }).viewModel;
+        expect(vm.viewName!()).toBe("CPU");
 
         setMeta("m1", { view: "memo", plot: "CPU + Mem" });
-        expect(vm.plotType()).toBe("CPU + Mem");
+        expect(vm.viewName!()).toBe("CPU + Mem");
         setMeta("m1", { view: "memo", plot: "Mem" });
-        expect(vm.plotType()).toBe("Mem");
+        expect(vm.viewName!()).toBe("Mem");
         expect(memoVmDisposals).toEqual([]);
     });
 
@@ -263,44 +257,43 @@ describe("Block — a ViewModel's own reactive state outlives meta changes", () 
 });
 
 describe("Block — preview/real ViewModel isolation", () => {
-    it("the real mount's ViewModel holds the real mount's own nodeModel, even when the preview mount constructs first", async () => {
+    // The two mounts are told apart by the focus their node models report:
+    // the instance's context reads it from the mount that created it.
+    it("the one live instance is bound to the real mount, even when the preview mount runs first", async () => {
         setBlockView("b1", "agent");
         const Block = await loadBlock();
 
-        const previewNodeModel = makeNodeModel({ blockId: "b1" }); // raw leaf model — no paneChromeHoisted at all
-        const realNodeModel = makeNodeModel({ blockId: "b1", paneChromeHoisted: () => true } as any);
+        const previewNodeModel = makeNodeModel({ blockId: "b1" }); // raw leaf model
+        const realNodeModel = makeNodeModel({ blockId: "b1", isFocused: () => true });
 
         // Preview mounts FIRST — the exact ordering that reproduced the bug.
         render(() => <Block nodeModel={previewNodeModel} preview={true} />);
         render(() => <Block nodeModel={realNodeModel} preview={false} />);
 
-        // Only the real mount constructed a ViewModel — a preview never builds
-        // a live instance (see "a preview never builds a live ViewModel").
+        // Only the real mount created an instance — a preview never builds
+        // a live one (see "a preview never builds a live ViewModel").
         expect(constructedViewModels).toHaveLength(1);
-        const realVm = constructedViewModels.find((v) => v.nodeModel === realNodeModel);
-        expect(realVm).toBeDefined();
-        expect((realVm!.nodeModel as any).paneChromeHoisted?.()).toBe(true);
+        expect(constructedViewModels[0].ctx.isFocused()).toBe(true);
 
         // The registry holds only the REAL mount's registration.
-        const registered = registry.get("b1") as { viewModel: TestAgentViewModel } | undefined;
-        expect(registered?.viewModel.nodeModel).toBe(realNodeModel);
+        const registered = registry.get("b1") as { viewModel: ViewModel } | undefined;
+        expect(registered?.viewModel.viewName!()).toBe("live name of b1");
     });
 
-    it("the real mount's ViewModel holds the real mount's own nodeModel, even when the preview mount constructs second", async () => {
+    it("the one live instance is bound to the real mount, even when the preview mount runs second", async () => {
         setBlockView("b1", "agent");
         const Block = await loadBlock();
 
         const previewNodeModel = makeNodeModel({ blockId: "b1" });
-        const realNodeModel = makeNodeModel({ blockId: "b1", paneChromeHoisted: () => true } as any);
+        const realNodeModel = makeNodeModel({ blockId: "b1", isFocused: () => true });
 
         // Real mounts FIRST this time — the ordering that happened to work
         // by luck before this fix; must still work after it.
         render(() => <Block nodeModel={realNodeModel} preview={false} />);
         render(() => <Block nodeModel={previewNodeModel} preview={true} />);
 
-        const registered = registry.get("b1") as { viewModel: TestAgentViewModel } | undefined;
-        expect(registered?.viewModel.nodeModel).toBe(realNodeModel);
-        expect(registered?.viewModel.noHeader()).toBe(true);
+        expect(constructedViewModels).toHaveLength(1);
+        expect(constructedViewModels[0].ctx.isFocused()).toBe(true);
     });
 });
 
@@ -330,8 +323,8 @@ describe("Block — a preview never builds a live ViewModel", () => {
         preview.unmount();
 
         expect(constructedViewModels).toHaveLength(1);
-        const registered = registry.get("p2") as { viewModel: TestAgentViewModel };
-        expect(registered.viewModel.disposed).toBe(false);
+        expect(constructedViewModels[0].disposed).toBe(false);
+        expect(registry.get("p2")).toBeDefined();
     });
 
     it("the preview's header shows the live ViewModel's name", async () => {
