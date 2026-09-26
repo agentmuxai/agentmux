@@ -19,6 +19,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { toolHeaderText } from "./components/tool-header";
 import type { DocumentNode } from "./types";
 
 /**
@@ -58,7 +59,9 @@ function renderSnapshotLine(node: DocumentNode): string | null {
             if (node.metadata?.thinking) return null;
             return `Assistant: ${truncateLine(node.content, MAX_LINE_CHARS)}`;
         case "tool":
-            return `Tool ${node.tool}: ${truncateLine(node.summary, MAX_LINE_CHARS)}`;
+            // Status spelled out, same shape as the shell line: the summary
+            // carries no outcome glyph (ToolNode.summary).
+            return `Tool ${node.toolName ?? node.tool} (${node.status}): ${truncateLine(toolHeaderText(node), MAX_LINE_CHARS)}`;
         case "agent_message": {
             const who = node.direction === "incoming" ? `from ${node.from}` : `to ${node.to}`;
             return `Agent message (${who}): ${truncateLine(node.message, MAX_LINE_CHARS)}`;

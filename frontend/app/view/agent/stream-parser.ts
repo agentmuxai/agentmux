@@ -20,7 +20,6 @@ import {
     JektTier,
     JektTrust,
     MemoryReinjectionNode,
-    STATUS_ICONS,
     StreamEvent,
     TextEvent,
     ThinkingEvent,
@@ -571,7 +570,7 @@ export class ClaudeCodeStreamParser {
             }
         }
 
-        const summary = this.generateToolSummary(event.tool, event.params, "running");
+        const summary = this.generateToolSummary(event.tool, event.params);
 
         return {
             type: "tool",
@@ -614,12 +613,7 @@ export class ClaudeCodeStreamParser {
         this.pendingToolCalls.delete(event.id);
         this.pendingToolTimestamps.delete(event.id);
 
-        const summary = this.generateToolSummary(
-            toolName,
-            params,
-            event.status,
-            event.duration
-        );
+        const summary = this.generateToolSummary(toolName, params);
 
         return {
             type: "tool",
@@ -818,22 +812,14 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
-     * Generate tool summary string
+     * Plain-text summary: icon, tool name, detail. No status glyph or
+     * duration — both change after parse time, and ToolBlock renders them
+     * from the node's live fields (see ToolNode.summary).
      */
-    private generateToolSummary(
-        tool: string,
-        params: Record<string, any>,
-        status: string,
-        duration?: number
-    ): string {
+    private generateToolSummary(tool: string, params: Record<string, any>): string {
         const icon = TOOL_ICONS[tool] || TOOL_ICONS.Other;
-        const statusIcon = STATUS_ICONS[status] || "";
-        const durationStr = duration ? ` (${duration.toFixed(1)}s)` : "";
-
-        // Extract relevant param for display
         const detail = extractToolDetail(tool, params);
-
-        return `${icon} ${tool} ${detail}${durationStr} ${statusIcon}`.trim();
+        return detail ? `${icon} ${tool} ${detail}` : `${icon} ${tool}`;
     }
 
     /**

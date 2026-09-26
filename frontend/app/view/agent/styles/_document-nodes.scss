@@ -281,6 +281,16 @@ $transcript-preview-max-height: calc(50vh / 3);
                 white-space: nowrap;
             }
 
+            // Composed header (tool-header.ts): the tool name reads as the
+            // verb, the detail (path / command / query) as its argument.
+            // Colors still come from `.agent-tool-name` so the per-tool
+            // `[data-tool=…] .agent-tool-name` rules keep applying.
+            .agent-tool-detail {
+                font-weight: 400;
+            }
+
+            // A reducer-set note on a status (e.g. "cleared via muxspect").
+            .agent-tool-status-note,
             .agent-tool-duration {
                 flex-shrink: 0;
                 color: var(--secondary-text-color);
