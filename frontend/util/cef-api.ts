@@ -16,6 +16,7 @@ import {
 } from "@/app/util/menu-position";
 import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { benchMark } from "@/util/startup-bench";
+import { cefBrowserPanes, cefReclaimWindowFocus } from "@/app/host/cef-host-commands";
 import { CEF_HOST_CAPS } from "@/app/host/host-caps";
 import { isTransientNetworkError, retryTransient } from "@/util/transient-network";
 
@@ -478,6 +479,8 @@ export function buildCefApi(): AppApi {
             const path = await invokeCommand<string>("ensure_settings_file");
             await invokeCommand("open_in_editor", { path });
         },
+        browserPanes: cefBrowserPanes,
+        reclaimWindowFocus: cefReclaimWindowFocus,
 
         // --- Synchronous getters (return cached values) ---
         getAuthKey: () => cachedValues!.authKey,
@@ -876,10 +879,7 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<{ opened: boolean }>("open_login_terminal", { cliPath, loginArgs, authEnv });
         },
 
-        listen: async (event: string, callback: (event: any) => void) => {
-            const unlisten = await listenEvent(event, callback);
-            return unlisten;
-        },
+        listen: <T = any>(event: string, callback: (payload: T) => void) => listenEvent<T>(event, callback),
 
         // --- Maintenance panel ---
         runMigrations: async () => {

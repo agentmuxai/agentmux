@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { onCleanup, onMount } from "solid-js";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import type { ModalLayerApi } from "@/element/modal-layer";
 import type { BrowserViewModel } from "./browser-model";
 
@@ -58,25 +58,23 @@ export function useBrowserAuth(params: {
             onSubmit: (username, password, save) => {
                 pendingAuthIds.delete(c.request_id);
                 diag(`auth-submit request_id=${c.request_id} save=${save}`);
-                void invokeCommand("browser_pane_auth_submit", {
-                    request_id: c.request_id,
-                    username,
-                    password,
-                }).catch((e) => diag(`auth-submit-failed err=${String(e)}`));
+                void getApi().browserPanes.authSubmit(c.request_id, username, password).catch((e) => diag(`auth-submit-failed err=${String(e)}`));
                 // Opt-in save — a wholly separate IPC call (not a flag on
                 // browser_pane_auth_submit) so that command's contract
                 // stays byte-for-byte unchanged. A save failure never
                 // affects the page load: auth already succeeded via the
                 // call above regardless of what happens here.
                 if (save) {
-                    void invokeCommand("browser_pane_auth_save", {
-                        block_id: model.blockId,
-                        origin: c.origin,
-                        realm: c.realm,
-                        is_proxy: c.is_proxy,
-                        username,
-                        password,
-                    }).catch((e) => diag(`auth-save-failed err=${String(e)}`));
+                    void getApi()
+                        .browserPanes.authSave({
+                            blockId: model.blockId,
+                            origin: c.origin,
+                            realm: c.realm,
+                            isProxy: c.is_proxy,
+                            username,
+                            password,
+                        })
+                        .catch((e) => diag(`auth-save-failed err=${String(e)}`));
                 }
                 authActive = false;
                 drainAuthQueue();
@@ -84,9 +82,7 @@ export function useBrowserAuth(params: {
             onCancel: () => {
                 pendingAuthIds.delete(c.request_id);
                 diag(`auth-cancel request_id=${c.request_id}`);
-                void invokeCommand("browser_pane_auth_cancel", {
-                    request_id: c.request_id,
-                }).catch(() => {});
+                void getApi().browserPanes.authCancel(c.request_id).catch(() => {});
                 authActive = false;
                 drainAuthQueue();
             },
@@ -103,7 +99,7 @@ export function useBrowserAuth(params: {
 
     onMount(() => {
         // Subscribe to CEF's HTTP Basic/Digest auth challenges.
-        void listenEvent<{
+        void getApi().listen<{
             block_id: string;
             request_id: string;
             origin: string;
@@ -152,8 +148,7 @@ export function useBrowserAuth(params: {
         // `browser_pane_close` as a safety net, but firing them here
         // ensures each cancel logs against the correct request_id.
         for (const requestId of pendingAuthIds) {
-            invokeCommand("browser_pane_auth_cancel", { request_id: requestId })
-                .catch(() => {});
+            getApi().browserPanes.authCancel(requestId).catch(() => {});
         }
         pendingAuthIds.clear();
         authQueue.length = 0;

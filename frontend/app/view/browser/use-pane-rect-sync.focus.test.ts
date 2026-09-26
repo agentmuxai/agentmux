@@ -10,6 +10,9 @@ vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn(() => Promise.resolv
 vi.mock("@/app/store/block-component-registry", () => ({ isBlockDormant: () => () => false }));
 
 import { usePaneRectSync } from "./use-pane-rect-sync";
+import { installCefWireHost } from "../../../test/cef-wire-host";
+
+installCefWireHost();
 
 // jsdom has no ResizeObserver; the hook's onMount observes the placeholder.
 vi.stubGlobal(

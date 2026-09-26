@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { onCleanup, type JSX } from "solid-js";
-import { invokeBrowserApi } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 
@@ -44,11 +44,7 @@ export function useDragSnapshot(params: {
         const pr = paneRect();
         if (!paneCreated() || model.closed || pr.width <= 0 || pr.height <= 0) return null;
         try {
-            const data = await invokeBrowserApi<{ png_base64: string }>("screenshot", {
-                block_id: model.blockId,
-                format: "jpeg",
-                quality: 80,
-            });
+            const data = await getApi().browserPanes.screenshot(model.blockId, { format: "jpeg", quality: 80 });
             if (!data?.png_base64) return null;
             const src = `data:image/jpeg;base64,${data.png_base64}`;
             const img = new Image();

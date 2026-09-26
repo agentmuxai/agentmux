@@ -4,7 +4,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
@@ -100,10 +100,7 @@ export function BrowserNavBar(props: {
         setAddressBar(url);
 
         if (props.paneCreated()) {
-            invokeCommand("browser_pane_navigate", {
-                block_id: model.blockId,
-                url,
-            }).catch((e: any) => model.onError(`Navigation failed: ${e}`));
+            getApi().browserPanes.navigate(model.blockId, url).catch((e: any) => model.onError(`Navigation failed: ${e}`));
         } else {
             props.createPane(url);
         }
@@ -140,7 +137,7 @@ export function BrowserNavBar(props: {
     // untrusted) page. See issue #1190.
     onMount(() => {
         let unsub: (() => void) | undefined;
-        void listenEvent<{ block_id: string; action: string }>(
+        void getApi().listen<{ block_id: string; action: string }>(
             "browser-pane-shortcut",
             (payload) => {
                 if (payload.block_id !== model.blockId) return;
@@ -151,7 +148,7 @@ export function BrowserNavBar(props: {
                 // holds OS keyboard focus, so a bare DOM .focus() call
                 // wouldn't actually move keystrokes to this input without
                 // first reclaiming OS focus for this window.
-                invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
+                getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                 addressInputRef?.focus();
                 addressInputRef?.select();
             }
@@ -384,7 +381,7 @@ export function BrowserNavBar(props: {
                 >{"→"}</button>
                 <button
                     class="browser-nav-btn"
-                    onClick={() => invokeCommand("browser_pane_reload", { block_id: model.blockId }).catch(() => {})}
+                    onClick={() => getApi().browserPanes.reload(model.blockId).catch(() => {})}
                     title="Reload"
                 >{"↻"}</button>
                 <FlyoutMenu
@@ -457,7 +454,7 @@ export function BrowserNavBar(props: {
                         // <button> click; <input> doesn't get the same
                         // treatment when the parent webview HWND lacks focus.
                         diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
-                        invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
+                        getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                     }}
                     onFocus={(e) => {
                         // relatedTarget = the element that LOST focus to us
@@ -476,7 +473,7 @@ export function BrowserNavBar(props: {
                         // the IPC is a no-op when the target window is
                         // already foreground, so it's safe to send on every
                         // legitimate focus event without triggering loops.
-                        invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
+                        getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                     }}
                     onBlur={(e) => {
                         const next = e.relatedTarget as Element | null;
