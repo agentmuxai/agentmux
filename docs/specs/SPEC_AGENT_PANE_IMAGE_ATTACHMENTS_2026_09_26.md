@@ -181,9 +181,9 @@ A 1 GB batch must not pass through the V8 heap, the JSON RPC channel (2 MB axum 
 | Ctrl+V, right-click Paste (CEF) | New CEF IPC `read_clipboard_attachments` → returns `{paths}` for a file list (Windows `CF_HDROP`, macOS `NSFilenamesPboardType`, Linux `text/uri-list`), or writes clipboard image data (Windows PNG/`CF_DIBV5`, macOS PNG/TIFF, Linux `image/png` via `wl-paste`/`xclip -t`) to `<store>/incoming/<uuid>.png` and returns that path → `attachments.ingest` | No |
 | Ctrl+V fallback (native read returned nothing but the `paste` event has `clipboardData.files`), and the non-CEF dev host | `fetch(POST /api/v1/attachments/upload, body: file)` per file, streamed | Blob only, never an ArrayBuffer |
 
-For Ctrl+V the composer's `onPaste` handler checks `clipboardData.files.length` / image items **synchronously**. If there are any, it calls `preventDefault()` for the non-text part, then goes native. Text is still inserted normally.
+For Ctrl+V the composer's `onPaste` handler checks `clipboardData.files.length` / image items **synchronously**. If there are none, it does nothing and the browser pastes text as usual. If there are any, `preventDefault()` cancels the **whole** paste (the browser can't cancel only the image part), so the handler also reads `clipboardData.getData("text/plain")` and inserts it itself with `document.execCommand("insertText")`, which replaces the selection and keeps the textarea's native undo stack. Then it goes native for the images.
 
-The upload route is the only new HTTP body path. It sets `DefaultBodyLimit` to the per-file cap **on that route only**, streams to disk while hashing, and requires `X-AuthKey` like `stream-local-file`.
+The upload route is the only new HTTP body path. It reads the raw body as a stream (axum's `DefaultBodyLimit` only governs buffering extractors, so it does not cap this), **counts bytes as it writes**, and aborts and deletes the partial file the moment the count passes the per-file cap. It hashes while writing and requires `X-AuthKey` like `stream-local-file`.
 
 ### 6.3 Storage
 
@@ -195,12 +195,12 @@ attachments/
   derived/ab/abcdef….thumb.webp       256 px long edge, for tiles and transcript
   derived/ab/abcdef….send.png|jpg     what the agent gets (§6.4)
   incoming/<uuid>.<ext>               in-flight paste/upload, renamed into blobs/ when hashed
-  refs.db                             SQLite: attachment ↔ (block id, message id | draft) references
+  derived/ab/abcdef….json             dimensions, formats and sizes of the three files
 ```
 
 - **Content addressing:** duplicates within and across prompts cost nothing, and the ID in every API is the hex SHA-256. IDs are validated as 64 hex chars before any path join.
 - **Permissions:** directory is user-only (0700 on Unix; default user-profile ACL on Windows under `~/.agentmux`).
-- **Retention:** an attachment is kept while any draft or sent message references it. The existing agent-history deletion removes its references. A sweep on srv start and every 6 h deletes blobs with no references and a last-reference older than `attachments:retentiondays` (default 30, matching Claude Code). `incoming/` files older than 1 h are deleted (screenshot-dir precedent).
+- **Retention is by last use, not by reference tracking.** Ingesting or sending an attachment refreshes the modification time of its files. A sweep on srv start and every 6 h deletes attachment files not touched for `attachments:retentiondays` (default 30, the same rule Claude Code uses). There is no reference table, so nothing can pin a blob forever: an abandoned draft (lost on restart) ages out like anything else. The cost is that a sent message older than the retention window shows "image no longer available" in place of its thumbnails. `incoming/` files older than 1 h are deleted (screenshot-dir precedent).
 
 ### 6.4 Processing pipeline (srv, Rust)
 
@@ -214,7 +214,7 @@ Runs on a bounded blocking pool (`max(1, cores/2)` workers) so 128 files don't s
 6. **Send-copy:** long edge ≤ **2000 px** (fits Anthropic's many-image rule, OpenAI, Gemini), metadata stripped (EXIF, including GPS, never leaves the machine). PNG when the source has alpha or looks like a screenshot (PNG source, ≤ 256 distinct colors in a sample); otherwise JPEG quality 85. Re-encode down to ≤ **5 MB** if needed (Bedrock/Vertex cap). If the original already satisfies every rule and has no metadata, the send-copy is a hard link to it.
 7. Emit `attachment:ready` with `{id, name, mime, bytes, width, height, send_bytes, send_width, send_height, thumb_url}`.
 
-Cancel drops queued jobs and deletes `incoming/` files for that batch; blobs already stored stay (they may be referenced elsewhere) and the sweep handles them.
+Cancel drops queued jobs and deletes `incoming/` files for that batch; blobs already stored stay (another draft may use the same bytes) and the sweep handles them.
 
 ### 6.5 Events and serving
 
@@ -259,7 +259,7 @@ The numbering in every preamble matches the tile badges (§5.1).
 | `attachments:maxtotalmb` | `1024` | Per prompt, originals. Per-file cap equals this. |
 | `attachments:sendmaxedge` | `2000` | Long edge of the send-copy. |
 | `attachments:claudeinlinemax` | `20` | Max images sent as inline blocks to Claude (0 = paths only). |
-| `attachments:retentiondays` | `30` | Unreferenced-blob retention. |
+| `attachments:retentiondays` | `30` | Days since last use before an attachment's files are deleted. |
 
 Existing `dnd:enabled` still gates drop as a whole; `dnd:agentinserttoken` now applies only to non-image files.
 
@@ -275,7 +275,7 @@ Existing `dnd:enabled` still gates drop as a whole; `dnd:agentinserttoken` now a
 
 ## 9. Tests
 
-- **Rust, srv:** pipeline unit tests over fixture images (PNG with alpha, EXIF-rotated JPEG, CMYK JPEG, animated GIF, 16-bit TIFF, BMP, SVG, a HEIC renamed `.jpg`, a truncated PNG, a 20000×20000 header). Assert: orientation applied, long edge ≤ 2000, ≤ 5 MB, no EXIF in output, bomb rejected before decode, HEIC reported not crashed. Dedup: same bytes twice → one blob. Retention sweep with and without references. Upload route: body larger than the cap is rejected mid-stream; missing auth → 401.
+- **Rust, srv:** pipeline unit tests over fixture images (PNG with alpha, EXIF-rotated JPEG, CMYK JPEG, animated GIF, 16-bit TIFF, BMP, SVG, a HEIC renamed `.jpg`, a truncated PNG, a 20000×20000 header). Assert: orientation applied, long edge ≤ 2000, ≤ 5 MB, no EXIF in output, bomb rejected before decode, HEIC reported not crashed. Dedup: same bytes twice → one blob. Retention sweep deletes files older than the window and keeps recently touched ones. Upload route: body larger than the cap is rejected mid-stream; missing auth → 401.
 - **Rust, delivery:** per provider, the exact stdin line / argv / JSON-RPC params for 0, 1, 25 attachments; the Claude hybrid budget split; the persisted Claude line contains IDs, not base64.
 - **Vitest:** tray grouping math (how many tiles fit per width; "+N" count); summary text and warn/error thresholds; keyboard removal focus rules; draft save/restore with attachments; `formatBytes`.
 - **CEF:** `read_clipboard_attachments` on Windows for a PNG screenshot, a `CF_DIBV5` bitmap, and an Explorer file list.
