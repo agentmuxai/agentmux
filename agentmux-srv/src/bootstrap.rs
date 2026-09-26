@@ -1572,10 +1572,10 @@ pub async fn bind_listeners_and_network(
     // gates only the three LAN-forwarding routes (`lan_or_full_auth_middleware`)
     // — not the full auth_key previously broadcast here, which gated the entire
     // API surface (see Config::lan_key's doc comment).
-    // Loopback, OS-chosen ports — or the fixed ports headless mode was given
-    // (`--web-port` / `--ws-port`, SPEC_SRV_HEADLESS_MODE_2026_09_26.md).
-    let web_bind = crate::headless::loopback_bind_addr("AGENTMUX_SRV_WEB_PORT");
-    let ws_bind = crate::headless::loopback_bind_addr("AGENTMUX_SRV_WS_PORT");
+    // Loopback, OS-chosen ports — or, headless only, the fixed ports it was
+    // given (`--web-port` / `--ws-port`, SPEC_SRV_HEADLESS_MODE_2026_09_26.md).
+    let web_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Web);
+    let ws_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Ws);
     let web_listener = TcpListener::bind(&web_bind)
         .await
         .unwrap_or_else(|e| panic!("failed to bind web listener on {web_bind}: {e}"));

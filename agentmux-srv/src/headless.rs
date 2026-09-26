@@ -31,6 +31,17 @@ static LOCK: OnceLock<MuxLock> = OnceLock::new();
 /// Set once `prepare_env` succeeded: this process is the headless server.
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// `--web-port` / `--ws-port`, held in-process (never in the env, so a
+/// launcher-spawned srv or an agent can't inherit them — ReAgent P1 on #3893).
+static PORTS: OnceLock<(Option<u16>, Option<u16>)> = OnceLock::new();
+
+/// Which startup listener a bind address is for.
+#[derive(Clone, Copy)]
+pub enum Listener {
+    Web,
+    Ws,
+}
+
 /// Is this process running headless (after `prepare_env`)?
 pub fn active() -> bool {
     ACTIVE.load(std::sync::atomic::Ordering::SeqCst)
@@ -121,12 +132,12 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
         std::env::set_var("AGENTMUX_AUTH_KEY", key);
     }
 
-    for (flag, var) in [("--web-port", "AGENTMUX_SRV_WEB_PORT"), ("--ws-port", "AGENTMUX_SRV_WS_PORT")] {
-        if let Some(port) = arg_value(&args, flag) {
-            port.parse::<u16>().map_err(|_| format!("{flag}: not a port: {port:?}"))?;
-            std::env::set_var(var, port);
-        }
-    }
+    let port = |flag: &str| -> Result<Option<u16>, String> {
+        arg_value(&args, flag)
+            .map(|p| p.parse::<u16>().map_err(|_| format!("{flag}: not a port: {p:?}")))
+            .transpose()
+    };
+    let _ = PORTS.set((port("--web-port")?, port("--ws-port")?));
 
     if std::env::var_os("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").is_none() {
         std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1");
@@ -169,10 +180,19 @@ fn write_generated_key(dir: &Path) -> Result<(String, PathBuf), String> {
 }
 
 /// The address a startup listener binds: `STARTUP_BIND_ADDR` (loopback,
-/// OS-chosen port), or the same loopback host with the fixed port in `var`.
-pub fn loopback_bind_addr(var: &str) -> String {
+/// OS-chosen port) — or, headless only, the same loopback host with the port
+/// `--web-port` / `--ws-port` gave. A non-headless srv always gets the default.
+pub fn startup_bind_addr(listener: Listener) -> String {
+    let fixed = PORTS.get().and_then(|(web, ws)| match listener {
+        Listener::Web => *web,
+        Listener::Ws => *ws,
+    });
+    bind_addr_with(fixed)
+}
+
+fn bind_addr_with(port: Option<u16>) -> String {
     let default = crate::backend::lan_listeners::STARTUP_BIND_ADDR;
-    match std::env::var(var).ok().and_then(|p| p.parse::<u16>().ok()) {
+    match port {
         Some(port) => {
             let host = default.rsplit_once(':').map(|(h, _)| h).unwrap_or(default);
             format!("{host}:{port}")
@@ -242,11 +262,22 @@ mod tests {
     }
 
     #[test]
-    fn loopback_bind_addr_defaults_to_the_startup_address() {
+    fn bind_addr_is_the_startup_address_or_its_host_with_a_fixed_port() {
+        let default = crate::backend::lan_listeners::STARTUP_BIND_ADDR;
+        assert_eq!(bind_addr_with(None), default);
+        assert_eq!(bind_addr_with(Some(8190)), "127.0.0.1:8190");
+    }
+
+    /// Only `prepare_env` sets the fixed ports, and only in-process: a srv
+    /// that isn't headless binds the default whatever its env says.
+    #[test]
+    fn a_non_headless_srv_ignores_port_env() {
+        std::env::set_var("AGENTMUX_SRV_WEB_PORT", "8190");
         assert_eq!(
-            loopback_bind_addr("AGENTMUX_TEST_UNSET_PORT_VAR"),
+            startup_bind_addr(Listener::Web),
             crate::backend::lan_listeners::STARTUP_BIND_ADDR
         );
+        std::env::remove_var("AGENTMUX_SRV_WEB_PORT");
     }
 
     #[cfg(unix)]
