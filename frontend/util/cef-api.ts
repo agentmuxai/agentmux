@@ -16,6 +16,7 @@ import {
 } from "@/app/util/menu-position";
 import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { benchMark } from "@/util/startup-bench";
+import { CEF_HOST_CAPS } from "@/app/host/host-caps";
 
 // Cache for "synchronous" values that are fetched once at startup.
 let cachedValues: {
@@ -459,6 +460,8 @@ export function buildCefApi(): AppApi {
     }
 
     const api: AppApi = {
+        getHostCaps: () => CEF_HOST_CAPS,
+
         // --- Synchronous getters (return cached values) ---
         getAuthKey: () => cachedValues!.authKey,
         getIsDev: () => cachedValues!.isDev,

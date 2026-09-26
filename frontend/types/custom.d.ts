@@ -91,7 +91,39 @@ declare global {
         primaryTabStartup?: boolean;
     };
 
+    /**
+     * What the host the frontend is running in can do. The CEF desktop host
+     * can do all of it; any other host (a test harness, a plain browser)
+     * reports what it lacks, and UI for a missing capability hides itself
+     * instead of calling a host command that isn't there.
+     * docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md
+     */
+    type HostCaps = {
+        /** More than one native window: open/focus/list windows. */
+        multiWindow: boolean;
+        /** Tear a tab or pane off into its own native window; cross-window drag. */
+        tearOff: boolean;
+        /** Browser panes (native CEF child browsers). */
+        nativeBrowserPane: boolean;
+        /** Native open/save file dialogs. */
+        nativeDialogs: boolean;
+        /** In-app update check and install. */
+        updater: boolean;
+        /** Start at login (OS login entry). */
+        autostart: boolean;
+        /** System tray icon and menu. */
+        tray: boolean;
+        /** Detect and install provider CLIs on this machine. */
+        localCliInstall: boolean;
+        /** Window transparency and opacity. */
+        windowTransparency: boolean;
+        /** Custom title bar and window controls (minimize/maximize/close, drag). */
+        nativeWindowChrome: boolean;
+    };
+
     type AppApi = {
+        /** Capabilities of the host this frontend is running in. */
+        getHostCaps(): HostCaps;
         getAuthKey(): string;
         getIsDev(): boolean;
         getCursorPoint: () => { x: number; y: number };
