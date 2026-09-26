@@ -106,7 +106,7 @@ pub(super) async fn handle_agent_takeover(
     }
     // The holder let go: forget the cached relay refusal, or the pane's
     // retry is refused from it for up to 90 s (Codex P1 on #3899).
-    crate::muxbus::wan_lease::forget_elsewhere(&name);
+    crate::muxbus::wan_lease::forget_elsewhere(&name).await;
     (
         StatusCode::OK,
         Json(json!({ "ok": true, "released": true, "from_channel": holder.channel })),
@@ -194,20 +194,45 @@ pub(super) async fn handle_agent_release(State(state): State<AppState>, Json(req
         );
         surface_failure(&state, &block.oid, &reason);
     }
-    // No pane runs it here, but the relay may still see this srv as the
-    // holder: a subscription that outlived its panes (charlie, 2026-09-26)
-    // renews the WAN lease every tick. Let go of it now, and before
-    // answering, so the requester's retry can claim the lease.
+    // The relay may still see this srv as the holder — even with no pane
+    // running it: a subscription that outlived its panes (charlie,
+    // 2026-09-26) renews the WAN lease every tick. Let go of it now, and
+    // before answering, so the requester's retry can claim the lease.
+    //
+    // Also after stopping live panes (Codex P1 on #3903): their exit hands
+    // the WAN release to a background task, so the requester's retry could
+    // still meet this srv's lease and be fenced. The handover hold keeps
+    // this srv from re-claiming the agent, so letting go here is safe.
     let agent = req.agent.trim();
-    if !agent.is_empty()
-        && !crate::backend::reactive::handler::get_global_handler().has_live_name(agent)
-        && crate::muxbus::cloud_subscriber::release_agent_now(&state.id_store, agent).await
-    {
-        tracing::info!(agent = %agent, "agent_admission.takeover: released a relay subscription no pane held");
-        released += 1;
-    }
-    if released > 0 {
+    let was_live = released > 0;
+    // The hold goes up before the release is awaited (Codex P1 on #3908):
+    // otherwise a local turn in that window re-registers the agent, re-adds
+    // its subscription, and this srv keeps the lease it claims to hand over.
+    let hand_over = was_live || !agent.is_empty();
+    if hand_over {
         agent_admission::hold_after_handover(&uid, &to);
+    }
+    if !agent.is_empty() {
+        use crate::muxbus::cloud_subscriber::RelayRelease;
+        match crate::muxbus::cloud_subscriber::release_agent_now(&state.id_store, agent).await {
+            RelayRelease::Released => {
+                tracing::info!(agent = %agent, was_live, "agent_admission.takeover: released the relay subscription and lease");
+                if !was_live {
+                    released += 1;
+                }
+            }
+            // Re-added despite the hold (a turn already past admission): the
+            // relay lease stays here, so the requester's retry would be fenced.
+            RelayRelease::Kept => {
+                tracing::warn!(agent = %agent, "agent_admission.takeover: the agent was re-added while releasing — relay lease kept");
+            }
+            // No relay subscription (or no relay at all): nothing to release.
+            RelayRelease::NotSubscribed => {}
+        }
+    }
+    if released == 0 && hand_over {
+        // Nothing was handed over after all: don't block this srv's own use.
+        agent_admission::clear_handover_hold(&uid);
     }
     tracing::info!(uid = %uid, released, to = %to, "agent_admission.takeover: release handled");
     (StatusCode::OK, Json(json!({ "ok": true, "released": released }))).into_response()

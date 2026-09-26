@@ -219,19 +219,39 @@ impl CloudSubscriber {
     /// under `wan_lease`'s per-agent lock, serialized with the RemoveAgent
     /// arm's own: when this returns, whichever of the two ran has finished,
     /// and neither releases an agent that was subscribed again.
-    async fn release_now(&self, agent_id: &str, base: &str, token: impl std::future::Future<Output = String>) -> bool {
+    async fn release_now(
+        &self,
+        agent_id: &str,
+        base: &str,
+        token: impl std::future::Future<Output = String>,
+    ) -> RelayRelease {
         let key = agent_id.to_lowercase();
-        {
+        let was_subscribed = {
             let mut agents = self.agents.lock().unwrap();
-            if !agents.remove(&key) {
-                return false;
+            let removed = agents.remove(&key);
+            if removed {
+                let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key.clone()));
             }
-            let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key.clone()));
+            removed
+        };
+        // Not subscribed is not "no lease" (Codex P1 on #3908): a stopped
+        // pane's exit may already have unsubscribed it and queued a release
+        // that runs detached. Release here too — idempotent, and under the
+        // per-agent op lock, so this also waits for a release in flight.
+        let held = super::wan_lease::is_held(&key);
+        if !was_subscribed && !held {
+            // Wait out a release already in flight; nothing is held here.
+            super::wan_lease::release(base, &key, "", &reqwest::Client::new(), || true).await;
+            return RelayRelease::NotSubscribed;
         }
         let token = token.await;
         let still_gone = || !self.agents.lock().unwrap().contains(&key);
-        super::wan_lease::release(base, &key, &token, &reqwest::Client::new(), still_gone).await;
-        true
+        // Re-added meanwhile: then this srv kept the lease.
+        if super::wan_lease::release(base, &key, &token, &reqwest::Client::new(), still_gone).await {
+            RelayRelease::Released
+        } else {
+            RelayRelease::Kept
+        }
     }
 
     /// Called after muxbus.login completes — trigger a fresh WS connection
@@ -871,6 +891,8 @@ async fn sync_agent_reactive(
 
     let url = format!("{}/reactive/pending/{}", base, agent_id);
     let body: PendingResp = loop {
+        // For telling a 409 from before a Take over apart (note_not_holder_since).
+        let resp_started = std::time::Instant::now();
         let resp = match http
             .get(&url)
             .header("Authorization", format!("Bearer {}", agent_token))
@@ -918,8 +940,9 @@ async fn sync_agent_reactive(
         if resp.status() == reqwest::StatusCode::CONFLICT {
             // The relay's lease fence: another instance holds this agent.
             let body = resp.json::<serde_json::Value>().await.unwrap_or_default();
-            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
-            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            if let Some(where_) = super::wan_lease::note_not_holder_since(agent_id, &body, resp_started) {
+                crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            }
             return AgentSyncOutcome::Ok;
         }
         if !resp.status().is_success() {
@@ -958,6 +981,8 @@ async fn sync_agent_reactive(
     let all_ids: Vec<String> = body.injections.iter().map(|inj| inj.id.clone()).collect();
     let ack_url = format!("{}/reactive/ack", base);
     let claimed: AckResp = loop {
+        // For telling a 409 from before a Take over apart (note_not_holder_since).
+        let claim_resp_started = std::time::Instant::now();
         let claim_resp = match http
             .post(&ack_url)
             .header("Authorization", format!("Bearer {}", agent_token))
@@ -1002,8 +1027,9 @@ async fn sync_agent_reactive(
             // this pull and this claim): same handling as a 409 on the pull —
             // claim nothing, and fence the local holder (ReAgent P1 on #3746).
             let body = claim_resp.json::<serde_json::Value>().await.unwrap_or_default();
-            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
-            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            if let Some(where_) = super::wan_lease::note_not_holder_since(agent_id, &body, claim_resp_started) {
+                crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            }
             return AgentSyncOutcome::Ok;
         }
         if !claim_resp.status().is_success() {
@@ -1310,14 +1336,25 @@ fn orphaned_subscriptions(registered: &[String], is_live: impl Fn(&str) -> bool)
 /// awaiting the release (the `RemoveAgent` arm's is fire-and-forget) — for a
 /// Take over, whose requester claims the lease right after. `false` if it
 /// wasn't subscribed. `id_store` is where muxbus credentials live.
+/// What a Take over's relay release did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RelayRelease {
+    /// Not in the relay subscription: no relay lease to release.
+    NotSubscribed,
+    /// Unsubscribed and the lease released (or none was held).
+    Released,
+    /// Re-added while releasing: the lease was kept.
+    Kept,
+}
+
 /// Is `agent` in the relay subscription? `true` when there is no
 /// subscriber (tests), so a lease check fails open as before.
 pub(crate) fn is_subscribed(agent: &str) -> bool {
     get_global_subscriber().is_none_or(|s| s.agents.lock().unwrap().contains(&agent.to_lowercase()))
 }
 
-pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> bool {
-    let Some(sub) = get_global_subscriber() else { return false };
+pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> RelayRelease {
+    let Some(sub) = get_global_subscriber() else { return RelayRelease::NotSubscribed };
     sub.release_now(agent, &super::relay::rest_base_url(), shared_token_now(id_store, "")).await
 }
 
@@ -1495,10 +1532,34 @@ mod tests {
                 String::new()
             })
             .await;
-        assert!(released);
+        assert_eq!(released, super::RelayRelease::Kept, "re-added meanwhile: the lease was kept");
         assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::RemoveAgent(k)) if k == "opaz"), "removal first");
         assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::AddAgent(k)) if k == "opaz"), "then the re-add");
         assert!(sub.agents.lock().unwrap().contains("opaz"), "and it ends subscribed");
+    }
+
+    // ReAgent P2 on #3908: "not subscribed" (e.g. no relay) must not read
+    // as "re-added, lease kept".
+    // Codex P1 on #3908: the stopped pane's own exit may already have
+    // unsubscribed the agent and queued RemoveAgent, whose release runs
+    // detached. "Not in the set" is not "no lease": release it here too
+    // (idempotently) and answer only once it's gone.
+    #[tokio::test]
+    async fn a_take_over_release_still_releases_a_lease_the_exit_left_behind() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        crate::muxbus::wan_lease::mark_held_for_test(&agent);
+        let (sub, mut rx) = test_subscriber(&[]);
+        let outcome = sub.release_now(&agent, "http://127.0.0.1:9", async { String::new() }).await;
+        assert_eq!(outcome, super::RelayRelease::Released);
+        assert!(!crate::muxbus::wan_lease::is_held(&agent), "the lease is let go before answering");
+        assert!(rx.try_recv().is_err(), "no second RemoveAgent");
+    }
+
+    #[tokio::test]
+    async fn a_take_over_release_of_an_unsubscribed_agent_says_so() {
+        let (sub, _rx) = test_subscriber(&[]);
+        let outcome = sub.release_now("Opaz", "http://127.0.0.1:9", async { String::new() }).await;
+        assert_eq!(outcome, super::RelayRelease::NotSubscribed);
     }
 
     #[test]
