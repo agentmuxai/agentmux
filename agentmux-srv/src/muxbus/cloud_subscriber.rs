@@ -491,7 +491,25 @@ async fn connect_and_run(
             // open, so a long-lived session no longer needs to special-case
             // its own credential check here.
             _ = lease_interval.tick() => {
-                let registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
+                let mut registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
+                // Never renew a lease for an agent no live block holds: drop
+                // the leaked subscription instead. `remove_agent` goes through
+                // the RemoveAgent arm below, which unsubscribes and releases
+                // the lease.
+                let handler = get_global_handler();
+                let orphans = orphaned_subscriptions(&registered, |a| handler.has_live_name(a));
+                if !orphans.is_empty() {
+                    if let Some(sub) = get_global_subscriber() {
+                        for agent_id in &orphans {
+                            tracing::warn!(
+                                agent = %agent_id,
+                                "cloud_subscriber: subscribed agent has no live pane — dropping it and releasing its WAN lease"
+                            );
+                            sub.remove_agent(agent_id);
+                        }
+                    }
+                    registered.retain(|a| !orphans.contains(a));
+                }
                 futures_util::future::join_all(registered.iter().map(|agent_id| async move {
                     let per_agent = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
                     let agent_token = match per_agent {
@@ -1218,6 +1236,24 @@ where
     fresh().await.unwrap_or_else(|| connection_token.to_string())
 }
 
+/// Whether a spawn's exit drops its agent from the cloud subscription.
+/// `registration_was_ours`: its own nonce matched. That alone was the old
+/// rule, and a registration already gone (`false`) read as "a newer spawn
+/// owns it" — so the agent stayed subscribed, and the lease tick renewed
+/// its WAN lease for as long as the srv ran, fencing it on every other
+/// instance (charlie, 2026-09-26). Keep it only while a live block holds it.
+pub(crate) fn drop_cloud_subscription_on_exit(registration_was_ours: bool, still_held: bool) -> bool {
+    registration_was_ours || !still_held
+}
+
+/// Subscribed agents no live block holds. Every way into the subscription
+/// (`add_agent`) runs with a live registration, so one without is a leak
+/// from a teardown that missed it; renewing its WAN lease would fence the
+/// agent everywhere else for as long as this srv runs.
+fn orphaned_subscriptions(registered: &[String], is_live: impl Fn(&str) -> bool) -> Vec<String> {
+    registered.iter().filter(|a| !is_live(a)).cloned().collect()
+}
+
 /// [`fresh_shared_token`] against the broker and `mstore` (the store muxbus
 /// credentials live in — `CloudSubscriber::init_global`'s `id_store`).
 async fn shared_token_now(mstore: &Arc<Store>, connection_token: &str) -> String {
@@ -1313,6 +1349,25 @@ mod tests {
     async fn calls_during_a_connection_get_a_fresh_token_not_the_connections() {
         let token = super::fresh_shared_token(|| async { Some("fresh".to_string()) }, "stale-connection-token").await;
         assert_eq!(token, "fresh");
+    }
+
+    // Charlie 2026-09-26: a spawn's exit found its block's registration
+    // already gone, took that for "a newer spawn owns it" and kept the
+    // agent in the cloud subscription — whose lease tick then renewed its
+    // WAN lease for as long as the srv ran, fencing the agent everywhere.
+    #[test]
+    fn an_exit_drops_the_subscription_when_nobody_holds_the_agent() {
+        assert!(super::drop_cloud_subscription_on_exit(false, false), "no registration and no live holder");
+        assert!(super::drop_cloud_subscription_on_exit(true, false));
+        assert!(!super::drop_cloud_subscription_on_exit(false, true), "a newer spawn holds it: keep");
+    }
+
+    #[test]
+    fn the_lease_tick_finds_subscriptions_no_live_block_holds() {
+        let registered = vec!["opaz".to_string(), "maricon".to_string()];
+        let orphans = super::orphaned_subscriptions(&registered, |name| name == "maricon");
+        assert_eq!(orphans, vec!["opaz".to_string()]);
+        assert!(super::orphaned_subscriptions(&registered, |_| true).is_empty());
     }
 
     #[tokio::test]
