@@ -49,8 +49,16 @@ export function toolHeaderParts(node: ToolNode): ToolHeaderParts {
     return { icon, label, detail };
 }
 
-/** The same header as one plain string, e.g. "🌐 solid docs". */
+/** AskUserQuestion's flow writes its own row text into `summary` ("❓ Waiting
+ *  for your answer", "❓ Answered — …"); for it, that text IS the header. */
+export function hasAuthoredSummary(node: ToolNode): boolean {
+    return node.toolName === "AskUserQuestion";
+}
+
+/** The same header as one plain string, e.g. "🌐 solid docs" (or the authored
+ *  summary, see `hasAuthoredSummary`). */
 export function toolHeaderText(node: ToolNode): string {
+    if (hasAuthoredSummary(node)) return node.summary;
     const { icon, label, detail } = toolHeaderParts(node);
     return [icon, label, detail].filter(Boolean).join(" ");
 }

@@ -1,7 +1,7 @@
 # Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row
 
 **Date:** 2026-09-26
-**Status:** In progress — §3.2 (header row) implemented in the first PR; the rest proposed
+**Status:** active — §3.2 (header row) implemented in #3871; the rest proposed
 **Scope:** agent pane tool previews (`frontend/app/view/agent/`)
 **Verified against:** `main` @ `6b5c2b59b`, which includes #3861 (the jekt
 height cap)

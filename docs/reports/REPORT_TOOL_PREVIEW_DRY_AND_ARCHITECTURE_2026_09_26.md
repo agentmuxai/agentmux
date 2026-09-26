@@ -1,6 +1,7 @@
 # Report: DRY and architecture cleanup — agent-pane tool previews and message blocks
 
 **Date:** 2026-09-26
+**Status:** analysis
 **Verified against:** `main` @ `6b5c2b59b`
 **Scope:**
 - Tool previews: `frontend/app/view/agent/components/ToolBlock.tsx`,

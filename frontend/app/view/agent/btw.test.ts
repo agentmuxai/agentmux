@@ -54,12 +54,45 @@ describe("buildBtwContextSnapshot", () => {
         expect(snapshot).toBe("User: a real question");
     });
 
-    it("renders tool calls with their summary", () => {
-        const nodes: DocumentNode[] = [tool("1", "🖥 Bash: echo hi ✓")];
+    // The summary no longer carries a status glyph (SPEC_TOOL_PREVIEW_CONTENT_
+    // FIRST_2026_09_26.md §3.2), so the outcome is spelled out from `status`,
+    // the same shape as the shell line.
+    it("renders tool calls with their status and composed header", () => {
+        const nodes: DocumentNode[] = [tool("1", "🔧 Bash echo hi")];
 
         const snapshot = buildBtwContextSnapshot(nodes);
 
-        expect(snapshot).toBe("Tool Bash: 🖥 Bash: echo hi ✓");
+        expect(snapshot).toBe("Tool Bash (success): 🔧 Bash echo hi");
+    });
+
+    it("names a tool by its raw name and reflects a status set after parsing", () => {
+        const search: DocumentNode = {
+            type: "tool",
+            id: "1",
+            tool: "Other",
+            toolName: "WebSearch",
+            params: { query: "solid docs" },
+            status: "canceled",
+            collapsed: true,
+            summary: "🌐 WebSearch solid docs",
+        };
+
+        expect(buildBtwContextSnapshot([search])).toBe("Tool WebSearch (canceled): 🌐 solid docs");
+    });
+
+    it("keeps an AskUserQuestion's authored text", () => {
+        const answered: DocumentNode = {
+            type: "tool",
+            id: "1",
+            tool: "Other",
+            toolName: "AskUserQuestion",
+            params: {},
+            status: "success",
+            collapsed: true,
+            summary: "❓ Answered — Red",
+        };
+
+        expect(buildBtwContextSnapshot([answered])).toBe("Tool AskUserQuestion (success): ❓ Answered — Red");
     });
 
     it("omits pure UI/boundary nodes like day dividers and section headers", () => {

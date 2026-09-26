@@ -49,7 +49,7 @@ import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteRes
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
-import { toolHeaderParts } from "./tool-header";
+import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -316,9 +316,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
     const header = createMemo(() => toolHeaderParts(props.node));
     const cmdText = () => header().detail;
-    // AskUserQuestion's flow writes its own row text ("❓ Waiting for your
-    // answer", "❓ Answered — …") into `summary`; that text IS its header.
-    const authoredSummary = () => props.node.toolName === "AskUserQuestion";
+    const authoredSummary = () => hasAuthoredSummary(props.node);
 
     // Peek-tooltip time + estimate lines (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
     // §2.3). Real API-reported token/cost data doesn't exist per-tool-call
