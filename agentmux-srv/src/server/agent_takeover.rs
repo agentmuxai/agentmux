@@ -104,6 +104,9 @@ pub(super) async fn handle_agent_takeover(
     if let Err(e) = agent_admission::wait_until_free(store, &uid, &state.boot_id, TAKEOVER_WAIT).await {
         return (StatusCode::GATEWAY_TIMEOUT, Json(json!({ "error": e }))).into_response();
     }
+    // The holder let go: forget the cached relay refusal, or the pane's
+    // retry is refused from it for up to 90 s (Codex P1 on #3899).
+    crate::muxbus::wan_lease::forget_elsewhere(&name);
     (
         StatusCode::OK,
         Json(json!({ "ok": true, "released": true, "from_channel": holder.channel })),

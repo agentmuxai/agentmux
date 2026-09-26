@@ -555,14 +555,18 @@ async fn connect_and_run(
                     }
                     registered.retain(|a| !orphans.contains(a));
                 }
+                let subscribed = &agents;
                 futures_util::future::join_all(registered.iter().map(|agent_id| async move {
                     let per_agent = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
                     let agent_token = match per_agent {
                         Some(t) => t,
                         None => shared_token_now(mstore, token).await,
                     };
+                    // Re-checked under the lease's per-agent lock: a Take over
+                    // may have released it since this list was copied.
+                    let still_subscribed = || subscribed.lock().unwrap().contains(agent_id);
                     if let super::wan_lease::Outcome::HeldElsewhere(where_) =
-                        super::wan_lease::ensure(base, agent_id, &agent_token, http).await
+                        super::wan_lease::ensure(base, agent_id, &agent_token, http, still_subscribed).await
                     {
                         crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
                     }
@@ -859,7 +863,7 @@ async fn sync_agent_reactive(
     // not take its jekts — and fence the local holder of this agent, if any
     // (the newcomer yields). Fails open on any error (wan_lease::Outcome::Unknown).
     if let super::wan_lease::Outcome::HeldElsewhere(where_) =
-        super::wan_lease::ensure(base, agent_id, &agent_token, http).await
+        super::wan_lease::ensure(base, agent_id, &agent_token, http, || is_subscribed(agent_id)).await
     {
         crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
         return AgentSyncOutcome::Ok;
@@ -1306,6 +1310,12 @@ fn orphaned_subscriptions(registered: &[String], is_live: impl Fn(&str) -> bool)
 /// awaiting the release (the `RemoveAgent` arm's is fire-and-forget) — for a
 /// Take over, whose requester claims the lease right after. `false` if it
 /// wasn't subscribed. `id_store` is where muxbus credentials live.
+/// Is `agent` in the relay subscription? `true` when there is no
+/// subscriber (tests), so a lease check fails open as before.
+pub(crate) fn is_subscribed(agent: &str) -> bool {
+    get_global_subscriber().is_none_or(|s| s.agents.lock().unwrap().contains(&agent.to_lowercase()))
+}
+
 pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> bool {
     let Some(sub) = get_global_subscriber() else { return false };
     sub.release_now(agent, &super::relay::rest_base_url(), shared_token_now(id_store, "")).await

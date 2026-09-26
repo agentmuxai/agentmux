@@ -82,6 +82,15 @@ pub(crate) fn held_elsewhere(agent: &str) -> Option<String> {
     (at.elapsed() < HELD_ELSEWHERE_FRESH).then_some(desc)
 }
 
+/// Drop a cached "held elsewhere" answer for `agent` — after a Take over
+/// freed it, so the retried turn isn't refused from the cache for up to
+/// [`HELD_ELSEWHERE_FRESH`] (Codex P1 on #3899).
+pub(crate) fn forget_elsewhere(agent: &str) {
+    if let Some(e) = STATE.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key(agent)) {
+        e.elsewhere = None;
+    }
+}
+
 /// Is a [`describe_holder`] description about this computer (another
 /// AgentMux instance on the same host, e.g. a second channel)?
 pub(crate) fn holder_on_this_computer(desc: &str) -> bool {
@@ -158,12 +167,24 @@ pub(crate) fn note_not_holder(agent_id: &str, body: &serde_json::Value) -> Strin
 
 /// Claim or renew `agent_id`'s WAN lease, at most every [`RENEW_EVERY`].
 /// `base` is the relay's REST base URL ([`super::relay::rest_base_url`]).
-pub(crate) async fn ensure(base: &str, agent_id: &str, token: &str, http: &reqwest::Client) -> Outcome {
+pub(crate) async fn ensure(
+    base: &str,
+    agent_id: &str,
+    token: &str,
+    http: &reqwest::Client,
+    still_subscribed: impl Fn() -> bool,
+) -> Outcome {
     if UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now()) {
         return Outcome::Unknown;
     }
     let op = op_lock(agent_id);
     let _op = op.lock().await;
+    // Callers work from a copy of the subscription; a Take over may have
+    // released the agent since. Re-checked under the op lock so it
+    // can't claim the lease straight back (Codex P2 on #3899).
+    if !still_subscribed() {
+        return Outcome::Unknown;
+    }
     let renew_due = {
         let state = STATE.lock().unwrap_or_else(|e| e.into_inner());
         match state.get(&key(agent_id)) {
@@ -261,6 +282,42 @@ pub(crate) async fn release(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Codex P1 on #3899: after a successful Take over the requester's own
+    // cached refusal still refused the retried turn for up to 90 s.
+    #[test]
+    fn forgetting_a_refusal_lets_the_next_turn_through() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        note_not_holder(&agent, &serde_json::json!({ "held_by": { "host": "desk" } }));
+        assert!(held_elsewhere(&agent).is_some());
+        forget_elsewhere(&agent.to_uppercase());
+        assert_eq!(held_elsewhere(&agent), None);
+    }
+
+    // Codex P2 on #3899: a lease tick that snapshotted the agent before a
+    // Take over released it would claim the lease straight back.
+    #[tokio::test]
+    async fn a_renewal_for_an_agent_no_longer_subscribed_claims_nothing() {
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        let app = axum::Router::new().fallback(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                axum::Json(serde_json::json!({ "ok": true, "epoch": 1 }))
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        let http = reqwest::Client::new();
+
+        assert_eq!(ensure(&base, &agent, "", &http, || false).await, Outcome::Unknown);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "no claim for an unsubscribed agent");
+        assert_eq!(ensure(&base, &agent, "", &http, || true).await, Outcome::Held);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 
     // Codex P2 (third pass) on #3897: the RemoveAgent arm's release runs
     // detached; if the agent was subscribed and claimed again meanwhile, it
