@@ -361,6 +361,20 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     )
 }
 
+/// `initial_view` of the credential-approval page (`credential_broker`).
+pub const CREDENTIAL_APPROVAL_VIEW: &str = "credential-approval";
+/// `initial_view` of the memory-adoption approval page (`memory_adoption`).
+pub const MEMORY_ADOPTION_APPROVAL_VIEW: &str = "memory-adoption-approval";
+
+/// True for the views that are approval pages — the windows the browser API
+/// must never resolve a pane into (`AppState::approval_windows`). Matched
+/// by name rather than "opened with a view": the generic `open_subwindow`
+/// IPC accepts any view string, and a future pane-hosting view opened that
+/// way must not silently become unreachable to the browser API (Opaz, #3843).
+pub fn is_approval_view(view: Option<&str>) -> bool {
+    matches!(view, Some(CREDENTIAL_APPROVAL_VIEW | MEMORY_ADOPTION_APPROVAL_VIEW))
+}
+
 /// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
 /// reserved for agent / backend callers that need a transient auxiliary
 /// top-level window (tool-spawned panels, diff views, etc.). Sub-windows are
@@ -410,12 +424,11 @@ pub fn open_subwindow(
         None,
         false,
     )?;
-    // A subwindow opened WITH a view (the credential / memory-adoption
-    // approval pages) renders only that view. Record it so the browser API
-    // never resolves a pane into it (#3681 review) — by label, because
-    // neither WindowKind::Subwindow (floaters carry it too) nor the page's
-    // DOM is a structural guarantee.
-    if initial_view.is_some() {
+    // An approval page (credential / memory-adoption) renders only that
+    // view. Record it so the browser API never resolves a pane into it
+    // (#3681 review) — by label, because neither WindowKind::Subwindow
+    // (floaters carry it too) nor the page's DOM is a structural guarantee.
+    if is_approval_view(initial_view) {
         if let Some(label) = opened.as_str() {
             state.approval_windows.lock().insert(label.to_string());
         }
@@ -1228,5 +1241,25 @@ mod new_window_origin_tests {
     fn odd_leftovers_round_down_consistently() {
         assert_eq!(center_in_work_area(0, 0, 1001, 801, 1000, 800), (0, 0));
         assert_eq!(center_in_work_area(0, 0, 1003, 805, 1000, 800), (1, 2));
+    }
+}
+
+#[cfg(test)]
+mod approval_view_tests {
+    use super::{is_approval_view, CREDENTIAL_APPROVAL_VIEW, MEMORY_ADOPTION_APPROVAL_VIEW};
+
+    #[test]
+    fn the_two_approval_pages_are_approval_views() {
+        assert!(is_approval_view(Some(CREDENTIAL_APPROVAL_VIEW)));
+        assert!(is_approval_view(Some(MEMORY_ADOPTION_APPROVAL_VIEW)));
+    }
+
+    #[test]
+    fn any_other_view_or_none_is_not() {
+        // A future pane-hosting view opened through the generic
+        // open_subwindow IPC must stay reachable to the browser API.
+        assert!(!is_approval_view(Some("some-future-view")));
+        assert!(!is_approval_view(Some("")));
+        assert!(!is_approval_view(None));
     }
 }

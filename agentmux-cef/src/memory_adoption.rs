@@ -121,7 +121,7 @@ fn open(
     let opened = crate::commands::window::open_subwindow(
         state,
         parent_label.to_string(),
-        Some("memory-adoption-approval"),
+        Some(crate::commands::window::MEMORY_ADOPTION_APPROVAL_VIEW),
         Some(&meta),
     )
     .and_then(|v| v.as_str().map(str::to_string).ok_or_else(|| "open_subwindow returned no label".to_string()));
