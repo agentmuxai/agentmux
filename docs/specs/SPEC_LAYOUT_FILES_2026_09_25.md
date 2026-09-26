@@ -4,8 +4,8 @@
 **Status:** active — Phase 1 ships in PR #3787 (spec: PR #3778): ☰ →
 Layouts → Save layout…, the host Save dialog, `layout.save`,
 `backend/layout_file.rs` and the v1 schema. Phase 2 (☰ → Layouts → Open
-layout…, adding the file's tabs to the current window, §3.6) is built on
-branch `agent2/layout-open-phase2`. Phases 2b, 3 and 4 are not started.
+layout…, adding the file's tabs to the current window, §3.6) ships in
+PR #3825. Phases 2b, 3 and 4 are not started.
 Measured against `agentmux` `main` @ `c0268089b`.
 **Trigger:** Repo owner: *"in the hamburger we'd add a new entry 'Layouts' and a
 single submenu: 'Save layout' which would let you save it as a file (you'll
@@ -375,7 +375,7 @@ people it's meant to be shared with.
 | Phase | Ships | Notes |
 |---|---|---|
 | **1** | ☰ → **Layouts** → **Save layout…** (between Opacity and the Settings divider, per the 08-13 spec §5.1). Native Save dialog. `layout.save` RPC writes the file. | exactly the request |
-| 2 | Layouts → **Open layout…**: preview, trust, add as tabs, placeholders, held commands | built — §3.6 |
+| 2 | Layouts → **Open layout…**: preview, trust, add as tabs, placeholders, held commands | built — §3.6, PR #3825 |
 | 2b | "Open in a new window" | needs window-create plumbing (§3.6) |
 | 3 | Named layouts from the default folder listed in the submenu; "Save changes to <name>"; recent list; optional "open at startup" | the 08-13 spec's §5.1 list, file-backed |
 | 4 | Decision-gated: ABF `kind` + `workspace` bundles (layout + referenced agents) | §5.2 |
