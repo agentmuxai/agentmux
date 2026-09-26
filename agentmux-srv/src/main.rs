@@ -31,7 +31,7 @@ mod test_support;
 use std::future::IntoFuture;
 use std::sync::Arc;
 
-use server::build_router;
+use server::build_routers;
 
 #[tokio::main]
 async fn main() {
@@ -192,13 +192,14 @@ async fn main() {
     boot_timing::log_summary();
 
     // 7. Build router and serve on both listeners
-    // Clone Arcs that are needed after `state` is moved into build_router.
+    // Clone Arcs that are needed after `state` is moved into build_routers.
     let shell_sessions_shutdown = state.shell_sessions.clone();
     let wal_mstore = Arc::clone(&state.mstore);
     let wal_filestore = Arc::clone(&state.filestore);
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let dev_proxy_registry = state.dev_proxy.clone();
-    let router = build_router(state);
+    let routers = build_routers(state);
+    let router = routers.full;
 
     // Native dev-proxy (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)
     // — a small standalone HTTP server on its own fixed port, separate from
@@ -209,12 +210,12 @@ async fn main() {
     tokio::spawn(backend::dev_proxy::serve(dev_proxy_registry));
 
     // Hand the LAN listener supervisor its router now that one exists —
-    // `build_router` consumes `AppState`, which owns the supervisor, so this
+    // `build_routers` consumes `AppState`, which owns the supervisor, so this
     // cannot happen at construction time. Then honor the current setting and
     // start the self-healing sweep, which also picks up interface changes
     // (DHCP renewal, Wi-Fi↔Ethernet handoff, VPN up/down) without a restart.
     // See `backend::lan_listeners`.
-    net.lan_listeners.set_router(router.clone());
+    net.lan_listeners.set_router(routers.lan);
     net.lan_listeners
         .apply(config_watcher_for_lan.get_settings().network_lan_discovery);
     Arc::clone(&net.lan_listeners).spawn_reconcile_loop();

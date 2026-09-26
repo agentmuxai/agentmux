@@ -308,8 +308,24 @@ pub struct AppState {
     pub fs_watch_pool: std::sync::Arc<crate::backend::fs_watch::FsWatchPool>,
 }
 
-/// Build the Axum router with all routes, auth middleware, and CORS.
+/// The two routers srv serves. `full` is every route and is bound on
+/// loopback only. `lan` is what `backend::lan_listeners` binds on LAN
+/// interfaces when LAN discovery is on: the routes a LAN peer calls (all
+/// behind `lan_or_full_auth_middleware`), plus health and the WhatsApp
+/// webhook, which authenticate themselves. Nothing that requires the full
+/// `auth_key` is served off-host, so a LAN listener has no full-key surface.
+pub struct SrvRouters {
+    pub full: Router,
+    pub lan: Router,
+}
+
+/// Build the full router (see [`build_routers`]).
 pub fn build_router(state: AppState) -> Router {
+    build_routers(state).full
+}
+
+/// Build both routers with all routes, auth middleware, and CORS.
+pub fn build_routers(state: AppState) -> SrvRouters {
     // CORS: reflect only loopback origins.
     //
     // Before the 2026-05-11 security audit (C3) this allowed any origin
@@ -774,14 +790,24 @@ pub fn build_router(state: AppState) -> Router {
         }
     });
 
-    Router::new()
+    let lan = Router::new()
+        .merge(health.clone())
+        .merge(whatsapp_webhooks.clone())
+        .merge(lan_forward_routes.clone())
+        .layer(version_header.clone())
+        .layer(cors.clone())
+        .with_state(state.clone());
+
+    let full = Router::new()
         .merge(health)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
         .merge(authed_routes)
         .layer(version_header)
         .layer(cors)
-        .with_state(state)
+        .with_state(state);
+
+    SrvRouters { full, lan }
 }
 
 // ---- Health ----
