@@ -660,6 +660,7 @@ pub fn plan_from_doc(store: &Store, doc: &LayoutDoc, opts: &PlanOptions) -> Appl
             summary: Vec::new(),
             node_by_pane: HashMap::new(),
             panes_used: 0,
+            truncated: Vec::new(),
             commands: &mut plan.commands,
             notes: &mut plan.notes,
         };
@@ -693,14 +694,35 @@ struct PlanBuilder<'a> {
     summary: Vec<String>,
     node_by_pane: HashMap<String, String>,
     panes_used: usize,
+    truncated: Vec<Truncated>,
     commands: &'a mut Vec<String>,
     notes: &'a mut Vec<String>,
 }
 
+/// A per-tab limit the file hit. Each is noted once per tab, however many
+/// panes or branches it cuts off.
+#[derive(PartialEq)]
+enum Truncated {
+    Depth,
+    Panes,
+}
+
 impl PlanBuilder<'_> {
+    fn note_once(&mut self, what: Truncated) {
+        if self.truncated.contains(&what) {
+            return;
+        }
+        let tab = &self.doc_tab.name;
+        self.notes.push(match what {
+            Truncated::Depth => format!("Tab “{tab}” nests too deeply; the rest is skipped."),
+            Truncated::Panes => format!("Tab “{tab}” has more than {MAX_PANES_PER_TAB} panes; only the first {MAX_PANES_PER_TAB} are opened."),
+        });
+        self.truncated.push(what);
+    }
+
     fn node(&mut self, node: &TreeNode, size: f64, depth: usize) -> Option<LayoutNode> {
         if depth > MAX_TREE_DEPTH {
-            self.notes.push(format!("Tab “{}” nests too deeply; the rest is skipped.", self.doc_tab.name));
+            self.note_once(Truncated::Depth);
             return None;
         }
         match node {
@@ -730,6 +752,7 @@ impl PlanBuilder<'_> {
             }
             TreeNode::Leaf { pane, .. } => {
                 if self.panes_used >= MAX_PANES_PER_TAB {
+                    self.note_once(Truncated::Panes);
                     return None;
                 }
                 let doc_pane = self.doc_tab.panes.get(pane)?;

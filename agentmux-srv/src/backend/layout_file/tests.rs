@@ -560,6 +560,35 @@ fn panes_missing_from_the_map_are_skipped_and_a_tab_with_none_left_is_noted() {
 }
 
 #[test]
+fn panes_past_the_per_tab_limit_are_dropped_with_one_note() {
+    let home = tempfile::tempdir().unwrap();
+    let count = MAX_PANES_PER_TAB + 2;
+    let panes: Map<String, Value> = (0..count).map(|i| (format!("p{i}"), json!({ "views": [{ "type": "sysinfo" }] }))).collect();
+    let children: Vec<Value> = (0..count).map(|i| json!({ "ratio": 1.0 / count as f64, "node": { "pane": format!("p{i}") } })).collect();
+    let doc = doc_with_tab(Value::Object(panes), json!({ "split": "row", "children": children }));
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    assert_eq!(plan.tabs[0].blocks.len(), MAX_PANES_PER_TAB);
+    let capped: Vec<_> = plan.notes.iter().filter(|n| n.contains(&MAX_PANES_PER_TAB.to_string())).collect();
+    assert_eq!(capped.len(), 1, "{:?}", plan.notes);
+    assert!(capped[0].contains("one"), "names the tab: {}", capped[0]);
+}
+
+#[test]
+fn a_tree_nested_past_the_limit_is_cut_with_one_note() {
+    let home = tempfile::tempdir().unwrap();
+    // Every level holds a pane beside the next level, so several branches
+    // cross the depth limit.
+    let mut root = json!({ "pane": "p0" });
+    for _ in 0..MAX_TREE_DEPTH + 3 {
+        root = json!({ "split": "row", "children": [{ "ratio": 0.5, "node": { "pane": "p0" } }, { "ratio": 0.5, "node": root }] });
+    }
+    let doc = doc_with_tab(json!({ "p0": { "views": [{ "type": "sysinfo" }] } }), root);
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    assert!(!plan.tabs[0].blocks.is_empty());
+    assert_eq!(plan.notes.iter().filter(|n| n.contains("nests too deeply")).count(), 1, "{:?}", plan.notes);
+}
+
+#[test]
 fn trust_needs_both_this_install_and_the_layouts_folder() {
     let mut doc = export(false).doc;
     let dir = PathBuf::from(if cfg!(windows) { "C:\\l" } else { "/l" });
