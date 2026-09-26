@@ -1,7 +1,7 @@
 # Spec: One descriptor per tool (agent pane)
 
 **Date:** 2026-09-26
-**Status:** active — PR 1 (descriptors, status table) implemented; PRs 2–3 proposed
+**Status:** active — PR 1 (descriptors, status table) implemented in #3901; PRs 2–3 proposed
 **Scope:** `frontend/app/view/agent/` — tool rows, tool previews, the activity row
 **Verified against:** `main` @ `ba9abe92f` (after #3871, #3874, #3877, #3883)
 **Source:** `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`
