@@ -37,10 +37,14 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
   is confirmed published. Carrying works: same-account jekts between narko
   and Area54 get the cloud's `inj-w-` ids, which it gives only to rows stored
   with a valid carried tuple.
-- The receiver verifies whatever arrives carried. **In practice every one has
-  still arrived `TRUST=network-claimed`**: the injection audit on narko shows
-  `wan_key_unavailable` for all of them — the same-account and envelope checks
-  pass, then the directory fetch fails. The cause is not yet known; see §5.
+- The receiver verifies whatever arrives carried. Until #3865 it did so only
+  in the first 15 minutes of each cloud connection: the key lookup used the
+  connection's shared token, loaded once at connect, and a desktop (PKCE)
+  token lives 15 minutes. After that every lookup was a 401, read as
+  `wan_key_unavailable`, and the jekt arrived `TRUST=network-claimed`.
+  #3865 loads a fresh token per lookup; #3866 does the same for the lease and
+  pending-fetch calls. Retro:
+  `docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`.
 
 ## 3. Needs a person
 
@@ -80,11 +84,13 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
   verify. One clock throughout, with a boundary test (#3775).
 - **Record match was case-sensitive for instance and channel**, against
   spec §2.3 — Codex P2 on #3727, fixed there.
-- **After the C1 deploy, no receiver verified anything, and nothing said
+- **After the C1 deploy, receivers mostly verified nothing, and nothing said
   why** (2026-09-26, `INVESTIGATION_V0_57_6_FRESH_PORTABLE_DEBUG_LOG_2026_09_25.md`
-  §6). Every "couldn't check" renders exactly like an unsigned jekt, the
-  carry gate and the verifier logged only at `debug`, and
-  `wan_key_unavailable` covered five different causes. Now: the relay's
+  §6). The cause was the stale directory token above (#3865, #3866). It was
+  hard to see because every "couldn't check" renders exactly like an
+  unsigned jekt, the carry gate and the verifier logged only at `debug`, and
+  `wan_key_unavailable` covered five different causes. #3865 added a `warn`
+  for a refused or unreachable directory. #3863 adds: the relay's
   "queued for WAN delivery" line says whether the signature was carried
   (`signed`, `unsigned_reason`, `cloud_kept_signature`); the receiver logs
   one `wan verify:` line per WAN jekt at `info`; and the verdict carries a

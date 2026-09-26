@@ -494,7 +494,10 @@ async fn connect_and_run(
                 let registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
                 futures_util::future::join_all(registered.iter().map(|agent_id| async move {
                     let per_agent = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
-                    let agent_token = per_agent.unwrap_or_else(|| token.to_string());
+                    let agent_token = match per_agent {
+                        Some(t) => t,
+                        None => shared_token_now(mstore, token).await,
+                    };
                     if let super::wan_lease::Outcome::HeldElsewhere(where_) =
                         super::wan_lease::ensure(base, agent_id, &agent_token, http).await
                     {
@@ -552,8 +555,12 @@ async fn connect_and_run(
                     Some(CtrlMsg::RemoveAgent(id)) => {
                         // The agent went away here: let another instance have it.
                         {
-                            let (id, base, token, http) = (id.clone(), base.to_string(), token.to_string(), http.clone());
-                            tokio::spawn(async move { super::wan_lease::release(&base, &id, &token, &http).await });
+                            let (id, base, token, http, mstore) =
+                                (id.clone(), base.to_string(), token.to_string(), http.clone(), mstore.clone());
+                            tokio::spawn(async move {
+                                let token = shared_token_now(&mstore, &token).await;
+                                super::wan_lease::release(&base, &id, &token, &http).await
+                            });
                         }
                         let msg = serde_json::to_string(&ClientMsg::SubscribeRemove { agents: vec![id] })
                             .unwrap_or_default();
@@ -774,7 +781,10 @@ async fn sync_agent_reactive(
     // a 401 can be attributed correctly and, for a per-agent credential,
     // retried once with the shared token instead of just giving up.
     let per_agent_token = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
-    let mut agent_token = per_agent_token.clone().unwrap_or_else(|| token.to_string());
+    let mut agent_token = match per_agent_token.clone() {
+        Some(t) => t,
+        None => shared_token_now(mstore, token).await,
+    };
     let mut using_per_agent = per_agent_token.is_some();
 
     // One live instance per agent across the WAN
@@ -829,7 +839,7 @@ async fn sync_agent_reactive(
                     status = %resp.status(),
                     "cloud_subscriber: per-agent credential rejected — invalidated, retrying with shared token",
                 );
-                agent_token = token.to_string();
+                agent_token = shared_token_now(mstore, token).await;
                 using_per_agent = false;
                 continue;
             }
@@ -911,7 +921,7 @@ async fn sync_agent_reactive(
                     status = %claim_resp.status(),
                     "cloud_subscriber: per-agent credential rejected on claim — invalidated, retrying with shared token",
                 );
-                agent_token = token.to_string();
+                agent_token = shared_token_now(mstore, token).await;
                 using_per_agent = false;
                 continue;
             }
@@ -1044,10 +1054,11 @@ async fn sync_agent_reactive(
             (Some(wan), Some(_)) => match wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()) {
                 Ok(own) => {
                     let base_url = crate::muxbus::relay::rest_base_url();
+                    let dir_token = shared_token_now(mstore, token).await;
                     let dir = crate::muxbus::wan_verify::Directory {
                         base_url: &base_url,
                         http,
-                        token,
+                        token: &dir_token,
                         budget: &crate::muxbus::wan_verify::GLOBAL_BUDGET,
                     };
                     crate::muxbus::wan_verify::verify(
@@ -1177,6 +1188,36 @@ async fn sync_agent_reactive(
     AgentSyncOutcome::Ok
 }
 
+/// The shared account token for an HTTP call made during a connection: loaded
+/// fresh (`fresh`), the same way `wan_publish` and `relay::relay_token` load
+/// theirs. Not the connection's `token`: that one is loaded once at connect, a
+/// desktop (PKCE) access token lives 15 minutes and a connection up to 2
+/// hours, so after minute 15 every call made with it is a 401. For the W3-S
+/// key directory that turned every same-account WAN jekt `network-claimed`;
+/// for a lease release it left the lease held until it expired. The
+/// connection's token is only the fallback when no fresh one can be loaded,
+/// and otherwise only authenticates the WebSocket handshake.
+async fn fresh_shared_token<F, Fut>(fresh: F, connection_token: &str) -> String
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Option<String>>,
+{
+    fresh().await.unwrap_or_else(|| connection_token.to_string())
+}
+
+/// [`fresh_shared_token`] against the broker and `mstore` (the store muxbus
+/// credentials live in — `CloudSubscriber::init_global`'s `id_store`).
+async fn shared_token_now(mstore: &Arc<Store>, connection_token: &str) -> String {
+    fresh_shared_token(
+        || async {
+            let scheduler = crate::broker::get_global()?;
+            load_valid_token(mstore, &scheduler).await
+        },
+        connection_token,
+    )
+    .await
+}
+
 /// Load a valid (non-expired) access token via the broker, refreshing first
 /// if the stored credential is missing/stale. Returns None if no credentials
 /// are stored, the token is expired and refresh fails, or the refresh_token
@@ -1248,6 +1289,24 @@ mod tests {
     use crate::muxbus::pkce::RefreshTokenError;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
+
+    // The connection's token is loaded once at connect, and a desktop (PKCE)
+    // access token lives 15 min while a connection lasts up to 2 h. Handing
+    // it to the key directory made every lookup after minute 15 a 401, read
+    // as "couldn't check" — every same-account WAN jekt arrived
+    // `network-claimed`; a lease release with it left the lease held. Calls
+    // made during a connection must get a freshly loaded token.
+    #[tokio::test]
+    async fn calls_during_a_connection_get_a_fresh_token_not_the_connections() {
+        let token = super::fresh_shared_token(|| async { Some("fresh".to_string()) }, "stale-connection-token").await;
+        assert_eq!(token, "fresh");
+    }
+
+    #[tokio::test]
+    async fn calls_during_a_connection_fall_back_to_the_connections_token() {
+        let token = super::fresh_shared_token(|| async { None }, "connection-token").await;
+        assert_eq!(token, "connection-token");
+    }
 
     // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 — a
     // checkAgentBinding rejection (403) must trigger the exact same

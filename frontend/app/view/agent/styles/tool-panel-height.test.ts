@@ -32,9 +32,15 @@ function ruleBody(scss: string, selector: RegExp): string {
 }
 
 describe("tool preview panel height", () => {
-    it("tool previews are capped at one third of the old 50vh", () => {
+    it("the shared cap is one third of the old 50vh", () => {
+        expect(read("_document-nodes.scss")).toMatch(
+            /^\$transcript-preview-max-height:\s*calc\(50vh \/ 3\);/m,
+        );
+    });
+
+    it("tool previews use the shared cap, not the old 50vh", () => {
         const body = ruleBody(read("_document-nodes.scss"), /^ {8}\.agent-tool-panel\s*\{/m);
-        expect(body).toMatch(/^\s*max-height:\s*calc\(50vh \/ 3\);/m);
+        expect(body).toMatch(/^\s*max-height:\s*\$transcript-preview-max-height;/m);
         expect(body).not.toMatch(/^\s*max-height:\s*50vh;/m);
     });
 
@@ -48,5 +54,28 @@ describe("tool preview panel height", () => {
     it("the persistent-shell log keeps its own 50vh cap", () => {
         const body = ruleBody(read("_shell-node.scss"), /^\.agent-shell-block \.agent-tool-panel\s*\{/m);
         expect(body).toMatch(/^\s*max-height:\s*50vh;/m);
+    });
+});
+
+// SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
+describe("jekt message height", () => {
+    const scss = read("_document-nodes.scss");
+
+    it("the expanded jekt body takes the same cap as tool previews and scrolls", () => {
+        const body = ruleBody(scss, /^ {12}\.agent-jekt-body\s*\{/m);
+        expect(body).toMatch(/^\s*max-height:\s*\$transcript-preview-max-height;/m);
+        expect(body).toMatch(/^\s*overflow-y:\s*auto;/m);
+    });
+
+    it("the raw payload block takes the same cap", () => {
+        const fromRaw = scss.slice(scss.indexOf(".agent-jekt-raw {"));
+        const body = ruleBody(fromRaw, /^ {16}pre\s*\{/m);
+        expect(body).toMatch(/^\s*max-height:\s*\$transcript-preview-max-height;/m);
+        expect(body).toMatch(/^\s*overflow-y:\s*auto;/m);
+    });
+
+    it("the jekt body never sets overscroll-behavior (native wheel chaining to the pane)", () => {
+        const body = ruleBody(scss, /^ {12}\.agent-jekt-body\s*\{/m);
+        expect(body).not.toMatch(/overscroll-behavior\s*:/);
     });
 });

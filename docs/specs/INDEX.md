@@ -397,6 +397,7 @@ partial list.
 | [`SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17`](SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17.md) | SPEC: Shell-integration scripts must be per-instance, not machine-global |
 | [`SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03`](SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md) | SPEC: Shift+drag group resize — move all sibling panes together on one splitter drag |
 | [`SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17`](SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md) | SPEC: Shift+drag group resize — fix borders that move opposite the drag direction |
+| [`SPEC_SHUTDOWN_INVALID_CONFIGURATION_FLASH_2026_09_22`](SPEC_SHUTDOWN_INVALID_CONFIGURATION_FLASH_2026_09_22.md) | SPEC: "invalid configuration" flashes during a normal window close |
 | [`SPEC_SLACK_WIDGET_GET_STARTED_URL_2026_09_16`](SPEC_SLACK_WIDGET_GET_STARTED_URL_2026_09_16.md) | SPEC: Slack widget should open Slack's get-started/create-workspace page, not the generic sign-in page |
 | [`SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14`](SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md) | SPEC — Slash Command Architecture |
 | [`SPEC_SOUND_NOTIFICATIONS_2026_06_05`](SPEC_SOUND_NOTIFICATIONS_2026_06_05.md) | SPEC — Sound notifications subsystem |
@@ -494,6 +495,7 @@ partial list.
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
+| [`SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26`](SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md) | SPEC: switch account from the composer's sign-in chip, cap the height of jekt messages, and outline Swarm rows on hover |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21`](SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) | SPEC: cross-channel agent history resolution |
 | [`SPEC_DECISION_PROMPT_2026_04_24`](SPEC_DECISION_PROMPT_2026_04_24.md) | Spec: Per-Tool-Call Permission Decision Prompt |
@@ -922,7 +924,6 @@ partial list.
 | [`SPEC_SETTINGS_MESSAGING_BRIDGES_SECTION_2026_08_22`](SPEC_SETTINGS_MESSAGING_BRIDGES_SECTION_2026_08_22.md) | SPEC — Settings: new "Integrations" section (Discord / Telegram / Slack / WhatsApp bridges) |
 | [`SPEC_SETTINGS_PANE_2026_06_25`](SPEC_SETTINGS_PANE_2026_06_25.md) | Spec: Settings → Widget Pane with UI Form |
 | [`SPEC_SETTINGS_WIDGET`](SPEC_SETTINGS_WIDGET.md) | Spec: Settings Widget |
-| [`SPEC_SHUTDOWN_INVALID_CONFIGURATION_FLASH_2026_09_22`](SPEC_SHUTDOWN_INVALID_CONFIGURATION_FLASH_2026_09_22.md) | SPEC: "invalid configuration" flashes during a normal window close |
 | [`SPEC_SLASH_TERMINAL_COMMAND_2026_06_25`](SPEC_SLASH_TERMINAL_COMMAND_2026_06_25.md) | SPEC: `/terminal` Slash Command — Open Agent CWD in New Terminal Pane |
 | [`SPEC_SPLASH_SCREEN_BORDER_2026_08_25`](SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md) | SPEC — Splash screen: add a darkened 2px border, across all 3 platforms |
 | [`SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25`](SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md) | Spec: Splash Screen Startup Telemetry |

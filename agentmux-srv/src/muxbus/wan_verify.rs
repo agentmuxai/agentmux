@@ -161,9 +161,19 @@ async fn get_json<T: serde::de::DeserializeOwned>(dir: &Directory<'_>, url: &str
                     Err(e) => Fetched::Unavailable(format!("directory record doesn't parse: {e}")),
                 }
             }
-            Ok(r) => cause = format!("directory answered {}", r.status()),
-            // `without_url`: the query names the sender's instance and key.
-            Err(e) => cause = format!("directory unreachable: {}", e.without_url()),
+            // Still "couldn't check", but never silently: a directory that
+            // rejects this install's token turned every WAN jekt
+            // `network-claimed` with nothing in the log to say why. The
+            // cause also rides on the verdict (`detail`) into the audit.
+            Ok(r) => {
+                tracing::warn!(status = %r.status(), "wan verify: key directory refused the lookup");
+                cause = format!("directory answered {}", r.status());
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "wan verify: key directory unreachable");
+                // `without_url`: the query names the sender's instance and key.
+                cause = format!("directory unreachable: {}", e.without_url());
+            }
         }
     }
     Fetched::Unavailable(cause)

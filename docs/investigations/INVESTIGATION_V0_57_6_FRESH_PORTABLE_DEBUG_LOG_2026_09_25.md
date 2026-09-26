@@ -20,7 +20,7 @@ chain on v0.57.5, AgentA), `SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_
 | 3 | "Couldn't resume" banner never goes away on its own | fixed in #3848 |
 | 4 | Agent's file-based memory left behind under the old account | by design — adoption is offered in the Armory; check pending |
 | 5 | Agent processes run at below-normal priority (#3834) | confirmed live |
-| 6 | Jekts between narko and Area54 arrive unsigned (`TRUST=network-claimed`) | open — receiver's key lookup fails; diagnostics in #3863 |
+| 6 | Jekts between narko and Area54 arrive unsigned (`TRUST=network-claimed`) | fixed on `main` (#3865, #3866); diagnostics in #3863; two-machine re-check pending |
 | 7 | Plain `gh` inside an agent is logged out (#3751) | confirmed live |
 
 ---
@@ -161,8 +161,16 @@ same processes under the running 0.57.2 portable (no #3834) are at `Normal`.
 
 ## 6. Jekts between narko and Area54 arrive unsigned
 
-**Status:** open. Signing and carrying work on both sides. The receiver's directory fetch fails
-(`wan_key_unavailable`), cause not yet known. Logging that names it is in #3863.
+**Status:** root cause found and fixed on `main` (#3865, #3866, Agent2); needs a two-machine re-check.
+
+**Root cause (#3865):** the receiver looked up the sender's key with the cloud connection's shared
+token, loaded once at connect. A desktop (PKCE) token lives 15 minutes and a connection up to 2
+hours, so from minute 15 every `GET /agents/<agent>/wan-key` was a 401, read as
+`wan_key_unavailable`. It fits the data here: narko's connection opened at 06:11:29, and AgentA's
+jekt arrived at 06:28:52, 17 minutes in. #3866 fixes three more calls that used the same token.
+Retro: `docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`. The analysis below,
+written before that landed, narrowed it down to the directory fetch; #3863 makes the cause of any
+future `wan_key_unavailable` visible in the log and the audit.
 
 **Seen:** AgentA's reply (`inj-w-5d8e0efaa0d5d3e98f4127369172e87e`, 06:28:52) arrived as
 `DELIVERY=wan TRUST=network-claimed` with no `SIG=`. A keyword in it forced `TIER=sensitive`, and
