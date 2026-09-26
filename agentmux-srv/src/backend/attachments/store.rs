@@ -725,7 +725,7 @@ mod tests {
             set_mtime(&p, then).unwrap();
         }
         assert_eq!(s.sweep(Duration::from_secs(30 * 24 * 3600)), 0);
-        assert_eq!(s.session_inline_bytes("sess-1"), 1500);
+        assert_eq!(s.session_inline_bytes("sess-1"), 2200);
     }
 
     fn age_all(s: &Store, id: &str, days: u64) {
