@@ -386,44 +386,6 @@ pub(crate) async fn fleet_bulk_stop_with_override(
     let (local, other): (Vec<String>, Vec<String>) = targets
         .into_iter()
         .partition(|b| crate::backend::blockcontroller::get_controller(b).is_some());
-    let mut now = FleetActionResult::default();
-    let mut remote_pending = Vec::new();
-    let mut nowhere = Vec::new();
-    for block_id in other {
-        let Some(entry) = shared_channel_for(state, &block_id) else {
-            nowhere.push(block_id);
-            continue;
-        };
-        let request_id = uuid::Uuid::new_v4().to_string();
-        match forward_stop_pending(state, &entry, &block_id, by, signal).await {
-            Forwarded::Pending(v) => {
-                state.reactive_handler.log_fleet_action_audit(
-                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                    true, None, &v.request_id,
-                    Some(&format!("pending user override on channel {}", entry.channel)),
-                );
-                remote_pending.push(v);
-            }
-            Forwarded::Immediate(outcome) => {
-                let note = format!("channel {} predates the user override: stopped at once", entry.channel);
-                state.reactive_handler.log_fleet_action_audit(
-                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                    outcome.is_ok(), outcome.as_ref().err().map(String::as_str), &request_id, Some(&note),
-                );
-                match outcome {
-                    Ok(()) => now.succeeded.push(block_id),
-                    Err(error) => now.failed.push(FleetActionFailure { id: block_id, error }),
-                }
-            }
-            Forwarded::Refused(error) => {
-                state.reactive_handler.log_fleet_action_audit(
-                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                    false, Some(&error), &request_id, None,
-                );
-                now.failed.push(FleetActionFailure { id: block_id, error });
-            }
-        }
-    }
     let mut pending: Vec<crate::sagas::pending_shutdown::PendingView> = local
         .iter()
         .map(|block_id| {
@@ -453,6 +415,54 @@ pub(crate) async fn fleet_bulk_stop_with_override(
             v
         })
         .collect();
+    let mut now = FleetActionResult::default();
+    let mut remote_pending = Vec::new();
+    let mut nowhere = Vec::new();
+    // Local windows are open (above); now ask the other instances, all at
+    // once, so one slow peer delays neither the rest nor any countdown
+    // (ReAgent P1 on #3824).
+    let mut forwards = Vec::new();
+    for block_id in other {
+        match shared_channel_for(state, &block_id) {
+            Some(entry) => forwards.push((block_id, entry)),
+            None => nowhere.push(block_id),
+        }
+    }
+    let answers = futures_util::future::join_all(
+        forwards.iter().map(|(block_id, entry)| forward_stop_pending(state, entry, block_id, by, signal)),
+    )
+    .await;
+    for ((block_id, entry), answer) in forwards.into_iter().zip(answers) {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        match answer {
+            Forwarded::Pending(v) => {
+                state.reactive_handler.log_fleet_action_audit(
+                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                    true, None, &v.request_id,
+                    Some(&format!("pending user override on channel {}", entry.channel)),
+                );
+                remote_pending.push(v);
+            }
+            Forwarded::Immediate(outcome) => {
+                let note = format!("channel {} predates the user override: stopped at once", entry.channel);
+                state.reactive_handler.log_fleet_action_audit(
+                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                    outcome.is_ok(), outcome.as_ref().err().map(String::as_str), &request_id, Some(&note),
+                );
+                match outcome {
+                    Ok(()) => now.succeeded.push(block_id),
+                    Err(error) => now.failed.push(FleetActionFailure { id: block_id, error }),
+                }
+            }
+            Forwarded::Refused(error) => {
+                state.reactive_handler.log_fleet_action_audit(
+                    Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                    false, Some(&error), &request_id, None,
+                );
+                now.failed.push(FleetActionFailure { id: block_id, error });
+            }
+        }
+    }
     pending.extend(remote_pending);
     if !nowhere.is_empty() {
         let rest = fleet_bulk_stop_impl(state, nowhere, signal, staged).await;
