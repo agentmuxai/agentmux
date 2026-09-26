@@ -207,6 +207,12 @@ declare global {
             y: number;
         }): Promise<{ target_label?: string | null }>;
         clearFloatingRedockHover(): Promise<void>;
+        /** Record (or clear, with nulls) where this window's re-dock ghost would drop a floating pane. */
+        setFloatingRedockTarget(windowLabel: string, blockId: string | null, dir: number | null): Promise<void>;
+        /** A pre-warmed pool window is listening and ready to be promoted. */
+        poolWindowReady(windowLabel: string): Promise<void>;
+        /** A pre-warmed pane-pool window is listening and ready to be promoted. */
+        panePoolWindowReady(windowLabel: string): Promise<void>;
         resolveWindowAtCursor(args: {
             x: number;
             y: number;
