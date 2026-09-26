@@ -2,7 +2,8 @@
 
 **Author:** lark
 **Date:** 2026-09-26
-**Status:** Parts B and C implemented (one PR each). Part A in progress; Q1 in §5 still needs a live check before it ships.
+**Status:** active. Part B implemented in #3861, Part C in #3862. Part A is in progress; §5 Q1 is answered from the
+backend code but still wants one live check.
 **Related:** `SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md` (where the chip's email comes from),
 `SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md` (the failure row's "Bind account" action, which this
 reuses), `SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md` (the live-apply pair a bind performs),
@@ -114,7 +115,11 @@ presentational)
    `SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md`). Making `auth` interactive changes only
    its position among the *left* slots (interactive first). The runtime dropup is already interactive and
    first, so the expected order is unchanged. Confirm with the existing strip tests; do not assume.
-5. **Multiple panes, one agent.** A bind is per agent definition. Another open pane of the same agent picks
+5. **The provider session restarts.** The new account's config dir cannot see the old CLI session, so a
+   switch starts a fresh CLI session that carries AgentMux's own record of the conversation, and the
+   transcript shows a session-outcome row saying so (Q1 in §5). Expected, and already implemented in the
+   backend; the menu does not need to warn about it.
+6. **Multiple panes, one agent.** A bind is per agent definition. Another open pane of the same agent picks
    the change up through the same `agentidentities:changed` event that the auto-unblock path already uses.
 
 ### A.4 Tests
@@ -292,15 +297,18 @@ the intent was instead the *lightened* colour the hover tint used, it is a one-l
 
 ## 5. Open questions
 
-**Q1. Does `--resume` survive the switch? (Part A, must check before shipping.)** A bind force-restarts
-the controller with `--resume`. Claude's session transcripts live inside the account's config directory
-(`REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md`: `claude/projects/*.jsonl` inside the
-identity-bundle tree). After the switch, `CLAUDE_CONFIG_DIR` points at a **different** account's directory,
-so the resumed session may not be found and the agent could come back with an empty conversation. The
-Armory's Bind-to-Agent menu already does the same thing and its spec calls the respawn
-"session-preserving", but I did not find a place that confirms that holds across two different accounts.
-Test it live (A.4, last bullet). If it does not hold, the choices are: warn in the menu ("starts a new
-session"), or have the switch carry the session over. That is more than this spec and would need its own.
+**Q1. Does `--resume` survive the switch? (Part A.) Answered from the code: no, and the backend already
+handles it. One live check remains.** A bind force-restarts the controller with `--resume`, and Claude's
+session transcripts live inside the account's config directory
+(`REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md`). After a switch the CLI points at a different
+account's directory and reports `No conversation found with session ID`. `persistent/spawn.rs` (~line 464)
+handles exactly this case: it clears the unreachable session id, marks the resume as failed
+(`mark_resume_failed`, which puts a session-outcome notice in the transcript), and starts a fresh CLI
+session. The new session receives AgentMux's own record of the conversation with its first message
+(`carry_continuation`, `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` §4.4). So the pane does not go
+blank and nothing is silent, but the provider-side session is a new one and the user sees a "fresh start"
+row after switching. Part A therefore needs no session-handling code. It does need the live check (A.4,
+last bullet) to confirm the notice appears and the next message is answered with the conversation intact.
 
 **Q2. Should expired accounts appear, marked?** This spec keeps them out, following the existing
 `valid`-only rule and its reason (A.3.2). If the user would rather see them, the price is the
