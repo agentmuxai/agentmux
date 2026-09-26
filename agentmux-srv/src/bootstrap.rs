@@ -428,10 +428,9 @@ pub fn load_config() -> config::Config {
         // `AGENTMUX_DATA_HOME` and the bare default stay last for the
         // standalone / pre-unification shapes.
         let data_dir: std::path::PathBuf = args.wavedata
-            .as_deref()
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var("AGENTMUX_DATA_DIR").ok().filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
-            .or_else(|| std::env::var("AGENTMUX_DATA_HOME").ok().map(std::path::PathBuf::from))
+            .clone()
+            .or_else(|| std::env::var_os("AGENTMUX_DATA_DIR").filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
+            .or_else(|| std::env::var_os("AGENTMUX_DATA_HOME").map(std::path::PathBuf::from))
             .unwrap_or_else(|| std::path::PathBuf::from(base::get_mux_data_dir()));
         let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify);
         std::process::exit(code);
@@ -483,10 +482,10 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     base::set_build_time(build_time);
 
     // Set up data directory (uses AGENTMUX_DATA_HOME or default)
-    if !config.data_home.is_empty() {
+    if !config.data_home.as_os_str().is_empty() {
         std::env::set_var("AGENTMUX_DATA_HOME", &config.data_home);
     }
-    if !config.config_home.is_empty() {
+    if !config.config_home.as_os_str().is_empty() {
         std::env::set_var("AGENTMUX_CONFIG_HOME", &config.config_home);
     }
     if !config.app_path.is_empty() {
@@ -495,6 +494,13 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
 
     base::ensure_mux_data_dir().unwrap_or_else(|e| {
         tracing::error!("Failed to ensure data dir: {}", e);
+        std::process::exit(1);
+    });
+    // One srv per set of databases, however it was started (headless already
+    // took this in `headless::prepare_env`; that makes this a no-op).
+    base::acquire_data_dir_lock(&base::get_mux_data_dir()).unwrap_or_else(|e| {
+        tracing::error!("{e}");
+        eprintln!("agentmux-srv: {e}");
         std::process::exit(1);
     });
     base::ensure_mux_db_dir().unwrap_or_else(|e| {
@@ -1572,13 +1578,16 @@ pub async fn bind_listeners_and_network(
     // gates only the three LAN-forwarding routes (`lan_or_full_auth_middleware`)
     // — not the full auth_key previously broadcast here, which gated the entire
     // API surface (see Config::lan_key's doc comment).
-    let bind_addr = backend::lan_listeners::STARTUP_BIND_ADDR;
-    let web_listener = TcpListener::bind(bind_addr)
+    // Loopback, OS-chosen ports — or, headless only, the fixed ports it was
+    // given (`--web-port` / `--ws-port`, SPEC_SRV_HEADLESS_MODE_2026_09_26.md).
+    let web_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Web);
+    let ws_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Ws);
+    let web_listener = TcpListener::bind(&web_bind)
         .await
-        .expect("failed to bind web listener");
-    let ws_listener = TcpListener::bind(bind_addr)
+        .unwrap_or_else(|e| panic!("failed to bind web listener on {web_bind}: {e}"));
+    let ws_listener = TcpListener::bind(&ws_bind)
         .await
-        .expect("failed to bind ws listener");
+        .unwrap_or_else(|e| panic!("failed to bind ws listener on {ws_bind}: {e}"));
 
     let web_addr = web_listener.local_addr().unwrap();
     let ws_addr = ws_listener.local_addr().unwrap();
@@ -1624,6 +1633,10 @@ pub async fn bind_listeners_and_network(
         web_addr.port(),
         ws_addr.port(),
     ));
+    // Headless srv is loopback-only, whatever the channel's LAN setting says.
+    if crate::headless::active() {
+        lan_listeners.forbid_lan();
+    }
     // The supervisor owns the advertise/reachable pairing: it re-gates mDNS on
     // every reconcile so we never advertise an address nothing is listening on,
     // and it performs the boot-time setting read too (via `main.rs`).
@@ -2028,30 +2041,34 @@ pub fn emit_estart(ws_port: u16, web_port: u16, version: &str, build_time: &str,
 /// stdinReadWatch) and the SIGINT/SIGTERM handler. Both cancel the returned
 /// token, which the WAL checkpoint loop and the final server select! also
 /// watch for graceful shutdown.
-pub fn install_shutdown_handlers() -> tokio_util::sync::CancellationToken {
-    // 8. Spawn stdin watch thread (exit on EOF — matching Go's stdinReadWatch)
+pub fn install_shutdown_handlers(watch_stdin: bool) -> tokio_util::sync::CancellationToken {
+    // 8. Spawn stdin watch thread (exit on EOF — matching Go's stdinReadWatch).
+    //    Not in headless mode: nothing owns srv's stdin there (a container's
+    //    is /dev/null), so EOF would mean "shut down now".
     let stdin_token = tokio_util::sync::CancellationToken::new();
     let stdin_shutdown = stdin_token.clone();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut stdin = std::io::stdin().lock();
-        let mut buf = [0u8; 1024];
-        loop {
-            match stdin.read(&mut buf) {
-                Ok(0) => {
-                    eprintln!("stdin closed, shutting down");
-                    stdin_shutdown.cancel();
-                    break;
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("stdin read error: {}, shutting down", e);
-                    stdin_shutdown.cancel();
-                    break;
+    if watch_stdin {
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut stdin = std::io::stdin().lock();
+            let mut buf = [0u8; 1024];
+            loop {
+                match stdin.read(&mut buf) {
+                    Ok(0) => {
+                        eprintln!("stdin closed, shutting down");
+                        stdin_shutdown.cancel();
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("stdin read error: {}, shutting down", e);
+                        stdin_shutdown.cancel();
+                        break;
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 
     // 9. Spawn signal handler (SIGINT/SIGTERM → graceful shutdown)
     let signal_token = stdin_token.clone();

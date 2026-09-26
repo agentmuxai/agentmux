@@ -241,6 +241,8 @@ pub struct LanListenerSupervisor {
     /// Last value passed to `apply`, so the periodic sweep knows which way it
     /// should be converging.
     enabled: std::sync::atomic::AtomicBool,
+    /// False once `forbid_lan` ran (headless): `apply(true)` is then ignored.
+    lan_allowed: std::sync::atomic::AtomicBool,
     /// The mDNS controller, so advertising can be gated on actually being
     /// reachable. Optional only because the two are constructed separately;
     /// in production it is always set.
@@ -255,8 +257,18 @@ impl LanListenerSupervisor {
             ws_port,
             active: std::sync::Mutex::new(std::collections::HashMap::new()),
             enabled: std::sync::atomic::AtomicBool::new(false),
+            lan_allowed: std::sync::atomic::AtomicBool::new(true),
             discovery: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Never listen on the LAN in this process, whatever the setting says —
+    /// headless srv is loopback-only by contract (SPEC_SRV_HEADLESS_MODE §2),
+    /// and a channel's saved `network:lan_discovery` must not quietly widen it
+    /// (Codex P1 on #3893). One-way: nothing turns it back on.
+    pub fn forbid_lan(&self) {
+        self.lan_allowed.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.apply(false);
     }
 
     /// Give the supervisor the mDNS controller so it can keep advertising in
@@ -278,6 +290,7 @@ impl LanListenerSupervisor {
     /// Idempotent live toggle, mirroring `LanDiscoveryController::apply` so both
     /// can be driven from one call site and cannot drift apart.
     pub fn apply(&self, enabled: bool) {
+        let enabled = enabled && self.lan_allowed.load(std::sync::atomic::Ordering::SeqCst);
         self.enabled.store(enabled, std::sync::atomic::Ordering::SeqCst);
         self.reconcile();
     }
@@ -707,6 +720,19 @@ mod supervisor_tests {
             !sup.has_lan_listener(),
             "disabling must release every LAN listener, not leave them bound until restart"
         );
+    }
+
+    /// Headless srv never listens on the LAN, even when the channel's saved
+    /// setting (or a later settings change) asks for it.
+    #[tokio::test]
+    async fn a_forbidden_supervisor_ignores_enable() {
+        let (w, s) = free_port_pair();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+        sup.forbid_lan();
+        sup.apply(true);
+        sup.reconcile();
+        assert!(!sup.has_lan_listener(), "forbid_lan must win over apply(true)");
     }
 
     /// `apply` is called unconditionally from the setconfig path (the fs
