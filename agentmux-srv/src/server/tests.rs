@@ -6592,6 +6592,29 @@ async fn frontend_dir_serves_the_ui_and_moves_health() {
     assert!(!body.contains("[package]"), "{status} {body}");
 }
 
+/// The frontend fallback sits inside the router's layers, like every route:
+/// it gets the version header and CORS (ReAgent P1 on #3900).
+#[tokio::test]
+async fn frontend_responses_get_the_version_header_and_cors() {
+    let dir = frontend_fixture();
+    let full = build_routers_with(test_state(), Some(dir.path())).full;
+    for uri in ["/", "/assets/app.js", "/some/view"] {
+        let req = Request::builder()
+            .uri(uri)
+            .header("Origin", "http://127.0.0.1:5173")
+            .body(Body::empty())
+            .unwrap();
+        let resp = full.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        assert!(resp.headers().contains_key("x-agentmux-srv-version"), "{uri}: no version header");
+        assert_eq!(
+            resp.headers().get("access-control-allow-origin").and_then(|v| v.to_str().ok()),
+            Some("http://127.0.0.1:5173"),
+            "{uri}: no CORS header"
+        );
+    }
+}
+
 #[tokio::test]
 async fn without_frontend_dir_root_is_health_and_so_is_health() {
     let full = build_routers_with(test_state(), None).full;

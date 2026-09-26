@@ -60,7 +60,7 @@ jobs:
           docker run -d --name srv agentmux-srv:ci
           trap 'docker logs srv 2>&1 | tail -40; docker rm -f srv >/dev/null' EXIT
 
-          # Healthy = the image's own HEALTHCHECK (GET / on loopback) passed.
+          # Healthy = the image's own HEALTHCHECK (GET /health on loopback) passed.
           for i in $(seq 1 45); do
             status=$(docker inspect -f '{{.State.Health.Status}}' srv)
             [ "$status" = healthy ] && break

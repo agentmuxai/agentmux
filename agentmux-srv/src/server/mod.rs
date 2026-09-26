@@ -814,14 +814,15 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .merge(health)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
-        .merge(authed_routes)
-        .layer(version_header)
-        .layer(cors)
-        .with_state(state);
+        .merge(authed_routes);
+    // Before the layers: `Router::layer` wraps only the routes and fallback
+    // that exist when it's called, so a fallback added afterwards would skip
+    // CORS and the version header (ReAgent P1 on #3900).
     let full = match frontend_dir {
         Some(dir) => with_frontend(full, dir),
         None => full,
     };
+    let full = full.layer(version_header).layer(cors).with_state(state);
 
     SrvRouters { full, lan }
 }
@@ -830,7 +831,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
 /// included. Unauthenticated, like the CEF host's static server: the bundle
 /// holds no secrets, and srv's key still guards every API route. Unknown
 /// paths get `index.html`. Full router only; the LAN router never serves it.
-fn with_frontend(router: Router, dir: &std::path::Path) -> Router {
+fn with_frontend(router: Router<AppState>, dir: &std::path::Path) -> Router<AppState> {
     use tower_http::services::{ServeDir, ServeFile};
     let index = ServeFile::new(dir.join("index.html"));
     router.fallback_service(ServeDir::new(dir).fallback(index))
@@ -3112,9 +3113,10 @@ pub(crate) fn is_allowed_origin(origin: &str) -> bool {
 }
 
 /// `http://127.0.0.1` or `http://localhost`, optionally with a numeric
-/// port: the only origins srv's own frontend is ever served from (the CEF
-/// host's loopback server, or the Vite dev server). Used by CORS and by
-/// [`ws_origin_guard`].
+/// port: where the desktop frontend is served from (the CEF host's loopback
+/// server, or the Vite dev server). A headless srv behind a reverse proxy can
+/// also accept the proxy's origin; see [`is_allowed_origin`], which CORS and
+/// [`ws_origin_guard`] use.
 pub(crate) fn is_loopback_origin(origin: &str) -> bool {
     ["http://127.0.0.1", "http://localhost"].iter().any(|host| {
         origin.strip_prefix(host).is_some_and(|rest| {
