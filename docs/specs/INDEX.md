@@ -286,6 +286,7 @@ partial list.
 | [`SPEC_CODEX_JSONL_CONTRACT_2026_08_08`](SPEC_CODEX_JSONL_CONTRACT_2026_08_08.md) | Codex CLI JSONL Adapter Contract |
 | [`SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21`](SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md) | SPEC: harden the Tailwind color system against silent per-theme breakage |
 | [`SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02`](SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md) | Spec: `compaction_started` Arriving Before Turn-Phase Reconciliation Drops the Ping Permanently |
+| [`SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26`](SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md) | SPEC: switch account from the composer's sign-in chip, cap the height of jekt messages, and outline Swarm rows on hover |
 | [`SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11`](SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md) | Composer: Shift+ArrowUp triggers history recall before the top line is fully selected |
 | [`SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16`](SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md) | SPEC: Composer Strip — Auth/Compact Side Stability Across the Row-Count Boundary |
 | [`SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14`](SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14.md) | SPEC — Composer strip: stable width + deliberate edge-split tiers |
@@ -495,7 +496,6 @@ partial list.
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
-| [`SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26`](SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md) | SPEC: switch account from the composer's sign-in chip, cap the height of jekt messages, and outline Swarm rows on hover |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21`](SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) | SPEC: cross-channel agent history resolution |
 | [`SPEC_DECISION_PROMPT_2026_04_24`](SPEC_DECISION_PROMPT_2026_04_24.md) | Spec: Per-Tool-Call Permission Decision Prompt |
