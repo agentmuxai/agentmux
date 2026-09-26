@@ -295,7 +295,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 return null;
             }
             case "Grep": {
-                const n = (r as GrepResult).matches?.length;
+                // Claude Code's Grep result is a string ({content}), one match
+                // per line; a structured provider result has `matches`.
+                const text = typeof r.content === "string" ? (r.content as string) : null;
+                const n = (r as GrepResult).matches?.length ?? text?.split("\n").filter((l) => l.trim()).length;
                 if (typeof n === "number") {
                     return { label: `${n} match${n === 1 ? "" : "es"}`, variant: "matches" };
                 }

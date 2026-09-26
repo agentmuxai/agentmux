@@ -1,7 +1,7 @@
 # Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row
 
 **Date:** 2026-09-26
-**Status:** active — §3.2 (header row) implemented in #3871; §3.1, §3.3 and §3.4 (WebSearch content-first) in the follow-up PR; the rest proposed
+**Status:** active — §3.2 (header row) implemented in #3871; §3.1, §3.3 and §3.4 (WebSearch content-first) in the second PR; §3.5 and §3.6 (text bodies, content blocks) in the third; §3.7 proposed
 **Scope:** agent pane tool previews (`frontend/app/view/agent/`)
 **Verified against:** `main` @ `6b5c2b59b`, which includes #3861 (the jekt
 height cap)
@@ -363,6 +363,9 @@ Defense in depth: `extractRecords` rejects arrays whose rows are all
 
 Effects:
 - **MCP (F2):** a text body.
+- **Agent body:** no longer repeats the description the row header already
+  shows (seen live). A Workflow body shows its description only when the header
+  shows a different title.
 - **Agent (F3):** `renderAgent` renders `result.content` as
   `<Markdown scrollable={false}>`.
 

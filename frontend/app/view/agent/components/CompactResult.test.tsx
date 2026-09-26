@@ -49,3 +49,31 @@ describe("CompactResult — terminal vs JSON body", () => {
         expect(container.querySelector(".agent-tool-compact-json")).not.toBeNull();
     });
 });
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5 — the tool panel is
+// already the expand/collapse control; a second `▸` inside it for a text
+// body was the "tree parent". Only structured results keep it.
+describe("CompactResult — no chevron for a text body", () => {
+    it("shows a multi-line text body directly, as a terminal", () => {
+        const { container } = render(() => (
+            <CompactResult tool="Other" params={{}} result={{ content: "line1\nline2" }} />
+        ));
+        expect(container.querySelector(".agent-tool-compact-summary")).toBeNull();
+        expect(container.querySelector(".agent-terminal-output")).not.toBeNull();
+        expect(container.textContent).toContain("line2");
+    });
+
+    it("shows a one-line text body as plain text, without a toggle", () => {
+        const { container } = render(() => <CompactResult tool="Other" params={{}} result={{ content: "Todos updated" }} />);
+        expect(container.querySelector(".agent-tool-compact-chevron")).toBeNull();
+        expect(container.querySelector(".agent-terminal-output")).toBeNull();
+        expect(container.textContent).toBe("Todos updated");
+    });
+
+    it("keeps the chevron for a structured result", () => {
+        const { container } = render(() => (
+            <CompactResult tool="Task" params={{}} result={{ status: "done", count: 3, items: [1, 2, 3] }} />
+        ));
+        expect(container.querySelector(".agent-tool-compact-chevron")).not.toBeNull();
+    });
+});

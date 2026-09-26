@@ -742,3 +742,23 @@ describe("ToolBlock — content-first (WebSearch)", () => {
         expect(onToggleCollapse).not.toHaveBeenCalled();
     });
 });
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5 — Claude Code's Grep
+// result is a string, not a `matches` array, so the pill counts its lines.
+describe("ToolBlock — Grep pill", () => {
+    it("counts the non-empty lines of a string result", () => {
+        const grep: ToolNode = {
+            type: "tool",
+            id: "g-1",
+            tool: "Grep",
+            toolName: "Grep",
+            params: { pattern: "x" },
+            status: "success",
+            collapsed: true,
+            summary: "x",
+            result: { content: "a.ts:1:x\nb.ts:2:x\n" } as any,
+        };
+        const { container } = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-result-pill")!.textContent).toBe("2 matches");
+    });
+});
