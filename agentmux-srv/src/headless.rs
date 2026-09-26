@@ -49,7 +49,7 @@ pub fn active() -> bool {
 
 /// File name of the generated auth key under the instance runtime dir.
 pub const AUTH_KEY_FILE_NAME: &str = "srv-auth-key";
-/// Per-channel lock file under the instance runtime dir.
+/// Lock file in the directory holding srv's databases.
 const LOCK_FILE_NAME: &str = "srv-headless.lock";
 
 /// Is this the headless server starting (`--headless` or `AGENTMUX_HEADLESS=1`)?
@@ -110,11 +110,18 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     std::fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("cannot create {}: {e}", runtime_dir.display()))?;
 
-    let lock = MuxLock::acquire_at(&runtime_dir.join(LOCK_FILE_NAME)).map_err(|_| {
+    // Lock the directory the databases actually live in: `--wavedata` when
+    // given (Config makes it the data home), else the resolved data dir.
+    // Codex P1 on #3893: a lock beside the runtime dir let two servers with the
+    // same --wavedata write one database.
+    let data_dir = effective_data_dir(&args, &paths.data_dir);
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
+    let lock_path = data_dir.join(LOCK_FILE_NAME);
+    let lock = MuxLock::acquire_at(&lock_path).map_err(|_| {
         format!(
             "another headless agentmux-srv is already using {} (lock {})",
-            paths.instance_dir.display(),
-            runtime_dir.join(LOCK_FILE_NAME).display()
+            data_dir.display(),
+            lock_path.display()
         )
     })?;
     let _ = LOCK.set(lock);
@@ -145,6 +152,15 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
 
     ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
     Ok(generated)
+}
+
+/// The directory srv will open its databases in: `--wavedata` if given (the
+/// same precedence `Config::from_env_and_args` applies), else `resolved`.
+fn effective_data_dir(args: &[String], resolved: &Path) -> PathBuf {
+    arg_value(args, "--wavedata")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolved.to_path_buf())
 }
 
 /// Read a key from a file the operator provided; surrounding whitespace is ignored.
@@ -223,6 +239,18 @@ mod tests {
     fn a_subcommand_is_never_headless() {
         assert!(!requested_from(&args(&["srv", "migrate", "--verify"]), Some("1")));
         assert!(!requested_from(&args(&["srv", "--headless", "migrate", "--list"]), None));
+    }
+
+    /// The lock goes where the databases go: --wavedata wins, as in Config.
+    #[test]
+    fn the_lock_follows_wavedata() {
+        let resolved = Path::new("/home/u/.agentmux/channels/stable/versions/1/data");
+        assert_eq!(effective_data_dir(&args(&["srv", "--headless"]), resolved), resolved);
+        assert_eq!(
+            effective_data_dir(&args(&["srv", "--headless", "--wavedata", "/shared"]), resolved),
+            Path::new("/shared")
+        );
+        assert_eq!(effective_data_dir(&args(&["srv", "--wavedata=/shared"]), resolved), Path::new("/shared"));
     }
 
     #[test]
