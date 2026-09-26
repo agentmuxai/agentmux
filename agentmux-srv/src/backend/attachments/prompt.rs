@@ -124,8 +124,14 @@ pub fn list_block(items: &[Resolved], missing: &[String], inline_count: usize) -
     if inline_count > 0 && inline_count == items.len() {
         out.push_str(" They are shown above; the files are listed here too.");
     } else if inline_count > 0 {
+        // Name the inlined images by their real numbers: a missing
+        // attachment earlier in the list shifts them off 1..=n.
+        let shown: Vec<usize> = items[..inline_count].iter().map(|i| i.number).collect();
+        let noun = if shown.len() == 1 { "Image" } else { "Images" };
+        let verb = if shown.len() == 1 { "is" } else { "are" };
         out.push_str(&format!(
-            " Images 1–{inline_count} are shown above. Open the others from these paths with your file or image viewing tool when you need them."
+            " {noun} {} {verb} shown above. Open the others from these paths with your file or image viewing tool when you need them.",
+            number_list(&shown)
         ));
     } else if !items.is_empty() {
         out.push_str(
@@ -146,6 +152,30 @@ pub fn list_block(items: &[Resolved], missing: &[String], inline_count: usize) -
     }
     out.push_str(BLOCK_CLOSE);
     out
+}
+
+/// "1–3", "2, 4 and 5", "1 and 2": runs of three or more consecutive
+/// numbers collapse to a range.
+fn number_list(nums: &[usize]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < nums.len() {
+        let mut j = i;
+        while j + 1 < nums.len() && nums[j + 1] == nums[j] + 1 {
+            j += 1;
+        }
+        if j - i >= 2 {
+            parts.push(format!("{}–{}", nums[i], nums[j]));
+        } else {
+            parts.extend(nums[i..=j].iter().map(|n| n.to_string()));
+        }
+        i = j + 1;
+    }
+    match parts.len() {
+        0 => String::new(),
+        1 => parts.remove(0),
+        n => format!("{} and {}", parts[..n - 1].join(", "), parts[n - 1]),
+    }
 }
 
 /// The user's text with the attachment list after it.
@@ -250,8 +280,26 @@ mod tests {
     fn list_says_which_images_are_inline() {
         let items = vec![item(1, "a", "/a"), item(2, "b", "/b")];
         assert!(list_block(&items, &[], 2).contains("They are shown above"));
-        assert!(list_block(&items, &[], 1).contains("Images 1–1 are shown above"));
+        assert!(list_block(&items, &[], 1).contains("Image 1 is shown above"));
         assert!(list_block(&items, &[], 0).contains("Open them from these paths"));
+    }
+
+    #[test]
+    fn inline_text_uses_real_numbers_when_an_earlier_image_is_missing() {
+        // refs = [missing, #2, #3]; one inlined.
+        let items = vec![item(2, "b", "/b"), item(3, "c", "/c")];
+        let list = list_block(&items, &["a".into()], 1);
+        assert!(list.contains("Image 2 is shown above"), "{list}");
+        assert!(!list.contains("Image 1 "));
+    }
+
+    #[test]
+    fn number_lists_read_naturally() {
+        assert_eq!(number_list(&[1]), "1");
+        assert_eq!(number_list(&[1, 2]), "1 and 2");
+        assert_eq!(number_list(&[1, 2, 3]), "1–3");
+        assert_eq!(number_list(&[2, 4, 5]), "2, 4 and 5");
+        assert_eq!(number_list(&[1, 2, 3, 7]), "1–3 and 7");
     }
 
     #[test]
@@ -291,7 +339,7 @@ mod tests {
         let p = prepare(&items, &[], 2, u64::MAX);
         assert_eq!(p.inline.len(), 2);
         assert_eq!(p.inline[0]["source"]["media_type"], "image/png");
-        assert!(p.list.contains("Images 1–2 are shown above"));
+        assert!(p.list.contains("Images 1 and 2 are shown above"));
         assert_eq!(
             inline_bytes(&p.inline),
             16,

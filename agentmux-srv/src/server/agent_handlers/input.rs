@@ -896,12 +896,15 @@ pub async fn run_agent_turn(
         // Claude Code keeps every inline image in its own session transcript,
         // so inline bytes are budgeted per session too (spec §6.6). A new
         // session has no id yet; its first turn counts against the block.
-        let session_key = {
-            let sid = crate::backend::obj::meta_get_string(&block.meta, "agent:sessionid", "");
-            if sid.is_empty() { format!("block:{block_id}") } else { format!("session:{sid}") }
-        };
+        // Once the id is known, that first turn's count moves to the session.
+        let sid = crate::backend::obj::meta_get_string(&block.meta, "agent:sessionid", "");
+        let new_session_key = format!("block:{block_id}:new");
+        let session_key = if sid.is_empty() { new_session_key.clone() } else { format!("session:{sid}") };
         let prepared = tokio::task::spawn_blocking(move || {
             use crate::backend::attachments::prompt;
+            if session_key != new_session_key {
+                svc.store().adopt_session_inline_bytes(&new_session_key, &session_key);
+            }
             let used = svc.store().session_inline_bytes(&session_key);
             let budget = limits.claude_session_inline_bytes.saturating_sub(used);
             let (found, missing) = prompt::resolve(&svc, &attachments);
