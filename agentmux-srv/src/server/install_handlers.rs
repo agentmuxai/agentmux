@@ -241,33 +241,30 @@ fn provider_install_dir(provider_id: &str) -> Option<std::path::PathBuf> {
 
 /// Returns the path to the installed CLI binary if present in the
 /// per-version cache, else None. Used by `install.check`.
-/// Locate a system tool (e.g. `git`, `gh`) on PATH. Uses the platform
-/// equivalent of `which` and returns the resolved absolute path. None
-/// when the tool isn't on PATH or the lookup itself failed.
+/// Locate a system tool (e.g. `git`, `gh`) on this process's PATH and return
+/// its absolute path; None when it isn't there.
 ///
 /// Used by `resolve.prereqs` to pre-launch-check whether a provider's
 /// system dependencies are installed. The probe is path-only — never
 /// executes the tool — so it's safe to call without side effects.
 /// See SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
 pub(crate) async fn resolve_tool_path(tool: &str) -> Option<String> {
-    let cmd = if cfg!(windows) { "where" } else { "which" };
-    let mut c = tokio::process::Command::new(cmd);
-    c.arg(tool);
-    // CREATE_NO_WINDOW: `where` is console-subsystem; without this it flashes
-    // a console window on every pre-launch prereq check. See cli.rs's note.
-    #[cfg(windows)]
-    {
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        c.creation_flags(CREATE_NO_WINDOW);
-    }
-    let output = c.output().await.ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    // `where` on Windows can return multiple lines; first is canonical.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.lines().next().map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    // In-process PATH search (the `which` crate: PATHEXT-aware on Windows),
+    // not a spawned `which`/`where`. The spawn made "the lookup program is
+    // missing" indistinguishable from "the tool is missing": on a minimal
+    // Linux without `which`, node/npm read as absent and launches were
+    // blocked (Codex P2 on #3891). No console window to suppress either.
+    let tool = tool.to_string();
+    tokio::task::spawn_blocking(move || find_on_path(&tool, std::env::var_os("PATH").as_deref()))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// `tool`'s absolute path in the directories of `path` (a PATH-style list).
+fn find_on_path(tool: &str, path: Option<&std::ffi::OsStr>) -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    which::which_in(tool, path, cwd).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Version of a managed provider install, read from the installed package's
@@ -707,7 +704,25 @@ fn spawn_install_task(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_cli_command, is_safe_provider_id};
+    use super::{find_on_path, is_safe_cli_command, is_safe_provider_id};
+
+    /// The lookup is in-process: a PATH holding only the tool (no `which`
+    /// binary anywhere on it) still finds it. Codex P2 on #3891.
+    #[test]
+    fn find_on_path_needs_no_which_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = if cfg!(windows) { "node.exe" } else { "node" };
+        let exe = dir.path().join(name);
+        std::fs::write(&exe, b"").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let found = find_on_path("node", Some(dir.path().as_os_str())).expect("node found");
+        assert_eq!(std::path::Path::new(&found), exe.as_path());
+        assert!(find_on_path("npm", Some(dir.path().as_os_str())).is_none());
+    }
 
     #[test]
     fn safe_provider_ids_accepted() {

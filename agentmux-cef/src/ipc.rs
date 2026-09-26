@@ -423,7 +423,6 @@ async fn route_command(
 
         // ---- Tier 3: Provider/CLI management ----
         "set_provider_auth" => commands::providers::set_provider_auth(state, args).await,
-        "check_nodejs_available" => commands::providers::check_nodejs_available().await,
         "ensure_auth_dir" => commands::platform::ensure_auth_dir(state, args),
         "run_cli_login" => commands::cli_login::run_cli_login(state.clone(), args).await,
         "cancel_cli_login" => commands::cli_login::cancel_cli_login(state),

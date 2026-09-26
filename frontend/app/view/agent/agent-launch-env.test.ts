@@ -17,7 +17,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getMemory = vi.fn();
 const loggerWarn = vi.fn();
-const checkNodejsAvailable = vi.fn();
+const resolvePrereqs = vi.fn();
+/** srv's `resolve.prereqs` answer for node/npm. */
+const prereqs = (node: boolean, npm: boolean) => ({
+    results: [
+        { tool: "node", found: node, path: node ? "/usr/bin/node" : null },
+        { tool: "npm", found: npm, path: npm ? "/usr/bin/npm" : null },
+    ],
+});
 
 const resolveCli = vi.fn();
 // A plain function, not a vi.fn, for the failure case: vitest reports what a
@@ -28,6 +35,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         GetBundleCommand: (...args: unknown[]) => getMemory(...args),
         ResolveCliCommand: (...args: unknown[]) => (resolveCliImpl ?? resolveCli)(...args),
+        ResolvePrereqsCommand: (...args: unknown[]) => resolvePrereqs(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -35,7 +43,7 @@ vi.mock("@/util/logger", () => ({
     Logger: { warn: (...args: unknown[]) => loggerWarn(...args) },
 }));
 vi.mock("@/app/store/global", () => ({
-    getApi: () => ({ checkNodejsAvailable: (...args: unknown[]) => checkNodejsAvailable(...args) }),
+    getApi: () => ({}),
 }));
 
 import * as launchEnv from "./agent-launch-env";
@@ -139,58 +147,58 @@ describe("resolveInitialRuntimeConfig", () => {
     });
 });
 
-// reagent P2 (PR #2947): originally covered a version of this function that
-// derived the check purely from npmPackage. Codex P1 caught that removing
-// the `claude` id-based exemption entirely reintroduces a real bug: this
-// check's probe runs in the CEF host's own PATH, but the actual npm spawn
-// runs in the srv sidecar, whose PATH is separately enriched for Homebrew/
-// nvm on macOS (agentmux-cef/src/sidecar.rs) — so the host-side probe can
-// false-negative even when the sidecar would succeed. Claude is kept exempt
-// by id (see the function's own doc comment for the full explanation); these
-// tests cover both the id-based exemption and the npmPackage-based check for
-// everything else, so either drifting independently would fail a test.
+// History (PR #2947): this check once probed the CEF host's own PATH, which
+// lacks srv's login-shell enrichment (Homebrew/nvm on macOS), so Claude was
+// exempted by id to avoid a false "Node.js is not installed". It now asks srv
+// (`resolve.prereqs`), where npm actually runs, so the exemption is gone and
+// every npm-installed provider — Claude included — gets the same check.
 describe("checkNodejsForProvider", () => {
     beforeEach(() => {
-        checkNodejsAvailable.mockReset();
+        resolvePrereqs.mockReset();
     });
 
     afterEach(() => {
         vi.clearAllMocks();
     });
 
-    it("skips the check entirely for claude, regardless of Node/npm availability (host/sidecar PATH mismatch workaround)", async () => {
-        checkNodejsAvailable.mockResolvedValue({ available: false, npm_available: false });
+    it("asks srv (resolve.prereqs, the PATH npm actually runs with) for node and npm", async () => {
+        resolvePrereqs.mockResolvedValue(prereqs(true, true));
+        await checkNodejsForProvider({ id: "codex", npmPackage: "@openai/codex" });
+        expect(resolvePrereqs).toHaveBeenCalledWith(expect.anything(), { tools: ["node", "npm"] });
+    });
+
+    it("checks claude like every other npm-installed provider (no PATH-mismatch exemption any more)", async () => {
+        resolvePrereqs.mockResolvedValue(prereqs(false, false));
         const result = await checkNodejsForProvider({ id: "claude", npmPackage: "@anthropic-ai/claude-code" });
-        expect(result).toBeNull();
-        expect(checkNodejsAvailable).not.toHaveBeenCalled();
+        expect(result).toContain("Node.js is not installed");
     });
 
     it("skips the check entirely for a provider with no npmPackage (e.g. kimi, pip-based)", async () => {
         const result = await checkNodejsForProvider({ id: "kimi", npmPackage: "" });
         expect(result).toBeNull();
-        expect(checkNodejsAvailable).not.toHaveBeenCalled();
+        expect(resolvePrereqs).not.toHaveBeenCalled();
     });
 
-    it("returns null when Node.js and npm are both available for an npm-installed, non-claude provider", async () => {
-        checkNodejsAvailable.mockResolvedValue({ available: true, npm_available: true });
+    it("returns null when Node.js and npm are both available", async () => {
+        resolvePrereqs.mockResolvedValue(prereqs(true, true));
         const result = await checkNodejsForProvider({ id: "codex", npmPackage: "@openai/codex" });
         expect(result).toBeNull();
     });
 
     it("returns a friendly Node.js-missing message when Node.js itself is unavailable", async () => {
-        checkNodejsAvailable.mockResolvedValue({ available: false, npm_available: false });
+        resolvePrereqs.mockResolvedValue(prereqs(false, false));
         const result = await checkNodejsForProvider({ id: "codex", npmPackage: "@openai/codex" });
         expect(result).toContain("Node.js is not installed");
     });
 
     it("returns a friendly npm-missing message when Node.js is present but npm is not", async () => {
-        checkNodejsAvailable.mockResolvedValue({ available: true, npm_available: false });
+        resolvePrereqs.mockResolvedValue(prereqs(true, false));
         const result = await checkNodejsForProvider({ id: "codex", npmPackage: "@openai/codex" });
         expect(result).toContain("npm is not installed");
     });
 
-    it("does not block launch when the availability check itself throws", async () => {
-        checkNodejsAvailable.mockRejectedValue(new Error("RPC unavailable"));
+    it("does not block launch when the check itself fails", async () => {
+        resolvePrereqs.mockRejectedValue(new Error("RPC unavailable"));
         const result = await checkNodejsForProvider({ id: "codex", npmPackage: "@openai/codex" });
         expect(result).toBeNull();
     });

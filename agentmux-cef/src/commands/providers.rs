@@ -9,8 +9,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 use crate::state::AppState;
 
@@ -39,15 +37,6 @@ pub struct ProviderSettings {
     pub auth_status: String,
     pub output_format: String,
     pub extra_args: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NodejsStatus {
-    pub available: bool,
-    pub version: Option<String>,
-    pub npm_available: bool,
-    pub npm_version: Option<String>,
-    pub path: Option<String>,
 }
 
 impl Default for ProviderConfig {
@@ -167,72 +156,6 @@ pub async fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) 
 // dir (as codex/gemini/openclaw/copilot already did), so the login writes there
 // directly and no copy-back is needed. Do not reintroduce a source-side global
 // read here.
-
-/// Check if Node.js and npm are available.
-pub async fn check_nodejs_available() -> Result<serde_json::Value, String> {
-    let result = tokio::task::spawn_blocking(|| {
-        let node_cmd = if cfg!(windows) { "node.exe" } else { "node" };
-        let npm_cmd = if cfg!(windows) { "npm.cmd" } else { "npm" };
-
-        let mut status = NodejsStatus {
-            available: false,
-            version: None,
-            npm_available: false,
-            npm_version: None,
-            path: None,
-        };
-
-        let mut cmd = std::process::Command::new(node_cmd);
-        cmd.arg("--version");
-        #[cfg(windows)]
-        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
-        if let Ok(output) = cmd.output() {
-            if output.status.success() {
-                status.available = true;
-                status.version = Some(
-                    String::from_utf8_lossy(&output.stdout).trim().to_string(),
-                );
-
-                let which_cmd = if cfg!(windows) { "where" } else { "which" };
-                let mut wcmd = std::process::Command::new(which_cmd);
-                wcmd.arg(node_cmd);
-                #[cfg(windows)]
-                wcmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
-                if let Ok(path_out) = wcmd.output() {
-                    if path_out.status.success() {
-                        status.path = Some(
-                            String::from_utf8_lossy(&path_out.stdout)
-                                .lines()
-                                .next()
-                                .unwrap_or("")
-                                .trim()
-                                .to_string(),
-                        );
-                    }
-                }
-            }
-        }
-
-        let mut cmd = std::process::Command::new(npm_cmd);
-        cmd.arg("--version");
-        #[cfg(windows)]
-        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
-        if let Ok(output) = cmd.output() {
-            if output.status.success() {
-                status.npm_available = true;
-                status.npm_version = Some(
-                    String::from_utf8_lossy(&output.stdout).trim().to_string(),
-                );
-            }
-        }
-
-        status
-    })
-    .await
-    .map_err(|e| format!("Failed to check Node.js: {e}"))?;
-
-    serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
-}
 
 /// Copy a file to a directory.
 pub fn copy_file_to_dir(args: &serde_json::Value) -> Result<serde_json::Value, String> {

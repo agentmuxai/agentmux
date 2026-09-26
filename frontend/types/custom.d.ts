@@ -366,7 +366,6 @@ declare global {
         setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;
         setProviderAuth: (provider: string, token: string) => Promise<void>;
-        checkNodejsAvailable: () => Promise<NodejsStatus>;
         ensureAuthDir: (providerId: string) => Promise<string>;
         runCliLogin: (
             cliPath: string,
@@ -945,14 +944,6 @@ declare global {
     }
 
     type SuggestionsFnType = (query: string, reqContext: SuggestionRequestContext) => Promise<FetchSuggestionsResponse>;
-
-    type NodejsStatus = {
-        available: boolean;
-        version: string | null;
-        npm_available: boolean;
-        npm_version: string | null;
-        path: string | null;
-    };
 
     type DraggedFile = {
         uri: string;
