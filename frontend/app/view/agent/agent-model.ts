@@ -1,15 +1,13 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal } from "solid-js";
-import { BlockNodeModel } from "@/app/block/blocktypes";
+import { createMemo, createSignal, type Accessor } from "solid-js";
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, MOS } from "@/app/store/global";
-import { SignalAtom } from "@/util/util";
 import { agentModels } from "./agent-models";
-import { AgentBlockContent } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
@@ -32,18 +30,19 @@ import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from 
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 
-export class AgentViewModel implements ViewModel {
+/** The agent's state behind its native pane tab (`agentPaneTabManifest`,
+ *  agent-manifest.tsx). */
+export class AgentViewModel {
     viewType = "agent";
     blockId: string;
-    nodeModel: BlockNodeModel;
-    blockAtom: SignalAtom<Block>;
+    /** This block, as its components read it (only its meta is ever read);
+     *  built from the host context's meta. */
+    blockAtom: Accessor<Block | undefined>;
 
     viewIcon: () => string | IconButtonDecl;
     viewName: () => string;
     setViewName: (name: string) => Promise<void>;
     viewText: () => string | HeaderElem[];
-    viewComponent: ViewComponent;
-    noPadding: () => boolean;
     setProgressBarMount: (el: HTMLDivElement | null) => void;
     /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
      *  reads this directly off its own concrete `AgentViewModel` instance
@@ -107,12 +106,17 @@ export class AgentViewModel implements ViewModel {
     focusTargetRef: { current: HTMLTextAreaElement | null } = { current: null };
 
     private unregisterModel: () => void;
+    private ctx: PaneTabHostContext;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
+    // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
+    // (agent-manifest.tsx) in its own reactive root. Its own block's meta
+    // comes from, and goes to, the host context; `launchAgentDefinition` can
+    // target ANOTHER block, so that path still writes by block id.
+    constructor(ctx: PaneTabHostContext) {
+        const blockId = ctx.blockId;
+        this.ctx = ctx;
         this.blockId = blockId;
-        this.nodeModel = nodeModel;
-        this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
-        this.viewComponent = AgentBlockContent as any;
+        this.blockAtom = createMemo(() => ({ oid: blockId, meta: ctx.meta() }) as Block);
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
         this.progressBarMount = progressBarMountSig;
         this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);
@@ -158,11 +162,9 @@ export class AgentViewModel implements ViewModel {
         // pane-color unification pass) — generation itself is untouched since
         // swarm-model.ts also reads term:ambient_summary for the Swarm view.
         this.viewText = (): HeaderElem[] => [];
-        this.noPadding = () => true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;
-            const oref = MOS.makeORef("block", this.blockId);
-            await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { agentName: name.trim() } });
+            await this.ctx.setMeta({ agentName: name.trim() });
         };
 
         // Pane-frame header button: a single "Stash" (backpack) icon
@@ -232,24 +234,20 @@ export class AgentViewModel implements ViewModel {
      * useAgentCommands.back (which delegates here).
      */
     backToPicker = async (): Promise<void> => {
-        const oref = MOS.makeORef("block", this.blockId);
         try {
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref,
-                meta: {
-                    agentId: null,
-                    agentProvider: null,
-                    agentOutputFormat: null,
-                    agentName: null,
-                    agentIcon: null,
-                    agentCliPath: null,
-                    agentCliArgs: null,
-                    agentBinDir: null,
-                    controller: null,
-                    // Identity M4b-3 (spec §6.5.8): a stamp left behind here
-                    // would name the previous launch's row to the next one.
-                    agentInstanceId: null,
-                },
+            await this.ctx.setMeta({
+                agentId: null,
+                agentProvider: null,
+                agentOutputFormat: null,
+                agentName: null,
+                agentIcon: null,
+                agentCliPath: null,
+                agentCliArgs: null,
+                agentBinDir: null,
+                controller: null,
+                // Identity M4b-3 (spec §6.5.8): a stamp left behind here
+                // would name the previous launch's row to the next one.
+                agentInstanceId: null,
             });
         } catch {
             // fail silently — user can manually switch via widget bar
@@ -308,7 +306,6 @@ export class AgentViewModel implements ViewModel {
             outputFormat: provider.styledOutputFormat,
         });
 
-        const oref = MOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
 
         // Build CLI args: use persistent args if available, otherwise standard launch args
@@ -340,19 +337,16 @@ export class AgentViewModel implements ViewModel {
 
         try {
             // Store CLI config in block metadata for the backend to read on AgentInput
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref,
-                meta: {
-                    agentId: agentId,
-                    agentOutputFormat: provider.styledOutputFormat,
-                    controller: isPersistent ? "persistent" : "subprocess",
-                    cmd: cliBin,
-                    "cmd:args": cliArgs,
-                    "cmd:env": envVars,
-                    "agent:resume_flag": provider.resumeFlag ?? "",
-                    "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
-                    "agent:session_id_field": provider.sessionIdField,
-                },
+            await this.ctx.setMeta({
+                agentId: agentId,
+                agentOutputFormat: provider.styledOutputFormat,
+                controller: isPersistent ? "persistent" : "subprocess",
+                cmd: cliBin,
+                "cmd:args": cliArgs,
+                "cmd:env": envVars,
+                "agent:resume_flag": provider.resumeFlag ?? "",
+                "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
+                "agent:session_id_field": provider.sessionIdField,
             });
 
             // Create SubprocessController (no-op start — waits for first message)
