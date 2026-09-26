@@ -28,19 +28,36 @@ use crate::backend::base::MuxLock;
 
 /// Held for the process lifetime once acquired.
 static LOCK: OnceLock<MuxLock> = OnceLock::new();
+/// Set once `prepare_env` succeeded: this process is the headless server.
+static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Is this process running headless (after `prepare_env`)?
+pub fn active() -> bool {
+    ACTIVE.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 /// File name of the generated auth key under the instance runtime dir.
 pub const AUTH_KEY_FILE_NAME: &str = "srv-auth-key";
 /// Per-channel lock file under the instance runtime dir.
 const LOCK_FILE_NAME: &str = "srv-headless.lock";
 
-/// Was srv started headless (`--headless` or `AGENTMUX_HEADLESS=1`)?
+/// Is this the headless server starting (`--headless` or `AGENTMUX_HEADLESS=1`)?
+/// Never for a subcommand such as `migrate`: it needs none of the headless
+/// setup, and its lock would refuse a `migrate --verify` run beside a running
+/// headless server (ReAgent P1 on #3893).
 pub fn requested() -> bool {
-    requested_from(std::env::args(), std::env::var("AGENTMUX_HEADLESS").ok().as_deref())
+    let args: Vec<String> = std::env::args().collect();
+    requested_from(&args, std::env::var("AGENTMUX_HEADLESS").ok().as_deref())
 }
 
-fn requested_from(mut args: impl Iterator<Item = String>, env: Option<&str>) -> bool {
-    args.any(|a| a == "--headless") || matches!(env, Some("1") | Some("true"))
+fn requested_from(args: &[String], env: Option<&str>) -> bool {
+    let asked = args.iter().any(|a| a == "--headless") || matches!(env, Some("1") | Some("true"));
+    // Parse with the same CliArgs `load_config` uses; an argv clap rejects is
+    // left for `load_config` to report.
+    let runs_a_subcommand = <crate::config::CliArgs as clap::Parser>::try_parse_from(args)
+        .map(|a| a.command.is_some())
+        .unwrap_or(false);
+    asked && !runs_a_subcommand
 }
 
 /// The value after `flag` in argv (`--flag value` or `--flag=value`).
@@ -73,6 +90,11 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
             p
         }
     };
+    // Every path is now explicit in the env, as the launcher leaves it. Drop the
+    // root override so srv resolves its stores the launcher's way — from the
+    // exported data dir — rather than at the override root, which would put
+    // every version's databases in one place (Codex P1 on #3893).
+    std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
     let runtime_dir = paths.instance_runtime_dir.clone();
     std::fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("cannot create {}: {e}", runtime_dir.display()))?;
@@ -110,6 +132,7 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
         std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1");
     }
 
+    ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
     Ok(generated)
 }
 
@@ -168,10 +191,18 @@ mod tests {
 
     #[test]
     fn headless_is_requested_by_flag_or_env() {
-        assert!(requested_from(args(&["srv", "--headless"]).into_iter(), None));
-        assert!(requested_from(args(&["srv"]).into_iter(), Some("1")));
-        assert!(!requested_from(args(&["srv", "--wavedata", "x"]).into_iter(), None));
-        assert!(!requested_from(args(&["srv"]).into_iter(), Some("0")));
+        assert!(requested_from(&args(&["srv", "--headless"]), None));
+        assert!(requested_from(&args(&["srv"]), Some("1")));
+        assert!(!requested_from(&args(&["srv", "--wavedata", "x"]), None));
+        assert!(!requested_from(&args(&["srv"]), Some("0")));
+    }
+
+    /// A subcommand never runs the headless setup (or takes its lock), even
+    /// with AGENTMUX_HEADLESS=1 set for the whole environment.
+    #[test]
+    fn a_subcommand_is_never_headless() {
+        assert!(!requested_from(&args(&["srv", "migrate", "--verify"]), Some("1")));
+        assert!(!requested_from(&args(&["srv", "--headless", "migrate", "--list"]), None));
     }
 
     #[test]

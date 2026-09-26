@@ -1627,6 +1627,10 @@ pub async fn bind_listeners_and_network(
         web_addr.port(),
         ws_addr.port(),
     ));
+    // Headless srv is loopback-only, whatever the channel's LAN setting says.
+    if crate::headless::active() {
+        lan_listeners.forbid_lan();
+    }
     // The supervisor owns the advertise/reachable pairing: it re-gates mDNS on
     // every reconcile so we never advertise an address nothing is listening on,
     // and it performs the boot-time setting read too (via `main.rs`).

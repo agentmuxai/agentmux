@@ -38,7 +38,7 @@ So srv can't be a container entrypoint, a system service, or a CI fixture withou
 
 ### 3.1 Startup
 
-`main` checks `headless::requested()` before anything else.
+`main` checks `headless::requested()` before anything else. It is true for `--headless` or `AGENTMUX_HEADLESS=1`, **but never when a subcommand such as `migrate` runs**. A subcommand needs none of this setup, and the lock would refuse a `migrate --verify` run beside a running headless server.
 - **Headless:** `headless::prepare_env()` runs, and the parent watcher is **not** installed.
 - **Otherwise:** `install_process_watchers()` runs as before.
 
@@ -54,10 +54,13 @@ Runs before logging is initialized, so the log dir comes from the paths it resol
    - export `to_env_vars()`, exactly what the launcher exports.
 
    The root follows the usual rules: `AGENTMUX_HOME_OVERRIDE`, then `AGENTMUX_DATA_HOME`, then `~/.agentmux`. If the env is already set, it is used as is.
+
+   **Then `AGENTMUX_HOME_OVERRIDE` is removed.** Every path is explicit in the env now, as the launcher leaves it, and srv resolves its stores from the exported data dir. Left set, the override would win in `agentmux_root()`, and every version's databases would open at the override root.
 2. **Lock:** an exclusive lock on `<instance runtime>/srv-headless.lock` (`MuxLock::acquire_at`), held for the process lifetime. A second headless srv on the same channel exits 1 and names the lock. The lock is per channel, not per `~/.agentmux`.
 3. **Auth key**, unless `AGENTMUX_AUTH_KEY` is already set: `--auth-key-file` / `AGENTMUX_AUTH_KEY_FILE` (trimmed, must not be empty); otherwise a fresh key (two v4 UUIDs, 244 random bits, 64 hex characters) written to `<instance runtime>/srv-auth-key` with mode `0600`, **replaced on every start**, as a launcher-spawned srv gets a new key each launch. The path is printed; the key never is. It then becomes `AGENTMUX_AUTH_KEY`, and srv's normal config reads it and removes it from the environment.
 4. **Ports:** `--web-port` / `--ws-port` become `AGENTMUX_SRV_WEB_PORT` / `AGENTMUX_SRV_WS_PORT`. The startup listeners bind `STARTUP_BIND_ADDR`'s loopback host with that port (`headless::loopback_bind_addr`), or `STARTUP_BIND_ADDR` itself (OS-chosen port) when unset. **Still loopback only.**
 5. **Cloud subscriber:** `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER=1` unless the caller set it. The subscriber reads the OS keychain at startup, which a container usually lacks.
+6. **No LAN listeners:** bootstrap calls `LanListenerSupervisor::forbid_lan()`, so a saved `network:lan_discovery: true` (or a later settings change) can't bind srv's ports on other interfaces or advertise them. mDNS advertising follows the supervisor's bound listeners, so it stays off too.
 
 ### 3.3 Readiness
 
@@ -88,12 +91,16 @@ Runs before logging is initialized, so the log dir comes from the paths it resol
   - the generated key is 64 hex characters, mode `0600`, and new each time;
   - key files are trimmed and must not be empty;
   - the bind address defaults to `STARTUP_BIND_ADDR`;
-  - the lock admits one holder and is released on drop.
+  - the lock admits one holder and is released on drop;
+  - a subcommand is never headless;
+  - a forbidden LAN supervisor ignores `apply(true)`. Mutation check: without the guard, this test fails.
 - **Live run** (clean environment via `env -i`, `AGENTMUX_HOME_OVERRIDE=<tmp>`, stdin from `/dev/null`, `--web-port 18190 --ws-port 18191`):
   - still running after 12 s;
   - `GET /` gives 200;
   - the key file is mode `600`, 64 bytes;
   - `/agentmux/discovery` gives 200 with the key and 401 without;
   - a second `--headless` on the same home exits 1, naming the lock;
-  - SIGTERM gives "received SIGTERM, shutting down" and the process exits.
+  - SIGTERM gives "received SIGTERM, shutting down" and the process exits;
+  - the stores open at `channels/stable/versions/<v>/data/db/objects.db`, not the override root;
+  - with `network:lan_discovery: true` saved, srv listens only on `127.0.0.1`. The control run, without `forbid_lan`, also binds the host's LAN address.
 - **The full `cargo test -p agentmux-srv` suite** covers the non-headless startup paths, which are unchanged.
