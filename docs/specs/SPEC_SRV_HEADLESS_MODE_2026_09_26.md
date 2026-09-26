@@ -1,7 +1,7 @@
 # SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host
 
 **Date:** 2026-09-26
-**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) ships in PR #3893. Slices 2–4 (container image, headless secret backend, frontend serving + allowed origins) remain.
+**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893. Slice 2 (§3.4: container image) is in review in PR #3898. Slices 3–4 (headless secret backend, frontend serving + allowed origins) remain.
 **Author:** Maricon
 
 ---
@@ -75,12 +75,36 @@ Runs before logging is initialized, so the log dir comes from the paths it resol
 - Unchanged: the `AGENTMUXSRV-ESTART ws:… web:…` line on stderr.
 - `GET /` (no auth) answers `{"status":"ok","version":…}` once srv is serving, so it works as a container health check.
 
+### 3.4 Container image (slice 2): `docker/Dockerfile.srv`
+
+Build from the repo root: `docker build -f docker/Dockerfile.srv -t agentmux-srv .`
+
+- **Build stage** (`rust:1-bookworm`): `cargo build --release -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap`.
+  - Agents started by srv launch `agentmux-mcp` and `agentmux-bashwrap` by bare name from `PATH`, as in the container agent image, so both ship in `/usr/local/bin`.
+  - srv itself links only glibc; `agentmux-mcp` needs `libdbus-1-3` and `libxcb1` at runtime.
+- **Runtime** (`node:24-slim`, Debian and glibc):
+  - node/npm, because agent CLIs are npm packages srv installs and runs; plus git, bash, procps, curl and ca-certificates;
+  - the unprivileged user `agentmux` (UID 1000), `HOME=/home/agentmux`, working dir `/workspace`.
+- **Entrypoint:** `tini -- agentmux-srv --headless`, with `CMD --web-port 8190 --ws-port 8191`. tini is PID 1, forwards SIGTERM, and reaps the shells and agents srv spawns. srv exits 0 on SIGTERM.
+- **State:** everything lives under `~/.agentmux`, declared a `VOLUME`. Databases and the generated key sit in `channels/stable/versions/<v>/data/`.
+- **Auth key:** `AGENTMUX_AUTH_KEY` in the environment, a mounted file via `--auth-key-file`, or generated. A generated key's path is printed at start; the key never is.
+- **Health:** `HEALTHCHECK` runs `curl http://127.0.0.1:8190/`.
+- **Loopback only, in the container too.** srv is reachable only from its own network namespace: a reverse proxy sharing it (a sidecar in the same pod or task, or `docker run --network container:<proxy>`) terminates TLS, authenticates users and sends the key. `docker run -p` can't reach it, on purpose.
+- **CI:** `.github/workflows/srv-image.yml` builds the image (linux/amd64, no push) when its inputs change, or on demand. It then smoke-tests it:
+  - it goes healthy;
+  - the key file is mode `600`;
+  - `/agentmux/discovery` gives 200 with the key and 401 without;
+  - every listening socket is loopback;
+  - it runs as `agentmux`, with the helpers, node and git on `PATH`;
+  - `docker stop` exits 0.
+- **Not published.** Where an image is published, and for which architectures, is up to whoever deploys it.
+
 ## 4. Slices
 
 | Slice | Content |
 |---|---|
 | **1** | §3: `--headless`, `prepare_env`, per-channel lock, auth-key file, fixed loopback ports, no stdin/parent watchers, cloud subscriber off by default |
-| 2 | `docker/Dockerfile.srv`: the existing agent image's build stage plus `-p agentmux-srv`; runtime needs node/npm, git and bash; `tini` entrypoint; data volume; `HEALTHCHECK` on `/` |
+| **2** | §3.4: `docker/Dockerfile.srv` and its CI smoke test |
 | 3 | A secret backend for machines without an OS keychain (the file-backed fallback `secret_store.rs` already lists as a follow-up), so Armory keys, MuxBus credentials and OAuth accounts work headless |
 | 4 | Serving the built frontend, and a configurable allowed-origins list for CORS and the `/ws` origin check, for a same-origin client behind a reverse proxy |
 
