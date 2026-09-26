@@ -15,6 +15,7 @@
 import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
 
 import { ErrorBanner } from "@/app/errors/ErrorBanner";
+import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 
 import type { InstallSession } from "./install-session";
@@ -90,7 +91,8 @@ export const InstallProgress = (props: InstallProgressProps): JSX.Element => {
                         class="install-details-copy"
                         disabled={props.session.lines().length === 0}
                         onClick={() =>
-                            void clipboardWriteText(props.session.logText()).catch((err) =>
+                            // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
+                            void clipboardWriteText(redactSecrets(props.session.logText())).catch((err) =>
                                 console.log("clipboard write failed", err),
                             )
                         }

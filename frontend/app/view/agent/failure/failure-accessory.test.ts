@@ -21,7 +21,10 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, bindAccount: 0, newSession: 0, toggleDetails: 0, dismiss: 0, takeOver: 0 };
+    const _calls = {
+        retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, bindAccount: 0, newSession: 0, toggleDetails: 0,
+        copyError: 0, dismiss: 0, takeOver: 0,
+    };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
@@ -31,6 +34,7 @@ const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, nu
         bindAccount: vi.fn(() => void _calls.bindAccount++),
         newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
+        copyError: vi.fn(() => void _calls.copyError++),
         dismiss: vi.fn(() => void _calls.dismiss++),
     };
 };
@@ -157,6 +161,29 @@ describe("failureToRow", () => {
         // Neither detail nor stderr → nothing to expand, no toggle.
         const bare = failureToRow(mkFailure({ detail: "", stderrTail: undefined }), mkView(), on);
         expect(action(bare, "Details")).toBeUndefined();
+    });
+
+    // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surfaces 1/2.
+    it("always offers a Copy error/details action, before Details, wired to copyError", () => {
+        const on = mkActions();
+        const withoutStderr = failureToRow(mkFailure({ stderrTail: undefined }), mkView(), on);
+        const copyIdx = withoutStderr.actions.findIndex((a) => a.label === "Copy error");
+        const detailsIdx = withoutStderr.actions.findIndex((a) => a.label === "Details");
+        expect(copyIdx).toBeGreaterThanOrEqual(0);
+        expect(detailsIdx).toBeGreaterThan(copyIdx);
+        withoutStderr.actions[copyIdx].onClick();
+        expect(on._calls.copyError).toBe(1);
+
+        // A stderr tail present -> "Copy details", matching the action-row
+        // label convention ("Copy details" when there's more than a message).
+        const withStderr = failureToRow(mkFailure({ stderrTail: "panic: boom" }), mkView(), on);
+        expect(action(withStderr, "Copy details")).toBeTruthy();
+    });
+
+    it("reflects copyState in the Copy action's label", () => {
+        const on = mkActions();
+        expect(action(failureToRow(mkFailure(), mkView({ copyState: "copied" }), on), "Copied")).toBeTruthy();
+        expect(action(failureToRow(mkFailure(), mkView({ copyState: "failed" }), on), "Copy failed")).toBeTruthy();
     });
 
     it("Details toggle flips its label/glyph when expanded", () => {

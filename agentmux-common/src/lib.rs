@@ -13,6 +13,7 @@ pub mod jekt_sign;
 pub mod layout_types;
 pub mod pagefile;
 pub mod process;
+pub mod redact;
 pub mod runtime_mode;
 pub mod srv_stderr;
 pub mod time;

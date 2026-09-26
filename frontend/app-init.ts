@@ -50,6 +50,7 @@ import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
+import { describeError, formatDescribedError } from "@/app/errors/error-report";
 import { withTimeout } from "@/app/init/timeout";
 import { fireAndForget } from "@/util/util";
 import { setProviderModels } from "@/app/view/agent/providers";
@@ -433,9 +434,12 @@ async function initHostMux(): Promise<void> {
         benchDump(); // emit full startup timeline to log
 
     } catch (error) {
-        console.error("[initHostMux] Initialization failed:", error);
-        getApi().sendLog(`[initHostMux] ERROR: ${error}`);
-        showStartupError(String(error));
+        // §6.1: describeError keeps the stack — String(error) serialized a
+        // plain Error to "{}" or dropped it entirely.
+        const described = describeError(error);
+        console.error("[initHostMux] Initialization failed:", described);
+        getApi().sendLog(`[initHostMux] ERROR: ${formatDescribedError(described)}`);
+        showStartupError(formatDescribedError(described));
     }
 }
 
@@ -548,9 +552,10 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         })();
 
     } catch (error) {
-        console.error("[initHostNewWindow] Initialization failed:", error);
-        try { getApi().sendLog(`[initHostNewWindow] Error: ${error}`); } catch {}
-        showStartupError("New window: " + String(error));
+        const described = describeError(error);
+        console.error("[initHostNewWindow] Initialization failed:", described);
+        try { getApi().sendLog(`[initHostNewWindow] Error: ${formatDescribedError(described)}`); } catch {}
+        showStartupError("New window: " + formatDescribedError(described));
     }
 }
 
@@ -647,9 +652,10 @@ async function initAppInner() {
         // path. reagentx P1 on PR #3486.
         getApi().onAgentMuxInit((payload) => {
             void initMuxWrap(payload).catch((error) => {
-                console.error("[onAgentMuxInit] Initialization failed:", error);
-                getApi().sendLog(`[onAgentMuxInit] ERROR: ${error}`);
-                showStartupError(String(error));
+                const described = describeError(error);
+                console.error("[onAgentMuxInit] Initialization failed:", described);
+                getApi().sendLog(`[onAgentMuxInit] ERROR: ${formatDescribedError(described)}`);
+                showStartupError(formatDescribedError(described));
             });
         });
     }
@@ -745,9 +751,10 @@ async function initAppInner() {
                 }
             }
         } catch (error) {
-            console.error("[initApp] Host initialization failed:", error);
-            getApi().sendLog(`Host init error: ${error}`);
-            showStartupError(String(error));
+            const described = describeError(error);
+            console.error("[initApp] Host initialization failed:", described);
+            getApi().sendLog(`Host init error: ${formatDescribedError(described)}`);
+            showStartupError(formatDescribedError(described));
         }
     }
 

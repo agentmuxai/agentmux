@@ -23,8 +23,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use agentmux_common::redact::redact_secrets;
 use crate::backend::agent_session::{agent_zone_for_block_meta, global_transcript_store, OUTPUT_FILE};
-use crate::backend::continuity::{defuse_delimiters, is_relayed, redact_secrets, render, turns_from_stream, Turn};
+use crate::backend::continuity::{defuse_delimiters, is_relayed, render, turns_from_stream, Turn};
 use crate::backend::obj::{meta_get_string, Block, MetaMapType};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;

@@ -25,7 +25,7 @@ import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ProviderLogo } from "@/element/ProviderLogo";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 
 // Production Cognito config — set after deployment.
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
@@ -155,42 +155,9 @@ function expiryLabel(status: MuxBusStatus | null): string | null {
     return new Date(status.expiresAt * 1000).toLocaleString();
 }
 
-/**
- * A connect/disconnect error can be long (e.g. a wrapped keychain error) —
- * wraps + scrolls instead of blowing up the panel, and offers a copy button
- * so the user can hand the exact text to support/an issue without retyping
- * it. `class` names the container; `-text` / `-copy-btn` suffixes get their
- * own rules alongside it (see `_identity-panel.scss` / `_form-overlay.scss`).
- */
-function CopyableErrorMessage(props: { message: string; class: string }): JSX.Element {
-    const [copied, setCopied] = createSignal(false);
-    let copiedTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const copy = () => {
-        void clipboardWriteText(props.message)
-            .then(() => {
-                if (copiedTimer) clearTimeout(copiedTimer);
-                setCopied(true);
-                copiedTimer = setTimeout(() => setCopied(false), 1500);
-            })
-            .catch(() => {});
-    };
-
-    return (
-        <div class={props.class}>
-            <span class={`${props.class}-text`}>{props.message}</span>
-            <button
-                type="button"
-                class={`${props.class}-copy-btn`}
-                onClick={copy}
-                title={copied() ? "Copied!" : "Copy error message"}
-                aria-label="Copy error message"
-            >
-                <i class={copied() ? "fa-solid fa-check" : "fa-solid fa-copy"} aria-hidden="true" />
-            </button>
-        </div>
-    );
-}
+// CopyableErrorMessage moved to frontend/app/errors/CopyableErrorMessage.tsx
+// and exported (SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §3, §5) so any
+// surface can use it, not just this one — imported above.
 
 /**
  * Per-agent identity panel section (unchanged UI). Owns its own controller so
