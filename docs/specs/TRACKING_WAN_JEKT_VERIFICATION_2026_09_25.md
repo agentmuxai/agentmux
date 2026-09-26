@@ -90,7 +90,9 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
   hard to see because every "couldn't check" renders exactly like an
   unsigned jekt, the carry gate and the verifier logged only at `debug`, and
   `wan_key_unavailable` covered five different causes. #3865 added a `warn`
-  for a refused or unreachable directory. #3863 adds: the relay's
+  per failed directory attempt; that is now folded into the single
+  per-jekt outcome line below, at `warn` whenever a cause is known. #3863
+  adds: the relay's
   "queued for WAN delivery" line says whether the signature was carried
   (`signed`, `unsigned_reason`, `cloud_kept_signature`); the receiver logs
   one `wan verify:` line per WAN jekt at `info`; and the verdict carries a
