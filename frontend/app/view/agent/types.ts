@@ -898,26 +898,6 @@ export const DEFAULT_RUNTIME_CONFIG: AgentRuntimeConfig = {
 };
 
 /**
- * Tool icon mapping
- */
-export const TOOL_ICONS: Record<string, string> = {
-    Read: "📖",
-    Edit: "✏️",
-    Write: "📝",
-    Bash: "🔧",
-    Grep: "🔍",
-    Glob: "📁",
-    Task: "🛠️",
-    Agent: "🤖",
-    Workflow: "🕸️",
-    WebSearch: "🌐",
-    web_search: "🌐",
-    WebFetch: "🌐",
-    web_fetch: "🌐",
-    Other: "🛠️",
-};
-
-/**
  * Agent message icon mapping
  */
 export const AGENT_MESSAGE_ICONS: Record<string, string> = {

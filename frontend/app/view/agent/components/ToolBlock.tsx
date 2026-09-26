@@ -51,7 +51,8 @@ import { PeekOverlay } from "./PeekOverlay";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { grepResultCount } from "./grep-result";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
-import { isContentFirstTool } from "./tool-presentation";
+import { TOOL_STATUS } from "../tool-meta/tool-status";
+import { isContentFirstTool } from "../tool-meta/tool-descriptors";
 import { extractSearchResults, extractWebSearch } from "./tool-renderers/search-results";
 
 /**
@@ -115,7 +116,7 @@ interface ToolBlockProps {
     onTogglePin: () => void;
     /** Mark this tool held-open — called once on its active→inactive transition. */
     onHoldOpen?: () => void;
-    /** Content-first tools (tool-presentation.ts) only: the user collapsed
+    /** Content-first tools (tool-meta/tool-descriptors.ts) only: the user collapsed
      *  it (`documentState.collapsedNodes`). They're expanded by default. */
     userCollapsed?: boolean;
     /** Content-first tools only: toggle `userCollapsed` (the header click). */
@@ -125,16 +126,6 @@ interface ToolBlockProps {
      *  match was found, or for any other tool kind. */
     dispatchMatch?: AgentDispatch;
 }
-
-const STATUS_ICON: Record<ToolNode["status"], string> = {
-    running: "⏳",
-    pending_approval: "⚠",
-    awaiting_answer: "❓",
-    success: "✓",
-    failed: "✗",
-    denied: "⊘",
-    canceled: "⏹",
-};
 
 // The tool preview used to carry its OWN Ctrl+wheel zoom here — a local
 // `previewFontScale` signal applied as `font-size: N%` on the overlay-log
@@ -180,9 +171,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // slot-position state leakage — when a streaming-buffer cap-advance swaps the
     // node at this slot, the old prevStatus must not seed the incoming node's
     // transition baseline.
-    let prevStatus: string = props.node.status;
+    let prevStatus: ToolNode["status"] = props.node.status;
     let prevNodeId: string = props.node.id;
-    const isActive = (s: string): boolean => s === "running" || s === "pending_approval";
+    const isActive = (s: ToolNode["status"]): boolean => TOOL_STATUS[s]?.active === true;
     createEffect(() => {
         const s = props.node.status;
         const id = props.node.id;
@@ -211,13 +202,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 and
     // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md — the 3 s
     // post-completion timer was replaced by scroll-position-driven collapse.
-    const isFailTerminal = (): boolean => {
-        const s = props.node.status;
-        return s === "denied" || s === "canceled";
-    };
     const autoExpanded = (): boolean => {
-        const s = props.node.status;
-        return s === "running" || s === "pending_approval" || (!isFailTerminal() && !!props.heldOpen);
+        const s = TOOL_STATUS[props.node.status];
+        return s.active || (!s.dismissed && !!props.heldOpen);
     };
     // Hover-to-peek was removed in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28
     // — expansion is now driven exclusively by pin + active-state auto-
@@ -330,7 +317,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // gone with the hover trigger.
     const panelMode = (): "hidden" | "flow" => (expanded() ? "flow" : "hidden");
 
-    const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
+    const statusIcon = (): string => TOOL_STATUS[props.node.status]?.icon || "•";
 
     // Header parts, composed from the node's fields rather than the `summary`
     // baked at parse time — see tool-header.ts. The hover tooltip's bare

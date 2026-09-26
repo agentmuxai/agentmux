@@ -12,8 +12,8 @@
  * SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.2.
  */
 
-import { extractToolDetail } from "../stream-parser";
-import { TOOL_ICONS, type ToolNode } from "../types";
+import { toolDetail, toolIcon, toolLabel, toolNameOf } from "../tool-meta/tool-descriptors";
+import type { ToolNode } from "../types";
 
 export interface ToolHeaderParts {
     icon: string;
@@ -23,30 +23,14 @@ export interface ToolHeaderParts {
     detail: string;
 }
 
-/** Tools whose icon plus detail identify them without the name: a globe
- *  followed by a search query or a host/path can only be a web tool. */
-const SELF_DESCRIBING = new Set(["WebSearch", "web_search", "WebFetch", "web_fetch"]);
-
-const MCP_PREFIX = "mcp__";
-
-/** "mcp__agentmux__WhoAmI" → "agentmux · WhoAmI"; null if not an MCP name. */
-export function mcpDisplayName(name: string): string | null {
-    if (!name.startsWith(MCP_PREFIX)) return null;
-    const rest = name.slice(MCP_PREFIX.length);
-    const sep = rest.indexOf("__");
-    if (sep <= 0 || sep + 2 >= rest.length) return null;
-    return `${rest.slice(0, sep)} · ${rest.slice(sep + 2)}`;
-}
-
+/** Icon, label and detail from the tool's descriptor (tool-meta/tool-descriptors.ts). */
 export function toolHeaderParts(node: ToolNode): ToolHeaderParts {
-    const name = node.toolName ?? node.tool;
+    const name = toolNameOf(node);
     const params = (node.params as Record<string, any>) ?? {};
-    const icon = TOOL_ICONS[name] ?? TOOL_ICONS[node.tool] ?? TOOL_ICONS.Other;
-    // The raw name first: a WebSearch's coarse kind is "Other", which has no
-    // detail rule. The coarse kind covers provider aliases the raw name misses.
-    const detail = extractToolDetail(name, params) || (name !== node.tool ? extractToolDetail(node.tool, params) : "");
-    const label = SELF_DESCRIBING.has(name) && detail ? null : (mcpDisplayName(name) ?? name);
-    return { icon, label, detail };
+    // The raw name first; the coarse kind covers a node whose raw name has no
+    // descriptor of its own (e.g. an older node without toolName).
+    const detail = toolDetail(name, params) || (name !== node.tool ? toolDetail(node.tool, params) : "");
+    return { icon: toolIcon(node), label: toolLabel(name, detail), detail };
 }
 
 /** AskUserQuestion's flow writes its own row text into `summary` ("❓ Waiting

@@ -23,7 +23,6 @@ import {
     StreamEvent,
     TextEvent,
     ThinkingEvent,
-    TOOL_ICONS,
     ToolCallEvent,
     ToolChunkEvent,
     ToolLogChunk,
@@ -32,6 +31,7 @@ import {
     UserMessageEvent,
 } from "./types";
 import { buildMemoryReinjectionNodeFromReplay } from "./memory-reinjection";
+import { toolDetail, toolIcon } from "./tool-meta/tool-descriptors";
 
 /**
  * Detects the auto-generated startup payload by its literal first
@@ -119,49 +119,6 @@ function stripJektEnvelope(body: string, tier: JektTier): string {
     if (/^─+$/.test(lines[end - 1] ?? "")) end--;
 
     return lines.slice(start, end).join("\n").trim();
-}
-
-/**
- * Extract relevant detail from tool params for summary/tooltip display.
- * Returns the full text, untruncated — callers decide how to clip/wrap it
- * (the .agent-tool-name CSS rule clips with `text-overflow: ellipsis` based
- * on actual row width, so the ellipsis position recomputes for free on zoom
- * and pane resize; a hover tooltip instead word-wraps the same full string).
- * Pre-truncating here would freeze either presentation at a fixed character
- * count. (See SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md.) Exported so both
- * generateToolSummary and a tool-block tooltip share one per-tool-kind
- * switch instead of drifting out of sync.
- */
-export function extractToolDetail(tool: string, params: Record<string, any>): string {
-    switch (tool) {
-        case "Read":
-        case "Edit":
-        case "Write":
-            return params.file_path || "";
-        case "Bash":
-            return params.command || "";
-        case "Grep":
-            return params.pattern || "";
-        case "Glob":
-            return params.pattern || "";
-        case "Agent":
-            return params.description || params.prompt || "";
-        case "Workflow":
-            return params.title || params.description || "";
-        case "web_search":
-        case "WebSearch":
-            return params.query || "";
-        case "WebFetch":
-        case "web_fetch":
-            try {
-                const u = new URL(params.url || "");
-                return u.host + (u.pathname === "/" ? "" : u.pathname);
-            } catch {
-                return params.url || "";
-            }
-        default:
-            return "";
-    }
 }
 
 /**
@@ -817,8 +774,8 @@ export class ClaudeCodeStreamParser {
      * from the node's live fields (see ToolNode.summary).
      */
     private generateToolSummary(tool: string, params: Record<string, any>): string {
-        const icon = TOOL_ICONS[tool] || TOOL_ICONS.Other;
-        const detail = extractToolDetail(tool, params);
+        const icon = toolIcon({ tool: "Other", toolName: tool });
+        const detail = toolDetail(tool, params);
         return detail ? `${icon} ${tool} ${detail}` : `${icon} ${tool}`;
     }
 

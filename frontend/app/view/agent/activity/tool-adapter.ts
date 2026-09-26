@@ -28,7 +28,8 @@
  * §3 step 1, §4.1-4.3.
  */
 
-import { extractToolDetail } from "../stream-parser";
+import { toolDetail, toolNameOf } from "../tool-meta/tool-descriptors";
+import { TOOL_STATUS } from "../tool-meta/tool-status";
 import type { BashParams, BashResult, DocumentNode, ToolNode } from "../types";
 import { wholeCommandSleepMs } from "./sleep-detect";
 import type { ActivityStatus, PinnedActivity } from "./types";
@@ -215,20 +216,9 @@ function everCrossedThreshold(n: ToolNode, now: number): boolean {
     return false;
 }
 
-function toolActivityStatus(status: ToolNode["status"]): ActivityStatus {
-    switch (status) {
-        case "running": return "running";
-        case "success": return "done";
-        case "failed": return "error";
-        // denied/canceled/pending_approval/awaiting_answer — cut off or
-        // never actually ran long, not a failure signal. Same bucket as
-        // subagent-adapter.ts's "abandoned" → "stopped".
-        default: return "stopped";
-    }
-}
-
 export function toolToActivity(n: ToolNode): PinnedActivity {
-    const detail = extractToolDetail(n.tool, (n.params as Record<string, any>) ?? {});
+    // By raw name: a WebSearch's coarse kind is "Other", which has no detail.
+    const detail = toolDetail(toolNameOf(n), (n.params as Record<string, any>) ?? {});
     const sleepMs = pureSleepMs(n);
     return {
         id: n.id,
@@ -238,7 +228,7 @@ export function toolToActivity(n: ToolNode): PinnedActivity {
         // remaining time is actually KNOWN rather than guessed — the row shows
         // a countdown instead of a blind elapsed timer.
         ...(sleepMs != null ? { sleepMs } : {}),
-        status: toolActivityStatus(n.status),
+        status: TOOL_STATUS[n.status]?.activity ?? "stopped",
         startedAt: n.timestamp!,
         endedAt: n.status !== "running" && n.duration != null ? n.timestamp! + n.duration * 1000 : undefined,
         // No cancel path exists for a single in-flight tool call today (only
