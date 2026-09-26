@@ -23,6 +23,7 @@ import type {
     ToolNode,
     UserMessageNode,
 } from "../types";
+import { isContentFirstTool } from "../components/tool-presentation";
 
 export type NodeKind = DocumentNode["type"];
 
@@ -100,7 +101,18 @@ export function estimateSection(_node: SectionNode): number {
     return SECTION_PX;
 }
 
+/**
+ * A content-first tool (WebSearch) renders expanded by default, its body
+ * capped by CSS at `$transcript-preview-max-height` (≈ 233 px on a 1400 px
+ * window), plus the header row and padding. Same approximation as
+ * JEKT_EXPANDED_MAX_ESTIMATE_PX; the measured height replaces it on render.
+ */
+export const CONTENT_FIRST_TOOL_ESTIMATE_PX = 280;
+
 export function estimateTool(node: ToolNode, state: DocumentState): number {
+    if (isContentFirstTool(node)) {
+        return state.collapsedNodes.has(node.id) ? TOOL_COLLAPSED_PX : CONTENT_FIRST_TOOL_ESTIMATE_PX;
+    }
     return state.pinnedNodes.has(node.id) ? TOOL_EXPANDED_PX : TOOL_COLLAPSED_PX;
 }
 
