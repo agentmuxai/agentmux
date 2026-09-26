@@ -105,8 +105,13 @@
     border-radius: 4px;
     user-select: none;
 
+    // --swarm-agent-hover-bg / --swarm-agent-active-border are set inline per
+    // row from that agent's own resolved pane-tab color (computeBlockActiveBorderColor,
+    // lightened for hover) — see swarm-view.tsx's AgentRow. The var(...,
+    // <default>) fallbacks are what a row without a resolvable color (no
+    // blockId, or a block with no color set) keeps showing.
     &:hover {
-        background: var(--highlight-bg);
+        background: var(--swarm-agent-hover-bg, var(--highlight-bg));
     }
 
     &--active {
@@ -114,7 +119,7 @@
         // inset box-shadow draws on all four sides inside the element and is
         // never clipped by ancestor overflow:hidden (unlike outline which
         // renders outside the box and is cut at the swarm-view edge).
-        box-shadow: inset 0 0 0 1px var(--accent-color, #5b8dd9);
+        box-shadow: inset 0 0 0 1px var(--swarm-agent-active-border, var(--accent-color, #5b8dd9));
         border-radius: 0;
     }
 }
@@ -180,37 +185,6 @@
         opacity: 0.6;
         white-space: nowrap;
     }
-}
-
-// Focus button — same hover-reveal shape as .swarm-subagent-retire, but the
-// hover-trigger ancestor is .swarm-agent-card (this row's click target),
-// not .swarm-agent-row, since that's what the click-to-toggle now lives on.
-.swarm-agent-focus {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--secondary-text-color);
-    font-size: 11px;
-    border-radius: 4px;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-
-.swarm-agent-card:hover .swarm-agent-focus {
-    opacity: 0.75;
-}
-
-.swarm-agent-focus:hover {
-    opacity: 1;
-    color: var(--accent-color);
-    background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
 }
 
 // ── Children area ────────────────────────────────────────────────────────
