@@ -59,15 +59,8 @@ describe("SettingsView rail", () => {
     });
 
     function renderSettings() {
-        const model = new SettingsViewModel("test-block", null as any);
-        const result = render(() => (
-            <SettingsView
-                blockId="test-block"
-                model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
-            />
-        ));
+        const model = new SettingsViewModel();
+        const result = render(() => <SettingsView model={model} />);
         return { ...result, model };
     }
 
@@ -111,20 +104,20 @@ describe("SettingsView pane title", () => {
     });
 
     it("defaults viewName() to 'Appearance'", () => {
-        const model = new SettingsViewModel("test-block", null as any);
+        const model = new SettingsViewModel();
         expect(model.viewName()).toBe("Appearance");
     });
 
     it("viewName() reflects the active section after setSection", () => {
-        const model = new SettingsViewModel("test-block", null as any);
+        const model = new SettingsViewModel();
         model.setSection("sounds");
         expect(model.viewName()).toBe("Sounds");
     });
 
     it("clicking a rail item updates viewName() to match", () => {
-        const model = new SettingsViewModel("test-block", null as any);
+        const model = new SettingsViewModel();
         render(() => (
-            <SettingsView blockId="test-block" model={model} blockRef={{ current: null }} contentRef={{ current: null }} />
+            <SettingsView model={model} />
         ));
         const rail = screen.getByLabelText("Settings section", { selector: "nav.settings-rail" });
         const advancedButton = Array.from(rail.querySelectorAll("button")).find(
@@ -140,9 +133,9 @@ describe("SettingsView search bar", () => {
     afterEach(() => cleanup());
 
     function renderSettings() {
-        const model = new SettingsViewModel("test-block", null as any);
+        const model = new SettingsViewModel();
         render(() => (
-            <SettingsView blockId="test-block" model={model} blockRef={{ current: null }} contentRef={{ current: null }} />
+            <SettingsView model={model} />
         ));
         return { model };
     }

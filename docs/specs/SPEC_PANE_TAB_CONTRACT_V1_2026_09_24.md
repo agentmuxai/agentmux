@@ -446,8 +446,27 @@ working throughout through a legacy adapter.
        Stash button, context menu, voice (Ctrl+Shift+V; the mic itself sits
        beside the composer, so no `headerMic`), progress mount and focus. The
        manifest lives in its own module, so the model no longer imports its
-       view to hand the host a `viewComponent`. Still on `legacyAdapter`:
-       `launcher`, `memory`, `identity`, `toolchain` and `settings`.
+       view to hand the host a `viewComponent`.
+     - **Launcher, memory, identity, toolchain, settings (implemented, part
+       2b-4) — Phase 2c complete: every built-in view is native.**
+       `launcherPaneTab` declares `header: "none"` (new: the view draws no
+       header; the adapter maps it to `noHeader`), and hands the host its
+       focus and grid key handling. `memoryPaneTab` and `identityPaneTab`
+       read only their block's `meta.agentId` and `frame:title`, so they have
+       no model: the memory pane used to be backed by a full
+       `BundleViewModel` that listed every bundle and subscribed to changes
+       on construction for nothing it showed — `BundleViewModel` is now just
+       the context-free `BundleManager`'s editor model, and
+       `IdentityPaneViewModel` is gone. `toolchainPaneTab` has no model
+       either (its view holds its state); `settingsPaneTab` keeps a small
+       model for its open section and query, and titles the pane with the
+       section. Their pills show the icons their headers always did
+       (`shapes`, `layer-group`, `user`, `wrench`, `cog`) and proper labels
+       instead of the old fallback square and lowercase view names.
+       Nothing but tests uses `legacyAdapter` now (the widget loader
+       already rejects a class-based widget), so the class path
+       (`viewModelClass`, `makeViewModel`'s class branch) is dead code;
+       removing it is the follow-up.
      - **Terminal and agent hooks (implemented, part 2b-1).**
        Unlike the eight views above, shared code reached INTO these two view
        models through the host, which works only while the host holds the
