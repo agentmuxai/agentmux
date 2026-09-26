@@ -54,9 +54,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         move |req: CommandAttachmentsInfoData, _ctx| {
             let svc = info_svc.clone();
             async move {
-                let items = tokio::task::spawn_blocking(move || svc.info(&req.ids))
-                    .await
-                    .map_err(|e| format!("attachments.info: {e}"))?;
+                let items = svc.info(&req.ids).await;
                 Ok(AttachmentsInfoResult { items })
             }
         },

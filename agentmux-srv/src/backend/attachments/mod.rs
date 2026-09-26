@@ -222,24 +222,51 @@ impl Service {
 
     /// Info for each id still in the store, in request order. May decode
     /// (after a send-edge change), so call it off the async workers.
-    pub fn info(&self, ids: &[String]) -> Vec<AttachmentInfo> {
+    pub async fn info(self: &Arc<Self>, ids: &[String]) -> Vec<AttachmentInfo> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(meta) = self.ensure_derived(id).await {
+                out.push(meta.to_info(id, ""));
+            }
+        }
+        out
+    }
+
+    /// Metadata under the current fingerprint. When the send edge or the
+    /// pipeline changed since the attachment was processed, re-derive it
+    /// from the stored original under the same CPU and memory limits as
+    /// ingest, so a transcript full of old thumbnails can't start an
+    /// unbounded number of decodes at once.
+    pub async fn ensure_derived(self: &Arc<Self>, id: &str) -> Option<store::StoredMeta> {
         let edge = self.limits().send_max_edge;
-        ids.iter()
-            .filter_map(|id| {
-                self.store
-                    .ensure_derived(id, edge)
-                    .map(|m| m.to_info(id, ""))
-            })
-            .collect()
+        let fp = store::fingerprint(edge);
+        if let Some(meta) = self.store.meta(id, &fp) {
+            return Some(meta);
+        }
+        let (blob, format) = self.store.find_blob(id)?;
+        let _cpu = self.permits.clone().acquire_owned().await.ok()?;
+        let blob_for_dims = blob.clone();
+        let (w, h) = blocking(move || process::header_dimensions(&blob_for_dims))
+            .await
+            .ok()?;
+        let _mem = self.reserve_memory(w, h).await;
+        // Another request may have derived it while this one waited.
+        if let Some(meta) = self.store.meta(id, &fp) {
+            return Some(meta);
+        }
+        let svc = Arc::clone(self);
+        let id = id.to_string();
+        blocking(move || svc.store.derive_and_save(&id, &blob, format, edge))
+            .await
+            .ok()
     }
 
     /// Resolve an id to the send-copy path and MIME type for delivery,
-    /// marking it used. May decode, so call it off the async workers.
+    /// marking it used. Doesn't decode: call [`Self::ensure_derived`] first
+    /// so a stale fingerprint is re-derived under the limits.
     #[allow(dead_code)] // used by prompt delivery (next PR in the stack)
     pub fn send_path(&self, id: &str) -> Option<(PathBuf, String)> {
-        let edge = self.limits().send_max_edge;
-        self.store.ensure_derived(id, edge)?;
-        let fp = store::fingerprint(edge);
+        let fp = store::fingerprint(self.limits().send_max_edge);
         let found = self.store.file(id, &fp, Kind::Send)?;
         self.store.mark_sent(id);
         self.store.touch(id, &fp);
@@ -263,15 +290,15 @@ impl Service {
     ) -> Result<AttachmentInfo, process::ProcessError> {
         // Same CPU limit as batch jobs, so a burst of pastes can't run more
         // decodes at once than a drop can.
-        let _cpu = self
-            .permits
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| process::ProcessError {
-                code: "cancelled",
-                message: "Cancelled.".into(),
-            })?;
+        let _cpu =
+            self.permits
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| process::ProcessError {
+                    code: "cancelled",
+                    message: "Cancelled.".into(),
+                })?;
         let edge = self.limits().send_max_edge;
         let svc = Arc::clone(self);
         let place_id = id.clone();

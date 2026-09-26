@@ -52,23 +52,20 @@ pub(super) async fn handle_attachment_file(
     let svc = service(&state);
     let edge = svc.limits().send_max_edge;
     let fp = attachments::store::fingerprint(edge);
-    let lookup_svc = svc.clone();
-    let lookup_id = id.clone();
-    let found = tokio::task::spawn_blocking(move || {
-        let store = lookup_svc.store();
-        if kind == Kind::Original {
-            // The original is served straight from blobs/: it must not
-            // depend on the derive pipeline succeeding.
-            let (path, format) = store.find_blob(&lookup_id)?;
-            return Some((path, attachments::process::mime_of(format).to_string()));
+    let found = if kind == Kind::Original {
+        // The original is served straight from blobs/: it must not depend on
+        // the derive pipeline succeeding.
+        svc.store()
+            .find_blob(&id)
+            .map(|(path, format)| (path, attachments::process::mime_of(format).to_string()))
+    } else {
+        // Re-derives (under the service's limits) when the fingerprint
+        // changed since the attachment was processed.
+        match svc.ensure_derived(&id).await {
+            Some(_) => svc.store().file(&id, &fp, kind),
+            None => None,
         }
-        // Re-derives when the fingerprint changed since the upload.
-        store.ensure_derived(&lookup_id, edge)?;
-        store.file(&lookup_id, &fp, kind)
-    })
-    .await
-    .ok()
-    .flatten();
+    };
     let Some((path, mime)) = found else {
         return error(StatusCode::NOT_FOUND, "attachment not found");
     };

@@ -442,6 +442,9 @@ impl Store {
 
     /// Metadata for `id` under the current send edge, re-deriving from the
     /// stored original when the fingerprint changed since it was processed.
+    /// Test helper: production code goes through `Service::ensure_derived`,
+    /// which applies the CPU and memory limits.
+    #[cfg(test)]
     pub fn ensure_derived(&self, id: &str, send_max_edge: u32) -> Option<StoredMeta> {
         let fp = fingerprint(send_max_edge);
         if let Some(meta) = self.meta(id, &fp) {
