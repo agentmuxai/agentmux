@@ -339,8 +339,71 @@ cef::wrap_task! {
                 use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
                 DestroyWindow(self.hwnd as *mut std::ffi::c_void);
             }
+            // `on_before_close` does not fire for every pool window: a window
+            // that was promoted, closed and demoted back into the pool
+            // (`demote_promoted_pool_window`, round 6) is a parked browser, and
+            // this build never delivers `on_before_close` for one — the demote
+            // path's own comment names it. Its entry then stayed in
+            // `state.browsers` for good, outside the pool sets (popped above),
+            // so it was counted and listed as a live user window — a second
+            // window in the status bar that has no window behind it (seen on
+            // 0.57.6). Same class as `cleanup_failed_promote_orphan`'s orphan.
+            // Check back after a grace period and do `on_before_close`'s job
+            // if it never came.
+            let mut reap = ReapUnclosedEvictedPoolBrowserTask::new(
+                Arc::clone(&self.state),
+                self.label.clone(),
+            );
+            cef::post_delayed_task(cef::ThreadId::UI, Some(&mut reap), EVICTION_CLOSE_GRACE_MS);
         }
     }
+}
+
+/// How long an evicted pool window gets for CEF's `on_before_close` to
+/// unregister it before `ReapUnclosedEvictedPoolBrowserTask` does it. The
+/// callback normally lands within milliseconds of the destroy.
+#[cfg(target_os = "windows")]
+const EVICTION_CLOSE_GRACE_MS: i64 = 2_000;
+
+#[cfg(target_os = "windows")]
+cef::wrap_task! {
+    struct ReapUnclosedEvictedPoolBrowserTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            reap_unclosed_evicted_pool_browser(&self.state, &self.label);
+        }
+    }
+}
+
+/// `on_before_close`'s cleanup for an evicted pool window whose close
+/// callback never came, in the order that callback runs it: unregister
+/// (honoring its drain verdict), drop the cached HWND, pool bookkeeping,
+/// the launcher's close + count report, window meta. A no-op when the
+/// callback did run (the label is already unregistered); a callback that
+/// arrives after this finds no label and skips itself.
+#[cfg(target_os = "windows")]
+fn reap_unclosed_evicted_pool_browser(state: &Arc<AppState>, label: &str) {
+    if state.get_browser(label).is_none() {
+        return;
+    }
+    let out = state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
+        label: label.to_string(),
+    });
+    crate::ui_tasks::consume_request_drain(state, &out, "evicted_pool_reap");
+    state.window_hwnds.lock().remove(label);
+    on_pool_window_destroyed(state, label);
+    crate::launcher_ipc::report_window_closed(label.to_string());
+    crate::launcher_ipc::compute_and_report_host_counts(state);
+    state.window_meta.lock().remove(label);
+    tracing::warn!(
+        target: "pool:window",
+        label = %label,
+        "[pool] eviction: on_before_close never came — unregistered the pool window directly"
+    );
 }
 
 /// Spawn a single pool window. Called at startup (N times) and
