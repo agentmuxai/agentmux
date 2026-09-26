@@ -936,3 +936,29 @@ fn an_agentmux_write_outside_the_agents_own_folder_is_not_recorded() {
     f.change_elsewhere("only-elsewhere.md", Some("never projected here"));
     assert!(!record_agentmux_write_in(&f.fs, UID, &f.dir(), "only-elsewhere.md", b"y", "agent", "").unwrap());
 }
+
+/// A conflict file gets its index line once: a line someone removes, while
+/// keeping the file, stays removed.
+#[test]
+fn a_removed_conflict_index_line_is_not_added_back() {
+    let f = fixture();
+    f.put("MEMORY.md", "# Memory\n");
+    f.put("notes.md", "v1");
+    f.run();
+    f.change_elsewhere("notes.md", Some("theirs"));
+    f.put("notes.md", "mine");
+    assert_eq!(f.run().conflicts, 1);
+    assert!(f.get("MEMORY.md").unwrap().contains("__conflict_"));
+    f.put("MEMORY.md", "# Memory\n(the conflict line, removed on purpose)\n");
+    f.run();
+    f.run();
+    let idx = f.get("MEMORY.md").unwrap();
+    assert!(!idx.contains("__conflict_"), "{idx}");
+    assert_eq!(f.head_body("MEMORY.md").as_deref(), Some("# Memory\n(the conflict line, removed on purpose)\n"));
+}
+
+#[test]
+fn a_conflict_on_a_conflict_copy_is_named_after_the_original() {
+    assert_eq!(conflict_file_name("notes__conflict_aaaaaaaa.md", "v_bbbbbbbbcccc"), "notes__conflict_bbbbbbbb.md");
+    assert_eq!(conflict_file_name("notes.md", "v_bbbbbbbbcccc"), "notes__conflict_bbbbbbbb.md");
+}
