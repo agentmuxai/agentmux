@@ -126,9 +126,13 @@ impl Config {
         // names (`AGENTMUX_DATA_HOME`, `AGENTMUX_CONFIG_HOME`) are no
         // longer set — no fallback (symmetry; partial-rollout isn't a
         // supported scenario per spec §3.4 "no migration").
+        // An empty `--wavedata ""` counts as absent, as it does for the lock
+        // headless takes (`headless::effective_data_dir`) — otherwise the lock
+        // and the stores would pick different directories (Codex P2 on #3893).
         let data_home = args
             .wavedata
             .clone()
+            .filter(|p| !p.as_os_str().is_empty())
             .or_else(|| std::env::var_os("AGENTMUX_DATA_DIR").map(PathBuf::from))
             .unwrap_or_default();
 
@@ -248,6 +252,18 @@ mod tests {
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.data_home, PathBuf::from("/from/cli"));
         assert!(std::env::var("AGENTMUX_AUTH_KEY").is_err());
+        clear_env();
+    }
+
+    #[test]
+    fn empty_cli_wavedata_counts_as_absent() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-empty-wavedata");
+        std::env::set_var("AGENTMUX_DATA_DIR", "/from/env");
+        let args = CliArgs { wavedata: Some(PathBuf::new()), ..Default::default() };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.data_home, PathBuf::from("/from/env"));
         clear_env();
     }
 

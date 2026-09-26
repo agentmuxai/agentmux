@@ -237,6 +237,13 @@ mod tests {
         assert_eq!(dir(&["srv", "--headless"]), resolved);
         assert_eq!(dir(&["srv", "--headless", "--wavedata", "/shared"]), Path::new("/shared"));
         assert_eq!(dir(&["srv", "--wavedata=/shared"]), Path::new("/shared"));
+        // An empty --wavedata is a parse error (clap's PathBuf parser), so
+        // prepare_env exits before taking any lock; Config also treats an
+        // empty value as absent (Codex P2 on #3893).
+        assert!(<CliArgs as clap::Parser>::try_parse_from(args(&["srv", "--headless", "--wavedata", ""])).is_err());
+        assert!(<CliArgs as clap::Parser>::try_parse_from(args(&["srv", "--headless", "--wavedata="])).is_err());
+        assert!(requested_from(&args(&["srv", "--headless", "--wavedata", ""]), None));
+        assert_eq!(effective_data_dir(Some(Path::new("")), resolved), resolved);
     }
 
     /// A `--wavedata` that isn't valid UTF-8 is locked byte for byte, the same
