@@ -701,9 +701,8 @@ mod tests {
         );
 
         let (tx, _rx) = mpsc::unbounded_channel();
-        let handle = run_agent_with_bin(
-            path.to_str().unwrap(),
-            AgentRef::default(),
+        let handle = run_stub(
+            &path,
             AgentTask {
                 prompt: "hi".to_string(),
                 context: serde_json::Map::new(),
@@ -757,9 +756,8 @@ mod tests {
         );
 
         let (tx, _rx) = mpsc::unbounded_channel();
-        let handle = run_agent_with_bin(
-            path.to_str().unwrap(),
-            AgentRef::default(),
+        let handle = run_stub(
+            &path,
             AgentTask {
                 prompt: "hi".to_string(),
                 context: serde_json::Map::new(),
@@ -865,6 +863,30 @@ mod tests {
         std::fs::rename(&tmp, path).unwrap();
     }
 
+    /// [`run_agent_with_bin`] on a stub from [`write_stub_script`], retrying
+    /// while the stub is "Text file busy". ETXTBSY is about the file, not its
+    /// path: a child forked by another test while the stub was open for
+    /// writing holds that write fd until it execs, and the rename above keeps
+    /// the same file — so the race it was meant to close stays open under the
+    /// parallel suite. It is always transient.
+    #[cfg(unix)]
+    async fn run_stub(
+        path: &std::path::Path,
+        task: AgentTask,
+        tx: mpsc::UnboundedSender<AgentEvent>,
+    ) -> Result<AgentRunHandle, AgentError> {
+        let mut attempt = 0;
+        loop {
+            match run_agent_with_bin(path.to_str().unwrap(), AgentRef::default(), task.clone(), tx.clone()).await {
+                Err(e) if attempt < 20 && format!("{e:?}").contains("Text file busy") => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+                r => return r,
+            }
+        }
+    }
+
     /// End-to-end (Unix): claude can report an error on stdout and still
     /// exit 0; the runner must NOT treat that as success. codex P1 #1353.
     #[cfg(unix)]
@@ -878,9 +900,8 @@ mod tests {
         write_stub_script(&path, &[&format!("echo '{frame}'"), "exit 0"]);
 
         let (tx, _rx) = mpsc::unbounded_channel();
-        let handle = run_agent_with_bin(
-            path.to_str().unwrap(),
-            AgentRef::default(),
+        let handle = run_stub(
+            &path,
             AgentTask {
                 prompt: "hi".to_string(),
                 context: serde_json::Map::new(),
