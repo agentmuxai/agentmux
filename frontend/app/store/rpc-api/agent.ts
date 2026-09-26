@@ -57,6 +57,7 @@ import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
+import type { AgentDefCreateFromTemplateResult } from "@/types/rpc/AgentDefCreateFromTemplateResult";
 import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
@@ -348,7 +349,7 @@ export const AgentApi = {
             model_vendor_base_url?: string;
         },
         opts?: RpcOpts,
-    ): Promise<{ definition_id: string; identity_id: string; memory_id: string }> {
+    ): Promise<AgentDefCreateFromTemplateResult> {
         return client.rpcCall("agentdefcreatefromtemplate", data, opts);
     },
 

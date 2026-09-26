@@ -17,7 +17,7 @@ import { translateError } from "@/app/errors/translate";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
-import { buildConfigFiles } from "./agent-config-builder";
+import { buildConfigFiles, deriveSlug } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
@@ -463,7 +463,7 @@ export class AgentViewModel {
         // email) so credentials and identity persist even when the
         // user relaunches the same definition with different instance
         // names. See SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md §1.
-        const slug = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+        const slug = agent.slug || deriveSlug(agent.name);
 
         // Instance name: overrides.instanceName wins (modal-supplied);
         // falls back to the definition's own name for callers that

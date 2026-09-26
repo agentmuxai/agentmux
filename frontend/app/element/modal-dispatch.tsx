@@ -242,6 +242,7 @@ export function renderRequest(
                                     name,
                                     agentType,
                                     model,
+                                    resp.slug,
                                 );
                                 setSubmitting(false);
                                 api.close();

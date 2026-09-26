@@ -936,6 +936,40 @@ mod recent_sessions_tests {
         assert_eq!(new_def.parent_id, "tpl-claude");
     }
 
+    /// #3573: the response carries the slug the backend gave the new row,
+    /// punctuation-trimmed and collision-suffixed, so the launch's
+    /// `AGENTMUX_AGENT_ID` names this agent and not another (or none).
+    #[tokio::test]
+    async fn create_from_template_returns_the_rows_own_slug() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let mut created = Vec::new();
+        for name in ["Reviewer!", "Reviewer?"] {
+            let resp: crate::backend::rpc_types::AgentDefCreateFromTemplateResult = call_rpc(
+                &engine,
+                &mut rx,
+                crate::backend::rpc_types::COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+                serde_json::json!({ "template_id": "tpl-claude", "name": name }),
+            )
+            .await;
+            created.push(resp);
+        }
+        let (first, second) = (&created[0], &created[1]);
+        assert_eq!(first.slug, "reviewer");
+        assert_eq!(second.slug, "reviewer-2");
+
+        let agents: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({}),
+        )
+        .await;
+        for resp in &created {
+            let row = agents.iter().find(|a| a.id == resp.definition_id).unwrap();
+            assert_eq!(row.slug, resp.slug);
+        }
+    }
+
     // ---- Mandatory ABF: definition-time bundle provisioning ----
     //
     // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2 — every
