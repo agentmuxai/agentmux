@@ -26,14 +26,15 @@ The CI workflow's "Resolve Claude Code version" step (`id: claude_ver`) has a sp
 - Input empty or `"latest"` → resolve via `npm view @anthropic-ai/claude-code version` at build time
 
 `frontend/app/view/agent/providers/pin-consistency.test.ts` enforces agreement
-across the **five matching-version-string** locations (the first five rows
+across the **four matching-version-string** locations (the first four rows
 above), including the Dockerfile `ARG` — added 2026-08-27, closing a gap this
 doc itself had warned about (in this same paragraph) for over a month without
-it becoming a test. It does **not**, and structurally cannot, check the sixth
-row (the model `label`) — that's not a version string to compare, it's a
+it becoming a test. (A fifth, the CEF host's own installer pin, was removed on
+2026-09-26 with that unused installer.) It does **not**, and structurally
+cannot, check the fifth row (the model `label`) — that's not a version string to compare, it's a
 semantic claim about upstream state; see `SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`
 §3.3 for the open question of whether/how to make that check less manual too.
-All five version pins must still be updated together, and the test only
+All four version pins must still be updated together, and the test only
 catches a *mismatch* — not a location someone forgot to touch at all. (That
 drift-in-a-warning — plus this doc having separately drifted on the frontend
 file path, plus this exact paragraph ALSO originally mis-stated "all six" as
