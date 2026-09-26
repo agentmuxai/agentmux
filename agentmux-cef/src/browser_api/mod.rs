@@ -6,8 +6,10 @@
 //! External clients (test harnesses, automation scripts) use these
 //! endpoints to query and mutate the DOM inside a running browser
 //! pane without depending on screen-pixel geometry. Implemented as a
-//! thin proxy over CEF's Chrome DevTools Protocol (CDP) server on
-//! `remote_debugging_port` (9223 dev / 9222 release).
+//! thin proxy over the Chrome DevTools Protocol (CDP), driven in-process
+//! through each CEF `Browser`'s own DevTools message channel (`cdp`) —
+//! no remote-debugging server needed, which is what lets release builds
+//! run without one (#3681, `crate::cdp_port`).
 //!
 //! Phase 1 implements only `browser.query` — a CSS-selector lookup
 //! that returns matching elements with their tag, text, attrs, and
@@ -49,8 +51,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/reload", post(routes::reload))
 }
 
-/// Shared state for the browser API — primarily the CDP target
-/// cache (block_id → target_id). Lives inside `AppState` and is
+/// Shared state for the browser API — primarily the resolver's
+/// cache (block_id → window label, for panes inside shared windows). Lives inside `AppState` and is
 /// lazily populated on first resolve per block.
 pub struct BrowserApiState {
     pub target_cache: resolver::TargetCache,

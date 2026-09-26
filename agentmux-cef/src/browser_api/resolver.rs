@@ -1,78 +1,68 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Resolve `block_id` → CDP target id.
+//! Resolve `block_id` → the CEF `Browser` (by host-state label) whose page
+//! holds it.
 //!
-//! CEF's `/json` endpoint exposes every active page target but does
-//! NOT expose the underlying `cef::Browser::identifier()`, so we can't
-//! match by CEF id directly. Two resolution paths:
+//! The browser API drives CDP in-process through each `Browser`'s own
+//! DevTools message channel (`super::cdp`), so a target is simply a
+//! `Browser` — which host state already tracks by label. That replaced the
+//! old approach of listing the remote-debugging server's `/json` targets
+//! and matching by URL (then by a stamped page when several panes shared a
+//! URL): with the browser in hand there is nothing to match (#3681).
 //!
 //! **Path 1 — dedicated browser-pane block** (a `view: "browser"` widget,
 //! embedding its own separate CEF `Browser` for arbitrary third-party
-//! content): resolve by URL match, as originally shipped.
-//! 1. Ask the pane manager for the pane's current URL.
-//! 2. Probe `GET http://127.0.0.1:<debug>/json`.
-//! 3. Find the entry whose `url` matches the pane's URL AND whose
-//!    `id` isn't already owned by some other cached block.
+//! content): the pane's own live browser, straight from host state.
 //!
 //! **Path 2 — any other block** (agent/terminal/editor/etc. panes, which
-//! are DOM nodes inside a SHARED main/pool/floating window's page, not
-//! their own CDP target — see `SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`
-//! §1): there is no URL-based way to disambiguate which window a given
-//! block lives in, so instead probe every "page" target directly and ask
-//! each one (via one `Runtime.evaluate`) whether its DOM contains a
-//! `[data-blockid="<id>"]` element (set on every pane's root wrapper by
-//! `frontend/app/block/blockframe.tsx`). First match wins.
+//! are DOM nodes inside a SHARED main/pool/floating window's page, not their
+//! own browser — see `SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`
+//! §1): ask each top-level window's page (one `Runtime.evaluate`) whether its
+//! DOM contains a `[data-blockid="<id>"]` element (set on every pane's root
+//! wrapper by `frontend/app/block/blockframe.tsx`). First match wins. Only
+//! top-level app windows and floaters are probed (`list_top_level_browsers`)
+//! — never a browser pane's third-party page, which could otherwise plant a
+//! matching element, and never an OAuth popup.
 //!
-//! Callers MUST know which path resolved a target, because it changes
-//! whether DOM-subtree scoping is required: a Path-2 target is a SHARED
-//! page (other panes' DOM lives there too — queries/clicks/screenshots
-//! must scope to `[data-blockid]`), while a Path-1 target already IS the
-//! block's own isolated page (arbitrary third-party content with no
-//! `data-blockid` concept — scoping would break it). See `ResolvedTarget`.
+//! Callers MUST know which path resolved, because it changes whether
+//! DOM-subtree scoping is required: a Path-2 page is SHARED (other panes'
+//! DOM lives there too — queries/clicks/screenshots must scope to
+//! `[data-blockid]`), while a Path-1 page already IS the block's own
+//! isolated page (arbitrary third-party content with no `data-blockid`
+//! concept — scoping would break it). See `ResolvedTarget`.
 //!
-//! Cache: `(block_id → ResolvedTarget)`. Two browser panes on the same URL
-//! used to be indistinguishable here, so a block could be handed ANOTHER
-//! pane's page: screenshots came back sized for the wrong pane, and `eval`/
-//! `navigate` could act on the wrong one. When more than one unclaimed
-//! target matches, Path 1 now asks the block's own `Browser` to stamp its
-//! page with a one-off value and picks the target whose page carries it
-//! (`pick_by_stamp`).
+//! Cache: Path 2 remembers which window last held a block and probes it
+//! first, but always re-probes — a block can move windows (tear-off,
+//! re-dock), and a probe is one in-process evaluate. Path 1 needs no cache.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use serde::Deserialize;
 
 use super::cdp::CdpSession;
 use crate::state::AppState;
 
 pub type ResolveError = String;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
-    pub target_id: String,
-    /// True when this target is a page SHARED with other panes (the main
+    /// Host-state label of the `Browser` to drive (`super::cdp::CdpSession::attach`).
+    pub label: String,
+    /// True when this browser's page is SHARED with other panes (the main
     /// AgentMux UI, or a pool/floating window) — callers must scope
     /// queries/clicks/screenshots to this block's own `[data-blockid]`
-    /// subtree. False for a dedicated browser-pane target, which already
-    /// IS this block's own page.
+    /// subtree. False for a dedicated browser pane, whose page already IS
+    /// this block's own.
     pub scope_to_block: bool,
 }
 
 #[derive(Default)]
 pub struct TargetCache {
-    // block_id → resolved target
-    entries: Mutex<HashMap<String, ResolvedTarget>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct JsonTarget {
-    id: String,
-    url: String,
-    #[serde(default, rename = "type")]
-    kind: String,
+    // block_id → window label that last held it (Path 2 only)
+    last_window: Mutex<HashMap<String, String>>,
 }
 
 impl TargetCache {
@@ -85,526 +75,176 @@ impl TargetCache {
         state: &Arc<AppState>,
         block_id: &str,
     ) -> Result<ResolvedTarget, ResolveError> {
-        // Fast path: cache hit.
-        if let Some(cached) = self.entries.lock().get(block_id).cloned() {
-            return Ok(cached);
-        }
-
-        let debug_port = *state.debug_port.lock();
-        if debug_port == 0 {
-            return Err("CEF debug port not yet configured".to_string());
-        }
-
-        // Path 1: a dedicated browser-pane block — resolve by URL match,
-        // exactly as originally shipped. Target exclusivity (via
-        // already_cached) matters here: two browser panes must never be
-        // handed the same dedicated target.
-        let resolved = if let Some(pane_url) = state.browser_panes.pane_url(state, block_id) {
-            let already_cached = self.already_cached();
-            let candidates = Self::url_candidates(debug_port, &pane_url, &already_cached).await?;
-            let target_id = match candidates.as_slice() {
-                [] => {
-                    return Err(format!(
-                        "UNKNOWN_BLOCK_ID: no unclaimed CDP target matches url={pane_url} \
-                         for block_id={block_id}"
-                    ))
-                }
-                [only] => only.clone(),
-                _ => {
-                    let stamp = uuid::Uuid::new_v4().simple().to_string();
-                    if !state
-                        .browser_panes
-                        .run_js_in_pane(state, block_id, &stamp_js(&stamp))
-                    {
-                        return Err(format!("block_id={block_id}: pane closed while resolving"));
-                    }
-                    Self::pick_by_stamp(debug_port, &candidates, &stamp, STAMP_POLLS, STAMP_POLL_INTERVAL)
-                        .await
-                        .ok_or_else(|| {
-                            format!(
-                                "UNKNOWN_BLOCK_ID: {} CDP targets match url={pane_url} and none \
-                                 carried block_id={block_id}'s stamp",
-                                candidates.len()
-                            )
-                        })?
-                }
-            };
-            ResolvedTarget {
-                target_id,
+        // Path 1: a live browser pane is its own browser.
+        if let Some(label) = state.live_browser_pane_label(block_id) {
+            return Ok(ResolvedTarget {
+                label,
                 scope_to_block: false,
-            }
-        } else {
-            // Path 2 (fallback): not a browser pane — a DOM node inside
-            // one of the shared window pages. Probe. NOT target-exclusive
-            // — see resolve_by_dom_probe's doc comment for why.
-            let target_id = Self::resolve_by_dom_probe(debug_port, block_id).await?;
-            ResolvedTarget {
-                target_id,
-                scope_to_block: true,
-            }
-        };
-
-        self.entries
-            .lock()
-            .insert(block_id.to_string(), resolved.clone());
-        Ok(resolved)
-    }
-
-    fn already_cached(&self) -> Vec<String> {
-        self.entries
-            .lock()
-            .values()
-            .map(|r| r.target_id.clone())
-            .collect()
-    }
-
-    async fn fetch_page_targets(debug_port: u16) -> Result<Vec<JsonTarget>, ResolveError> {
-        let json_url = format!("http://127.0.0.1:{debug_port}/json");
-        let resp = reqwest::get(&json_url)
-            .await
-            .map_err(|e| format!("GET {json_url}: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("{json_url} returned {}", resp.status()));
+            });
         }
-        resp.json()
-            .await
-            .map_err(|e| format!("parse /json: {e}"))
-    }
 
-    /// Every unclaimed page target whose URL matches the pane's, in `/json`
-    /// order. More than one means several panes are on the same URL, which
-    /// only `pick_by_stamp` can tell apart.
-    async fn url_candidates(
-        debug_port: u16,
-        pane_url: &str,
-        already_cached: &[String],
-    ) -> Result<Vec<String>, ResolveError> {
-        let targets = Self::fetch_page_targets(debug_port).await?;
-
-        // Filter:
-        // - type=="page" (skip worker, iframe, etc.)
-        // - url matches the pane's url (exact or trailing-slash-tolerant)
-        // - id not already in our cache (avoids claiming another block's target)
-        let pane_url_norm = normalize_url(pane_url);
-        Ok(targets
-            .iter()
-            .filter(|t| t.kind == "page" || t.kind.is_empty())
-            .filter(|t| !already_cached.contains(&t.id))
-            .filter(|t| normalize_url(&t.url) == pane_url_norm)
-            .map(|t| t.id.clone())
-            .collect())
-    }
-
-    /// Which of `candidates` is the page stamped with `stamp` (`stamp_js`,
-    /// run in the block's own `Browser`). Polled, because the stamp is
-    /// posted to the renderer and lands a little later; the matching page's
-    /// stamp is removed once found. None if no page shows it in time.
-    async fn pick_by_stamp(
-        debug_port: u16,
-        candidates: &[String],
-        stamp: &str,
-        polls: u32,
-        interval: std::time::Duration,
-    ) -> Option<String> {
-        let mut sessions = Vec::new();
-        for id in candidates {
-            let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{id}");
-            if let Ok(cdp) = CdpSession::connect(&ws_url).await {
-                sessions.push((id.clone(), cdp));
-            }
-        }
-        let probe = stamp_probe_js(stamp);
-        let mut found = None;
-        'poll: for attempt in 0..polls {
-            if attempt > 0 {
-                tokio::time::sleep(interval).await;
-            }
-            for (id, cdp) in sessions.iter_mut() {
-                let reply = cdp
-                    .call(
-                        "Runtime.evaluate",
-                        serde_json::json!({ "expression": probe, "returnByValue": true }),
-                    )
-                    .await;
-                let hit = reply
-                    .ok()
-                    .and_then(|v| v.get("result").and_then(|r| r.get("value")).cloned())
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                if hit {
-                    found = Some(id.clone());
-                    break 'poll;
-                }
-            }
-        }
-        for (_, cdp) in sessions {
-            cdp.close().await;
-        }
-        found
-    }
-
-    /// Probe every "page" CDP target and ask each one (via a cheap
-    /// `Runtime.evaluate`) whether its DOM contains this block's
-    /// `[data-blockid]` wrapper. There are normally only a handful of live
-    /// top-level windows, so this is fast; no window-topology bookkeeping
-    /// (host↔srv round trip) is needed.
-    ///
-    /// Deliberately does NOT exclude already-cached/claimed targets the way
-    /// `url_candidates` does — that exclusivity is a Path-1 (dedicated
-    /// browser-pane) concept, where one CDP target really can only belong
-    /// to one block. Path 2's whole premise is the opposite: MANY blocks
-    /// (every pane in a window) legitimately share ONE target. Applying
-    /// Path-1's exclusivity here was a real bug (caught during live
-    /// verification, 2026-08-19): the first block resolved in a window
-    /// would "claim" the only target, and every other block in that SAME
-    /// window would then fail to resolve at all — see
-    /// `resolve_by_dom_probe_lets_multiple_blocks_share_one_window_target`.
-    async fn resolve_by_dom_probe(
-        debug_port: u16,
-        block_id: &str,
-    ) -> Result<String, ResolveError> {
-        let targets = Self::fetch_page_targets(debug_port).await?;
-        // JSON-encode block_id so it's a safe JS string literal; the
-        // selector itself is built via CSS.escape inside the expression,
-        // not string-concatenated here, so a block_id containing quotes
-        // can't break out of the selector.
-        let block_id_js = serde_json::to_string(block_id).unwrap_or_else(|_| "\"\"".to_string());
-        let probe_expr = format!(
-            "(() => {{ try {{ return !!document.querySelector(\
-             '[data-blockid=\"' + CSS.escape({block_id_js}) + '\"]'); \
-             }} catch (e) {{ return false; }} }})()"
-        );
-
-        for t in targets
-            .iter()
-            .filter(|t| t.kind == "page" || t.kind.is_empty())
-        {
-            let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{}", t.id);
-            let mut cdp = match CdpSession::connect(&ws_url).await {
-                Ok(c) => c,
-                Err(_) => continue, // target may have closed between /json and connect
-            };
-            let reply = cdp
-                .call(
+        // Path 2: which top-level window's page holds this block? Labels
+        // only — `Browser` handles aren't Send and aren't needed here.
+        let windows: Vec<String> = state
+            .list_top_level_browsers()
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect();
+        let cached = self.last_window.lock().get(block_id).cloned();
+        let expr = block_probe_expr(block_id);
+        let label = find_window_holding(block_id, &windows, cached.as_deref(), |label| {
+            let mut cdp = CdpSession::attach(state, label);
+            let expr = expr.clone();
+            async move {
+                cdp.call(
                     "Runtime.evaluate",
-                    serde_json::json!({ "expression": probe_expr, "returnByValue": true }),
+                    serde_json::json!({ "expression": expr, "returnByValue": true }),
                 )
-                .await;
-            let _ = cdp.close().await;
-            let found = reply
+                .await
                 .ok()
                 .and_then(|v| v.get("result").and_then(|r| r.get("value")).cloned())
                 .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if found {
-                return Ok(t.id.clone());
+                .unwrap_or(false)
             }
-        }
-
-        let probed = targets
-            .iter()
-            .filter(|t| t.kind == "page" || t.kind.is_empty())
-            .count();
-        Err(format!(
-            "UNKNOWN_BLOCK_ID: no CDP target's DOM contains a [data-blockid=\"{block_id}\"] \
-             element (probed {probed} page targets)"
-        ))
+        })
+        .await?;
+        self.last_window.lock().insert(block_id.to_string(), label.clone());
+        Ok(ResolvedTarget {
+            label,
+            scope_to_block: true,
+        })
     }
 
-    /// Invalidate a block's cached target — called when a pane closes
-    /// or navigates. On next resolve we'll re-probe.
+    /// Drop a block's remembered window — called when a pane closes or
+    /// navigates. The next resolve probes every window.
     pub fn forget(&self, block_id: &str) {
-        self.entries.lock().remove(block_id);
+        self.last_window.lock().remove(block_id);
     }
 }
 
-/// Window property the stamp lives in while a same-URL resolve is in flight.
-const STAMP_KEY: &str = "__agentmuxResolveStamp";
-/// ~600ms in all: the stamp normally lands within a frame or two.
-const STAMP_POLLS: u32 = 20;
-const STAMP_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(30);
-
-/// JS that stamps the page it runs in. Non-enumerable, so the page's own
-/// scripts don't trip over it walking `window`; removed by `stamp_probe_js`.
-fn stamp_js(stamp: &str) -> String {
-    format!(
-        "Object.defineProperty(window, '{STAMP_KEY}', {{ value: '{stamp}', configurable: true }});"
-    )
+/// Probe `windows` (the remembered one first, if still open) and return the
+/// first whose page holds `block_id`. Deliberately NOT exclusive: many
+/// blocks legitimately share one window, so a window that already resolved
+/// another block stays a candidate (the exclusivity bug caught in live
+/// verification on 2026-08-19 must not come back —
+/// `many_blocks_can_share_one_window`).
+async fn find_window_holding<F, Fut>(
+    block_id: &str,
+    windows: &[String],
+    cached: Option<&str>,
+    mut holds_block: F,
+) -> Result<String, ResolveError>
+where
+    F: FnMut(&str) -> Fut,
+    Fut: Future<Output = bool>,
+{
+    for label in probe_order(windows, cached) {
+        if holds_block(&label).await {
+            return Ok(label);
+        }
+    }
+    Err(format!(
+        "UNKNOWN_BLOCK_ID: no window's DOM contains a [data-blockid=\"{block_id}\"] element \
+         (probed {} windows)",
+        windows.len()
+    ))
 }
 
-/// JS that answers whether this page carries `stamp`, removing it if so.
-fn stamp_probe_js(stamp: &str) -> String {
-    format!(
-        "(() => {{ const hit = window['{STAMP_KEY}'] === '{stamp}'; \
-         if (hit) delete window['{STAMP_KEY}']; return hit; }})()"
-    )
+/// `windows` with `cached` moved to the front — only if it is still open.
+fn probe_order(windows: &[String], cached: Option<&str>) -> Vec<String> {
+    let mut order: Vec<String> = Vec::with_capacity(windows.len());
+    if let Some(c) = cached.filter(|c| windows.iter().any(|w| w == c)) {
+        order.push(c.to_string());
+    }
+    order.extend(windows.iter().filter(|w| Some(w.as_str()) != cached).cloned());
+    order
 }
 
-fn normalize_url(u: &str) -> String {
-    // `https://www.google.com` vs `https://www.google.com/` are the
-    // same target; CEF /json includes the trailing slash, the pane's
-    // meta.url in our tests usually doesn't.
-    let trimmed = u.trim_end_matches('/').to_string();
-    trimmed.to_ascii_lowercase()
+/// JS answering whether this page holds `block_id`'s pane. `block_id` is
+/// JSON-encoded into a string literal and then `CSS.escape`d inside the
+/// page, so no block id can break out of the selector.
+fn block_probe_expr(block_id: &str) -> String {
+    let block_id_js = serde_json::to_string(block_id).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        "(() => {{ try {{ return !!document.querySelector(\
+         '[data-blockid=\"' + CSS.escape({block_id_js}) + '\"]'); \
+         }} catch (e) {{ return false; }} }})()"
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_url, stamp_js, stamp_probe_js, TargetCache};
+    use super::*;
+    use std::collections::HashSet;
 
-    #[test]
-    fn normalize_strips_trailing_slash_and_lowercases() {
-        assert_eq!(
-            normalize_url("https://www.google.com/"),
-            normalize_url("https://WWW.GOOGLE.COM"),
-        );
+    fn labels(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Minimal fake CDP `/json` endpoint — serves `body` verbatim for every
-    /// GET. Enough to exercise url_candidates / resolve_by_dom_probe's
-    /// target-matching logic without a real CEF process.
-    async fn spawn_fake_json_endpoint(body: &'static str) -> u16 {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else { return };
-                tokio::spawn(async move {
-                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                    let mut buf = [0u8; 2048];
-                    let Ok(_) = stream.read(&mut buf).await else { return };
-                    let resp = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        body.len(),
-                        body
-                    );
-                    let _ = stream.write_all(resp.as_bytes()).await;
-                });
-            }
-        });
-        port
+    /// A fake probe: `layout` maps window → the blocks its page holds.
+    fn probe<'a>(
+        layout: &'a HashMap<&'static str, HashSet<&'static str>>,
+        block: &'static str,
+    ) -> impl FnMut(&str) -> std::future::Ready<bool> + 'a {
+        move |w: &str| std::future::ready(layout.get(w).is_some_and(|b| b.contains(block)))
     }
 
-    // Path 1 (dedicated browser-pane block): matches by normalized URL, and
-    // — critically for the multi-pane case — must not re-claim a target
-    // another cached block already owns even when the URL still matches.
     #[tokio::test]
-    async fn url_candidates_match_and_skip_already_claimed_targets() {
-        let port = spawn_fake_json_endpoint(
-            r#"[
-                {"id": "target-a", "type": "page", "url": "https://example.com/pane-a/"},
-                {"id": "target-b", "type": "page", "url": "https://example.com/pane-b"}
-            ]"#,
-        )
-        .await;
+    async fn many_blocks_can_share_one_window() {
+        let layout = HashMap::from([("main", HashSet::from(["a", "b", "c"]))]);
+        let windows = labels(&["main"]);
+        for block in ["a", "b", "c"] {
+            let got = find_window_holding(block, &windows, None, probe(&layout, block)).await;
+            assert_eq!(got.unwrap(), "main", "block {block} must resolve even after others claimed main");
+        }
+    }
 
-        let found = TargetCache::url_candidates(port, "https://example.com/pane-a", &[])
+    #[tokio::test]
+    async fn finds_the_window_a_block_lives_in() {
+        let layout = HashMap::from([
+            ("main", HashSet::from(["a"])),
+            ("floating-1", HashSet::from(["torn-off"])),
+        ]);
+        let windows = labels(&["main", "floating-1"]);
+        let got = find_window_holding("torn-off", &windows, None, probe(&layout, "torn-off")).await;
+        assert_eq!(got.unwrap(), "floating-1");
+    }
+
+    #[tokio::test]
+    async fn a_stale_remembered_window_is_re_probed_not_trusted() {
+        // The block was in main, then torn off to floating-1.
+        let layout = HashMap::from([
+            ("main", HashSet::from([])),
+            ("floating-1", HashSet::from(["moved"])),
+        ]);
+        let windows = labels(&["main", "floating-1"]);
+        let got = find_window_holding("moved", &windows, Some("main"), probe(&layout, "moved")).await;
+        assert_eq!(got.unwrap(), "floating-1");
+    }
+
+    #[tokio::test]
+    async fn nothing_matching_is_a_clear_error() {
+        let layout = HashMap::from([("main", HashSet::from(["a"]))]);
+        let err = find_window_holding("ghost", &labels(&["main"]), None, probe(&layout, "ghost"))
             .await
-            .expect("/json is reachable");
-        assert_eq!(found, vec!["target-a".to_string()]);
-
-        let claimed = TargetCache::url_candidates(
-            port,
-            "https://example.com/pane-a",
-            &["target-a".to_string()],
-        )
-        .await
-        .expect("/json is reachable");
-        assert!(claimed.is_empty(), "target-a is already claimed, must not be handed out twice");
-    }
-
-    // Several panes on one URL: every one of them is a candidate, which is
-    // what sends resolve() to pick_by_stamp instead of taking the first.
-    #[tokio::test]
-    async fn url_candidates_returns_every_same_url_target() {
-        let port = spawn_fake_json_endpoint(
-            r#"[
-                {"id": "target-a", "type": "page", "url": "https://agentmux.ai/"},
-                {"id": "target-b", "type": "page", "url": "https://agentmux.ai/"},
-                {"id": "target-c", "type": "page", "url": "https://example.com/"}
-            ]"#,
-        )
-        .await;
-
-        let found = TargetCache::url_candidates(port, "https://agentmux.ai", &[])
-            .await
-            .expect("/json is reachable");
-        assert_eq!(found, vec!["target-a".to_string(), "target-b".to_string()]);
-    }
-
-    // The stamped page is found even when it isn't the first candidate —
-    // the old first-URL-match rule handed block B target-a here.
-    #[tokio::test]
-    async fn pick_by_stamp_finds_the_stamped_page_among_same_url_targets() {
-        let port = spawn_fake_cdp_endpoint(r#"[]"#, Some("target-b")).await;
-        let found = TargetCache::pick_by_stamp(
-            port,
-            &["target-a".to_string(), "target-b".to_string()],
-            "stamp",
-            3,
-            std::time::Duration::from_millis(1),
-        )
-        .await;
-        assert_eq!(found.as_deref(), Some("target-b"));
-    }
-
-    #[tokio::test]
-    async fn pick_by_stamp_gives_up_when_no_page_carries_the_stamp() {
-        let port = spawn_fake_cdp_endpoint(r#"[]"#, Some("target-z")).await;
-        let found = TargetCache::pick_by_stamp(
-            port,
-            &["target-a".to_string(), "target-b".to_string()],
-            "stamp",
-            2,
-            std::time::Duration::from_millis(1),
-        )
-        .await;
-        assert_eq!(found, None);
+            .unwrap_err();
+        assert!(err.starts_with("UNKNOWN_BLOCK_ID"), "{err}");
+        assert!(err.contains("ghost") && err.contains("probed 1 windows"), "{err}");
     }
 
     #[test]
-    fn stamp_js_and_probe_agree_on_the_key_and_value() {
-        let set = stamp_js("abc123");
-        let probe = stamp_probe_js("abc123");
-        assert!(set.contains("'__agentmuxResolveStamp'") && set.contains("'abc123'"), "{set}");
-        assert!(probe.contains("'__agentmuxResolveStamp'") && probe.contains("'abc123'"), "{probe}");
-        assert!(probe.contains("delete window"), "the probe removes the stamp once found: {probe}");
+    fn the_remembered_window_is_probed_first_only_while_it_is_open() {
+        let w = labels(&["main", "floating-1", "window-2"]);
+        assert_eq!(probe_order(&w, Some("floating-1")), labels(&["floating-1", "main", "window-2"]));
+        assert_eq!(probe_order(&w, Some("closed-window")), w);
+        assert_eq!(probe_order(&w, None), w);
     }
 
-    // Path 2 (fallback — any other block): no real CDP server sits behind
-    // these fake targets, so every connect attempt fails and this exercises
-    // the "probed N targets, none matched" error path without needing to
-    // fake the CDP WebSocket protocol itself.
-    #[tokio::test]
-    async fn resolve_by_dom_probe_reports_a_clear_error_when_nothing_matches() {
-        let port = spawn_fake_json_endpoint(
-            r#"[{"id": "target-a", "type": "page", "url": "https://example.com/"}]"#,
-        )
-        .await;
-
-        let err = TargetCache::resolve_by_dom_probe(port, "some-block-id")
-            .await
-            .expect_err("no CDP target is actually reachable in this test");
-        assert!(err.contains("UNKNOWN_BLOCK_ID"), "got: {err}");
-        assert!(err.contains("some-block-id"), "got: {err}");
-    }
-
-    /// Minimal fake CDP endpoint: serves `/json` (like `spawn_fake_json_endpoint`)
-    /// AND accepts a WebSocket at `/devtools/page/<id>`, answering every
-    /// `Runtime.evaluate` call with `{result: {value: true}}` — i.e. "yes,
-    /// this target's DOM contains whatever [data-blockid] selector was
-    /// asked about." Good enough to exercise the DOM-probe *success* path,
-    /// which the connect-always-fails tests above can't reach.
-    /// `true_only_on`: answer true only on that target's socket, false on
-    /// every other — "only this page carries the stamp."
-    async fn spawn_fake_cdp_endpoint(json_body: &'static str, true_only_on: Option<&'static str>) -> u16 {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else { return };
-                tokio::spawn(async move {
-                    // Peek (not consume) the request line to route: `/json`
-                    // is a plain HTTP GET, `/devtools/page/<id>` is a WS
-                    // upgrade. Using `peek` (rather than reading via a
-                    // BufReader and calling `.into_inner()`) matters: `
-                    // BufReader::into_inner()` DISCARDS whatever it already
-                    // buffered past the first line, desyncing the stream
-                    // and hanging `accept_async`'s handshake read forever —
-                    // that was a real bug in an earlier version of this
-                    // test helper (2026-08-19), not in production code.
-                    let mut peek_buf = [0u8; 128];
-                    let Ok(n) = stream.peek(&mut peek_buf).await else { return };
-                    // The request line's path, e.g. `/devtools/page/target-b`.
-                    let path = std::str::from_utf8(&peek_buf[..n])
-                        .ok()
-                        .and_then(|l| l.split_whitespace().nth(1))
-                        .unwrap_or("")
-                        .to_string();
-                    let answer = match true_only_on {
-                        Some(id) => path.ends_with(&format!("/{id}")),
-                        None => true,
-                    };
-                    if peek_buf[..n].starts_with(b"GET /json") {
-                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                        let mut stream = stream;
-                        let mut buf = [0u8; 1024];
-                        let _ = stream.read(&mut buf).await; // drain the request, best-effort
-                        let resp = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                            json_body.len(),
-                            json_body
-                        );
-                        let _ = stream.write_all(resp.as_bytes()).await;
-                        return;
-                    }
-                    // WebSocket upgrade for /devtools/page/<id>.
-                    let mut ws = match tokio_tungstenite::accept_async(stream).await {
-                        Ok(w) => w,
-                        Err(_) => return,
-                    };
-                    use futures_util::{SinkExt, StreamExt};
-                    while let Some(Ok(msg)) = ws.next().await {
-                        let tokio_tungstenite::tungstenite::Message::Text(text) = msg else {
-                            continue;
-                        };
-                        let Ok(req): Result<serde_json::Value, _> = serde_json::from_str(&text)
-                        else {
-                            continue;
-                        };
-                        let id = req.get("id").cloned().unwrap_or(serde_json::json!(0));
-                        let reply = serde_json::json!({ "id": id, "result": { "result": { "value": answer } } });
-                        if ws
-                            .send(tokio_tungstenite::tungstenite::Message::Text(
-                                reply.to_string().into(),
-                            ))
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                });
-            }
-        });
-        port
-    }
-
-    // Regression test for a real bug caught during live verification
-    // (2026-08-19): two DIFFERENT blocks that legitimately live in the SAME
-    // shared window (e.g. an "agent" pane and a "sysinfo" pane both on the
-    // main window) must BOTH resolve successfully to that one shared
-    // target. The `already_cached` target-exclusivity check that Path 1
-    // needs (two browser panes must never be handed the same dedicated
-    // target) was wrongly also applied to Path 2, where "many blocks, one
-    // shared target" is the whole point — the first block_id resolved
-    // would "claim" the only target, so any lookup for a different block
-    // in the SAME window then failed with UNKNOWN_BLOCK_ID even though its
-    // [data-blockid] element genuinely exists on that page.
-    #[tokio::test]
-    async fn resolve_by_dom_probe_lets_multiple_blocks_share_one_window_target() {
-        let port = spawn_fake_cdp_endpoint(
-            r#"[{"id": "main-window-target", "type": "page", "url": "http://127.0.0.1:5307/"}]"#,
-            None,
-        )
-        .await;
-
-        let first = TargetCache::resolve_by_dom_probe(port, "agent-block-id")
-            .await
-            .expect("first block in the shared window should resolve");
-        assert_eq!(first, "main-window-target");
-
-        // The critical assertion: a SECOND, different block_id in the SAME
-        // window must ALSO resolve — this is what broke before the fix,
-        // when resolve() fed the first block's already-cached target_id
-        // into an exclusivity filter this function no longer has.
-        let second = TargetCache::resolve_by_dom_probe(port, "sysinfo-block-id")
-            .await
-            .expect(
-                "a second block sharing the same window target must still resolve — \
-                 target exclusivity is a Path-1 (dedicated browser pane) concept, \
-                 not a Path-2 (shared window) one",
-            );
-        assert_eq!(second, "main-window-target");
+    #[test]
+    fn the_probe_escapes_the_block_id_inside_the_page() {
+        let expr = block_probe_expr(r#"x"]');alert(1)//"#);
+        // The id only ever appears as a JSON string literal passed to CSS.escape.
+        assert!(expr.contains(r#"CSS.escape("x\"]');alert(1)//")"#), "{expr}");
+        assert!(!expr.contains(r#"[data-blockid="x"]"#));
     }
 }

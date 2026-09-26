@@ -106,7 +106,9 @@ The launcher runs the full reducer + saga coordinator on Linux (since v0.42.x A1
 
 ## Remote debugging
 
-The CEF host starts a remote debugger. It PREFERS port 9222 (release) or 9223 (dev), but takes an OS-assigned port when that one is busy — which is normal, since multiple instances run in parallel by design. **Do not assume the constant**: it names whichever instance won the race, not the one you want. Read the actual port from that instance's `authkey.dev` (`debug_port`), or from its log:
+The CEF host's remote debugger (an unauthenticated CDP server on loopback) is **off in release builds** unless you opt in with `AGENTMUX_CDP_PORT` — any other local user could otherwise connect to it (#3681). Dev builds run it by default. `AGENTMUX_CDP_PORT=<port>` turns it on preferring that port, `=1`/`on` on the default port, `=0`/`off` turns it off (dev builds too); nothing inside AgentMux needs it — the browser API drives CDP in-process.
+
+When it is on, it PREFERS port 9222 (release) or 9223 (dev), but takes an OS-assigned port when that one is busy — which is normal, since multiple instances run in parallel by design. **Do not assume the constant**: it names whichever instance won the race, not the one you want. Read the actual port from that instance's `authkey.dev` (`debug_port`), or from its log:
 
 ```
 grep 'remote-debugging port' ~/.agentmux/channels/<channel>/versions/<ver>/logs/cef-debug.log
@@ -115,7 +117,7 @@ node -e 'import("./tools/tests/lib/instance-discovery.mjs").then(m=>console.log(
 ```
 
 
-1. Start AgentMux
+1. Start AgentMux (a release build with `AGENTMUX_CDP_PORT=9222`, or any dev build)
 2. Open `chrome://inspect` in another Chromium browser
 3. Under "Remote Target", click "Configure…" and add `localhost:<debug_port>` — the value from step 0, not a guess
 4. The AgentMux renderer process appears under "Remote Target"

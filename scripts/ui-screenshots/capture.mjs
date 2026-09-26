@@ -17,6 +17,10 @@
 // scoped to the calling agent's own pane and can't reach a separate
 // instance's window. See the spec's §2 for why. Node's native WebSocket
 // (no external dependency) is used throughout.
+//
+// A RELEASE instance only runs that port when launched with
+// AGENTMUX_CDP_PORT set (#3681) — e.g. `AGENTMUX_CDP_PORT=9222` for both the
+// app and this script. Dev builds run it by default.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
