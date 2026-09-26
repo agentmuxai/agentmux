@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.57.8 — 2026-09-26
+
+- Closing the main window no longer flashes "invalid configuration, client or window was not loaded" on the way out. That message is for a window that never loaded; once a window has loaded, losing its record (as closing does) now shows the plain background instead.
+- Closing an agent now releases its WAN lease even late in a relay connection, so the agent can be reopened on another install straight away instead of staying fenced until the lease expires. The lease heartbeat and mail-check fallbacks also stop using an expired login.
+- Same-account WAN jekts are now verified after a relay connection is more than 15 minutes old. The key lookup used the login loaded when the connection opened, which expires after 15 minutes, so every WAN jekt after that arrived TRUST=network-claimed. It now loads a fresh login, and a refused lookup is logged with its HTTP status.
+- Why a WAN signature didn't verify is now recorded: the audit carries the cause (for example the directory's HTTP status), and each WAN jekt logs one line with its verification outcome.
+- An expanded jekt's body is capped at the same height as tool previews and scrolls inside its box, with the sender and trust line still visible.
+- Hovering an agent in the Swarm panel now outlines it in the unselected-pane border colour instead of filling it.
+- Click the account shown in an agent's composer to switch it to another signed-in account of the same provider (while the agent is idle).
+
 ## 0.57.7 — 2026-09-26
 
 - a fresh session on a new build or channel gets the agent's record of the conversation, instead of nothing
