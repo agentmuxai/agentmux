@@ -3349,7 +3349,7 @@ mod fleet_tests {
                 }),
             )
             .route(
-                "/api/v1/agent/shutdown/{id}",
+                "/api/v1/agent/shutdown/:id",
                 get(move |headers: axum::http::HeaderMap| async move {
                     let key = headers.get("X-AuthKey").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
                     h2.lock().unwrap().push(format!("status:{key}"));
