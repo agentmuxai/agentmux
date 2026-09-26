@@ -255,6 +255,34 @@ impl MuxLock {
     }
 }
 
+/// File srv locks in the directory holding its databases.
+pub const SRV_DATA_LOCK_FILE: &str = "srv.lock";
+
+/// Data-dir locks this process holds, kept for its lifetime.
+static DATA_DIR_LOCKS: std::sync::Mutex<Vec<(PathBuf, MuxLock)>> = std::sync::Mutex::new(Vec::new());
+
+/// Take srv's exclusive lock on `data_dir` (`<data_dir>/srv.lock`): one srv per
+/// set of databases, however each was started — launcher, host or `--headless`
+/// (SPEC_SRV_HEADLESS_MODE §3.2; Codex P1 on #3893). Idempotent within a
+/// process, so headless setup can take it early and bootstrap again later.
+/// Advisory `flock` on Unix; not exclusive elsewhere (see `MuxLock`).
+pub fn acquire_data_dir_lock(data_dir: &Path) -> Result<(), String> {
+    let mut held = DATA_DIR_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    if held.iter().any(|(p, _)| p == data_dir) {
+        return Ok(());
+    }
+    let lock_path = data_dir.join(SRV_DATA_LOCK_FILE);
+    let lock = MuxLock::acquire_at(&lock_path).map_err(|_| {
+        format!(
+            "another agentmux-srv is already using {} (lock {})",
+            data_dir.display(),
+            lock_path.display()
+        )
+    })?;
+    held.push((data_dir.to_path_buf(), lock));
+    Ok(())
+}
+
 // ---- Environment helpers ----
 
 /// Check if AgentMux is in dev mode.

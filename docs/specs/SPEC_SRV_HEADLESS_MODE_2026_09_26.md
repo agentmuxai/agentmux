@@ -27,7 +27,7 @@ So srv can't be a container entrypoint, a system service, or a CI fixture withou
 2. **The auth key is never printed.** It comes from `AGENTMUX_AUTH_KEY`, from `--auth-key-file <path>`, or is generated and written to a file only the owner can read. Only the file's path is logged.
 3. **Predictable addresses**: `--web-port` / `--ws-port` fix the ports.
 4. **One headless srv per data dir.**
-5. **Nothing else changes** for the launcher- and host-spawned srv.
+5. **Nothing else changes** for the launcher- and host-spawned srv, except that it now also takes the data-dir lock (§3.2).
 
 **Non-goals (this slice):**
 - Listening on anything but loopback. Remote access is a reverse proxy's job, with TLS and its own authentication, in front of a loopback srv (§5).
@@ -38,7 +38,7 @@ So srv can't be a container entrypoint, a system service, or a CI fixture withou
 
 ### 3.1 Startup
 
-`main` checks `headless::requested()` before anything else. It is true for `--headless` or `AGENTMUX_HEADLESS=1`, **but never when a subcommand such as `migrate` runs**. A subcommand needs none of this setup, and the lock would refuse a `migrate --verify` run beside a running headless server.
+`main` checks `headless::requested()` before anything else. It is true for `--headless` or `AGENTMUX_HEADLESS=1`, **but never for a subcommand such as `migrate`, or for `--help` / `--version`**. A subcommand needs none of this setup, and the lock would refuse a `migrate --verify` run beside a running headless server.
 - **Headless:** `headless::prepare_env()` runs, and the parent watcher is **not** installed.
 - **Otherwise:** `install_process_watchers()` runs as before.
 
@@ -56,8 +56,11 @@ Runs before logging is initialized, so the log dir comes from the paths it resol
    The root follows the usual rules: `AGENTMUX_HOME_OVERRIDE`, then `AGENTMUX_DATA_HOME`, then `~/.agentmux`. If the env is already set, it is used as is.
 
    **Then `AGENTMUX_HOME_OVERRIDE` is removed.** Every path is explicit in the env now, as the launcher leaves it, and srv resolves its stores from the exported data dir. Left set, the override would win in `agentmux_root()`, and every version's databases would open at the override root.
-2. **Lock:** an exclusive lock on `srv-headless.lock` **in the directory holding the databases** (`MuxLock::acquire_at`), held for the process lifetime. That directory is `--wavedata` when given (the precedence `Config` applies), otherwise the resolved data dir. A second headless srv on the same data dir exits 1 and names the lock.
-3. **Auth key**, unless `AGENTMUX_AUTH_KEY` is already set: `--auth-key-file` / `AGENTMUX_AUTH_KEY_FILE` (trimmed, must not be empty); otherwise a fresh key (two v4 UUIDs, 244 random bits, 64 hex characters) written to `<instance runtime>/srv-auth-key` with mode `0600`, **replaced on every start**, as a launcher-spawned srv gets a new key each launch. The path is printed; the key never is. It then becomes `AGENTMUX_AUTH_KEY`, and srv's normal config reads it and removes it from the environment.
+2. **Lock:** `base::acquire_data_dir_lock` takes an exclusive lock on `srv.lock` **in the directory holding the databases**, held for the process lifetime. That directory is `--wavedata` when given (the precedence `Config` applies), otherwise the resolved data dir.
+   - **Every srv takes this same lock**, launcher-, host- or headless-started: bootstrap takes it before opening stores. So no two servers share a set of databases, however each was started.
+   - Headless takes it early, before writing anything. The call is idempotent within a process, so bootstrap's later call is a no-op.
+   - A second server on the same data dir exits 1 and names the lock.
+3. **Auth key**, unless `AGENTMUX_AUTH_KEY` is already set: `--auth-key-file` / `AGENTMUX_AUTH_KEY_FILE` (trimmed, must not be empty); otherwise a fresh key (two v4 UUIDs, 244 random bits, 64 hex characters) written **beside the databases** (`<data dir>/srv-auth-key`) with mode `0600`, so two servers on different data dirs can't overwrite each other's key, **replaced on every start**, as a launcher-spawned srv gets a new key each launch. The path is printed; the key never is. It then becomes `AGENTMUX_AUTH_KEY`, and srv's normal config reads it and removes it from the environment.
 4. **Ports:** `--web-port` / `--ws-port` are kept **in-process**, not in the env, so neither a launcher-spawned srv nor an agent can inherit them. The startup listeners bind `STARTUP_BIND_ADDR`'s loopback host with that port (`headless::startup_bind_addr`). A srv that isn't headless, or a headless srv without the flag, binds `STARTUP_BIND_ADDR` itself (OS-chosen port). **Still loopback only.**
 5. **Cloud subscriber:** `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER=1` unless the caller set it. The subscriber reads the OS keychain at startup, which a container usually lacks.
 6. **No LAN listeners:** bootstrap calls `LanListenerSupervisor::forbid_lan()`, so a saved `network:lan_discovery: true` (or a later settings change) can't bind srv's ports on other interfaces or advertise them. mDNS advertising follows the supervisor's bound listeners, so it stays off too.

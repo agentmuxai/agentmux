@@ -497,6 +497,13 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         tracing::error!("Failed to ensure data dir: {}", e);
         std::process::exit(1);
     });
+    // One srv per set of databases, however it was started (headless already
+    // took this in `headless::prepare_env`; that makes this a no-op).
+    base::acquire_data_dir_lock(&base::get_mux_data_dir()).unwrap_or_else(|e| {
+        tracing::error!("{e}");
+        eprintln!("agentmux-srv: {e}");
+        std::process::exit(1);
+    });
     base::ensure_mux_db_dir().unwrap_or_else(|e| {
         tracing::error!("Failed to ensure db dir: {}", e);
         std::process::exit(1);
