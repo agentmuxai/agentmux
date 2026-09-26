@@ -23,6 +23,7 @@ import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "@/app/store/keymodel-bindings";
 import { formatKeyDescription } from "@/util/keyutil";
 import { saveCurrentLayout } from "./save-layout";
+import { openLayoutFromFile } from "./open-layout";
 import { createMemo, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
 
@@ -113,6 +114,11 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                         label: "Save layout…",
                         icon: "floppy-disk",
                         onClick: () => fireAndForget(saveCurrentLayout),
+                    },
+                    {
+                        label: "Open layout…",
+                        icon: "folder-open",
+                        onClick: () => fireAndForget(openLayoutFromFile),
                     },
                 ],
             },

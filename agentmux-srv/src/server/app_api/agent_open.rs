@@ -327,6 +327,42 @@ pub(crate) async fn open_agent_impl(
     state: &AppState,
     cmd: CommandAgentOpenData,
 ) -> Result<AgentOpenResult, String> {
+    open_agent_inner(state, cmd, None).await
+}
+
+/// `agent.open`, but launching into an existing, empty agent pane
+/// (`{view:"agent"}`, the picker) instead of creating a new one and
+/// inserting it into the layout. Used by Layouts → Open layout…
+/// (`SPEC_LAYOUT_FILES_2026_09_25.md` §3.5), which rebuilds the saved split
+/// tree first and then launches each agent into its placeholder — so every
+/// check `agent.open` makes (admission, one live instance, provider, CLI,
+/// resume, config files) applies unchanged. If the agent is already open in
+/// this tab, that pane is returned and the placeholder is left as a picker.
+pub(crate) async fn open_agent_into_block(
+    state: &AppState,
+    agent_id: &str,
+    tab_id: &str,
+    block_id: &str,
+) -> Result<AgentOpenResult, String> {
+    open_agent_inner(
+        state,
+        CommandAgentOpenData {
+            agent_id: agent_id.to_string(),
+            tab_id: Some(tab_id.to_string()),
+            split_direction: None,
+            split_reference_block_id: None,
+            focus: Some(false),
+        },
+        Some(block_id),
+    )
+    .await
+}
+
+async fn open_agent_inner(
+    state: &AppState,
+    cmd: CommandAgentOpenData,
+    into_block: Option<&str>,
+) -> Result<AgentOpenResult, String> {
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     let event_bus = state.event_bus.clone();
@@ -784,6 +820,44 @@ pub(crate) async fn open_agent_impl(
                 // which the controller resync below reloads by id.
                 let meta_val = serde_json::to_value(&meta)
                     .map_err(|e| format!("agent.open: meta serialize: {e}"))?;
+                let block_id = if let Some(target) = into_block {
+                    // Layouts → Open layout…: the pane already exists and sits
+                    // in the rebuilt tree — give it the agent's meta through
+                    // the reducer (like `pane.open`'s editor reuse) and skip
+                    // the layout insert below.
+                    let target_block = mstore
+                        .get::<Block>(target)
+                        .map_err(|e| format!("agent.open: read target pane: {e}"))?
+                        .ok_or_else(|| format!("agent.open: no such pane: {target}"))?;
+                    if obj::meta_get_string(&target_block.meta, "view", "") != "agent"
+                        || !obj::meta_get_string(&target_block.meta, "agentId", "").is_empty()
+                    {
+                        return Err("agent.open: the target pane is not an empty agent pane".to_string());
+                    }
+                    let mut patch = meta_val.clone();
+                    if let Some(p) = patch.as_object_mut() {
+                        // The layout's "which agent goes here" hint is spent.
+                        p.insert(crate::backend::layout_file::META_LAYOUT_AGENT.to_string(), serde_json::Value::Null);
+                    }
+                    let meta_events = crate::server::service::dispatch_to_reducer(
+                        &app_state,
+                        agentmux_common::ipc::Command::UpdateBlockMeta { block_id: target.to_string(), meta_patch: patch },
+                    )
+                    .await;
+                    if let Some(msg) = meta_events.iter().find_map(|e| match e {
+                        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                        _ => None,
+                    }) {
+                        return Err(format!("agent.open: UpdateBlockMeta: {msg}"));
+                    }
+                    for ev in &meta_events {
+                        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                            tracing::warn!("agent.open: UpdateBlockMeta mstore apply failed: {e}");
+                        }
+                    }
+                    crate::server::service::publish_events(&app_state, &meta_events);
+                    target.to_string()
+                } else {
                 let create_events = crate::server::service::dispatch_to_reducer(
                     &app_state,
                     agentmux_common::ipc::Command::CreateBlock {
@@ -851,6 +925,8 @@ pub(crate) async fn open_agent_impl(
                         tracing::warn!("agent.open: layout action enqueue failed: {e}");
                     }
                 }
+                block_id
+                };
 
                 tracing::info!(
                     block_id = %block_id,

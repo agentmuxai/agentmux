@@ -193,6 +193,11 @@ declare global {
          *  if the user cancelled. Writes nothing itself. See
          *  docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §6.1. */
         showSaveLayoutDialog(defaultName: string): Promise<string | null>;
+        /** Native "open file" dialog for a layout file, opening in
+         *  `~/.agentmux/shared/layouts/`. Resolves to the chosen absolute
+         *  path, or null if cancelled. Reads nothing itself. See
+         *  docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.5. */
+        showOpenLayoutDialog(): Promise<string | null>;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;

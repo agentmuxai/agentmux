@@ -484,6 +484,8 @@ pub const COMMAND_BOOKMARKS_SET: &str = "bookmarks.set";
 // Layout files — save a window as `*.agentmux-layout.json`.
 // See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.
 pub const COMMAND_LAYOUT_SAVE: &str = "layout.save";
+pub const COMMAND_LAYOUT_PREVIEW: &str = "layout.preview";
+pub const COMMAND_LAYOUT_OPEN: &str = "layout.open";
 
 // Browser-pane start page — a single URL, also global (shared_dir-backed).
 // Write-only RPC: the value is read via GetFullConfig's `browserstartpage`

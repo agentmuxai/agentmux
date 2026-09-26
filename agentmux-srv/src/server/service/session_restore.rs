@@ -41,7 +41,7 @@ use super::reducer_helpers::{dispatch_to_reducer, seed_layout_via_reducer};
 
 const SNAPSHOT_META_KEY: &str = "session:last_topology";
 
-fn placeholder(idx: usize) -> String {
+pub(crate) fn placeholder(idx: usize) -> String {
     format!("__snap_block_{idx}__")
 }
 
@@ -419,6 +419,109 @@ fn current_workspace_id(store: &Store) -> Option<String> {
     })
 }
 
+/// One tab to rebuild: its blocks' meta, and a split tree whose leaves name
+/// those blocks by position (`placeholder(i)` ↔ `blocks[i]`).
+pub(crate) struct ReplayTab {
+    pub name: String,
+    pub blocks: Vec<Value>,
+    pub rootnode: Option<LayoutNode>,
+    pub focused: String,
+    pub magnified: String,
+}
+
+/// A tab that `replay_tabs` actually rebuilt, with its blocks' new ids in
+/// the order they were created.
+pub(crate) struct ReplayedTab {
+    pub tab_id: String,
+    pub block_ids: Vec<String>,
+}
+
+/// Rebuild `tabs` inside an existing workspace: per tab `CreateTab`, each
+/// block `CreateBlock` (its saved meta), then `LayoutSetTree` with the tree's
+/// placeholders resolved to the new block ids. Shared by restore-on-relaunch
+/// (into a fresh workspace) and Layouts → Open layout… (into the current
+/// window's) — `SPEC_LAYOUT_FILES_2026_09_25.md` §1.1.
+///
+/// Per-tab and per-block failures are logged and skipped, never fatal: a
+/// partially-stale input still rebuilds everything else. The returned vector
+/// is parallel to `tabs` (`None` = that tab didn't come back). Events are
+/// applied to the store but **not published** — the caller does that.
+pub(crate) async fn replay_tabs(
+    state: &AppState,
+    ws_id: &str,
+    tabs: &[ReplayTab],
+    log_ctx: &str,
+) -> (Vec<Event>, Vec<Option<ReplayedTab>>) {
+    let mut all_events = Vec::new();
+    let mut replayed = Vec::with_capacity(tabs.len());
+    for tab in tabs {
+        let tab_events = dispatch_to_reducer(
+            state,
+            Command::CreateTab { workspace_id: ws_id.to_string(), name: tab.name.clone() },
+        )
+        .await;
+        if let Some(err) = find_error(&tab_events) {
+            tracing::warn!(error = %err, "{log_ctx}: CreateTab failed — skipping this tab");
+            replayed.push(None);
+            continue;
+        }
+        if apply_and_publish(state, &tab_events).await.is_err() {
+            tracing::warn!("{log_ctx}: CreateTab SQLite write failed — skipping this tab");
+            replayed.push(None);
+            continue;
+        }
+        let Some(tab_id) = tab_events.iter().find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        }) else {
+            replayed.push(None);
+            continue;
+        };
+        all_events.extend(tab_events);
+
+        let mut new_block_ids: Vec<String> = Vec::new();
+        for meta in &tab.blocks {
+            let blk_events = dispatch_to_reducer(
+                state,
+                Command::CreateBlock { tab_id: tab_id.clone(), meta: meta.clone() },
+            )
+            .await;
+            if let Some(err) = find_error(&blk_events) {
+                tracing::warn!(error = %err, "{log_ctx}: CreateBlock failed — skipping this block");
+                continue;
+            }
+            if apply_and_publish(state, &blk_events).await.is_err() {
+                tracing::warn!("{log_ctx}: CreateBlock SQLite write failed — skipping this block");
+                continue;
+            }
+            if let Some(block_id) = blk_events.iter().find_map(|e| match e {
+                Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            }) {
+                new_block_ids.push(block_id);
+            }
+            all_events.extend(blk_events);
+        }
+
+        if new_block_ids.is_empty() {
+            replayed.push(None);
+            continue;
+        }
+
+        if let Some(mut tree) = tab.rootnode.clone() {
+            resolve_placeholders(&mut tree, &new_block_ids);
+            if let Err(e) =
+                seed_layout_via_reducer(state, &tab_id, tree, tab.focused.clone(), Vec::new(), tab.magnified.clone())
+                    .await
+            {
+                tracing::warn!(tab_id = %tab_id, error = %e, "{log_ctx}: layout write failed — tab restored blank");
+            }
+        }
+        replayed.push(Some(ReplayedTab { tab_id, block_ids: new_block_ids }));
+    }
+    (all_events, replayed)
+}
+
 pub(crate) async fn restore_last_session(
     state: &AppState,
 ) -> Result<Option<(String, Vec<Event>)>, String> {
@@ -450,111 +553,42 @@ pub(crate) async fn restore_last_session(
         return Err("restore_last_session: CreateWorkspace produced no WorkspaceCreated event".into());
     };
 
+    let replay: Vec<ReplayTab> = tabs_json
+        .iter()
+        .map(|tab_json| ReplayTab {
+            name: tab_json.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            blocks: tab_json
+                .get("blocks")
+                .and_then(|v| v.as_array())
+                .map(|blocks| blocks.iter().map(|b| b.get("meta").cloned().unwrap_or(Value::Null)).collect())
+                .unwrap_or_default(),
+            rootnode: tab_json
+                .get("rootnode")
+                .filter(|v| !v.is_null())
+                .and_then(|v| serde_json::from_value::<LayoutNode>(v.clone()).ok()),
+            focused: tab_json.get("focusednodeid").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            // `magnifiednodeid` refers to a LayoutNode.id, not a block id —
+            // like `focusednodeid`, it survives the snapshot round-trip
+            // verbatim (only block ids are placeholder-remapped). Previously
+            // never captured/passed at all (reagentx P2 on PR #2560), so a tab
+            // closed with a pane magnified relaunched showing the full tree.
+            magnified: tab_json.get("magnifiednodeid").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        })
+        .collect();
+    let (tab_events, replayed) = replay_tabs(state, &ws_id, &replay, "restore_last_session").await;
     let mut all_events = ws_events;
-    let mut restored_any_tab = false;
+    all_events.extend(tab_events);
+    let restored_any_tab = replayed.iter().any(Option::is_some);
     // Maps this tab's position in the ORIGINAL snapshot (`tabs_json`) to its
     // freshly-created id, for tabs that actually made it through restore —
-    // resolves `active_tab_index` below the same way `resolve_placeholders`
-    // resolves block placeholders: by position among what actually survived,
+    // resolves `active_tab_index` below by position among what survived,
     // not raw snapshot index (a tab that fails to restore must not desync
     // this lookup for every tab after it).
-    let mut new_tab_ids_by_snapshot_index: HashMap<usize, String> = HashMap::new();
-
-    for (snapshot_idx, tab_json) in tabs_json.iter().enumerate() {
-        let name = tab_json
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let tab_events = dispatch_to_reducer(
-            state,
-            Command::CreateTab { workspace_id: ws_id.clone(), name },
-        )
-        .await;
-        if let Some(err) = find_error(&tab_events) {
-            tracing::warn!(error = %err, "restore_last_session: CreateTab failed — skipping this tab");
-            continue;
-        }
-        if apply_and_publish(state, &tab_events).await.is_err() {
-            tracing::warn!("restore_last_session: CreateTab SQLite write failed — skipping this tab");
-            continue;
-        }
-        let Some(tab_id) = tab_events.iter().find_map(|e| match e {
-            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
-            _ => None,
-        }) else {
-            continue;
-        };
-        all_events.extend(tab_events);
-
-        let blocks_json = tab_json
-            .get("blocks")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let mut new_block_ids: Vec<String> = Vec::new();
-        for block_json in &blocks_json {
-            let meta = block_json.get("meta").cloned().unwrap_or(Value::Null);
-            let blk_events = dispatch_to_reducer(
-                state,
-                Command::CreateBlock { tab_id: tab_id.clone(), meta },
-            )
-            .await;
-            if let Some(err) = find_error(&blk_events) {
-                tracing::warn!(error = %err, "restore_last_session: CreateBlock failed — skipping this block");
-                continue;
-            }
-            if apply_and_publish(state, &blk_events).await.is_err() {
-                tracing::warn!("restore_last_session: CreateBlock SQLite write failed — skipping this block");
-                continue;
-            }
-            if let Some(block_id) = blk_events.iter().find_map(|e| match e {
-                Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
-                _ => None,
-            }) {
-                new_block_ids.push(block_id);
-            }
-            all_events.extend(blk_events);
-        }
-
-        if new_block_ids.is_empty() {
-            continue;
-        }
-        restored_any_tab = true;
-        new_tab_ids_by_snapshot_index.insert(snapshot_idx, tab_id.clone());
-
-        if let Some(rootnode_json) = tab_json.get("rootnode").filter(|v| !v.is_null()) {
-            if let Ok(mut tree) = serde_json::from_value::<LayoutNode>(rootnode_json.clone()) {
-                resolve_placeholders(&mut tree, &new_block_ids);
-                let focused = tab_json
-                    .get("focusednodeid")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                // `magnifiednodeid` refers to a LayoutNode.id, not a block
-                // id — like `focusednodeid`, it survives the snapshot
-                // round-trip verbatim (only `data.block_id`/`block_stack`/
-                // `active_block_id` get placeholder-remapped, never
-                // `LayoutNode.id` itself), so no resolve_placeholders-style
-                // step is needed here. Previously never captured/passed at
-                // all (reagentx P2 on PR #2560), so a tab closed with a
-                // pane magnified always relaunched showing the full split
-                // tree.
-                let magnified = tab_json
-                    .get("magnifiednodeid")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                if let Err(e) = seed_layout_via_reducer(state, &tab_id, tree, focused, Vec::new(), magnified).await {
-                    tracing::warn!(
-                        tab_id = %tab_id,
-                        error = %e,
-                        "restore_last_session: layout write failed — tab restored blank"
-                    );
-                }
-            }
-        }
-    }
+    let new_tab_ids_by_snapshot_index: HashMap<usize, String> = replayed
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| r.as_ref().map(|r| (i, r.tab_id.clone())))
+        .collect();
 
     if !restored_any_tab {
         // Nothing actually came back (every tab's CreateTab/CreateBlock

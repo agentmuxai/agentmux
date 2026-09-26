@@ -535,6 +535,9 @@ export function buildCefApi(): AppApi {
         showSaveLayoutDialog: (defaultName: string) => {
             return invokeCommand<string | null>("show_save_layout_dialog", { defaultName });
         },
+        showOpenLayoutDialog: () => {
+            return invokeCommand<string | null>("show_open_layout_dialog");
+        },
         onQuicklook: (filePath: string) => {
             invokeCommand("quicklook", { filePath }).catch(console.error);
         },
