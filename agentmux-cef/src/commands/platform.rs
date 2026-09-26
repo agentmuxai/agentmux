@@ -61,63 +61,14 @@ pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String
 /// Get the AgentMux account-wide root (`~/.agentmux/`) — `user_home_dir`, set
 /// from `paths.home_dir` (sidecar.rs; the same root in portable / installed /
 /// override modes, not a per-channel or `<portable>/data` subdir). Used by the
-/// frontend for per-agent paths (e.g. the working dir) and as the root
-/// of the shared provider auth dir (`ensure_auth_dir`).
+/// frontend for per-agent paths (e.g. the working dir). (The shared
+/// provider auth dir under it is srv's `provider.ensureauthdir`.)
 pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let dir = state.user_home_dir.lock();
     match dir.as_ref() {
         Some(d) => Ok(serde_json::json!(d)),
         None => Err("User home dir not initialized yet".to_string()),
     }
-}
-
-/// Ensure a provider auth directory exists and return its absolute path.
-/// The DEFAULT provider auth lives in the account-wide, version- and
-/// channel-independent `~/.agentmux/shared/providers/<provider>/` — the
-/// per-identity bundle override (identity_handlers) still wins for explicit
-/// multi-account.
-pub fn ensure_auth_dir(
-    state: &Arc<AppState>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let provider_id = args
-        .get("provider_id")
-        .or_else(|| args.get("providerId"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "Missing provider_id".to_string())?;
-
-    // Reject path traversal attempts in provider_id
-    if provider_id.contains('/')
-        || provider_id.contains('\\')
-        || provider_id.contains("..")
-        || provider_id.is_empty()
-    {
-        return Err(format!(
-            "Invalid provider_id '{}': must not contain path separators or '..'",
-            provider_id
-        ));
-    }
-
-    // The DEFAULT provider auth/config dir lives under the account-wide, version-
-    // and channel-independent shared root (`~/.agentmux/shared/providers/<provider>/`),
-    // NOT the per-channel config dir. One login is shared across every instance /
-    // channel / version — the structural fix for the per-channel validate-spin
-    // regression (docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md).
-    // The per-identity bundle override (identity_handlers) still wins for explicit
-    // multi-account. `user_home_dir` is the AgentMux root (`~/.agentmux/`).
-    let home = state.user_home_dir.lock();
-    let home = home
-        .as_ref()
-        .ok_or_else(|| "Home dir not initialized yet".to_string())?;
-
-    let auth_dir = std::path::PathBuf::from(home)
-        .join("shared")
-        .join("providers")
-        .join(provider_id);
-    std::fs::create_dir_all(&auth_dir)
-        .map_err(|e| format!("Failed to create auth dir for {}: {}", provider_id, e))?;
-
-    Ok(serde_json::json!(auth_dir.to_string_lossy()))
 }
 
 /// Get an environment variable value.

@@ -366,7 +366,6 @@ declare global {
         setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;
         setProviderAuth: (provider: string, token: string) => Promise<void>;
-        ensureAuthDir: (providerId: string) => Promise<string>;
         runCliLogin: (
             cliPath: string,
             loginArgs: string[],

@@ -140,6 +140,7 @@ pub const COMMAND_SHELL_STATUS: &str = "shellstatus";
 pub const COMMAND_WRITE_AGENT_CONFIG: &str = "writeagentconfig";
 pub const COMMAND_RESOLVE_CLI: &str = "resolvecli";
 pub const COMMAND_CHECK_CLI_AUTH: &str = "checkcliauth";
+pub const COMMAND_ENSURE_PROVIDER_AUTH_DIR: &str = "provider.ensureauthdir";
 
 // Block commands
 

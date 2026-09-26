@@ -49,6 +49,7 @@ import { InAppLoginPanel, type InAppLoginPhase } from "./InAppLoginPanel";
 import { runProviderLogin } from "../flows/run-provider-login";
 import type { ProviderDefinition } from "../providers";
 import "./PreLaunchAuthPanel.scss";
+import { ensureProviderAuthDir } from "../agent-launch-env";
 
 export interface PreLaunchAuthPanelProps {
     /** The provider to authenticate. */
@@ -382,11 +383,11 @@ async function startConnect(
     const authEnv: Record<string, string> = {};
     if (provider.authConfigDirEnvVar) {
         try {
-            const authDir = await getApi().ensureAuthDir(provider.id);
+            const authDir = await ensureProviderAuthDir(provider.id);
             authEnv[provider.authConfigDirEnvVar] = authDir;
-            console.log(`[auth-diag] ensureAuthDir ok: ${provider.authConfigDirEnvVar}=${authDir}`);
+            console.log(`[auth-diag] ensureProviderAuthDir ok: ${provider.authConfigDirEnvVar}=${authDir}`);
         } catch (e) {
-            console.error(`[auth-diag] ensureAuthDir FAILED: ${(e as Error)?.message ?? String(e)}`);
+            console.error(`[auth-diag] ensureProviderAuthDir FAILED: ${(e as Error)?.message ?? String(e)}`);
             controller.failConnect(e);
             return;
         }

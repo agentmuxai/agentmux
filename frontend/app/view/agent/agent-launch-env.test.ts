@@ -27,6 +27,7 @@ const prereqs = (node: boolean, npm: boolean) => ({
 });
 
 const resolveCli = vi.fn();
+const ensureAuthDirRpc = vi.fn();
 // A plain function, not a vi.fn, for the failure case: vitest reports what a
 // vi.fn implementation throws as a test error even when the caller catches it.
 let resolveCliImpl: ((...args: unknown[]) => unknown) | null = null;
@@ -36,6 +37,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         GetBundleCommand: (...args: unknown[]) => getMemory(...args),
         ResolveCliCommand: (...args: unknown[]) => (resolveCliImpl ?? resolveCli)(...args),
         ResolvePrereqsCommand: (...args: unknown[]) => resolvePrereqs(...args),
+        EnsureProviderAuthDirCommand: (...args: unknown[]) => ensureAuthDirRpc(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -49,6 +51,7 @@ vi.mock("@/app/store/global", () => ({
 import * as launchEnv from "./agent-launch-env";
 import {
     checkNodejsForProvider,
+    ensureProviderAuthDir,
     commitLaunch,
     resolveCliBin,
     resolveEffectiveLaunchProvider,
@@ -340,5 +343,18 @@ describe("resolveCliBin", () => {
 
     it("no longer exports the host-home path builder", () => {
         expect((launchEnv as Record<string, unknown>).resolveCliDir).toBeUndefined();
+    });
+});
+
+describe("ensureProviderAuthDir", () => {
+    it("asks srv (provider.ensureauthdir) for the provider and returns the path", async () => {
+        ensureAuthDirRpc.mockResolvedValue({ path: "/home/u/.agentmux/shared/providers/claude" });
+        await expect(ensureProviderAuthDir("claude")).resolves.toBe("/home/u/.agentmux/shared/providers/claude");
+        expect(ensureAuthDirRpc).toHaveBeenCalledWith(expect.anything(), { provider_id: "claude" });
+    });
+
+    it("passes srv's refusal through (an unknown provider is an error, not a path)", async () => {
+        ensureAuthDirRpc.mockRejectedValue(new Error("provider.ensureauthdir: unknown provider \"x\""));
+        await expect(ensureProviderAuthDir("x")).rejects.toThrow("unknown provider");
     });
 });

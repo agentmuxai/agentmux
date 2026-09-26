@@ -733,7 +733,7 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
 
         case "ConnectFailed": {
             // Codex P2 on #853 round 7: gate on connect-attempt kinds
-            // so a stale ResolveCli/ensureAuthDir rejection from an
+            // so a stale ResolveCli/ensureProviderAuthDir rejection from an
             // abandoned connect can't clobber a newer `ready`/
             // `authenticated`/`saving` selection. Only honored where
             // a connect was actually in progress.
