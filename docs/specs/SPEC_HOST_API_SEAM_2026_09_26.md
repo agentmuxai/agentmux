@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** active — Slice 1 (capabilities, test host, boundary ratchet) ships in PR #3878. Slices 2–5 remain (§5).
+**Status:** active — Slice 1 (capabilities, test host, boundary ratchet) ships in PR #3878 and slice 2 (Settings) in PR #3879. Slices 3–5 remain (§5).
 **Author:** Maricon
 
 ---
@@ -88,7 +88,7 @@ Moving the CEF implementation into `frontend/app/host/cef/`, or splitting the fr
 | Slice | Content | PENDING after |
 |---|---|---|
 | **1** | `HostCaps` + `getHostCaps()`, test host, boundary ratchet, this spec | 47 |
-| 2 | Settings: `open_in_editor`, `ensure_settings_file`, `autostart_status` behind `AppApi`; start-at-login row guarded by `autostart` | ↓ |
+| **2** | Settings: `getAutostartStatus()` and `openSettingsFileInEditor()` on `AppApi` (also used by the command palette); the System tray rows guarded by `tray` and `autostart` | 44 |
 | 3 | Browser panes: the 27 `browser_pane_*` calls behind a browser-pane group on `AppApi`; pane type guarded by `nativeBrowserPane` | ↓ |
 | 4 | Window drag, position and focus, tear-off, floating panes (`nativeWindowChrome`, `tearOff`, `multiWindow`) | ↓ |
 | 5 | The remainder: logging, clipboard, drag-and-drop, approvals, startup (`bootstrap.ts`, `app-init.ts`) | 0 |

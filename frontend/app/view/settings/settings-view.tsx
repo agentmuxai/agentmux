@@ -4,7 +4,7 @@
 import { For, Match, Show, Switch, type JSX } from "solid-js";
 
 import { fullConfigAtom } from "@/app/store/global";
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { SETTINGS_SECTION_LABELS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
 import { SettingsSearchBar } from "./settings-search-bar";
 import { AppearanceSection } from "./sections/appearance-section";
@@ -20,10 +20,7 @@ import "./settings.scss";
 
 function ConfigErrorsBanner(): JSX.Element {
     const errors = () => fullConfigAtom()?.configerrors ?? [];
-    const openRaw = async () => {
-        const path = await invokeCommand<string>("ensure_settings_file");
-        await invokeCommand("open_in_editor", { path });
-    };
+    const openRaw = () => getApi().openSettingsFileInEditor();
     return (
         <Show when={errors().length > 0}>
             <div class="settings-config-errors">
@@ -70,10 +67,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     const section = () => props.model.activeSection();
     const setSection = (s: SettingsSection) => props.model.setSection(s);
 
-    const openRaw = async () => {
-        const path = await invokeCommand<string>("ensure_settings_file");
-        await invokeCommand("open_in_editor", { path });
-    };
+    const openRaw = () => getApi().openSettingsFileInEditor();
 
     function handleSelectResult(entry: SettingsIndexEntry) {
         setSection(entry.section);

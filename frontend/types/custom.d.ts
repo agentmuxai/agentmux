@@ -121,9 +121,16 @@ declare global {
         nativeWindowChrome: boolean;
     };
 
+    /** Whether the host can manage an OS login entry, and whether one is registered. */
+    type AutostartStatus = { available: boolean; enabled: boolean };
+
     type AppApi = {
         /** Capabilities of the host this frontend is running in. */
         getHostCaps(): HostCaps;
+        /** Start at login: can the host manage a login entry, and is one registered? */
+        getAutostartStatus(): Promise<AutostartStatus>;
+        /** Create the settings file if it is missing, and open it for editing. */
+        openSettingsFileInEditor(): Promise<void>;
         getAuthKey(): string;
         getIsDev(): boolean;
         getCursorPoint: () => { x: number; y: number };
