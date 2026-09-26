@@ -294,7 +294,6 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 if (!data?.block_id || !data?.workspace_id) return;
                 void (async () => {
                     try {
-                        const { invokeCommand } = await import("@/app/platform/ipc");
                         // width/height are DIP on all platforms; x/y are physical
                         // px on Windows, DIP on macOS/Linux (see floating_pane.rs).
                         // Center a default-sized floater over the current window.
@@ -304,7 +303,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                         const height = Math.max(400, Math.min(900, Math.round(window.innerHeight * 0.6)));
                         const cssX = window.screenX + Math.max(0, (window.outerWidth - width) / 2);
                         const cssY = window.screenY + Math.max(0, (window.outerHeight - height) / 2);
-                        await invokeCommand("open_floating_pane_window", {
+                        await getApi().windows.openFloatingPane({
                             pane_id: data.block_id,
                             workspace_id: data.workspace_id,
                             x: isWindows ? Math.round(cssX * dpr) : Math.round(cssX),

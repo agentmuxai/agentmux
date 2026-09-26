@@ -16,7 +16,7 @@
  */
 
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { Button } from "@/element/button";
 
 import "./memory-adoption-approval-window.scss";
@@ -69,7 +69,7 @@ export const MemoryAdoptionApprovalWindow = (): JSX.Element => {
         setBusy(true);
         // The host adopts (on approve), reports to the Armory, and closes
         // this window itself.
-        void invokeCommand("memory_adoption_decide", { approval_id: meta.approvalId, approve }).catch(() => {
+        void getApi().approvals.decideMemoryAdoption(meta.approvalId, approve).catch(() => {
             setBusy(false);
         });
     };

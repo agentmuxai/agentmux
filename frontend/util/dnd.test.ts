@@ -3,6 +3,9 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { baseName, copyFilesToDir, isFileDrag } from "./dnd";
+import { installCefWireHost } from "../test/cef-wire-host";
+
+installCefWireHost();
 
 const invokeCommandMock = vi.fn<(cmd: string, args: Record<string, unknown>) => Promise<unknown>>();
 vi.mock("@/app/platform/ipc", () => ({

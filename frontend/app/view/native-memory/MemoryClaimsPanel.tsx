@@ -14,7 +14,6 @@
  */
 
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { RpcApi, type NativeMemoryClaimList, type NativeMemoryClaimedFolder } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
@@ -71,7 +70,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
     }));
 
     let unlisten: (() => void) | undefined;
-    void listenEvent<any>("memory-adoption-result", (payload) => {
+    void getApi().listen<any>("memory-adoption-result", (payload) => {
         if (payload?.agent_id !== props.agentId || payload?.kind !== "release") return;
         setWaiting(null);
         setOutcome(releaseOutcome(payload));
@@ -89,7 +88,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
         setOutcome(null);
         setWaiting(f.index);
         try {
-            await invokeCommand("memory_release_request", {
+            await getApi().approvals.requestMemoryRelease({
                 window_label: await getApi().getWindowLabel(),
                 agent_id: props.agentId,
                 list_id: l.list_id,

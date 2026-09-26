@@ -102,6 +102,7 @@ vi.mock("./NativeMemoryFileView", () => ({
 
 import { fileMetaLabel, formatFileAge, formatFileSize } from "./MemoryFileCard";
 import { NativeMemoryManager } from "./native-memory-manager";
+import { makeTestHostApi } from "@/app/host/test-host";
 
 function agent(id: string, name: string): AgentDefinition {
     return { id, name, slug: id, provider: "claude" } as AgentDefinition;
@@ -112,6 +113,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+    window.api = makeTestHostApi();
     listAgentDefinitionsMock.mockReset();
     nativeMemoryListMock.mockReset();
     listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY")]);

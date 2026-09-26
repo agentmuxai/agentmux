@@ -13,6 +13,7 @@
 // This is that half: called once during window init, it drains whatever the
 // user has not already been shown and raises a notification.
 
+import { getApi } from "@/app/store/app-api";
 import { pushNotification } from "@/store/flash-notifications";
 
 type AuditEntry = { at_ms: number; kind: string };
@@ -48,8 +49,7 @@ export function summarize(entries: AuditEntry[]): string | null {
  */
 export async function surfaceBackgroundAudit(): Promise<void> {
     try {
-        const { invokeCommand } = await import("@/app/platform/ipc");
-        const payload = (await invokeCommand("background_audit_take", {})) as AuditPayload | null;
+        const payload = (await getApi().takeBackgroundAudit()) as AuditPayload | null;
         const entries = payload?.entries ?? [];
         const message = summarize(entries);
         if (!message) return;

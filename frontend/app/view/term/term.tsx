@@ -21,7 +21,7 @@ import { TermWrap } from "./termwrap";
 import { termModels } from "./term-models";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
-import { detectHost, invokeCommand } from "@/app/platform/ipc";
+import { hostHas } from "@/app/host/host-caps";
 import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -374,7 +374,7 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
     const [isDragOver, setIsDragOver] = createSignal(false);
 
     onMount(() => {
-        if (detectHost() === "cef") {
+        if (hostHas("nativeFileDrop")) {
             // CEF: HTML5 drag events work natively (unlike WebView2)
             if (!viewRef) return;
             const onDragOver = (e: DragEvent) => {

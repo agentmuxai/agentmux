@@ -117,3 +117,41 @@ export const cefWindows: WindowHostApi = {
     resolveWindowAtCursor: (args) =>
         invokeCommand<{ label: string | null; window_id: string | null }>("resolve_window_at_cursor", args),
 };
+
+/** `AppApi.approvals` on CEF. */
+export const cefApprovals: ApprovalHostApi = {
+    decideCredential: async (approvalId, approve) => {
+        await invokeCommand("credential_approval_decide", { approval_id: approvalId, approve });
+    },
+    decideMemoryAdoption: async (approvalId, approve) => {
+        await invokeCommand("memory_adoption_decide", { approval_id: approvalId, approve });
+    },
+    requestMemoryAdoption: async (args) => {
+        await invokeCommand("memory_adoption_request", args);
+    },
+    requestMemoryRelease: async (args) => {
+        await invokeCommand("memory_release_request", args);
+    },
+};
+
+/** The flat `AppApi` methods added by slice 5 of the host seam, on CEF. */
+export const cefHostMisc = {
+    openExternalChecked: async (url: string) => {
+        await invokeCommand("open_external", { url });
+    },
+    readClipboardText: () => invokeCommand<string>("read_clipboard", {}),
+    writeClipboardText: async (text: string) => {
+        await invokeCommand("write_clipboard", { text });
+    },
+    consumeDroppedFilePaths: () => invokeCommand<string[]>("consume_drag_paths", {}),
+    copyFileToDir: (sourcePath: string, targetDir: string) =>
+        invokeCommand<string>("copy_file_to_dir", { sourcePath, targetDir }),
+    openDataDirInFileManager: async () => {
+        await invokeCommand("open_in_file_manager", { target: "data" });
+    },
+    getHostInfo: () => invokeCommand<Record<string, unknown>>("get_host_info", {}),
+    setTaskbarAttention: async (windowLabel: string, count: number, inputCount: number) => {
+        await invokeCommand("set_taskbar_attention", { label: windowLabel, count, input_count: inputCount });
+    },
+    takeBackgroundAudit: () => invokeCommand<unknown>("background_audit_take", {}),
+} satisfies Partial<AppApi>;

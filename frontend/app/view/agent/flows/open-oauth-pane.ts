@@ -18,7 +18,7 @@
  */
 
 import { createBlock } from "@/app/store/global";
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 
 export type OAuthOpenResult = "pane" | "external" | "failed";
 
@@ -28,7 +28,7 @@ export async function openOAuthBrowserPane(url: string): Promise<OAuthOpenResult
         // real failure — no default browser handler, disallowed scheme, spawn
         // error — falls through to the in-app pane instead of silently
         // reporting "external" with nothing having opened.
-        await invokeCommand("open_external", { url });
+        await getApi().openExternalChecked(url);
         return "external";
     } catch {
         try {
