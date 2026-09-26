@@ -148,7 +148,9 @@ cross-account phases W0–W2. This spec:
 - **What agents hold.** Every spawned agent gets:
   - the account's cloud access token as `MUXBUS_TOKEN`
     (`server/agent_handlers/input.rs:543`, `server/muxbus_handlers.rs:339`),
-    the same token the srv presents (`relay.rs:183`);
+    the same token the srv presents (`relay.rs:183`). **Removed by #3881**
+    (2026-09-26): no agent env carries it any more
+    (`backend/account_login_guard.rs`, on every spawn path);
   - the srv's `AGENTMUX_AUTH_KEY` (`input.rs:564`), which reaches `/ws` and
     `/agentmux/service` (`server/mod.rs:458-460`, `auth_middleware` at
     `:2953`) — the same RPC the frontend writes settings through
@@ -688,9 +690,9 @@ Every field is optional on every hop, so the order below is a preference:
 **Does not prove:**
 - **That a new instance is legitimate.** Anyone holding the account token —
   every agent (§1.1), or a compromised cloud — can mint one. It verifies,
-  shows `INSTANCE_STATUS=new`, and gets no relaxation. Removing
-  `MUXBUS_TOKEN` from agent environments would narrow who can mint (open
-  question 4).
+  shows `INSTANCE_STATUS=new`, and gets no relaxation. #3881 removed
+  `MUXBUS_TOKEN` from agent environments, which narrows who can mint to the
+  srv and anything that reads its stored login from disk (open question 4).
 - **Anything against a compromised machine.** An agent can read its own
   machine's `wan.db`, including the instance key and approvals.
   - This is **worse than the host and LAN tiers**, whose keys work only from
@@ -791,8 +793,11 @@ revocations (`None`, or delayed revocation). It cannot forge them.
    key. If the machine is lost, only receivers' local un-approval is left.
    An account-level revocation would need step-up authentication that agents
    can't perform.
-4. **Stop injecting `MUXBUS_TOKEN` into agent environments?** It would make
-   the directory and instance minting srv-only; first audit what uses it.
+4. **Stop injecting `MUXBUS_TOKEN` into agent environments?** Done in #3881
+   (2026-09-26). The audit found no reader in agentmux; in agentmux-cloud
+   only the standalone `@agentmuxai/muxbus-client` MCP client, which agents
+   don't use. Minting now needs the srv's stored login, which a same-user
+   process can still read from disk (question 5).
 5. **Keep the instance key out of agents' reach** (OS keychain, a separate
    user)? It would remove the §4 copied-key residual.
 6. **Does the per-version `objects.db` also re-mint host and LAN keys on

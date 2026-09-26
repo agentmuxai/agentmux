@@ -29,6 +29,8 @@ import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, capText, dropBashwrapStartingChunk, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
+import { terminalText } from "./terminal-text";
+import { startsAtTop } from "./tool-presentation";
 import {
     registerToolRenderer,
     resolveToolRenderer,
@@ -231,8 +233,13 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // - Document-like previews (Read / Write / Edit) that haven't streamed
     //   start DETACHED at the top: the start of a file or diff is where
     //   reading begins. If one does start streaming, it follows.
+    //   Content-first previews (WebSearch, tool-presentation.ts) too: the
+    //   answer is read from its start.
     const initialFollow = (): boolean =>
-        !(DOCUMENT_KINDS.has(props.node.tool) && dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0);
+        !(
+            (DOCUMENT_KINDS.has(props.node.tool) || startsAtTop(props.node)) &&
+            dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0
+        );
     let following = initialFollow();
     // Detached only because of the document-preview default, not by the user.
     let detachedByDefault = !following;
@@ -728,10 +735,11 @@ function renderWrite(node: ToolNode): JSX.Element {
     );
 }
 
+// No "Pattern:" line: the row header already shows the pattern
+// (tool-header.ts). SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5.
 function renderSearch(node: ToolNode): JSX.Element {
     return (
         <div class="agent-tool-search">
-            <div class="agent-tool-pattern">Pattern: {(node.params as any).pattern}</div>
             <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
         </div>
     );
@@ -739,19 +747,37 @@ function renderSearch(node: ToolNode): JSX.Element {
 
 // Exported (not just module-local) so `DispatchCard.tsx`'s no-match fallback
 // can delegate to the SAME per-kind rendering these built-ins already do
-// (description-while-running, no-result gating) instead of a bare
+// (the report as markdown, no-result gating) instead of a bare
 // `CompactResult` call that loses both — reagent/codex P1 on PR #2676: a
 // still-running unmatched Agent/Task call was showing raw "No output" and a
 // completed one was losing its description entirely, guaranteed to trigger
 // on the Agent History tab (which always falls back to CompactResult there).
 export function renderAgent(node: ToolNode): JSX.Element {
+    // A subagent's report is markdown; render it as such rather than as a
+    // compact one-liner (SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.6).
+    // No description line: the row header already shows it (tool-header.ts),
+    // running or finished.
+    // Head-capped like a Read preview: the panel's max-height bounds what's
+    // visible, not the DOM, and a subagent report can be very long.
+    const text = terminalText(node.result);
+    const report = text ? capText(text, MAX_TOOL_OUTPUT_LINES, "head") : null;
     return (
         <div class="agent-tool-agent">
-            <Show when={(node.params as any).description}>
-                <div class="agent-tool-agent-desc">{(node.params as any).description}</div>
-            </Show>
-            <Show when={node.result}>
-                <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+            <Show
+                when={report}
+                fallback={
+                    <Show when={node.result}>
+                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+                    </Show>
+                }
+            >
+                <div class="agent-tool-agent-report">
+                    {/* scrollable={false} — see renderRead's markdown branch. */}
+                    <Markdown text={report!.text} scrollable={false} />
+                </div>
+                <Show when={report!.hiddenLines > 0}>
+                    <OutputHiddenMarker hidden={report!.hiddenLines} noun="line" from="head" />
+                </Show>
             </Show>
         </div>
     );
@@ -766,12 +792,14 @@ export function renderTask(node: ToolNode): JSX.Element {
 }
 
 export function renderWorkflow(node: ToolNode): JSX.Element {
+    // The row header shows the title, or the description when there's no
+    // title; repeat the description here only when the header shows the title.
+    const params = node.params as any;
+    const extraDesc = params.title && params.description && params.description !== params.title ? params.description : null;
     return (
         <div class="agent-tool-workflow">
-            <Show when={(node.params as any).description ?? (node.params as any).title}>
-                <div class="agent-tool-agent-desc">
-                    {(node.params as any).description ?? (node.params as any).title}
-                </div>
+            <Show when={extraDesc}>
+                <div class="agent-tool-agent-desc">{extraDesc}</div>
             </Show>
             <Show when={node.result}>
                 <CompactResult tool={node.tool} params={node.params as any} result={node.result} />

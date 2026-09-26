@@ -39,6 +39,9 @@ function isFlatRecord(v: unknown): v is Record<string, unknown> {
 export function extractRecords(result: unknown): RecordTableData | null {
     if (!Array.isArray(result) || result.length === 0) return null;
     if (!result.every(isFlatRecord)) return null;
+    // Content blocks ([{type:"text", text}]) are flat by shape but are text;
+    // the translator normally joins them first — this is the backstop.
+    if (result.every((r) => (r as Record<string, unknown>).type === "text")) return null;
 
     // Column order = first-seen union of keys across rows.
     const columns: string[] = [];

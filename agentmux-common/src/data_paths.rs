@@ -893,9 +893,8 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 /// every time.
 ///
 /// **This gates ONLY the one-shot eager call at boot** — not every future
-/// MuxBus interaction on that channel. `muxbus.status` and the
-/// agent-spawn `inject_muxbus_env` injection (reagentx P0/P1 on PR #3248,
-/// round 2) instead check whether
+/// MuxBus interaction on that channel. `muxbus.status` (reagentx P0/P1 on
+/// PR #3248, round 2) instead checks whether
 /// `muxbus::cloud_subscriber::get_global_subscriber()` has been
 /// initialized — `None` until either this flag let boot initialize it
 /// (stable/dev channels), or a user explicitly completes `muxbus.login`

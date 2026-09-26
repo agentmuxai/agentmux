@@ -487,11 +487,13 @@ pub enum TurnRegistration {
 }
 
 /// Builds the full spawn environment for a persistent-controller CLI
-/// process: `cmd:env` base → Layer 3 identity/credential gate → MuxBus
-/// cloud token → the two RESERVED wrapper variables (unconditionally
-/// overwritten — `AGENTMUX_AUTH_KEY`/`AGENTMUX_BLOCKID`) → the two agent-
-/// identity variables and per-agent git identity (all user-overridable via
-/// `cmd:env`) → bundled/user tools PATH.
+/// process: `cmd:env` base → Layer 3 identity/credential gate → the two
+/// RESERVED wrapper variables (unconditionally overwritten —
+/// `AGENTMUX_AUTH_KEY`/`AGENTMUX_BLOCKID`) → the two agent-identity
+/// variables and per-agent git identity (all user-overridable via
+/// `cmd:env`) → bundled/user tools PATH → the reserved guards (`gh_guard`,
+/// `account_login_guard`: no agent gets a human's `gh` login or the
+/// account's cloud login).
 ///
 /// Shared by every real spawn of a persistent-controller CLI — this
 /// function's own logic used to live inline in `run_agent_turn` below, and
@@ -499,7 +501,7 @@ pub enum TurnRegistration {
 /// path (`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md`)
 /// built its own second, independent copy of a SUBSET of this — codex P1 on
 /// PR #3513 found it had already drifted from this one: missing PATH and
-/// MuxBus-token injection entirely, and using `entry().or_insert()` instead
+/// (then) MuxBus-token injection entirely, and using `entry().or_insert()` instead
 /// of an unconditional overwrite for the two reserved wrapper variables
 /// (meaning a stale persisted `cmd:env` value for either would silently
 /// survive across an eager resume, unlike a live message send). One
@@ -537,10 +539,8 @@ pub(crate) async fn build_persistent_spawn_env(
     )
     .await?;
 
-    // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN if
-    // the user has authenticated via muxbus.login. No-op if no credentials
-    // are stored. Auto-refreshes if token is nearly expired.
-    crate::server::muxbus_handlers::inject_muxbus_env(&id_store, &mut env_vars).await;
+    // No MuxBus account login here: agents reach the cloud through the srv,
+    // which uses its own stored login (see `account_login_guard`).
 
     // Streaming-bash wrapper auth + discovery
     // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
@@ -572,8 +572,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // muxbus -- MCP tool routing, native memory, shell OSC titling, jekt
     // auto-registration, etc; see this repo's CLAUDE.md Naming Conventions
     // table). MUXBUS_AGENT_ID mirrors the same value so muxbus-client picks
-    // it up under the MUXBUS_* prefix it already checks first (alongside
-    // MUXBUS_TOKEN/MUXBUS_COGNITO_DOMAIN injected above) -- this does NOT
+    // it up under the MUXBUS_* prefix it already checks first -- this does NOT
     // make MUXBUS_AGENT_ID a second source of truth for agent identity
     // app-wide, it's scoped to this one muxbus hand-off point (ARCH-002,
     // 2026-07-28 architecture analyst report). Only set if not already
@@ -677,10 +676,12 @@ pub(crate) async fn build_persistent_spawn_env(
             env_vars.insert("PATH".to_string(), new_path);
         }
     }
-    // Plain `gh` must not act as a human's gh login (see `gh_guard`). Last, so
-    // nothing above — a persisted `cmd:env`, an identity binding — can set it
-    // back: this is a reserved variable, not a default.
+    // Plain `gh` must not act as a human's gh login (see `gh_guard`), and no
+    // agent holds the account's cloud login (see `account_login_guard`). Last,
+    // so nothing above — a persisted `cmd:env`, an identity binding — can set
+    // them back: these are reserved variables, not defaults.
     crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
+    crate::backend::account_login_guard::strip_account_login(&mut env_vars);
 
     Ok(env_vars)
 }

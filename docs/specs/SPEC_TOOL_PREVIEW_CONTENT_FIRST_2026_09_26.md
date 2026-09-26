@@ -1,7 +1,7 @@
 # Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row
 
 **Date:** 2026-09-26
-**Status:** active — §3.2 (header row) implemented in #3871; the rest proposed
+**Status:** active — §3.2 (header row) implemented in #3871; §3.1, §3.3 and §3.4 (WebSearch content-first) in the second PR; §3.5 and §3.6 (text bodies, content blocks) in the third; §3.7 proposed
 **Scope:** agent pane tool previews (`frontend/app/view/agent/`)
 **Verified against:** `main` @ `6b5c2b59b`, which includes #3861 (the jekt
 height cap)
@@ -178,31 +178,36 @@ snippets.
 
 ## 3. Design
 
-### 3.1 Presentation modes on the renderer registry
+### 3.1 Content-first tools (implemented in the second PR)
 
-Add an optional field to `ToolRendererEntry`, plus a
-`resolveToolPresentation(node)` resolver. `resolveToolRenderer` keeps its
-signature.
+`components/tool-presentation.ts` holds a plain name table (`WebSearch`,
+`web_search`) and two predicates:
 
-```ts
-/** "panel" (default): today's behavior. The panel auto-expands while running,
- *  folds on scroll-off, click toggles a pin, and the box follows the latest
- *  output.
- *  "content": content-first. Once there is a result, the body is always shown;
- *  a header click collapses it (a user override); the box starts at the TOP;
- *  there's no chevron inside. */
-presentation?: "panel" | "content";
-```
+- `isContentFirstTool(node)`: a content-first tool that finished with a result
+  (`success`, or `failed` with its error). While running it's auto-expanded
+  like any tool; `denied`/`canceled` have nothing to show.
+- `startsAtTop(node)`: by name only, because the preview box is mounted while
+  the tool is still running and must not start pinned to the bottom.
+
+*(Changed from the draft, which proposed a `presentation` field on the renderer
+registry.)* The virtualizer (`expansion-source.ts`, `renderers.ts`) needs the
+same answer. The registry is only populated as a side effect of importing
+`ToolOverlayLog`, which those modules and their tests never do, so a registry
+field would silently read "panel" there. This is the fragility described in the
+companion report's C5. The table moves into the report's per-tool descriptor
+(A1) once that exists.
 
 `ToolBlock`:
 
 ```ts
-const contentFirst = () => resolveToolPresentation(props.node) === "content"
-    && props.node.status !== "running" && props.node.status !== "pending_approval";
+const contentFirst = () => isContentFirstTool(props.node);
 const expanded = () => contentFirst()
     ? !props.userCollapsed                    // documentState.collapsedNodes
     : props.pinned || autoExpanded() || userHolding();
 ```
+
+A header click (and the row's `e` key in `DocumentRow`) toggles the collapse for
+a content-first tool, and the pin for everything else.
 
 - User collapse uses the existing `documentState.collapsedNodes` set, which
   agent messages and jekts already use (both are expanded by default and
@@ -301,15 +306,19 @@ before the summary even starts.
   pattern and reason as `renderRead`'s markdown branch
   (`ToolOverlayLog.tsx:654-661`). It uses the pane's markdown typography one
   step smaller (the transcript body size, not the tool-log monospace), so it
-  reads as prose, not as tool output. Verify that link clicks inside it open in
+  reads as prose, not as tool output. Headings render as bold body-size
+  labels without rules: at document size, one `## Official docs` took a large
+  share of the capped box (seen live). Verify that link clicks inside it open in
   the system browser like the cards do.
 - **Sources strip:** a wrapping row of chips below a hairline divider
   (`border-top: 1px solid var(--border-color)`) and a small-caps `SOURCES` label
   (`font-size: 10px; letter-spacing; opacity: .6`).
   - Each chip shows the favicon (14 px; existing Google S2 URL and `onError`
     fallback) and the **domain**.
-  - Links on the same domain group into one chip with a `×N` count; a click on a
-    grouped chip opens a small popover listing its titles.
+  - Links on the same domain group into one chip with a `×N` count. A click on
+    a grouped chip lists its links inline under the strip (one line each: favicon,
+    title, domain). It doesn't open a popover: a popover inside a virtualized row
+    is clipped by the next row (see `PeekOverlay.tsx`).
   - Chip style: `border: 1px solid var(--border-color)`, `border-radius: 0`
     (matching today's cards), `padding: 1px 6px`, `font-size: 11px`, and
     `color: var(--secondary-text-color)`. Hover sets
@@ -336,8 +345,16 @@ results.
 Grep (F4):
 - Drop the `Pattern:` line; the row shows it.
 - The body is the match lines.
-- The existing Grep pill falls back to counting non-empty content lines when
-  there's no `matches` array.
+- With no `matches` array, the Grep pill reads Claude Code's text per
+  `output_mode` (`grep-result.ts`, formats captured from live calls):
+  `Found N files` → "N files" (the default, `files_with_matches`); the
+  `count` trailer's total → "N matches"; `content` lines, minus `--`
+  separators and the pagination notice → "N matches"; `No files found` /
+  `No matches found` → zero. Counting every line read 3 files as "4 matches"
+  (Opaz P1 on #3877).
+- Grep and Glob text bodies read from the head (a result list); other text
+  bodies keep the tail. One-line text bodies are character-capped, and the
+  Agent report markdown is line-capped, like every other body.
 
 ### 3.6 Unwrap text content-block arrays (F2, F3)
 
@@ -354,6 +371,9 @@ Defense in depth: `extractRecords` rejects arrays whose rows are all
 
 Effects:
 - **MCP (F2):** a text body.
+- **Agent body:** no longer repeats the description the row header already
+  shows (seen live). A Workflow body shows its description only when the header
+  shows a different title.
 - **Agent (F3):** `renderAgent` renders `result.content` as
   `<Markdown scrollable={false}>`.
 

@@ -23,6 +23,7 @@ import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
+import { isContentFirstTool } from "../components/tool-presentation";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
@@ -101,7 +102,9 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
 
     const onExpand = (): void => {
         const n = props.node();
-        if (n.type === "tool" || n.type === "shell") props.onTogglePin(n.id);
+        // A content-first tool collapses (collapsedNodes) instead of pinning,
+        // the same as its header click in ToolBlock.
+        if ((n.type === "tool" && !isContentFirstTool(n)) || n.type === "shell") props.onTogglePin(n.id);
         else props.onToggleCollapse(n.id);
     };
 
@@ -239,6 +242,8 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     heldOpen={props.documentState().expandedTools.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                     onHoldOpen={() => props.onHoldToolOpen?.(props.node().id)}
+                    userCollapsed={props.documentState().collapsedNodes.has(props.node().id)}
+                    onToggleCollapse={() => props.onToggleCollapse(props.node().id)}
                     dispatchMatch={dispatchMatch()}
                 />
             </Show>

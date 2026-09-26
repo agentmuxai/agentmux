@@ -49,7 +49,10 @@ import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteRes
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
+import { grepResultCount } from "./grep-result";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
+import { isContentFirstTool } from "./tool-presentation";
+import { extractSearchResults, extractWebSearch } from "./tool-renderers/search-results";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -112,6 +115,11 @@ interface ToolBlockProps {
     onTogglePin: () => void;
     /** Mark this tool held-open — called once on its active→inactive transition. */
     onHoldOpen?: () => void;
+    /** Content-first tools (tool-presentation.ts) only: the user collapsed
+     *  it (`documentState.collapsedNodes`). They're expanded by default. */
+    userCollapsed?: boolean;
+    /** Content-first tools only: toggle `userCollapsed` (the header click). */
+    onToggleCollapse?: () => void;
     /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
      *  see `activity/dispatch-correlation.ts`. Undefined when no confident
      *  match was found, or for any other tool kind. */
@@ -221,7 +229,13 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // we hold it open until they leave so a scroll-off collapse can't fold it
     // mid-read.
     const [userHolding, setUserHolding] = createSignal(false);
-    const expanded = () => props.pinned || autoExpanded() || userHolding();
+    // A finished content-first tool (WebSearch) reads like a message:
+    // expanded by default — in history too — until the user collapses it.
+    // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.1.
+    const contentFirst = () => isContentFirstTool(props.node);
+    const expanded = () =>
+        contentFirst() ? !props.userCollapsed : props.pinned || autoExpanded() || userHolding();
+    const onHeaderClick = () => (contentFirst() ? props.onToggleCollapse?.() : props.onTogglePin());
 
     // Result pill — compact inline summary shown at medium+ pane widths
     // (visible only via CSS container query; always rendered so the
@@ -252,6 +266,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
         if (s === "running" || s === "pending_approval" || !props.node.result) return null;
         const r = props.node.result as any;
+        const name = props.node.toolName ?? props.node.tool;
+        if (name === "WebSearch" || name === "web_search") {
+            const n = extractWebSearch(r)?.links.length ?? extractSearchResults(r)?.length;
+            return n ? { label: `${n} source${n === 1 ? "" : "s"}`, variant: "sources" } : null;
+        }
         switch (props.node.tool) {
             case "Bash": {
                 const br = r as BashResult;
@@ -277,11 +296,17 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 return null;
             }
             case "Grep": {
-                const n = (r as GrepResult).matches?.length;
-                if (typeof n === "number") {
-                    return { label: `${n} match${n === 1 ? "" : "es"}`, variant: "matches" };
+                // A structured provider result has `matches`; Claude Code's is
+                // text whose shape depends on output_mode (grep-result.ts).
+                const matches = (r as GrepResult).matches?.length;
+                if (typeof matches === "number") {
+                    return { label: `${matches} match${matches === 1 ? "" : "es"}`, variant: "matches" };
                 }
-                return null;
+                if (typeof r.content !== "string") return null;
+                const { n, noun } = grepResultCount(r.content);
+                return noun === "file"
+                    ? { label: `${n} file${n === 1 ? "" : "s"}`, variant: "files" }
+                    : { label: `${n} match${n === 1 ? "" : "es"}`, variant: "matches" };
             }
             case "Write": {
                 const b = (r as WriteResult).bytesWritten;
@@ -419,7 +444,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 // than adding a second listener pair, since SolidJS only keeps the
                 // last onMouseEnter/onMouseLeave assigned to a given element.
                 onMouseEnter={() => {
-                    if (props.pinned || autoExpanded()) setUserHolding(true);
+                    if (!contentFirst() && (props.pinned || autoExpanded())) setUserHolding(true);
                     handlePeekEnter();
                 }}
                 onMouseLeave={() => {
@@ -427,7 +452,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     handlePeekLeave();
                 }}
             >
-                <div class="agent-tool-summary" onClick={props.onTogglePin}>
+                <div class="agent-tool-summary" onClick={onHeaderClick}>
                     <span class="agent-tool-status-icon">{statusIcon()}</span>
                     <span class="agent-tool-name-peek-anchor">
                         <Show

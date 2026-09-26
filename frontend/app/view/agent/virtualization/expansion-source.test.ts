@@ -112,3 +112,21 @@ describe("currentExpansion — parity with the per-kind expansion rules", () => 
         });
     });
 });
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.1 — a content-first tool
+// (WebSearch) is open by default once finished, like a message; the user
+// collapses it through `collapsedNodes`.
+describe("currentExpansion — content-first tools", () => {
+    const search = (status: ToolNode["status"]): ToolNode => ({
+        type: "tool", id: "ws", tool: "Other", toolName: "WebSearch", params: {}, status, collapsed: true, summary: "x",
+    });
+    it("a finished WebSearch is open by default, even from history", () => {
+        expect(currentExpansion(search("success"), inputs())).toEqual({ open: true, via: "default" });
+    });
+    it("collapses when the user collapsed it", () => {
+        expect(currentExpansion(search("success"), inputs(["ws"]))).toEqual({ open: false });
+    });
+    it("a running WebSearch is auto-expanded like any tool", () => {
+        expect(currentExpansion(search("running"), inputs())).toEqual({ open: true, via: "auto" });
+    });
+});
