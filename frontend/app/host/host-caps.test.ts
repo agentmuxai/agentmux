@@ -24,6 +24,12 @@ describe("host capabilities", () => {
         expect(hostHas("multiWindow")).toBe(false);
     });
 
+    it("the test host's listen resolves to an unsubscribe function, like a real host's", async () => {
+        const unlisten = await makeTestHostApi().listen("any-event", () => {});
+        expect(typeof unlisten).toBe("function");
+        expect(() => unlisten()).not.toThrow();
+    });
+
     it("the test host no-ops anything not overridden", async () => {
         const api = makeTestHostApi({ getPlatform: () => "linux" });
         expect(api.getPlatform()).toBe("linux");
