@@ -63,7 +63,16 @@ pub(crate) enum EndReason {
 enum Event {
     Start(Start),
     Session { segment_id: String, provider_session_id: String, at_ms: i64 },
-    End { segment_id: String, ended_at_ms: i64, end_reason: EndReason, byte_end: Option<i64> },
+    End {
+        segment_id: String,
+        ended_at_ms: i64,
+        end_reason: EndReason,
+        byte_end: Option<i64>,
+        /// Size of the provider's session file when the process went away
+        /// (spec §4.4). `None`: unknown, or a record from before the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_bytes_end: Option<i64>,
+    },
 }
 
 /// What is known about a segment when its process starts.
@@ -116,6 +125,7 @@ pub(crate) struct Segment {
     pub ended_at_ms: Option<i64>,
     pub end_reason: Option<EndReason>,
     pub byte_end: Option<i64>,
+    pub provider_bytes_end: Option<i64>,
 }
 
 /// `agent-uid:<uid>:segments`, or `None` for a UID outside the safe zone-name
@@ -182,8 +192,23 @@ pub(crate) fn record_end(
     byte_end: Option<i64>,
     ended_at_ms: i64,
 ) -> Result<(), String> {
+    record_end_with_provider_bytes(fs, agent_uid, segment_id, end_reason, byte_end, None, ended_at_ms)
+}
+
+/// [`record_end`], also recording the provider session file's size then
+/// (spec §4.4), so a later spawn can tell whether something outside
+/// AgentMux wrote to it since.
+pub(crate) fn record_end_with_provider_bytes(
+    fs: &FileStore,
+    agent_uid: &str,
+    segment_id: &str,
+    end_reason: EndReason,
+    byte_end: Option<i64>,
+    provider_bytes_end: Option<i64>,
+    ended_at_ms: i64,
+) -> Result<(), String> {
     let zone = zone_for(agent_uid).ok_or("agent uid is not a valid zone key")?;
-    append(fs, &zone, &Event::End { segment_id: segment_id.to_string(), ended_at_ms, end_reason, byte_end })
+    append(fs, &zone, &Event::End { segment_id: segment_id.to_string(), ended_at_ms, end_reason, byte_end, provider_bytes_end })
 }
 
 /// Every segment the agent has run, oldest first. A segment with no `end` is
@@ -199,19 +224,20 @@ fn fold(events: impl Iterator<Item = Event>) -> Vec<Segment> {
     for event in events {
         match event {
             Event::Start(start) => {
-                out.push(Segment { start, ended_at_ms: None, end_reason: None, byte_end: None });
+                out.push(Segment { start, ended_at_ms: None, end_reason: None, byte_end: None, provider_bytes_end: None });
             }
             Event::Session { segment_id, provider_session_id, .. } => {
                 if let Some(s) = out.iter_mut().rev().find(|s| s.start.segment_id == segment_id) {
                     s.start.provider_session_id = Some(provider_session_id);
                 }
             }
-            Event::End { segment_id, ended_at_ms, end_reason, byte_end } => {
+            Event::End { segment_id, ended_at_ms, end_reason, byte_end, provider_bytes_end } => {
                 // Closed exactly once: the first `end` wins.
                 if let Some(s) = out.iter_mut().rev().find(|s| s.start.segment_id == segment_id && s.ended_at_ms.is_none()) {
                     s.ended_at_ms = Some(ended_at_ms);
                     s.end_reason = Some(end_reason);
                     s.byte_end = byte_end;
+                    s.provider_bytes_end = provider_bytes_end;
                 }
             }
         }
@@ -259,6 +285,11 @@ pub(crate) enum ResumeGate {
     /// `from_config_dir`: copy it in and resume it with `--fork-session`
     /// (spec §4.3).
     Relocate { head: String, from_config_dir: String },
+    /// `head` is reachable here, but its file grew after AgentMux last saw
+    /// it: the conversation continued outside AgentMux. Resume it with
+    /// `--fork-session`, so that branch is never appended to by a second
+    /// writer (spec §4.4, H4).
+    Fork { head: String },
 }
 
 /// What the gate weighs about the spawn.
@@ -285,6 +316,8 @@ pub(crate) struct Head {
     pub config_dir: Option<String>,
     pub provider: String,
     pub cwd: String,
+    /// The provider file's size when the head's segment ended, when known.
+    pub provider_bytes_end: Option<i64>,
 }
 
 /// Only the chain head is resumed natively (spec §3 I1), and never across
@@ -295,12 +328,13 @@ pub(crate) struct Head {
 /// offer than the candidate. The identity check refuses only when both
 /// sides are known and differ.
 ///
-/// `reachable_here(sid)`: the session's file is under the spawn's config
-/// dir and cwd. `resumable_at(config_dir, sid)`: a complete session file for
-/// the spawn's cwd exists under that other config dir (§4.3 (4)).
+/// `size_here(sid)`: the size of the session's file under the spawn's
+/// config dir and cwd, `None` when it isn't there. `resumable_at(config_dir,
+/// sid)`: a complete session file for the spawn's cwd exists under that
+/// other config dir (§4.3).
 pub(crate) fn resume_gate(
     input: &GateInput<'_>,
-    reachable_here: impl Fn(&str) -> bool,
+    size_here: impl Fn(&str) -> Option<u64>,
     resumable_at: impl Fn(&str, &str) -> bool,
 ) -> ResumeGate {
     let Some(head) = input.head else { return ResumeGate::Allow };
@@ -312,7 +346,10 @@ pub(crate) fn resume_gate(
         return refuse();
     }
     let is_candidate = head.session_id == input.candidate;
-    if reachable_here(&head.session_id) {
+    if let Some(size) = size_here(&head.session_id) {
+        if head.provider_bytes_end.is_some_and(|end| i64::try_from(size).unwrap_or(i64::MAX) > end) {
+            return ResumeGate::Fork { head: head.session_id.clone() };
+        }
         return if is_candidate { ResumeGate::Allow } else { ResumeGate::Redirect { head: head.session_id.clone() } };
     }
     if let Some(from) = relocation_source(head, input) {
@@ -364,6 +401,7 @@ pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<Head> {
             config_dir: s.start.config_dir,
             provider: s.start.provider,
             cwd: s.start.cwd,
+            provider_bytes_end: s.provider_bytes_end,
         })
     })
 }
@@ -480,7 +518,7 @@ mod tests {
     /// complete under any other.
     fn gate(candidate: &str, head: Option<&Head>, identity: Option<&str>, poisoned: Option<&str>, here: &[&str], elsewhere: &[&str]) -> ResumeGate {
         let input = GateInput { candidate, head, identity, poisoned, config_dir: "C:/cfg/new", cwd: "C:/work" };
-        resume_gate(&input, |sid| here.contains(&sid), |_, sid| elsewhere.contains(&sid))
+        resume_gate(&input, |sid| here.contains(&sid).then_some(10), |_, sid| elsewhere.contains(&sid))
     }
 
     #[test]
@@ -560,6 +598,7 @@ mod tests {
             config_dir: Some("C:/cfg/old".into()),
             provider: "claude".into(),
             cwd: "C:/work".into(),
+            provider_bytes_end: None,
         }
     }
 
@@ -591,6 +630,40 @@ mod tests {
             ResumeGate::Refuse { head: "s2".into() },
             "another identity is refused outright"
         );
+    }
+
+    // Continued outside AgentMux (spec §4.4, H4).
+
+    /// The head's file is larger than when its segment ended: something
+    /// outside AgentMux (a terminal `claude --resume`) continued it.
+    #[test]
+    fn a_head_that_grew_outside_agentmux_is_forked() {
+        let h = Head { provider_bytes_end: Some(9), ..head("s2", None) };
+        assert_eq!(gate("s2", Some(&h), None, None, &["s2"], &[]), ResumeGate::Fork { head: "s2".into() });
+        assert_eq!(gate("s1", Some(&h), None, None, &["s2"], &[]), ResumeGate::Fork { head: "s2".into() });
+    }
+
+    #[test]
+    fn a_head_as_agentmux_left_it_resumes_in_place() {
+        let same = Head { provider_bytes_end: Some(10), ..head("s2", None) };
+        let unknown = Head { provider_bytes_end: None, ..head("s2", None) };
+        assert_eq!(gate("s2", Some(&same), None, None, &["s2"], &[]), ResumeGate::Allow);
+        assert_eq!(gate("s2", Some(&unknown), None, None, &["s2"], &[]), ResumeGate::Allow);
+    }
+
+    #[test]
+    fn a_segment_end_records_the_provider_file_size_and_older_ends_still_read() {
+        let fs = FileStore::open_in_memory().unwrap();
+        let a = record_start(&fs, start(1_000, Rung::Fresh)).unwrap();
+        record_session(&fs, UID, &a, "sid-a", 1_001).unwrap();
+        record_end_with_provider_bytes(&fs, UID, &a, EndReason::Exited, None, Some(4_096), 2_000).unwrap();
+        assert_eq!(chain_head(&fs, UID).unwrap().provider_bytes_end, Some(4_096));
+
+        let old = serde_json::json!({"event": "end", "segment_id": "s", "ended_at_ms": 5, "end_reason": "exited", "byte_end": null});
+        match serde_json::from_value::<Event>(old).unwrap() {
+            Event::End { provider_bytes_end, .. } => assert_eq!(provider_bytes_end, None),
+            other => panic!("expected an end event, got {other:?}"),
+        }
     }
 
     #[test]
@@ -671,7 +744,7 @@ mod tests {
 
     #[test]
     fn events_are_tagged_json_lines() {
-        let e = Event::End { segment_id: "s".into(), ended_at_ms: 5, end_reason: EndReason::Restarted, byte_end: None };
+        let e = Event::End { segment_id: "s".into(), ended_at_ms: 5, end_reason: EndReason::Restarted, byte_end: None, provider_bytes_end: None };
         let json = serde_json::to_string(&e).unwrap();
         assert!(json.contains("\"event\":\"end\"") && json.contains("\"end_reason\":\"restarted\""), "{json}");
     }
@@ -680,7 +753,7 @@ mod tests {
         let mut s = start(0, Rung::Fresh);
         s.segment_id = id.into();
         s.provider_session_id = sid.map(str::to_string);
-        Segment { start: s, ended_at_ms: None, end_reason: None, byte_end: None }
+        Segment { start: s, ended_at_ms: None, end_reason: None, byte_end: None, provider_bytes_end: None }
     }
 
     #[test]
