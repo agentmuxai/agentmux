@@ -1,0 +1,64 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! `attachments.ingest` / `attachments.cancel` / `attachments.info` — image
+//! attachments in the agent composer
+//! (docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6). The work
+//! itself lives in `backend::attachments`; these only adapt it to the RPC
+//! engine. Typed registration, so `frontend/types/rpc/` gets the bindings.
+
+use super::*;
+use crate::backend::attachments;
+
+pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let svc = attachments::init(state.broker.clone(), state.config_watcher.clone());
+
+    let ingest_svc = svc.clone();
+    engine.register_typed(
+        COMMAND_ATTACHMENTS_INGEST,
+        move |req: CommandAttachmentsIngestData, _ctx| {
+            let svc = ingest_svc.clone();
+            async move {
+                if req.batch_id.trim().is_empty() {
+                    return Err("attachments.ingest: batch_id is required".to_string());
+                }
+                // Classification stats files and reads a few header bytes
+                // each; a folder drop can touch thousands, so keep it off
+                // the async workers. Processing then runs in the background.
+                let handle = tokio::runtime::Handle::current();
+                tokio::task::spawn_blocking(move || {
+                    let _guard = handle.enter();
+                    svc.ingest(req)
+                })
+                .await
+                .map_err(|e| format!("attachments.ingest: {e}"))
+            }
+        },
+    );
+
+    let cancel_svc = svc.clone();
+    engine.register_typed(
+        COMMAND_ATTACHMENTS_CANCEL,
+        move |req: CommandAttachmentsCancelData, _ctx| {
+            let svc = cancel_svc.clone();
+            async move {
+                svc.cancel(&req.batch_id);
+                Ok(serde_json::Value::Null)
+            }
+        },
+    );
+
+    let info_svc = svc;
+    engine.register_typed(
+        COMMAND_ATTACHMENTS_INFO,
+        move |req: CommandAttachmentsInfoData, _ctx| {
+            let svc = info_svc.clone();
+            async move {
+                let items = tokio::task::spawn_blocking(move || svc.info(&req.ids))
+                    .await
+                    .map_err(|e| format!("attachments.info: {e}"))?;
+                Ok(AttachmentsInfoResult { items })
+            }
+        },
+    );
+}

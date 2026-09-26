@@ -67,6 +67,10 @@ encoding_rs = "0.8"
 chardetng = "0.1"
 flate2 = "1"
 sha2 = "0.10"
+# Image attachments in the agent composer: decode, orient, downscale, re-encode
+# (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.4). Same 0.25 line the
+# workspace already locks for agentmux-mcp.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 hex = "0.4"
 # HMAC-SHA256 for the WhatsApp Cloud API webhook signature check
 # (X-Hub-Signature-256). `Mac::verify_slice` is constant-time internally

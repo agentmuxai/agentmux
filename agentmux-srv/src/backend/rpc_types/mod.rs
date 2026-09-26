@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 mod agent;
+mod attachments;
 mod block;
 mod commands;
 mod editor;
@@ -32,6 +33,7 @@ mod toolchain;
 mod websocket;
 
 pub use agent::*;
+pub use attachments::*;
 pub use block::*;
 pub use commands::*;
 pub use editor::*;
