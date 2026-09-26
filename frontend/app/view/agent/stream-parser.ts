@@ -31,7 +31,7 @@ import {
     UserMessageEvent,
 } from "./types";
 import { buildMemoryReinjectionNodeFromReplay } from "./memory-reinjection";
-import { toolDetail, toolIcon } from "./tool-meta/tool-descriptors";
+import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
 
 /**
  * Detects the auto-generated startup payload by its literal first
@@ -774,8 +774,9 @@ export class ClaudeCodeStreamParser {
      * from the node's live fields (see ToolNode.summary).
      */
     private generateToolSummary(tool: string, params: Record<string, any>): string {
-        const icon = toolIcon({ tool: "Other", toolName: tool });
-        const detail = toolDetail(tool, params);
+        const node = { tool: this.normalizeToolName(tool), toolName: tool, params };
+        const icon = toolIcon(node);
+        const detail = toolDetailOf(node);
         return detail ? `${icon} ${tool} ${detail}` : `${icon} ${tool}`;
     }
 

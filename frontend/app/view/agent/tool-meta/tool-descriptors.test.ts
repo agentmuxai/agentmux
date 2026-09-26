@@ -3,7 +3,17 @@
 
 import { describe, expect, it } from "vitest";
 import type { ToolNode } from "../types";
-import { TOOL_DESCRIPTORS, resolveFact, toolDetail, toolIcon, toolNameOf, type ToolDescriptor } from "./tool-descriptors";
+import {
+    TOOL_DESCRIPTORS,
+    isContentFirstTool,
+    resolveFact,
+    startsAtTop,
+    toolDetail,
+    toolDetailOf,
+    toolIcon,
+    toolNameOf,
+    type ToolDescriptor,
+} from "./tool-descriptors";
 
 const node = (toolName: string | undefined, tool: ToolNode["tool"] = "Other"): ToolNode => ({
     type: "tool",
@@ -72,5 +82,27 @@ describe("helpers", () => {
     it("toolDetail has no generic fallback: unknown tools have no header detail", () => {
         expect(toolDetail("mcp__github__search_issues", { query: "bug" })).toBe("");
         expect(toolDetail("Grep", { pattern: "x" })).toBe("x");
+    });
+});
+
+// Codex P2 on #3901: normalizeToolName() maps a noncanonical casing ("READ",
+// "bAsH") to its coarse kind, and the descriptors must too, or the row loses
+// its kind's icon, scroll start and detail.
+describe("coarse-kind fallback", () => {
+    const odd = (toolName: string, tool: ToolNode["tool"], params: Record<string, any>): ToolNode => ({
+        ...node(toolName, tool),
+        params,
+    });
+
+    it("a raw name with no descriptor of its own resolves through its coarse kind", () => {
+        expect(toolIcon(odd("READ", "Read", {}))).toBe("📖");
+        expect(startsAtTop(odd("READ", "Read", {}))).toBe(true);
+        expect(toolDetailOf(odd("bAsH", "Bash", { command: "ls" }))).toBe("ls");
+    });
+
+    it("a raw name's own descriptor still wins over its coarse kind", () => {
+        // WebSearch's coarse kind is "Other"; its own facts apply.
+        expect(isContentFirstTool({ ...odd("WebSearch", "Other", {}), status: "success" })).toBe(true);
+        expect(toolIcon(odd("WebSearch", "Other", {}))).toBe("🌐");
     });
 });

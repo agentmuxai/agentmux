@@ -28,7 +28,7 @@
  * §3 step 1, §4.1-4.3.
  */
 
-import { toolDetail, toolNameOf } from "../tool-meta/tool-descriptors";
+import { toolDetailOf } from "../tool-meta/tool-descriptors";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
 import type { BashParams, BashResult, DocumentNode, ToolNode } from "../types";
 import { wholeCommandSleepMs } from "./sleep-detect";
@@ -217,8 +217,9 @@ function everCrossedThreshold(n: ToolNode, now: number): boolean {
 }
 
 export function toolToActivity(n: ToolNode): PinnedActivity {
-    // By raw name: a WebSearch's coarse kind is "Other", which has no detail.
-    const detail = toolDetail(toolNameOf(n), (n.params as Record<string, any>) ?? {});
+    // By raw name, then coarse kind: a WebSearch's kind is "Other", which
+    // has no detail; a "BASH" is still a Bash.
+    const detail = toolDetailOf(n);
     const sleepMs = pureSleepMs(n);
     return {
         id: n.id,

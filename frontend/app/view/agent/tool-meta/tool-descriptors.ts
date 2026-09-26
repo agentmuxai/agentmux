@@ -120,15 +120,34 @@ export function resolveFact<K extends Fact>(
 const fact = <K extends Fact>(name: string, key: K): NonNullable<ToolDescriptor[K]> =>
     resolveFact(TOOL_DESCRIPTORS, name, key)!;
 
+const SPECIFIC = TOOL_DESCRIPTORS.filter((d) => !isCatchAll(d));
+
+/**
+ * A node's fact: by its raw name, then by its coarse kind, then the
+ * catch-all. normalizeToolName() maps a noncanonical casing ("READ", "bAsH")
+ * to the coarse kind, so such a node still gets its kind's facts (Codex P2
+ * on #3901); a raw name with its own descriptor (WebSearch, whose kind is
+ * "Other") keeps its own.
+ */
+function nodeFact<K extends Fact>(node: Pick<ToolNode, "tool" | "toolName">, key: K): NonNullable<ToolDescriptor[K]> {
+    const own = resolveFact(SPECIFIC, toolNameOf(node), key);
+    return (own ?? fact(node.tool, key)) as NonNullable<ToolDescriptor[K]>;
+}
+
 // ── facts ─────────────────────────────────────────────────────────────────
 
 export function toolIcon(node: Pick<ToolNode, "tool" | "toolName">): string {
-    return fact(toolNameOf(node), "icon");
+    return nodeFact(node, "icon");
 }
 
 /** The header's detail for a raw tool name ("" when the tool has none). */
 export function toolDetail(name: string, params: Record<string, any> | undefined): string {
     return fact(name, "detail")(params ?? {});
+}
+
+/** A node's header detail: its raw name's, else its coarse kind's. */
+export function toolDetailOf(node: Pick<ToolNode, "tool" | "toolName" | "params">): string {
+    return nodeFact(node, "detail")((node.params as Record<string, any>) ?? {});
 }
 
 export function toolLabel(name: string, detail: string): string | null {
@@ -157,7 +176,7 @@ export function toolActivityArg(name: string, params: Record<string, unknown> | 
  *  like any tool; denied/canceled have nothing to show. */
 export function isContentFirstTool(node: ToolNode): boolean {
     return (
-        fact(toolNameOf(node), "presentation") === "content" && (node.status === "success" || node.status === "failed")
+        nodeFact(node, "presentation") === "content" && (node.status === "success" || node.status === "failed")
     );
 }
 
@@ -165,5 +184,5 @@ export function isContentFirstTool(node: ToolNode): boolean {
  *  rather than following the latest output. By name, not status: the box is
  *  mounted while the tool is still running. */
 export function startsAtTop(node: Pick<ToolNode, "tool" | "toolName">): boolean {
-    return fact(toolNameOf(node), "scroll") === "top";
+    return nodeFact(node, "scroll") === "top";
 }

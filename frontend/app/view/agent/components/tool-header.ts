@@ -12,7 +12,7 @@
  * SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.2.
  */
 
-import { toolDetail, toolIcon, toolLabel, toolNameOf } from "../tool-meta/tool-descriptors";
+import { toolDetailOf, toolIcon, toolLabel, toolNameOf } from "../tool-meta/tool-descriptors";
 import type { ToolNode } from "../types";
 
 export interface ToolHeaderParts {
@@ -25,12 +25,8 @@ export interface ToolHeaderParts {
 
 /** Icon, label and detail from the tool's descriptor (tool-meta/tool-descriptors.ts). */
 export function toolHeaderParts(node: ToolNode): ToolHeaderParts {
-    const name = toolNameOf(node);
-    const params = (node.params as Record<string, any>) ?? {};
-    // The raw name first; the coarse kind covers a node whose raw name has no
-    // descriptor of its own (e.g. an older node without toolName).
-    const detail = toolDetail(name, params) || (name !== node.tool ? toolDetail(node.tool, params) : "");
-    return { icon: toolIcon(node), label: toolLabel(name, detail), detail };
+    const detail = toolDetailOf(node);
+    return { icon: toolIcon(node), label: toolLabel(toolNameOf(node), detail), detail };
 }
 
 /** AskUserQuestion's flow writes its own row text into `summary` ("❓ Waiting
