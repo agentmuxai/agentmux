@@ -428,6 +428,16 @@ pub(super) fn forked_outcome(
     }
 }
 
+/// A relocated resume the CLI kept under the attempted id, resumed in place
+/// rather than forked. Capture skips an id the controller already holds, so
+/// this is settled on its own, once a result frame proves the resume worked
+/// (an earlier frame echoes the attempted id even when the resume goes on to
+/// fail). Left unsettled, the segment would hold no session (a relocated
+/// Start records none) and the next spawn would sweep the live copy.
+pub(super) fn kept_relocated_id(adopted: bool, confirmed: bool, has_copy: bool, forked_from: Option<&str>, captured: &str) -> bool {
+    !adopted && confirmed && has_copy && forked_from == Some(captured)
+}
+
 /// Once a relocated resume reports its session: a fork (a new id) never
 /// wrote the copy, so it goes. The same id back means the CLI resumed the
 /// copy in place instead of forking; it is live now, so only its marker

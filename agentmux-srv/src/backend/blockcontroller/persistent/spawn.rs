@@ -1072,9 +1072,19 @@ impl PersistentSubprocessController {
                                     "persistent session ID captured"
                                 );
                                 core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
+                            }
+                            let kept_relocated_id = super::segments::kept_relocated_id(
+                                should_capture,
+                                is_confirmed_success,
+                                relocated_copy_read.is_some(),
+                                forked_from_read.as_deref(),
+                                &sid_string,
+                            );
+                            if should_capture || kept_relocated_id {
                                 super::segments::record_segment_session(&segment_read, &sid_string);
                                 // The fork has its own session now; the copy it
-                                // read from goes (spec §4.3 (3), I4).
+                                // read from goes (spec §4.3 (3), I4). Kept under
+                                // the attempted id, the copy is the live session.
                                 if let Some(copy) = relocated_copy_read.take() {
                                     super::segments::settle_relocated_copy(&block_id_read, &copy, forked_from_read.as_deref(), &sid_string);
                                 }

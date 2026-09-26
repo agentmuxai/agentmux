@@ -218,7 +218,10 @@ once the fork reports it. The attempted id names the copy, not the conversation.
 process dies before capture (a restart seconds after opening is enough), step 4 sweeps that
 copy. As the head, such a segment would then point the next spawn at a session "in this dir"
 that is gone: no relocation, a plain `--resume`, "No conversation found", and fresh + packet.
-Without it, the head stays the source segment, and the next spawn relocates again.
+Without it, the head stays the source segment, and the next spawn relocates again. The
+same-id case of step 3 is settled on its own once a result frame confirms the resume, since
+capture never adopts an id the controller already holds: the id is recorded on the segment
+and the copy's marker goes.
 
 ### 4.4 Fork when the file changed outside AgentMux (H4)
 Each segment's `End` records `provider_bytes_end`: the size of the provider session file when

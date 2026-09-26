@@ -341,6 +341,19 @@ fn a_fork_reporting_its_own_id_is_the_resume_succeeding() {
     assert_eq!(forked_outcome(Resumed, Some("s2"), "s2", None), Resumed);
 }
 
+/// Codex P1 on #3907: capture never adopts an id the controller already
+/// holds, so a relocated resume the CLI kept in place is settled apart.
+#[test]
+fn a_relocated_resume_kept_in_place_is_settled_once_a_result_proves_it() {
+    use super::super::segments::kept_relocated_id;
+    assert!(kept_relocated_id(false, true, true, Some("s2"), "s2"));
+    assert!(!kept_relocated_id(false, false, true, Some("s2"), "s2"), "an init frame echoes the attempted id before a failure");
+    assert!(!kept_relocated_id(true, true, true, Some("s2"), "s2"), "adopted: the capture path settles it");
+    assert!(!kept_relocated_id(false, true, false, Some("s2"), "s2"), "already settled, or a same-dir fork with no copy");
+    assert!(!kept_relocated_id(false, true, true, Some("s2"), "s3"), "a fork: its new id is adopted");
+    assert!(!kept_relocated_id(false, true, true, None, "s2"), "not a fork");
+}
+
 #[test]
 fn the_copy_goes_once_the_fork_has_its_own_id() {
     use super::super::segments::settle_relocated_copy;
