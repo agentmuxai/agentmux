@@ -55,6 +55,9 @@ struct Entry {
     held: bool,
     last_ok: Option<Instant>,
     elsewhere: Option<(String, Instant)>,
+    /// When a Take over last cleared `elsewhere`: a 409 to a request that
+    /// started before this is stale ([`note_not_holder_since`]).
+    forgotten_at: Option<Instant>,
 }
 
 static STATE: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
@@ -91,9 +94,10 @@ pub(crate) async fn forget_elsewhere(agent: &str) {
     // refusal after it was forgotten (Codex P2 on #3903).
     let op = op_lock(agent);
     let _op = op.lock().await;
-    if let Some(e) = STATE.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key(agent)) {
-        e.elsewhere = None;
-    }
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let e = state.entry(key(agent)).or_default();
+    e.elsewhere = None;
+    e.forgotten_at = Some(Instant::now());
 }
 
 /// Is a [`describe_holder`] description about this computer (another
@@ -161,6 +165,24 @@ fn record(agent_id: &str, outcome: &Outcome) {
         }
         Outcome::Unknown => {}
     }
+}
+
+/// [`note_not_holder`] for a request that started at `started`: `None`
+/// (nothing recorded, and the caller must not fence) when a Take over
+/// cleared the refusal after the request started — its 409 predates the
+/// holder letting go (Codex P1 on #3908). Pulls and acks don't take the op
+/// lock, so ordering by start time is what keeps them from restoring it.
+pub(crate) fn note_not_holder_since(agent_id: &str, body: &serde_json::Value, started: Instant) -> Option<String> {
+    let stale = STATE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key(agent_id))
+        .and_then(|e| e.forgotten_at)
+        .is_some_and(|at| at > started);
+    if stale {
+        return None;
+    }
+    Some(note_not_holder(agent_id, body))
 }
 
 /// Note a 409 `not_holder` the relay returned on a pending pull or an ack.
@@ -259,20 +281,21 @@ async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, p
 }
 
 /// Release `agent_id`'s lease (best effort) and forget it — unless
-/// `still_gone` says it was subscribed again by the time this runs.
+/// `still_gone` says it was subscribed again by the time this runs, in
+/// which case this returns `false` (it did not let go).
 pub(crate) async fn release(
     base: &str,
     agent_id: &str,
     token: &str,
     http: &reqwest::Client,
     still_gone: impl Fn() -> bool,
-) {
+) -> bool {
     let op = op_lock(agent_id);
     let _op = op.lock().await;
     // Checked under the op lock: an agent subscribed again since the
     // release was queued keeps its (possibly fresh) claim.
     if !still_gone() {
-        return;
+        return false;
     }
     let was_held = STATE
         .lock()
@@ -282,6 +305,7 @@ pub(crate) async fn release(
     if was_held {
         let _ = call(base, agent_id, token, http, "/agents/lease/release").await;
     }
+    true
 }
 
 #[cfg(test)]
@@ -297,6 +321,25 @@ mod tests {
         assert!(held_elsewhere(&agent).is_some());
         forget_elsewhere(&agent.to_uppercase()).await;
         assert_eq!(held_elsewhere(&agent), None);
+    }
+
+    // Codex P1 on #3908: a pull or ack answered 409 before the holder let
+    // go, but processed after the refusal was forgotten, restored it (and
+    // could fence the new pane). Only answers to requests started after
+    // the forget count.
+    #[tokio::test]
+    async fn a_409_to_a_request_from_before_a_take_over_is_ignored() {
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        let body = serde_json::json!({ "held_by": { "host": "desk" } });
+        let started = Instant::now();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        forget_elsewhere(&agent).await;
+        assert_eq!(note_not_holder_since(&agent, &body, started), None, "stale: not recorded, not fenced");
+        assert_eq!(held_elsewhere(&agent), None);
+
+        let later = Instant::now();
+        assert!(note_not_holder_since(&agent, &body, later).is_some(), "a fresh 409 still counts");
+        assert!(held_elsewhere(&agent).is_some());
     }
 
     // Codex P2 on #3903: a lease check already in flight could record a
@@ -350,7 +393,10 @@ mod tests {
     async fn a_release_skips_an_agent_subscribed_again() {
         let agent = format!("agent-{}", uuid::Uuid::new_v4());
         record(&agent, &Outcome::Held);
-        release("http://127.0.0.1:9", &agent, "", &reqwest::Client::new(), || false).await;
+        assert!(
+            !release("http://127.0.0.1:9", &agent, "", &reqwest::Client::new(), || false).await,
+            "reports that it did not let go"
+        );
         let held = STATE.lock().unwrap().get(&key(&agent)).is_some_and(|e| e.held);
         assert!(held, "the fresh claim is left alone");
     }

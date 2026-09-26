@@ -230,8 +230,8 @@ impl CloudSubscriber {
         }
         let token = token.await;
         let still_gone = || !self.agents.lock().unwrap().contains(&key);
-        super::wan_lease::release(base, &key, &token, &reqwest::Client::new(), still_gone).await;
-        true
+        // `false` if it was re-added meanwhile: then this srv did not let go.
+        super::wan_lease::release(base, &key, &token, &reqwest::Client::new(), still_gone).await
     }
 
     /// Called after muxbus.login completes — trigger a fresh WS connection
@@ -871,6 +871,8 @@ async fn sync_agent_reactive(
 
     let url = format!("{}/reactive/pending/{}", base, agent_id);
     let body: PendingResp = loop {
+        // For telling a 409 from before a Take over apart (note_not_holder_since).
+        let resp_started = std::time::Instant::now();
         let resp = match http
             .get(&url)
             .header("Authorization", format!("Bearer {}", agent_token))
@@ -918,8 +920,9 @@ async fn sync_agent_reactive(
         if resp.status() == reqwest::StatusCode::CONFLICT {
             // The relay's lease fence: another instance holds this agent.
             let body = resp.json::<serde_json::Value>().await.unwrap_or_default();
-            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
-            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            if let Some(where_) = super::wan_lease::note_not_holder_since(agent_id, &body, resp_started) {
+                crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            }
             return AgentSyncOutcome::Ok;
         }
         if !resp.status().is_success() {
@@ -958,6 +961,8 @@ async fn sync_agent_reactive(
     let all_ids: Vec<String> = body.injections.iter().map(|inj| inj.id.clone()).collect();
     let ack_url = format!("{}/reactive/ack", base);
     let claimed: AckResp = loop {
+        // For telling a 409 from before a Take over apart (note_not_holder_since).
+        let claim_resp_started = std::time::Instant::now();
         let claim_resp = match http
             .post(&ack_url)
             .header("Authorization", format!("Bearer {}", agent_token))
@@ -1002,8 +1007,9 @@ async fn sync_agent_reactive(
             // this pull and this claim): same handling as a 409 on the pull —
             // claim nothing, and fence the local holder (ReAgent P1 on #3746).
             let body = claim_resp.json::<serde_json::Value>().await.unwrap_or_default();
-            let where_ = super::wan_lease::note_not_holder(agent_id, &body);
-            crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            if let Some(where_) = super::wan_lease::note_not_holder_since(agent_id, &body, claim_resp_started) {
+                crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            }
             return AgentSyncOutcome::Ok;
         }
         if !claim_resp.status().is_success() {
@@ -1495,7 +1501,7 @@ mod tests {
                 String::new()
             })
             .await;
-        assert!(released);
+        assert!(!released, "re-added meanwhile: reported as not released");
         assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::RemoveAgent(k)) if k == "opaz"), "removal first");
         assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::AddAgent(k)) if k == "opaz"), "then the re-add");
         assert!(sub.agents.lock().unwrap().contains("opaz"), "and it ends subscribed");

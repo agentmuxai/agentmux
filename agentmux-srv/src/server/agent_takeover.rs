@@ -205,14 +205,28 @@ pub(super) async fn handle_agent_release(State(state): State<AppState>, Json(req
     // this srv from re-claiming the agent, so letting go here is safe.
     let agent = req.agent.trim();
     let was_live = released > 0;
-    if !agent.is_empty() && crate::muxbus::cloud_subscriber::release_agent_now(&state.id_store, agent).await {
-        tracing::info!(agent = %agent, was_live, "agent_admission.takeover: released the relay subscription and lease");
-        if !was_live {
-            released += 1;
+    // The hold goes up before the release is awaited (Codex P1 on #3908):
+    // otherwise a local turn in that window re-registers the agent, re-adds
+    // its subscription, and this srv keeps the lease it claims to hand over.
+    let hand_over = was_live || !agent.is_empty();
+    if hand_over {
+        agent_admission::hold_after_handover(&uid, &to);
+    }
+    if !agent.is_empty() {
+        if crate::muxbus::cloud_subscriber::release_agent_now(&state.id_store, agent).await {
+            tracing::info!(agent = %agent, was_live, "agent_admission.takeover: released the relay subscription and lease");
+            if !was_live {
+                released += 1;
+            }
+        } else if was_live {
+            // Re-added despite the hold (a turn already past admission): the
+            // relay lease stays here, so the requester's retry would be fenced.
+            tracing::warn!(agent = %agent, "agent_admission.takeover: the agent was re-added while releasing — relay lease kept");
         }
     }
-    if released > 0 {
-        agent_admission::hold_after_handover(&uid, &to);
+    if released == 0 && hand_over {
+        // Nothing was handed over after all: don't block this srv's own use.
+        agent_admission::clear_handover_hold(&uid);
     }
     tracing::info!(uid = %uid, released, to = %to, "agent_admission.takeover: release handled");
     (StatusCode::OK, Json(json!({ "ok": true, "released": released }))).into_response()
