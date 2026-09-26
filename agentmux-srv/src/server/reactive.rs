@@ -1575,7 +1575,13 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
             Some(serde_json::to_value(&body).unwrap_or_default())
         }
         crate::muxbus::relay::RelayOutcome::Failed(e) => {
-            tracing::warn!(target = %req.target_agent, error = %e, "cloud relay failed");
+            tracing::warn!(
+                target = %req.target_agent,
+                error = %e,
+                signed = carried.is_some(),
+                unsigned_reason,
+                "cloud relay failed"
+            );
             None
         }
     }
