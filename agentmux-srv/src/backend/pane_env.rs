@@ -262,6 +262,8 @@ mod spawn_site_coverage {
          "sanitized: language server, sanitize_process_command"),
         ("src/backend/mcp_probe.rs", "command", 1,
          "sanitized: MCP server probe, sanitize_process_command"),
+        ("src/backend/process_tracker/windows.rs", "\"cmd\"", 1,
+         "test: a short-lived child placed in a Job Object to check the below-normal priority limit applies to it"),
         ("src/backend/process_tracker/registry.rs", "\"cmd\"", 1,
          "test: disposable child for the job-object tracker"),
         ("src/backend/process_tracker/registry.rs", "\"sh\"", 1,

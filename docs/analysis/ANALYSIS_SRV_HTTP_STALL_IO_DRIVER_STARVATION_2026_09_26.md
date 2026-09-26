@@ -1,8 +1,9 @@
 # Analysis: srv stops answering HTTP under host load — Tokio I/O-driver starvation
 
 **Date:** 2026-09-26
-**Status:** analysis — root-cause mechanism confirmed from live stack dumps; three
-fixes (§6) in the accompanying PR; §8 is a proposal (spec), not implemented.
+**Status:** analysis — root-cause mechanism confirmed from live stack dumps; the
+§6 fixes shipped in #3826; §8.3 implemented; §8.1–§8.2 in progress; §9 (keeping
+AgentMux responsive under agent load) lists further proposals.
 **Author:** AgentY, at the request of the repo owner
 **Related:** `docs/specs/SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md` (the
 liveness probe that recycled srv), `docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`
@@ -219,3 +220,158 @@ contention, while still using all idle CPU — builds only slow down when the
 machine is actually contended. §5's before/after (normal-priority build → 3
 misses and a recycle; the same build at BelowNormal → 0 misses) is the evidence,
 one run each. Make it a setting, on by default.
+
+**Implemented.** `agent:belownormalpriority` (settings.json, default `true`, read
+live per spawn). Applied to the job of every **agent** process tree — the ACP,
+persistent and subprocess controllers, and agent panes' shells — never to a
+terminal pane a human types in. The job's limits are read-modify-written so
+`KILL_ON_JOB_CLOSE` is preserved. Windows only; a no-op on Linux and macOS.
+Not sufficient on its own for a backgrounded window — see §9.3 item 3.
+
+## 9. Keeping AgentMux responsive while agents saturate the machine
+
+The owner's question: *will this ensure that processes started by agents never
+freeze AgentMux, and can the CPU charts that break into sections be fixed once
+and for all?* This section answers it from the evidence above and from platform
+documentation (sources at the end).
+
+### 9.1 "Freezing" is four different failures
+
+| # | Failure | Visible as | Cause |
+|---|---|---|---|
+| F1 | srv's async runtime starved | server deaf, **chart gaps**, watchdog restarts | blocking work on a runtime worker (§3–§4) |
+| F2 | AgentMux threads lose the CPU | everything slow | agents' builds run at the same priority as AgentMux |
+| F3 | renderer backgrounded by Chromium | a window stops painting | Chromium drops a background renderer to `IDLE_PRIORITY_CLASS` + EcoQoS |
+| F4 | memory pressure | stutters regardless of CPU priority | AgentMux's pages trimmed while builds fill RAM and commit |
+
+Each needs its own fix. None of them alone covers the others.
+
+### 9.2 Why the CPU charts break into sections
+
+The chart draws a break on purpose. `sysinfo-model.ts` inserts `NaN` points
+between two consecutive samples more than `max(3000ms, 2.5 × interval)` apart
+(`getGapThresholdMs`). Each sample carries **srv's** capture timestamp
+(`convertMuxEventToDataItem` reads `event.data.ts`), and no sysinfo events were
+dropped on the way (zero `ws egress lane full` warnings in the day's log). So a
+break means **srv took no sample for 3 seconds**.
+
+The sampler (`run_sysinfo_loop`) is a task on the same Tokio runtime as
+everything else. Its interval is a Tokio timer, and Tokio's timers are driven by
+the same driver whose starvation silenced the sockets in §3.1. When F1 happens,
+the sampler's ticks do not fire (and `MissedTickBehavior::Skip` then skips them
+rather than catching up). **The broken chart and the watchdog restart are the
+same event seen twice.** A rendering stall (F3) does not create a break: samples
+keep their capture timestamps and are drawn late, not missing.
+
+### 9.3 Practices, and what AgentMux does or should do
+
+**1. Never block the async runtime.** Tokio guidance: async code "should never
+spend a long time without reaching an `.await`" — roughly 10–100µs between
+awaits — with `spawn_blocking` for blocking I/O, a dedicated thread for
+long-running loops, and rayon for CPU-bound work. *Status:* the offenders found
+in §4 are fixed in #3826. *Add:* a stall detector, so the next offender is named
+instead of rediscovered with a debugger — a watchdog thread that notices the
+runtime's own heartbeat task falling behind and logs it.
+
+**2. Separate priorities; do not raise AgentMux to HIGH.** Windows schedules by
+strict priority: "if a higher-priority thread becomes available to run, the
+system ceases to execute the lower-priority thread". Microsoft warns against
+`HIGH_PRIORITY_CLASS` for anything that runs for long ("other threads in the
+system will not get processor time"). The right direction is to lower the
+work, not raise the UI. *Status:* agents' job objects at `BELOW_NORMAL` (§8.3).
+Lower-priority threads are still not starved outright: the scheduler boosts
+dynamic priority on I/O completion, input and the foreground window, and
+background-mode threads "will never be starved".
+
+**3. Stop Chromium backgrounding AgentMux's own renderers (F3).** In Chromium's
+`base/process/process_win.cc`, a best-effort (background) process gets
+`IDLE_PRIORITY_CLASS`, and — via `kUseEcoQoSForBackgroundProcess`, enabled by
+default — EcoQoS (reduced frequency, efficiency cores). An idle-priority renderer
+(base priority 4) loses even to below-normal agent builds (base priority 6), so
+**§8.3 alone does not protect a backgrounded window**. AgentMux already disables
+`CalculateNativeWinOcclusion` but does not pass `--disable-renderer-backgrounding`
+or `--disable-background-timer-throttling` (timers in background pages are
+throttled). *Proposed:* pass both, and
+`--disable-backgrounding-occluded-windows`. Cost: AgentMux keeps normal priority
+and timer cadence when it is not in view — right for a workbench whose value is
+watching agents work, and cheap when idle. Make it a setting, on by default.
+
+**4. Memory priority for agents (F4).** CPU priority is not enough; Microsoft's
+own remarks: "even an idle CPU priority process can easily interfere with system
+responsiveness when it uses the disk and memory". `SetProcessInformation(…,
+ProcessMemoryPriority, …)` lowers the priority of a process's pages, so the
+memory manager "trims lower priority pages before higher priority pages". It
+takes a `PROCESS_SET_INFORMATION` handle, so srv can apply it to agent processes
+it tracks. *Proposed:* `MEMORY_PRIORITY_BELOW_NORMAL` for agent processes, applied
+by the process-tracker poller as new members appear (the job-object priority
+limit covers CPU only). This targets the 66/74 GB commit and the page file
+eviction seen during §5's incidents.
+
+**5. I/O.** `PROCESS_MODE_BACKGROUND_BEGIN` lowers CPU, I/O and memory priority
+together, but "can be specified only if hProcess is a handle to the current
+process", so srv cannot put an agent's build into background mode. Per-process
+I/O priority for another process has no documented API. *Not proposed now*;
+revisit only if disk contention shows up as its own symptom.
+
+**6. CPU rate control: weight, not a hard cap.** Job objects support hard caps
+(`CpuRate`, in 1/100 %), min/max rates, and weight-based sharing (1–9, default 5).
+A hard cap "no threads associated with the job will run until the next interval"
+— wasting idle cores and slowing every build even on an idle machine. Priority
+(§8.3) already makes agents yield under contention while using idle CPU fully.
+*Not proposed by default*; a weight option could later balance several agents
+against each other.
+
+**7. EcoQoS for agents: no.** Microsoft: EcoQoS is for work "not contributing to
+the foreground user experience" and "should not be used for performance
+critical" work — it lowers CPU frequency and prefers efficiency cores. Agents'
+builds are what the user is waiting for; slowing them to save power is the wrong
+trade by default.
+
+**8. Take samples on a dedicated, elevated thread.** Move sysinfo sampling off
+the Tokio runtime onto its own OS thread at `THREAD_PRIORITY_ABOVE_NORMAL` —
+brief work every interval, which is what Microsoft's guidance allows higher
+priority for — timestamping at capture into a small ring buffer that the
+runtime drains and publishes. The chart then breaks only when AgentMux itself
+could not run for 3 seconds, which makes a break a real alarm instead of noise.
+The health-latency banner (§8.2) says the same thing in words.
+
+**9. Other platforms (not verified here).** Linux: the process tracker already
+places agents in a cgroup; cgroup v2 `cpu.weight` (and `io.weight`) is the
+equivalent of the job priority limit, with `nice`/`ionice` as the per-process
+fallback. macOS: the background QoS / `PRIO_DARWIN_BG` policy throttles CPU, I/O
+and network together for a process.
+
+### 9.4 Once and for all?
+
+For **load created by agents' processes**, yes — with §8.3 (done), #3826 (done)
+and items 3, 4 and 8 above, an agent build cannot take AgentMux's CPU, starve
+its server, background its renderer, or evict its pages before its own. What
+this cannot guarantee against: another application running at `HIGH` or
+`REALTIME` priority, driver or interrupt storms, and genuine memory exhaustion
+(when the page file is full, every process stalls). With the layers in place,
+those are the only remaining ways to get a gap in the chart — and the gap, the
+health banner and the watchdog log will then point at the machine, not at
+AgentMux.
+
+### 9.5 Plan
+
+| Item | Where | Status |
+|---|---|---|
+| No blocking on async workers | srv | done (#3826) |
+| Agents' job objects `BELOW_NORMAL` | srv, process tracker | done (this PR) |
+| Renderer backgrounding flags | CEF host | proposed |
+| Sampler on a dedicated elevated thread | srv sysinfo | proposed |
+| Agent memory priority `BELOW_NORMAL` | srv, process tracker | proposed |
+| Runtime stall detector | srv | proposed |
+| Slow-vs-dead recycle, latency banner | launcher, host, frontend | in progress (§8.1–§8.2) |
+
+### Sources
+
+- Microsoft, *Scheduling Priorities*: https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities
+- Microsoft, *Priority Boosts*: https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts
+- Microsoft, *SetPriorityClass* (background mode remarks): https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setpriorityclass
+- Microsoft, *SetProcessInformation* (memory priority, EcoQoS): https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation
+- Microsoft, *JOBOBJECT_CPU_RATE_CONTROL_INFORMATION*: https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_cpu_rate_control_information
+- Chromium, `base/process/process_win.cc` (background priority, EcoQoS feature): https://chromium.googlesource.com/chromium/src/+/refs/heads/main/base/process/process_win.cc
+- Chrome, *Chrome flags for tools* (renderer backgrounding, timer throttling): https://github.com/GoogleChrome/chrome-launcher/blob/main/docs/chrome-flags-for-tools.md
+- Alice Ryhl, *Async: What is blocking?*: https://ryhl.io/blog/async-what-is-blocking/

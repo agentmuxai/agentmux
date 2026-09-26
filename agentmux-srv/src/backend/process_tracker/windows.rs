@@ -37,12 +37,12 @@ use windows_sys::Win32::System::JobObjects::{
     JobObjectExtendedLimitInformation, QueryInformationJobObject,
     SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PRIORITY_CLASS,
 };
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA,
-    PROCESS_TERMINATE,
+    OpenProcess, TerminateProcess, BELOW_NORMAL_PRIORITY_CLASS, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SET_QUOTA, PROCESS_TERMINATE,
 };
 
 use super::{TrackedProcess, TrackerHandle, TrackingConfidence};
@@ -249,6 +249,52 @@ impl TrackerHandle for JobObjectTracker {
         }
     }
 
+    fn set_below_normal_priority(&self, on: bool) -> Result<(), String> {
+        // Read-modify-write the job's extended limits so KILL_ON_JOB_CLOSE
+        // (set at creation) is preserved.
+        unsafe {
+            let inner = self.inner.lock().unwrap();
+            if inner.closed {
+                return Ok(());
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = zeroed();
+            let ok = QueryInformationJobObject(
+                inner.job,
+                JobObjectExtendedLimitInformation,
+                &mut info as *mut _ as *mut _,
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            );
+            if ok == 0 {
+                return Err(format!("QueryInformationJobObject failed: {}", std::io::Error::last_os_error()));
+            }
+            let flags = info.BasicLimitInformation.LimitFlags;
+            let want = if on {
+                flags | JOB_OBJECT_LIMIT_PRIORITY_CLASS
+            } else {
+                flags & !JOB_OBJECT_LIMIT_PRIORITY_CLASS
+            };
+            if want == flags && (!on || info.BasicLimitInformation.PriorityClass == BELOW_NORMAL_PRIORITY_CLASS) {
+                return Ok(());
+            }
+            info.BasicLimitInformation.LimitFlags = want;
+            if on {
+                info.BasicLimitInformation.PriorityClass = BELOW_NORMAL_PRIORITY_CLASS;
+            }
+            let ok = SetInformationJobObject(
+                inner.job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const _,
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            if ok == 0 {
+                return Err(format!("SetInformationJobObject failed: {}", std::io::Error::last_os_error()));
+            }
+            tracing::info!(block_id = %self.block_id, below_normal = on, "[process-tracker] job CPU priority set");
+            Ok(())
+        }
+    }
+
     fn confidence(&self) -> TrackingConfidence {
         TrackingConfidence::High
     }
@@ -369,5 +415,74 @@ fn query_rss(pid: u32) -> u64 {
         } else {
             counters.WorkingSetSize as u64
         }
+    }
+}
+
+#[cfg(test)]
+mod priority_tests {
+    use super::*;
+    use windows_sys::Win32::System::Threading::{GetPriorityClass, NORMAL_PRIORITY_CLASS};
+
+    fn priority_of(pid: u32) -> u32 {
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            assert!(!h.is_null(), "OpenProcess({pid}) failed");
+            let p = GetPriorityClass(h);
+            CloseHandle(h);
+            p
+        }
+    }
+
+    fn limit_flags(t: &JobObjectTracker) -> u32 {
+        unsafe {
+            let inner = t.inner.lock().unwrap();
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = zeroed();
+            let ok = QueryInformationJobObject(
+                inner.job,
+                JobObjectExtendedLimitInformation,
+                &mut info as *mut _ as *mut _,
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            );
+            assert!(ok != 0);
+            info.BasicLimitInformation.LimitFlags
+        }
+    }
+
+    /// A real child in the job runs below normal once the limit is set, and
+    /// the job keeps KILL_ON_JOB_CLOSE (set at creation) — the read-modify-write
+    /// must not drop it, or an AgentMux crash would leak the agent's tree.
+    #[test]
+    fn a_process_in_the_job_runs_below_normal_and_kill_on_close_survives() {
+        // Explicitly NORMAL: a child inherits its parent's priority class, and
+        // the test runner itself may be running below normal.
+        use std::os::windows::process::CommandExt;
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1 >nul"])
+            .creation_flags(NORMAL_PRIORITY_CLASS)
+            .spawn()
+            .expect("spawn cmd");
+        let pid = child.id();
+        let t = JobObjectTracker::new("priority-test").unwrap();
+        t.assign_process(pid).unwrap();
+        assert_eq!(priority_of(pid), NORMAL_PRIORITY_CLASS);
+
+        t.set_below_normal_priority(true).unwrap();
+        assert_eq!(priority_of(pid), BELOW_NORMAL_PRIORITY_CLASS);
+        let flags = limit_flags(&t);
+        assert_ne!(flags & JOB_OBJECT_LIMIT_PRIORITY_CLASS, 0);
+        assert_ne!(flags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, 0, "KILL_ON_JOB_CLOSE must survive");
+
+        // Idempotent.
+        t.set_below_normal_priority(true).unwrap();
+
+        // Off lifts the limit (and still keeps KILL_ON_JOB_CLOSE).
+        t.set_below_normal_priority(false).unwrap();
+        let flags = limit_flags(&t);
+        assert_eq!(flags & JOB_OBJECT_LIMIT_PRIORITY_CLASS, 0);
+        assert_ne!(flags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, 0);
+
+        t.kill_tree();
+        let _ = child.wait();
     }
 }
