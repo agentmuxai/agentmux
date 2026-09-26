@@ -267,6 +267,16 @@ pub(super) async fn bundle_import_for_agent_impl(
                 warnings.push(format!("{path}: referenced in components.memory but not found among the bundle's files; skipped"));
                 continue;
             };
+            // Into the agent's memory record first, as every AgentMux write
+            // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
+            crate::backend::memory_reconcile::record_agentmux_write(
+                &agent.id,
+                &memory_dir,
+                filename,
+                content.as_bytes(),
+                "bundle-import",
+                "",
+            );
             let dest = memory_dir.join(filename);
             let tmp = memory_dir.join(format!(".{filename}.{}.tmp", uuid::Uuid::new_v4()));
             let write_result = std::fs::write(&tmp, &content)

@@ -1315,6 +1315,16 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 ) {
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: version insert failed (non-fatal)");
                 }
+                // And into the agent's memory record, likewise first
+                // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
+                crate::backend::memory_reconcile::record_agentmux_write(
+                    &agent.id,
+                    &dir,
+                    &cmd.filename,
+                    cmd.content.as_bytes(),
+                    version_source,
+                    &version_detail,
+                );
 
                 let dest = dir.join(&cmd.filename);
                 // Per-write UUID suffix prevents concurrent writes to the same
@@ -1584,6 +1594,14 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 let new_version = id_store
                     .agent_native_memory_version_insert(&agent.id, &cmd.filename, &target.content, "revert", &detail, "")
                     .map_err(|e| format!("agent:memory:revert: version insert: {e}"))?;
+                crate::backend::memory_reconcile::record_agentmux_write(
+                    &agent.id,
+                    &dir,
+                    &cmd.filename,
+                    target.content.as_bytes(),
+                    "revert",
+                    &detail,
+                );
 
                 let dest = dir.join(&cmd.filename);
                 let tmp = dir.join(format!(".{}.{}.tmp", cmd.filename, uuid::Uuid::new_v4()));
