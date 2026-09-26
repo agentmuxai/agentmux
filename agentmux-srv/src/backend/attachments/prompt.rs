@@ -25,6 +25,9 @@ use crate::backend::rpc_types::AttachmentRef;
 /// caps a request at 32 MB, and the whole conversation is resent each turn.
 pub const INLINE_MAX_B64_BYTES: usize = 20 * 1024 * 1024;
 pub const DEFAULT_INLINE_MAX_COUNT: usize = 20;
+/// Inline at most this much base64 across one Claude session. Claude Code
+/// keeps every inline image in its own session transcript.
+pub const DEFAULT_SESSION_INLINE_MB: u64 = 50;
 
 pub const BLOCK_OPEN: &str = "<attached_images>";
 pub const BLOCK_CLOSE: &str = "</attached_images>";
@@ -67,11 +70,18 @@ pub fn resolve(svc: &Service, refs: &[AttachmentRef]) -> (Vec<Resolved>, Vec<Str
     (found, missing)
 }
 
-/// Build the list and (when `inline_max_count > 0`) the inline blocks.
-/// Reads the send-copies from disk for the inline part. Blocking.
-pub fn prepare(items: &[Resolved], missing: &[String], inline_max_count: usize) -> Prepared {
+/// Build the list and (when `inline_max_count > 0`) the inline blocks, using
+/// at most `inline_budget` base64 bytes (further capped at
+/// [`INLINE_MAX_B64_BYTES`] per message). Reads the send-copies from disk
+/// for the inline part. Blocking.
+pub fn prepare(
+    items: &[Resolved],
+    missing: &[String],
+    inline_max_count: usize,
+    inline_budget: u64,
+) -> Prepared {
     let mut inline = Vec::new();
-    let mut budget = INLINE_MAX_B64_BYTES;
+    let mut budget = (INLINE_MAX_B64_BYTES as u64).min(inline_budget) as usize;
     for item in items.iter().take(inline_max_count) {
         let Ok(bytes) = std::fs::read(&item.path) else {
             break;
@@ -90,6 +100,15 @@ pub fn prepare(items: &[Resolved], missing: &[String], inline_max_count: usize) 
         list: list_block(items, missing, inline.len()),
         inline,
     }
+}
+
+/// Base64 bytes carried by inline blocks, for the session budget.
+pub fn inline_bytes(blocks: &[serde_json::Value]) -> u64 {
+    blocks
+        .iter()
+        .filter_map(|b| b.pointer("/source/data").and_then(|d| d.as_str()))
+        .map(|d| d.len() as u64)
+        .sum()
 }
 
 /// The `<attached_images>` block.
@@ -269,11 +288,20 @@ mod tests {
                 mime: "image/png".into(),
             })
             .collect();
-        let p = prepare(&items, &[], 2);
+        let p = prepare(&items, &[], 2, u64::MAX);
         assert_eq!(p.inline.len(), 2);
         assert_eq!(p.inline[0]["source"]["media_type"], "image/png");
         assert!(p.list.contains("Images 1–2 are shown above"));
-        assert!(prepare(&items, &[], 0).inline.is_empty());
+        assert_eq!(
+            inline_bytes(&p.inline),
+            16,
+            "two 5-byte files are 8 base64 chars each"
+        );
+        assert!(prepare(&items, &[], 0, u64::MAX).inline.is_empty());
+        // A spent session budget means paths only.
+        let spent = prepare(&items, &[], 20, 10);
+        assert_eq!(spent.inline.len(), 1);
+        assert!(prepare(&items, &[], 20, 0).inline.is_empty());
     }
 
     #[test]

@@ -62,6 +62,8 @@ pub struct Limits {
     pub retention: Duration,
     /// Images Claude gets inline (the rest by path only). 0 = paths only.
     pub claude_inline_max: usize,
+    /// Base64 bytes Claude may get inline across one session.
+    pub claude_session_inline_bytes: u64,
 }
 
 impl Default for Limits {
@@ -72,6 +74,7 @@ impl Default for Limits {
             send_max_edge: DEFAULT_SEND_MAX_EDGE,
             retention: Duration::from_secs(DEFAULT_RETENTION_DAYS * 24 * 3600),
             claude_inline_max: prompt::DEFAULT_INLINE_MAX_COUNT,
+            claude_session_inline_bytes: prompt::DEFAULT_SESSION_INLINE_MB * 1024 * 1024,
         }
     }
 }
@@ -105,6 +108,12 @@ impl Limits {
                 .filter(|n| n.is_finite() && *n >= 0.0)
                 .map(|n| (n as usize).min(100))
                 .unwrap_or(d.claude_inline_max),
+            claude_session_inline_bytes: extra
+                .get("attachments:claudesessioninlinemb")
+                .and_then(|v| v.as_f64())
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .map(|n| (n * 1024.0 * 1024.0) as u64)
+                .unwrap_or(d.claude_session_inline_bytes),
         }
     }
 }
