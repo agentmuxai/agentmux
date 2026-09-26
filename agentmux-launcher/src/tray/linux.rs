@@ -173,21 +173,40 @@ pub fn spawn(data_dir: std::path::PathBuf, dir_hash: String) -> Result<mpsc::Rec
     let (utx, urx) = mpsc::channel::<Update>();
     let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
     let running = super::service_reachable(&data_dir, &dir_hash);
+    let login_start = crate::autostart::login_start();
 
     std::thread::Builder::new()
         .name("agentmux-tray".into())
         .spawn(move || {
-            let tray = AgentMuxTray {
-                tx,
-                running,
-                nstate: notify_menu::get(),
-                start_at_login: crate::start_at_login::current(),
-            };
-            let handle = match tray.spawn() {
-                Ok(h) => h,
-                Err(e) => {
-                    let _ = ready_tx.send(Err(format!("ksni spawn: {e}")));
-                    return;
+            // A login start retries while the StatusNotifier watcher is not up
+            // yet (SPEC_START_WITH_OS §3.4); any other start fails fast.
+            let deadline = login_start.then(|| std::time::Instant::now() + super::LOGIN_TRAY_WAIT);
+            let mut attempts = 0u32;
+            let handle = loop {
+                attempts += 1;
+                let tray = AgentMuxTray {
+                    tx: tx.clone(),
+                    running,
+                    nstate: notify_menu::get(),
+                    start_at_login: crate::start_at_login::current(),
+                };
+                match tray.spawn() {
+                    Ok(h) => {
+                        if attempts > 1 {
+                            crate::log(&format!("tray: StatusNotifier host appeared (attempt {attempts})"));
+                        }
+                        break h;
+                    }
+                    Err(e) if deadline.is_some_and(|d| std::time::Instant::now() < d) => {
+                        if attempts == 1 {
+                            crate::log(&format!("tray: no StatusNotifier host yet at login ({e}); waiting"));
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(format!("ksni spawn: {e}")));
+                        return;
+                    }
                 }
             };
             let _ = ready_tx.send(Ok(()));
@@ -207,7 +226,7 @@ pub fn spawn(data_dir: std::path::PathBuf, dir_hash: String) -> Result<mpsc::Rec
         .map_err(|e| e.to_string())?;
     // Bounded, like the Windows toast backend: a missing/wedged session bus
     // must not stall the supervisor.
-    match ready_rx.recv_timeout(super::READY_TIMEOUT) {
+    match ready_rx.recv_timeout(super::ready_timeout(login_start)) {
         Ok(Ok(())) => {}
         Ok(Err(e)) => return Err(e),
         Err(_) => return Err("tray did not start within 5s".into()),

@@ -28,7 +28,8 @@ export const NOTIFICATIONS_SETTINGS = {
     autostart: {
         id: "notifications.autostart",
         label: "Start at login",
-        description: "Start AgentMux when you log in. The tray icon's menu has the same switch.",
+        description:
+            "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch.",
         section: "notifications",
         keywords: ["auto start", "autostart", "launch at login", "startup", "run at boot", "login items", "app:startatlogin"],
     },

@@ -211,6 +211,19 @@ pub(crate) fn forward_open_new_window_or_log(data_dir: &std::path::Path, dir_has
     }
 }
 
+/// What a launcher that lost the single-instance race does: open a window in
+/// the running instance, unless it was started by a login entry, which only
+/// asks that AgentMux be running (SPEC_START_WITH_OS_2026_09_25.md §3.6).
+/// Not used by the macOS reopen handler, which is a user asking for a window.
+#[cfg(not(target_os = "windows"))]
+fn forward_for_second_instance(data_dir: &std::path::Path, dir_hash: &str) {
+    if !crate::autostart::second_instance_opens_window(&std::env::args().collect::<Vec<_>>()) {
+        log("login start: AgentMux is already running — exiting without opening a window");
+        return;
+    }
+    forward_open_new_window_or_log(data_dir, dir_hash);
+}
+
 /// Bind the launcher's IPC socket with single-instance enforcement +
 /// crash-safe stale-socket recovery, serialized across concurrent
 /// launchers via `flock(2)`.
@@ -322,7 +335,7 @@ pub(crate) fn bind_socket_with_recovery(
                     socket_path
                 );
             }
-            forward_open_new_window_or_log(data_dir, dir_hash);
+            forward_for_second_instance(data_dir, dir_hash);
             log(&format!(
                 "[ipc] second-instance detected — existing launcher owns {}",
                 socket_path
@@ -359,7 +372,7 @@ pub(crate) fn bind_socket_with_recovery(
                             socket_path
                         );
                     }
-                    forward_open_new_window_or_log(data_dir, dir_hash);
+                    forward_for_second_instance(data_dir, dir_hash);
                     log(&format!(
                         "[ipc] post-recovery bind lost the race to a fresh launcher on {} — exiting as second instance",
                         socket_path

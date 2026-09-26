@@ -894,6 +894,11 @@ wrap_task! {
 }
 
 pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
+    // Focusing a held "main" (a notification click, the macOS Dock) means
+    // showing it (`crate::start_hidden`); the reveal also focuses it.
+    if label == crate::start_hidden::HELD_LABEL && crate::start_hidden::release_for_request(state, "focus_window") {
+        return;
+    }
     let mut task = FocusWindowTask::new(state.clone(), label.to_string());
     post_task(ThreadId::UI, Some(&mut task));
 }

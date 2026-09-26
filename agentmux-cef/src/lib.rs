@@ -13,6 +13,7 @@
 
 mod app;
 mod background_audit;
+mod start_hidden;
 mod browser_api;
 mod browser_panes;
 mod client;

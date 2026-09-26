@@ -252,6 +252,12 @@ mod object_id_tests {
 /// entry, independent lifecycle. See
 /// `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md`.
 pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    // Login start: the first window request shows the held "main" (which has
+    // restored the session) instead of opening a second, blank one
+    // (`crate::start_hidden`).
+    if crate::start_hidden::release_for_request(state, "open_new_window") {
+        return Ok(serde_json::json!(crate::start_hidden::HELD_LABEL));
+    }
     let initial_view = args
         .get("initial_view")
         .and_then(|v| v.as_str())

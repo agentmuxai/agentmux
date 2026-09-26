@@ -99,7 +99,7 @@ pub fn spawn(
     // Wait for the main thread to actually create the item. Queued is not
     // created: a failed `create` must reach `start_if_enabled` so it can drop
     // background mode (ReAgent P1 on #3785).
-    match ready_rx.recv_timeout(super::READY_TIMEOUT) {
+    match ready_rx.recv_timeout(super::ready_timeout(crate::autostart::login_start())) {
         Ok(Ok(())) => Ok(rx),
         Ok(Err(e)) => Err(e),
         Err(_) => {

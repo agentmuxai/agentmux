@@ -57,6 +57,22 @@ use std::sync::mpsc;
 /// *requested*: `unavailable` depends on it (ReAgent P1s on #3785).
 pub(crate) const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How long a login start keeps trying for a tray host that is not up yet
+/// (`SPEC_START_WITH_OS_2026_09_25.md` §3.4). At login the Linux StatusNotifier
+/// watcher can register after the autostart entry runs; nobody is looking at a
+/// login start yet, and a late tray beats a window nobody asked for.
+pub(crate) const LOGIN_TRAY_WAIT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// The ready timeout for this start: long enough to cover the retries a
+/// login start makes.
+pub(crate) fn ready_timeout(login_start: bool) -> std::time::Duration {
+    if login_start {
+        LOGIN_TRAY_WAIT + READY_TIMEOUT
+    } else {
+        READY_TIMEOUT
+    }
+}
+
 /// Set when the tray was requested but could not start. Read by the host spawn.
 static TRAY_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 

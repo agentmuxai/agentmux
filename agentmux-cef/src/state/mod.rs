@@ -684,6 +684,10 @@ pub struct AppState {
     /// plus an unbounded `send` is allocation-free and never blocks.
     pub background_audit_tx:
         std::sync::OnceLock<std::sync::mpsc::Sender<crate::background_audit::AuditEntry>>,
+
+    /// Login start: hold "main" hidden until a window is requested
+    /// (`crate::start_hidden`).
+    pub start_hidden: crate::start_hidden::StartHidden,
 }
 
 impl Default for AppState {
@@ -773,6 +777,7 @@ impl Default for AppState {
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
             background_audit: Mutex::new(crate::background_audit::BackgroundAudit::default()),
             background_audit_tx: std::sync::OnceLock::new(),
+            start_hidden: crate::start_hidden::StartHidden::from_env(),
             promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }
