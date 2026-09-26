@@ -428,10 +428,9 @@ pub fn load_config() -> config::Config {
         // `AGENTMUX_DATA_HOME` and the bare default stay last for the
         // standalone / pre-unification shapes.
         let data_dir: std::path::PathBuf = args.wavedata
-            .as_deref()
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var("AGENTMUX_DATA_DIR").ok().filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
-            .or_else(|| std::env::var("AGENTMUX_DATA_HOME").ok().map(std::path::PathBuf::from))
+            .clone()
+            .or_else(|| std::env::var_os("AGENTMUX_DATA_DIR").filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
+            .or_else(|| std::env::var_os("AGENTMUX_DATA_HOME").map(std::path::PathBuf::from))
             .unwrap_or_else(|| std::path::PathBuf::from(base::get_mux_data_dir()));
         let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify);
         std::process::exit(code);
@@ -483,10 +482,10 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     base::set_build_time(build_time);
 
     // Set up data directory (uses AGENTMUX_DATA_HOME or default)
-    if !config.data_home.is_empty() {
+    if !config.data_home.as_os_str().is_empty() {
         std::env::set_var("AGENTMUX_DATA_HOME", &config.data_home);
     }
-    if !config.config_home.is_empty() {
+    if !config.config_home.as_os_str().is_empty() {
         std::env::set_var("AGENTMUX_CONFIG_HOME", &config.config_home);
     }
     if !config.app_path.is_empty() {

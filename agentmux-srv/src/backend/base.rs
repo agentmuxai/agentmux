@@ -138,7 +138,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
 /// Get the AgentMux config directory.
 /// Uses `AGENTMUX_CONFIG_HOME` env var, or defaults to `~/.agentmux/config`.
 pub fn get_mux_config_dir() -> PathBuf {
-    if let Ok(dir) = env::var(MUX_CONFIG_HOME_ENV) {
+    if let Some(dir) = env::var_os(MUX_CONFIG_HOME_ENV) {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }

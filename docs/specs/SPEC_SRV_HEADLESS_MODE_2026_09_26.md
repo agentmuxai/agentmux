@@ -95,7 +95,8 @@ Runs before logging is initialized, so the log dir comes from the paths it resol
 
 - **Unit tests (`headless.rs`):**
   - flag and env detection;
-  - `--flag value` and `--flag=value` parsing;
+  - `--flag value` and `--flag=value` parsing, through the same `CliArgs` parser `Config` uses;
+  - data, config and `--wavedata` paths that aren't valid UTF-8 are kept byte for byte (read with `var_os` / `args_os`), so the lock and the stores agree on the directory;
   - the generated key is 64 hex characters, mode `0600`, and new each time;
   - key files are trimmed and must not be empty;
   - the bind address defaults to `STARTUP_BIND_ADDR`;

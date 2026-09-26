@@ -22,8 +22,11 @@
 //! It still binds loopback only (`--web-port` / `--ws-port` fix the ports).
 //! Reaching it from another machine is a reverse proxy's job, not srv's.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+use crate::config::CliArgs;
 
 
 /// Set once `prepare_env` succeeded: this process is the headless server.
@@ -53,18 +56,18 @@ pub const AUTH_KEY_FILE_NAME: &str = "srv-auth-key";
 /// setup, and its lock would refuse a `migrate --verify` run beside a running
 /// headless server (ReAgent P1 on #3893).
 pub fn requested() -> bool {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<OsString> = std::env::args_os().collect();
     requested_from(&args, std::env::var("AGENTMUX_HEADLESS").ok().as_deref())
 }
 
-fn requested_from(args: &[String], env: Option<&str>) -> bool {
+fn requested_from(args: &[OsString], env: Option<&str>) -> bool {
     let asked = args.iter().any(|a| a == "--headless") || matches!(env, Some("1") | Some("true"));
     // Parse with the same CliArgs `load_config` uses. A subcommand, or
     // --help/--version (which clap reports as an Err), is not the server, so
     // no setup and no lock (Codex P2 on #3893). Any other argv clap rejects is
     // left for `load_config` to report.
     use clap::error::ErrorKind;
-    let not_the_server = match <crate::config::CliArgs as clap::Parser>::try_parse_from(args) {
+    let not_the_server = match <CliArgs as clap::Parser>::try_parse_from(args) {
         Ok(a) => a.command.is_some(),
         Err(e) => matches!(
             e.kind(),
@@ -74,23 +77,13 @@ fn requested_from(args: &[String], env: Option<&str>) -> bool {
     asked && !not_the_server
 }
 
-/// The value after `flag` in argv (`--flag value` or `--flag=value`).
-fn arg_value(args: &[String], flag: &str) -> Option<String> {
-    let eq = format!("{flag}=");
-    args.iter().enumerate().find_map(|(i, a)| {
-        if a == flag {
-            args.get(i + 1).cloned()
-        } else {
-            a.strip_prefix(&eq).map(str::to_string)
-        }
-    })
-}
-
 /// Prepare the environment the launcher would normally provide. Runs before
 /// logging is initialized, so problems are returned for `main` to print.
 /// Returns the path the auth key was written to, when it generated one.
 pub fn prepare_env() -> Result<Option<PathBuf>, String> {
-    let args: Vec<String> = std::env::args().collect();
+    // The same parser `load_config` uses, over `args_os`, so path flags that
+    // aren't valid UTF-8 arrive intact (Codex P2 on #3893).
+    let cli = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()).map_err(|e| e.to_string())?;
 
     let paths = match agentmux_common::DataPaths::from_env() {
         Some(p) => p,
@@ -115,14 +108,15 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     // the same lock every srv takes (`base::acquire_data_dir_lock`), and before
     // writing anything there, so a second server can't clobber the first's key
     // file (Codex P1/P2 on #3893).
-    let data_dir = effective_data_dir(&args, &paths.data_dir);
+    let data_dir = effective_data_dir(cli.wavedata.as_deref(), &paths.data_dir);
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
     crate::backend::base::acquire_data_dir_lock(&data_dir)?;
 
     let mut generated = None;
     if std::env::var("AGENTMUX_AUTH_KEY").map(|k| k.is_empty()).unwrap_or(true) {
-        let key = match arg_value(&args, "--auth-key-file").or_else(|| std::env::var("AGENTMUX_AUTH_KEY_FILE").ok()) {
-            Some(file) => read_key_file(Path::new(&file))?,
+        let key_file = cli.auth_key_file.clone().or_else(|| std::env::var_os("AGENTMUX_AUTH_KEY_FILE").map(PathBuf::from));
+        let key = match key_file {
+            Some(file) => read_key_file(&file)?,
             None => {
                 let (key, path) = write_generated_key(&data_dir)?;
                 generated = Some(path);
@@ -132,12 +126,7 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
         std::env::set_var("AGENTMUX_AUTH_KEY", key);
     }
 
-    let port = |flag: &str| -> Result<Option<u16>, String> {
-        arg_value(&args, flag)
-            .map(|p| p.parse::<u16>().map_err(|_| format!("{flag}: not a port: {p:?}")))
-            .transpose()
-    };
-    let _ = PORTS.set((port("--web-port")?, port("--ws-port")?));
+    let _ = PORTS.set((cli.web_port, cli.ws_port));
 
     if std::env::var_os("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").is_none() {
         std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1");
@@ -149,11 +138,11 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
 
 /// The directory srv will open its databases in: `--wavedata` if given (the
 /// same precedence `Config::from_env_and_args` applies), else `resolved`.
-fn effective_data_dir(args: &[String], resolved: &Path) -> PathBuf {
-    arg_value(args, "--wavedata")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| resolved.to_path_buf())
+fn effective_data_dir(wavedata: Option<&Path>, resolved: &Path) -> PathBuf {
+    wavedata
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(resolved)
+        .to_path_buf()
 }
 
 /// Read a key from a file the operator provided; surrounding whitespace is ignored.
@@ -214,8 +203,12 @@ fn bind_addr_with(port: Option<u16>) -> String {
 mod tests {
     use super::*;
 
-    fn args(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
+    fn args(v: &[&str]) -> Vec<OsString> {
+        v.iter().map(OsString::from).collect()
+    }
+
+    fn cli(v: &[&str]) -> CliArgs {
+        <CliArgs as clap::Parser>::try_parse_from(args(v)).unwrap()
     }
 
     #[test]
@@ -240,20 +233,32 @@ mod tests {
     #[test]
     fn the_lock_follows_wavedata() {
         let resolved = Path::new("/home/u/.agentmux/channels/stable/versions/1/data");
-        assert_eq!(effective_data_dir(&args(&["srv", "--headless"]), resolved), resolved);
-        assert_eq!(
-            effective_data_dir(&args(&["srv", "--headless", "--wavedata", "/shared"]), resolved),
-            Path::new("/shared")
-        );
-        assert_eq!(effective_data_dir(&args(&["srv", "--wavedata=/shared"]), resolved), Path::new("/shared"));
+        let dir = |v: &[&str]| effective_data_dir(cli(v).wavedata.as_deref(), resolved);
+        assert_eq!(dir(&["srv", "--headless"]), resolved);
+        assert_eq!(dir(&["srv", "--headless", "--wavedata", "/shared"]), Path::new("/shared"));
+        assert_eq!(dir(&["srv", "--wavedata=/shared"]), Path::new("/shared"));
+    }
+
+    /// A `--wavedata` that isn't valid UTF-8 is locked byte for byte, the same
+    /// directory Config then opens the stores in.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_wavedata_is_kept() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let raw = OsStr::from_bytes(b"/data/caf\xe9");
+        let a = vec![OsString::from("srv"), OsString::from("--headless"), OsString::from("--wavedata"), raw.to_os_string()];
+        assert!(requested_from(&a, None));
+        let parsed = <CliArgs as clap::Parser>::try_parse_from(a).unwrap();
+        assert_eq!(effective_data_dir(parsed.wavedata.as_deref(), Path::new("/x")).as_os_str(), raw);
     }
 
     #[test]
-    fn arg_value_reads_both_forms() {
-        let a = args(&["srv", "--headless", "--web-port", "8190", "--ws-port=8191"]);
-        assert_eq!(arg_value(&a, "--web-port").as_deref(), Some("8190"));
-        assert_eq!(arg_value(&a, "--ws-port").as_deref(), Some("8191"));
-        assert_eq!(arg_value(&a, "--auth-key-file"), None);
+    fn flags_parse_in_both_forms() {
+        let c = cli(&["srv", "--headless", "--web-port", "8190", "--ws-port=8191"]);
+        assert_eq!((c.web_port, c.ws_port), (Some(8190), Some(8191)));
+        assert_eq!(c.auth_key_file, None);
+        assert!(<CliArgs as clap::Parser>::try_parse_from(args(&["srv", "--web-port", "x"])).is_err());
     }
 
     #[test]
