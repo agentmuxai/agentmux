@@ -2,8 +2,8 @@
 
 **Author:** lark
 **Date:** 2026-09-26
-**Status:** active. Part B implemented in #3861, Part C in #3862. Part A is in progress; §5 Q1 is answered from the
-backend code but still wants one live check.
+**Status:** implemented. Part A in #3864, Part B in #3861, Part C in #3862. Checked by the user in a `task dev`
+build on 2026-09-26. §5 Q1 (resume across accounts) is answered from the backend code.
 **Related:** `SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md` (where the chip's email comes from),
 `SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md` (the failure row's "Bind account" action, which this
 reuses), `SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md` (the live-apply pair a bind performs),
