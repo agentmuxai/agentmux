@@ -24,6 +24,7 @@ import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { accountPickerItems, planBind, type BindMode } from "./failure/account-picker";
 import {
     atoms,
     getApi,
@@ -2031,30 +2032,32 @@ const AgentPresentationView = ({
         return computeAccountBindCandidates(prov.id, accountCache(), linkedAccountId());
     });
 
-    const onBindAccount = (e?: MouseEvent) => {
-        const candidates = bindCandidates();
-        if (candidates.length === 0) return;
-        if (candidates.length === 1) {
-            void status.bindExistingAccount(candidates[0]);
+    // A flat picker of accounts to bind, anchored at the click — same
+    // ContextMenuModel primitive the Armory's Bind-to-Agent menu uses
+    // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md), just a flat
+    // list here (the trigger IS the button — no outer submenu to nest under).
+    // What to do for a given candidate list is `planBind` (failure/account-picker.ts,
+    // unit-tested): the failure row's "adopt" binds a lone candidate at once; the
+    // composer chip's "switch" never does — the agent works and a switch restarts
+    // it, so the user picks a named destination
+    // (SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A).
+    const runBind = (mode: BindMode, e: MouseEvent | undefined, labelPrefix = "") => {
+        const plan = planBind(mode, bindCandidates());
+        if (plan.kind === "none") return;
+        if (plan.kind === "bind") {
+            void status.bindExistingAccount(plan.account);
             return;
         }
-        // 2+ candidates: a picker, anchored at the click — same
-        // ContextMenuModel primitive the Armory's Bind-to-Agent menu uses
-        // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md), just a flat
-        // list here (this button IS the trigger — no outer submenu to nest
-        // under). No event to anchor on (shouldn't happen — PaneRow's render
-        // call site always passes one) → no-op rather than guessing a position.
+        // No event to anchor on (shouldn't happen — PaneRow's render call site
+        // always passes one) → no-op rather than guessing a position.
         if (!e) return;
         ContextMenuModel.showContextMenu(
-            candidates.map((acct) => ({
-                // The login email, else the name — every Claude account is
-                // named `claude-oauth`, so the name alone cannot tell them apart.
-                label: accountLabel(acct),
-                click: () => void status.bindExistingAccount(acct),
-            })),
+            accountPickerItems(plan.candidates, (acct) => void status.bindExistingAccount(acct), labelPrefix),
             e,
         );
     };
+    const onBindAccount = (e?: MouseEvent) => runBind("adopt", e);
+    const onSwitchAccount = (e: MouseEvent) => runBind("switch", e, "Switch to ");
 
     // Declare the auth-blocking state resolved: clears canRetry/authNotice
     // (notifyControllerHealthy) and, ONLY when the live failure is actually
@@ -2850,6 +2853,8 @@ const AgentPresentationView = ({
                 contextWindow={(paneModel.state.lastContextWindow ?? null) ?? provider()?.contextWindow}
                 authStatus={loginStatus()}
                 authEmail={authEmail()}
+                switchAccountCandidates={bindCandidates().map((a) => ({ id: a.id, name: accountLabel(a) }))}
+                onSwitchAccount={onSwitchAccount}
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}

@@ -959,3 +959,140 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
         expect(chip(container)).not.toHaveTextContent("@");
     });
 });
+
+// The chip is a "switch account" link when signed in, idle, and another account
+// of the same provider exists. A switch restarts the agent, so it is plain text
+// while a turn or a compaction is running.
+// SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A.
+describe("AgentComposerStrip — sign-in chip switches account", () => {
+    const chip = (container: HTMLElement) => container.querySelector(".agent-composer-strip-auth")!;
+    const link = (container: HTMLElement) =>
+        container.querySelector<HTMLButtonElement>("button.agent-composer-strip-auth-link");
+    const others = [{ id: "a2", name: "second@example.com" }];
+
+    it("renders the email as a button that hands the click to onSwitchAccount", async () => {
+        const onSwitchAccount = vi.fn();
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                authStatus="authenticated"
+                authEmail="asafebgi@gmail.com"
+                switchAccountCandidates={others}
+                onSwitchAccount={onSwitchAccount}
+            />
+        ));
+        const btn = link(container)!;
+        expect(btn).not.toBeNull();
+        expect(btn).toHaveTextContent("asafebgi@gmail.com");
+        expect(btn.getAttribute("aria-haspopup")).toBe("menu");
+        expect(chip(container).getAttribute("title")).toBe("Signed in as asafebgi@gmail.com. Click to switch account.");
+        expect(chip(container).querySelector(".agent-composer-strip-auth-dot")).not.toBeNull();
+        expect(chip(container).classList.contains("agent-composer-strip-auth--ok")).toBe(true);
+
+        await userEvent.click(btn);
+        expect(onSwitchAccount).toHaveBeenCalledTimes(1);
+        expect(onSwitchAccount.mock.calls[0][0]).toBeInstanceOf(MouseEvent);
+    });
+
+    it("an account with no recorded email is a link too", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                authStatus="authenticated"
+                switchAccountCandidates={others}
+                onSwitchAccount={() => {}}
+            />
+        ));
+        expect(link(container)).toHaveTextContent("Logged in");
+    });
+
+    it("stays plain text when there is no other account to switch to", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                authStatus="authenticated"
+                authEmail="asafebgi@gmail.com"
+                switchAccountCandidates={[]}
+                onSwitchAccount={() => {}}
+            />
+        ));
+        expect(link(container)).toBeNull();
+        expect(chip(container)).toHaveTextContent("asafebgi@gmail.com");
+        expect(chip(container).getAttribute("title")).toBe("Signed in as asafebgi@gmail.com");
+    });
+
+    it("stays plain text with candidates but no handler", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                authStatus="authenticated"
+                authEmail="asafebgi@gmail.com"
+                switchAccountCandidates={others}
+            />
+        ));
+        expect(link(container)).toBeNull();
+    });
+
+    it("is plain text, with the reason in the tooltip, while a turn is running", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                loading={true}
+                authStatus="authenticated"
+                authEmail="asafebgi@gmail.com"
+                switchAccountCandidates={others}
+                onSwitchAccount={() => {}}
+            />
+        ));
+        expect(link(container)).toBeNull();
+        expect(chip(container)).toHaveTextContent("asafebgi@gmail.com");
+        expect(chip(container).getAttribute("title")).toBe(
+            "Signed in as asafebgi@gmail.com. Switching accounts restarts the agent — wait for the current turn to finish."
+        );
+    });
+
+    it("is plain text while a compaction is in progress", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                compacting={{ startedAt: 1 } as never}
+                authStatus="authenticated"
+                authEmail="asafebgi@gmail.com"
+                switchAccountCandidates={others}
+                onSwitchAccount={() => {}}
+            />
+        ));
+        expect(link(container)).toBeNull();
+    });
+
+    it("becomes a link again once the turn ends", () => {
+        const [loading, setLoading] = createSignal(true);
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                loading={loading()}
+                authStatus="authenticated"
+                authEmail="asafebgi@gmail.com"
+                switchAccountCandidates={others}
+                onSwitchAccount={() => {}}
+            />
+        ));
+        expect(link(container)).toBeNull();
+        setLoading(false);
+        expect(link(container)).not.toBeNull();
+    });
+
+    it("signed out is unchanged: no link even with candidates", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                authStatus="unauthenticated"
+                switchAccountCandidates={others}
+                onSwitchAccount={() => {}}
+            />
+        ));
+        expect(link(container)).toBeNull();
+        expect(chip(container)).toHaveTextContent("Not logged in");
+        expect(chip(container).getAttribute("title")).toBe("Not signed in — click Log in to continue");
+    });
+});
