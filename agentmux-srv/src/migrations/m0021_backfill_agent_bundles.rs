@@ -207,7 +207,14 @@ impl Migration for M0021BackfillAgentBundles {
             if let Some(fs) = sidecar.as_ref() {
                 match sc::claim(fs, &def.id, &bundle_id) {
                     Ok(winner) if winner != bundle_id && matches!(bundle_store.bundle_get(&winner), Ok(Some(_))) => {
-                        let _ = bundle_store.bundle_delete(&bundle_id);
+                        if let Err(e) = bundle_store.bundle_delete(&bundle_id) {
+                            tracing::warn!(
+                                agent_id = %def.id,
+                                bundle_id = %bundle_id,
+                                error = %e,
+                                "backfill_agent_bundles: another channel's bundle won; this duplicate could not be deleted and is left unbound"
+                            );
+                        }
                         bundle_id = winner;
                     }
                     Ok(_) => {}
