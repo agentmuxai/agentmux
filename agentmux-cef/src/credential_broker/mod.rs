@@ -332,7 +332,7 @@ fn open_approval_window(
     let result = crate::commands::window::open_subwindow(
         state,
         parent_label,
-        Some("credential-approval"),
+        Some(crate::commands::window::CREDENTIAL_APPROVAL_VIEW),
         Some(&meta),
     )?;
     result
