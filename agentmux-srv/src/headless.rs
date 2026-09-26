@@ -20,7 +20,9 @@
 //!   SIGINT/SIGTERM still shut it down.
 //!
 //! It still binds loopback only (`--web-port` / `--ws-port` fix the ports).
-//! Reaching it from another machine is a reverse proxy's job, not srv's.
+//! Reaching it from another machine is a reverse proxy's job, not srv's. For a
+//! client behind such a proxy, `--frontend-dir` serves the built frontend and
+//! `--allowed-origin` names the proxy's origin for CORS and the /ws check.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -35,6 +37,16 @@ static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 /// `--web-port` / `--ws-port`, held in-process (never in the env, so a
 /// launcher-spawned srv or an agent can't inherit them — ReAgent P1 on #3893).
 static PORTS: OnceLock<(Option<u16>, Option<u16>)> = OnceLock::new();
+
+/// `--frontend-dir` / `--allowed-origin`, held in-process like the ports.
+static WEB: OnceLock<WebOptions> = OnceLock::new();
+
+#[derive(Debug, Default)]
+struct WebOptions {
+    frontend_dir: Option<PathBuf>,
+    /// Normalized by [`normalize_origin`].
+    allowed_origins: Vec<String>,
+}
 
 /// Which startup listener a bind address is for.
 #[derive(Clone, Copy)]
@@ -84,6 +96,8 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     // The same parser `load_config` uses, over `args_os`, so path flags that
     // aren't valid UTF-8 arrive intact (Codex P2 on #3893).
     let cli = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()).map_err(|e| e.to_string())?;
+    // Checked before anything is written, so a typo leaves no lock or key behind.
+    let web = web_options(cli.frontend_dir.clone(), &cli.allowed_origins)?;
 
     let paths = match agentmux_common::DataPaths::from_env() {
         Some(p) => p,
@@ -127,6 +141,7 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     }
 
     let _ = PORTS.set((cli.web_port, cli.ws_port));
+    let _ = WEB.set(web);
 
     if std::env::var_os("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").is_none() {
         std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1");
@@ -143,6 +158,58 @@ fn effective_data_dir(wavedata: Option<&Path>, resolved: &Path) -> PathBuf {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(resolved)
         .to_path_buf()
+}
+
+fn web_options(frontend_dir: Option<PathBuf>, origins: &[String]) -> Result<WebOptions, String> {
+    if let Some(dir) = &frontend_dir {
+        if !dir.join("index.html").is_file() {
+            return Err(format!("--frontend-dir {}: no index.html there", dir.display()));
+        }
+    }
+    let allowed_origins = origins
+        .iter()
+        .map(|o| normalize_origin(o).map_err(|e| format!("--allowed-origin {o:?}: {e}")))
+        .collect::<Result<_, _>>()?;
+    Ok(WebOptions { frontend_dir, allowed_origins })
+}
+
+/// The directory `--frontend-dir` named, when headless and given.
+pub fn frontend_dir() -> Option<&'static Path> {
+    WEB.get().and_then(|w| w.frontend_dir.as_deref())
+}
+
+/// Is `origin` one `--allowed-origin` named? Always false for a srv that
+/// isn't headless.
+pub fn is_extra_allowed_origin(origin: &str) -> bool {
+    WEB.get().is_some_and(|w| origin_in(origin, &w.allowed_origins))
+}
+
+fn origin_in(origin: &str, allowed: &[String]) -> bool {
+    normalize_origin(origin).is_ok_and(|o| allowed.contains(&o))
+}
+
+/// An origin as browsers send it, via the WHATWG URL parser browsers use:
+/// http or https, a host, an optional port — no path, user, query or
+/// fragment. Serialized the way `Origin` is: lowercase, IDNA hosts in
+/// punycode, canonical IPv4/IPv6, and no default port, so every spelling of
+/// one origin compares equal (Codex P2s on #3900). A trailing `/` is fine.
+fn normalize_origin(origin: &str) -> Result<String, String> {
+    const SHAPE: &str = "expected scheme://host[:port], with no path, user or query";
+    let url = url::Url::parse(origin.trim()).map_err(|e| format!("{SHAPE} ({e})"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("scheme must be http or https".into());
+    }
+    let only_origin = url.host().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    // `Url` drops an empty `?` / `#`; refuse them too.
+    if !only_origin || origin.contains(['?', '#', '@']) {
+        return Err(SHAPE.into());
+    }
+    Ok(url.origin().ascii_serialization())
 }
 
 /// Read a key from a file the operator provided; surrounding whitespace is ignored.
@@ -266,6 +333,72 @@ mod tests {
         assert_eq!((c.web_port, c.ws_port), (Some(8190), Some(8191)));
         assert_eq!(c.auth_key_file, None);
         assert!(<CliArgs as clap::Parser>::try_parse_from(args(&["srv", "--web-port", "x"])).is_err());
+    }
+
+    #[test]
+    fn origins_normalize_the_way_browsers_send_them() {
+        let n = |o: &str| normalize_origin(o);
+        assert_eq!(n("https://App.Example.com").unwrap(), "https://app.example.com");
+        assert_eq!(n("https://app.example.com/").unwrap(), "https://app.example.com");
+        assert_eq!(n("https://app.example.com:443").unwrap(), "https://app.example.com");
+        assert_eq!(n("http://app.example.com:80").unwrap(), "http://app.example.com");
+        assert_eq!(n("https://app.example.com:8443").unwrap(), "https://app.example.com:8443");
+        assert_eq!(n("http://[::1]:8190").unwrap(), "http://[::1]:8190");
+        assert_eq!(n("https://app.example.com:0443").unwrap(), "https://app.example.com");
+        assert_eq!(n("https://app.example.com:08443").unwrap(), "https://app.example.com:8443");
+        assert_eq!(n("http://[0:0:0:0:0:0:0:1]:8190").unwrap(), "http://[::1]:8190");
+        assert_eq!(n("http://127.1:8190").unwrap(), "http://127.0.0.1:8190");
+        // An empty port is the default one, as browsers parse it.
+        assert_eq!(n("https://app.example.com:").unwrap(), "https://app.example.com");
+        assert_eq!(n("https://bücher.example").unwrap(), "https://xn--bcher-kva.example");
+        for bad in [
+            "app.example.com",
+            "ftp://app.example.com",
+            "https://",
+            "https://app.example.com/path",
+            "https://user@app.example.com",
+            "https://app.example.com?x=1",
+            "https://app.example.com?",
+            "https://app.example.com#",
+            "https://user:pw@app.example.com",
+            "https://app.example.com:99999",
+            "http://[evil/x]",
+            "*",
+            "null",
+        ] {
+            assert!(n(bad).is_err(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn only_the_named_origins_are_added() {
+        let allowed = vec![normalize_origin("https://app.example.com").unwrap()];
+        assert!(origin_in("https://app.example.com", &allowed));
+        assert!(origin_in("https://APP.example.com:443", &allowed));
+        assert!(!origin_in("http://app.example.com", &allowed));
+        assert!(!origin_in("https://app.example.com.evil.test", &allowed));
+        assert!(!origin_in("https://evil.test", &allowed));
+        assert!(!origin_in("null", &allowed));
+        assert!(!origin_in("https://app.example.com", &[]));
+    }
+
+    #[test]
+    fn frontend_dir_needs_an_index_and_origins_must_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(web_options(Some(dir.path().to_path_buf()), &[]).is_err());
+        std::fs::write(dir.path().join("index.html"), "<!doctype html>").unwrap();
+        let w = web_options(Some(dir.path().to_path_buf()), &["https://App.example.com/".into()]).unwrap();
+        assert_eq!(w.allowed_origins, vec!["https://app.example.com".to_string()]);
+        assert!(web_options(None, &["https://app.example.com/ui".into()]).is_err());
+        let c = cli(&["srv", "--headless", "--allowed-origin", "https://a.test", "--allowed-origin=https://b.test"]);
+        assert_eq!(c.allowed_origins, vec!["https://a.test", "https://b.test"]);
+    }
+
+    /// A srv that isn't headless never set WEB: no extra origins, no frontend.
+    #[test]
+    fn a_non_headless_srv_adds_nothing() {
+        assert!(!is_extra_allowed_origin("https://app.example.com"));
+        assert!(frontend_dir().is_none());
     }
 
     #[test]

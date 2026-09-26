@@ -1,7 +1,7 @@
 # SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host
 
 **Date:** 2026-09-26
-**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893. Slice 2 (§3.4: container image) is in review in PR #3898. Slices 3–4 (headless secret backend, frontend serving + allowed origins) remain.
+**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893; slice 2 (§3.4: container image) in PR #3898. Slice 4 (§3.5: frontend serving + allowed origins) is in review in PR #3900. Slice 3 (headless secret backend) remains.
 **Author:** Maricon
 
 ---
@@ -73,7 +73,7 @@ Runs before logging is initialized, so the log dir comes from the paths it resol
 ### 3.3 Readiness
 
 - Unchanged: the `AGENTMUXSRV-ESTART ws:… web:…` line on stderr.
-- `GET /` (no auth) answers `{"status":"ok","version":…}` once srv is serving, so it works as a container health check.
+- `GET /health` (no auth) answers `{"status":"ok","version":…}` once srv is serving, so it works as a container health check. `GET /` answers the same unless `--frontend-dir` serves the UI there (§3.5).
 
 ### 3.4 Container image (slice 2): `docker/Dockerfile.srv`
 
@@ -88,7 +88,7 @@ Build from the repo root: `docker build -f docker/Dockerfile.srv -t agentmux-srv
 - **Entrypoint:** `tini -- agentmux-srv --headless`, with `CMD --web-port 8190 --ws-port 8191`. tini is PID 1, forwards SIGTERM, and reaps the shells and agents srv spawns. srv exits 0 on SIGTERM.
 - **State:** everything lives under `~/.agentmux`, declared a `VOLUME`. Databases and the generated key sit in `channels/stable/versions/<v>/data/`.
 - **Auth key:** `AGENTMUX_AUTH_KEY` in the environment, a mounted file via `--auth-key-file`, or generated. A generated key's path is printed at start; the key never is.
-- **Health:** `HEALTHCHECK` runs `curl http://127.0.0.1:8190/`.
+- **Health:** `HEALTHCHECK` runs `curl http://127.0.0.1:8190/health`, which answers whether or not `--frontend-dir` is given (§3.5).
 - **Loopback only, in the container too.** srv is reachable only from its own network namespace: a reverse proxy sharing it (a sidecar in the same pod or task, or `docker run --network container:<proxy>`) terminates TLS, authenticates users and sends the key. `docker run -p` can't reach it, on purpose.
 - **CI:** `.github/workflows/srv-image.yml` builds the image (linux/amd64, no push) when its inputs change, or on demand. It then smoke-tests it:
   - it goes healthy;
@@ -99,6 +99,25 @@ Build from the repo root: `docker build -f docker/Dockerfile.srv -t agentmux-srv
   - `docker stop` exits 0.
 - **Not published.** Where an image is published, and for which architectures, is up to whoever deploys it.
 
+### 3.5 Frontend and allowed origins (slice 4)
+
+For a browser client that reaches srv through a reverse proxy on one public origin. Headless only; both options are checked before anything is written (a bad value exits 1 and leaves no lock or key), and held in-process like the ports, so nothing inherits them.
+
+- **`--frontend-dir <dir>`** (must contain `index.html`): srv serves the built frontend for every path no route claims, `/` included, and `index.html` for unknown paths, as a single-page app expects.
+  - **Health moves to `/health`.** `/health` always exists; without `--frontend-dir`, `/` stays the health endpoint as before.
+  - **Unauthenticated**, like the CEF host's static server: the bundle holds no secrets, and every API route still requires the key.
+  - **Full router only.** The LAN router never serves it.
+- **`--allowed-origin <origin>`** (repeatable): the proxy's public origin, e.g. `https://app.example.com`. It is accepted beside loopback by CORS and by the `/ws` Origin check (`is_allowed_origin`).
+  - Written the way browsers send `Origin`: http or https, host, optional port; no path, user or query. Lowercased, a trailing `/` dropped, and the scheme's default port removed, so `https://App.example.com:443/` matches `https://app.example.com`.
+  - Exact match only: no wildcards, no subdomains, never `null`.
+- **Serving the frontend is not enough on its own** for a browser client to work: the UI still gets its endpoints and key through the desktop host today. Bootstrapping from srv and a pluggable host are separate work.
+- **Live check** (headless, `--frontend-dir` with a fixture, `--allowed-origin https://App.Example.test/`):
+  - `GET /` gives the UI; `/assets/app.js` gives 200; `/health` gives the health JSON;
+  - `/agentmux/discovery` gives 401 without the key and 200 with it;
+  - `/ws` upgrades from `https://app.example.test` and from loopback (101), and is refused from `https://evil.test` (403);
+  - a CORS preflight reflects `https://app.example.test` and not `https://evil.test`;
+  - `--allowed-origin https://app.example.test/ui` and a `--frontend-dir` without `index.html` both exit 1, writing nothing.
+
 ## 4. Slices
 
 | Slice | Content |
@@ -106,7 +125,7 @@ Build from the repo root: `docker build -f docker/Dockerfile.srv -t agentmux-srv
 | **1** | §3: `--headless`, `prepare_env`, per-channel lock, auth-key file, fixed loopback ports, no stdin/parent watchers, cloud subscriber off by default |
 | **2** | §3.4: `docker/Dockerfile.srv` and its CI smoke test |
 | 3 | A secret backend for machines without an OS keychain (the file-backed fallback `secret_store.rs` already lists as a follow-up), so Armory keys, MuxBus credentials and OAuth accounts work headless |
-| 4 | Serving the built frontend, and a configurable allowed-origins list for CORS and the `/ws` origin check, for a same-origin client behind a reverse proxy |
+| **4** | §3.5: `--frontend-dir` serves the built frontend (health at `/health`); `--allowed-origin` for CORS and the `/ws` check |
 
 ## 5. Security notes
 

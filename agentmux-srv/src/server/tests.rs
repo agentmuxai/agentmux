@@ -6541,3 +6541,102 @@ fn loopback_origin_rule() {
         assert!(!is_loopback_origin(bad), "{bad}");
     }
 }
+
+// Headless `--frontend-dir`: the built frontend is served for every path no
+// route claims, `/` included; health moves to `/health`; API routes keep
+// requiring the key; the LAN router never serves the frontend.
+
+fn frontend_fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.html"), "<!doctype html>agentmux-ui").unwrap();
+    std::fs::create_dir(dir.path().join("assets")).unwrap();
+    std::fs::write(dir.path().join("assets/app.js"), "console.log('ui')").unwrap();
+    dir
+}
+
+async fn get_body(router: Router, uri: &str) -> (StatusCode, String) {
+    let resp = router.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tokio::test]
+async fn frontend_dir_serves_the_ui_and_moves_health() {
+    let dir = frontend_fixture();
+    let full = build_routers_with(test_state(), Some(dir.path())).full;
+
+    let (status, body) = get_body(full.clone(), "/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("agentmux-ui"), "{body}");
+
+    let (status, body) = get_body(full.clone(), "/assets/app.js").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("console.log"), "{body}");
+
+    // An unknown path gets index.html, as a single-page app expects.
+    let (status, body) = get_body(full.clone(), "/some/view").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("agentmux-ui"), "{body}");
+
+    let (status, body) = get_body(full.clone(), "/health").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("\"status\":\"ok\""), "{body}");
+
+    // The API still requires the key.
+    let (status, _) = get_body(full.clone(), "/agentmux/discovery").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Nothing outside the directory.
+    let (status, body) = get_body(full, "/../Cargo.toml").await;
+    assert!(!body.contains("[package]"), "{status} {body}");
+}
+
+/// The frontend fallback sits inside the router's layers, like every route:
+/// it gets the version header and CORS (ReAgent P1 on #3900).
+#[tokio::test]
+async fn frontend_responses_get_the_version_header_and_cors() {
+    let dir = frontend_fixture();
+    let full = build_routers_with(test_state(), Some(dir.path())).full;
+    for uri in ["/", "/assets/app.js", "/some/view"] {
+        let req = Request::builder()
+            .uri(uri)
+            .header("Origin", "http://127.0.0.1:5173")
+            .body(Body::empty())
+            .unwrap();
+        let resp = full.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        assert!(resp.headers().contains_key("x-agentmux-srv-version"), "{uri}: no version header");
+        assert_eq!(
+            resp.headers().get("access-control-allow-origin").and_then(|v| v.to_str().ok()),
+            Some("http://127.0.0.1:5173"),
+            "{uri}: no CORS header"
+        );
+    }
+}
+
+#[tokio::test]
+async fn without_frontend_dir_root_is_health_and_so_is_health() {
+    let full = build_routers_with(test_state(), None).full;
+    for uri in ["/", "/health"] {
+        let (status, body) = get_body(full.clone(), uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert!(body.contains("\"status\":\"ok\""), "{uri}: {body}");
+    }
+    let (status, _) = get_body(full, "/assets/app.js").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_lan_router_never_serves_the_frontend() {
+    let dir = frontend_fixture();
+    let lan = build_routers_with(test_state(), Some(dir.path())).lan;
+    let (status, body) = get_body(lan.clone(), "/assets/app.js").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    // Its health is unchanged: `/` is still health there (ReAgent P2 on #3900).
+    for uri in ["/", "/health"] {
+        let (status, body) = get_body(lan.clone(), uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert!(body.contains("\"status\":\"ok\""), "{uri}: {body}");
+    }
+}
