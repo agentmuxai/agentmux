@@ -847,6 +847,9 @@ export function update(
                 status: "canceled",
                 log: closedLog,
                 summary: "⏹ Canceled — cleared via muxspect",
+                // The row composes its own header (tool-header.ts); this note
+                // is what it shows of the summary's "cleared via muxspect".
+                statusNote: "cleared via muxspect",
             };
             return {
                 state: { ...state, nodes: nextNodes },

@@ -431,6 +431,7 @@ partial list.
 | [`SPEC_TOOL_BLOCK_INTERACTION_HOLD_AND_GLOB_EXPAND_2026_06_09`](SPEC_TOOL_BLOCK_INTERACTION_HOLD_AND_GLOB_EXPAND_2026_06_09.md) | SPEC: Tool Block Interaction Hold + Glob Auto-Expand |
 | [`SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) | Tool block: live log popout + bottom action bar |
 | [`SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17`](SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md) | SPEC: Tee redirected tool output to the feed + render tool output as a terminal |
+| [`SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26`](SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md) | SPEC: content-first tool previews — WebSearch expanded with no chevron, a de-duplicated header row, restyled search body; MCP/Agent/Grep wrong-shape renders (DRY companion: `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`) |
 | [`SPEC_TOOL_PREVIEW_DEDENT_2026_08_08`](SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md) | SPEC: Tool preview common-indentation stripping (dedent) |
 | [`SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25`](SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md) | SPEC: tool previews — cap at one third of today's height, and always follow the latest output |
 | [`SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08`](SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md) | SPEC: Tool preview scrollbar-to-edge padding removal |

@@ -265,7 +265,18 @@ export interface ToolNode {
      *  Grep). See SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md. */
     log?: ToolStreamingLog;
     collapsed: boolean;
-    summary: string; // e.g., "📖 Read auth.ts (0.3s) ✓"
+    /**
+     * Plain-text one-liner, e.g. "📖 Read auth.ts". No status glyph and no
+     * duration: those change after parse time (the reducer sets `canceled`
+     * without re-parsing), so ToolBlock renders them from `status`/`duration`.
+     * ToolBlock composes its header from the node's fields (`tool-header.ts`)
+     * and shows `summary` itself only for AskUserQuestion, whose flow writes
+     * its own text here. Text consumers (btw snapshot) still read it.
+     */
+    summary: string;
+    /** Short note the reducer attaches to a status it set itself (e.g.
+     *  "cleared via muxspect"); shown dimmed after the header. */
+    statusNote?: string;
     timestamp?: number; // Unix ms — when this tool call was initiated
     /** Set when status === "pending_approval". Carried into the
      *  decision panel + echoed back through `tool:decision` IPC. */
@@ -904,16 +915,6 @@ export const TOOL_ICONS: Record<string, string> = {
     WebFetch: "🌐",
     web_fetch: "🌐",
     Other: "🛠️",
-};
-
-/**
- * Status icon mapping
- */
-export const STATUS_ICONS: Record<string, string> = {
-    running: "⏳",
-    success: "✓",
-    failed: "✗",
-    canceled: "⏹",
 };
 
 /**

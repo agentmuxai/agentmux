@@ -43,13 +43,13 @@ import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
-import { extractToolDetail } from "../stream-parser";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteResult } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
+import { toolHeaderParts } from "./tool-header";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -307,14 +307,18 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
-    // Bare command/detail text for the hover tooltip — same per-tool-kind
-    // extraction generateToolSummary() uses for the decorated `summary`
-    // string, so the two never drift out of sync. Empty (and so not shown)
-    // when there's nothing tool-kind-specific to show; shown regardless of
-    // expand state (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
-    const cmdText = createMemo(() =>
-        extractToolDetail(props.node.tool, (props.node.params as Record<string, any>) ?? {})
-    );
+    // Header parts, composed from the node's fields rather than the `summary`
+    // baked at parse time — see tool-header.ts. The hover tooltip's bare
+    // command/detail text is the same `detail`, so the two never drift out of
+    // sync; it's read by the raw tool name, so a WebSearch (coarse kind
+    // "Other") has one. Empty (and so not shown) when there's nothing
+    // tool-kind-specific to show; shown regardless of expand state
+    // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
+    const header = createMemo(() => toolHeaderParts(props.node));
+    const cmdText = () => header().detail;
+    // AskUserQuestion's flow writes its own row text ("❓ Waiting for your
+    // answer", "❓ Answered — …") into `summary`; that text IS its header.
+    const authoredSummary = () => props.node.toolName === "AskUserQuestion";
 
     // Peek-tooltip time + estimate lines (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
     // §2.3). Real API-reported token/cost data doesn't exist per-tool-call
@@ -428,8 +432,28 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 <div class="agent-tool-summary" onClick={props.onTogglePin}>
                     <span class="agent-tool-status-icon">{statusIcon()}</span>
                     <span class="agent-tool-name-peek-anchor">
-                        <span class="agent-tool-name">{props.node.summary}</span>
+                        <Show
+                            when={!authoredSummary()}
+                            fallback={<span class="agent-tool-name">{props.node.summary}</span>}
+                        >
+                            {/* One text run (no whitespace between spans) so
+                                the row's textContent reads "🌐 solid docs". */}
+                            <span class="agent-tool-name">
+                                <span class="agent-tool-icon">{header().icon}</span>
+                                <Show when={header().label}>
+                                    {" "}
+                                    <span class="agent-tool-label">{header().label}</span>
+                                </Show>
+                                <Show when={header().detail}>
+                                    {" "}
+                                    <span class="agent-tool-detail">{header().detail}</span>
+                                </Show>
+                            </span>
+                        </Show>
                     </span>
+                    <Show when={props.node.statusNote}>
+                        <span class="agent-tool-status-note">{props.node.statusNote}</span>
+                    </Show>
                     <Show when={props.node.duration}>
                         <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                     </Show>

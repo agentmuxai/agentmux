@@ -626,3 +626,39 @@ describe("heldTiming", () => {
         expect(heldTiming({ TS: "0", HELD_FOR: "5" }, 42)).toEqual({ timestamp: 42 });
     });
 });
+
+// SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.2 — ToolBlock renders the
+// status glyph and duration itself, from the node's live fields. Baking them
+// into `summary` as well showed them twice, and left a stale ⏳ on any tool
+// whose status the reducer changed without re-parsing.
+describe("tool summary text", () => {
+    test("carries no status glyph or duration, on the call or the result", () => {
+        const parser = new ClaudeCodeStreamParser();
+        const call = parser.parseStreamEvent({
+            type: "tool_call",
+            tool: "WebSearch",
+            id: "ws_1",
+            params: { query: "solid docs" },
+        }) as ToolNode;
+        const result = parser.parseStreamEvent({
+            type: "tool_result",
+            tool: "WebSearch",
+            id: "ws_1",
+            status: "success",
+            duration: 1.25,
+        }) as ToolNode;
+        expect(call.summary).toBe("🌐 WebSearch solid docs");
+        expect(result.summary).toBe("🌐 WebSearch solid docs");
+    });
+
+    test("an empty detail leaves no trailing space", () => {
+        const parser = new ClaudeCodeStreamParser();
+        const call = parser.parseStreamEvent({
+            type: "tool_call",
+            tool: "mcp__agentmux__WhoAmI",
+            id: "m_1",
+            params: {},
+        }) as ToolNode;
+        expect(call.summary).toBe("🛠️ mcp__agentmux__WhoAmI");
+    });
+});
