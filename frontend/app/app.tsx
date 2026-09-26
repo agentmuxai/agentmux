@@ -35,6 +35,7 @@ import debug from "debug";
 import "overlayscrollbars/overlayscrollbars.css";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { AppBackground } from "./app-bg";
+import { appShellState } from "./app-shell-state";
 import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
 import { DragOverlay } from "./drag/DragOverlay";
 import { CenteredDiv } from "./element/quickelems";
@@ -410,13 +411,26 @@ const AppInner = () => {
         return <MemoryAdoptionApprovalWindow />;
     }
 
+    // Latches once client and window have both loaded; never resets (a
+    // window's page is never re-initialized in place). Lets the fallback tell
+    // a real startup failure from the window record being deleted on close.
+    const [loadedOnce, setLoadedOnce] = createSignal(false);
+    createEffect(() => {
+        if (client() != null && windowData() != null) {
+            setLoadedOnce(true);
+        }
+    });
+    const shellState = () => appShellState(client() != null, windowData() != null, loadedOnce());
+
     return (
         <Show
-            when={client() != null && windowData() != null}
+            when={shellState() === "app"}
             fallback={
                 <div class="flex flex-col w-full h-full">
                     <AppBackground />
-                    <CenteredDiv>invalid configuration, client or window was not loaded</CenteredDiv>
+                    <Show when={shellState() === "invalid"}>
+                        <CenteredDiv>invalid configuration, client or window was not loaded</CenteredDiv>
+                    </Show>
                 </div>
             }
         >
