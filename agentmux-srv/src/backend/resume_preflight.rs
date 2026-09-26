@@ -136,8 +136,12 @@ pub struct PreflightInput {
     /// The head of the agent's segment chain
     /// (`continuity_segments::chain_head`), for the spawn's resume gate
     /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2).
-    /// Empty when the pane has no agent UID or the agent no chain.
-    pub chain_head_session_id: String,
+    /// `None` when the pane has no agent UID or the agent no chain.
+    pub chain_head: Option<crate::backend::continuity_segments::Head>,
+    /// The identity `config_dir` is signed in as
+    /// (`account_email::identity_key_from_oauth_dir`), for the gate's
+    /// identity check. `None` when unknown.
+    pub identity_key: Option<String>,
 }
 
 /// The spawn's resume gate (`PersistentSubprocessController::apply_resume_gate`),
@@ -146,8 +150,7 @@ pub struct PreflightInput {
 fn gate(input: &PreflightInput, candidate: &str, steps: &mut Vec<Step>) -> Option<(Verdict, Option<String>)> {
     use crate::backend::continuity_segments::{resume_gate, ResumeGate};
     let t = Instant::now();
-    let head = Some(input.chain_head_session_id.as_str()).filter(|h| !h.is_empty());
-    match resume_gate(candidate, head, None, |h| {
+    match resume_gate(candidate, input.chain_head.as_ref(), input.identity_key.as_deref(), None, |h| {
         session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, h)
     }) {
         ResumeGate::Allow => None,
@@ -160,7 +163,7 @@ fn gate(input: &PreflightInput, candidate: &str, steps: &mut Vec<Step>) -> Optio
                 "chain",
                 "Checking the agent's conversation",
                 false,
-                format!("moved on to {head}, not under this config dir"),
+                format!("in {head}, which this spawn can't resume here"),
                 t,
             ));
             Some((Verdict::Fresh, None))
@@ -312,7 +315,8 @@ mod tests {
             working_dir: working_dir.to_string(),
             config_dir: config_dir.to_string_lossy().to_string(),
             history_session_id: String::new(),
-            chain_head_session_id: String::new(),
+            chain_head: None,
+            identity_key: None,
         }
     }
 
@@ -451,6 +455,14 @@ mod tests {
         }
     }
 
+    fn head(sid: &str, identity: Option<&str>) -> crate::backend::continuity_segments::Head {
+        crate::backend::continuity_segments::Head {
+            session_id: sid.into(),
+            identity_key: identity.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
     // ── the resume gate, mirrored (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION §4.2) ──
 
     /// The pane holds S1 and both files are here, but the agent's
@@ -460,7 +472,7 @@ mod tests {
     fn a_held_session_that_is_not_the_chain_head_resumes_the_head() {
         let cfg = config_dir_with(WORK_DIR, &[("sid-old", 4096), ("sid-head", 4096)]);
         let mut i = input(cfg.path(), WORK_DIR, "sid-old");
-        i.chain_head_session_id = "sid-head".into();
+        i.chain_head = Some(head("sid-head", None));
         let out = preflight(&i);
         assert_eq!(out.verdict, Verdict::Resume);
         assert_eq!(out.session_id.as_deref(), Some("sid-head"));
@@ -472,7 +484,7 @@ mod tests {
     fn a_held_session_that_is_not_the_chain_head_starts_fresh_when_the_head_is_elsewhere() {
         let cfg = config_dir_with(WORK_DIR, &[("sid-old", 4096)]);
         let mut i = input(cfg.path(), WORK_DIR, "sid-old");
-        i.chain_head_session_id = "sid-elsewhere".into();
+        i.chain_head = Some(head("sid-elsewhere", None));
         let out = preflight(&i);
         assert_eq!(out.verdict, Verdict::Fresh);
         assert_eq!(out.session_id, None);
@@ -483,7 +495,7 @@ mod tests {
         let cfg = config_dir_with(WORK_DIR, &[("sid-old", 4096), ("sid-head", 4096)]);
         let mut i = input(cfg.path(), WORK_DIR, "");
         i.history_session_id = "sid-old".into();
-        i.chain_head_session_id = "sid-head".into();
+        i.chain_head = Some(head("sid-head", None));
         let out = preflight(&i);
         assert_eq!(out.verdict, Verdict::Resume);
         assert_eq!(out.session_id.as_deref(), Some("sid-head"));
@@ -493,10 +505,23 @@ mod tests {
     fn the_chain_head_itself_resumes_unchanged() {
         let cfg = config_dir_with(WORK_DIR, &[("sid-live", 4096)]);
         let mut i = input(cfg.path(), WORK_DIR, "sid-live");
-        i.chain_head_session_id = "sid-live".into();
+        i.chain_head = Some(head("sid-live", None));
         let out = preflight(&i);
         assert_eq!(out.verdict, Verdict::Resume);
         assert_eq!(out.session_id.as_deref(), Some("sid-live"));
         assert!(out.steps.iter().all(|s| s.id != "chain"), "no gate step when the candidate is the head");
+    }
+
+    /// The config dir now signs in as someone else: the head's file is here,
+    /// but resuming it would cross identities.
+    #[test]
+    fn the_head_under_another_identity_starts_fresh() {
+        let cfg = config_dir_with(WORK_DIR, &[("sid-live", 4096)]);
+        let mut i = input(cfg.path(), WORK_DIR, "sid-live");
+        i.chain_head = Some(head("sid-live", Some("k-old")));
+        i.identity_key = Some("k-new".into());
+        let out = preflight(&i);
+        assert_eq!(out.verdict, Verdict::Fresh);
+        assert_eq!(out.session_id, None);
     }
 }

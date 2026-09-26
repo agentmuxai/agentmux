@@ -45,6 +45,11 @@ fn fixture(on_disk: &[&str]) -> Fixture {
 
 /// Append a segment whose process reported `sid`, `at` ms in.
 fn segment(gfs: &FileStore, sid: &str, at: i64) {
+    segment_as(gfs, sid, at, None);
+}
+
+/// [`segment`], recorded under the identity `identity_key`.
+fn segment_as(gfs: &FileStore, sid: &str, at: i64, identity_key: Option<&str>) {
     let id = segs::record_start(
         gfs,
         segs::Start {
@@ -64,6 +69,7 @@ fn segment(gfs: &FileStore, sid: &str, at: i64) {
             continuity_rung: segs::Rung::Fresh,
             predecessor_segment_id: None,
             lease_epoch: None,
+            identity_key: identity_key.map(str::to_string),
         },
     )
     .unwrap();
@@ -154,6 +160,40 @@ fn nothing_is_gated_without_what_the_gate_needs() {
     let c = controller_holding(Some("s1"));
     c.apply_resume_gate_with(&f.config, None);
     assert_eq!(held(&c).as_deref(), Some("s1"), "no global store");
+}
+
+/// Signs the fixture's config dir in as `account`/`org`, and returns that
+/// identity's key as the spawn will compute it.
+fn sign_in(f: &Fixture, account: &str, org: &str) -> String {
+    let dir = f.config.env_vars["CLAUDE_CONFIG_DIR"].clone();
+    std::fs::write(
+        std::path::Path::new(&dir).join(".claude.json"),
+        format!(r#"{{"oauthAccount":{{"accountUuid":"{account}","organizationUuid":"{org}"}}}}"#),
+    )
+    .unwrap();
+    crate::identity::account_email::identity_key_from_oauth_dir("claude", &dir).unwrap()
+}
+
+/// SPEC §3 I2: the config dir was re-logged-into as another identity. The
+/// head's file is right here, but resuming it would cross identities.
+#[test]
+fn the_head_recorded_under_another_identity_is_not_resumed() {
+    let f = fixture(&["s2"]);
+    let _now = sign_in(&f, "acc-new", "org-new");
+    segment_as(&f.gfs, "s2", 2_000, Some("0000000000000000"));
+    let c = controller_holding(Some("s2"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    assert_eq!(held(&c), None);
+}
+
+#[test]
+fn the_head_recorded_under_the_same_identity_is_resumed() {
+    let f = fixture(&["s1", "s2"]);
+    let key = sign_in(&f, "acc-1", "org-1");
+    segment_as(&f.gfs, "s2", 2_000, Some(&key));
+    let c = controller_holding(Some("s1"));
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs));
+    assert_eq!(held(&c).as_deref(), Some("s2"));
 }
 
 #[test]

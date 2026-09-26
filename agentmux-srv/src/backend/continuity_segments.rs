@@ -96,6 +96,12 @@ pub(crate) struct Start {
     /// UID) or a record written before this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_epoch: Option<u64>,
+    /// The Anthropic identity `config_dir` was signed in as
+    /// (`account_email::identity_key_from_oauth_dir`,
+    /// SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.1).
+    /// `None`: unknown, or a record written before this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_key: Option<String>,
 }
 
 /// One segment, folded from its events.
@@ -246,32 +252,58 @@ pub(crate) enum ResumeGate {
     Refuse { head: String },
 }
 
-/// Only the chain head is resumed natively (spec §3 I1). `head` is the
-/// agent's [`head_session`]; `None` (an agent from before the segment index,
-/// or no readable chain) allows the candidate, as before the gate existed.
-/// A head equal to the poisoned id allows too: that head is known dead, so
-/// the chain has nothing better to offer than the candidate.
+/// Where the agent's conversation was last: the newest segment that has a
+/// provider session, and what that segment recorded about it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Head {
+    pub session_id: String,
+    pub identity_key: Option<String>,
+    pub config_dir: Option<String>,
+    pub provider: String,
+}
+
+/// Only the chain head is resumed natively (spec §3 I1), and never across
+/// identities (I2). `head` is the agent's [`chain_head`]; `None` (an agent
+/// from before the segment index, or no readable chain) allows the
+/// candidate, as before the gate existed. A head equal to the poisoned id
+/// allows too: that head is known dead, so the chain has nothing better to
+/// offer than the candidate. `identity` is the spawn's identity key; the
+/// identity check refuses only when both sides are known and differ.
 pub(crate) fn resume_gate(
     candidate: &str,
-    head: Option<&str>,
+    head: Option<&Head>,
+    identity: Option<&str>,
     poisoned: Option<&str>,
     head_reachable: impl FnOnce(&str) -> bool,
 ) -> ResumeGate {
     let Some(head) = head else { return ResumeGate::Allow };
-    if head == candidate || Some(head) == poisoned {
+    if Some(head.session_id.as_str()) == poisoned {
         return ResumeGate::Allow;
     }
-    if head_reachable(head) {
-        ResumeGate::Redirect { head: head.to_string() }
+    let other_identity = matches!((head.identity_key.as_deref(), identity), (Some(h), Some(s)) if h != s);
+    let refuse = || ResumeGate::Refuse { head: head.session_id.clone() };
+    if head.session_id == candidate {
+        return if other_identity { refuse() } else { ResumeGate::Allow };
+    }
+    if !other_identity && head_reachable(&head.session_id) {
+        ResumeGate::Redirect { head: head.session_id.clone() }
     } else {
-        ResumeGate::Refuse { head: head.to_string() }
+        refuse()
     }
 }
 
-/// The session the agent's conversation was last in, read from its chain in
-/// `fs`. `None` when the UID has no chain.
-pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<String> {
-    head_session(&segments(fs, agent_uid), None)
+/// Where the agent's conversation was last, read from its chain in `fs`.
+/// `None` when the UID has no chain.
+pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<Head> {
+    segments(fs, agent_uid).into_iter().rev().find_map(|s| {
+        let session_id = s.start.provider_session_id?;
+        Some(Head {
+            session_id,
+            identity_key: s.start.identity_key,
+            config_dir: s.start.config_dir,
+            provider: s.start.provider,
+        })
+    })
 }
 
 /// The rung a spawn started on, from what the spawn knows: whether it passed
@@ -325,6 +357,7 @@ mod tests {
             continuity_rung: rung,
             predecessor_segment_id: None,
             lease_epoch: None,
+            identity_key: None,
         }
     }
 
@@ -375,33 +408,67 @@ mod tests {
 
     // ── resume_gate (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION §4.2) ──
 
+    fn head(sid: &str, identity: Option<&str>) -> Head {
+        Head { session_id: sid.into(), identity_key: identity.map(str::to_string), ..Default::default() }
+    }
+
     #[test]
     fn the_chain_head_itself_is_resumed() {
-        assert_eq!(resume_gate("s2", Some("s2"), None, |_| panic!("no lookup needed")), ResumeGate::Allow);
+        let h = head("s2", None);
+        assert_eq!(resume_gate("s2", Some(&h), None, None, |_| panic!("no lookup needed")), ResumeGate::Allow);
     }
 
     #[test]
     fn without_a_chain_the_candidate_is_resumed_as_before() {
-        assert_eq!(resume_gate("s1", None, None, |_| panic!("no lookup needed")), ResumeGate::Allow);
+        assert_eq!(resume_gate("s1", None, Some("k1"), None, |_| panic!("no lookup needed")), ResumeGate::Allow);
     }
 
     /// The operator's case: the pane holds S1, the conversation moved on to S2.
     #[test]
     fn a_stale_candidate_is_redirected_to_a_reachable_head() {
-        assert_eq!(
-            resume_gate("s1", Some("s2"), None, |h| h == "s2"),
-            ResumeGate::Redirect { head: "s2".into() }
-        );
+        let h = head("s2", None);
+        assert_eq!(resume_gate("s1", Some(&h), None, None, |h| h == "s2"), ResumeGate::Redirect { head: "s2".into() });
     }
 
     #[test]
     fn a_stale_candidate_is_refused_when_the_head_is_out_of_reach() {
-        assert_eq!(resume_gate("s1", Some("s2"), None, |_| false), ResumeGate::Refuse { head: "s2".into() });
+        let h = head("s2", None);
+        assert_eq!(resume_gate("s1", Some(&h), None, None, |_| false), ResumeGate::Refuse { head: "s2".into() });
     }
 
     #[test]
     fn a_poisoned_head_never_displaces_the_candidate() {
-        assert_eq!(resume_gate("s1", Some("s2"), Some("s2"), |_| true), ResumeGate::Allow);
+        let h = head("s2", None);
+        assert_eq!(resume_gate("s1", Some(&h), None, Some("s2"), |_| true), ResumeGate::Allow);
+    }
+
+    // Identity (spec §3 I2, H3): never resume across identities.
+
+    /// The config dir was re-logged-into as someone else: the head's file is
+    /// here, but it belongs to another identity.
+    #[test]
+    fn the_head_under_another_identity_is_not_resumed() {
+        let h = head("s2", Some("k-old"));
+        assert_eq!(resume_gate("s2", Some(&h), Some("k-new"), None, |_| true), ResumeGate::Refuse { head: "s2".into() });
+        assert_eq!(resume_gate("s1", Some(&h), Some("k-new"), None, |_| true), ResumeGate::Refuse { head: "s2".into() });
+    }
+
+    #[test]
+    fn the_same_identity_resumes_and_redirects() {
+        let h = head("s2", Some("k1"));
+        assert_eq!(resume_gate("s2", Some(&h), Some("k1"), None, |_| true), ResumeGate::Allow);
+        assert_eq!(resume_gate("s1", Some(&h), Some("k1"), None, |_| true), ResumeGate::Redirect { head: "s2".into() });
+    }
+
+    /// Either side unknown (an older record, an unreadable `.claude.json`):
+    /// no information, so the gate behaves as it did before identities.
+    #[test]
+    fn an_unknown_identity_on_either_side_changes_nothing() {
+        let known = head("s2", Some("k1"));
+        let unknown = head("s2", None);
+        assert_eq!(resume_gate("s2", Some(&known), None, None, |_| true), ResumeGate::Allow);
+        assert_eq!(resume_gate("s2", Some(&unknown), Some("k1"), None, |_| true), ResumeGate::Allow);
+        assert_eq!(resume_gate("s1", Some(&known), None, None, |_| true), ResumeGate::Redirect { head: "s2".into() });
     }
 
     #[test]
@@ -410,11 +477,30 @@ mod tests {
         assert_eq!(chain_head(&fs, UID), None);
         let a = record_start(&fs, start(1_000, Rung::Fresh)).unwrap();
         record_session(&fs, UID, &a, "sid-a", 1_001).unwrap();
-        let b = record_start(&fs, start(2_000, Rung::Fresh)).unwrap();
+        let b = record_start(&fs, Start { identity_key: Some("k1".into()), ..start(2_000, Rung::Fresh) }).unwrap();
         record_session(&fs, UID, &b, "sid-b", 2_001).unwrap();
         // A spawn that died before reporting a session doesn't move the head.
         record_start(&fs, start(3_000, Rung::Fresh)).unwrap();
-        assert_eq!(chain_head(&fs, UID).as_deref(), Some("sid-b"));
+        let h = chain_head(&fs, UID).expect("a head");
+        assert_eq!(h.session_id, "sid-b");
+        assert_eq!(h.identity_key.as_deref(), Some("k1"));
+        assert_eq!(h.config_dir.as_deref(), Some("C:/cfg/a"));
+        assert_eq!(h.provider, "claude");
+    }
+
+    /// A record written before `identity_key` existed still reads, as `None`.
+    #[test]
+    fn older_records_without_an_identity_still_read() {
+        let old = serde_json::json!({
+            "event": "start", "segment_id": "s", "agent_uid": UID, "definition_id": null, "provider": "claude",
+            "config_dir": null, "provider_session_id": "sid", "cwd": "", "channel": "stable",
+            "agentmux_version": "0.57.5", "block_id": "b", "zone": null, "byte_start": null,
+            "started_at_ms": 1, "continuity_rung": "native", "predecessor_segment_id": null, "lease_epoch": 2,
+        });
+        match serde_json::from_value::<Event>(old).unwrap() {
+            Event::Start(s) => assert_eq!(s.identity_key, None),
+            other => panic!("expected a start event, got {other:?}"),
+        }
     }
 
     #[test]

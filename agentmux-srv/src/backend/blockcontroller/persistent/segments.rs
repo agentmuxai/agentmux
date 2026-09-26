@@ -84,7 +84,8 @@ impl PersistentSubprocessController {
             return;
         };
         let head = segs::chain_head(gfs, uid.trim());
-        let decision = segs::resume_gate(&candidate, head.as_deref(), poisoned.as_deref(), |h| {
+        let identity = crate::identity::account_email::identity_key_from_oauth_dir("claude", config_dir);
+        let decision = segs::resume_gate(&candidate, head.as_ref(), identity.as_deref(), poisoned.as_deref(), |h| {
             crate::backend::session_backfill::session_is_reachable(config_dir, &config.working_dir, h)
         });
         let next = match decision {
@@ -105,7 +106,7 @@ impl PersistentSubprocessController {
                     block_id = %self.block_id,
                     candidate = %candidate,
                     head = %head,
-                    "resume gate: the conversation moved on to a session this config dir can't reach; starting fresh with the record"
+                    "resume gate: the conversation is in a session this spawn can't resume (out of reach, or another identity's); starting fresh with the record"
                 );
                 None
             }
@@ -208,11 +209,16 @@ impl PersistentSubprocessController {
         let definition_id = Some(crate::backend::obj::meta_get_string(&meta, "agentId", "")).filter(|d| !d.is_empty());
         let provider = crate::backend::obj::meta_get_string(&meta, "agentProvider", "");
         let zone = crate::backend::agent_session::agent_zone_for_block_meta(&meta);
+        let config_dir = spawn_config_dir(&provider, &config.env_vars);
+        let identity_key = config_dir
+            .as_deref()
+            .and_then(|dir| crate::identity::account_email::identity_key_from_oauth_dir(&provider, dir));
         let start = segs::Start {
             segment_id: String::new(),
             agent_uid: agent_uid.to_string(),
             definition_id,
-            config_dir: spawn_config_dir(&provider, &config.env_vars),
+            config_dir,
+            identity_key,
             provider,
             provider_session_id: attempted_resume_sid.map(str::to_string),
             cwd: config.working_dir.clone(),
