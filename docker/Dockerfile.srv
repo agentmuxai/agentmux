@@ -1,0 +1,90 @@
+# AgentMux srv, headless — for containers, servers and CI.
+# docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md, slice 2.
+#
+# Runs `agentmux-srv --headless`: no launcher, no desktop host, no OS keychain.
+# srv binds loopback only (127.0.0.1:8190 web, :8191 websocket), so it is
+# reachable only from inside its own network namespace — from a reverse proxy
+# that shares it (a sidecar in the same pod/task, or
+# `docker run --network container:<proxy>`). The proxy terminates TLS,
+# authenticates users and sends srv's key. Don't publish srv's ports directly.
+#
+# Auth key, in order of precedence (headless.rs):
+#   1. AGENTMUX_AUTH_KEY in the environment;
+#   2. --auth-key-file <path> (or AGENTMUX_AUTH_KEY_FILE), e.g. a mounted secret;
+#   3. otherwise srv generates one and writes it, mode 0600, to
+#      <data dir>/srv-auth-key; srv prints that path (never the key) at start.
+#
+# Build context is the REPO ROOT, like Dockerfile.agent-agentmux:
+#   docker build -f docker/Dockerfile.srv -t agentmux-srv .
+# The root .dockerignore keeps the context small.
+
+# ── Stage 1: build srv and the two helpers agents need ──────────────────────
+FROM rust:1-bookworm AS builder
+
+# agentmux-mcp's `xcap` dependency needs dbus-1.pc and -lxcb to link (same
+# packages as Dockerfile.agent-agentmux and ci-pr.yml).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libdbus-1-dev \
+    libxcb1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY . .
+
+# agentmux-mcp and agentmux-bashwrap: agents srv starts launch them by bare
+# name from PATH (.mcp.json from agent_config.rs's build_mcp_config, and the
+# PreToolUse hook), exactly as in the container agent image.
+RUN cargo build --release -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+# node:24-slim (Debian, glibc): agent CLIs are npm packages that srv installs
+# and runs, and Claude Code needs glibc.
+FROM node:24-slim
+
+# tini: PID 1, forwards SIGTERM to srv and reaps the shells and agents it spawns.
+# git, bash, procps, curl, ca-certificates: what terminals and agents expect.
+# libdbus-1-3, libxcb1: runtime libraries agentmux-mcp links dynamically.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini \
+    git \
+    bash \
+    procps \
+    curl \
+    ca-certificates \
+    libdbus-1-3 \
+    libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# node:24-slim ships a 'node' user at UID 1000; rename it rather than adding a
+# second UID-1000 user.
+RUN usermod -l agentmux -d /home/agentmux -m node \
+    && groupmod -n agentmux node
+
+COPY --from=builder --chmod=755 /build/target/release/agentmux-srv /usr/local/bin/agentmux-srv
+COPY --from=builder --chmod=755 /build/target/release/agentmux-mcp /usr/local/bin/agentmux-mcp
+COPY --from=builder --chmod=755 /build/target/release/agentmux-bashwrap /usr/local/bin/agentmux-bashwrap
+
+ENV HOME=/home/agentmux
+ENV TERM=xterm-256color
+ENV LANG=C.UTF-8
+ENV NO_UPDATE_NOTIFIER=1
+
+# Everything srv keeps — databases, settings, the generated key, agent homes —
+# lives under ~/.agentmux. Mount a volume here to keep it across containers.
+# Created with the runtime user's ownership so a fresh named volume is writable.
+RUN mkdir -p /home/agentmux/.agentmux /workspace \
+    && chown agentmux:agentmux /home/agentmux/.agentmux /workspace
+VOLUME ["/home/agentmux/.agentmux"]
+
+WORKDIR /workspace
+USER agentmux
+
+# `GET /` answers without the key; inside the container loopback is reachable.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -fsS -o /dev/null http://127.0.0.1:8190/ || exit 1
+
+# Fixed ports so a proxy and the health check know where srv is. Override
+# CMD to change them (keep the health check's port in step).
+ENTRYPOINT ["/usr/bin/tini", "--", "agentmux-srv", "--headless"]
+CMD ["--web-port", "8190", "--ws-port", "8191"]
