@@ -543,6 +543,7 @@ impl PersistentSubprocessController {
                 &config,
                 attempted_resume_sid.as_deref(),
                 attempted_resume_sid.as_deref().filter(|_| forked),
+                relocated_copy.is_some(),
                 continuation.is_some(),
                 agent_lease.as_ref().map(|l| l.epoch()),
             )
@@ -1059,11 +1060,11 @@ impl PersistentSubprocessController {
                             // See PersistentInner::try_capture_session_id — refuses
                             // to (re-)adopt an id the stderr reader (above) already
                             // confirmed unreachable, whichever task wins the race.
-                            let (should_capture, capture_effects) = inner_read.lock().unwrap().try_capture_session_id(
-                                &sid_string,
-                                my_generation_read,
-                                is_confirmed_success,
-                            );
+                            let (should_capture, capture_effects, holds_current) = {
+                                let mut inner = inner_read.lock().unwrap();
+                                let (adopted, effects) = inner.try_capture_session_id(&sid_string, my_generation_read, is_confirmed_success);
+                                (adopted, effects, inner.holds_current_session(&sid_string, my_generation_read))
+                            };
                             if should_capture {
                                 tracing::info!(
                                     block_id = %block_id_read,
@@ -1071,9 +1072,20 @@ impl PersistentSubprocessController {
                                     "persistent session ID captured"
                                 );
                                 core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
+                            }
+                            let kept_relocated_id = super::segments::kept_relocated_id(
+                                should_capture,
+                                is_confirmed_success,
+                                holds_current,
+                                relocated_copy_read.is_some(),
+                                forked_from_read.as_deref(),
+                                &sid_string,
+                            );
+                            if should_capture || kept_relocated_id {
                                 super::segments::record_segment_session(&segment_read, &sid_string);
                                 // The fork has its own session now; the copy it
-                                // read from goes (spec §4.3 (3), I4).
+                                // read from goes (spec §4.3 (3), I4). Kept under
+                                // the attempted id, the copy is the live session.
                                 if let Some(copy) = relocated_copy_read.take() {
                                     super::segments::settle_relocated_copy(&block_id_read, &copy, forked_from_read.as_deref(), &sid_string);
                                 }
