@@ -23,7 +23,7 @@ import {
     statusClass,
     type FetchResultData,
 } from "./web-fetch-result";
-import { byName, registerToolRenderer } from "./registry";
+import { byName, type ToolRendererEntry } from "./registry";
 import { faviconSrc as faviconFor, hostname, openUrl, prettyUrl } from "./url";
 
 export function WebFetchResult(props: { node: ToolNode }): JSX.Element {
@@ -108,9 +108,9 @@ function FetchResultView(props: { data: FetchResultData }): JSX.Element {
 WebFetchResult.displayName = "WebFetchResult";
 
 // Register for WebFetch by name (priority above the coarse-kind built-ins).
-registerToolRenderer({
+export const webFetchRenderer: ToolRendererEntry = {
     priority: 10,
     label: "web:fetch",
     match: byName("WebFetch", "web_fetch"),
     render: (node) => <WebFetchResult node={node} />,
-});
+};

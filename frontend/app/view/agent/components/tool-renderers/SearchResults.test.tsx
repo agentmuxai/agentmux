@@ -8,6 +8,7 @@ const openExternal = vi.fn();
 vi.mock("@/store/global", () => ({ getApi: () => ({ openExternal }) }));
 
 import { SearchResults } from "./SearchResults";
+import { registerToolRenderers } from ".";
 import { resolveToolRenderer } from "./registry";
 import { CLAUDE_WEBSEARCH_RESULT } from "./websearch-fixture";
 import type { ToolNode } from "../../types";
@@ -65,6 +66,7 @@ describe("SearchResults", () => {
     });
 
     it("is registered for the WebSearch tool by name", () => {
+        registerToolRenderers();
         // Importing this module registered the web:search renderer.
         expect(resolveToolRenderer(node([{ url: "https://a.com" }]))).not.toBeNull();
         // ...and it routes a WebSearch node (toolName) regardless of coarse kind.

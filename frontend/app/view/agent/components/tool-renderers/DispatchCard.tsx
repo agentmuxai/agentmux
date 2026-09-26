@@ -17,8 +17,8 @@ import { Show, type JSX } from "solid-js";
 import { createBlock } from "@/app/store/global";
 import type { AgentDispatch } from "../../../swarm/swarm-model";
 import type { ToolNode } from "../../types";
-import { renderAgent, renderTask, renderWorkflow } from "../ToolOverlayLog";
-import { byKind, registerToolRenderer, type ToolRenderContext } from "./registry";
+import { renderAgent, renderTask, renderWorkflow } from "./builtins";
+import { byKind, type ToolRenderContext, type ToolRendererEntry } from "./registry";
 
 // No-match fallback must reproduce the SAME per-kind rendering the
 // priority-0 builtins give every OTHER Agent/Task/Workflow call (the report as
@@ -88,9 +88,9 @@ DispatchCard.displayName = "DispatchCard";
 // its own internal fallback covers the no-match case, so the priority-0
 // builtins remain reachable only as defense-in-depth if this entry were
 // ever removed.
-registerToolRenderer({
+export const dispatchCardRenderer: ToolRendererEntry = {
     priority: 10,
     label: "dispatch:card",
     match: byKind("Agent", "Task", "Workflow"),
     render: (node, ctx) => <DispatchCard node={node} ctx={ctx} />,
-});
+};
