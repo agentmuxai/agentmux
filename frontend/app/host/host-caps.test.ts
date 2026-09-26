@@ -30,6 +30,13 @@ describe("host capabilities", () => {
         expect(() => unlisten()).not.toThrow();
     });
 
+    it("the test host's method groups resolve, so callers' .catch chains work", async () => {
+        const api = makeTestHostApi();
+        await expect(api.approvals.decideCredential("a1", true).catch(() => "caught")).resolves.toBeUndefined();
+        await expect(api.windows.maximize("main")).resolves.toBeUndefined();
+        await expect(api.browserPanes.reload("b1")).resolves.toBeUndefined();
+    });
+
     it("the test host no-ops anything not overridden", async () => {
         const api = makeTestHostApi({ getPlatform: () => "linux" });
         expect(api.getPlatform()).toBe("linux");

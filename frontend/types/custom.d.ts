@@ -119,6 +119,18 @@ declare global {
         windowTransparency: boolean;
         /** Custom title bar and window controls (minimize/maximize/close, drag). */
         nativeWindowChrome: boolean;
+        /** Files dragged in from the OS arrive with real local paths. */
+        nativeFileDrop: boolean;
+    };
+
+    /** Host-mediated approvals and memory adoption (the approval windows and panels). */
+    type ApprovalHostApi = {
+        decideCredential(approvalId: string, approve: boolean): Promise<void>;
+        decideMemoryAdoption(approvalId: string, approve: boolean): Promise<void>;
+        /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
+        requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
+        /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */
+        requestMemoryRelease(args: Record<string, unknown>): Promise<void>;
     };
 
     /** A rectangle in CSS pixels. */
@@ -216,6 +228,24 @@ declare global {
         browserPanes: BrowserPaneHostApi;
         /** Native windows (see `WindowHostApi`). */
         windows: WindowHostApi;
+        /** Approvals and memory adoption (see `ApprovalHostApi`). */
+        approvals: ApprovalHostApi;
+        /** Open a URL in the system browser; rejects if the host could not. */
+        openExternalChecked(url: string): Promise<void>;
+        readClipboardText(): Promise<string>;
+        writeClipboardText(text: string): Promise<void>;
+        /** Local paths of the files an OS drag just dropped (`nativeFileDrop`). */
+        consumeDroppedFilePaths(): Promise<string[]>;
+        /** Copy a local file into a directory; resolves to the destination path. */
+        copyFileToDir(sourcePath: string, targetDir: string): Promise<string>;
+        /** Show AgentMux's data folder in the OS file manager. */
+        openDataDirInFileManager(): Promise<void>;
+        /** Host machine details for the status bar. */
+        getHostInfo(): Promise<Record<string, unknown>>;
+        /** Flash/badge this window's taskbar entry for pending notifications. */
+        setTaskbarAttention(windowLabel: string, count: number, inputCount: number): Promise<void>;
+        /** Take (and clear) what happened while no window was open. */
+        takeBackgroundAudit(): Promise<unknown>;
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         getAuthKey(): string;

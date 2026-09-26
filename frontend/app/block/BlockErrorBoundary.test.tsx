@@ -19,12 +19,17 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 // Hoisted because vi.mock factories run before module imports.
 const invokeCommandMock = vi.fn<(cmd: string, args: Record<string, unknown>) => Promise<void>>(() => Promise.resolve());
 vi.mock("@/app/platform/ipc", () => ({
-    invokeCommand: invokeCommandMock,
+    // Lazy, so importing the module before this line has run is safe.
+    invokeCommand: (cmd: string, args: Record<string, unknown>) => invokeCommandMock(cmd, args),
 }));
+
+// Imported after the mock's variable exists: the real CEF logging over it.
+import { installCefWireHost } from "../../test/cef-wire-host";
+
+installCefWireHost();
 
 // Suppress SolidJS's own console.error of the caught exception so the
 // vitest log isn't drowned in red. The boundary still catches and the

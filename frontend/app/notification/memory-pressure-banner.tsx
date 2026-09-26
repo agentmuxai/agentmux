@@ -33,7 +33,7 @@
  */
 
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { listenEvent } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import "./memory-pressure-banner.scss";
 
 export type PressureLevel = "normal" | "warn" | "critical";
@@ -136,7 +136,7 @@ export const MemoryPressureBanner = (props: MemoryPressureBannerProps) => {
 
     onMount(() => {
         let unsub: (() => void) | undefined;
-        void listenEvent<MemoryPressurePayload>("memory-pressure", (p) => {
+        void getApi().listen<MemoryPressurePayload>("memory-pressure", (p) => {
             if (!p || p.kind !== props.kind) return;
             const next: PressureLevel = p.level ?? "normal";
             setLevel(next);

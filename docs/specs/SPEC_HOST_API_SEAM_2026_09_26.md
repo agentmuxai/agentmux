@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** active — Slices 1–3 merged (PRs #3878, #3879, #3882); slice 4 (windows) in PR #3886. Slice 5 remains (§5).
+**Status:** active — Slices 1–3 merged (PRs #3878, #3879, #3882); slice 4 (windows) in PR #3886, slice 5a (feature calls) in PR #3887. Slice 5b (startup) remains (§5).
 **Author:** Maricon
 
 ---
@@ -91,7 +91,8 @@ Moving the CEF implementation into `frontend/app/host/cef/`, or splitting the fr
 | **2** | Settings: `getAutostartStatus()` and `openSettingsFileInEditor()` on `AppApi` (also used by the command palette); the System tray rows guarded by `tray` and `autostart` | 44 |
 | **3** | Browser panes: `AppApi.browserPanes` (one method per `browser_pane_*` / `pane_media_*` command, plus the screenshot browser API) and `reclaimWindowFocus()`. Events through `AppApi.listen`, now generic. The CEF implementation lives in `app/host/cef-host-commands.ts` (seam). A host without `nativeBrowserPane` shows a notice in a browser pane | 32 |
 | **4** | Windows: `AppApi.windows` (drag, maximize, position and rect, cursor point, floating panes and their redock). Tear-off, tab-drag and window-resize events through `AppApi.listen`. Window drag installs only with `nativeWindowChrome`. `hostHas()` treats "no host yet" as no capabilities, as `detectHost()` did | 21 |
-| 5 | The remainder: logging, clipboard, drag-and-drop, approvals, startup (`bootstrap.ts`, `app-init.ts`) | 0 |
+| **5a** | Feature calls: `AppApi.approvals` (credential and memory-adoption decisions, adopt/release requests); `openExternalChecked`, clipboard, dropped-file paths and copy, the data folder, host info, taskbar attention, background audit; events through `listen`. New capability `nativeFileDrop` gates terminal and agent-pane file drops | 6 |
+| 5b | Startup and the CEF log transport: `bootstrap.ts`, `app-init.ts`, `app/init/pool.ts`, `app/init/error-display.ts`, `log/log-pipe.ts`, `log/error-forwarder.ts`. These run before `window.api` exists, so this slice splits the CEF entry from shared startup rather than routing them through `AppApi` | 0 |
 
 ## 6. Testing
 

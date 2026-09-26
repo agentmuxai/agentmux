@@ -23,7 +23,7 @@
  */
 
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { Button } from "@/element/button";
 
 import "./credential-approval-window.scss";
@@ -62,10 +62,8 @@ export const CredentialApprovalWindow = (): JSX.Element => {
     const decide = (approve: boolean) => {
         if (!meta || busy() || decided()) return;
         setBusy(true);
-        void invokeCommand("credential_approval_decide", {
-            approval_id: meta.approvalId,
-            approve,
-        })
+        void getApi()
+            .approvals.decideCredential(meta.approvalId, approve)
             .catch(() => { /* host-side failure already falls through to the normal prompt */ })
             .finally(() => {
                 // The host closes this window itself once the decision

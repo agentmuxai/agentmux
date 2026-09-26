@@ -22,12 +22,17 @@
 //     the host log shows block_id + view_type + error_name + stack alongside
 //     the existing cascade-detection warnings.
 
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "@/log/source-map-resolver";
 import { getTrail } from "@/log/render-trail";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { ErrorBoundary as SolidErrorBoundary, createSignal, Show } from "solid-js";
 import type { JSX } from "solid-js";
+
+/** Structured log line to the host. Fire-and-forget; never throws. */
+function logStructured(entry: { level: string; module: string; message: string; data: Record<string, any> | null }) {
+    getApi().sendLogStructured(entry.level, entry.module, entry.message, entry.data);
+}
 
 export interface BlockErrorBoundaryProps {
     /** The block this boundary protects. Logged in the host trace. */
@@ -86,7 +91,7 @@ function logBoundaryCatch(blockId: string, viewType: string | undefined, err: Er
         })();
 
         // Fire-and-forget — never let logging compound the rendering fault.
-        invokeCommand("fe_log_structured", {
+        logStructured({
             level: "error",
             module: "block-error-boundary",
             message: `[block-error-boundary] ${errName}: ${errMessage} (block=${blockId.substring(0, 7)}, view=${viewType ?? "?"})`,
@@ -100,7 +105,7 @@ function logBoundaryCatch(blockId: string, viewType: string | undefined, err: Er
                 stack_resolved: stackResolved,
                 render_trail: trailSnapshot,
             },
-        }).catch(() => {});
+        });
 
         // If the synchronous resolve couldn't reach every frame, kick
         // off the async load and emit a follow-up entry once the
@@ -112,7 +117,7 @@ function logBoundaryCatch(blockId: string, viewType: string | undefined, err: Er
             void resolveStack(stackToResolve)
                 .then((fullyResolved) => {
                     try {
-                        invokeCommand("fe_log_structured", {
+                        logStructured({
                             level: "warn",
                             module: "block-error-boundary",
                             message: `[block-error-boundary] (stack-resolved) ${errName}: ${errMessage} (block=${blockId.substring(0, 7)})`,
@@ -125,7 +130,7 @@ function logBoundaryCatch(blockId: string, viewType: string | undefined, err: Er
                                 error_stack_raw: stackToResolve,
                                 stack_resolved: fullyResolved.status,
                             },
-                        }).catch(() => {});
+                        });
                     } catch {
                         // swallow
                     }

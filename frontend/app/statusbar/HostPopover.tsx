@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getApi, lanInstancesAtom, lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom, settingsAtom } from "@/store/global";
-import { invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Accessor, createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -133,7 +132,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     const openDataDir = async () => {
         setOpenDirError(null);
         try {
-            await invokeCommand("open_in_file_manager", { target: "data" });
+            await getApi().openDataDirInFileManager();
         } catch (e) {
             setOpenDirError(`Couldn't open folder: ${e}`);
         }
@@ -488,7 +487,7 @@ const HostPopover = (): JSX.Element => {
             return;
         }
         try {
-            const info = await invokeCommand<HostInfo>("get_host_info", {});
+            const info = (await getApi().getHostInfo()) as unknown as HostInfo;
             setHostInfo(info);
         } catch {
             // Fallback for a host build without get_host_info

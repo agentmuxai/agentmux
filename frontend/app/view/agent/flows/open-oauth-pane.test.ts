@@ -27,6 +27,9 @@ vi.mock("@/app/platform/ipc", () => ({
 }));
 
 import { openOAuthBrowserPane } from "./open-oauth-pane";
+import { installCefWireHost } from "../../../../test/cef-wire-host";
+
+installCefWireHost();
 
 const URL = "https://claude.ai/oauth/authorize?client_id=abc";
 

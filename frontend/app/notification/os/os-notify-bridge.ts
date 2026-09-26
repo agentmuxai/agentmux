@@ -175,8 +175,7 @@ async function applyTaskbarAttention(count: number, inputCount: number): Promise
     try {
         const label = await getApi().getWindowLabel();
         if (!label) return;
-        const { invokeCommand } = await import("@/app/platform/ipc");
-        await invokeCommand("set_taskbar_attention", { label, count, input_count: inputCount });
+        await getApi().setTaskbarAttention(label, count, inputCount);
     } catch {
         /* older host without the verb */
     }

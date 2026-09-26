@@ -10,7 +10,7 @@
  */
 
 import { createSignal, onCleanup, onMount } from "solid-js";
-import { detectHost } from "@/app/platform/ipc";
+import { hostHas } from "@/app/host/host-caps";
 import { getSettingsKeyAtom, pushNotification, MOS } from "@/app/store/global";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 
@@ -82,7 +82,7 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
     };
 
     onMount(() => {
-        if (detectHost() !== "cef") return;
+        if (!hostHas("nativeFileDrop")) return;
         const root = opts.rootRef();
         if (!root) return;
 

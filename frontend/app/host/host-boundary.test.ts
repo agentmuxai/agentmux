@@ -32,26 +32,11 @@ const SEAM = [
 /** Still bypass the seam. Move each call behind `AppApi`, then remove it here. */
 const PENDING = [
     "app-init.ts",
-    "app/block/BlockErrorBoundary.tsx",
-    "app/init/background-audit.ts",
     "app/init/error-display.ts",
     "app/init/pool.ts",
-    "app/notification/memory-pressure-banner.tsx",
-    "app/notification/os/os-notify-bridge.ts",
-    "app/statusbar/HostPopover.tsx",
-    "app/store/global.ts",
-    "app/view/agent/flows/open-oauth-pane.ts",
-    "app/view/agent/hooks/useAgentDropAttach.ts",
-    "app/view/credential-approval/CredentialApprovalWindow.tsx",
-    "app/view/memory-adoption-approval/MemoryAdoptionApprovalWindow.tsx",
-    "app/view/native-memory/MemoryAdoptionPanel.tsx",
-    "app/view/native-memory/MemoryClaimsPanel.tsx",
-    "app/view/term/term.tsx",
     "bootstrap.ts",
     "log/error-forwarder.ts",
     "log/log-pipe.ts",
-    "util/clipboard.ts",
-    "util/dnd.ts",
 ];
 
 // Static `from "…"` and dynamic `import("…")` alike.
