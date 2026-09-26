@@ -681,7 +681,12 @@ fn delete_if_unchanged(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str, d: &
 /// directory's projection all agree on MEMORY.md; otherwise a later pass.
 fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> Result<(), StoreError> {
     let heads = record::heads(fs, uid)?;
-    let conflict_files: Vec<&String> = heads.live().map(|(n, _)| n).filter(|n| n.contains(CONFLICT_MARK)).collect();
+    // Each conflict file gets its line once: one someone removed stays gone.
+    let conflict_files: Vec<&String> = heads
+        .live()
+        .map(|(n, _)| n)
+        .filter(|n| n.contains(CONFLICT_MARK) && !heads.indexed_conflicts.contains(*n))
+        .collect();
     if conflict_files.is_empty() {
         return Ok(());
     }
@@ -706,8 +711,10 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
     let disk_sha = on_disk.as_deref().map(record::sha256_hex);
     let mut next = on_disk.unwrap_or_default();
     let before = next.clone();
-    for name in conflict_files {
+    let mut already: Vec<String> = Vec::new();
+    for name in &conflict_files {
         if next.windows(name.len()).any(|w| w == name.as_bytes()) {
+            already.push(name.to_string());
             continue;
         }
         if !next.is_empty() && !next.ends_with(b"\n") {
@@ -720,6 +727,7 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
         );
     }
     if next == before {
+        record::mark_conflicts_indexed(fs, uid, &already)?;
         return Ok(());
     }
     let outcome = record::append_version(
@@ -739,6 +747,8 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
     // Written to disk only once recorded against the head it was based on.
     if matches!(outcome, AppendOutcome::Appended(_)) && disk_still_holds(dir, INDEX_FILE, disk_sha.as_deref()) {
         write_atomic(dir, INDEX_FILE, &next)?;
+        let names: Vec<String> = conflict_files.iter().map(|n| n.to_string()).collect();
+        record::mark_conflicts_indexed(fs, uid, &names)?;
     }
     Ok(())
 }
@@ -902,6 +912,9 @@ pub(crate) fn record_agentmux_write_in(
 /// within `validate_filename`'s 200-character stem.
 pub(crate) fn conflict_file_name(name: &str, version: &str) -> String {
     let stem = name.strip_suffix(".md").unwrap_or(name);
+    // A conflict on a conflict copy is named after the original, not
+    // stacked (`x__conflict_a__conflict_b.md`).
+    let stem = stem.split(CONFLICT_MARK).next().unwrap_or(stem);
     let short: String = version.trim_start_matches("v_").chars().take(8).collect();
     let suffix = format!("{CONFLICT_MARK}{short}");
     let keep = 200usize.saturating_sub(suffix.len()).min(stem.len());
