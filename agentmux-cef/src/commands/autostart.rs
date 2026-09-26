@@ -1,8 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Settings-UI bridge to the launcher's auto-start CLI verbs —
+// Settings-UI bridge to the launcher's auto-start status —
 // docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1.
+//
+// Read-only. Turning start-at-login on or off is the `app:startatlogin`
+// setting, which the launcher applies to the OS login entry
+// (docs/specs/SPEC_START_WITH_OS_2026_09_25.md §3.9); this only reports
+// whether an entry is registered, so Settings can show when that failed.
 //
 // The launcher owns auto-start registration (`agentmux-launcher/src/autostart`:
 // Scheduled Task / LaunchAgent / XDG autostart). Rather than duplicate that
@@ -55,19 +60,6 @@ pub async fn autostart_status() -> Result<serde_json::Value, String> {
         Some(enabled) => serde_json::json!({ "available": true, "enabled": enabled }),
         None => serde_json::json!({ "available": false, "enabled": false }),
     })
-}
-
-/// `set_autostart { enabled: bool }` → the new status.
-pub async fn set_autostart(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let enabled = args
-        .get("enabled")
-        .and_then(|v| v.as_bool())
-        .ok_or_else(|| "set_autostart: enabled (bool) required".to_string())?;
-    let flag = if enabled { "--enable-autostart" } else { "--disable-autostart" };
-    tokio::task::spawn_blocking(move || run_launcher(flag))
-        .await
-        .map_err(|e| e.to_string())??;
-    autostart_status().await
 }
 
 #[cfg(test)]

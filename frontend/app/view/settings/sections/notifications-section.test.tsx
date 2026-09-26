@@ -7,18 +7,24 @@
  * Pins the two contracts that are easy to break silently:
  * - the tray toggle writes exactly `app:runinbackground` (the key
  *   `agentmux-launcher/src/background_config.rs` reads before the app runs);
- * - auto-start goes through the host IPC verbs, and a host/launcher that
- *   can't do it renders the row as unavailable instead of a live toggle that
- *   does nothing.
+ * - start at login writes exactly `app:startatlogin` (the one property the
+ *   tray's check item also writes, and the launcher applies to the OS login
+ *   entry), is off by default, and a host/launcher that can't manage a login
+ *   entry renders the row as unavailable instead of a live toggle.
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setConfig = vi.fn();
 const notifyTest = vi.fn();
 const invokeCommand = vi.fn();
 let settings: Record<string, unknown> = {};
+// Reading this inside the mocked atom makes it reactive, like the real one:
+// `bump()` stands in for a settings broadcast replacing the whole object.
+const [settingsVersion, setSettingsVersion] = createSignal(0);
+const bump = () => setSettingsVersion((v) => v + 1);
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -27,7 +33,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/global", () => ({ settingsAtom: () => settings }));
+vi.mock("@/app/store/global", () => ({ settingsAtom: () => (settingsVersion(), { ...settings }) }));
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: (...args: unknown[]) => invokeCommand(...args),
 }));
@@ -66,22 +72,60 @@ describe("Notifications & Tray — run in background", () => {
 
 describe("Notifications & Tray — start at login", () => {
     beforeEach(() => {
+        setConfig.mockReset();
         invokeCommand.mockReset();
         settings = {};
     });
     afterEach(() => cleanup());
 
-    it("shows the launcher-reported status and toggles via set_autostart", async () => {
-        invokeCommand.mockImplementation(async (cmd: string, args: any) =>
-            cmd === "set_autostart" ? { available: true, enabled: args.enabled } : { available: true, enabled: false },
-        );
+    it("is off by default and writes app:startatlogin=true when turned on", async () => {
+        invokeCommand.mockResolvedValue({ available: true, enabled: false });
         render(() => <NotificationsSection />);
         await waitFor(() => expect(invokeCommand).toHaveBeenCalledWith("autostart_status", {}));
         const t = toggleFor("Start at login");
-        await waitFor(() => expect(t.getAttribute("aria-checked")).toBe("false"));
+        expect(t.getAttribute("aria-checked")).toBe("false");
+        fireEvent.click(t);
+        expect(setConfig.mock.calls[0][1]).toEqual({ "app:startatlogin": true });
+    });
+
+    it("shows the setting, not the registration, so it matches the tray", async () => {
+        settings = { "app:startatlogin": true };
+        invokeCommand.mockResolvedValue({ available: true, enabled: true });
+        render(() => <NotificationsSection />);
+        await waitFor(() => expect(invokeCommand).toHaveBeenCalled());
+        expect(toggleFor("Start at login").getAttribute("aria-checked")).toBe("true");
         fireEvent.click(toggleFor("Start at login"));
-        await waitFor(() => expect(invokeCommand).toHaveBeenCalledWith("set_autostart", { enabled: true }));
-        await waitFor(() => expect(toggleFor("Start at login").getAttribute("aria-checked")).toBe("true"));
+        expect(setConfig.mock.calls[0][1]).toEqual({ "app:startatlogin": false });
+    });
+
+    it("says so when the setting is on but nothing is registered", async () => {
+        settings = { "app:startatlogin": true };
+        invokeCommand.mockResolvedValue({ available: true, enabled: false });
+        render(() => <NotificationsSection />);
+        await waitFor(() => expect(screen.getByText(/not registered with the system yet/)).toBeTruthy());
+    });
+
+    it("re-reads the registration only when start at login itself changes", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            invokeCommand.mockResolvedValue({ available: true, enabled: false });
+            render(() => <NotificationsSection />);
+            await waitFor(() => expect(invokeCommand).toHaveBeenCalledTimes(1));
+
+            // An unrelated setting changes: the atom is replaced, nothing re-reads.
+            settings = { "term:fontsize": 13 };
+            bump();
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(invokeCommand).toHaveBeenCalledTimes(1);
+
+            // This setting changes: one re-read, after the settle delay.
+            settings = { "term:fontsize": 13, "app:startatlogin": true };
+            bump();
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(invokeCommand).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("renders as unavailable when the host can't reach the launcher", async () => {
@@ -89,7 +133,7 @@ describe("Notifications & Tray — start at login", () => {
         render(() => <NotificationsSection />);
         await waitFor(() => expect(screen.getByText(/Unavailable in this build/)).toBeTruthy());
         fireEvent.click(toggleFor("Start at login"));
-        expect(invokeCommand).not.toHaveBeenCalledWith("set_autostart", expect.anything());
+        expect(setConfig).not.toHaveBeenCalled();
     });
 });
 

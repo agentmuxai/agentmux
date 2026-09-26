@@ -77,6 +77,13 @@ pub fn get() -> NotifyTrayState {
     STATE.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
 }
 
+/// Ask the tray to redraw its menu (also used for the start-at-login item).
+pub fn wake() {
+    if let Some(w) = WAKE.get() {
+        w();
+    }
+}
+
 /// A backend registers how to wake its UI thread when the state changes.
 pub fn set_wake(f: Wake) {
     let _ = WAKE.set(f);
