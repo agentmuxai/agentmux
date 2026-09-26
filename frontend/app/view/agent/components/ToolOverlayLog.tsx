@@ -43,6 +43,7 @@ import "./tool-renderers/SearchResults";
 import "./tool-renderers/WebFetchResult";
 import "./tool-renderers/RecordTable";
 import "./tool-renderers/DispatchCard";
+import "./tool-renderers/ToolReferences";
 
 interface ToolOverlayLogProps {
     node: ToolNode;

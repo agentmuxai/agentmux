@@ -19,6 +19,11 @@ describe("grepResultCount", () => {
         expect(grepResultCount(text)).toEqual({ n: 3, noun: "match" });
     });
 
+    it("content with -A/-B/-C: context lines (path-N-text) are not matches (Opaz / ReAgent P2 on #3877)", () => {
+        const text = ["C:\\x\\a.ts-11-before", "C:\\x\\a.ts:12:match", "C:\\x\\a.ts-13-after", "--", "C:\\x\\b.ts:40:match"].join("\n");
+        expect(grepResultCount(text)).toEqual({ n: 2, noun: "match" });
+    });
+
     it("count: the total from the trailer, not the per-file lines", () => {
         const text = "b.tsx:2\na.ts:3\n\nFound 5 total occurrences across 2 files.";
         expect(grepResultCount(text)).toEqual({ n: 5, noun: "match" });
