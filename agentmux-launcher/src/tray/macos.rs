@@ -51,6 +51,8 @@ struct Request {
     tx: mpsc::Sender<TrayAction>,
     data_dir: PathBuf,
     dir_hash: String,
+    /// Told whether `create` succeeded, so `spawn` reports the real outcome.
+    ready: mpsc::Sender<Result<(), String>>,
 }
 
 /// The pending request, if any. `spawn` fills it; `pump_tick` takes it.
@@ -80,16 +82,33 @@ pub fn spawn(
         );
     }
     let (tx, rx) = mpsc::channel::<TrayAction>();
-    let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
-    if pending.is_some() {
-        return Err("a menu-bar item request is already queued".to_string());
+    let (ready, ready_rx) = mpsc::channel::<Result<(), String>>();
+    {
+        let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        if pending.is_some() {
+            return Err("a menu-bar item request is already queued".to_string());
+        }
+        *pending = Some(Request {
+            tx,
+            data_dir,
+            dir_hash,
+            ready,
+        });
+    } // release PENDING before waiting: `pump_tick` takes it to serve the request
+
+    // Wait for the main thread to actually create the item. Queued is not
+    // created: a failed `create` must reach `start_if_enabled` so it can drop
+    // background mode (ReAgent P1 on #3785).
+    match ready_rx.recv_timeout(super::READY_TIMEOUT) {
+        Ok(Ok(())) => Ok(rx),
+        Ok(Err(e)) => Err(e),
+        Err(_) => {
+            // Withdraw the request so the item cannot appear after we have
+            // already told the host there is no tray.
+            PENDING.lock().unwrap_or_else(|e| e.into_inner()).take();
+            Err("menu-bar item was not created within the timeout".to_string())
+        }
     }
-    *pending = Some(Request {
-        tx,
-        data_dir,
-        dir_hash,
-    });
-    Ok(rx)
 }
 
 /// Everything that must live — and only be touched — on the main thread.
@@ -126,9 +145,16 @@ pub fn pump_tick() {
             None => {
                 let request = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take();
                 if let Some(req) = request {
+                    let ready = req.ready.clone();
                     match create(req) {
-                        Ok(l) => *live = Some(l),
-                        Err(e) => crate::log(&format!("tray: creating menu-bar item failed: {}", e)),
+                        Ok(l) => {
+                            *live = Some(l);
+                            let _ = ready.send(Ok(()));
+                        }
+                        Err(e) => {
+                            crate::log(&format!("tray: creating menu-bar item failed: {}", e));
+                            let _ = ready.send(Err(e));
+                        }
                     }
                 }
             }

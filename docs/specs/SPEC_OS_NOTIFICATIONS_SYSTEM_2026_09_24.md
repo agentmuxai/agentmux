@@ -199,7 +199,7 @@ The kind is a **closed enum**. A Source cannot invent a new visual treatment. Ne
    - Better long term: stop reading env inside `tray::` and pass a resolved `LauncherOptions { tray, background_service }` built once in `main`. Both env and settings (next item) feed it.
 2. **Add a real setting.**
    - The launcher reads `<config_dir>/settings.json` directly at startup. It starts before srv, and it already knows the data dir (see `data_paths.rs`).
-   - New key: `app:runinbackground` (bool, default `false`). "Keep AgentMux running in the system tray when all windows are closed."
+   - New key: `app:runinbackground` (bool, default `false`; **changed to `true` on 2026-09-25** by the repo owner, see the tray spec §6). "Keep AgentMux running in the system tray when all windows are closed."
    - It implies both flags, preserving the tray spec's deliberate pairing (§1.1 rationale at `tray/mod.rs:240-246`: a tray without background mode would lie).
    - The env vars stay as developer overrides.
    - Changing it requires a restart in v1. Surface that in the settings UI. Live toggling can follow once the launcher is subscribed to srv's `config` event (§3.3).

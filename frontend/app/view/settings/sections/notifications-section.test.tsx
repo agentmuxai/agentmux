@@ -49,12 +49,12 @@ describe("Notifications & Tray — run in background", () => {
     });
     afterEach(() => cleanup());
 
-    it("is off by default and writes app:runinbackground=true when turned on", () => {
+    it("is on by default and writes app:runinbackground=false when turned off", () => {
         render(() => <NotificationsSection />);
         const t = toggleFor("Keep running in the system tray");
-        expect(t.getAttribute("aria-checked")).toBe("false");
+        expect(t.getAttribute("aria-checked")).toBe("true");
         fireEvent.click(t);
-        expect(setConfig.mock.calls[0][1]).toEqual({ "app:runinbackground": true });
+        expect(setConfig.mock.calls[0][1]).toEqual({ "app:runinbackground": false });
     });
 
     it("reflects a stored true", () => {

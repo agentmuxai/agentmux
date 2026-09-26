@@ -3,6 +3,17 @@
 
 use crate::logging::log;
 
+/// Background mode without a tray icon is a resident process nobody can see
+/// or quit. When the tray was requested but failed to start, take both
+/// switches back out of the host's environment, whether they came from the
+/// launcher's own env (the setting) or from `--background`. Must run after
+/// every `.env`/`.envs` that could set them: later `Command` env calls win.
+fn drop_background_if_no_tray(cmd: &mut tokio::process::Command, tray_unavailable: bool) {
+    if tray_unavailable {
+        cmd.env_remove("AGENTMUX_BACKGROUND_SERVICE").env_remove("AGENTMUX_TRAY");
+    }
+}
+
 /// Spawn the CEF host suspended, assign it to the launcher's Job Object, and
 /// resume it. Returns the running child, or `None` if any step failed — the
 /// caller decides (fatal on first launch, give-up on a restart). `splash_event`
@@ -79,6 +90,7 @@ pub(crate) fn spawn_host_supervised(
         .stderr(std::process::Stdio::null())
         .creation_flags(CREATE_SUSPENDED)
         .kill_on_drop(false); // J0 handles cleanup.
+    drop_background_if_no_tray(&mut host_cmd, crate::tray::unavailable());
     if let Some(dir) = host_runtime_dir {
         host_cmd.env("AGENTMUX_HOME", dir);
     }
@@ -189,6 +201,7 @@ pub(crate) fn spawn_host_unix(
         // — the same blast-radius bound Windows gets for free from owning
         // its Job Object.
         .process_group(0);
+    drop_background_if_no_tray(&mut host_cmd, crate::tray::unavailable());
     if disable_gpu {
         host_cmd.arg("--disable-gpu");
     }
@@ -492,4 +505,38 @@ fn launcher_exe_env() -> Vec<(&'static str, std::ffi::OsString)> {
     std::env::current_exe()
         .map(|p| vec![("AGENTMUX_LAUNCHER_EXE", p.into_os_string())])
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tray_fallback_tests {
+    fn host_env(tray_unavailable: bool, args: &[String]) -> Vec<(String, Option<String>)> {
+        let mut cmd = tokio::process::Command::new("agentmux-host");
+        cmd.env("AGENTMUX_BACKGROUND_SERVICE", "1")
+            .env("AGENTMUX_TRAY", "1")
+            .envs(crate::autostart::background_env_for(args));
+        super::drop_background_if_no_tray(&mut cmd, tray_unavailable);
+        cmd.as_std()
+            .get_envs()
+            .filter(|(k, _)| k.to_str().is_some_and(|k| k == "AGENTMUX_BACKGROUND_SERVICE" || k == "AGENTMUX_TRAY"))
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect()
+    }
+
+    /// A tray that failed to start must not leave the host in background
+    /// mode: closing the last window would leave a process with no icon.
+    /// Covers both sources, the launcher's env (the setting) and `--background`.
+    #[test]
+    fn a_failed_tray_removes_background_mode_from_the_host() {
+        let args = vec!["agentmux".to_string(), crate::autostart::BACKGROUND_FLAG.to_string()];
+        let env = host_env(true, &args);
+        assert_eq!(env.len(), 2, "{env:?}");
+        assert!(env.iter().all(|(_, v)| v.is_none()), "both switches removed: {env:?}");
+    }
+
+    #[test]
+    fn a_working_tray_leaves_background_mode_alone() {
+        let env = host_env(false, &["agentmux".to_string()]);
+        assert_eq!(env.len(), 2, "{env:?}");
+        assert!(env.iter().all(|(_, v)| v.is_some()), "{env:?}");
+    }
 }
