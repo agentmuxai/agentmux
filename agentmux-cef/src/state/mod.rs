@@ -332,6 +332,15 @@ pub struct AppState {
     /// for why step e ≠ delete here.
     pub window_meta: Mutex<HashMap<String, WindowMeta>>,
 
+    /// Labels of windows opened by `open_subwindow` WITH an `initial_view`
+    /// — today only the credential- and memory-adoption approval pages. They
+    /// render that one view, never workspace panes, and the browser API never
+    /// resolves a pane into them (#3681 review). Tracked by label rather than
+    /// derived from `WindowKind::Subwindow`: floaters are recorded as
+    /// `Subwindow` too, and a session restore recreates a subwindow without
+    /// its view, as an ordinary pane-hosting window. Removed on close.
+    pub approval_windows: Mutex<std::collections::HashSet<String>>,
+
     /// Phase F.1 — host reducer state.
     ///
     /// Owns `pending_window_creations` (formerly a top-level
@@ -733,6 +742,7 @@ impl Default for AppState {
             ipc_token: uuid::Uuid::new_v4().to_string(),
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
+            approval_windows: Mutex::new(std::collections::HashSet::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
             media_grants: Mutex::new(
                 crate::browser_panes::media_grants::MediaGrantStore::new(),
@@ -938,6 +948,24 @@ impl AppState {
             .iter()
             .map(|(k, h)| (k.clone(), h.browser.clone()))
             .collect()
+    }
+
+    /// Labels of every top-level app window and floater — the same set as
+    /// [`Self::list_top_level_browsers`], without the `Browser` handles
+    /// (not Send). Used by the browser API's Path-2 resolution.
+    pub fn top_level_labels(&self) -> Vec<String> {
+        self.host_state
+            .lock()
+            .browsers
+            .iter()
+            .filter(|(_, h)| matches!(h.kind, BrowserKind::TopLevel { .. } | BrowserKind::Floater { .. }))
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
+
+    /// True if `label` is a live approval window (see `approval_windows`).
+    pub fn is_approval_window(&self, label: &str) -> bool {
+        self.approval_windows.lock().contains(label)
     }
 
     /// Snapshot of top-level + floater browsers — excludes only `BrowserKind::Pane`
