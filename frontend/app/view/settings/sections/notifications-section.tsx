@@ -8,6 +8,8 @@
 
 import { createMemo, createResource, Show, type JSX } from "solid-js";
 
+import { hostHas } from "@/app/host/host-caps";
+import { getApi } from "@/app/store/app-api";
 import { settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -126,16 +128,12 @@ export const NOTIFICATIONS_SETTINGS = {
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
-/** Whether the launcher can manage a login entry, and whether one is registered. */
-type AutostartStatus = { available: boolean; enabled: boolean };
-
 /** Time for the launcher to apply a change before the registration is re-read. */
 const AUTOSTART_SETTLE_MS = 2000;
 
 async function fetchAutostart(): Promise<AutostartStatus> {
     try {
-        const { invokeCommand } = await import("@/app/platform/ipc");
-        return ((await invokeCommand("autostart_status", {})) as AutostartStatus) ?? { available: false, enabled: false };
+        return await getApi().getAutostartStatus();
     } catch {
         // Older host without the verb, or no launcher (standalone dev host).
         return { available: false, enabled: false };
@@ -280,31 +278,38 @@ export function NotificationsSection(): JSX.Element {
                     </button>
                 }
             />
-            <SectionHeader label="System tray" />
-            <SettingRow
-                id={NOTIFICATIONS_SETTINGS.runInBackground.id}
-                label={NOTIFICATIONS_SETTINGS.runInBackground.label}
-                description={NOTIFICATIONS_SETTINGS.runInBackground.description}
-                control={
-                    <ToggleControl
-                        checked={(s()["app:runinbackground"] as boolean | undefined) ?? true}
-                        onChange={(v) => set("app:runinbackground", v)}
-                    />
-                }
-            />
-            <SettingRow
-                id={NOTIFICATIONS_SETTINGS.autostart.id}
-                label={NOTIFICATIONS_SETTINGS.autostart.label}
-                description={autostartDescription()}
-                control={
-                    <Show
-                        when={autostart()?.available !== false}
-                        fallback={<ToggleControl checked={false} onChange={() => {}} />}
-                    >
-                        <ToggleControl checked={startAtLogin()} onChange={(v) => set("app:startatlogin", v)} />
-                    </Show>
-                }
-            />
+            {/* Desktop-only: a host without a tray or login entries doesn't show these. */}
+            <Show when={hostHas("tray") || hostHas("autostart")}>
+                <SectionHeader label="System tray" />
+            </Show>
+            <Show when={hostHas("tray")}>
+                <SettingRow
+                    id={NOTIFICATIONS_SETTINGS.runInBackground.id}
+                    label={NOTIFICATIONS_SETTINGS.runInBackground.label}
+                    description={NOTIFICATIONS_SETTINGS.runInBackground.description}
+                    control={
+                        <ToggleControl
+                            checked={(s()["app:runinbackground"] as boolean | undefined) ?? true}
+                            onChange={(v) => set("app:runinbackground", v)}
+                        />
+                    }
+                />
+            </Show>
+            <Show when={hostHas("autostart")}>
+                <SettingRow
+                    id={NOTIFICATIONS_SETTINGS.autostart.id}
+                    label={NOTIFICATIONS_SETTINGS.autostart.label}
+                    description={autostartDescription()}
+                    control={
+                        <Show
+                            when={autostart()?.available !== false}
+                            fallback={<ToggleControl checked={false} onChange={() => {}} />}
+                        >
+                            <ToggleControl checked={startAtLogin()} onChange={(v) => set("app:startatlogin", v)} />
+                        </Show>
+                    }
+                />
+            </Show>
         </div>
     );
 }

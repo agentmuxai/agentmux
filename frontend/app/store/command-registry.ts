@@ -16,7 +16,6 @@ import {
 } from "@/app/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
-import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
@@ -328,8 +327,7 @@ export function registerDefaultCommands(): void {
         icon: "cog",
         execute: async () => {
             try {
-                const path = await invokeCommand<string>("ensure_settings_file");
-                await invokeCommand("open_in_editor", { path });
+                await getApi().openSettingsFileInEditor();
             } catch (e) {
                 console.error("[command-palette] Failed to open settings:", e);
             }

@@ -461,6 +461,12 @@ export function buildCefApi(): AppApi {
 
     const api: AppApi = {
         getHostCaps: () => CEF_HOST_CAPS,
+        getAutostartStatus: async () =>
+            (await invokeCommand<AutostartStatus>("autostart_status", {})) ?? { available: false, enabled: false },
+        openSettingsFileInEditor: async () => {
+            const path = await invokeCommand<string>("ensure_settings_file");
+            await invokeCommand("open_in_editor", { path });
+        },
 
         // --- Synchronous getters (return cached values) ---
         getAuthKey: () => cachedValues!.authKey,
