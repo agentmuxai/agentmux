@@ -104,6 +104,10 @@ pub(crate) struct EntryHead {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Heads {
+    /// The scope this record is for, as written — its zone name is a hash
+    /// when the channel id has characters a zone name can't.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope: String,
     #[serde(default)]
     pub entries: BTreeMap<String, EntryHead>,
     #[serde(default)]
@@ -214,6 +218,7 @@ pub(crate) fn sync_entry(fs: &FileStore, store: &Store, scope: &str, id: &str, s
         z.append_lines(LOG_FILE, &line(&Event::Entry(v.clone()))?)?;
         let extra = head.map(|h| h.extra.clone()).unwrap_or_default();
         heads.entries.insert(id.to_string(), EntryHead { version: v.version, sha256: sha, name, is_system, extra });
+        heads.scope = scope.to_string();
         z.put(HEADS_FILE, &serde_json::to_vec(&heads).map_err(|e| StoreError::Other(e.to_string()))?)?;
         Ok(true)
     })
@@ -229,6 +234,7 @@ pub(crate) fn sync_order(fs: &FileStore, store: &Store, scope: &str) -> Result<b
         }
         z.append_lines(LOG_FILE, &line(&Event::Order { ids: ids.clone(), at_ms: agentmux_common::time::now_ms() })?)?;
         heads.order = ids.clone();
+        heads.scope = scope.to_string();
         z.put(HEADS_FILE, &serde_json::to_vec(&heads).map_err(|e| StoreError::Other(e.to_string()))?)?;
         Ok(true)
     })
@@ -251,6 +257,157 @@ pub(crate) fn sync_all(fs: &FileStore, store: &Store, scope: &str) -> Result<usi
     }
     sync_order(fs, store, scope)?;
     Ok(n)
+}
+
+// ── Import into an isolated channel (§2.1.6) ────────────────────────────
+//
+// An isolated channel keeps its own Global Memory, on purpose: destructive
+// Armory testing there can't touch the real store. So a new one starts
+// empty of the entries people added elsewhere. The Armory offers to bring
+// them in from another scope's record — never silently.
+
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportEntry")]
+pub(crate) struct ImportEntry {
+    pub entry_id: String,
+    pub name: String,
+}
+
+/// Another scope whose record holds entries this channel lacks.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportSource")]
+pub(crate) struct ImportSource {
+    pub index: usize,
+    /// `shared`, or `channel:<id>`.
+    pub scope: String,
+    /// Its live, non-system entries this channel doesn't have, in its order.
+    pub missing: Vec<ImportEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportSources")]
+pub(crate) struct ImportSources {
+    pub list_id: String,
+    /// This channel's scope. Sources are offered only to an isolated one.
+    pub scope: String,
+    pub sources: Vec<ImportSource>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportReport")]
+pub(crate) struct ImportReport {
+    pub added: usize,
+    /// Added under a new name: another entry here already had theirs.
+    pub renamed: usize,
+}
+
+struct IssuedImport {
+    zones: Vec<(String, String)>, // (zone, scope)
+    at: std::time::Instant,
+}
+
+fn issued_imports() -> &'static std::sync::Mutex<std::collections::HashMap<String, IssuedImport>> {
+    static ISSUED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, IssuedImport>>> =
+        std::sync::OnceLock::new();
+    ISSUED.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+const IMPORT_LIST_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// The live, non-system entries of the record in `zone` that `store` doesn't
+/// have as Global Memory, in that record's order.
+fn missing_from(fs: &FileStore, store: &Store, zone: &str) -> Result<(String, Vec<(String, EntryHead)>), StoreError> {
+    let heads = read_heads(fs.read_files_consistent(zone, &[HEADS_FILE])?.pop().flatten())?;
+    let label = if heads.scope.is_empty() { zone.trim_start_matches("global-memory:").to_string() } else { heads.scope.clone() };
+    let mut ids: Vec<String> = heads.order.iter().filter(|id| heads.entries.contains_key(*id)).cloned().collect();
+    ids.extend(heads.entries.keys().filter(|id| !heads.order.contains(id)).cloned());
+    let mut out = Vec::new();
+    for id in ids {
+        let Some(h) = heads.entries.get(&id) else { continue };
+        if h.sha256.is_none() || h.is_system {
+            continue;
+        }
+        if store.bundle_get(&id)?.is_some_and(|b| b.is_global) {
+            continue;
+        }
+        out.push((id, h.clone()));
+    }
+    Ok((label, out))
+}
+
+/// The other scopes this channel could import Global Memory from, under a
+/// new `list_id`. Empty unless this channel is isolated.
+pub(crate) fn import_sources_in(fs: &FileStore, store: &Store, own_scope: &str) -> Result<ImportSources, StoreError> {
+    let mut sources = Vec::new();
+    let mut zones = Vec::new();
+    if own_scope.starts_with("channel:") {
+        let own_zone = zone(own_scope);
+        let mut all: Vec<String> =
+            fs.get_all_zone_ids()?.into_iter().filter(|z| z.starts_with("global-memory:") && *z != own_zone).collect();
+        all.sort_by_key(|z| (z != "global-memory:shared", z.clone()));
+        for z in all {
+            let (scope, missing) = missing_from(fs, store, &z)?;
+            if missing.is_empty() {
+                continue;
+            }
+            sources.push(ImportSource {
+                index: sources.len(),
+                scope: scope.clone(),
+                missing: missing.into_iter().map(|(entry_id, h)| ImportEntry { entry_id, name: h.name }).collect(),
+            });
+            zones.push((z, scope));
+        }
+    }
+    let list_id = uuid::Uuid::new_v4().simple().to_string();
+    let mut map = issued_imports().lock().unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, i| i.at.elapsed() < IMPORT_LIST_TTL);
+    map.insert(list_id.clone(), IssuedImport { zones, at: std::time::Instant::now() });
+    Ok(ImportSources { list_id, scope: own_scope.to_string(), sources })
+}
+
+pub(crate) fn import_sources(fs: &FileStore, store: &Store) -> Result<ImportSources, StoreError> {
+    import_sources_in(fs, store, &scope())
+}
+
+/// Bring source `index` of list `list_id` into this channel's Global Memory:
+/// the entries it still lacks, each keeping its id, after the ones here. An
+/// entry already here is never overwritten; a name another entry here has is
+/// taken as `<name> (<id short>)`.
+pub(crate) fn import(fs: &FileStore, store: &Store, list_id: &str, index: usize) -> Result<ImportReport, StoreError> {
+    let (zone, scope) = {
+        let map = issued_imports().lock().unwrap_or_else(|e| e.into_inner());
+        let list = map
+            .get(list_id)
+            .filter(|l| l.at.elapsed() < IMPORT_LIST_TTL)
+            .ok_or_else(|| StoreError::Other("unknown-list: the list expired; list again".into()))?;
+        list.zones.get(index).cloned().ok_or_else(|| StoreError::Other("bad-choice".into()))?
+    };
+    let mut report = ImportReport::default();
+    let mut next_order = store.bundle_list_global()?.iter().map(|b| b.sort_order).max().unwrap_or(0) + 1;
+    for (id, head) in missing_from(fs, store, &zone)?.1 {
+        let Some(sha) = head.sha256.as_deref() else { continue };
+        let Some(bytes) = fs.read_files_consistent(&zone, &[&format!("blob/{sha}")])?.pop().flatten() else { continue };
+        let Ok(b) = serde_json::from_slice::<Body>(&bytes) else { continue };
+        let taken = store.bundle_list()?.into_iter().any(|x| x.name == b.name && x.id != id);
+        let name = if taken {
+            report.renamed += 1;
+            store.resolve_unique_bundle_name(&format!("{} ({})", b.name, &id[..id.len().min(8)]))?
+        } else {
+            b.name.clone()
+        };
+        let mut bundle: crate::backend::storage::store::Bundle = serde_json::from_value(serde_json::json!({
+            "id": id, "name": name, "instructions": b.instructions, "is_global": true,
+            "mcp_servers": "[]", "skills": "[]", "sort_order": next_order,
+        }))
+        .map_err(|e| StoreError::Other(e.to_string()))?;
+        let now = agentmux_common::time::now_ms();
+        bundle.created_at = now;
+        bundle.updated_at = now;
+        store.bundle_upsert_with_version(&bundle, "armory-ui", "", "import", &format!("from {scope}"))?;
+        next_order += 1;
+        report.added += 1;
+    }
+    Ok(report)
 }
 
 /// What the worker is asked to do.

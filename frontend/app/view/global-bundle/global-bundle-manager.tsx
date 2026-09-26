@@ -28,6 +28,7 @@
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import type { Bundle } from "@/app/store/rpc-api";
+import { GlobalMemoryImportBanner } from "./GlobalMemoryImportBanner";
 import { formatFileAge, formatFileSize } from "@/app/view/native-memory/MemoryFileCard";
 import { MemoryTile } from "@/app/view/native-memory/MemoryTile";
 import "@/app/view/native-memory/native-memory-manager.scss";
@@ -120,6 +121,8 @@ export const GlobalBundleManager = (): JSX.Element => {
                 Every agent inherits this at launch — takes effect after a restart. Drag entries to change their
                 order.
             </p>
+
+            <GlobalMemoryImportBanner onImported={() => void model.refresh()} />
 
             <Show when={model.errorAtom()}>
                 <div class="global-bundle-error">{model.errorAtom()}</div>
