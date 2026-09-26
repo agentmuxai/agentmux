@@ -1062,12 +1062,32 @@ async fn sync_agent_reactive(
                     )
                     .await
                 }
-                Err(_) => crate::muxbus::wan_verify::WanVerdict::default(),
+                Err(e) => crate::muxbus::wan_verify::WanVerdict::unchecked("wan_no_local_instance", e.to_string()),
             },
-            _ => crate::muxbus::wan_verify::WanVerdict::default(),
+            (None, Some(_)) => crate::muxbus::wan_verify::WanVerdict::unchecked("wan_no_local_store", "no wan.db attached"),
+            (_, None) => crate::muxbus::wan_verify::WanVerdict::default(),
         };
-        if wan_verdict.reason == Some("wan_not_same_account") {
-            tracing::debug!(injection_id = %inj.id, "wan verify: sender and receiver don't share an account (or a side has none)");
+        // Every "couldn't check" renders exactly like an unsigned message
+        // (`TRUST=network-claimed`), so say which one happened at a level
+        // that is actually recorded. One line per WAN jekt.
+        if inj.wan_sig.is_some() {
+            let (verified, reason, detail) =
+                (wan_verdict.verified, wan_verdict.reason.unwrap_or(""), wan_verdict.detail.as_deref().unwrap_or(""));
+            if verified == Some(false) {
+                tracing::warn!(injection_id = %inj.id, source = ?inj.source_agent, reason, "wan verify: signature FAILED");
+            } else {
+                tracing::info!(
+                    injection_id = %inj.id,
+                    source = ?inj.source_agent,
+                    verified = ?verified,
+                    reason,
+                    detail,
+                    same_account = ?inj.sender_same_account,
+                    "wan verify: outcome"
+                );
+            }
+        } else if inj.reagent_sig.is_none() {
+            tracing::info!(injection_id = %inj.id, source = ?inj.source_agent, "wan verify: arrived without a WAN signature");
         }
 
         let mut req = InjectionRequest {
@@ -1084,6 +1104,7 @@ async fn sync_agent_reactive(
             wan_verified: wan_verdict.verified,
             wan_instance: wan_verdict.instance.clone(),
             wan_reason: wan_verdict.reason.map(str::to_string),
+            wan_detail: wan_verdict.detail.clone(),
             ..Default::default()
         };
         // Phase C (muxspect Phase B/C conversation visibility,
