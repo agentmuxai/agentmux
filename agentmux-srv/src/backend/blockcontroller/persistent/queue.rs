@@ -657,7 +657,11 @@ impl PersistentSubprocessController {
     /// node, but its stream keeps no gap where this record sits.
     pub(super) fn persist_message_to_blockfile(&self, json_str: &str) {
         let global_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
-        let line_with_newline = format!("{json_str}\n");
+        // A line with inline image attachments is stored without the base64:
+        // its text still lists every image, and every reader of stored user
+        // lines expects string content.
+        let stored = crate::backend::attachments::prompt::persisted_line(json_str);
+        let line_with_newline = format!("{stored}\n");
         // Two SQLite write transactions (the block's store and the host-global
         // transcript store every instance writes to), each allowed to wait out
         // a 5s busy timeout. The async callers (run_agent_turn, agent.send)
@@ -688,18 +692,27 @@ impl PersistentSubprocessController {
         config: PersistentSpawnConfig,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
     ) -> Result<(), String> {
+        self.send_message_with_images_from(message, Vec::new(), config, origin)
+    }
+
+    /// [`Self::send_message_from`] with Anthropic `image` content blocks
+    /// placed before the text (image attachments,
+    /// SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6). With no images
+    /// the line is byte-for-byte what `send_message_from` always wrote.
+    /// Stored copies drop the images again — see
+    /// `persist_message_to_blockfile`.
+    pub fn send_message_with_images_from(
+        &self,
+        message: String,
+        images: Vec<serde_json::Value>,
+        config: PersistentSpawnConfig,
+        origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+    ) -> Result<(), String> {
         // Pre-turn fence (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.3):
         // a process that lost the agent to another instance starts no turn.
         self.fence_check()?;
         // Format as stream-json user message.
-        let json_msg = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": message
-            }
-        });
-        let json_str = json_msg.to_string();
+        let json_str = crate::backend::attachments::prompt::claude_user_line(message, images);
 
         let queued_origin = origin.clone();
         let action = self.decide_send_action_from(&json_str, None, origin);

@@ -7,7 +7,7 @@ use crate::backend::blockcontroller;
 use crate::backend::obj::Block;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    CommandAgentInputData, CommandAgentStopData, CommandSubprocessSpawnData, COMMAND_AGENT_INPUT,
+    AttachmentRef, CommandAgentInputData, CommandAgentStopData, CommandSubprocessSpawnData, COMMAND_AGENT_INPUT,
     COMMAND_AGENT_STOP, COMMAND_SUBPROCESS_SPAWN,
 };
 
@@ -710,6 +710,7 @@ pub async fn run_agent_turn(
     message_id: Option<String>,
     registration: TurnRegistration,
     origin: crate::backend::blockcontroller::health::TurnOrigin,
+    attachments: Vec<AttachmentRef>,
 ) -> Result<(), String> {
     let AgentTurnDeps {
         mstore,
@@ -871,6 +872,36 @@ pub async fn run_agent_turn(
     let session_id_field =
         crate::backend::obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
 
+    // Image attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md
+    // §6.6): every provider gets a numbered list of the send-copies appended
+    // to the text; Claude's persistent stream-json path also gets the first
+    // ones inline. Container agents can't reach host paths yet, so they
+    // refuse rather than send a list the agent can't open.
+    let mut inline_images: Vec<serde_json::Value> = Vec::new();
+    let message = if attachments.is_empty() {
+        message
+    } else {
+        let agent_mode = crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host");
+        if agent_mode == "container" {
+            return Err("Image attachments aren't supported for container agents yet.".to_string());
+        }
+        let svc = crate::backend::attachments::get()
+            .ok_or_else(|| "image attachments are unavailable".to_string())?;
+        let is_persistent = ctrl
+            .as_any()
+            .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+            .is_some();
+        let inline_max = if is_persistent { svc.limits().claude_inline_max } else { 0 };
+        let prepared = tokio::task::spawn_blocking(move || {
+            let (found, missing) = crate::backend::attachments::prompt::resolve(&svc, &attachments);
+            crate::backend::attachments::prompt::prepare(&found, &missing, inline_max)
+        })
+        .await
+        .map_err(|e| format!("attachments: {e}"))?;
+        inline_images = prepared.inline;
+        crate::backend::attachments::prompt::append(&message, &prepared.list)
+    };
+
     // App Server owns a persistent thread/turn process and has its own typed
     // protocol path. Keep it ahead of the legacy stream-json branches.
     //
@@ -925,7 +956,7 @@ pub async fn run_agent_turn(
             message_id: message_id.clone(),
         };
         let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone() };
-        if let Err(e) = persistent_ctrl.send_message_from(message, config, Some(input)) {
+        if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input)) {
             // A single-live-instance refusal from inside the controller (the
             // spawn-time claim losing to another instance, or the pre-turn
             // fence) gets the same pane treatment as the early check above.
@@ -1343,6 +1374,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     cmd.message_id,
                     TurnRegistration::Register,
                     origin,
+                    cmd.attachments.unwrap_or_default(),
                 )
                 .await?;
                 Ok(())
