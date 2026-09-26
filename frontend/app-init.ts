@@ -49,9 +49,10 @@ import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
-import { showStartupError } from "@/app/init/error-display";
+import { failStartup, showStartupError, StartupFailureHandled } from "@/app/init/error-display";
 import { describeError, formatDescribedError } from "@/app/errors/error-report";
 import { withTimeout } from "@/app/init/timeout";
+import { retryTransient } from "@/util/transient-network";
 import { fireAndForget } from "@/util/util";
 import { setProviderModels } from "@/app/view/agent/providers";
 import { scheduleRevealLift } from "@/store/tab-reveal";
@@ -338,7 +339,14 @@ async function initHostMux(): Promise<void> {
     try {
         // Get client data
         let t = performance.now();
-        const clientData = await withTimeout(ClientService.GetClientData(), RPC_TIMEOUT, "GetClientData");
+        // Discovery reads retry a request that never got a response (#3868:
+        // a refused loopback connect used to fail the whole window). Writes
+        // below (CreateWindow/CloseWindow) are not retried.
+        const clientData = await withTimeout(
+            retryTransient(() => ClientService.GetClientData()),
+            RPC_TIMEOUT,
+            "GetClientData"
+        );
         tlog("GetClientData", t);
 
         let windowId = clientData.windowids?.[0];
@@ -359,7 +367,11 @@ async function initHostMux(): Promise<void> {
 
         // Verify window exists
         t = performance.now();
-        let windowData = await withTimeout(WindowService.GetWindow(windowId), RPC_TIMEOUT, "GetWindow");
+        let windowData = await withTimeout(
+            retryTransient(() => WindowService.GetWindow(windowId)),
+            RPC_TIMEOUT,
+            "GetWindow"
+        );
         tlog("GetWindow", t);
 
         if (!windowData) {
@@ -371,7 +383,11 @@ async function initHostMux(): Promise<void> {
 
         // Get workspace
         t = performance.now();
-        let workspace = await withTimeout(WorkspaceService.GetWorkspace(windowData.workspaceid), RPC_TIMEOUT, "GetWorkspace");
+        let workspace = await withTimeout(
+            retryTransient(() => WorkspaceService.GetWorkspace(windowData.workspaceid)),
+            RPC_TIMEOUT,
+            "GetWorkspace"
+        );
         tlog("GetWorkspace", t);
 
         if (!workspace) {
@@ -439,7 +455,9 @@ async function initHostMux(): Promise<void> {
         const described = describeError(error);
         console.error("[initHostMux] Initialization failed:", described);
         getApi().sendLog(`[initHostMux] ERROR: ${formatDescribedError(described)}`);
-        showStartupError(formatDescribedError(described));
+        // Bounded auto-reload, then the card — the same recovery a bootstrap
+        // failure gets. Throws, so initApp's caller never sees success.
+        failStartup(formatDescribedError(described));
     }
 }
 
@@ -462,7 +480,13 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
 
         // Get client data (reuse existing client)
         let t = performance.now();
-        const clientData = await withTimeout(ClientService.GetClientData(), RPC_TIMEOUT, "GetClientData");
+        // Reads retry a request that never got a response (#3868), as in
+        // initHostMux; CreateWindow below is a write and does not.
+        const clientData = await withTimeout(
+            retryTransient(() => ClientService.GetClientData()),
+            RPC_TIMEOUT,
+            "GetClientData"
+        );
         tlog("GetClientData", t);
 
         // If this window was opened for a tear-off, the workspace ID is in the URL.
@@ -507,7 +531,11 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
 
         // Get the workspace that was auto-created with the window
         t = performance.now();
-        const workspace = await withTimeout(WorkspaceService.GetWorkspace(newWindow.workspaceid), RPC_TIMEOUT, "GetWorkspace");
+        const workspace = await withTimeout(
+            retryTransient(() => WorkspaceService.GetWorkspace(newWindow.workspaceid)),
+            RPC_TIMEOUT,
+            "GetWorkspace"
+        );
         tlog("GetWorkspace", t);
         if (!workspace) {
             throw new Error("Workspace not created with new window");
@@ -556,6 +584,11 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         console.error("[initHostNewWindow] Initialization failed:", described);
         try { getApi().sendLog(`[initHostNewWindow] Error: ${formatDescribedError(described)}`); } catch {}
         showStartupError("New window: " + formatDescribedError(described));
+        // Card, not failStartup's auto-reload: pool and pane-pool renderers are
+        // promoted in place by host events, and reloading one after promotion
+        // is not verified to bring it back. But it is still a failed startup —
+        // throw so bootstrap doesn't log success or reset the reload budget.
+        throw new StartupFailureHandled("New window: " + formatDescribedError(described));
     }
 }
 
@@ -751,10 +784,14 @@ async function initAppInner() {
                 }
             }
         } catch (error) {
+            // Already handled below us (initHostMux) — don't show a second card.
+            if (error instanceof StartupFailureHandled) throw error;
             const described = describeError(error);
             console.error("[initApp] Host initialization failed:", described);
             getApi().sendLog(`Host init error: ${formatDescribedError(described)}`);
             showStartupError(formatDescribedError(described));
+            // The card is up; tell bootstrap this was not a successful startup.
+            throw new StartupFailureHandled(formatDescribedError(described));
         }
     }
 
@@ -777,11 +814,16 @@ async function initAppInner() {
 // This self-start path is kept only for dev environments where the
 // bootstrap entry point is not used. Skip if running in the CEF host
 // since the bootstrap handles setup (window.api) before calling initApp().
+// A StartupFailureHandled rejection has already put up its own UI.
+const selfStartApp = () =>
+    initApp().catch((error) => {
+        if (!(error instanceof StartupFailureHandled)) console.error("[initApp] self-start failed:", error);
+    });
 if (!isHostApp()) {
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initApp);
+        document.addEventListener("DOMContentLoaded", selfStartApp);
     } else {
-        initApp();
+        selfStartApp();
     }
 }
 
