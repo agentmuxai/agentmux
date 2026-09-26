@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `/btw <question>` — support code for the frontend half of Claude Code
- * CLI's own native `/btw`: a tool-less, context-aware side question asked
+ * `/btw <question>` — support code for the frontend half of AgentMux's
+ * `/btw` (modelled on Claude Code CLI's own native one, and offered on
+ * Claude, Codex and Gemini panes): a tool-less, context-aware side question asked
  * in a floating overlay (`components/BtwOverlay.tsx`) without touching the
  * pane's own live turn or transcript.
  *
