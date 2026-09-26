@@ -6484,3 +6484,60 @@ async fn full_router_still_serves_full_key_routes() {
     let resp = build_routers(test_state()).full.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+// /ws Origin check. Browsers always send `Origin` on a WebSocket upgrade;
+// srv's native clients (launcher, agentmux-mcp) send none. So an upgrade is
+// refused only when it carries a non-loopback Origin — the same rule CORS
+// applies to every other route.
+
+fn ws_request(origin: Option<&str>) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(Method::GET)
+        .uri("/ws?authkey=test-secret-key")
+        .header("Connection", "upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+    if let Some(o) = origin {
+        b = b.header("Origin", o);
+    }
+    b.body(Body::empty()).unwrap()
+}
+
+#[tokio::test]
+async fn ws_rejects_a_non_loopback_origin() {
+    for origin in ["https://evil.example", "http://192.168.1.20:8080", "null", "http://127.0.0.1.evil.example"] {
+        let resp = test_router().oneshot(ws_request(Some(origin))).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "Origin {origin} must be refused");
+    }
+}
+
+#[tokio::test]
+async fn ws_does_not_refuse_loopback_or_missing_origin() {
+    // In a oneshot there is no real connection to upgrade, so the request
+    // cannot succeed; the point is that it gets past the Origin check.
+    for origin in [Some("http://127.0.0.1:51234"), Some("http://localhost:5173"), None] {
+        let resp = test_router().oneshot(ws_request(origin)).await.unwrap();
+        assert_ne!(resp.status(), StatusCode::FORBIDDEN, "Origin {origin:?} must be allowed");
+        assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[test]
+fn loopback_origin_rule() {
+    for ok in ["http://127.0.0.1", "http://localhost", "http://127.0.0.1:1", "http://localhost:5173"] {
+        assert!(is_loopback_origin(ok), "{ok}");
+    }
+    for bad in [
+        "https://127.0.0.1:5173",
+        "http://127.0.0.1:",
+        "http://127.0.0.1:80.evil.example",
+        "http://localhost:5173@evil.example",
+        "http://localhost.evil.example",
+        "http://10.0.0.5:5173",
+        "null",
+        "",
+    ] {
+        assert!(!is_loopback_origin(bad), "{bad}");
+    }
+}
