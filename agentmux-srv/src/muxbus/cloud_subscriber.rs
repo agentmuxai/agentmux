@@ -191,6 +191,26 @@ impl CloudSubscriber {
         let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
     }
 
+    /// Unsubscribe `agent_id` if no live block holds it (`is_live`), and
+    /// say whether it did. Removes first and checks after: a respawn that
+    /// registers while this runs either still finds the key (its
+    /// `add_agent` sends nothing) — then the check here sees it live and
+    /// puts the key back — or finds it gone and re-adds it itself. Checking
+    /// first and removing after could drop a live agent (Codex P2, #3897).
+    /// `is_live` must not take the `agents` lock.
+    pub fn drop_if_orphaned(&self, agent_id: &str, is_live: impl Fn(&str) -> bool) -> bool {
+        let key = agent_id.to_lowercase();
+        if !self.agents.lock().unwrap().remove(&key) {
+            return false;
+        }
+        if is_live(&key) {
+            self.agents.lock().unwrap().insert(key);
+            return false;
+        }
+        let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
+        true
+    }
+
     /// Called after muxbus.login completes — trigger a fresh WS connection
     /// with the newly stored token.
     pub fn reload_token(&self) {
@@ -493,19 +513,21 @@ async fn connect_and_run(
             _ = lease_interval.tick() => {
                 let mut registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
                 // Never renew a lease for an agent no live block holds: drop
-                // the leaked subscription instead. `remove_agent` goes through
-                // the RemoveAgent arm below, which unsubscribes and releases
-                // the lease.
+                // the leaked subscription instead. A drop goes through the
+                // RemoveAgent arm below, which unsubscribes and releases the
+                // lease; `drop_if_orphaned` re-checks liveness so a respawn
+                // registering meanwhile keeps its subscription.
                 let handler = get_global_handler();
                 let orphans = orphaned_subscriptions(&registered, |a| handler.has_live_name(a));
                 if !orphans.is_empty() {
                     if let Some(sub) = get_global_subscriber() {
                         for agent_id in &orphans {
-                            tracing::warn!(
-                                agent = %agent_id,
-                                "cloud_subscriber: subscribed agent has no live pane — dropping it and releasing its WAN lease"
-                            );
-                            sub.remove_agent(agent_id);
+                            if sub.drop_if_orphaned(agent_id, |a| handler.has_live_name(a)) {
+                                tracing::warn!(
+                                    agent = %agent_id,
+                                    "cloud_subscriber: subscribed agent has no live pane — dropped it and released its WAN lease"
+                                );
+                            }
                         }
                     }
                     registered.retain(|a| !orphans.contains(a));
@@ -1360,6 +1382,36 @@ mod tests {
         assert!(super::drop_cloud_subscription_on_exit(false, false), "no registration and no live holder");
         assert!(super::drop_cloud_subscription_on_exit(true, false));
         assert!(!super::drop_cloud_subscription_on_exit(false, true), "a newer spawn holds it: keep");
+    }
+
+    fn test_subscriber(
+        agents: &[&str],
+    ) -> (super::CloudSubscriber, tokio::sync::mpsc::UnboundedReceiver<super::CtrlMsg>) {
+        let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
+        let set = agents.iter().map(|a| a.to_string()).collect::<std::collections::HashSet<_>>();
+        (super::CloudSubscriber { ctrl_tx, agents: std::sync::Arc::new(std::sync::Mutex::new(set)) }, ctrl_rx)
+    }
+
+    // Codex P2 on #3897: "no live block" can be read just before a respawn
+    // registers; its add_agent then finds the key still present and sends
+    // nothing, and an unconditional removal after that drops the live
+    // agent's subscription. The drop must re-check liveness after removing.
+    #[test]
+    fn dropping_an_orphan_keeps_an_agent_that_registered_meanwhile() {
+        let (sub, mut rx) = test_subscriber(&["opaz"]);
+        // Liveness flips to true between the caller's check and the drop.
+        assert!(!sub.drop_if_orphaned("Opaz", |_| true));
+        assert!(sub.agents.lock().unwrap().contains("opaz"), "still subscribed");
+        assert!(rx.try_recv().is_err(), "no RemoveAgent sent");
+    }
+
+    #[test]
+    fn dropping_an_orphan_removes_it_and_tells_the_ws_loop() {
+        let (sub, mut rx) = test_subscriber(&["opaz"]);
+        assert!(sub.drop_if_orphaned("Opaz", |_| false));
+        assert!(!sub.agents.lock().unwrap().contains("opaz"));
+        assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::RemoveAgent(k)) if k == "opaz"));
+        assert!(!sub.drop_if_orphaned("Opaz", |_| false), "already gone");
     }
 
     #[test]
