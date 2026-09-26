@@ -5,9 +5,10 @@ name: Headless srv image
 # image is published.
 #
 # Not a required check, so workflow-level `paths:` is fine here (ci-pr.yml bans
-# it only for required workflows, which would sit Pending forever). A full srv
-# release build in Docker takes a while, so it runs only when the image's inputs
-# change, plus on demand.
+# it only for required workflows, which would sit Pending forever). It runs when
+# anything the image is built from changes: the crates it compiles (and
+# agentmux-common, which they share), the workspace manifests and lockfile, the
+# repo-root files srv embeds, and the Docker inputs. Plus on demand.
 
 on:
   pull_request:
@@ -15,7 +16,15 @@ on:
       - 'docker/Dockerfile.srv'
       - '.dockerignore'
       - '.github/workflows/srv-image.yml'
-      - 'agentmux-srv/src/headless.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '*/Cargo.toml'
+      - 'agentmux-srv/**'
+      - 'agentmux-common/**'
+      - 'agentmux-mcp/**'
+      - 'agentmux-bashwrap/**'
+      - 'schema/**'
+      - 'settings-template.jsonc'
   workflow_dispatch:
 
 permissions:
