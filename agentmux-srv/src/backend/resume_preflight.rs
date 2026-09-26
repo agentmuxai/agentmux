@@ -133,6 +133,39 @@ pub struct PreflightInput {
     /// (`persistent::pane_history_session_id`). A first spawn with no
     /// `session_id` continues it when reachable. Empty when there is none.
     pub history_session_id: String,
+    /// The head of the agent's segment chain
+    /// (`continuity_segments::chain_head`), for the spawn's resume gate
+    /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2).
+    /// Empty when the pane has no agent UID or the agent no chain.
+    pub chain_head_session_id: String,
+}
+
+/// The spawn's resume gate (`PersistentSubprocessController::apply_resume_gate`),
+/// mirrored: a candidate that isn't the chain head is redirected to the head
+/// when reachable here, else refused. `None` when the candidate stands.
+fn gate(input: &PreflightInput, candidate: &str, steps: &mut Vec<Step>) -> Option<(Verdict, Option<String>)> {
+    use crate::backend::continuity_segments::{resume_gate, ResumeGate};
+    let t = Instant::now();
+    let head = Some(input.chain_head_session_id.as_str()).filter(|h| !h.is_empty());
+    match resume_gate(candidate, head, None, |h| {
+        session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, h)
+    }) {
+        ResumeGate::Allow => None,
+        ResumeGate::Redirect { head } => {
+            steps.push(step("chain", "Checking the agent's conversation", true, format!("moved on to {head}"), t));
+            Some((Verdict::Resume, Some(head)))
+        }
+        ResumeGate::Refuse { head } => {
+            steps.push(step(
+                "chain",
+                "Checking the agent's conversation",
+                false,
+                format!("moved on to {head}, not under this config dir"),
+                t,
+            ));
+            Some((Verdict::Fresh, None))
+        }
+    }
 }
 
 fn step(id: &'static str, label: &str, ok: bool, detail: impl Into<String>, started: Instant) -> Step {
@@ -187,6 +220,9 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
             let sid = input.history_session_id.clone();
             if session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, &sid) {
                 steps.push(step("history", "Continuing this pane's conversation", true, sid.clone(), t));
+                if let Some((verdict, sid)) = gate(input, &sid, &mut steps) {
+                    return finish(verdict, sid, None, steps);
+                }
                 return finish(Verdict::Resume, Some(sid), None, steps);
             }
             steps.push(step(
@@ -217,6 +253,9 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
         return finish(Verdict::Fresh, None, on_disk, steps);
     }
     steps.push(step("session-id", "Resolving session id", true, input.session_id.clone(), t));
+    if let Some((verdict, sid)) = gate(input, &input.session_id, &mut steps) {
+        return finish(verdict, sid, None, steps);
+    }
 
     // 3. Would `--resume <sid>` actually find it? Same check the CLI makes.
     let t = Instant::now();
@@ -273,6 +312,7 @@ mod tests {
             working_dir: working_dir.to_string(),
             config_dir: config_dir.to_string_lossy().to_string(),
             history_session_id: String::new(),
+            chain_head_session_id: String::new(),
         }
     }
 
@@ -409,5 +449,54 @@ mod tests {
                 "every step needs an id and a human label",
             );
         }
+    }
+
+    // ── the resume gate, mirrored (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION §4.2) ──
+
+    /// The pane holds S1 and both files are here, but the agent's
+    /// conversation moved on to S2: the spawn resumes S2, so the verdict
+    /// names S2.
+    #[test]
+    fn a_held_session_that_is_not_the_chain_head_resumes_the_head() {
+        let cfg = config_dir_with(WORK_DIR, &[("sid-old", 4096), ("sid-head", 4096)]);
+        let mut i = input(cfg.path(), WORK_DIR, "sid-old");
+        i.chain_head_session_id = "sid-head".into();
+        let out = preflight(&i);
+        assert_eq!(out.verdict, Verdict::Resume);
+        assert_eq!(out.session_id.as_deref(), Some("sid-head"));
+    }
+
+    /// The head lives under another login: the spawn resumes nothing, so the
+    /// held (stale but reachable) session must not be promised.
+    #[test]
+    fn a_held_session_that_is_not_the_chain_head_starts_fresh_when_the_head_is_elsewhere() {
+        let cfg = config_dir_with(WORK_DIR, &[("sid-old", 4096)]);
+        let mut i = input(cfg.path(), WORK_DIR, "sid-old");
+        i.chain_head_session_id = "sid-elsewhere".into();
+        let out = preflight(&i);
+        assert_eq!(out.verdict, Verdict::Fresh);
+        assert_eq!(out.session_id, None);
+    }
+
+    #[test]
+    fn a_rendered_history_that_is_not_the_chain_head_resumes_the_head() {
+        let cfg = config_dir_with(WORK_DIR, &[("sid-old", 4096), ("sid-head", 4096)]);
+        let mut i = input(cfg.path(), WORK_DIR, "");
+        i.history_session_id = "sid-old".into();
+        i.chain_head_session_id = "sid-head".into();
+        let out = preflight(&i);
+        assert_eq!(out.verdict, Verdict::Resume);
+        assert_eq!(out.session_id.as_deref(), Some("sid-head"));
+    }
+
+    #[test]
+    fn the_chain_head_itself_resumes_unchanged() {
+        let cfg = config_dir_with(WORK_DIR, &[("sid-live", 4096)]);
+        let mut i = input(cfg.path(), WORK_DIR, "sid-live");
+        i.chain_head_session_id = "sid-live".into();
+        let out = preflight(&i);
+        assert_eq!(out.verdict, Verdict::Resume);
+        assert_eq!(out.session_id.as_deref(), Some("sid-live"));
+        assert!(out.steps.iter().all(|s| s.id != "chain"), "no gate step when the candidate is the head");
     }
 }
