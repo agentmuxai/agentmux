@@ -523,6 +523,21 @@ fn log_history(z: &mut crate::backend::storage::filestore::ZoneTxn<'_>, rows: &[
     Ok(count)
 }
 
+/// Every version's content hash (`None` for a tombstone), by version id —
+/// read once, for a caller asking about many versions (a reconcile pass).
+pub(crate) fn version_shas(fs: &FileStore, agent_uid: &str) -> Result<std::collections::HashMap<String, Option<String>>, StoreError> {
+    let zone = zone_or_err(agent_uid)?;
+    let log = fs.read_files_consistent(&zone, &[LOG_FILE])?.pop().flatten().unwrap_or_default();
+    Ok(log
+        .split(|b| *b == b'\n')
+        .filter_map(|line| serde_json::from_slice::<Event>(line).ok())
+        .filter_map(|e| match e {
+            Event::Version(v) => Some((v.version, v.sha256)),
+            _ => None,
+        })
+        .collect())
+}
+
 /// Every version of `file`, oldest first — by time, since imported history
 /// is logged after the versions it predates.
 pub(crate) fn history(fs: &FileStore, agent_uid: &str, file: &str) -> Result<Vec<Version>, StoreError> {
