@@ -13,7 +13,7 @@ import { For, Show, type JSX } from "solid-js";
 import type { ToolNode } from "../../types";
 import { CompactResult } from "../CompactResult";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
-import { byShape, registerToolRenderer } from "./registry";
+import { byShape, type ToolRendererEntry } from "./registry";
 import { extractRecords, looksLikeRecords, cellText } from "./record-table";
 
 export function RecordTable(props: { node: ToolNode }): JSX.Element {
@@ -60,9 +60,9 @@ RecordTable.displayName = "RecordTable";
 // below the coarse-kind built-ins (0) and name-matched rich renderers (10), so a
 // record list from an unknown tool becomes a table while known tools are
 // untouched.
-registerToolRenderer({
+export const recordTableRenderer: ToolRendererEntry = {
     priority: -1,
     label: "shape:record-table",
     match: byShape(looksLikeRecords),
     render: (node) => <RecordTable node={node} />,
-});
+};

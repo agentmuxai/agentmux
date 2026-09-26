@@ -6,8 +6,8 @@
  * SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.4).
  *
  * Renders `ToolNode.log.chunks` if the streaming runner has populated
- * them. Falls back to per-tool rich result content (BashOutputViewer,
- * DiffViewer, ...) when no chunks are present — preserves today's UX
+ * them. Falls back to the per-tool rich result renderer
+ * (tool-renderers/, e.g. BashOutputViewer, DiffViewer) when no chunks are present — preserves today's UX
  * for tools that don't stream (yet) or that have already terminated
  * before Phase 2's backend wraps the runner.
  *
@@ -20,30 +20,15 @@ import { For, Match, Show, Switch, createComputed, createEffect, createMemo, cre
 import type { ToolNode } from "../types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contract";
-import { Markdown } from "@/app/element/markdown";
-import { BashOutputViewer } from "./BashOutputViewer";
-import { CompactResult } from "./CompactResult";
-import { DiffViewer } from "./DiffViewer";
-import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capChars, createChunkCapper, createSpinnerCollapser, capText, dropBashwrapStartingChunk, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
-import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "./dedent";
-import { detectLanguage } from "./detectLanguage";
-import { terminalText } from "./terminal-text";
+import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";
-import {
-    registerToolRenderer,
-    resolveToolRenderer,
-    byKind,
-    anyTool,
-    type ToolRenderContext,
-} from "./tool-renderers/registry";
-// Side-effect: registers the rich renderers (WebSearch cards, WebFetch view, record tables, …).
-import "./tool-renderers/SearchResults";
-import "./tool-renderers/WebFetchResult";
-import "./tool-renderers/RecordTable";
-import "./tool-renderers/DispatchCard";
-import "./tool-renderers/ToolReferences";
+import { renderCompactDefault } from "./tool-renderers/builtins";
+import { registerToolRenderers } from "./tool-renderers";
+import { resolveToolRenderer, type ToolRenderContext } from "./tool-renderers/registry";
+
+// Every result renderer, from one explicit list (tool-renderers/index.ts).
+registerToolRenderers();
 
 interface ToolOverlayLogProps {
     node: ToolNode;
@@ -587,237 +572,6 @@ function ToolOverlayResult(props: { node: ToolNode; dispatchMatch?: AgentDispatc
         </Show>
     );
 }
-
-// Per-tool result renderers. Each is registered with the tool-renderer registry
-// (below) so the open-ended tool universe can be routed by name/shape rather than
-// a closed switch — these are the built-in (coarse-kind) entries. The bodies are
-// the former `switch` arms verbatim; behavior is unchanged. See
-// SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md (Phase 1).
-
-function renderEdit(node: ToolNode): JSX.Element {
-    return <DiffViewer params={node.params as any} result={node.result as any} status={node.status} />;
-}
-
-function renderBash(node: ToolNode): JSX.Element {
-    return <BashOutputViewer params={node.params as any} result={node.result as any} />;
-}
-
-function renderRead(node: ToolNode): JSX.Element {
-    const filePath = (node.params as any).file_path ?? "";
-    const content: string | undefined = (node.result as any)?.content;
-    // Head-cap file content (read top-down) so a huge Read can't bloat
-    // the conversation DOM; HighlightedCode stays simple (it injects
-    // innerHTML, so capping here is cleaner than inside it).
-    const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    // Dedent (common to every VISIBLE line — computed after capping so a
-    // deeper hidden tail can't reduce the dedent of what's actually shown,
-    // SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.1), narrow the remaining
-    // relative indentation to 2 columns per level, and re-emit Claude Code's
-    // "<N>\t" line-number gutter right-aligned at a fixed width. That last
-    // part removes the tab, and with it the sideways step the code column
-    // took at every digit-count boundary (9→10, 999→1000) — see dedent.ts's
-    // module header and docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
-    const preview = capped ? formatReadPreview(capped.text) : null;
-    // Render markdown files as formatted markdown, matching renderWrite. Without
-    // this a .md Read shows raw source instead of a rendered preview.
-    const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
-    return (
-        <div class="agent-tool-read">
-            <div class="agent-tool-file-path">{filePath}</div>
-            <Show
-                when={capped}
-                fallback={
-                    <Show when={node.result}>
-                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                    </Show>
-                }
-            >
-                <Show
-                    when={isMarkdown}
-                    fallback={
-                        <HighlightedCode
-                            code={preview!.withGutter}
-                            // Language detection reads the RAW (non-dedented) first
-                            // line — shebang/content sniffing should see the file
-                            // as-is; only the displayed text is dedented.
-                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
-                            class="agent-tool-read-content"
-                        />
-                    }
-                >
-                    <div class="agent-tool-read-content agent-tool-read-md">
-                        {/* `body`, not `withGutter`: a line-number column is
-                            meaningless in rendered markdown and actively
-                            corrupts it (a "1\t# Title" line is not a heading).
-                            SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2.1 flagged
-                            this in August and deferred it; this is the fix.
-
-                            scrollable={false}, same as MarkdownBlock: this
-                            preview lives inside the virtualized document,
-                            which owns the scroll. `scrollable` defaults to
-                            true, and each mount then constructs an
-                            OverlayScrollbars instance — getComputedStyle +
-                            scrollLeft probes that each force a layout of the
-                            whole pane. Measured at 46% of `flushPendingNodes`
-                            under load (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2). */}
-                        <Markdown text={preview!.body} scrollable={false} />
-                    </div>
-                </Show>
-                <Show when={capped!.hiddenLines > 0}>
-                    <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
-                </Show>
-            </Show>
-        </div>
-    );
-}
-
-function formatBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function renderWrite(node: ToolNode): JSX.Element {
-    const filePath = (node.params as any).file_path ?? "";
-    const content: string | undefined = (node.params as any).content;
-    const bytes: number | undefined = (node.result as any)?.bytesWritten;
-    const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    // Plain dedent + narrow, NOT the Read-specific gutter-aware variant
-    // (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) — Write content has no
-    // CLI-added "<N>\t" line-number prefix, so formatReadPreview's numbered
-    // heuristic would misfire on a genuine tab-delimited file (TSV/BED/GTF)
-    // whose every non-blank line happens to start with digits+tab, silently
-    // dropping that real leading column. formatCodePreview has no such
-    // ambiguity, and its dedent half is a no-op for the common already-flush
-    // case anyway (a whole file starts at column 0) — which is exactly why the
-    // narrowing half matters here: it's the only part that fires on a Write.
-    const dedentedText = capped ? formatCodePreview(capped.text) : "";
-    // Markdown is indentation-sensitive — four leading spaces are a code
-    // block, and rescaling them to two turns it into prose. Dedent only for
-    // that path (codex P2 on PR #2958); `formatMarkdownPreview` documents why.
-    const markdownText = capped ? formatMarkdownPreview(capped.text) : "";
-    const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
-    return (
-        <div class="agent-tool-write">
-            <div class="agent-tool-file-path-row">
-                <span class="agent-tool-file-path">{filePath}</span>
-                <Show when={bytes != null}>
-                    <span class="agent-tool-write-bytes">{formatBytes(bytes!)}</span>
-                </Show>
-            </div>
-            <Show when={capped} fallback={<div class="agent-tool-write-info">No content written.</div>}>
-                <Show
-                    when={isMarkdown}
-                    fallback={
-                        <HighlightedCode
-                            code={dedentedText}
-                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
-                            class="agent-tool-write-content"
-                        />
-                    }
-                >
-                    <div class="agent-tool-write-content agent-tool-write-md">
-                        {/* scrollable={false} — see renderRead's markdown branch. */}
-                        <Markdown text={markdownText} scrollable={false} />
-                    </div>
-                </Show>
-                <Show when={capped!.hiddenLines > 0}>
-                    <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
-                </Show>
-            </Show>
-        </div>
-    );
-}
-
-// No "Pattern:" line: the row header already shows the pattern
-// (tool-header.ts). SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.5.
-function renderSearch(node: ToolNode): JSX.Element {
-    return (
-        <div class="agent-tool-search">
-            <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-        </div>
-    );
-}
-
-// Exported (not just module-local) so `DispatchCard.tsx`'s no-match fallback
-// can delegate to the SAME per-kind rendering these built-ins already do
-// (the report as markdown, no-result gating) instead of a bare
-// `CompactResult` call that loses both — reagent/codex P1 on PR #2676: a
-// still-running unmatched Agent/Task call was showing raw "No output" and a
-// completed one was losing its description entirely, guaranteed to trigger
-// on the Agent History tab (which always falls back to CompactResult there).
-export function renderAgent(node: ToolNode): JSX.Element {
-    // A subagent's report is markdown; render it as such rather than as a
-    // compact one-liner (SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.6).
-    // No description line: the row header already shows it (tool-header.ts),
-    // running or finished.
-    // Head-capped like a Read preview: the panel's max-height bounds what's
-    // visible, not the DOM, and a subagent report can be very long.
-    const text = terminalText(node.result);
-    const report = text ? capText(text, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    return (
-        <div class="agent-tool-agent">
-            <Show
-                when={report}
-                fallback={
-                    <Show when={node.result}>
-                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                    </Show>
-                }
-            >
-                <div class="agent-tool-agent-report">
-                    {/* scrollable={false} — see renderRead's markdown branch. */}
-                    <Markdown text={report!.text} scrollable={false} />
-                </div>
-                <Show when={report!.hiddenLines > 0}>
-                    <OutputHiddenMarker hidden={report!.hiddenLines} noun="line" from="head" />
-                </Show>
-            </Show>
-        </div>
-    );
-}
-
-export function renderTask(node: ToolNode): JSX.Element {
-    return (
-        <div class="agent-tool-task">
-            <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-        </div>
-    );
-}
-
-export function renderWorkflow(node: ToolNode): JSX.Element {
-    // The row header shows the title, or the description when there's no
-    // title; repeat the description here only when the header shows the title.
-    const params = node.params as any;
-    const extraDesc = params.title && params.description && params.description !== params.title ? params.description : null;
-    return (
-        <div class="agent-tool-workflow">
-            <Show when={extraDesc}>
-                <div class="agent-tool-agent-desc">{extraDesc}</div>
-            </Show>
-            <Show when={node.result}>
-                <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-            </Show>
-        </div>
-    );
-}
-
-function renderCompactDefault(node: ToolNode): JSX.Element {
-    return <CompactResult tool={node.tool} params={node.params as any} result={node.result} />;
-}
-
-// Register the built-ins (priority 0; the catch-all sits below everything). Rich,
-// name/shape-matched renderers (WebSearch cards, mcp__* tools, DispatchCard, …)
-// register from their own modules at a higher priority.
-registerToolRenderer({ priority: 0, label: "builtin:Edit", match: byKind("Edit"), render: renderEdit });
-registerToolRenderer({ priority: 0, label: "builtin:Bash", match: byKind("Bash"), render: renderBash });
-registerToolRenderer({ priority: 0, label: "builtin:Read", match: byKind("Read"), render: renderRead });
-registerToolRenderer({ priority: 0, label: "builtin:Write", match: byKind("Write"), render: renderWrite });
-registerToolRenderer({ priority: 0, label: "builtin:Search", match: byKind("Grep", "Glob"), render: renderSearch });
-registerToolRenderer({ priority: 0, label: "builtin:Agent", match: byKind("Agent"), render: renderAgent });
-registerToolRenderer({ priority: 0, label: "builtin:Task", match: byKind("Task"), render: renderTask });
-registerToolRenderer({ priority: 0, label: "builtin:Workflow", match: byKind("Workflow"), render: renderWorkflow });
-registerToolRenderer({ priority: -Infinity, label: "builtin:default", match: anyTool, render: renderCompactDefault });
 
 function renderToolResultBody(node: ToolNode, ctx?: ToolRenderContext): JSX.Element {
     // Hard fallback to the default renderer if (somehow) nothing is registered.

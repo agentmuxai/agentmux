@@ -14,7 +14,7 @@ import { For, Show, type JSX } from "solid-js";
 import type { ToolNode } from "../../types";
 import { CompactResult } from "../CompactResult";
 import { mcpDisplayName } from "../../tool-meta/tool-descriptors";
-import { byName, registerToolRenderer } from "./registry";
+import { byName, type ToolRendererEntry } from "./registry";
 
 /** The referenced tool names, or null unless the result is a non-empty array
  *  made only of tool_reference blocks. */
@@ -51,9 +51,9 @@ export function ToolReferences(props: { node: ToolNode }): JSX.Element {
 
 ToolReferences.displayName = "ToolReferences";
 
-registerToolRenderer({
+export const toolReferencesRenderer: ToolRendererEntry = {
     priority: 10,
     label: "tool:search-references",
     match: byName("ToolSearch"),
     render: (node) => <ToolReferences node={node} />,
-});
+};

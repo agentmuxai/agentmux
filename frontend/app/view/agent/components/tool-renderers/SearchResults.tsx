@@ -34,7 +34,7 @@ import {
     type SearchResultItem,
     type SourceGroup,
 } from "./search-results";
-import { byName, registerToolRenderer } from "./registry";
+import { byName, type ToolRendererEntry } from "./registry";
 import { faviconSrc, hostname, openUrl, prettyUrl } from "./url";
 
 export function SearchResults(props: { node: ToolNode }): JSX.Element {
@@ -205,9 +205,9 @@ function SearchCard(props: { item: SearchResultItem }): JSX.Element {
 SearchResults.displayName = "SearchResults";
 
 // Register for WebSearch by name (priority above the coarse-kind built-ins).
-registerToolRenderer({
+export const searchResultsRenderer: ToolRendererEntry = {
     priority: 10,
     label: "web:search",
     match: byName("WebSearch", "web_search"),
     render: (node) => <SearchResults node={node} />,
-});
+};
