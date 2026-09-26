@@ -56,6 +56,7 @@ use axum::{
     routing::{delete, get, patch, post},
     Router,
 };
+use agentmux_common::secret_eq::secret_eq;
 use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -3085,7 +3086,7 @@ async fn auth_middleware(
     });
 
     match auth_key {
-        Some(key) if key == state.auth_key => {
+        Some(key) if secret_eq(key.as_bytes(), state.auth_key.as_bytes()) => {
             // Identity M4a: `caller_middleware` derives a `Caller` only for a
             // request marked as full-key authenticated — never by default.
             req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
@@ -3153,11 +3154,11 @@ async fn lan_or_full_auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     match auth_key {
-        Some(key) if key == state.auth_key => {
+        Some(key) if secret_eq(key.as_bytes(), state.auth_key.as_bytes()) => {
             req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
             next.run(req).await
         }
-        Some(key) if key == state.lan_key => {
+        Some(key) if secret_eq(key.as_bytes(), state.lan_key.as_bytes()) => {
             req.extensions_mut().insert(ReactiveAuthVia::LanKey);
             next.run(req).await
         }

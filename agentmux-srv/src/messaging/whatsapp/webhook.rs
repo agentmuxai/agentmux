@@ -34,6 +34,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use agentmux_common::secret_eq::secret_eq;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -66,7 +67,7 @@ pub async fn handle_verify(Query(params): Query<HashMap<String, String>>) -> imp
         .unwrap_or("");
     let challenge = params.get("hub.challenge").cloned().unwrap_or_default();
 
-    let token_matches = constant_time_eq(token.as_bytes(), bridge.verify_token().as_bytes());
+    let token_matches = secret_eq(token.as_bytes(), bridge.verify_token().as_bytes());
 
     if mode == "subscribe" && token_matches {
         (StatusCode::OK, challenge).into_response()
@@ -177,23 +178,6 @@ fn verify_signature(app_secret: &str, body: &[u8], header: &str) -> bool {
     mac.verify_slice(&expected).is_ok()
 }
 
-/// Constant-time byte comparison for the `hub.verify_token` handshake check
-/// (spec §3.1 step 1). Hand-rolled (XOR-and-OR-accumulate) rather than
-/// pulling in a dedicated crate — `subtle` is already available transitively
-/// via `hmac` for the signature check above, but reaching for it here too
-/// would mean threading an extra direct dependency through Cargo.toml for a
-/// six-line primitive; this is the simplest correct implementation.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,25 +221,5 @@ mod tests {
     #[test]
     fn verify_signature_rejects_empty_header() {
         assert!(!verify_signature("secret", b"hello", ""));
-    }
-
-    #[test]
-    fn constant_time_eq_matches_equal_tokens() {
-        assert!(constant_time_eq(b"my-verify-token", b"my-verify-token"));
-    }
-
-    #[test]
-    fn constant_time_eq_rejects_different_tokens_same_length() {
-        assert!(!constant_time_eq(b"my-verify-token1", b"my-verify-token2"));
-    }
-
-    #[test]
-    fn constant_time_eq_rejects_different_lengths() {
-        assert!(!constant_time_eq(b"short", b"a-much-longer-token"));
-    }
-
-    #[test]
-    fn constant_time_eq_empty_vs_empty() {
-        assert!(constant_time_eq(b"", b""));
     }
 }

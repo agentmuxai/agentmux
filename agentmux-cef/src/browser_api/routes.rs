@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use agentmux_common::secret_eq::secret_eq;
 use axum::Json;
 use serde_json::json;
 
@@ -940,7 +941,7 @@ fn authorized(headers: &HeaderMap, expected: &str) -> bool {
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|token| token == expected)
+        .map(|token| secret_eq(token.as_bytes(), expected.as_bytes()))
         .unwrap_or(false)
 }
 

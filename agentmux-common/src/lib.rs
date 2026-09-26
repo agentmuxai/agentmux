@@ -15,6 +15,7 @@ pub mod pagefile;
 pub mod process;
 pub mod redact;
 pub mod runtime_mode;
+pub mod secret_eq;
 pub mod srv_stderr;
 pub mod time;
 pub mod toolchain_path;
