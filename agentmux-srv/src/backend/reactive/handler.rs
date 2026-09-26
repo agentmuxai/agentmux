@@ -1295,18 +1295,26 @@ impl Handler {
         // until published keys have propagated (spec §6/§10) — so today
         // this field can only ever relax, never escalate.
         //
-        // `wan_verified` (W3-S §2.6) joins only for an **approved** instance.
-        // A verified signature from a `new` instance proves which install
-        // sent it, but anyone holding the account token can mint an install,
-        // so without a human's approval it relaxes nothing — exactly today's
-        // WAN behavior, just labelled. `revoked` is forcing, above.
+        // `wan_verified` (W3-S §2.6, amended 2026-09-26) joins for any
+        // verified same-account install that isn't revoked — `approved` or
+        // `new`. The signature proves which install of this account sent it.
+        // Until #3881 every agent held the account login and could mint an
+        // install, so only a human-approved one relaxed anything; the
+        // operator chose to trust same-account installs once agents no
+        // longer hold it (a same-user process reading the srv's stored login
+        // from disk is the accepted residual, spec open question 5).
+        // `revoked` is forcing, above; a verdict with no instance proves no
+        // install and relaxes nothing.
         let is_cryptographically_verified = req.sig_verified == Some(true)
             || req.reagent_verified == Some(true)
             || req.lan_verified == Some(true)
             || req.channel_verified == Some(true)
             || (delivery_tier == "wan"
                 && req.wan_verified == Some(true)
-                && wan_instance_status == Some(super::types::WanInstanceStatus::Approved));
+                && matches!(
+                    wan_instance_status,
+                    Some(super::types::WanInstanceStatus::Approved | super::types::WanInstanceStatus::New)
+                ));
         // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 2: the
         // ONE named exception to the verified-sender relaxation above. A
         // transcript_request's ESCALATE=required is not relaxed by a

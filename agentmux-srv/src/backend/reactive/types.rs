@@ -305,9 +305,9 @@ pub struct InjectionRequest {
     /// `delivery_tier: "wan"` always leaves it `None`.
     ///
     /// `Some(true)` renders `TRUST=wan-verified` with `wan_instance`, and
-    /// joins the verified-sender set **only for an approved instance**; a
-    /// `new` instance is treated exactly as unverified for escalation, and a
-    /// `revoked` one as `Some(false)`. `Some(false)` — the envelope, the
+    /// joins the verified-sender set for an `approved` or `new` instance
+    /// (same-account installs, spec §2.6 as amended 2026-09-26); a `revoked`
+    /// one is treated as `Some(false)`. `Some(false)` — the envelope, the
     /// certificate chain, the record match, the signature or the replay check
     /// actively failed — is forced `TIER=sensitive`. `None` covers every
     /// "couldn't check" case: unsigned, another account, stale, no record,

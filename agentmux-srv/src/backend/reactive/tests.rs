@@ -1632,14 +1632,30 @@ async fn test_wan_verified_approved_instance_keyword_match_is_escalate_none() {
 }
 
 #[tokio::test]
-async fn test_wan_verified_new_instance_escalates_exactly_as_unverified_but_is_labelled() {
+async fn test_wan_verified_new_instance_joins_the_verified_sender_set() {
+    // Operator decision 2026-09-26 (spec §2.6 amendment): a same-account
+    // install's verified signature relaxes the stop like any other verified
+    // sender, once agents no longer hold the account login (#3881). The
+    // keyword tag and the `new` label stay visible.
     let (resp, tag) = deliver_wan("the review flagged how the PAT is stored", Some(true), Some(WanInstanceStatus::New));
-    assert_eq!(resp.requires_stop, Some(true), "anyone with the account token can mint an instance: no relaxation");
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"), "the keyword tag is retained");
+    assert_eq!(resp.requires_stop, Some(false), "a verified same-account install needs no operator stop");
     assert!(tag.contains("TRUST=wan-verified INSTANCE=narko~gr2q7gf5 INSTANCE_STATUS=new"), "{tag}");
-    assert!(tag.contains("ESCALATE=required"), "{tag}");
+    assert!(tag.contains("ESCALATE=none"), "{tag}");
 
     let (clean, _) = deliver_wan("build is green", Some(true), Some(WanInstanceStatus::New));
     assert_eq!(clean.effective_tier.as_deref(), Some("coord"), "clean content isn't escalated by newness alone");
+}
+
+#[tokio::test]
+async fn test_wan_unverified_keyword_match_still_stops() {
+    // The relaxation is for a verified signature only: no verdict, or a
+    // verdict without an instance, keeps today's STOP.
+    let (resp, tag) = deliver_wan("the review flagged how the PAT is stored", None, None);
+    assert_eq!(resp.requires_stop, Some(true), "{tag}");
+    assert!(tag.contains("ESCALATE=required"), "{tag}");
+    let (resp, tag) = deliver_wan("the review flagged how the PAT is stored", Some(true), None);
+    assert_eq!(resp.requires_stop, Some(true), "a verdict with no instance proves no install: {tag}");
 }
 
 #[tokio::test]
