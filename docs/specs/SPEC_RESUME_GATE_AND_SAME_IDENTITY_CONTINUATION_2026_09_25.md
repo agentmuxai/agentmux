@@ -213,6 +213,16 @@ Action:
 The segment records `forked_from: Option<String>` (the head id). The rung stays `Native`; no
 enum change, so older builds can still fold the log.
 
+A relocated fork's segment records **no** `provider_session_id` at `Start`, only the new id
+once the fork reports it. The attempted id names the copy, not the conversation. If the
+process dies before capture (a restart seconds after opening is enough), step 4 sweeps that
+copy. As the head, such a segment would then point the next spawn at a session "in this dir"
+that is gone: no relocation, a plain `--resume`, "No conversation found", and fresh + packet.
+Without it, the head stays the source segment, and the next spawn relocates again. The
+same-id case of step 3 is settled on its own once a result frame confirms the resume, since
+capture never adopts an id the controller already holds: the id is recorded on the segment
+and the copy's marker goes.
+
 ### 4.4 Fork when the file changed outside AgentMux (H4)
 Each segment's `End` records `provider_bytes_end`: the size of the provider session file when
 the process went away, found from the segment's own record (config dir, cwd, session id;

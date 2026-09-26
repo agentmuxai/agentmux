@@ -698,6 +698,16 @@ impl PersistentInner {
         }
         (adopted, effects)
     }
+
+    /// The process of `generation` is still the current one, and still holds
+    /// `sid` as a session not known to be dead. A superseded generation's
+    /// draining stdout must not settle anything on the replacement's behalf
+    /// (codex P1 on #3907).
+    fn holds_current_session(&self, sid: &str, generation: u64) -> bool {
+        generation == self.spawn_generation
+            && self.session_id.as_deref() == Some(sid)
+            && self.resume_poisoned.as_deref() != Some(sid)
+    }
 }
 
 /// What `decide_send_action` determined a message's fate should be —

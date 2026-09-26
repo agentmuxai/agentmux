@@ -275,10 +275,40 @@ impl PersistentSubprocessController {
         config: &PersistentSpawnConfig,
         attempted_resume_sid: Option<&str>,
         forked_from: Option<&str>,
+        relocated: bool,
         carries_packet: bool,
         lease_epoch: Option<u64>,
     ) -> SegmentRef {
         let gfs = crate::backend::agent_session::global_transcript_store()?;
+        let start = self.segment_start(agent_uid, config, attempted_resume_sid, forked_from, relocated, carries_packet, lease_epoch);
+        let rung = start.continuity_rung;
+        match segs::record_start(gfs, start) {
+            Ok(id) => {
+                tracing::info!(block_id = %self.block_id, segment_id = %id, rung = ?rung, "continuity: segment started");
+                Some((agent_uid.to_string(), id))
+            }
+            Err(e) => {
+                tracing::warn!(block_id = %self.block_id, error = %e, "continuity: segment start not recorded");
+                None
+            }
+        }
+    }
+
+    /// The `Start` event [`record_segment_start`](Self::record_segment_start)
+    /// writes. A relocated fork records no session until it reports its own:
+    /// the attempted id names the copy, which is swept if the process dies
+    /// first, so as the head it would send the next spawn to `--resume` a
+    /// file that is gone instead of relocating again (spec §4.3).
+    pub(super) fn segment_start(
+        &self,
+        agent_uid: &str,
+        config: &PersistentSpawnConfig,
+        attempted_resume_sid: Option<&str>,
+        forked_from: Option<&str>,
+        relocated: bool,
+        carries_packet: bool,
+        lease_epoch: Option<u64>,
+    ) -> segs::Start {
         let meta = self
             .mstore
             .as_deref()
@@ -292,7 +322,7 @@ impl PersistentSubprocessController {
         let identity_key = config_dir
             .as_deref()
             .and_then(|dir| crate::identity::account_email::identity_key_from_oauth_dir(&provider, dir));
-        let start = segs::Start {
+        segs::Start {
             segment_id: String::new(),
             agent_uid: agent_uid.to_string(),
             definition_id,
@@ -300,7 +330,7 @@ impl PersistentSubprocessController {
             identity_key,
             forked_from: forked_from.map(str::to_string),
             provider,
-            provider_session_id: attempted_resume_sid.map(str::to_string),
+            provider_session_id: attempted_resume_sid.filter(|_| !relocated).map(str::to_string),
             cwd: config.working_dir.clone(),
             channel: crate::backend::reactive::registry::local_channel_id(),
             agentmux_version: crate::backend::base::get_version().to_string(),
@@ -311,17 +341,6 @@ impl PersistentSubprocessController {
             continuity_rung: segs::rung_for_spawn(attempted_resume_sid.is_some(), carries_packet),
             predecessor_segment_id: None,
             lease_epoch,
-        };
-        let rung = start.continuity_rung;
-        match segs::record_start(gfs, start) {
-            Ok(id) => {
-                tracing::info!(block_id = %self.block_id, segment_id = %id, rung = ?rung, "continuity: segment started");
-                Some((agent_uid.to_string(), id))
-            }
-            Err(e) => {
-                tracing::warn!(block_id = %self.block_id, error = %e, "continuity: segment start not recorded");
-                None
-            }
         }
     }
 }
@@ -407,6 +426,25 @@ pub(super) fn forked_outcome(
     } else {
         outcome
     }
+}
+
+/// A relocated resume the CLI kept under the attempted id, resumed in place
+/// rather than forked. Capture skips an id the controller already holds, so
+/// this is settled on its own, once a result frame proves the resume worked
+/// (an earlier frame echoes the attempted id even when the resume goes on to
+/// fail). Left unsettled, the segment would hold no session (a relocated
+/// Start records none) and the next spawn would sweep the live copy.
+/// `holds_current`: the reader's generation is still current and holds the
+/// id; a superseded one's copy path may already be the replacement's.
+pub(super) fn kept_relocated_id(
+    adopted: bool,
+    confirmed: bool,
+    holds_current: bool,
+    has_copy: bool,
+    forked_from: Option<&str>,
+    captured: &str,
+) -> bool {
+    !adopted && confirmed && holds_current && has_copy && forked_from == Some(captured)
 }
 
 /// Once a relocated resume reports its session: a fork (a new id) never
