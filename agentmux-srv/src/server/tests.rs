@@ -3337,6 +3337,15 @@ mod fleet_tests {
     /// whose status is `status_body`; `/agentmux/agent/stop` is the plain
     /// forward. `with_pending: false` is an instance that predates the route.
     async fn spawn_fake_peer(with_pending: bool, status_body: serde_json::Value) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        spawn_slow_fake_peer(with_pending, status_body, 0).await
+    }
+
+    /// `spawn_fake_peer` whose `stop-pending` takes `delay_ms` to answer.
+    async fn spawn_slow_fake_peer(
+        with_pending: bool,
+        status_body: serde_json::Value,
+        delay_ms: u64,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use axum::routing::{get, post};
         let hits: std::sync::Arc<std::sync::Mutex<Vec<String>>> = Default::default();
         let (h1, h2, h3) = (hits.clone(), hits.clone(), hits.clone());
@@ -3360,6 +3369,7 @@ mod fleet_tests {
             app = app.route(
                 "/agentmux/agent/stop-pending",
                 post(move |axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                     h3.lock().unwrap().push(format!("stop-pending:{}", body["by"].as_str().unwrap_or("")));
                     axum::Json(serde_json::json!({
                         "success": true,
@@ -3408,6 +3418,33 @@ mod fleet_tests {
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["status"], "kept_by_user");
         assert!(hits.lock().unwrap().contains(&"status:peer-secret-key".to_string()), "with the peer's own key");
+    }
+
+    /// ReAgent P1 on #3824: other instances are asked all at once, so a slow
+    /// one delays neither the rest nor any countdown.
+    #[tokio::test]
+    async fn other_instances_are_asked_at_once_not_one_after_another() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let mut targets = Vec::new();
+        for i in 0..3 {
+            let block_id = format!("blk-xchan-slow-{i}-{}", uuid::Uuid::new_v4());
+            let (peer_url, _) = spawn_slow_fake_peer(true, serde_json::Value::Null, 700).await;
+            write_raw_shared_entry(&shared_dir, &format!("peer-agent-slow-{i}"), &peer_url, &block_id, "k");
+            targets.push(block_id);
+        }
+        let state = test_state();
+
+        let started = std::time::Instant::now();
+        let (_, pending) =
+            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", targets, None, None).await;
+        let took = started.elapsed();
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert_eq!(pending.len(), 3);
+        assert!(took < std::time::Duration::from_millis(1800), "three 700 ms peers asked in parallel, took {took:?}");
     }
 
     #[tokio::test]
