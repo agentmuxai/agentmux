@@ -147,8 +147,7 @@ mod tests {
     // path; :memory: would be re-created per connection) — db_agent_credentials
     // lives in the shared schema (SHARED_STORE_SCHEMA_VERSION v3), not objects.db.
     fn shared_store() -> Store {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        Store::open_shared(tmp.path()).unwrap()
+        Store::open_shared(std::path::Path::new(":memory:")).unwrap()
     }
 
     #[test]

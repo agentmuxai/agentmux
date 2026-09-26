@@ -154,8 +154,7 @@ mod tests {
     use super::*;
 
     fn object_store() -> Store {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        Store::open(tmp.path()).unwrap()
+        Store::open(std::path::Path::new(":memory:")).unwrap()
     }
 
     #[test]
