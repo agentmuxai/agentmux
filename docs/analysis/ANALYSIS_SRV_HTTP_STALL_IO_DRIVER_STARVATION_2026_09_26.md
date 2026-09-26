@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-26
 **Status:** analysis — root-cause mechanism confirmed from live stack dumps; the
-§6 fixes shipped in #3826; §8.3 implemented; §8.1–§8.2 in progress; §9 (keeping
+§6 fixes shipped in #3826; §8.3 in #3834; §8.1–§8.2 in #3837; §9 (keeping
 AgentMux responsive under agent load) lists further proposals.
 **Author:** AgentY, at the request of the repo owner
 **Related:** `docs/specs/SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md` (the
@@ -373,12 +373,12 @@ AgentMux.
 | Item | Where | Status |
 |---|---|---|
 | No blocking on async workers | srv | done (#3826) |
-| Agents' job objects `BELOW_NORMAL` | srv, process tracker | done (this PR) |
+| Agents' job objects `BELOW_NORMAL` | srv, process tracker | done (#3834) |
 | Renderer backgrounding flags | CEF host | proposed |
 | Sampler on a dedicated elevated thread | srv sysinfo | proposed |
 | Agent memory priority `BELOW_NORMAL` | srv, process tracker | proposed |
 | Runtime stall detector | srv | proposed |
-| Slow-vs-dead recycle, latency banner | launcher, host, frontend | in progress (§8.1–§8.2) |
+| Slow-vs-dead recycle, latency banner | launcher, host, frontend | done (#3837) |
 
 ### Sources
 
