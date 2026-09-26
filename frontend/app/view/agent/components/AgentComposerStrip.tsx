@@ -611,11 +611,11 @@ interface AgentComposerStripProps {
      *  address, shortened to 22 characters (`shortenEmail`); the tooltip keeps
      *  it whole. Ignored unless `authStatus` is "authenticated". */
     authEmail?: string;
-    /** Other accounts this agent could switch to (same provider, signed in —
-     *  `computeAccountBindCandidates`). While signed in, idle, and there is at
-     *  least one, the chip is a link that calls `onSwitchAccount`; otherwise it
-     *  stays plain text. SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md. */
-    switchAccountCandidates?: { id: string; name: string }[];
+    /** Whether this agent has another account to switch to (same provider,
+     *  signed in — `computeAccountBindCandidates`). While signed in, idle, and
+     *  true, the chip is a link that calls `onSwitchAccount`; otherwise it stays
+     *  plain text. SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md. */
+    canSwitchAccount?: boolean;
     /** Opens the account picker at the click. A switch restarts the agent, so
      *  the chip only offers it when no turn is running (`loading`) and no
      *  compaction is in progress (`compacting`). */
@@ -806,7 +806,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 interactive: true,
                 render: () => {
                     const authed = () => props.authStatus === "authenticated";
-                    const hasOthers = () => (props.switchAccountCandidates?.length ?? 0) > 0 && !!props.onSwitchAccount;
+                    const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
                     // A switch restarts the agent (bindAccountToAgent ends in a
                     // forced controller resync), which would kill a turn or
                     // compaction in flight.

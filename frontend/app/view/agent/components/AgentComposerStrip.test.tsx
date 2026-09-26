@@ -968,7 +968,6 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
     const chip = (container: HTMLElement) => container.querySelector(".agent-composer-strip-auth")!;
     const link = (container: HTMLElement) =>
         container.querySelector<HTMLButtonElement>("button.agent-composer-strip-auth-link");
-    const others = [{ id: "a2", name: "second@example.com" }];
 
     it("renders the email as a button that hands the click to onSwitchAccount", async () => {
         const onSwitchAccount = vi.fn();
@@ -977,7 +976,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 {...baseProps}
                 authStatus="authenticated"
                 authEmail="asafebgi@gmail.com"
-                switchAccountCandidates={others}
+                canSwitchAccount={true}
                 onSwitchAccount={onSwitchAccount}
             />
         ));
@@ -999,7 +998,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="authenticated"
-                switchAccountCandidates={others}
+                canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />
         ));
@@ -1012,7 +1011,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 {...baseProps}
                 authStatus="authenticated"
                 authEmail="asafebgi@gmail.com"
-                switchAccountCandidates={[]}
+                canSwitchAccount={false}
                 onSwitchAccount={() => {}}
             />
         ));
@@ -1021,13 +1020,13 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(chip(container).getAttribute("title")).toBe("Signed in as asafebgi@gmail.com");
     });
 
-    it("stays plain text with candidates but no handler", () => {
+    it("stays plain text when it could switch but has no handler", () => {
         const { container } = render(() => (
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="authenticated"
                 authEmail="asafebgi@gmail.com"
-                switchAccountCandidates={others}
+                canSwitchAccount={true}
             />
         ));
         expect(link(container)).toBeNull();
@@ -1040,7 +1039,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 loading={true}
                 authStatus="authenticated"
                 authEmail="asafebgi@gmail.com"
-                switchAccountCandidates={others}
+                canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />
         ));
@@ -1058,7 +1057,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 compacting={{ startedAt: 1 } as never}
                 authStatus="authenticated"
                 authEmail="asafebgi@gmail.com"
-                switchAccountCandidates={others}
+                canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />
         ));
@@ -1073,7 +1072,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 loading={loading()}
                 authStatus="authenticated"
                 authEmail="asafebgi@gmail.com"
-                switchAccountCandidates={others}
+                canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />
         ));
@@ -1087,7 +1086,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="unauthenticated"
-                switchAccountCandidates={others}
+                canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />
         ));

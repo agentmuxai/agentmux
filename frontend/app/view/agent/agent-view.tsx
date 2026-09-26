@@ -2853,7 +2853,7 @@ const AgentPresentationView = ({
                 contextWindow={(paneModel.state.lastContextWindow ?? null) ?? provider()?.contextWindow}
                 authStatus={loginStatus()}
                 authEmail={authEmail()}
-                switchAccountCandidates={bindCandidates().map((a) => ({ id: a.id, name: accountLabel(a) }))}
+                canSwitchAccount={bindCandidates().length > 0}
                 onSwitchAccount={onSwitchAccount}
                 blockId={model.blockId}
                 blockAtom={block}
