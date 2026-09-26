@@ -36,7 +36,7 @@ agentmux-0.33.185-x64-portable/
 ├── README.txt
 ├── data/                 ← NEW: all user state (was ~/.agentmux)
 │   ├── db/               ← wave.db, block state
-│   ├── config/           ← settings.json, keybindings.json
+│   ├── config/           ← settings.json, widgets.json (optional)
 │   ├── logs/             ← host + sidecar log files
 │   ├── cef/              ← CEF browser cache (was %LOCALAPPDATA%/ai.agentmux.cef.vX)
 │   └── agents/           ← per-provider auth dirs, CLI installs

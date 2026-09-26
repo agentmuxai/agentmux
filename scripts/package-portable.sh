@@ -129,7 +129,7 @@ Data:
       versions\\${VERSION}\\cef-cache\\   browser cache (safe to delete when closed)
 
   Channel-wide (shared across versions, so settings and agents survive upgrades):
-      config\\    settings.json, keybindings.json
+      config\\    settings.json, and widgets.json for your own pane tabs (optional)
       agents\\    agent working directories
 
   This makes the portable folder disposable: move it, re-extract it, or delete
