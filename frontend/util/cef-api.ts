@@ -795,49 +795,9 @@ export function buildCefApi(): AppApi {
             return "";
         },
 
-        // --- Claude Code Auth (legacy stubs) ---
-        openClaudeCodeAuth: async () => {
-            await invokeCommand("open_claude_code_auth");
-        },
-        getClaudeCodeAuth: async () => {
-            return await invokeCommand<{ connected: boolean; email?: string; expires_at?: number }>(
-                "get_claude_code_auth"
-            );
-        },
-        disconnectClaudeCode: async () => {
-            await invokeCommand("disconnect_claude_code");
-        },
-
         // --- Provider Commands ---
-        detectInstalledClis: async () => {
-            return await invokeCommand<CliDetectionResult[]>("detect_installed_clis");
-        },
-        getProviderConfig: async () => {
-            return await invokeCommand<ProviderConfig>("get_provider_config");
-        },
-        saveProviderConfig: async (config: ProviderConfig) => {
-            await invokeCommand("save_provider_config", { config });
-        },
-        getProviderInstallInfo: async (provider: string) => {
-            return await invokeCommand<ProviderInstallInfo>("get_provider_install_info", { provider });
-        },
         setProviderAuth: async (provider: string, token: string) => {
             await invokeCommand("set_provider_auth", { provider, token });
-        },
-        clearProviderAuth: async (provider: string) => {
-            await invokeCommand("clear_provider_auth", { provider });
-        },
-        getProviderAuthStatus: async (provider: string) => {
-            return await invokeCommand<ProviderAuthStatus>("get_provider_auth_status", { provider });
-        },
-        checkCliAuthStatus: async (provider: string, cliPath?: string) => {
-            return await invokeCommand<CliAuthStatus>("check_cli_auth_status", { provider, cliPath: cliPath ?? null });
-        },
-        installCli: async (provider: string) => {
-            return await invokeCommand<CliInstallResult>("install_cli", { provider });
-        },
-        getCliPath: async (provider: string) => {
-            return await invokeCommand<string | null>("get_cli_path", { provider });
         },
         checkNodejsAvailable: async () => {
             return await invokeCommand<NodejsStatus>("check_nodejs_available");

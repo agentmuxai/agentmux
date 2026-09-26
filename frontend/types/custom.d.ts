@@ -365,19 +365,7 @@ declare global {
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;
-        openClaudeCodeAuth: () => Promise<void>;
-        getClaudeCodeAuth: () => Promise<{ connected: boolean; email?: string; expires_at?: number }>;
-        disconnectClaudeCode: () => Promise<void>;
-        detectInstalledClis: () => Promise<CliDetectionResult[]>;
-        getProviderConfig: () => Promise<ProviderConfig>;
-        saveProviderConfig: (config: ProviderConfig) => Promise<void>;
-        getProviderInstallInfo: (provider: string) => Promise<ProviderInstallInfo>;
         setProviderAuth: (provider: string, token: string) => Promise<void>;
-        clearProviderAuth: (provider: string) => Promise<void>;
-        getProviderAuthStatus: (provider: string) => Promise<ProviderAuthStatus>;
-        checkCliAuthStatus: (provider: string, cliPath?: string) => Promise<CliAuthStatus>;
-        installCli: (provider: string) => Promise<CliInstallResult>;
-        getCliPath: (provider: string) => Promise<string | null>;
         checkNodejsAvailable: () => Promise<NodejsStatus>;
         ensureAuthDir: (providerId: string) => Promise<string>;
         runCliLogin: (
@@ -957,54 +945,6 @@ declare global {
     }
 
     type SuggestionsFnType = (query: string, reqContext: SuggestionRequestContext) => Promise<FetchSuggestionsResponse>;
-
-    type CliDetectionResult = {
-        provider: string;
-        installed: boolean;
-        path: string | null;
-        version: string | null;
-    };
-
-    type ProviderConfig = {
-        default_provider: string;
-        providers: Record<string, ProviderSettings>;
-        setup_complete: boolean;
-    };
-
-    type ProviderSettings = {
-        cli_path: string | null;
-        auth_token: string | null;
-        auth_status: string;
-        output_format: string;
-        extra_args: string[];
-    };
-
-    type ProviderInstallInfo = {
-        provider: string;
-        install_command: string;
-        docs_url: string;
-    };
-
-    type ProviderAuthStatus = {
-        provider: string;
-        status: string;
-        error: string | null;
-    };
-
-    type CliAuthStatus = {
-        logged_in: boolean;
-        auth_method: string | null;
-        api_provider: string | null;
-        email: string | null;
-        subscription_type: string | null;
-    };
-
-    type CliInstallResult = {
-        provider: string;
-        cli_path: string;
-        version: string;
-        already_installed: boolean;
-    };
 
     type NodejsStatus = {
         available: boolean;

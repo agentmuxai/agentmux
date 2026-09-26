@@ -422,16 +422,7 @@ async fn route_command(
         "write_clipboard" => commands::clipboard::write_clipboard(args),
 
         // ---- Tier 3: Provider/CLI management ----
-        "detect_installed_clis" => commands::providers::detect_installed_clis().await,
-        "get_provider_config" => commands::providers::get_provider_config(state),
-        "save_provider_config" => commands::providers::save_provider_config(state, args),
-        "get_provider_install_info" => commands::providers::get_provider_install_info(args),
         "set_provider_auth" => commands::providers::set_provider_auth(state, args).await,
-        "clear_provider_auth" => commands::providers::clear_provider_auth(state, args),
-        "get_provider_auth_status" => commands::providers::get_provider_auth_status(state, args),
-        "check_cli_auth_status" => commands::providers::check_cli_auth_status(args).await,
-        "install_cli" => commands::providers::install_cli(state, args).await,
-        "get_cli_path" => commands::providers::get_cli_path(state, args),
         "check_nodejs_available" => commands::providers::check_nodejs_available().await,
         "ensure_auth_dir" => commands::platform::ensure_auth_dir(state, args),
         "run_cli_login" => commands::cli_login::run_cli_login(state.clone(), args).await,

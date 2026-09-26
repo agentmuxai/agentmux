@@ -24,9 +24,6 @@ pub fn handle_stub(cmd: &str, args: &serde_json::Value) -> serde_json::Value {
 /// Window effects:
 ///   set_window_transparency
 ///
-/// Legacy claude code stubs:
-///   open_claude_code_auth, get_claude_code_auth, disconnect_claude_code
-///
 /// Existing stubs (already unimplemented in Tauri):
 ///   download_file, quicklook, update_wco, set_keyboard_chord_mode,
 ///   create_workspace, switch_workspace, delete_workspace,
@@ -37,12 +34,7 @@ pub fn handle_stub(cmd: &str, args: &serde_json::Value) -> serde_json::Value {
 pub fn is_stub_command(cmd: &str) -> bool {
     matches!(
         cmd,
-        // Legacy stubs
-        "open_claude_code_auth"
-            | "get_claude_code_auth"
-            | "disconnect_claude_code"
-            // Existing stubs
-            | "download_file"
+        "download_file"
             | "quicklook"
             | "update_wco"
             | "set_keyboard_chord_mode"
