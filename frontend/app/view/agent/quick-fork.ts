@@ -139,7 +139,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     // then is there something to clean up. `launchAgentDefinition`'s own
     // doc comment claims it never throws, but that guarantee only covers
     // its OWN internal try/catches; `resolveEffectiveLaunchProvider`,
-    // `checkNodejsForProvider`, and `ensureAuthDir` all run unguarded
+    // `checkNodejsForProvider`, and `ensureProviderAuthDir` all run unguarded
     // before those (Codex's review of this PR), so a launch can genuinely
     // reject here, not just resolve to `false`.
     let paneOpenResult: { block_id: string } | undefined;
@@ -262,7 +262,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             // launchAgentDefinition's own doc comment claims it never throws,
             // but that only covers its internal try/catches — several awaited
             // calls inside it (resolveEffectiveLaunchProvider,
-            // checkNodejsForProvider, ensureAuthDir) run unguarded before
+            // checkNodejsForProvider, ensureProviderAuthDir) run unguarded before
             // those, so a rejection here CAN happen after the block was
             // already pushed onto the stack (Codex's review of this PR).
             // cleanupPushedBlock() is a no-op if paneOpenResult was never set

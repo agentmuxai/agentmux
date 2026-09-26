@@ -253,7 +253,7 @@ export class AuthFlowController {
     async connect(cli: ProviderCliMeta): Promise<void> {
         const s = this.state();
         // Codex P2 on #854 round 2: bail if disposed. Without this,
-        // `startConnect`'s ResolveCli/ensureAuthDir await chain can
+        // `startConnect`'s ResolveCli/ensureProviderAuthDir await chain can
         // call connect() after the modal was closed — the reducer
         // drops the resulting dispatches via state.closed, but
         // `rpc.start` still fires and spawns the provider CLI in the

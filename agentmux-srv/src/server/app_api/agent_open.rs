@@ -569,9 +569,7 @@ async fn open_agent_inner(
                 // login is shared everywhere (the structural fix for the per-channel
                 // validate-spin regression). The per-identity bundle override
                 // (identity_handlers) still wins for explicit multi-account.
-                let auth_dir = agentmux_common::DataPaths::from_env()
-                    .map(|p| p.provider_auth_dir(provider.auth_dir_name).to_string_lossy().into_owned())
-                    .unwrap_or_else(|| format!("{}/.agentmux/shared/providers/{}", home, provider.auth_dir_name));
+                let auth_dir = providers::default_auth_dir(provider)?;
                 // Create the dir AND apply its isolation guarantees in one
                 // inseparable step. Claude Code CLI's own user-level CLAUDE.md
                 // discovery falls through to the real $HOME/.claude/CLAUDE.md

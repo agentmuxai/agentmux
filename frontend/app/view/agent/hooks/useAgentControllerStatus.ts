@@ -49,6 +49,7 @@ import { bindAccountToAgent, type BindCandidate } from "@/app/view/identity/bind
 import type { Account } from "@/app/view/identity/identity-model";
 
 import type { LogFn } from "../types";
+import { ensureProviderAuthDir } from "../agent-launch-env";
 export type { LogFn };
 
 /**
@@ -289,7 +290,7 @@ async function buildAuthEnv(
 ): Promise<Record<string, string> | undefined> {
     if (!prov?.authConfigDirEnvVar || !prov?.authDirName) return undefined;
     try {
-        const authDir = await getApi().ensureAuthDir(prov.id);
+        const authDir = await ensureProviderAuthDir(prov.id);
         const env: Record<string, string> = { [prov.authConfigDirEnvVar]: authDir };
         if (prov.authExtraEnv) Object.assign(env, prov.authExtraEnv);
         return env;

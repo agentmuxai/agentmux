@@ -799,9 +799,6 @@ export function buildCefApi(): AppApi {
         setProviderAuth: async (provider: string, token: string) => {
             await invokeCommand("set_provider_auth", { provider, token });
         },
-        ensureAuthDir: async (providerId: string) => {
-            return await invokeCommand<string>("ensure_auth_dir", { providerId });
-        },
         runCliLogin: async (
             cliPath: string,
             loginArgs: string[],
