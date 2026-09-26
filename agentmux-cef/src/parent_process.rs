@@ -83,19 +83,14 @@ pub fn parent_is_agentmux_launcher() -> Option<bool> {
     Some(our_ppid == stamped)
 }
 
-/// Walk the Toolhelp32 process snapshot in a single pass to:
-///   1. Find the current PID's entry → record `th32ParentProcessID`.
-///   2. Find the entry where `th32ProcessID == parent_pid` → capture
-///      its `szExeFile`.
+/// PID of this process's parent, from a Toolhelp32 snapshot. `None` if
+/// the snapshot can't be taken or our own entry isn't in it.
 ///
-/// Uses `PROCESSENTRY32W.szExeFile` (a fixed 260-wide-char buffer of
-/// the executable's *filename only*, no path) rather than
-/// `QueryFullProcessImageNameW`. Per codex P2 on PR #882 round 2,
-/// the latter could fail when a Windows checkout's staged launcher
-/// path exceeds MAX_PATH — `szExeFile` is filename-only and never
-/// hits that limit.
+/// A parent PID can be reused once that parent exits, so on its own this
+/// is only meaningful compared against a PID the parent told us about
+/// (e.g. `AGENTMUX_LAUNCHER_PID`) — see `lib.rs::launcher_is_genuine_parent`.
 #[cfg(target_os = "windows")]
-fn parent_exe_file_windows() -> Option<String> {
+pub fn parent_pid() -> Option<u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
@@ -116,7 +111,6 @@ fn parent_exe_file_windows() -> Option<String> {
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
 
-        // First pass: find current PID's parent PID.
         let mut parent_pid: Option<u32> = None;
         let mut ok = Process32FirstW(snap, &mut entry);
         while ok != 0 {
@@ -126,19 +120,34 @@ fn parent_exe_file_windows() -> Option<String> {
             }
             ok = Process32NextW(snap, &mut entry);
         }
-
-        let parent_pid = match parent_pid {
-            Some(p) => p,
-            None => {
-                CloseHandle(snap);
-                return None;
-            }
-        };
-
-        // Second pass: re-snapshot to walk from start. CreateToolhelp32Snapshot's
-        // cursor isn't documented as rewindable, so the safest approach is a
-        // fresh snapshot rather than relying on iterator state after `break`.
         CloseHandle(snap);
+        parent_pid
+    }
+}
+
+/// Find the parent's PID (`parent_pid`), then the snapshot entry where
+/// `th32ProcessID == parent_pid` → capture its `szExeFile`.
+///
+/// Uses `PROCESSENTRY32W.szExeFile` (a fixed 260-wide-char buffer of
+/// the executable's *filename only*, no path) rather than
+/// `QueryFullProcessImageNameW`. Per codex P2 on PR #882 round 2,
+/// the latter could fail when a Windows checkout's staged launcher
+/// path exceeds MAX_PATH — `szExeFile` is filename-only and never
+/// hits that limit.
+#[cfg(target_os = "windows")]
+fn parent_exe_file_windows() -> Option<String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let parent_pid = parent_pid()?;
+
+    // SAFETY: as in `parent_pid`. A fresh snapshot rather than reusing
+    // one: CreateToolhelp32Snapshot's cursor isn't documented as
+    // rewindable.
+    unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE {
             return None;
@@ -188,6 +197,16 @@ mod tests {
         #[cfg(not(target_os = "windows"))]
         {
             assert!(result.is_none(), "non-windows always returns None");
+        }
+    }
+
+    /// The test runner always has a parent, and it isn't itself.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parent_pid_resolves_to_another_process() {
+        if let Some(ppid) = parent_pid() {
+            assert_ne!(ppid, std::process::id());
+            assert_ne!(ppid, 0);
         }
     }
 }

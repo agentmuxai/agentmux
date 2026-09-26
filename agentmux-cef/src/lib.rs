@@ -128,27 +128,63 @@ fn resolve_browser_subprocess_path() -> String {
 /// authoritative launcher hand-off from a STALE `AGENTMUX_BACKEND_WS`
 /// inherited down the environment from a parent agentmux pane (whose
 /// launcher pid will not match our real parent). Used only to relax the
-/// dev-build "ignore the env hand-off" rule for the macOS/Linux Phase 1
-/// launcher dev integration.
-///
-/// Unix-only — on other platforms it returns `false`, leaving the
-/// existing dev-build behavior unchanged.
+/// dev-build "ignore the env hand-off" rule for launcher-driven `task dev`
+/// (macOS/Linux Phase 1 launcher dev integration; Windows since #3868's
+/// follow-up — before that a Windows dev host always spawned a SECOND srv
+/// on the same data dir beside the launcher's).
 #[cfg(unix)]
 fn launcher_is_genuine_parent() -> bool {
-    match std::env::var("AGENTMUX_LAUNCHER_PID")
-        .ok()
-        .and_then(|s| s.trim().parse::<i32>().ok())
-    {
-        // SAFETY: getppid() takes no arguments, touches no memory, and is
-        // documented as always succeeding.
-        Some(pid) => pid == unsafe { libc::getppid() },
-        None => false,
+    // SAFETY: getppid() takes no arguments, touches no memory, and is
+    // documented as always succeeding.
+    let ppid = unsafe { libc::getppid() };
+    stamped_pid_is_parent(
+        std::env::var("AGENTMUX_LAUNCHER_PID").ok().as_deref(),
+        u32::try_from(ppid).ok(),
+    )
+}
+
+#[cfg(windows)]
+fn launcher_is_genuine_parent() -> bool {
+    stamped_pid_is_parent(
+        std::env::var("AGENTMUX_LAUNCHER_PID").ok().as_deref(),
+        parent_process::parent_pid(),
+    )
+}
+
+#[cfg(not(any(unix, windows)))]
+fn launcher_is_genuine_parent() -> bool {
+    false
+}
+
+/// `stamp` (the launcher's `AGENTMUX_LAUNCHER_PID`) names our actual
+/// parent. No stamp, an unparsable one, or an unknown parent → false.
+fn stamped_pid_is_parent(stamp: Option<&str>, parent_pid: Option<u32>) -> bool {
+    match (stamp.and_then(|s| s.trim().parse::<u32>().ok()), parent_pid) {
+        (Some(stamped), Some(parent)) => stamped == parent,
+        _ => false,
     }
 }
 
-#[cfg(not(unix))]
-fn launcher_is_genuine_parent() -> bool {
-    false
+#[cfg(test)]
+mod launcher_parent_tests {
+    use super::stamped_pid_is_parent;
+
+    #[test]
+    fn matches_only_the_real_parent() {
+        assert!(stamped_pid_is_parent(Some("4242"), Some(4242)));
+        assert!(stamped_pid_is_parent(Some(" 4242\n"), Some(4242)));
+        // A stamp inherited from a parent agentmux pane names some other process.
+        assert!(!stamped_pid_is_parent(Some("4242"), Some(777)));
+    }
+
+    #[test]
+    fn missing_or_bad_input_is_not_a_launcher_parent() {
+        assert!(!stamped_pid_is_parent(None, Some(4242)));
+        assert!(!stamped_pid_is_parent(Some(""), Some(4242)));
+        assert!(!stamped_pid_is_parent(Some("-1"), Some(4242)));
+        assert!(!stamped_pid_is_parent(Some("abc"), Some(4242)));
+        assert!(!stamped_pid_is_parent(Some("4242"), None));
+    }
 }
 
 /// Run the AgentMux host.
@@ -762,8 +798,9 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         // spawning our own, so the dev frontend runs against the wrong
         // (parent's) backend and no dev-version srv is ever started.
         //
-        // EXCEPTION (macOS/Linux Phase 1 launcher dev integration,
-        // SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): when a launcher
+        // EXCEPTION (launcher-driven `task dev` on every platform —
+        // SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30 for macOS/Linux,
+        // Windows since #3868's follow-up): when a launcher
         // is our GENUINE parent this run (it stamped AGENTMUX_LAUNCHER_PID
         // with its pid == our getppid), the env it set is fresh + ours —
         // adopt its launcher-owned srv instead of double-spawning. The
