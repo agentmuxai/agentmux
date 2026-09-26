@@ -1,7 +1,7 @@
 # SPEC: Browser API over in-process CDP; the CEF debug port is opt-in in release builds
 
 **Date:** 2026-09-25
-**Status:** implemented — #3819 (step 1, origins) and this PR (step 2)
+**Status:** implemented — #3819 (step 1, origins) and #3832 (step 2)
 **Issue:** #3681 (CEF remote-debugging port always on with `remote-allow-origins=*`, reachable by other local users)
 **Decision:** option A of #3681, chosen by Opaz (owner of the browser API, #3445) at the operator's direction; Opaz reviews.
 **Related:** `SPEC_BROWSER_DOM_API.md` / `PLAN_BROWSER_DOM_API.md` (the browser API), `SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` (Path 2), `SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md`, `SPEC_INSTANCE_DISCOVERY_FOR_TOOLING_2026_09_17.md` (`authkey.dev` `debug_port`).
