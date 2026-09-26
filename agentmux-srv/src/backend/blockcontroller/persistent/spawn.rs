@@ -70,6 +70,10 @@ impl PersistentSubprocessController {
                 }
             }
         }
+        // Whatever id the paths above settled on, only the head of the
+        // agent's chain is resumed natively
+        // (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2).
+        self.apply_resume_gate(&config);
 
         // Append `--resume <sid>` when we have a session id and the provider
         // supports simple-flag resume — same construction as

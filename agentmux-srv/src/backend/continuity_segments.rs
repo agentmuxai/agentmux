@@ -232,6 +232,48 @@ pub(crate) fn recovery_allowed(candidate: &str, head: Option<&str>) -> bool {
     head.is_none_or(|h| h == candidate)
 }
 
+/// What the resume gate decided for a session a spawn is about to `--resume`
+/// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResumeGate {
+    /// Resume the candidate: it is the chain head, or the chain can't say
+    /// otherwise.
+    Allow,
+    /// The conversation moved on to `head`, reachable here: resume that.
+    Redirect { head: String },
+    /// The conversation moved on to `head`, which this spawn can't reach:
+    /// resume nothing, so the spawn starts fresh and carries the record.
+    Refuse { head: String },
+}
+
+/// Only the chain head is resumed natively (spec §3 I1). `head` is the
+/// agent's [`head_session`]; `None` (an agent from before the segment index,
+/// or no readable chain) allows the candidate, as before the gate existed.
+/// A head equal to the poisoned id allows too: that head is known dead, so
+/// the chain has nothing better to offer than the candidate.
+pub(crate) fn resume_gate(
+    candidate: &str,
+    head: Option<&str>,
+    poisoned: Option<&str>,
+    head_reachable: impl FnOnce(&str) -> bool,
+) -> ResumeGate {
+    let Some(head) = head else { return ResumeGate::Allow };
+    if head == candidate || Some(head) == poisoned {
+        return ResumeGate::Allow;
+    }
+    if head_reachable(head) {
+        ResumeGate::Redirect { head: head.to_string() }
+    } else {
+        ResumeGate::Refuse { head: head.to_string() }
+    }
+}
+
+/// The session the agent's conversation was last in, read from its chain in
+/// `fs`. `None` when the UID has no chain.
+pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<String> {
+    head_session(&segments(fs, agent_uid), None)
+}
+
 /// The rung a spawn started on, from what the spawn knows: whether it passed
 /// `--resume`, and whether it carries a continuation packet.
 pub(crate) fn rung_for_spawn(resumed: bool, carries_packet: bool) -> Rung {
@@ -329,6 +371,50 @@ mod tests {
         assert_eq!(all[1].start.continuity_rung, Rung::Virtualized);
         assert!(all[1].ended_at_ms.is_none(), "still running");
         assert_ne!(first, second);
+    }
+
+    // ── resume_gate (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION §4.2) ──
+
+    #[test]
+    fn the_chain_head_itself_is_resumed() {
+        assert_eq!(resume_gate("s2", Some("s2"), None, |_| panic!("no lookup needed")), ResumeGate::Allow);
+    }
+
+    #[test]
+    fn without_a_chain_the_candidate_is_resumed_as_before() {
+        assert_eq!(resume_gate("s1", None, None, |_| panic!("no lookup needed")), ResumeGate::Allow);
+    }
+
+    /// The operator's case: the pane holds S1, the conversation moved on to S2.
+    #[test]
+    fn a_stale_candidate_is_redirected_to_a_reachable_head() {
+        assert_eq!(
+            resume_gate("s1", Some("s2"), None, |h| h == "s2"),
+            ResumeGate::Redirect { head: "s2".into() }
+        );
+    }
+
+    #[test]
+    fn a_stale_candidate_is_refused_when_the_head_is_out_of_reach() {
+        assert_eq!(resume_gate("s1", Some("s2"), None, |_| false), ResumeGate::Refuse { head: "s2".into() });
+    }
+
+    #[test]
+    fn a_poisoned_head_never_displaces_the_candidate() {
+        assert_eq!(resume_gate("s1", Some("s2"), Some("s2"), |_| true), ResumeGate::Allow);
+    }
+
+    #[test]
+    fn the_chain_head_is_the_newest_segment_with_a_session() {
+        let fs = FileStore::open_in_memory().unwrap();
+        assert_eq!(chain_head(&fs, UID), None);
+        let a = record_start(&fs, start(1_000, Rung::Fresh)).unwrap();
+        record_session(&fs, UID, &a, "sid-a", 1_001).unwrap();
+        let b = record_start(&fs, start(2_000, Rung::Fresh)).unwrap();
+        record_session(&fs, UID, &b, "sid-b", 2_001).unwrap();
+        // A spawn that died before reporting a session doesn't move the head.
+        record_start(&fs, start(3_000, Rung::Fresh)).unwrap();
+        assert_eq!(chain_head(&fs, UID).as_deref(), Some("sid-b"));
     }
 
     #[test]

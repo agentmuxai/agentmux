@@ -39,6 +39,89 @@ fn zone_size(zone: &str) -> Option<i64> {
 }
 
 impl PersistentSubprocessController {
+    /// The one resume gate
+    /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2):
+    /// before this spawn passes `--resume`, only the head of the agent's
+    /// segment chain may be the session it resumes. A stale id — the
+    /// conversation moved on in another channel, build or pane — is
+    /// redirected to the head when this config dir reaches it, and cleared
+    /// otherwise, so the spawn goes fresh and carries AgentMux's record.
+    /// Runs after every path that sets the id (hydrate from config, first
+    /// spawn onto rendered history), before the held-elsewhere check and the
+    /// lease, which then apply to whatever id survives. Never fails the spawn:
+    /// anything unknown leaves the id as it was.
+    pub(super) fn apply_resume_gate(&self, config: &PersistentSpawnConfig) {
+        let gfs = crate::backend::agent_session::global_transcript_store();
+        self.apply_resume_gate_with(config, gfs.map(|g| &**g));
+    }
+
+    pub(super) fn apply_resume_gate_with(&self, config: &PersistentSpawnConfig, gfs: Option<&FileStore>) {
+        if config.resume_flag.is_empty() {
+            return;
+        }
+        let (candidate, poisoned) = {
+            let inner = self.inner.lock().unwrap();
+            (inner.session_id.clone(), inner.resume_poisoned.clone())
+        };
+        let Some(candidate) = candidate else { return };
+        // Reachability is a file check under the provider's config dir; only
+        // Claude's is known. Without one the head can't be checked, so the
+        // gate stays out of the way.
+        let Some(config_dir) = config.env_vars.get("CLAUDE_CONFIG_DIR") else { return };
+        // A non-Claude spawn can still inherit that variable; its sessions
+        // aren't under it, so checking there would refuse every resume.
+        let provider = self
+            .mstore
+            .as_deref()
+            .and_then(|s| s.get::<crate::backend::obj::Block>(&self.block_id).ok().flatten())
+            .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentProvider", ""))
+            .unwrap_or_default();
+        if !matches!(provider.as_str(), "" | "claude" | "claude-code") {
+            return;
+        }
+        let (Some(gfs), Some(uid)) = (gfs, config.env_vars.get("AGENTMUX_AGENT_UID").filter(|u| !u.trim().is_empty()))
+        else {
+            return;
+        };
+        let head = segs::chain_head(gfs, uid.trim());
+        let decision = segs::resume_gate(&candidate, head.as_deref(), poisoned.as_deref(), |h| {
+            crate::backend::session_backfill::session_is_reachable(config_dir, &config.working_dir, h)
+        });
+        let next = match decision {
+            segs::ResumeGate::Allow => return,
+            segs::ResumeGate::Redirect { head } => {
+                tracing::info!(
+                    target: "continuity",
+                    block_id = %self.block_id,
+                    candidate = %candidate,
+                    head = %head,
+                    "resume gate: the conversation moved on; resuming the chain head instead"
+                );
+                Some(head)
+            }
+            segs::ResumeGate::Refuse { head } => {
+                tracing::info!(
+                    target: "continuity",
+                    block_id = %self.block_id,
+                    candidate = %candidate,
+                    head = %head,
+                    "resume gate: the conversation moved on to a session this config dir can't reach; starting fresh with the record"
+                );
+                None
+            }
+        };
+        {
+            let mut inner = self.inner.lock().unwrap();
+            // Only replace what the gate judged: another path may have moved
+            // the id meanwhile.
+            if inner.session_id.as_deref() != Some(candidate.as_str()) {
+                return;
+            }
+            inner.session_id = next.clone();
+        }
+        core::persist_session_id(&self.block_id, next.as_deref().unwrap_or(""), &self.mstore, &self.event_bus);
+    }
+
     /// Reconcile the agent's memory record with the folder this spawn is
     /// about to use, before the provider starts, within
     /// [`memory_reconcile::RECONCILE_BUDGET`](crate::backend::memory_reconcile::RECONCILE_BUDGET)
