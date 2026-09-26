@@ -3377,6 +3377,48 @@ async fn work_cancel_accepts_a_delete_with_no_body_like_its_cron_sibling() {
     );
 }
 
+/// `GET /api/v1/agent/shutdown/{id}` must reach its handler through the real
+/// router: the MCP tools poll it for the user's answer (SPEC_AGENT_SELF_QUIT
+/// §6.5). It was registered with axum 0.8's `{request_id}` syntax, a literal
+/// path in axum 0.7, so every poll got a 404 from the router.
+#[tokio::test]
+async fn shutdown_status_route_reaches_its_handler() {
+    let state = test_state();
+    let v = crate::sagas::pending_shutdown::request(
+        &state,
+        "blk-status-route",
+        "Korp",
+        "FleetBulkStop",
+        "",
+        crate::sagas::pending_shutdown::Action::Stop { signal: None },
+    );
+    let app = build_router(state.clone());
+    let req = Request::builder()
+        .uri(format!("/api/v1/agent/shutdown/{}", v.request_id))
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["request_id"], v.request_id.as_str());
+    assert_eq!(json["status"], "pending");
+
+    // An unknown id is the handler's own 404, with its error body.
+    let req = Request::builder()
+        .uri("/api/v1/agent/shutdown/no-such-request")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"], "no such shutdown request");
+    crate::sagas::pending_shutdown::keep(&state, "blk-status-route", &v.request_id);
+}
+
 /// The body is optional, not ignored — a supplied reason must still parse.
 #[tokio::test]
 async fn work_cancel_still_accepts_a_json_body_when_one_is_sent() {
