@@ -16,7 +16,6 @@
  */
 
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { RpcApi, type NativeMemoryAdoptionCandidate, type NativeMemoryAdoptionList } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
@@ -84,7 +83,7 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
     }));
 
     let unlisten: (() => void) | undefined;
-    void listenEvent<any>("memory-adoption-result", (payload) => {
+    void getApi().listen<any>("memory-adoption-result", (payload) => {
         if (payload?.agent_id !== props.agentId) return;
         // The same window confirms releasing a folder; that isn't ours.
         if (payload?.kind && payload.kind !== "adopt") return;
@@ -112,7 +111,7 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
         setOutcome(null);
         setWaiting(true);
         try {
-            await invokeCommand("memory_adoption_request", {
+            await getApi().approvals.requestMemoryAdoption({
                 window_label: await getApi().getWindowLabel(),
                 agent_id: props.agentId,
                 list_id: l.list_id,

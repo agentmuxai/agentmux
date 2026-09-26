@@ -9,12 +9,21 @@
 
 import { NO_HOST_CAPS } from "@/app/host/host-caps";
 
+/** `AppApi`'s method groups (every method in them returns a promise). Add new groups here. */
+const METHOD_GROUPS = ["browserPanes", "windows", "approvals"] as const;
+
+/** A group whose every method resolves to undefined, so `.then`/`.catch` chains work. */
+function noOpGroup(): unknown {
+    return new Proxy({}, { get: () => () => Promise.resolve(undefined) });
+}
+
 export function makeTestHostApi(overrides: Partial<AppApi> = {}, caps: Partial<HostCaps> = {}): AppApi {
     const base: Partial<AppApi> = {
         getHostCaps: () => ({ ...NO_HOST_CAPS, ...caps }),
         // Keep listen's contract (a promise of an unsubscribe function): UI
         // awaits it and calls the result on cleanup. The event never fires.
         listen: () => Promise.resolve(() => {}),
+        ...(Object.fromEntries(METHOD_GROUPS.map((g) => [g, noOpGroup()])) as Partial<AppApi>),
         ...overrides,
     };
     return new Proxy(base, {

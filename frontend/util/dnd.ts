@@ -12,7 +12,7 @@
  * Spec: docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md §3.3, §3.4, §3.7.
  */
 
-import { invokeCommand } from "@/app/platform/ipc";
+import { getApi } from "@/app/store/app-api";
 
 export interface DropOutcome {
     /** Source paths that were attempted. */
@@ -28,7 +28,7 @@ export interface DropOutcome {
  */
 export async function consumeDragPaths(): Promise<string[]> {
     try {
-        const paths = await invokeCommand<string[]>("consume_drag_paths", {});
+        const paths = await getApi().consumeDroppedFilePaths();
         return Array.isArray(paths) ? paths : [];
     } catch {
         return [];
@@ -61,10 +61,7 @@ export async function copyFilesToDir(
             if (i >= sourcePaths.length) return;
             const source = sourcePaths[i];
             try {
-                const dest = await invokeCommand<string>("copy_file_to_dir", {
-                    sourcePath: source,
-                    targetDir,
-                });
+                const dest = await getApi().copyFileToDir(source, targetDir);
                 results[i] = { source, dest };
             } catch (err: unknown) {
                 results[i] = { source, error: String(err) };
