@@ -144,12 +144,7 @@ function installFloatingRedockHoverListener(): void {
         // Phase 4b — clear the stored ghost state for this window so a stale
         // direction cannot bleed into the next drop event.
         fireAndForget(async () => {
-            const { invokeCommand } = await import("@/app/platform/ipc");
-            await invokeCommand("set_floating_redock_target", {
-                window_label: myLabel,
-                block_id: null,
-                dir: null,
-            });
+            await getApi().windows.setFloatingRedockTarget(myLabel, null, null);
         });
     };
 
@@ -200,9 +195,8 @@ function installFloatingRedockHoverListener(): void {
     const ghostArming = createRedockArming();
 
     fireAndForget(async () => {
-        const { listenEvent, invokeCommand } = await import("@/app/platform/ipc");
         const { determineDropDirection } = await import("@/layout/lib/utils");
-        await listenEvent<{
+        await getApi().listen<{
             target_label: string | null;
             source_label?: string;
             cursor_x?: number;
@@ -270,11 +264,7 @@ function installFloatingRedockHoverListener(): void {
             // event handler (ghost rendering happens synchronously above).
             const targetBlockId = leafEl.dataset.blockid;
             if (targetBlockId) {
-                void invokeCommand("set_floating_redock_target", {
-                    window_label: myLabel,
-                    block_id: targetBlockId,
-                    dir,
-                });
+                void getApi().windows.setFloatingRedockTarget(myLabel, targetBlockId, dir);
             }
         });
     });
@@ -593,7 +583,7 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
 }
 
 // initApp has two callers — bootstrap.ts and this module's self-start below —
-// and in CEF both fire (isHostApp() reads window.__AGENTMUX_IPC_PORT__, which
+// and in CEF both fire (isHostApp() reads the host's injected IPC port global, which
 // setupCefApi() only sets later, at bootstrap time). It must run exactly once
 // per page: a second concurrent run reaches CreateWindow twice and strands an
 // unregistered Window row in srv's Client.windowids.

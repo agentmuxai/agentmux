@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** active — Slices 1–3 merged (PRs #3878, #3879, #3882); slice 4 (windows) in PR #3886, slice 5a (feature calls) in PR #3887. Slice 5b (startup) remains (§5).
+**Status:** active — Slices 1–4 merged (PRs #3878, #3879, #3882, #3886); slice 5a in PR #3887 and slice 5b in PR #3888. When both merge, every file outside the seam reaches the host through `AppApi`.
 **Author:** Maricon
 
 ---
@@ -25,7 +25,9 @@ About 80–85% of the UI already depends only on `agentmux-srv` over WebSocket a
 
 ## 2. Goals
 
-1. `AppApi` is the **only** way UI code reaches the host. Only the CEF host implementation (`util/cef-api.ts`, `cef-init.ts`, `app/platform/ipc.ts`, `app/init/host-detect.ts`) talks IPC.
+1. `AppApi` is the **only** way UI code reaches the host. Only the CEF host's side talks IPC:
+   - its implementation of `AppApi` (`util/cef-api.ts`, `app/host/cef-host-commands.ts`, `cef-init.ts`, `app/platform/ipc.ts`, `app/init/host-detect.ts`);
+   - its entry point: `bootstrap.ts` and the log transport it installs (`log/log-pipe.ts`, `log/error-forwarder.ts`) run before `window.api` exists, and the boot-error recovery (`app/init/error-display.ts`) runs precisely when it failed. A different host brings its own entry.
 2. The host **reports its capabilities** (`HostCaps`). UI for a missing capability hides itself.
 3. Tests can run UI against a **stand-in host** with any capability set, without hand-building 110 methods.
 4. The boundary is **enforced by a test**, not by convention.
@@ -63,7 +65,7 @@ New capabilities are added when a slice needs one, not speculatively.
 
 ### 3.3 Boundary ratchet
 
-`frontend/app/host/host-boundary.test.ts` scans `frontend/` for files that import `app/platform/ipc`, statically or with a dynamic `import()`, or read `__AGENTMUX_IPC_*`. The result must equal the **seam** (the CEF implementation files) plus a **PENDING** list of files that still bypass it.
+`frontend/app/host/host-boundary.test.ts` scans `frontend/` for files that import `app/platform/ipc`, statically or with a dynamic `import()`, or read `__AGENTMUX_IPC_*`. The result must equal the **seam** (the CEF implementation and entry, goal 1) plus a **PENDING** list of files that still bypass it. PENDING is empty since slice 5b.
 
 - A **new** bypass fails the test.
 - A listed file that **no longer** bypasses also fails the test, until it's removed from the list. The list can only shrink.
@@ -92,7 +94,7 @@ Moving the CEF implementation into `frontend/app/host/cef/`, or splitting the fr
 | **3** | Browser panes: `AppApi.browserPanes` (one method per `browser_pane_*` / `pane_media_*` command, plus the screenshot browser API) and `reclaimWindowFocus()`. Events through `AppApi.listen`, now generic. The CEF implementation lives in `app/host/cef-host-commands.ts` (seam). A host without `nativeBrowserPane` shows a notice in a browser pane | 32 |
 | **4** | Windows: `AppApi.windows` (drag, maximize, position and rect, cursor point, floating panes and their redock). Tear-off, tab-drag and window-resize events through `AppApi.listen`. Window drag installs only with `nativeWindowChrome`. `hostHas()` treats "no host yet" as no capabilities, as `detectHost()` did | 21 |
 | **5a** | Feature calls: `AppApi.approvals` (credential and memory-adoption decisions, adopt/release requests); `openExternalChecked`, clipboard, dropped-file paths and copy, the data folder, host info, taskbar attention, background audit; events through `listen`. New capability `nativeFileDrop` gates terminal and agent-pane file drops | 6 |
-| 5b | Startup and the CEF log transport: `bootstrap.ts`, `app-init.ts`, `app/init/pool.ts`, `app/init/error-display.ts`, `log/log-pipe.ts`, `log/error-forwarder.ts`. These run before `window.api` exists, so this slice splits the CEF entry from shared startup rather than routing them through `AppApi` | 0 |
+| **5b** | Startup. `app-init.ts` and `app/init/pool.ts` run after `window.api` exists: their floating-redock target and pool-ready calls move onto `AppApi.windows`, and their events onto `listen`. `bootstrap.ts`, `log/log-pipe.ts`, `log/error-forwarder.ts` and `app/init/error-display.ts` are the CEF entry (goal 1) and join the seam | 0 |
 
 ## 6. Testing
 

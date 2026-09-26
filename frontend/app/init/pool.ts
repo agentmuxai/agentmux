@@ -42,9 +42,8 @@ export function isPanePoolMode(): boolean {
  * from ever bootstrapping. Lifetime is governed host-side.
  */
 export async function awaitPoolPromote(): Promise<{ initialView: string | null; initialMeta: Record<string, unknown> | null }> {
-    const { listenEvent } = await import("@/app/platform/ipc");
-    const { invokeCommand } = await import("@/app/platform/ipc");
     const { getApi } = await import("@/store/global");
+    const listenEvent: AppApi["listen"] = (event, callback) => getApi().listen(event, callback);
 
     return new Promise<{ initialView: string | null; initialMeta: Record<string, unknown> | null }>(async (resolve, reject) => {
         let unsub1: (() => void) | undefined;
@@ -84,7 +83,7 @@ export async function awaitPoolPromote(): Promise<{ initialView: string | null; 
         // Both listeners installed — safe to signal the host.
         try {
             const label = await getApi().getWindowLabel();
-            await invokeCommand("pool_window_ready", { label });
+            await getApi().windows.poolWindowReady(label);
         } catch (e) {
             cleanup();
             reject(new Error(`pool_window_ready signal failed: ${e}`));
@@ -105,9 +104,8 @@ export async function awaitPoolPromote(): Promise<{ initialView: string | null; 
  * signals the host, so the promote event cannot arrive before we are ready.
  */
 export async function awaitPanePoolPromote(): Promise<void> {
-    const { listenEvent } = await import("@/app/platform/ipc");
-    const { invokeCommand } = await import("@/app/platform/ipc");
     const { getApi } = await import("@/store/global");
+    const listenEvent: AppApi["listen"] = (event, callback) => getApi().listen(event, callback);
 
     return new Promise<void>(async (resolve, reject) => {
         let unsub: (() => void) | undefined;
@@ -144,7 +142,7 @@ export async function awaitPanePoolPromote(): Promise<void> {
 
         try {
             const label = await getApi().getWindowLabel();
-            await invokeCommand("pane_pool_window_ready", { label });
+            await getApi().windows.panePoolWindowReady(label);
         } catch (e) {
             cleanup();
             reject(new Error(`pane_pool_window_ready signal failed: ${e}`));
