@@ -61,12 +61,12 @@ describe("agentPerfStore", () => {
 
         it("computes miss-rate correctly across measurements", () => {
             // 1 miss, 3 hits → miss rate 0.25
-            agentPerfStore.recordEstimatorMeasurement("section", 50, 100); // 100% error → miss
-            agentPerfStore.recordEstimatorMeasurement("section", 50, 55);  // 10% → hit
-            agentPerfStore.recordEstimatorMeasurement("section", 50, 60);  // 20% → hit
-            agentPerfStore.recordEstimatorMeasurement("section", 50, 50);  // 0% → hit
+            agentPerfStore.recordEstimatorMeasurement("day_divider", 50, 100); // 100% error → miss
+            agentPerfStore.recordEstimatorMeasurement("day_divider", 50, 55);  // 10% → hit
+            agentPerfStore.recordEstimatorMeasurement("day_divider", 50, 60);  // 20% → hit
+            agentPerfStore.recordEstimatorMeasurement("day_divider", 50, 50);  // 0% → hit
             const snap = agentPerfStore.snapshot();
-            expect(snap.estimatorMissRateByKind.get("section")).toBeCloseTo(0.25, 2);
+            expect(snap.estimatorMissRateByKind.get("day_divider")).toBeCloseTo(0.25, 2);
         });
 
         it("rejects measurements with estimated=0 (avoid divide-by-zero)", () => {

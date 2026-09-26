@@ -76,7 +76,6 @@ function renderSnapshotLine(node: DocumentNode): string | null {
             return `Error ${node.code}: ${truncateLine(node.message, MAX_LINE_CHARS)}`;
         // No meaningful textual content for an LLM prompt: pure UI
         // boundary/decoration nodes.
-        case "section":
         case "context_compacted":
         case "compaction_started":
         case "session_outcome":

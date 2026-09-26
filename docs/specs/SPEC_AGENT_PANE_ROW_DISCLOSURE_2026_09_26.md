@@ -1,7 +1,7 @@
 # Spec: One open/closed model for agent-pane rows
 
 **Date:** 2026-09-26
-**Status:** active — PR 1 (reader, writer, estimates, canceled thinking) implemented in the PR stacked on #3904; PR 2 (remove `section`) proposed
+**Status:** active — PR 1 (reader, writer, estimates, canceled thinking) implemented in #3906; PR 2 (remove `section`) in the PR stacked on #3906
 **Scope:** `frontend/app/view/agent/` — how every transcript row decides whether
 it is open, how the user toggles it, and how the virtualizer estimates it
 **Verified against:** `main` @ `ba9abe92f`

@@ -1403,34 +1403,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-style: italic;
     }
 
-    // === Section Headings ===
-    .agent-section {
-        margin-top: var(--space-1-5);
-        padding: var(--space-0-5) 0;
-
-        &.level-1 h1 {
-            font-size: 18px;
-            font-weight: bold;
-            margin: var(--space-1) 0;
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: var(--space-0-5);
-            color: var(--accent-color);
-        }
-
-        &.level-2 h2 {
-            font-size: 15px;
-            font-weight: bold;
-            margin: 3px 0;
-        }
-
-        &.level-3 h3 {
-            font-size: 13px;
-            font-weight: 500;
-            margin: var(--space-0-5) 0;
-            opacity: 0.8;
-        }
-    }
-
     // === Read Tool ===
     .agent-tool-read {
         .agent-tool-file-path {
