@@ -5,8 +5,8 @@
 Layouts → Save layout…, the host Save dialog, `layout.save`,
 `backend/layout_file.rs` and the v1 schema. Phase 2 (☰ → Layouts → Open
 layout…, adding the file's tabs to the current window, §3.6) ships in
-PR #3825. Phase 2b (open in a new window, the default, §3.6) is built
-on branch agent2/layout-open-new-window. Phases 3 and 4 are not started.
+PR #3825. Phase 2b (open in a new window, the default, §3.6) ships in
+PR #3849. Phases 3 and 4 are not started.
 Measured against `agentmux` `main` @ `c0268089b`.
 **Trigger:** Repo owner: *"in the hamburger we'd add a new entry 'Layouts' and a
 single submenu: 'Save layout' which would let you save it as a file (you'll
