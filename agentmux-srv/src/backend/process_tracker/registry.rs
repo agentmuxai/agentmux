@@ -55,9 +55,29 @@ pub fn track_spawned(block_id: &str, pid: u32) {
     }
 }
 
+/// Settings key: run agents' process trees at below-normal CPU priority so
+/// their builds and tests yield to AgentMux (and the user's foreground apps)
+/// under contention, while still using every idle core. Default on.
+pub const SETTING_AGENT_BELOW_NORMAL_PRIORITY: &str = "agent:belownormalpriority";
+
+/// [`track_spawned`] for an **agent** process: also applies the agent CPU
+/// priority policy to the block's whole tree. Terminal panes a human types in
+/// keep calling [`track_spawned`] and are never deprioritized.
+pub fn track_spawned_agent(block_id: &str, pid: u32) {
+    track_spawned(block_id, pid);
+    let Some(registry) = global() else { return };
+    let on = registry.agent_below_normal_priority();
+    if let Err(e) = registry.set_below_normal_priority(block_id, on) {
+        tracing::warn!(block_id = %block_id, err = %e, "[process-tracker] could not set job CPU priority");
+    }
+}
+
 pub struct AgentProcessRegistry {
     inner: Mutex<HashMap<String, RegistryEntry>>,
     broker: Option<Arc<mps::Broker>>,
+    /// Live settings, read per spawn so a settings.json change applies to the
+    /// next agent spawn. `None` in tests and before bootstrap wires it.
+    config: Mutex<Option<Arc<crate::backend::wconfig::ConfigState>>>,
 }
 
 struct RegistryEntry {
@@ -77,7 +97,29 @@ impl AgentProcessRegistry {
         Self {
             inner: Mutex::new(HashMap::new()),
             broker,
+            config: Mutex::new(None),
         }
+    }
+
+    /// Attach the live settings (bootstrap).
+    pub fn set_config(&self, config: Arc<crate::backend::wconfig::ConfigState>) {
+        *self.config.lock() = Some(config);
+    }
+
+    /// The `agent:belownormalpriority` setting; `true` when unset or when no
+    /// settings are attached.
+    pub fn agent_below_normal_priority(&self) -> bool {
+        self.config
+            .lock()
+            .as_ref()
+            .and_then(|c| c.get_settings().extra.get(SETTING_AGENT_BELOW_NORMAL_PRIORITY).and_then(|v| v.as_bool()))
+            .unwrap_or(true)
+    }
+
+    /// Apply (or lift) the below-normal priority limit on `block_id`'s tree.
+    pub fn set_below_normal_priority(&self, block_id: &str, on: bool) -> Result<(), String> {
+        let tracker = self.ensure_tracker(block_id);
+        tracker.set_below_normal_priority(on)
     }
 
     /// Ensure a tracker exists for this block. Idempotent — calling
@@ -255,6 +297,29 @@ pub fn spawn_poller(registry: Arc<AgentProcessRegistry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_cpu_priority_policy_defaults_on_and_follows_the_setting() {
+        let reg = AgentProcessRegistry::new(None);
+        // No settings attached (tests, early boot): on.
+        assert!(reg.agent_below_normal_priority());
+
+        let config = Arc::new(crate::backend::wconfig::ConfigState::with_config(
+            crate::backend::wconfig::build_default_config(),
+        ));
+        reg.set_config(Arc::clone(&config));
+        // Key absent: on.
+        assert!(reg.agent_below_normal_priority());
+
+        let mut settings = config.get_settings();
+        settings.extra.insert(SETTING_AGENT_BELOW_NORMAL_PRIORITY.to_string(), serde_json::json!(false));
+        config.update_settings(settings.clone());
+        assert!(!reg.agent_below_normal_priority(), "read live, not captured");
+
+        settings.extra.insert(SETTING_AGENT_BELOW_NORMAL_PRIORITY.to_string(), serde_json::json!(true));
+        config.update_settings(settings);
+        assert!(reg.agent_below_normal_priority());
+    }
 
     #[test]
     fn track_spawned_is_a_safe_no_op_without_a_global_registry() {

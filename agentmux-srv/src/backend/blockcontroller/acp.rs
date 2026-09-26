@@ -245,7 +245,7 @@ impl AcpController {
         // Broker Phase B coverage gap for ACP-type agent panes (see
         // docs/specs/SPEC_PROCESS_BROKER_PHASE_B_SHELL_ACP_REGISTRATION_2026_07_31.md).
         if pid != 0 {
-            crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
+            crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
         }
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();

@@ -215,7 +215,7 @@ impl SubprocessController {
         // real tracker impl yet (stub handle accepts silently).
         // See `backend::process_tracker`.
         if pid != 0 {
-            crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
+            crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
         }
 
         // Store PID

@@ -1849,6 +1849,8 @@ pub fn build_app_state(
 ) -> AppState {
     // Clone before move into AppState for cron_scheduler construction.
     let shared_store_for_cron = stores.shared_store.clone();
+    // Live settings for the agent CPU-priority policy (process_tracker).
+    net.process_tracker.set_config(bg.config_watcher.clone());
     let broker = bg.broker;
 
     // Built before `container_manager` below so its constructor block can

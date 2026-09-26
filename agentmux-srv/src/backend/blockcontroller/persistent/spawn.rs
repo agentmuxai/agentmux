@@ -381,7 +381,7 @@ impl PersistentSubprocessController {
         // Matches `SubprocessController`'s identical path — both controller
         // types share the same swarm-pane visibility story.
         if pid != 0 {
-            crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
+            crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
         }
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<KillRequest>();
