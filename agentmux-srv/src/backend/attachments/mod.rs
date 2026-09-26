@@ -261,6 +261,17 @@ impl Service {
         id: String,
         name: String,
     ) -> Result<AttachmentInfo, process::ProcessError> {
+        // Same CPU limit as batch jobs, so a burst of pastes can't run more
+        // decodes at once than a drop can.
+        let _cpu = self
+            .permits
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| process::ProcessError {
+                code: "cancelled",
+                message: "Cancelled.".into(),
+            })?;
         let edge = self.limits().send_max_edge;
         let svc = Arc::clone(self);
         let place_id = id.clone();
