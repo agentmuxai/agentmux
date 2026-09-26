@@ -612,6 +612,9 @@ export function buildCefApi(): AppApi {
                 initial_meta: meta ? JSON.stringify(meta) : undefined,
             });
         },
+        openWorkspaceInNewWindow: async (workspaceId: string) => {
+            return await invokeCommand<string>("open_new_window", { workspace_id: workspaceId });
+        },
         closeWindow: async (label?: string) => {
             // Callers like the close button or `Cmd+W` invoke this without an
             // arg meaning "close the window I'm in." Resolve to the current

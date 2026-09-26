@@ -137,6 +137,8 @@ declare global {
         onControlShiftStateUpdate: (callback: (state: boolean) => void) => void;
         openNewWindow: () => Promise<string>;
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
+        /** Open a new window showing an existing workspace, not a fresh one. */
+        openWorkspaceInNewWindow: (workspaceId: string) => Promise<string>;
         closeWindow: (label?: string) => Promise<void>;
         minimizeWindow: () => void;
         maximizeWindow: () => void;

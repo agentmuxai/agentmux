@@ -96,9 +96,10 @@ pub(super) fn layout_preview_impl(store: &Store, path: &str, trust: &TrustInputs
     })
 }
 
-/// Add the file's tabs to `window_id`'s workspace, then launch each agent
-/// into its placeholder through `agent.open` (spec §3.5). Nothing already
-/// open is touched. An agent that can't start (not installed, live
+/// Add the file's tabs to `window_id`'s workspace — or, with `new_window`,
+/// to a new workspace for the caller to open a window onto — then launch
+/// each agent into its placeholder through `agent.open` (spec §3.5). Nothing
+/// already open is touched. An agent that can't start (not installed, live
 /// elsewhere, …) leaves its pane as the agent picker and adds a note.
 pub(super) async fn layout_open_impl(
     state: &AppState,
@@ -117,12 +118,17 @@ pub(super) async fn layout_open_impl(
     if plan.tabs.is_empty() {
         return Err("layout.open: the layout has no tabs that can be opened".to_string());
     }
-    let window = state
-        .mstore
-        .get::<obj::Window>(&req.window_id)
-        .map_err(|e| format!("layout.open: {e}"))?
-        .ok_or_else(|| format!("layout.open: no such window: {}", req.window_id))?;
-    let ws_id = window.workspaceid;
+    let new_window = req.new_window.unwrap_or(false);
+    let ws_id = if new_window {
+        create_empty_workspace(state, &plan.name).await?
+    } else {
+        state
+            .mstore
+            .get::<obj::Window>(&req.window_id)
+            .map_err(|e| format!("layout.open: {e}"))?
+            .ok_or_else(|| format!("layout.open: no such window: {}", req.window_id))?
+            .workspaceid
+    };
 
     let replay: Vec<crate::server::service::session_restore::ReplayTab> = plan
         .tabs
@@ -141,11 +147,24 @@ pub(super) async fn layout_open_impl(
 
     let mut notes = plan.notes;
     let tab_ids: Vec<String> = replayed.iter().flatten().map(|r| r.tab_id.clone()).collect();
+    if new_window && tab_ids.is_empty() {
+        // Nothing for the new window to show: don't leave an empty workspace.
+        let events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::DeleteWorkspace { workspace_id: ws_id, force: false },
+        )
+        .await;
+        for ev in &events {
+            let _ = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore);
+        }
+        crate::server::service::publish_events(state, &events);
+        return Err("layout.open: none of the layout's tabs could be created".to_string());
+    }
     if tab_ids.len() < plan.tabs.len() {
         notes.push(format!("{} of {} tabs couldn't be created.", plan.tabs.len() - tab_ids.len(), plan.tabs.len()));
     }
 
-    // The layout's active tab becomes this window's active tab.
+    // The layout's active tab becomes the workspace's active tab.
     if let Some(active) = plan.active_tab.and_then(|i| replayed.get(i)).and_then(|r| r.as_ref()) {
         let events = crate::server::service::dispatch_to_reducer(
             state,
@@ -174,7 +193,33 @@ pub(super) async fn layout_open_impl(
         }
     }
 
-    Ok(LayoutOpenResult { tab_ids, notes })
+    Ok(LayoutOpenResult { workspace_id: ws_id, tab_ids, notes })
+}
+
+/// A workspace with no tabs yet, for "Open in a new window": unlike
+/// `CreateWindow`'s fresh workspace it gets no default tab, so the new window
+/// shows only the layout. The caller opens the window onto it afterwards
+/// (the host's `open_new_window { workspace_id }`, the tear-off attach path).
+async fn create_empty_workspace(state: &AppState, name: &str) -> Result<String, String> {
+    use agentmux_common::ipc::{Command, Event};
+    let events = crate::server::service::dispatch_to_reducer(state, Command::CreateWorkspace { name: name.to_string() }).await;
+    if let Some(message) = events.iter().find_map(|e| match e {
+        Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("layout.open: {message}"));
+    }
+    for ev in &events {
+        crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).map_err(|e| format!("layout.open: {e}"))?;
+    }
+    crate::server::service::publish_events(state, &events);
+    events
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "layout.open: no workspace was created".to_string())
 }
 
 pub(super) fn layout_save_impl(store: &Store, req: CommandLayoutSaveData) -> Result<LayoutSaveResult, String> {
@@ -353,13 +398,14 @@ mod tests {
         let path = write_layout(dir.path(), "someone-else");
         let out = layout_open_impl(
             &state,
-            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id, run_commands: None },
+            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id, run_commands: None, new_window: None },
             &trust(dir.path(), Some(OWN)),
         )
         .await
         .unwrap();
 
         assert_eq!(out.tab_ids.len(), 1);
+        assert_eq!(out.workspace_id, ws_id);
         let ws = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap();
         assert!(ws.tabids.contains(&out.tab_ids[0]), "the tab lands in the window's own workspace");
         let tab = state.mstore.get::<Tab>(&out.tab_ids[0]).unwrap().unwrap();
@@ -404,7 +450,7 @@ mod tests {
 
         let trusted = layout_open_impl(
             &state,
-            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id: window_id.clone(), run_commands: None },
+            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id: window_id.clone(), run_commands: None, new_window: None },
             &trust(dir.path(), Some(OWN)),
         )
         .await
@@ -413,12 +459,61 @@ mod tests {
 
         let declined = layout_open_impl(
             &state,
-            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id, run_commands: Some(false) },
+            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id, run_commands: Some(false), new_window: None },
             &trust(dir.path(), Some(OWN)),
         )
         .await
         .unwrap();
         assert_eq!(term_controller(&state, &declined.tab_ids[0]), "shell");
+    }
+
+    #[tokio::test]
+    async fn open_in_a_new_window_builds_its_own_workspace_and_leaves_this_one_alone() {
+        let state = test_state();
+        with_agent(&state);
+        let (_, ws_id) = window_with_workspace(&state).await;
+        let before = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap().tabids;
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_layout(dir.path(), "someone-else");
+        let out = layout_open_impl(
+            &state,
+            // No window is needed: the new one is opened afterwards.
+            CommandLayoutOpenData {
+                path: path.to_string_lossy().to_string(),
+                window_id: String::new(),
+                run_commands: None,
+                new_window: Some(true),
+            },
+            &trust(dir.path(), Some(OWN)),
+        )
+        .await
+        .unwrap();
+
+        assert_ne!(out.workspace_id, ws_id);
+        assert_eq!(state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap().tabids, before, "the current window is untouched");
+        let ws = state.mstore.get::<Workspace>(&out.workspace_id).unwrap().unwrap();
+        assert_eq!(ws.name, "Work", "named after the layout");
+        assert_eq!(ws.tabids, out.tab_ids, "only the layout's tabs, no default tab");
+        assert_eq!(ws.activetabid, out.tab_ids[0]);
+        assert_eq!(
+            state.srv_state.lock().await.workspaces.get(&out.workspace_id).map(|w| w.tab_ids.clone()),
+            Some(out.tab_ids.clone()),
+            "the reducer knows the workspace, so a window can attach to it"
+        );
+        assert!(
+            state.mstore.get_all::<Window>().unwrap().iter().all(|w| w.workspaceid != out.workspace_id),
+            "no window yet; the caller opens one"
+        );
+
+        // The same rules as adding tabs: the untrusted command is held.
+        let tab = state.mstore.get::<Tab>(&out.tab_ids[0]).unwrap().unwrap();
+        let term = tab
+            .blockids
+            .iter()
+            .map(|b| state.mstore.get::<Block>(b).unwrap().unwrap())
+            .find(|b| obj::meta_get_string(&b.meta, "view", "") == "term")
+            .unwrap();
+        assert_eq!(obj::meta_get_string(&term.meta, "controller", ""), "shell");
     }
 
     #[tokio::test]
@@ -431,7 +526,7 @@ mod tests {
         let path = write_layout(dir.path(), OWN);
         let err = layout_open_impl(
             &state,
-            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id: "nope".into(), run_commands: None },
+            CommandLayoutOpenData { path: path.to_string_lossy().to_string(), window_id: "nope".into(), run_commands: None, new_window: None },
             &trust(dir.path(), None),
         )
         .await
