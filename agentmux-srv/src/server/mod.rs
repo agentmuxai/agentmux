@@ -756,14 +756,16 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             auth_middleware,
         ));
 
-    // Health endpoint (no auth). `/health` always; `/` too, unless headless
-    // `--frontend-dir` serves the frontend there (`with_frontend`).
-    let health = if frontend_dir.is_some() {
+    // Health endpoint (no auth). `/health` always; `/` too, except on the
+    // full router when headless `--frontend-dir` serves the frontend there
+    // (`with_frontend`). The LAN router's health never changes.
+    let health = Router::new()
+        .route("/", get(health_handler))
+        .route("/health", get(health_handler));
+    let full_health = if frontend_dir.is_some() {
         Router::new().route("/health", get(health_handler))
     } else {
-        Router::new()
-            .route("/", get(health_handler))
-            .route("/health", get(health_handler))
+        health.clone()
     };
 
     // WhatsApp Cloud API webhook receiver (no auth). Meta's servers call
@@ -811,7 +813,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .with_state(state.clone());
 
     let full = Router::new()
-        .merge(health)
+        .merge(full_health)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
         .merge(authed_routes);

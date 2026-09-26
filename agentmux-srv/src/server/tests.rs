@@ -6631,6 +6631,12 @@ async fn without_frontend_dir_root_is_health_and_so_is_health() {
 async fn the_lan_router_never_serves_the_frontend() {
     let dir = frontend_fixture();
     let lan = build_routers_with(test_state(), Some(dir.path())).lan;
-    let (status, body) = get_body(lan, "/assets/app.js").await;
+    let (status, body) = get_body(lan.clone(), "/assets/app.js").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    // Its health is unchanged: `/` is still health there (ReAgent P2 on #3900).
+    for uri in ["/", "/health"] {
+        let (status, body) = get_body(lan.clone(), uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert!(body.contains("\"status\":\"ok\""), "{uri}: {body}");
+    }
 }
