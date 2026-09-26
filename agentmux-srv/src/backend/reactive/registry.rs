@@ -797,8 +797,10 @@ mod shared_tests {
         // for the whole test binary — hence both the resolvable and the
         // unresolvable agent are covered here rather than in two tests that
         // would race to set it.
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let store = crate::backend::storage::store::Store::open(tmp.path()).unwrap();
+        // In memory: the resolver keeps the store for the process's life,
+        // so a file-backed one would outlive its temp file and leave its
+        // -wal/-shm behind (#3815).
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
         let minted = store.agent_lan_key_ensure("agentx").unwrap();
 
         init_jekt_public_key_resolver(move |agent_id| {
