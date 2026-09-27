@@ -17,6 +17,7 @@ All numbers come from the sources below; nothing here is estimated unless marked
 1. **The live 0.58.0 portable's logs.** Read only; nothing was tested in that instance.
 2. **Logs from every retained instance, 2026-09-20 → 27:** 12 dev builds and 3 portables. That's 65 agent opens with frontend `[perf]` data and 32 with backend launch-path lines.
 3. **A `task dev` build of main (`7042bb4`), profiled over CDP.** Each open was a real mouse click on a My Agents card, with a 200 µs sampling CPU profile, a `longtask` observer, and timing to the first row painted in the *new* pane and to "quiet" (no frame gap > 50 ms for 1.5 s). Agents: Lazo (58 MB transcript) and Lzop (48 MB), neither running anywhere else.
+   Two caveats for anyone repeating this. (a) The probe must not read layout itself; see the F3 correction. (b) The dev window must be **visible**. When it's behind other windows, Chromium's occlusion tracking reports the page `hidden` and stops `requestAnimationFrame`. Then a pane's reveal gate (history "painted" is a double rAF) never opens and the pane sits behind its loading cover, which looks exactly like a stuck open (`[pane-readiness] … gate(s) pending: history`), and any rAF-based timing stalls. Check `document.visibilityState` before trusting a run.
 4. **The real restore replay, run offline.** `parseHistoryLines` from main was run under Node on the actual last 5,000 lines of AgentA's 1.18 GB transcript, read directly from `shared/agents/transcripts/filestore.db` (read-only).
 
 ## 3. Findings, largest first
@@ -36,20 +37,22 @@ All numbers come from the sources below; nothing here is estimated unless marked
 
 `history: index built … discovered=61066 duration_ms=23542` (`agentmux-srv/src/backend/history/mod.rs:246`, 0.58.0 portable, 03:38:36 → 03:38:59). It runs at startup and covers the window when the user is most likely to open agents. It rescans all 61,066 sessions on every launch.
 
-### F3 — A warm open is ~1.3 s to "quiet", and half the JavaScript time is forced layout in the virtual list
+### F3 — A warm open is ~1.3 s to "quiet"; mount-time layout reads are a small part of it
 
 With the CLI installed and no startup work running (Lzop, dev, profiled):
 
 - click → quiet: **1,341 ms**; JavaScript busy: **329 ms**; 6 long tasks, **504 ms** in total (max 91 ms).
-- Top self time: `getBoundingClientRect` / forced layout **105 ms**, `dispatchScrollMargin` **53 ms** (`AgentDocumentVirtualList.tsx:707`), `parseHistoryLines.feed` **16 ms**, GC 20 ms.
+- Self time attributable to **app** code: `dispatchScrollMargin` **≈ 52 ms** (`AgentDocumentVirtualList.tsx:707`), the composer strip's `zoomRatio` / slot re-measure **≈ 25 ms** (`AgentComposerStrip.tsx`), `parseHistoryLines.feed` **16 ms**, GC 20 ms.
 
-`dispatchScrollMargin` reads `virtualContainerRef.offsetTop`, and its comment says that's safe because it only runs from "ResizeObserver/MutationObserver callbacks and user scroll". The profile shows it running from a **Solid effect triggered by `updateMuxObject`**, i.e. block-meta updates, and the launch flow sends several of those in a row (`MuxObj updated block:…` ×4–5 per open in the host log). Each one forces a synchronous layout of a document that's still mounting.
+**Correction (2026-09-27, after this spec merged):** the first version of this finding attributed **105 ms** of forced layout (Lazo: **268 ms**) to the app and called it "half the JavaScript time". That figure had **no app caller** in the profile. It was the profiling probe's own per-frame `getBoundingClientRect()` over every row, which it used to detect the first painted row. The probe now detects the first row without layout reads, and the numbers above are the app's own share. The same caveat applies to the long-task and quiet times: they include some probe overhead, so they're upper bounds.
+
+`dispatchScrollMargin` reads `virtualContainerRef.offsetTop`. The profile shows the read happening in the list's `onMount`, which runs inside the block-meta update (`updateMuxObject`) that mounts the pane, so it forces the pane's first layout synchronously. Whether that layout is *extra* depends on how much DOM changes after it before the frame, which wasn't measured cleanly. See §4.2.
 
 Across the 65 logged opens, total frontend long-task time per open was < 0.5 s for 33, 0.5–1.5 s for 19, and 1.5–3 s for 5.
 
 ### F4 — Cold-path extras on the main thread (the Lazo open: 1,874 ms of JavaScript)
 
-On top of F3's forced layout (268 ms `getBoundingClientRect` in this run):
+On top of F3's items (this run's 268 ms `getBoundingClientRect` was probe overhead; see the F3 correction):
 
 - **Markdown + highlighting ≈ 290 ms.** `remark-parse` 126 ms, `rehype-highlight` 67 ms, `shiki` 56 ms, shiki's wasm 38 ms, all for rows in the restored tail. Most of those rows are off-screen or rolled off moments later.
 - **Sound engine priming, 46 ms.** `primeOnce` → `sound-player.ts` `prime()` on the first open.
@@ -77,7 +80,9 @@ Ordered by user-visible impact.
 - When an instance starts and the pinned CLI isn't installed, **install it in the background** at low priority, before anyone opens an agent.
 - **Never block the pane on `ResolveCli`.** Render the restored history and the composer immediately. Only the *spawn* waits for the CLI, with the pane showing "preparing <provider> CLI…" in the composer strip instead of a blank pane.
 
-### 4.2 Stop forced layout during mount (F3)
+### 4.2 Stop forced layout during mount (F3; small, measure first)
+
+After the F3 correction, this is worth tens of milliseconds, not hundreds. Land it only with a before/after profile, taken with a visible dev window and a probe that doesn't read layout, showing a reduction in layout time during the open.
 
 - `dispatchScrollMargin` must not read `offsetTop` from effects driven by block-meta updates. Keep the reads in the ResizeObservers, which fire when layout is already clean, and in user scroll handlers. If a meta change can move the header, schedule one read for the next animation frame, coalescing any number of changes into a single read.
 - Add a dev-only assertion or `perf:allow-layout-read` audit so a layout read reached from `updateMuxObject` shows up in tests.
