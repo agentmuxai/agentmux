@@ -263,7 +263,8 @@ Proposed; not started. Each phase is one PR.
   - Claude Code runs `SessionStart` with `source` = `startup` | `resume` |
     `clear` | `compact` and adds the hook's `additionalContext` to the model's
     context without showing it as a conversation turn. One hook covers new
-    session, resume and compaction (G1, G4).
+    session and compaction (G1, G4), and normal resume if Q4 says so. Q4 is a
+    prerequisite for this phase.
   - Install it next to the existing `PreCompact` hook (`agentmux-bashwrap`
     subcommand; same install sites as §3.5).
   - The hook fetches the block from P1's endpoint and emits it as
@@ -273,19 +274,23 @@ Proposed; not started. Each phase is one PR.
     (#3673). When `source=compact`, the endpoint must append that summary the
     same way. Otherwise retiring the hidden turn drops the backstop against
     commitments the provider's own summary left out.
-  - **Only one path per event.** srv records each delivery (session, reason,
-    compaction boundary). While the frontend triggers remain as a fallback, the
-    controller asks srv **before** it hides output or dispatches `TurnStart`:
-    - if the hook already delivered for that session start or compaction, srv
-      answers `skipped`, and the controller stays idle;
+  - **Only one path per event.** Delivery is an **atomic claim** in srv, keyed
+    by (session, reason, compaction boundary). A lookup of completed deliveries
+    is not enough: on `/compact` the frontend sees the boundary while the hook
+    is still running, so both would see "not yet delivered".
+    - the hook claims when it fetches (state `pending`);
+    - the frontend fallback asks to claim **before** it hides output or
+      dispatches `TurnStart`. If the claim is `pending`, it waits for the hook to
+      acknowledge or time out. If the claim is already taken, srv answers
+      `skipped` and the controller stays idle;
     - a skip must never be a silent accept. The controller sets `hiding` and a
       pending node before `sendRpc`, and clears them only on a rejected RPC or
       the hidden turn's `session_end`, so a silent drop would leave the pane
       busy and suppressing output.
-    - a delivery counts only once the hook **acknowledges** it: after writing
-      and flushing valid `additionalContext`, the hook calls srv back. A fetch
-      with no acknowledgement (the hook timed out, crashed or wrote bad output)
-      is not a delivery, so the fallback still runs.
+    - a claim becomes a delivery only once the hook **acknowledges** it: after
+      writing and flushing valid `additionalContext`, the hook calls srv back. A
+      `pending` claim with no acknowledgement (the hook timed out, crashed or
+      wrote bad output) expires, and the waiting fallback takes it over.
     Without this gate, every compaction injects the memory twice.
   - **The notice ships with the hook (D6).**
     - srv emits one event per delivery (reason, entry names, token counts);
@@ -302,7 +307,9 @@ Proposed; not started. Each phase is one PR.
     fires after auto-compaction as well as `/compact`.
 
 - **P3 — retire the frontend triggers for Claude.** Only after P2 is verified
-  live: the hook fires for `startup`, `resume`, `clear` and `compact`; the
+  live: the hook fires for `startup`, `clear` and `compact`, and for `resume`
+  only if Q4 is answered "yes" (Q4 must be answered before P2 starts, since it
+  decides whether the hook acts on `source=resume`); the
   running summary arrives on compaction; the notice appears every time; and
   nothing was injected twice. Keep the hidden-turn primitive: P5 needs it.
 
