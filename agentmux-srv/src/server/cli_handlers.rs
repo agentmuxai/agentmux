@@ -17,10 +17,12 @@ use super::AppState;
 /// Register CLI-related RPC handlers (resolvecli, checkcliauth, runclilogin).
 pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // resolvecli → detect or install a CLI tool for an agent provider.
-    // Each AgentMux version gets its own isolated CLI install at:
-    //   <agentmux_home>/instances/v<AGENTMUX_VERSION>/cli/<provider>/
-    // (shared with `install.start` / `install.check` and the frontend
-    // launch path; resolved via `DataPaths::from_env()`).
+    // Installs are shared across AgentMux versions, keyed by the provider's
+    // pinned CLI version: `<shared_dir>/cli/<provider>/<pinned_version>/`,
+    // with the legacy `<home>/instances/v<AGENTMUX_VERSION>/cli/<provider>/`
+    // as a read-only fallback. One definition for every resolver
+    // (`install.start` / `install.check`, `agent.open`, the picker's
+    // read-only lookup): `backend::cli_install`.
     // Never falls back to system PATH for npm-backed providers.
     let broker_resolve = state.broker.clone();
     engine.register_typed(
@@ -38,38 +40,35 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "ResolveCli"
                 );
 
-                // Canonical install directory — shared with
-                // `install.start` / `install.check` and the frontend's
-                // `agent-model.ts::resolveCliDir`. Resolves to
-                // `<agentmux_home>/instances/v<version>/cli/<provider>/`
-                // via `DataPaths::from_env()` so portable, installed,
-                // and `AGENTMUX_HOME_OVERRIDE` modes all agree.
+                // Install location: shared across AgentMux versions, keyed
+                // by the provider's pinned CLI version, with the legacy
+                // per-version dir as a read-only fallback — see
+                // `backend::cli_install` (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md
+                // F1). The backend registry's pin wins over the caller's.
                 let paths = agentmux_common::DataPaths::from_env()
                     .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
-                let provider_dir = paths
-                    .home_dir
-                    .join("instances")
-                    .join(format!("v{AGENTMUX_VERSION}"))
-                    .join("cli")
-                    .join(&cmd.provider_id)
+                let pinned_version = crate::backend::providers::get_provider(&cmd.provider_id)
+                    .map(|p| p.pinned_version.to_string())
+                    .unwrap_or_else(|| cmd.pinned_version.clone());
+                let install_dir = crate::backend::cli_install::install_dir(&paths, &cmd.provider_id, &pinned_version);
+                let provider_dir = install_dir.to_string_lossy().to_string();
+                // npm binary path — the only valid location for installed CLIs.
+                let npm_bin = crate::backend::cli_install::npm_bin(&install_dir, &cmd.cli_command)
                     .to_string_lossy()
                     .to_string();
-                // npm binary path — the only valid location for installed CLIs.
-                let npm_bin = if cfg!(windows) {
-                    format!("{}/node_modules/.bin/{}.cmd", provider_dir, cmd.cli_command)
-                } else {
-                    format!("{}/node_modules/.bin/{}", provider_dir, cmd.cli_command)
-                };
 
-                // Step 1: Check if already installed in versioned directory
-                if std::path::Path::new(&npm_bin).exists() {
-                    let version = get_cli_version(&npm_bin).await;
-                    tracing::info!(
-                        path = %npm_bin, version = %version,
-                        "CLI found in versioned install"
-                    );
+                // Step 1: already installed (shared dir, else legacy per-version dir)?
+                if let Some(found) = crate::backend::cli_install::find_installed(
+                    &paths,
+                    &cmd.provider_id,
+                    &pinned_version,
+                    &cmd.cli_command,
+                ) {
+                    let found = found.to_string_lossy().to_string();
+                    let version = get_cli_version(&found).await;
+                    tracing::info!(path = %found, version = %version, "CLI found in local install");
                     return Ok(ResolveCliResult {
-                        cli_path: npm_bin,
+                        cli_path: found,
                         version,
                         source: "local_install".to_string(),
                     });
@@ -113,7 +112,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 tracing::info!(
                     provider = %cmd.provider_id,
                     npm_package = %cmd.npm_package,
-                    pinned_version = %cmd.pinned_version,
+                    pinned_version = %pinned_version,
                     target_dir = %provider_dir,
                     "CLI not found locally, installing via npm"
                 );
@@ -151,8 +150,39 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     } else {
                         provider_dir.clone()
                     };
-                    let package_arg = format!("{}@{}", cmd.npm_package, cmd.pinned_version);
+                    let package_arg = format!("{}@{}", cmd.npm_package, pinned_version);
                     tracing::info!(package = %package_arg, prefix = %prefix_dir, "running npm install");
+
+                    // Serialize with any other AgentMux instance installing the
+                    // same pinned CLI into the same shared dir, then re-check:
+                    // if it finished while we waited, reuse its install.
+                    let lock_paths = paths.clone();
+                    let lock_provider = cmd.provider_id.clone();
+                    let lock_pinned = pinned_version.clone();
+                    let install_guard = tokio::task::spawn_blocking(move || {
+                        crate::backend::cli_install::lock_install(&lock_paths, &lock_provider, &lock_pinned)
+                    })
+                    .await
+                    .map_err(|e| format!("install lock task panicked: {e}"))?
+                    .map_err(|e| format!("cannot take the CLI install lock: {e}"))?;
+                    // Reuse only a FINISHED install (completion marker, not
+                    // just a shim npm may have written early); clear a failed
+                    // or interrupted one so npm starts clean (Codex P2 on #3927).
+                    let shared_dir = crate::backend::cli_install::shared_cli_dir(&paths, &cmd.provider_id, &pinned_version);
+                    if let Some(dir) = shared_dir.as_deref() {
+                        if crate::backend::cli_install::is_complete(dir) && std::path::Path::new(&npm_bin).is_file() {
+                            drop(install_guard);
+                            let version = get_cli_version(&npm_bin).await;
+                            tracing::info!(path = %npm_bin, version = %version, "CLI installed by another instance while waiting");
+                            return Ok(ResolveCliResult {
+                                cli_path: npm_bin,
+                                version,
+                                source: "local_install".to_string(),
+                            });
+                        }
+                        crate::backend::cli_install::clear_unless_valid(dir, &cmd.cli_command)
+                            .map_err(|e| format!("cannot clear an incomplete CLI install at {}: {e}", dir.display()))?;
+                    }
 
                     // Collect all npm output after completion via .output().
                     // Pipe-based streaming (both async IOCP and sync blocking) does not receive
@@ -163,7 +193,17 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     tracing::info!(block_id = %block_id_install, package = %package_arg, prefix = %prefix_dir, "running npm install");
 
                     let broker_npm = broker.clone();
+                    // The blocking task owns the install lock and publishes the
+                    // completion marker itself. If the RPC times out, this
+                    // handler future is dropped but npm keeps running in the
+                    // task; the lock must stay held until npm exits, or a retry
+                    // or another instance clears the dir and runs a second npm
+                    // over it (Codex P2 on #3927).
+                    let task_shared_dir = shared_dir.clone();
+                    let task_npm_bin = npm_bin.clone();
+                    let task_pinned = pinned_version.clone();
                     let exit_status = tokio::task::spawn_blocking(move || {
+                        let _install_guard = install_guard;
                         let result = {
                             #[cfg(windows)]
                             {
@@ -233,6 +273,15 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                         }
                                     }
                                 }
+                                // Publish the shared install to every reader
+                                // only once npm succeeded and the shim exists.
+                                if out.status.success() && std::path::Path::new(&task_npm_bin).is_file() {
+                                    if let Some(dir) = task_shared_dir.as_deref() {
+                                        crate::backend::cli_install::mark_complete(dir, &task_pinned).map_err(|e| {
+                                            format!("cannot mark the CLI install complete at {}: {e}", dir.display())
+                                        })?;
+                                    }
+                                }
                                 Ok(out.status)
                             }
                             Err(e) => Err(format!("failed to run npm install: {e}")),
@@ -244,7 +293,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                     if !exit_status.success() {
                         return Err(agentmux_common::AgentMuxError::NpmInstallFailed {
-                            package: format!("{}@{}", cmd.npm_package, cmd.pinned_version),
+                            package: format!("{}@{}", cmd.npm_package, pinned_version),
                             message: format!(
                                 "exit {}; check the output above",
                                 exit_status.code().unwrap_or(-1)
