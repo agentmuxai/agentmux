@@ -612,7 +612,7 @@ impl CriticalSection {
 }
 
 #[cfg(unix)]
-fn lock_exclusive(file: &std::fs::File) -> std::io::Result<()> {
+pub(crate) fn lock_exclusive(file: &std::fs::File) -> std::io::Result<()> {
     use std::os::unix::io::AsRawFd;
     // Blocking (no LOCK_NB) — we want to wait for the holder, not fail.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
@@ -622,7 +622,7 @@ fn lock_exclusive(file: &std::fs::File) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-fn lock_exclusive(file: &std::fs::File) -> std::io::Result<()> {
+pub(crate) fn lock_exclusive(file: &std::fs::File) -> std::io::Result<()> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{LockFileEx, LOCKFILE_EXCLUSIVE_LOCK};
     use windows_sys::Win32::System::IO::OVERLAPPED;
