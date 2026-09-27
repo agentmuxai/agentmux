@@ -6,7 +6,8 @@
  *
  * Collapsed: one row of 64 px tiles; when they don't fit, the last slot is a
  * "+N" tile. Expanded: a scrolling grid with names and sizes. A summary
- * ("30 images · 214 MB / 1 GB") sits in the header, with a progress bar and
+ * ("30 images · 214 MB / 1 GB", or "attachments" once any isn't an image)
+ * sits in the header, with a progress bar and
  * Cancel while anything is processing. Removing shows an Undo line for a few
  * seconds, paused while hovered or focused.
  */
@@ -18,6 +19,7 @@ import type { AttachmentDraft, DraftAttachment, RemovedAttachment } from "./atta
 import { AttachmentLightbox, type LightboxItem } from "./AttachmentLightbox";
 import { AttachmentTile, type TileModel } from "./AttachmentTile";
 import { useAttachmentUrl } from "./attachment-url";
+import { attachmentNoun, fileKind, isPicture, kindIcon, type FileKind } from "./file-kind";
 import { limitLevel, trayLayout } from "./tray-layout";
 
 const UNDO_MS = 6000;
@@ -36,6 +38,10 @@ export function toTileModel(item: DraftAttachment, number: number): TileModel {
         progress: byteStage ? Math.min(1, item.doneBytes / item.bytes) : undefined,
         error: item.error,
         firstFrameOnly: item.info?.first_frame_only,
+        kind: fileKind(item.info?.kind, item.name),
+        pageCount: item.info?.page_count,
+        macros: item.info?.macros,
+        textNote: item.info?.text_note,
     };
 }
 
@@ -71,6 +77,8 @@ export function AttachmentTray(props: Props) {
     });
 
     const tiles = createMemo(() => d.items().map((item, i) => toTileModel(item, i + 1)));
+    const kinds = createMemo<FileKind[]>(() => tiles().map((t) => t.kind));
+    const noun = (n: number) => attachmentNoun(n, kinds());
     const layout = createMemo(() => trayLayout(tiles().length, width()));
     const shown = createMemo(() => (expanded() ? tiles() : tiles().slice(0, layout().visible)));
     const overflowTiles = createMemo(() => tiles().slice(layout().visible, layout().visible + 4));
@@ -92,10 +100,10 @@ export function AttachmentTray(props: Props) {
                 if (before != null && before > 0 && now === 0) {
                     const failed = d.items().filter((i) => i.status === "error").length;
                     setAnnouncement(
-                        `${d.count()} ${d.count() === 1 ? "image" : "images"} ready${failed ? `, ${failed} failed` : ""}.`,
+                        `${d.count()} ${noun(d.count())} ready${failed ? `, ${failed} failed` : ""}.`,
                     );
                 } else if ((before ?? 0) < now) {
-                    setAnnouncement(`Adding ${now} ${now === 1 ? "image" : "images"}.`);
+                    setAnnouncement(`Adding ${now} ${noun(now)}.`);
                 }
             },
         ),
@@ -112,7 +120,7 @@ export function AttachmentTray(props: Props) {
 
     const summary = () => {
         const n = d.count();
-        const countText = countLevel() === "ok" ? `${n} ${n === 1 ? "image" : "images"}` : `${n} / ${d.maxFiles()} images`;
+        const countText = countLevel() === "ok" ? `${n} ${noun(n)}` : `${n} / ${d.maxFiles()} ${noun(2)}`;
         return `${countText} · ${formatBytes(d.totalBytes())} / ${formatBytes(d.maxTotalBytes())}`;
     };
 
@@ -148,10 +156,11 @@ export function AttachmentTray(props: Props) {
     };
 
     const clearAll = () => {
+        const what = noun(d.count());
         const removed = d.removeAll();
         if (removed.length === 0) return;
-        startUndo(removed, `Removed ${removed.length} ${removed.length === 1 ? "image" : "images"}`);
-        setAnnouncement(`Removed ${removed.length} images.`);
+        startUndo(removed, `Removed ${removed.length} ${what}`);
+        setAnnouncement(`Removed ${removed.length} ${what}.`);
         props.focusComposer();
     };
 
@@ -212,7 +221,7 @@ export function AttachmentTray(props: Props) {
                                     <span
                                         class="agent-attachment-tray__bar"
                                         role="progressbar"
-                                        aria-label="Processing images"
+                                        aria-label={`Processing ${noun(2)}`}
                                         aria-valuemin={0}
                                         aria-valuemax={100}
                                         aria-valuenow={Math.round(
@@ -248,7 +257,7 @@ export function AttachmentTray(props: Props) {
                     <ul
                         ref={observeList}
                         class="agent-attachment-tray__tiles"
-                        aria-label={`Attached images: ${d.count()}`}
+                        aria-label={`Attached ${noun(2)}: ${d.count()}`}
                     >
                         <For each={shownKeys()}>
                             {(key) => {
@@ -274,13 +283,19 @@ export function AttachmentTray(props: Props) {
                                 <button
                                     type="button"
                                     class="agent-attachment-tile__main"
-                                    aria-label={`Show all ${d.count()} images`}
-                                    title={`Show all ${d.count()} images`}
+                                    aria-label={`Show all ${d.count()} ${noun(d.count())}`}
+                                    title={`Show all ${d.count()} ${noun(d.count())}`}
                                     onClick={() => setExpanded(true)}
                                 >
                                     <span class="mosaic" aria-hidden="true">
                                         <For each={overflowTiles()}>
-                                            {(t) => <MosaicCell id={t.status === "ready" ? t.id : undefined} />}
+                                            {(t) => (
+                                                <MosaicCell
+                                                    id={t.status === "ready" ? t.id : undefined}
+                                                    kind={t.kind}
+                                                    name={t.name}
+                                                />
+                                            )}
                                         </For>
                                     </span>
                                     <span class="more">+{layout().overflow}</span>
@@ -329,7 +344,11 @@ export function AttachmentTray(props: Props) {
     );
 }
 
-function MosaicCell(props: { id?: string }) {
-    const url = useAttachmentUrl(() => props.id, "thumb");
-    return <span class="cell" style={url() ? { "background-image": `url(${url()})` } : undefined} />;
+function MosaicCell(props: { id?: string; kind: FileKind; name: string }) {
+    const url = useAttachmentUrl(() => (isPicture(props.kind) ? props.id : undefined), "thumb");
+    return (
+        <span class={`cell is-${props.kind}`} style={url() ? { "background-image": `url(${url()})` } : undefined}>
+            {isPicture(props.kind) ? null : <i class={`fa-solid ${kindIcon(props.kind, props.name)}`} />}
+        </span>
+    );
 }
