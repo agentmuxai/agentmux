@@ -260,6 +260,15 @@
             padding: 0;
         }
 
+        // Floating pane "Always on top" tack. When on, the icon takes the theme
+        // accent (`.toggle.active`, iconbutton.scss); on a custom-colored header
+        // (`frame:hue`) the accent alone can be hard to see, so the on-state
+        // also gets the hover background. Scoped here so Stash and the search
+        // toggles are unchanged. SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4.
+        .block-frame-ontop.active {
+            background: var(--highlight-bg-color);
+        }
+
         .block-frame-btn-separator {
             width: 1px;
             height: 14px;

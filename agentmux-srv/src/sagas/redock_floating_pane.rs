@@ -162,6 +162,21 @@ async fn run_inner(
     .await
     .map_err(|e| format!("RedockFloatingPane MoveBlock: {}", e))?;
 
+    // A redocked pane is no longer "Always on top": drop the tack so a later
+    // tear-off starts untacked (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27
+    // §6.3, owner decision §9.1). Best-effort — the pane is already
+    // redocked, and a leftover key only means the next tear-off re-applies
+    // the tack.
+    if let Err(e) = ctx
+        .dispatch(Command::UpdateBlockMeta {
+            block_id: block_id.clone(),
+            meta_patch: json!({ "pane:floating_ontop": null }),
+        })
+        .await
+    {
+        tracing::warn!(block_id = %block_id, "RedockFloatingPane: clearing pane:floating_ontop failed: {e}");
+    }
+
     Ok(json!({
         "block_id": block_id,
         "target_tab_id": target_tab_id,
@@ -297,6 +312,51 @@ mod tests {
         assert_eq!(dst_tab_obj.blockids, vec![block_id.clone()]);
         let block = state.mstore.get::<Block>(&block_id).unwrap().unwrap();
         assert_eq!(block.parentoref, format!("tab:{}", dst_tab));
+    }
+
+    #[tokio::test]
+    async fn redock_clears_the_always_on_top_tack_and_keeps_other_meta() {
+        let state = test_state();
+        let (src_ws, src_tab, block_id) = seed_workspace_with_block(&state, "src").await;
+        dispatch_apply(
+            &state,
+            Command::UpdateBlockMeta {
+                block_id: block_id.clone(),
+                meta_patch: serde_json::json!({ "pane:floating_ontop": true, "frame:hue": 200 }),
+            },
+        )
+        .await;
+        let dst_ws = dispatch_apply(&state, Command::CreateWorkspace { name: "dst".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let dst_tab = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: dst_ws.clone(), name: "dt".into() },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+
+        run(&state, block_id.clone(), src_tab, src_ws, dst_tab, dst_ws, None)
+            .await
+            .unwrap();
+
+        let block = state.mstore.get::<Block>(&block_id).unwrap().unwrap();
+        assert!(
+            !block.meta.contains_key("pane:floating_ontop"),
+            "redock must drop the tack: {:?}",
+            block.meta
+        );
+        assert_eq!(block.meta.get("frame:hue"), Some(&serde_json::json!(200)), "other meta is kept");
     }
 
     #[tokio::test]

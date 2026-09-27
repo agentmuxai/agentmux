@@ -121,6 +121,9 @@ declare global {
         nativeWindowChrome: boolean;
         /** Files dragged in from the OS arrive with real local paths. */
         nativeFileDrop: boolean;
+        /** Keep a floating pane above every window of this instance (the header tack).
+         *  SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27. */
+        floatingAlwaysOnTop: boolean;
     };
 
     /** Host-mediated approvals and memory adoption (the approval windows and panels). */
@@ -199,6 +202,9 @@ declare global {
         /** Tear a pane off into its own floating window (payload: pane_id, workspace_id, x, y, …). */
         openFloatingPane(args: Record<string, unknown>): Promise<{ window_label: string }>;
         toggleFloatingMaximize(windowLabel: string, blockId: string): Promise<void>;
+        /** Tack / untack a floating pane: "Always on top" within this instance.
+         *  The host also records `pane:floating_ontop` on the block. */
+        setFloatingAlwaysOnTop(windowLabel: string, blockId: string, on: boolean): Promise<void>;
         /** Where a floating pane dragged over `windowLabel` would re-dock. */
         getFloatingRedockTarget(windowLabel: string): Promise<{ block_id?: string; dir?: number }>;
         updateFloatingRedockHover(args: {

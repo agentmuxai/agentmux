@@ -1043,6 +1043,20 @@ pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::V
 /// `<video>` element doesn't reliably accept the Matroska container for
 /// direct playback regardless of the codec inside, so listing it here
 /// would let a user pick a file that then fails to render.
+/// Hold for the lifetime of a native file dialog: on Windows it steps
+/// "Always on top" floaters down so the (unowned) dialog can't end up behind
+/// one (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.1). No-op elsewhere.
+#[cfg(target_os = "windows")]
+fn host_dialog_guard() -> crate::floating_pane::HostDialogGuard {
+    crate::floating_pane::HostDialogGuard::new()
+}
+#[cfg(not(target_os = "windows"))]
+fn host_dialog_guard() -> NoDialogGuard {
+    NoDialogGuard
+}
+#[cfg(not(target_os = "windows"))]
+struct NoDialogGuard;
+
 const MEDIA_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 const MEDIA_VIDEO_EXTENSIONS: &[&str] = &["webm", "mp4", "mov"];
 const MEDIA_AUDIO_EXTENSIONS: &[&str] = &["wav"];
@@ -1059,6 +1073,7 @@ pub async fn show_open_file_dialog(
     _args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let path = tokio::task::spawn_blocking(|| {
+        let _dialog_guard = host_dialog_guard();
         rfd::FileDialog::new()
             .add_filter(
                 "Supported media",
@@ -1089,6 +1104,7 @@ pub async fn show_open_bundle_dialog(
     _args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let path = tokio::task::spawn_blocking(|| {
+        let _dialog_guard = host_dialog_guard();
         rfd::FileDialog::new()
             .add_filter("Armory Bundle", &["abf"])
             .pick_file()
@@ -1152,6 +1168,7 @@ pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_j
         let _ = std::fs::create_dir_all(dir);
     }
     let path = tokio::task::spawn_blocking(move || {
+        let _dialog_guard = host_dialog_guard();
         let mut dialog = rfd::FileDialog::new()
             .set_title("Save layout")
             .set_file_name(format!("{stem}{LAYOUT_EXTENSION}"))
@@ -1178,6 +1195,7 @@ pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_j
 pub async fn show_open_layout_dialog(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts"));
     let path = tokio::task::spawn_blocking(move || {
+        let _dialog_guard = host_dialog_guard();
         let mut dialog = rfd::FileDialog::new()
             .set_title("Open layout")
             .add_filter("AgentMux layout", &["agentmux-layout.json"]);

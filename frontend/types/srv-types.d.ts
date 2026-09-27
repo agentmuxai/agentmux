@@ -793,6 +793,11 @@ declare global {
         file?: string;
         url?: string;
         pinnedurl?: string;
+        // Floating-pane window state (host-written; `pane:floating_*` family).
+        "pane:floating_placement"?: "normal" | "maximized";
+        "pane:floating_normal_rect"?: { left: number; top: number; right: number; bottom: number };
+        /** "Always on top" tack. SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27. */
+        "pane:floating_ontop"?: boolean;
         connection?: string;
         edit?: boolean;
         history?: string[];

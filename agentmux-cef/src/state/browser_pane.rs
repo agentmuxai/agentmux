@@ -96,7 +96,7 @@ pub enum WindowPlacement {
 /// un-maximize. Keyed by label (not block_id) because floaters are tracked
 /// by window label everywhere (`window_hwnds`, the `?windowLabel=` URL, the
 /// `on_before_close` teardown) and are not in `browser_panes`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[allow(dead_code)]
 pub struct PaneWindowState {
     pub placement: WindowPlacement,
@@ -104,4 +104,8 @@ pub struct PaneWindowState {
     /// normal-mode rect has been observed (replaces the deleted
     /// `AppState.floating_restored_rects` stash — spec §4).
     pub last_known_normal_rect: Option<PaneRect>,
+    /// "Always on top" (the header tack): stay above every window of this
+    /// instance while it is the active app.
+    /// SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.
+    pub always_on_top: bool,
 }
