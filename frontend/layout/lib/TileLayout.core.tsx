@@ -41,6 +41,9 @@ import { clearCrossTabDrop } from "./crossTabDrag";
 import { dragState } from "./tilelayout-drag-state";
 import {
     computeDragPreviewSize,
+    createDragPreviewIntent,
+    PANE_DRAG_EXCLUDED,
+    pressCanStartPaneDrag,
     dragPreviewCursorOffset,
     DRAG_PREVIEW_FALLBACK,
     type DragPreviewSize,
@@ -391,6 +394,11 @@ export function createTileLayout(platform: TileLayoutPlatform) {
             }
         };
 
+        // Rasterise on a resting hover or a press, not on every pointer that
+        // crosses the pane — see DRAG_PREVIEW_HOVER_MS.
+        const previewIntent = createDragPreviewIntent(generatePreviewImage);
+        onCleanup(previewIntent.dispose);
+
         // Register pragmatic-dnd draggable on the HEADER element directly.
         // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
         // commits the drag, so SolidJS reactive state updates won't cause
@@ -461,7 +469,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                         // overflows, PaneTabStrip.tsx) is deliberately NOT
                         // in this selector — it stays part of this region.
                         const atPoint = document.elementFromPoint(input.clientX, input.clientY);
-                        if (atPoint?.closest(".pane-tab, .pane-tab-strip-add")) return false;
+                        if (atPoint?.closest(PANE_DRAG_EXCLUDED)) return false;
                         return true;
                     },
                     getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
@@ -584,7 +592,11 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                 ref={tileNodeRef}
                 id={props.node.id}
                 style={tileStyle()}
-                onPointerEnter={generatePreviewImage}
+                onPointerEnter={previewIntent.enter}
+                onPointerLeave={previewIntent.leave}
+                onPointerDown={(event) => {
+                    if (pressCanStartPaneDrag(event.target as Element | null)) previewIntent.press();
+                }}
                 onPointerOver={(event) => event.stopPropagation()}
             >
                 {leafContent()}
