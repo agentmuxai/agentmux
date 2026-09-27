@@ -654,6 +654,7 @@ partial list.
 | [`SPEC_MULTIWINDOW_TASKBAR_GROUPING`](SPEC_MULTIWINDOW_TASKBAR_GROUPING.md) | SPEC: Multi-Window Taskbar Behaviour — Full Instances + Sub-Windows |
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
 | [`SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20`](SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md) | SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP) |
+| [`SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27`](SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md) | SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here" |
 | [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
 | [`SPEC_NAMED_AGENT_CONTINUATION_2026_05_12`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) | Spec: Named agent continuation — launch modal dropdown of existing agents |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
