@@ -7,6 +7,7 @@ Frontend: `npx tsc --noEmit` clean, full 3060-test vitest suite green (7
 new). Manual live-pane verification (§5, "Manual") not done as part of this
 PR — no live dev instance was available; do before/at merge if practical,
 same caveat as the sibling dedent PR (#2780). — #2782
+**Current delivery state:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
 **Scope:** `agentmux-srv/src/backend/storage/migrations.rs`,
 `agentmux-srv/src/backend/storage/memory_bundles.rs`,
 `agentmux-srv/src/backend/rpc_types/{commands,memory}.rs`,
