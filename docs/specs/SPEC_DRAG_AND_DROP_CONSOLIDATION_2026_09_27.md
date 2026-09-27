@@ -236,7 +236,7 @@ begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "bu
 ```
 
 - **Writers:**
-  - the pragmatic `onDragStart` sites (tile, window tab, pane tab) begin a session;
+  - the pragmatic `onDragStart` sites (tile, window tab, pane tab) begin a session. `begin` takes an eligibility flag: a **lone-tab** window-tab drag begins with `crossWindow: false`, so it is never eligible for tear-off or content-drop handling. Today it carries no payload at all (`droppable-tab.tsx:141-149`), and only the native strip-merge path may handle it (§5.8);
   - the drone chip;
   - the list reorder;
   - the file-drop controller (§5.3), on the first `dragenter` whose types include `"Files"`.
@@ -410,10 +410,21 @@ interface DragFiles {
 
   So neither can simply be made the only committer. Both event handlers instead call one `commitCrossWindowDrop(drop)` in `app/drag/cross-window-commit.ts`, which routes by kind and position:
   - a pane → `MoveBlockToTab`;
-  - a tab over the strip → an insert at the index;
+  - a tab over the strip → an insert at the index, **except a source window's last tab**, which keeps today's branches (`tab-tearoff-events.ts:266-296`):
+    - from a secondary window: `RestoreTornOffTab`, then close the emptied source window;
+    - from `main`: declined, because the main window is never closed.
   - a tab over content → `MoveTabToWorkspace`.
 
-  It de-duplicates by the host drag-session id, which is added to both events, instead of the time window in `wasTabRecentlyMerged` (deleted). `DragOverlay.tsx` then only draws, and becomes `CrossWindowDropOverlay.tsx` in phase 3. A characterisation test for each of the three routes lands before the move.
+  - **De-duplication needs a drag id that exists before the native mouse-up.** `tabdrag:merge-direct` is emitted synchronously by the mouse hook at button-up (`tear_off_hook.rs:596-618`). The host cross-drag session is created later, when the renderer's `dragend` monitor calls `startCrossDrag`, which on Windows comes after an extra 50 ms (`CrossWindowDragMonitor.win32.tsx:172-173`, `:245`). Lone-tab drags never call it at all. So:
+    - the renderer's `drag-session.begin` mints a `dragId` at drag start;
+    - it passes the id to the host when tracking starts: `start_tab_drag_tracking {dragId}` for tabs, and `startCrossDrag {dragId}` for the others;
+    - the host stamps it on `tabdrag:merge-direct` and on `cross-drag-end`;
+    - `commitCrossWindowDrop` commits each `dragId` at most once.
+
+    This replaces the time window in `wasTabRecentlyMerged` (deleted).
+  - **The source side keeps its end work.** When a tab leaves a window, the `cross-drag-end` listener also runs in the **source** renderer and disposes the tab's `LayoutModel` (`deleteLayoutModelForTab`, `DragOverlay.tsx:126-131`). That is source-side cleanup, not a commit. It moves into the session lifecycle, `onSessionEnded({ result: "moved-out" })`, rather than disappearing with the overlay's commit code; otherwise every cross-window tab move would leak the model and its reactive roots (`layoutModelHooks.ts:52-56`).
+  - `DragOverlay.tsx` then only draws, and becomes `CrossWindowDropOverlay.tsx` in phase 3.
+  - A characterisation test lands for each route before the move: pane → content; tab → strip; tab → content; last tab → strip from a secondary window and from `main`; and source-side model disposal.
 - **Dead host surface deleted:**
   - `set_js_drag_active` and its Linux caller;
   - `set_drag_cursor` / `restore_drag_cursor`;
@@ -429,6 +440,22 @@ interface DragFiles {
   - `register()` compares identity and re-registers only on change.
 - **This keeps the poll's two jobs:** first mount (one `register()` in `onMount`), and re-registration when a `Show` gate replaces the header. It does both when the DOM actually changes, instead of every 100 ms forever. A characterisation test mounts a tile with a detached fallback header and asserts the live header is the registered handle, before and after the change.
 - **The "never tear down mid-drag" rule** (`:438`) moves into the registrar, keyed on `session()`.
+
+### 5.8 Behaviours phases 4–5 must preserve
+
+Today's drag code encodes many deliberate edge cases, and a prose spec can't list them all. Phases 4 and 5 therefore start each move by writing **characterisation tests of today's behaviour** for the system being moved. The move passes only when those tests pass unchanged. The table below is the floor, not the ceiling: whoever does the move adds a test for every deliberate special case the old code comments on.
+
+| Behaviour | Today | Test |
+|---|---|---|
+| A lone-tab drag carries no cross-window payload; only the native strip merge handles it | `droppable-tab.tsx:141-149` | releasing a lone tab outside any strip does nothing and strands no window |
+| A last tab dropped on another strip: secondary → `RestoreTornOffTab` + close the source; `main` → declined | `tab-tearoff-events.ts:266-296` | both cases |
+| A source `onDrop` for an outside release keeps the payload for the monitor | `TileLayout.core.tsx:504-514`, `droppable-tab.tsx:175-200`, `PaneTabStrip.tsx:624-625` | tear-off still receives the payload |
+| No pragmatic registration teardown mid-drag | `TileLayout.core.tsx:438` | `activeDrag` resets after a drop while the header is replaced mid-drag |
+| The live header is registered, never the detached `ErrorBoundary` fallback | `TileLayout.core.tsx:420-424` | a tile with a detached fallback header |
+| A swallowed `dragend` on Windows is caught by the button poll | win32 monitor | the session ends and `activeDrag` resets |
+| The source renderer disposes the moved tab's `LayoutModel` | `DragOverlay.tsx:126-131` | the model map shrinks after a move-out |
+| Merge-direct and cross-drag-end commit once | `wasTabRecentlyMerged` today | both events with the same `dragId` → one commit |
+| Escape aborts a tab, pane-tab or tile drag | `tab-reorder.ts:148-154`, `PaneTabStrip.tsx:626-649`, `tab-tearoff-events.ts:218` | each kind |
 
 ## 6. Efficiency, before and after
 
