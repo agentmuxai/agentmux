@@ -882,11 +882,18 @@ pub async fn run_agent_turn(
         message
     } else {
         let agent_mode = crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host");
+        // Refusals go through surface_refusal like every other early exit
+        // here, so the reason survives a pane reload.
         if agent_mode == "container" {
-            return Err("Image attachments aren't supported for container agents yet.".to_string());
+            let msg = "Image attachments aren't supported for container agents yet.";
+            surface_refusal(msg);
+            return Err(msg.to_string());
         }
-        let svc = crate::backend::attachments::get()
-            .ok_or_else(|| "image attachments are unavailable".to_string())?;
+        let Some(svc) = crate::backend::attachments::get() else {
+            let msg = "Image attachments are unavailable: the attachment service isn't running.";
+            surface_refusal(msg);
+            return Err(msg.to_string());
+        };
         let is_persistent = ctrl
             .as_any()
             .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
@@ -908,15 +915,18 @@ pub async fn run_agent_turn(
         }
         let prepared = tokio::task::spawn_blocking(move || {
             use crate::backend::attachments::prompt;
-            if session_key != new_session_key {
-                svc.store().adopt_session_inline_bytes(&new_session_key, &session_key);
-            }
-            let used = svc.store().session_inline_bytes(&session_key);
-            let budget = limits.claude_session_inline_bytes.saturating_sub(used);
             let (found, missing) = prompt::resolve(&svc, &attachments);
-            let prepared = prompt::prepare(&found, &missing, inline_max, budget);
-            svc.store().add_session_inline_bytes(&session_key, prompt::inline_bytes(&prepared.inline));
-            prepared
+            // Read, spend and record the session budget as one locked step.
+            svc.with_session_inline_budget(
+                &session_key,
+                Some(&new_session_key),
+                limits.claude_session_inline_bytes,
+                |budget| {
+                    let prepared = prompt::prepare(&found, &missing, inline_max, budget);
+                    let spent = prompt::inline_bytes(&prepared.inline);
+                    (prepared, spent)
+                },
+            )
         })
         .await
         .map_err(|e| format!("attachments: {e}"))?;

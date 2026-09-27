@@ -133,6 +133,10 @@ pub struct Service {
     /// when no other job is still using it. Placing an original and the
     /// discard check both happen under this lock.
     inflight: Arc<Mutex<HashMap<String, usize>>>,
+    /// Serializes the per-session inline-budget read, spend and write, so two
+    /// overlapping turns of one Claude session can't both spend the same
+    /// remaining budget or overwrite each other's count.
+    session_budget: Mutex<()>,
 }
 
 /// One job's claim on an id in [`Service::inflight`], released on drop.
@@ -190,6 +194,7 @@ impl Service {
             memory: Arc::new(tokio::sync::Semaphore::new(DECODE_BUDGET_MIB as usize)),
             batches: Mutex::new(HashMap::new()),
             inflight: Arc::new(Mutex::new(HashMap::new())),
+            session_budget: Mutex::new(()),
         }
     }
 
@@ -303,6 +308,27 @@ impl Service {
         blocking(move || svc.store.derive_and_save(&id, &blob, format, edge))
             .await
             .ok()
+    }
+
+    /// Run `f` with the inline budget left in Claude session `key` (out of
+    /// `max`), and record what it reports spending, as one step under a
+    /// lock. `carry_from` is a per-block key counted before the session had
+    /// an id; its count moves into `key` first. Blocking.
+    pub fn with_session_inline_budget<T>(
+        &self,
+        key: &str,
+        carry_from: Option<&str>,
+        max: u64,
+        f: impl FnOnce(u64) -> (T, u64),
+    ) -> T {
+        let _guard = self.session_budget.lock().unwrap();
+        if let Some(from) = carry_from.filter(|from| *from != key) {
+            self.store.adopt_session_inline_bytes(from, key);
+        }
+        let used = self.store.session_inline_bytes(key);
+        let (out, spent) = f(max.saturating_sub(used));
+        self.store.add_session_inline_bytes(key, spent);
+        out
     }
 
     /// Resolve an id to the send-copy path and MIME type for delivery,
@@ -824,6 +850,32 @@ mod tests {
         svc.discard_unprocessed(guard_b).await;
         assert!(!blob.is_file(), "the last failing job cleans it up");
         assert!(svc.inflight.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn concurrent_turns_spend_one_session_budget_once() {
+        let d = tempfile::tempdir().unwrap();
+        let svc = Arc::new(Service::new(
+            Store::new(d.path().join("attachments")),
+            Arc::new(Broker::new()),
+            Arc::new(ConfigState::new()),
+        ));
+        // Eight turns race for a 100-byte budget, each wanting up to 30.
+        let turns: Vec<_> = (0..8)
+            .map(|_| {
+                let svc = Arc::clone(&svc);
+                std::thread::spawn(move || {
+                    svc.with_session_inline_budget("session:s", None, 100, |budget| {
+                        std::thread::sleep(Duration::from_millis(2));
+                        ((), budget.min(30))
+                    })
+                })
+            })
+            .collect();
+        for t in turns {
+            t.join().unwrap();
+        }
+        assert_eq!(svc.store().session_inline_bytes("session:s"), 100);
     }
 
     #[test]
