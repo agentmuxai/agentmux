@@ -132,6 +132,9 @@ export function composeReinjectionMessage(entries: MemoryEntryInput[], reason: R
     );
 }
 
+/** How the running summary's heading starts — Rust's `append_state_to_reinjection` (`continuity_state.rs`). */
+export const RUNNING_SUMMARY_HEADING = "Running summary of this conversation";
+
 /** The rule between Global Memory sections — Rust's `GLOBAL_SECTION_SEPARATOR` (`storage/bundles.rs`), which the startup file's block uses. */
 export const GLOBAL_SECTION_SEPARATOR = "\n\n---\n\n";
 
@@ -185,8 +188,10 @@ export function parseReinjectionMessage(
     const parseSection = (label: "global" | "personal", heading: string): MemoryReinjectionNode["perEntryTokens"] => {
         // Ends at the next SECTION header, not at any `# ` line: Global Memory's
         // own sections carry `# [AgentMux System] …` / `# [Workspace] …` headings.
+        // The running summary a compaction reinjection carries last
+        // (`continuity_state::append_state_to_reinjection`) is a section too.
         const re = new RegExp(
-            `# ${heading} \\(\\d+ entr(?:y|ies)\\)\\n([\\s\\S]*?)(?:\\n# (?:Global|Personal) Memory \\(\\d+ entr|\\n?</system-reminder>)`,
+            `# ${heading} \\(\\d+ entr(?:y|ies)\\)\\n([\\s\\S]*?)(?:\\n# (?:Global|Personal) Memory \\(\\d+ entr|\\n# ${RUNNING_SUMMARY_HEADING}|\\n?</system-reminder>)`,
         );
         const match = re.exec(text);
         if (!match) return [];
