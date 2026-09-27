@@ -331,8 +331,44 @@ P0 and P1 are done; P2–P5 not started. Each phase is one PR.
       `parseHistoryLines.ts` to rebuild it from.
     Otherwise every hook delivery would be silent, because today the label is
     produced only when the frontend's own hidden turn ends.
-  - Verify first: size limits on `additionalContext`, and whether `compact`
-    fires after auto-compaction as well as `/compact`.
+  - **Measured, 2026-09-27** (the CLI AgentMux bundles, 2.1.280, headless
+    `claude -p --settings <file>` with test hooks):
+    - `additionalContext` reaches the model: a code word placed in it was
+      answered.
+    - **About 10,000 characters per hook command.** 9,950 arrived whole. At
+      10,050 and above the CLI replaced it with a saved file plus a **2 KB
+      preview** and the file's path, which the model could not read.
+    - **The cap is per hook command, and many are allowed.** Six hooks of
+      9 KB each (about 54 KB) all arrived whole.
+    - **Order follows completion, not configuration.** The hooks run in
+      parallel, and a staggered test came back reversed.
+    - `source` has a fifth value, **`fork`** (a `--fork-session` resume, which
+      is how AgentMux resumes a relocated session). Like `resume`, it continues
+      an intact conversation, so it gets no delivery (D10).
+    - Not yet verified: whether `compact` fires after an auto-compaction as
+      well as after `/compact`.
+  - **So the memory is split:** parts of at most 9,000 characters, each labelled
+    "[AgentMux memory — part N of M]", and a fixed number of hook commands
+    (8, so up to 72,000 characters). Each command asks srv for its own part
+    number. A larger memory is cut at the end, and the last part says how much
+    was left out.
+  - **Built in two PRs:**
+    - **P2a, srv side, inert until P2b installs the hook:**
+      - `backend/memory_delivery.rs`: composition, splitting and the
+        source rules;
+      - `server/memory_delivery_handlers.rs`:
+        `POST /api/v1/agent/memory/session-start/part` composes once per
+        (block, session, reason) and serves each part from that cache, so
+        parallel hooks get consistent parts;
+        `…/session-start/ack` marks a part written. Once every part is
+        acknowledged, one persisted `agentmux_memory_injected` frame goes to
+        the pane with each entry's label, bytes and tokens (D11);
+      - `continuity_state::running_summary_section` supplies the summary on
+        compaction, formatted as the hidden reinjection formats it.
+    - **P2b:**
+      - `agentmux-bashwrap sessionstart --part N` and the hook entries;
+      - the pane renders the notice from that frame;
+      - the frontend fallback asks srv before hiding.
 
 - **P3 — retire the frontend triggers for Claude.** Only after P2 is verified
   live: the hook fires for `startup`, `clear` and `compact`, and never delivers

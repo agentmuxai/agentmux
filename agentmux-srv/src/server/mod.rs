@@ -40,6 +40,7 @@ mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
 pub(crate) mod native_memory_handlers;
+pub(crate) mod memory_delivery_handlers;
 mod notify_handlers;
 mod ui_handlers;
 
@@ -657,6 +658,19 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/globalmemory/history", get(handle_agent_globalmemory_history))
         .route("/api/v1/agent/globalmemory/diff", get(handle_agent_globalmemory_diff))
         .route("/api/v1/agent/globalmemory/revert", post(handle_agent_globalmemory_revert))
+        // An agent's memory delivered through Claude Code's `SessionStart`
+        // hook, one part per hook command, then an acknowledgement per part —
+        // SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2. Called by
+        // `agentmux-bashwrap sessionstart`, whose `X-Agent-Token` names the
+        // agent whose Personal Memory is delivered.
+        .route(
+            "/api/v1/agent/memory/session-start/part",
+            post(memory_delivery_handlers::handle_session_start_part),
+        )
+        .route(
+            "/api/v1/agent/memory/session-start/ack",
+            post(memory_delivery_handlers::handle_session_start_ack),
+        )
         .route("/api/v1/agent/preset/list", get(handle_agent_preset_list))
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
