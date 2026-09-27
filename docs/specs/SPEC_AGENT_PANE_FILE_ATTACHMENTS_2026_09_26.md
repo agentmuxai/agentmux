@@ -39,14 +39,14 @@ Sources: https://platform.claude.com/docs/en/build-with-claude/pdf-support · ht
 
 1. The **numbered path list** already sent for images is the only route that works for every agent, so every file goes there.
 2. **Office files need a text version made by AgentMux** — no agent reads them. (claude.ai does the same: "for non-PDF files Claude extracts text only".)
-3. **PDFs** go inline to Claude as `document` blocks within the existing inline budgets (so Claude sees them without a tool call, and without poppler), and by path to everyone else. Stream-json `document` blocks are undocumented, so this needs a smoke test against the pinned CLI before relying on it (§11).
+3. **PDFs** go inline to Claude as `document` blocks within the existing inline budgets (so Claude sees them without a tool call, and without poppler), and by path to everyone else **plus an extracted text version** — Codex has no way to read a PDF at all. Stream-json `document` blocks are undocumented, so this needs a smoke test against the pinned CLI before relying on it (§11).
 
 ## 3. Goals
 
 1. Drop, Ctrl+V or right-click Paste **any file** into the composer; it gets a tile in the tray and is sent with the message. Same limits as images: 128 attachments and 1 GB per message.
 2. **Tiles:** a real thumbnail when the preview is cheap and safe; a colored type icon for everything else (§5).
 3. Every agent can reach every file; Office documents also come with an extracted text version; Claude gets PDFs inline.
-4. Nothing is written into the working folder.
+4. Nothing is written into the working folder — except for **container agents**, which can't see host paths: their panes keep today's copy-into-the-working-folder behavior for every dropped or pasted file (the working folder is bind-mounted at `/workspace`), until attachments are uploaded into containers (image spec phase 3).
 
 ## 4. Non-goals
 
@@ -86,8 +86,10 @@ Same pipeline, CPU and memory limits, cancel, dedup by SHA-256 and retention as 
 
 - **Store:** the original keeps a sanitized version of its real extension (`<sha256>.pdf`, `.docx`, …) so agents' tools recognise it. Metadata gains `kind`, `ext`, `page_count?`, `text_ext?`, `macros?`, `preview_ext?`.
 - **Text-like:** derive `preview.txt` (first 40 lines, ≤ 2 KB, cut at a UTF-8 boundary).
-- **PDF:** page count with `lopdf` (pure Rust, MIT), read under the extraction limits below; a malformed PDF just has no count. No text extraction in this spec: the PDF parsers that extract text panic on malformed input and would need process isolation.
-- **DOCX / PPTX:** open the ZIP and stream only the parts needed through `quick-xml`: `word/document.xml` (plus headers, footers, footnotes); `ppt/slides/slideN.xml` in the order `presentation.xml` lists them. Emit `<w:t>` / `<a:t>` text, newlines at paragraph ends, tabs for `<w:tab/>`. Output a `text.txt` derived file with a short header ("Text extracted from report.docx by AgentMux; formatting and images are not included.").
+- **PDF:** page count with `lopdf` (pure Rust, MIT), and a **text version** from `lopdf`'s text extraction. PDF parsers can panic or recurse deeply on malformed input, so both run in a **separate process**: srv re-runs its own executable with a hidden `__extract-pdf` argument, with a 30-second timeout after which the child is killed. A PDF it can't read (scanned, encrypted, malformed) is attached by path only and says so. PDFs over 100 MB get neither.
+- **DOCX / PPTX / ODT / ODP:** open the ZIP and stream only the parts needed through `quick-xml`: `word/document.xml` (plus headers, footers, footnotes); `ppt/slides/slideN.xml` in the order `presentation.xml` lists them; ODF `content.xml`. Emit `<w:t>` / `<a:t>` / `<text:p>` text, newlines at paragraph ends, tabs for `<w:tab/>`. Output a `text.txt` derived file with a short header ("Text extracted from report.docx by AgentMux. Formatting, images and embedded objects are not included.").
+- **RTF:** a small control-word stripper (skip `{\*…}` destinations, map `\par` / `\line` / `\tab`, decode `\'hh` and `\uN`).
+- **Legacy binary `.doc` / `.ppt`:** no text version (reading the OLE binary formats is out of scope). The tile and the agent's list say "no text version — save it as .docx/.pptx" instead of implying one exists.
 - **XLSX / ODS / XLS:** `calamine` (pure Rust, MIT); each sheet as tab-separated rows under a `## Sheet name` heading.
 - **Extraction limits** (research §7): ≤ 10,000 ZIP entries; a shared decompressed-bytes budget of 200 MB enforced with `.take()` (declared sizes can lie); refuse entries whose declared ratio exceeds 100:1; never follow nested archives; quick-xml resolves only predefined entities; extracted text capped at 2 MB (Codex's prompt limit is ~1M characters) with a "[truncated]" line; a 30-second wall-clock deadline per file. Any failure leaves the attachment attached by path only, with the tile note "No text version: <reason>".
 - **SVG:** no derived files; the thumbnail is the original.
@@ -98,16 +100,18 @@ The `<attached_images>` block becomes `<attached_files>` (the replay parser keep
 
 ```
 <attached_files>
-The user attached 4 files. The numbers match how the user refers to them. …
+The user attached 5 files. The numbers match how the user refers to them. …
 1. screenshot.png — /…/ab….v1-e2000.send.png
-2. spec.pdf [PDF, 12 pages] — /…/cd….pdf
+2. spec.pdf [PDF, 12 pages; text version: /…/cd….text.txt] — /…/cd….pdf
+5. notes.doc [Word document; no text version, save it as .docx] — /…/34….doc
 3. report.docx [Word document; text version: /…/ef….text.txt] — /…/ef….docx
 4. data.csv — /…/12….csv
 </attached_files>
 ```
 
 - **Claude (persistent stream-json):** images inline as now. **PDFs inline as `document` blocks** (base64, `application/pdf`, `title` = the file name) within the same per-message (20 MB) and per-session (50 MB) inline budgets, and only for PDFs of ≤ 100 pages. Everything else by path. The intro line says which files are shown above.
-- **Codex, Gemini, Qwen, Kimi, ACP:** the list only (ACP `resource_link` blocks are a later refinement).
+- **Codex, Gemini, Qwen, Kimi, ACP:** the list only, which includes the text versions of Office files and PDFs (ACP `resource_link` blocks are a later refinement).
+- **Container agents:** no attachments; the pane keeps the copy-to-working-folder behavior (§3).
 - Stored copies drop `document` blocks exactly like `image` blocks (`persisted_line`).
 
 ## 8. Frontend
@@ -127,7 +131,7 @@ The user attached 4 files. The numbers match how the user refers to them. …
 
 ## 10. Tests
 
-- srv: classification table (content vs extension, renamed ZIP as `.txt`, OOXML detection, macros via content types); DOCX/PPTX/XLSX extraction on small fixtures; a zip bomb (high ratio, many entries, forged sizes) refused within limits; PDF page count on a fixture and a malformed PDF; text preview cut at a UTF-8 boundary; list lines for each kind; Claude line with a `document` block and its stored form.
+- srv: classification table (content vs extension, renamed ZIP as `.txt`, OOXML detection, macros via content types); DOCX/PPTX/ODT/XLSX/RTF extraction on small fixtures; PDF text via the child process, including a malformed PDF and a killed-on-timeout child; a zip bomb (high ratio, many entries, forged sizes) refused within limits; PDF page count on a fixture and a malformed PDF; text preview cut at a UTF-8 boundary; list lines for each kind; Claude line with a `document` block and its stored form.
 - frontend: tile kind → icon/thumbnail; text preview rendered as text; summary wording for mixed attachments; parser reads `<attached_files>` and the old `<attached_images>`.
 
 ## 11. Rollout
