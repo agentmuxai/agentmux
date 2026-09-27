@@ -470,3 +470,120 @@ fn a_head_recorded_before_identity_keys_under_another_person_is_not_relocated() 
     assert!(!here(&f, "s2").exists(), "nothing copied");
 }
 
+
+// ── The gate runs under the agent's lease ──
+
+/// A lease store in its own temp registry, so the fixture's [`UID`] never
+/// meets another test's lease.
+fn lease_registry() -> (tempfile::TempDir, Arc<crate::registry::Registry>) {
+    let tmp = tempfile::tempdir().unwrap();
+    let registry = Arc::new(crate::registry::Registry::open(tmp.path().to_path_buf()).unwrap());
+    (tmp, registry)
+}
+
+fn leased(sid: Option<&str>, registry: &Arc<crate::registry::Registry>, boot: &str) -> PersistentSubprocessController {
+    controller_holding(sid).with_agent_lease_store(Some(Arc::clone(registry)), Arc::from(boot))
+}
+
+/// The fixture's head `s2`, only under an old login of the same identity:
+/// a spawn holding it relocates it.
+fn relocatable(f: &Fixture) -> tempfile::TempDir {
+    let key = sign_in(f, "acc-1", "org-1");
+    let old = other_login("acc-1", "org-1", "s2");
+    segment_in(&f.gfs, "s2", 2_000, Some(&key), Some(&old.path().to_string_lossy()));
+    old
+}
+
+/// Another instance runs the agent: the spawn is refused before the gate
+/// sweeps, relocates or copies anything.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_spawn_the_lease_refuses_never_reaches_the_gate() {
+    let f = fixture(&[]);
+    let _old = relocatable(&f);
+    let (_reg, registry) = lease_registry();
+    let store = crate::backend::agent_admission::lease_store_for(Some(Arc::clone(&registry))).unwrap();
+    let _other = crate::backend::agent_admission::acquire(&store, UID, "AgentA", &Arc::from("other-srv"), "other-block", None, |_| {}).unwrap();
+
+    let c = leased(Some("s2"), &registry, "this-srv");
+    let err = c.lease_then_gate(&f.config, Some(&f.gfs), None).err().expect("refused");
+
+    assert!(err.contains("already running in another AgentMux instance"), "got: {err}");
+    assert!(c.inner.lock().unwrap().fork_copy.is_none(), "the gate must not have run");
+    assert!(!here(&f, "s2").exists(), "nothing relocated in");
+}
+
+/// The race #3924 kept narrowing: a second controller of the agent spawning
+/// while the first holds it is refused at the lease, so it never sweeps the
+/// first one's copy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_second_controller_cannot_sweep_the_holders_relocation() {
+    let f = fixture(&[]);
+    let _old = relocatable(&f);
+    let (_reg, registry) = lease_registry();
+
+    let first = leased(Some("s2"), &registry, "this-srv");
+    let lease = first.lease_then_gate(&f.config, Some(&f.gfs), None).unwrap();
+    assert!(lease.is_some(), "the first spawn holds the agent");
+    let copy = first.inner.lock().unwrap().fork_copy.clone().expect("relocated under the lease").copy;
+    assert_eq!(copy, here(&f, "s2"));
+
+    let second = leased(Some("s2"), &registry, "other-srv");
+    assert!(second.lease_then_gate(&f.config, Some(&f.gfs), None).is_err());
+    assert!(second.inner.lock().unwrap().fork_copy.is_none());
+    assert!(copy.exists(), "the holder's copy is untouched");
+    drop(lease);
+}
+
+/// The agent's other pane in this process holds the lease with this very
+/// conversation open: that is the held-elsewhere refusal, which callers
+/// never answer with a fresh session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_other_pane_holding_the_conversation_is_reported_as_held_elsewhere() {
+    let f = fixture(&[]);
+    let sid = format!("sid-{}", uuid::Uuid::new_v4());
+    let (_reg, registry) = lease_registry();
+    let store = crate::backend::agent_admission::lease_store_for(Some(Arc::clone(&registry))).unwrap();
+    let live_block = format!("live-{}", uuid::Uuid::new_v4());
+    let _held = crate::backend::agent_admission::acquire(&store, UID, "AgentA", &Arc::from("this-srv"), &live_block, None, |_| {}).unwrap();
+    let live = Arc::new(PersistentSubprocessController::new("tab".into(), live_block.clone(), None, None, None, None));
+    {
+        let mut g = live.inner.lock().unwrap();
+        g.session_id = Some(sid.clone());
+        g.current_pid = Some(4242);
+    }
+    crate::backend::blockcontroller::register_controller(&live_block, live.clone());
+
+    let c = leased(Some(&sid), &registry, "this-srv");
+    let err = c.lease_then_gate(&f.config, Some(&f.gfs), None).err().expect("refused");
+    crate::backend::blockcontroller::delete_controller(&live_block);
+
+    assert!(super::super::is_held_elsewhere_error(&err), "got: {err}");
+}
+
+/// Camper on #3935: this pane holds a stale id, and the agent's live pane in
+/// this process — on another session — holds the lease. Still "open in
+/// another pane" (with that pane's block), not "another instance", so the
+/// callers settle queued prompts instead of falling back to a fresh session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stale_pane_refused_by_the_agents_live_pane_is_held_elsewhere() {
+    let f = fixture(&[]);
+    let (_reg, registry) = lease_registry();
+    let store = crate::backend::agent_admission::lease_store_for(Some(Arc::clone(&registry))).unwrap();
+    let live_block = format!("live-{}", uuid::Uuid::new_v4());
+    let held = crate::backend::agent_admission::acquire(&store, UID, "AgentA", &Arc::from("this-srv"), &live_block, None, |_| {}).unwrap();
+    let live = Arc::new(PersistentSubprocessController::new("tab".into(), live_block.clone(), None, None, None, None));
+    {
+        let mut g = live.inner.lock().unwrap();
+        g.session_id = Some(format!("head-{}", uuid::Uuid::new_v4()));
+        g.current_pid = Some(4242);
+        g.agent_lease = Some(Arc::new(held));
+    }
+    crate::backend::blockcontroller::register_controller(&live_block, live.clone());
+
+    let stale = leased(Some(&format!("stale-{}", uuid::Uuid::new_v4())), &registry, "this-srv");
+    let err = stale.lease_then_gate(&f.config, Some(&f.gfs), None).err().expect("refused");
+    crate::backend::blockcontroller::delete_controller(&live_block);
+
+    assert!(super::super::is_held_elsewhere_error(&err), "got: {err}");
+    assert!(err.contains(&live_block), "names the live pane: {err}");
+}
