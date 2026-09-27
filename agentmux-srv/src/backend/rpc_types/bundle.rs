@@ -130,6 +130,11 @@ pub struct GlobalMemoryDiffResult {
     pub diff: String,
 }
 
+/// `globalmemory:sections` — no arguments.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandGlobalMemorySectionsData {}
+
 /// `globalmemory:import_sources` — no arguments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]

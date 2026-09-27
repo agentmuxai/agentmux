@@ -52,5 +52,5 @@ pub use error::StoreError;
 pub use history::AgentHistory;
 pub use identities::{AgentIdentityLink, IdentityAccount, SecretRef};
 pub use mcp_servers::McpServer;
-pub use bundles::{format_global_bundle_block, Bundle, BundleReseedOutcome};
+pub use bundles::{format_global_bundle_block, global_bundle_sections, Bundle, BundleReseedOutcome, GlobalMemorySection};
 pub use skills::{AgentSkill, Skill};

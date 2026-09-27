@@ -287,6 +287,10 @@ pub const COMMAND_GLOBAL_MEMORY_REVERT: &str = "globalmemory:revert";
 /// Global Memory into an isolated channel from another scope's record.
 pub const COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES: &str = "globalmemory:import_sources";
 pub const COMMAND_GLOBAL_MEMORY_IMPORT: &str = "globalmemory:import";
+/// The Global Memory block agents' startup files carry, as its sections —
+/// what memory reinjection re-delivers, Operator Config included
+/// (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
+pub const COMMAND_GLOBAL_MEMORY_SECTIONS: &str = "globalmemory:sections";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";
