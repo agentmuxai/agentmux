@@ -1092,13 +1092,28 @@ mod top_level;
 /// internal to `quit` — used by `count_live_user_windows` and its tests.)
 /// Test-only re-export so `background_audit`'s tests can mirror the exact
 /// decision `update` makes, rather than duplicating the rule and drifting.
+/// The WS4 attended/unattended crossing for this state once `live_after` user
+/// windows remain — every input read from `state`, so a quit in progress
+/// (`quit_state` past `Running`) is never mistaken for going to the background.
+/// Split out of `update` with the live count as a parameter so it can be tested:
+/// unit tests can't register a live window (a `BrowserHandle` needs a real
+/// `cef::Browser`).
+pub(crate) fn attention_after(state: &HostState, live_after: usize) -> Option<bool> {
+    quit::background_attention_transition(
+        state.background_service_enabled,
+        !matches!(state.quit_state, crate::state::QuitState::Running),
+        state.background_unattended,
+        live_after,
+    )
+}
+
 #[cfg(test)]
 pub(crate) fn background_attention_transition_for_test(
     enabled: bool,
     currently_unattended: bool,
     live_after: usize,
 ) -> Option<bool> {
-    quit::background_attention_transition(enabled, currently_unattended, live_after)
+    quit::background_attention_transition(enabled, false, currently_unattended, live_after)
 }
 
 pub(crate) use quit::{count_live_user_windows, live_user_window_labels};
@@ -1242,11 +1257,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         // window next opens. Computed here rather than at the close/open call
         // sites for the same reason `request_drain` is — one place that sees
         // every transition, instead of N sites that each have to remember.
-        out.background_attention = quit::background_attention_transition(
-            state.background_service_enabled,
-            state.background_unattended,
-            quit::count_live_user_windows(state),
-        );
+        out.background_attention = attention_after(state, quit::count_live_user_windows(state));
         // Update the flag HERE, under the same lock that decided it, so the
         // decision and the state it is based on can never be applied out of
         // order by two concurrent dispatches.
