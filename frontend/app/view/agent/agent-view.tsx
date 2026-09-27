@@ -903,6 +903,12 @@ const AgentPresentationView = ({
         // outgoing bubble (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
         agentName,
         definitionId: agentId,
+        // What the live feed keeps: its K finished turns plus the one in
+        // flight. Only Claude's transcript is split into turns on the
+        // backend. Read at restore time — after this component's body, so
+        // the live-feed consts declared below are set.
+        restoreTurns: () =>
+            liveFeedOn() && outputFormat() === "claude-stream-json" ? liveFeedTurns + 1 : undefined,
         onHistoryReady: () => {
             historyReadyFn?.();
             // A pane opens with K turns, not the load window's worth (§6.9).

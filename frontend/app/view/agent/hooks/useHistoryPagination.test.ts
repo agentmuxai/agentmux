@@ -338,3 +338,84 @@ describe("useHistoryPagination — cross-block continuation restore (#1397)", ()
         );
     });
 });
+
+describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGENT_OPEN_LATENCY §4.5)", () => {
+    const sameBlockV2 = () => {
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
+            content: JSON.stringify({
+                schemaVersion: 2,
+                savedAt: "2026-09-27T00:00:00Z",
+                highWaterMark: 6000,
+                sourceBlockId: "blk-1",
+                documentState: {},
+            }),
+            modts: Date.now() - 60_000,
+        });
+    };
+    const mount = (restoreTurns?: () => number | undefined) => {
+        const model = makeMockModel();
+        const pins: any[] = [];
+        let hook!: ReturnType<typeof useHistoryPagination>;
+        createRoot((d) => {
+            dispose = d;
+            hook = useHistoryPagination({
+                blockId: "blk-1",
+                model,
+                outputFormat: () => "claude-stream-json",
+                definitionId: "def-claude",
+                log: () => {},
+                transcriptSettle: { settle: (pin: any) => pins.push(pin) } as any,
+                restoreTurns,
+            });
+        });
+        return { model, pins, hook: () => hook };
+    };
+    const flush = async () => {
+        for (let i = 0; i < 4; i++) await flushMicrotasks();
+    };
+
+    it("asks for the last turns and continues from where they start", async () => {
+        sameBlockV2();
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
+            lines: ['{"type":"user","message":{"content":"latest"}}'],
+            total: 6000,
+            offset: 5999,
+            stream: "b:blk-1",
+            gen: "g1",
+        });
+        const { pins, hook } = mount(() => 7);
+        await flush();
+        expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledWith(
+            {},
+            expect.objectContaining({ offset: 1000, limit: 5000, tail_turns: 7 }),
+            { timeout: 30_000 },
+        );
+        // The live cursor resumes after the returned lines, contiguous from
+        // their start, and load-older pages back from there.
+        expect(pins).toEqual([{ stream: "b:blk-1", gen: "g1", next: 6000 }]);
+        expect(hook().historyOffset()).toBe(5999);
+    });
+
+    it("an older srv that ignores tail_turns returns the window, and that's where it starts", async () => {
+        sameBlockV2();
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
+            lines: Array.from({ length: 5000 }, () => "{}"),
+            total: 6000,
+            stream: "b:blk-1",
+            gen: "g1",
+        });
+        const { pins, hook } = mount(() => 7);
+        await flush();
+        expect(pins).toEqual([{ stream: "b:blk-1", gen: "g1", next: 6000 }]);
+        expect(hook().historyOffset()).toBe(1000);
+    });
+
+    it("without restoreTurns (live feed off, not Claude) the request has no tail_turns", async () => {
+        sameBlockV2();
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({ lines: [], total: 6000 });
+        mount(() => undefined);
+        await flush();
+        const [, data] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0];
+        expect(data).not.toHaveProperty("tail_turns");
+    });
+});

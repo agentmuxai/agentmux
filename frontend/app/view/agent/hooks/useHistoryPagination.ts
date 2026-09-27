@@ -100,6 +100,16 @@ export interface UseHistoryPaginationOptions {
      */
     transcriptSettle?: TranscriptSettleLatch;
     log: LogFn;
+    /**
+     * Restore only this many trailing turns instead of the whole
+     * `RESTORE_WINDOW_LINES` window: the pane's live feed keeps the turn in
+     * flight plus its last K finished turns and rolls the rest off right
+     * after the restore, so reading, sending and parsing them was wasted —
+     * in one real transcript the last 6 turns were 39% of the window
+     * (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5). Called once, when the
+     * restore reads. Undefined: the whole window.
+     */
+    restoreTurns?: () => number | undefined;
 }
 
 export interface UseHistoryPagination {
@@ -352,20 +362,26 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             }
                         }
                         const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
+                        const tailTurns = opts.restoreTurns?.();
                         const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
                             block_id: opts.blockId,
                             filename: "output",
                             offset: windowStart,
                             limit: hwm - windowStart,
+                            ...(tailTurns ? { tail_turns: tailTurns } : {}),
                         }, { timeout: 30_000 });
                         if (!mounted) return;
+                        // Where the returned lines start: the backend trims to
+                        // the last `tail_turns` turns and says where they begin
+                        // (an older srv ignores the field and returns the window).
+                        const readStart = typeof rangeResp.offset === "number" ? rangeResp.offset : windowStart;
                         markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
                         const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
                         markAgentOpen(opts.blockId, "parsed");
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Right after the dispatch, before anything else can
                         // run: live records must land after these nodes.
-                        opts.transcriptSettle?.settle(historyPin(windowStart, rangeResp));
+                        opts.transcriptSettle?.settle(historyPin(readStart, rangeResp));
                         // Hydrate the composer strip's context-fill bar from the
                         // resumed conversation's last known usage instead of
                         // leaving it blank until the first live turn — see
@@ -398,7 +414,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         // asks for offsets below the floor. See the invariant at the
                         // NDJSON replay path below.
                         const available = typeof rangeResp.total === "number" ? rangeResp.total : hwm;
-                        const clampedStart = Math.min(windowStart, available);
+                        const clampedStart = Math.min(readStart, available);
                         // Session-scope edge (spec §3.2): a fresh boundary
                         // inside the restored window means the reducer
                         // clamped the visible document at it — lines older

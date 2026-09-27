@@ -100,8 +100,8 @@ After the F3 correction, this is worth tens of milliseconds, not hundreds. Land 
 
 ### 4.5 Size the restore to the live feed (F5, small)
 
-- Skip `stream_event` lines in the restore replay when the matching final `assistant` message is inside the window. The replay produces the same nodes from a sixth of the lines.
-- Size the window from the last K turn starts (the backend's output index already has line offsets), not a fixed 5,000 lines.
+- Size the window from the last K turn starts, not a fixed 5,000 lines. **Done:** the restore sends `tail_turns` (K + 1, the turn in flight) and the backend returns only those turns plus where they start. In AgentA's real window that is 1,944 of 5,000 lines (39 %), and the live traces show the read, not the parse, dominates (150–750 ms vs ~50 ms).
+- ~~Skip `stream_event` lines when the matching final `assistant` message is inside the window.~~ **Not safe (2026-09-27):** in Claude's stream-json the final `assistant` frame carries only tool calls; assistant text and thinking arrive only as `stream_event` deltas (`claude-translator.ts` `handleAssistantMessage`), so dropping the deltas drops the text.
 
 ### 4.6 Measure opens, and teach muxlog to report them (F6)
 
