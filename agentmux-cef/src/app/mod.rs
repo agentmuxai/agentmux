@@ -379,8 +379,8 @@ wrap_browser_view_delegate! {
             // window_info out-param, not exposed by the current cef-rs wrapper)
             // — tracked as a follow-up ("circle back on login-window sizing").
             // The bounds are still computed/passed so the Alloy path (and a
-            // future Chrome-sizing hook) get correct geometry. macOS/Linux
-            // return None from get_monitor_work_area (stubs) → default sizing.
+            // future Chrome-sizing hook) get correct geometry. Linux returns
+            // None from get_monitor_work_area (stub) → default sizing.
             let initial_bounds = if is_devtools == 0 {
                 get_monitor_work_area(0, 0).map(|(wx, wy, ww, wh)| {
                     let w = (ww as f64 * 0.55).round() as i32;
