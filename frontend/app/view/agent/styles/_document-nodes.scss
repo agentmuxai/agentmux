@@ -2457,6 +2457,10 @@ $transcript-preview-max-height: calc(50vh / 3);
         &[data-tool="#{$tool}"] { color: $color; }
     }
 
+    // The tool's name in front of the argument ("Bash ls"): same colour,
+    // bolder, like the row's label reads against its detail.
+    .agent-node-peek-tooltip-tool { font-weight: 600; }
+
     // A persistent shell's row shows its command as `.agent-shell-header-cmd`
     // in the secondary text colour; the popover matches it.
     &--shell { color: var(--secondary-text-color); }

@@ -169,6 +169,20 @@ colour.
   line of its own, so a long path jumps to a new line first and leaves a ragged gap. `word-break: break-all`
   breaks at whatever character reaches the edge, so every line fills. `pre-wrap` keeps real newlines and spaces.
 
+### 4.2a The tool's name in front of the argument
+
+Added after the first review in a dev build (user, 2026-09-27): the popover names the tool before its argument,
+`Bash ls -la`, `Read /a/b.ts`, `WebSearch solid docs`. The row shows an icon for the tool rather than its name, so
+the popover spells it out.
+
+- Markup (`ToolBlock.tsx`): `<span class="agent-node-peek-tooltip-tool">{name}</span> {argument}` inside the
+  body, so the name takes the body's per-tool colour and monospace font; the name is `font-weight: 600`.
+- The name is the tool's raw name (`toolNameOf`), except MCP tools, which read `server · tool`
+  (`mcpDisplayName`) rather than `mcp__server__tool`. In practice MCP rows have no argument and so no command
+  line in the popover.
+- Only when there is an argument: a tool with no detail still shows no command line, as before. The persistent
+  shell's popover is unchanged (it's a shell, not a tool call).
+
 ### 4.3 Call sites
 
 Each of the seven files in §2 swaps its two meta `<Show>` blocks for
