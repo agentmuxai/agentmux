@@ -488,6 +488,15 @@ jobs:
       - name: Ligature font gate
         run: bash scripts/check-ligature-fonts.sh
 
+      # Every release packager must copy every tool agents run by bare name
+      # (agent_config.rs) into tools/bin. macOS and Linux shipped without
+      # agentmux-bashwrap from their first release, and nothing noticed: a
+      # missing hook binary is a non-blocking hook error, so Bash just ran
+      # unwrapped. Packaging only runs at release time, so this is the PR-time
+      # check.
+      - name: Bundled tools gate
+        run: bash scripts/check-bundled-tools.sh
+
       # scripts/cef-verify.sh is the carry-set gate for the CEF fork
       # (docs/cef-build/CEF_FORK_MAINTENANCE.md §5). It runs against a CEF
       # checkout, which CI does not have -- so what runs here is its TEST SUITE,
