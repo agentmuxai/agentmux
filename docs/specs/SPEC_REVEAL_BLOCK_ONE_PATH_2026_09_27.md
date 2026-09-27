@@ -2,7 +2,7 @@
 
 **Author:** lark
 **Date:** 2026-09-27
-**Status:** active — Phase 1 (revealBlock, Swarm + token popover) shipped in PR #3961; Phase 2 (move the other callers, delete duplicates), Phase 3 (other windows) and the optional MCP tool not started.
+**Status:** active — Phase 1 (revealBlock, Swarm + token popover) shipped in PR #3961; Phase 2 (notification clicks, AgentPicker, fork pill moved over; focus-block.ts deleted) in PR #3972; Phase 3 (other windows) and the optional MCP tool not started.
 **Related:** `SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md` §2.3 (Swarm select-to-focus),
 `SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md` (token popover → agent pane), the OS-notification
 rich-content spec (`notification:activate`, `os-notify-bridge.ts`), the in-pane tabs work
