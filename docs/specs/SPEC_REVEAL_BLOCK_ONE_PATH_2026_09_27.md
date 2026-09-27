@@ -175,9 +175,12 @@ Each phase is its own PR.
 
 There is no `focus-block.test.ts` today, and every current caller mocks `focusBlock` out. Phase 1 adds
 `reveal-block.test.ts`, which records calls on a fake layout model with `setActiveBlockInStack` stubbed. What it
-pins is what `revealBlockLocally` adds, the steps and their order; the stack switch itself (including that an
-already-active member writes nothing: no `persistToBackend`) is already covered against a real `LayoutModel` in
-`layout/tests/layoutStack.test.ts` (`setActiveBlockInStack`):
+pins is what `revealBlockLocally` adds, the steps and their order. The stack switch itself is tested against a
+real `LayoutModel` in `layout/tests/layoutStack.test.ts` (`setActiveBlockInStack`); PR #3961 adds the case
+`revealBlockLocally` relies on, since it calls the switch on every reveal: it persists only on a real switch,
+never for the already-active tab or a single-block pane (a `persistToBackend` spy).
+
+`reveal-block.test.ts` covers:
 
 - a background member of a multi-tab pane: window tab activated, then `setActiveBlockInStack(pane, block)`, then
   `focusNode(pane)`, then `giveBlockFocus(block)` — the caret strictly **after** the stack switch;

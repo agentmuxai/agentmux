@@ -282,6 +282,27 @@ describe("layoutStack", () => {
             expect(model.treeState.rootNode!.data).toEqual(before);
         });
 
+        // revealBlockLocally (app/util/reveal-block.ts) calls this unconditionally
+        // on every reveal, relying on it to write nothing when there is nothing to
+        // switch. SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §6.
+        it("persists only on a real switch — never for the already-active tab or a single-block pane", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const persist = vi.spyOn(model, "persistToBackend");
+
+            setActiveBlockInStack(model, nodeId, "b1"); // single-block pane
+            expect(persist).not.toHaveBeenCalled();
+
+            pushBlockOntoStack(model, nodeId, "b2"); // active = b2
+            persist.mockClear();
+            setActiveBlockInStack(model, nodeId, "b2"); // already active
+            expect(persist).not.toHaveBeenCalled();
+
+            setActiveBlockInStack(model, nodeId, "b1"); // real switch
+            expect(persist).toHaveBeenCalledTimes(1);
+            expect(model.treeState.rootNode!.data!.activeBlockId).toBe("b1");
+        });
+
         it("does NOT evict the cached NodeModel, on a real switch or on a no-op re-activation", () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
