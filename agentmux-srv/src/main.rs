@@ -36,8 +36,10 @@ use server::build_routers;
 
 #[tokio::main]
 async fn main() {
-    // -2. PDF reading child: srv re-runs itself to read an attached PDF out
-    //     of process, since PDF parsers can crash on malformed input
+    // -2. Document reading child: srv re-runs itself to parse one attached
+    //     document (PDF, Word, Excel, PowerPoint, ODF, RTF) out of process,
+    //     since parsers can crash, recurse or run long on hostile input and
+    //     the parent kills the child at its deadline
     //     (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §6). Nothing else
     //     may start in this mode.
     {
