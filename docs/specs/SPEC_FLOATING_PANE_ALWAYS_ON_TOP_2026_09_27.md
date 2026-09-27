@@ -1,7 +1,7 @@
 # SPEC: "Always on top" for floating panes
 
 **Date:** 2026-09-27
-**Status:** proposed
+**Status:** active — Phase 1 (Windows) implemented in PR #3970; live verification pending on a test machine (#3969). Phase 2 (macOS/Linux, §7) not started.
 **Author:** Clamk, at the repo owner's request: "introduce 'always on top' for floating panes … an extended header entry near the window controls (similar to the stash on the agent pane), use the tack symbol; when selected it is highlighted using the theme color and the floating pane will remain atop every window in the running agentmux instance. If 2 tacked floating panes overlap, they behave normally relative to each other."
 **Scope:** Windows first (Phase 1). macOS/Linux in Phase 2.
 

@@ -514,6 +514,7 @@ partial list.
 | [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) | SPEC: durable conversation memory — one continuous conversation per agent, in every case |
 | [`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24`](SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) | SPEC: durable jekt delivery — a message to an absent agent is held, not dropped |
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
+| [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
 | [`SPEC_GATED_RENDERER_RECOVERY_2026_06_01`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) | Gated Renderer Recovery — Memory-Aware Crash Handling |
 | [`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Spec: Global Memory delivery into agents — single source of truth |
@@ -624,7 +625,6 @@ partial list.
 | [`SPEC_FIRST_CLASS_GITHUB_APP_AND_AWS_IDENTITY_2026_09_19`](SPEC_FIRST_CLASS_GITHUB_APP_AND_AWS_IDENTITY_2026_09_19.md) | SPEC: GitHub App and AWS as first-class AgentMux identities |
 | [`SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01`](SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md) | Spec: Personal Memory is empty for any agent with a blank `working_directory` |
 | [`SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14`](SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14.md) | SPEC: Fleet-wide crash & hang forensic logging — implementation plan |
-| [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22`](SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md) | Floating-pane DnD lifecycle — architecture rethink |
 | [`SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`](SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30.md) | SPEC — Rename Pool-Promoted Floating Panes to `floating-<uuid>` (Option A) |
 | [`SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md) | Phase 4a Re-dock — MVP scope decision |
