@@ -148,3 +148,20 @@ export function createDragPreviewIntent(
         dispose: cancel,
     };
 }
+
+/**
+ * What a whole-pane drag can't start from, though it sits in the header:
+ * a Pane Tab pill (it has its own draggable) and the tab strip's "+".
+ * Shared by the pane's `canDrag` and {@link pressCanStartPaneDrag}.
+ */
+export const PANE_DRAG_EXCLUDED = ".pane-tab, .pane-tab-strip-add";
+
+/**
+ * Could a press on `target` start a whole-pane drag — on the pane's header,
+ * but not on a tab pill or "+"? Only then is it worth rasterising the ghost
+ * at once: switching tabs is a header click too (ReAgent P1 on #3940).
+ */
+export function pressCanStartPaneDrag(target: Element | null): boolean {
+    if (!target?.closest?.('[data-role="block-header"]')) return false;
+    return !target.closest(PANE_DRAG_EXCLUDED);
+}
