@@ -239,6 +239,10 @@ declare global {
         /** Open a URL in the system browser; rejects if the host could not. */
         openExternalChecked(url: string): Promise<void>;
         readClipboardText(): Promise<string>;
+        /** The clipboard's text plus paths for its copied files or image data
+         *  (image data written to a temp file by the host). For the agent
+         *  composer's right-click Paste, which has no `paste` event. */
+        readClipboardAttachments(): Promise<{ text: string; paths: string[] }>;
         writeClipboardText(text: string): Promise<void>;
         /** Local paths of the files an OS drag just dropped (`nativeFileDrop`). */
         consumeDroppedFilePaths(): Promise<string[]>;

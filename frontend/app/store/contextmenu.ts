@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi, openLink } from "./global";
-import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
+import {
+    readAttachments as clipboardReadAttachments,
+    readText as clipboardReadText,
+    writeText as clipboardWriteText,
+} from "@/util/clipboard";
 import * as util from "@/util/util";
 
 class ContextMenuModelType {
@@ -152,7 +156,20 @@ async function getClipboardURL(): Promise<URL | null> {
  * "Undo" (AgentFooter.tsx). When provided, the menu shows even if none of
  * the standard items are enabled (an empty composer still offers Undo).
  */
-async function showTextInputContextMenu(e: MouseEvent, leadingItems?: ContextMenuItem[]): Promise<void> {
+export interface TextInputMenuOptions {
+    /**
+     * Also take files and image data from the clipboard on Paste (the agent
+     * composer's image attachments). Receives their paths; the text part is
+     * still inserted as usual.
+     */
+    onPasteAttachments?: (paths: string[]) => void;
+}
+
+async function showTextInputContextMenu(
+    e: MouseEvent,
+    leadingItems?: ContextMenuItem[],
+    opts?: TextInputMenuOptions,
+): Promise<void> {
     e.preventDefault();
     e.stopPropagation();
     const canPaste = canEnablePaste();
@@ -199,6 +216,16 @@ async function showTextInputContextMenu(e: MouseEvent, leadingItems?: ContextMen
             label: "Paste",
             role: "paste",
             click: () => {
+                const onPasteAttachments = opts?.onPasteAttachments;
+                if (onPasteAttachments) {
+                    void clipboardReadAttachments()
+                        .then(({ text, paths }) => {
+                            if (text) insertIntoInput(target, text);
+                            if (paths.length > 0) onPasteAttachments(paths);
+                        })
+                        .catch(() => {});
+                    return;
+                }
                 void clipboardReadText()
                     .then((text) => {
                         if (text) insertIntoInput(target, text);
