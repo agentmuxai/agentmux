@@ -64,7 +64,94 @@ pub(crate) struct EntrySize {
     pub tokens: usize,
 }
 
-static DELIVERIES: LazyLock<Mutex<HashMap<DeliveryKey, Delivery>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// How long a claim on one event (a session start, a compaction) holds: the
+/// hook and the frontend's fallback for the same event arrive within
+/// seconds of each other, and one block has no two such events that close.
+const CLAIM_WINDOW_MS: i64 = 60_000;
+
+/// How long the fallback waits for a hook delivery still in flight, and how
+/// often it looks. A hook that never finishes must not leave the agent with
+/// no memory, so after this the fallback delivers instead.
+const PENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+const PENDING_POLL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Deliveries and fallback claims, behind one lock so "who claimed this event
+/// first" is decided atomically.
+#[derive(Default)]
+struct DeliveryState {
+    deliveries: HashMap<DeliveryKey, Delivery>,
+    /// Events the frontend's hidden-reinjection fallback claimed:
+    /// (block, reason) → when.
+    fallback_claims: HashMap<(String, Reason), i64>,
+}
+
+/// What the fallback's claim found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FallbackClaim {
+    /// Nothing delivered this event yet, or the fallback claimed it already:
+    /// the fallback delivers.
+    Deliver,
+    /// The hook delivered this event completely: the fallback stands down.
+    Skip,
+    /// The hook is delivering this event right now.
+    Pending,
+}
+
+impl DeliveryState {
+    fn prune(&mut self, now: i64) {
+        self.deliveries.retain(|_, d| now - d.created_ms < DELIVERY_TTL_MS);
+        self.fallback_claims.retain(|_, at| now - *at < CLAIM_WINDOW_MS);
+    }
+
+    fn fallback_claimed(&self, block_id: &str, reason: Reason) -> bool {
+        self.fallback_claims.contains_key(&(block_id.to_string(), reason))
+    }
+
+    /// The hook's deliveries of this event, newest first.
+    fn hook_deliveries_mut(&mut self, block_id: &str, reason: Reason, now: i64) -> Vec<&mut Delivery> {
+        let mut found: Vec<&mut Delivery> = self
+            .deliveries
+            .iter_mut()
+            .filter(|(k, d)| k.block_id == block_id && k.reason == reason && now - d.created_ms < CLAIM_WINDOW_MS)
+            .map(|(_, d)| d)
+            .collect();
+        found.sort_by_key(|d| std::cmp::Reverse(d.created_ms));
+        found
+    }
+
+    /// The fallback's atomic claim on an event. A `Deliver` for an unclaimed
+    /// event records the claim, so the hook's parts for it come back empty.
+    fn claim_fallback(&mut self, block_id: &str, reason: Reason, now: i64) -> FallbackClaim {
+        if self.fallback_claimed(block_id, reason) {
+            return FallbackClaim::Deliver;
+        }
+        let hook = self.hook_deliveries_mut(block_id, reason, now).into_iter().next().map(|d| d.notice_sent);
+        match hook {
+            Some(true) => FallbackClaim::Skip,
+            Some(false) => FallbackClaim::Pending,
+            None => {
+                self.fallback_claims.insert((block_id.to_string(), reason), now);
+                FallbackClaim::Deliver
+            }
+        }
+    }
+
+    /// The fallback gave up waiting for the hook: it delivers, and the hook's
+    /// unfinished delivery is closed so a late acknowledgement adds no second
+    /// notice.
+    fn take_over_from_hook(&mut self, block_id: &str, reason: Reason, now: i64) {
+        for d in self.hook_deliveries_mut(block_id, reason, now) {
+            d.notice_sent = true;
+        }
+        self.fallback_claims.insert((block_id.to_string(), reason), now);
+    }
+}
+
+static STATE: LazyLock<Mutex<DeliveryState>> = LazyLock::new(|| Mutex::new(DeliveryState::default()));
+
+fn state_lock() -> std::sync::MutexGuard<'static, DeliveryState> {
+    STATE.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct PartRequest {
@@ -106,9 +193,13 @@ pub(crate) async fn handle_session_start_part(
     let now = agentmux_common::time::now_ms();
 
     let cached = {
-        let mut map = DELIVERIES.lock().unwrap_or_else(|e| e.into_inner());
-        map.retain(|_, d| now - d.created_ms < DELIVERY_TTL_MS);
-        map.get(&key).cloned()
+        let mut st = state_lock();
+        st.prune(now);
+        // The frontend's fallback already delivered this event: stand down.
+        if st.fallback_claimed(&req.block_id, reason) {
+            return Json(PartResponse { text: None, part: req.part, of: 0 });
+        }
+        st.deliveries.get(&key).cloned()
     };
     let delivery = match cached {
         Some(d) => d,
@@ -129,8 +220,12 @@ pub(crate) async fn handle_session_start_part(
             };
             // A concurrent part may have composed first: keep that one, so
             // every part of this session start is from the same composition.
-            let mut map = DELIVERIES.lock().unwrap_or_else(|e| e.into_inner());
-            map.entry(key).or_insert(composed).clone()
+            // And the fallback may have claimed the event meanwhile.
+            let mut st = state_lock();
+            if st.fallback_claimed(&req.block_id, reason) {
+                return Json(PartResponse { text: None, part: req.part, of: 0 });
+            }
+            st.deliveries.entry(key).or_insert(composed).clone()
         }
     };
     Json(part_response(&delivery, req.part))
@@ -143,8 +238,8 @@ pub(crate) async fn handle_session_start_ack(State(state): State<AppState>, Json
     };
     let key = DeliveryKey { block_id: req.block_id.clone(), session_id: req.session_id.clone(), reason };
     let notice = {
-        let mut map = DELIVERIES.lock().unwrap_or_else(|e| e.into_inner());
-        map.get_mut(&key).and_then(|d| acknowledge(d, req.part).then(|| notice_frame(&key, d)))
+        let mut st = state_lock();
+        st.deliveries.get_mut(&key).and_then(|d| acknowledge(d, req.part).then(|| notice_frame(&key, d)))
     };
     let complete = notice.is_some();
     if let Some(frame) = notice {
@@ -161,6 +256,62 @@ pub(crate) async fn handle_session_start_ack(State(state): State<AppState>, Json
         );
     }
     Json(serde_json::json!({ "complete": complete }))
+}
+
+/// The event a frontend reinjection reason stands for: a compaction, or a
+/// fresh session (a spawn without `--resume`, whose hook `source` is
+/// `startup`). `None` for anything else.
+fn reason_for_fallback(reason: &str) -> Option<Reason> {
+    match reason {
+        "compaction" => Some(Reason::Compact),
+        "fresh_session" => Some(Reason::Startup),
+        _ => None,
+    }
+}
+
+/// Whether the frontend's hidden-reinjection fallback should deliver this
+/// event (`true`) or stand down because the `SessionStart` hook delivered it
+/// (`false`). Waits out a hook delivery still in flight for up to
+/// [`PENDING_WAIT`], then lets the fallback deliver, so a hook that died
+/// part-way never leaves the agent without its memory.
+pub(crate) async fn claim_fallback(block_id: &str, reason: &str) -> bool {
+    let Some(reason) = reason_for_fallback(reason) else { return true };
+    let deadline = tokio::time::Instant::now() + PENDING_WAIT;
+    loop {
+        let now = agentmux_common::time::now_ms();
+        let claim = {
+            let mut st = state_lock();
+            st.prune(now);
+            st.claim_fallback(block_id, reason, now)
+        };
+        match claim {
+            FallbackClaim::Deliver => return true,
+            FallbackClaim::Skip => {
+                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: the hook delivered; fallback stands down");
+                return false;
+            }
+            FallbackClaim::Pending if tokio::time::Instant::now() >= deadline => {
+                tracing::warn!(block_id, reason = reason.as_str(), "memory delivery: hook still unfinished; fallback delivers instead");
+                state_lock().take_over_from_hook(block_id, reason, agentmux_common::time::now_ms());
+                return true;
+            }
+            FallbackClaim::Pending => tokio::time::sleep(PENDING_POLL).await,
+        }
+    }
+}
+
+/// Registers `memorydelivery:claim_fallback` — the frontend's hidden memory
+/// reinjection asks it right before it would fire.
+pub(crate) fn register_memory_delivery_handlers(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>) {
+    use crate::backend::rpc_types::{
+        CommandMemoryDeliveryClaimFallbackData, MemoryDeliveryClaimFallbackResult, COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
+    };
+    engine.register_typed(
+        COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
+        |req: CommandMemoryDeliveryClaimFallbackData, _ctx| async move {
+            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason).await })
+        },
+    );
 }
 
 /// Reads the memory and composes the delivery. `None` when there is nothing
@@ -278,6 +429,62 @@ mod tests {
             created_ms: 1_790_000_000_000,
             notice_sent: false,
         }
+    }
+
+    fn state_with_hook_delivery(block: &str, reason: Reason, notice_sent: bool) -> DeliveryState {
+        let mut st = DeliveryState::default();
+        let mut d = delivery(1);
+        d.notice_sent = notice_sent;
+        st.deliveries.insert(DeliveryKey { block_id: block.into(), session_id: "s".into(), reason }, d);
+        st
+    }
+    const NOW: i64 = 1_790_000_000_500;
+
+    #[test]
+    fn an_unclaimed_event_goes_to_the_fallback_and_the_hook_then_stands_down() {
+        let mut st = DeliveryState::default();
+        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW), FallbackClaim::Deliver);
+        assert!(st.fallback_claimed("b", Reason::Compact), "the hook's parts now come back empty");
+        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW), FallbackClaim::Deliver, "a repeated claim is still the fallback's");
+        assert!(!st.fallback_claimed("b", Reason::Startup), "another event is untouched");
+        assert!(!st.fallback_claimed("other", Reason::Compact), "another block is untouched");
+    }
+
+    #[test]
+    fn a_complete_hook_delivery_makes_the_fallback_stand_down() {
+        let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW), FallbackClaim::Skip);
+        assert!(!st.fallback_claimed("b", Reason::Compact));
+    }
+
+    #[test]
+    fn a_hook_delivery_in_flight_is_pending_until_the_fallback_takes_over() {
+        let mut st = state_with_hook_delivery("b", Reason::Startup, false);
+        assert_eq!(st.claim_fallback("b", Reason::Startup, NOW), FallbackClaim::Pending);
+        st.take_over_from_hook("b", Reason::Startup, NOW);
+        assert!(st.fallback_claimed("b", Reason::Startup));
+        let d = st.deliveries.values_mut().next().unwrap();
+        assert!(!acknowledge(d, 1), "a late ack after the takeover adds no second notice");
+    }
+
+    #[test]
+    fn stale_claims_and_deliveries_expire() {
+        let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        st.fallback_claims.insert(("b".into(), Reason::Startup), NOW);
+        st.prune(NOW + CLAIM_WINDOW_MS + 1);
+        assert!(!st.fallback_claimed("b", Reason::Startup));
+        assert_eq!(
+            st.claim_fallback("b", Reason::Compact, NOW + CLAIM_WINDOW_MS + 1),
+            FallbackClaim::Deliver,
+            "a delivery older than the window is another event"
+        );
+    }
+
+    #[test]
+    fn the_fallback_reasons_map_to_hook_events() {
+        assert_eq!(reason_for_fallback("compaction"), Some(Reason::Compact));
+        assert_eq!(reason_for_fallback("fresh_session"), Some(Reason::Startup));
+        assert_eq!(reason_for_fallback("other"), None);
     }
 
     #[test]

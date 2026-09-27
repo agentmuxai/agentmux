@@ -5,9 +5,12 @@
 and on a `fresh` session outcome shipped in #3502 and #3512, with the running
 summary appended in #3673. P0 (§4: why a real `fresh` session got nothing) is
 done, and P1 (reinjection re-delivers the startup file's own block, Operator
-Config included) shipped with it in #3942. Remaining: a brand-new session gets no
-reinjection (P2); only Claude is covered; the trigger lives in the frontend; and
-reinjection has not yet been seen working live. The plan is in §7, P2–P5.
+Config included) shipped with it in #3942. P2 — Claude's `SessionStart` hook
+delivers the memory at every new session, `/clear` and compaction, with a notice
+naming each entry's size — shipped in #3949 (srv side) and P2b (the hook, the
+notice, and the fallback standing down when the hook delivered). Remaining:
+live verification of P2 on a running instance, then P3 (retire the frontend
+triggers); other providers (P4); edits reaching running agents (P5).
 **Date:** 2026-09-27
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at the repo
 owner's request: "lets consolidate all the docs … lets get a single source of
@@ -224,18 +227,17 @@ P1 fixes it.
 
 ## 6. Gaps
 
-- **G1 — new sessions:** a brand-new session gets no reinjection or notice. The
-  trigger fires only on `outcome === "fresh"` (conflicts with D8). A normal
-  resume is deliberately excluded (D10).
+- **G1 — resolved for Claude (P2):** the `SessionStart` hook delivers at every
+  `startup` and `clear`, not only on a `fresh` outcome. A normal resume is
+  deliberately excluded (D10). Not yet verified on a running instance.
 - **G2 — resolved (P0):** the `fresh` path did fire; it had nothing to send
   because of G3 (§4).
 - **G3 — resolved (P1):** reinjection now re-delivers the startup file's own
   block, Operator Config and the `[AgentMux System]`/`[Workspace]` headings and
   preamble included.
-- **G4 — frontend-owned trigger:** it fires only while a pane's `useAgentStream`
-  is mounted and subscribed. Background or headless agents get nothing, and a
-  re-subscribe that replays a `compact_boundary` frame may fire it twice (not
-  verified).
+- **G4 — resolved for Claude (P2):** the hook runs inside the CLI, pane or no
+  pane. The frontend trigger remains as a fallback that asks srv first
+  (`memorydelivery:claim_fallback`) and stands down when the hook delivered.
 - **G5 — Claude only:** no compaction signal from other providers. The
   token-drop heuristic draws a node but does not reinject.
 - **G6 — delivery holes in the startup file:**
@@ -265,7 +267,7 @@ P1 fixes it.
 
 ## 7. Plan
 
-P0 and P1 are done; P2–P5 not started. Each phase is one PR.
+P0–P2 are done (P2 awaits live verification); P3–P5 not started.
 
 - **P0 — explain G2. Done:** see §4. The `fresh` trigger fired, and G3 left it
   nothing to send. G4's double-fire risk moves to P2's claim design.
@@ -365,10 +367,34 @@ P0 and P1 are done; P2–P5 not started. Each phase is one PR.
         the pane with each entry's label, bytes and tokens (D11);
       - `continuity_state::running_summary_section` supplies the summary on
         compaction, formatted as the hidden reinjection formats it.
-    - **P2b:**
-      - `agentmux-bashwrap sessionstart --part N` and the hook entries;
-      - the pane renders the notice from that frame;
-      - the frontend fallback asks srv before hiding.
+    - **P2b, switched on:**
+      - `agentmux-bashwrap sessionstart --part N` (`sessionstart.rs`): reads
+        the hook's stdin, asks for its part (3 s timeout), prints it as
+        `additionalContext`, then acknowledges it. Any failure prints nothing
+        and exits 0, so the session starts regardless.
+      - The hook entry: one `SessionStart` entry, no matcher, 8 commands,
+        installed by both builders (`agent_config.rs`
+        `agentmux_sessionstart_entry`, `agent-config-builder.ts`, whose
+        `SESSION_START_HOOK_PARTS` is asserted against Rust's `HOOK_PARTS`). A
+        user's own `SessionStart` hooks are kept on both merge paths, before
+        ours; without that, a settings.json one would have been dropped.
+      - The notice: `memory-injected.ts` turns the frame into the existing
+        `MemoryReinjectionNode`, live (`useAgentStream.ts`) and on replay
+        (`parseHistoryLines.ts`), keyed by the frame's own id.
+      - One delivery per event. `memorydelivery:claim_fallback` is an atomic
+        claim in srv, keyed by (block, reason):
+        - the hidden-reinjection controller asks right before it would hide
+          anything, and only when it is really about to fire (never while
+          deferred);
+        - the hook's parts come back empty once the fallback has claimed;
+        - the fallback stands down once the hook has delivered;
+        - a hook delivery still in flight gets up to 4 s, then the fallback
+          delivers and the hook's unfinished delivery is closed, so a late
+          acknowledgement adds no second notice;
+        - a failed claim means deliver: a duplicate beats no memory.
+      - Semantics are at-least-once: a hook whose acknowledgement is lost after
+        Claude read its output can still lead to the fallback delivering again
+        (the Codex note on #3925).
 
 - **P3 — retire the frontend triggers for Claude.** Only after P2 is verified
   live: the hook fires for `startup`, `clear` and `compact`, and never delivers

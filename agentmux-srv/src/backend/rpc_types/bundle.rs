@@ -130,6 +130,24 @@ pub struct GlobalMemoryDiffResult {
     pub diff: String,
 }
 
+/// `memorydelivery:claim_fallback` — the frontend's hidden memory reinjection
+/// asks whether to deliver (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandMemoryDeliveryClaimFallbackData {
+    pub block_id: String,
+    /// The reinjection's reason: `compaction` or `fresh_session`.
+    pub reason: String,
+}
+
+/// Reply to `memorydelivery:claim_fallback`: `false` when Claude Code's
+/// `SessionStart` hook already delivered this event.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct MemoryDeliveryClaimFallbackResult {
+    pub deliver: bool,
+}
+
 /// `globalmemory:sections` — no arguments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]

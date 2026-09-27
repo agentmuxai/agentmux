@@ -279,8 +279,15 @@ export function uniqueSkillSlug(name: string, used: Set<string>): string {
 }
 
 /**
- * Merge a user-supplied `settings.json`-level hook-array (`PreToolUse`
- * or `PreCompact`) with whatever is already staged in `hooksObj` under
+ * How many `SessionStart` hook commands carry the agent's memory, one part
+ * each — Rust's `memory_delivery::HOOK_PARTS`, which the sidecar splits the
+ * memory into.
+ */
+export const SESSION_START_HOOK_PARTS = 8;
+
+/**
+ * Merge a user-supplied `settings.json`-level hook-array (`PreToolUse`,
+ * `PreCompact` or `SessionStart`) with whatever is already staged in `hooksObj` under
  * `key` (AgentMux's own auto-injected entries, possibly already
  * carrying legacy `content_map["hooks"]`-merged user entries from the
  * earlier pass). User entries are PREPENDED so their matchers/gates
@@ -344,9 +351,20 @@ export function buildSettingsWithHooks(
             { type: "command", command: "agentmux-bashwrap precompact --trigger=auto" },
         ],
     };
+    // `SessionStart`: one command per memory part (Rust
+    // `agentmux_sessionstart_entry`), so the agent's memory reaches the model
+    // at every new session, `/clear` and compaction without a visible turn.
+    // See docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
+    const agentmuxSessionstart = {
+        hooks: Array.from({ length: SESSION_START_HOOK_PARTS }, (_, i) => ({
+            type: "command",
+            command: `agentmux-bashwrap sessionstart --part ${i + 1}`,
+        })),
+    };
     const hooksObj: Record<string, unknown> = {};
     const pretooluseEntries: unknown[] = [];
     const precompactEntries: unknown[] = [];
+    const sessionstartEntries: unknown[] = [];
 
     if (userHooksContent) {
         let parsed: unknown;
@@ -370,6 +388,12 @@ export function buildSettingsWithHooks(
                     } else {
                         console.warn("agent-model: user hooks.PreCompact is not an array; dropping");
                     }
+                } else if (k === "SessionStart") {
+                    if (Array.isArray(v)) {
+                        sessionstartEntries.push(...v);
+                    } else {
+                        console.warn("agent-model: user hooks.SessionStart is not an array; dropping");
+                    }
                 } else {
                     hooksObj[k] = v;
                 }
@@ -382,6 +406,8 @@ export function buildSettingsWithHooks(
     hooksObj["PreToolUse"] = pretooluseEntries;
     precompactEntries.push(agentmuxPrecompactManual, agentmuxPrecompactAuto);
     hooksObj["PreCompact"] = precompactEntries;
+    sessionstartEntries.push(agentmuxSessionstart);
+    hooksObj["SessionStart"] = sessionstartEntries;
 
     // Wrap into settings.json shape, merging any user-supplied settings.
     const settingsObj: Record<string, unknown> = {};
@@ -412,7 +438,7 @@ export function buildSettingsWithHooks(
     const existingHooks = settingsObj["hooks"];
     if (existingHooks != null && typeof existingHooks === "object" && !Array.isArray(existingHooks)) {
         for (const [k, v] of Object.entries(existingHooks as Record<string, unknown>)) {
-            if (k === "PreToolUse" || k === "PreCompact") {
+            if (k === "PreToolUse" || k === "PreCompact" || k === "SessionStart") {
                 prependUserHookArray(hooksObj, k, v);
                 continue;
             }

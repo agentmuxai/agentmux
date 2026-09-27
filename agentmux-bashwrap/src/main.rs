@@ -28,6 +28,11 @@
 //!   live status instead of a silent gap. See `precompact.rs` and
 //!   `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`.
 //!
+//! - `sessionstart --part N` — registered as Claude Code's `SessionStart`
+//!   hook, once per part. Delivers part N of the agent's memory as the
+//!   hook's `additionalContext`. See `sessionstart.rs` and
+//!   `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` §7 P2.
+//!
 //! See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` for the
 //! full design rationale (why command rewrite vs. MCP deny-redirect,
 //! why a separate binary vs. extending an MCP server, channel
@@ -39,6 +44,7 @@ use clap::{Parser, Subcommand};
 mod bash_wrap;
 mod hook;
 mod precompact;
+mod sessionstart;
 #[cfg(test)]
 mod test_env_lock;
 mod mps_client;
@@ -64,6 +70,10 @@ enum Command {
     /// `compaction_started` MPS event and exits 0 with no stdout
     /// output — observe-only, never blocks compaction.
     Precompact(precompact::Args),
+    /// Registered as Claude Code's `SessionStart` hook, once per part.
+    /// Prints this part of the agent's memory as the hook's
+    /// `additionalContext` (or nothing), then acknowledges it.
+    Sessionstart(sessionstart::Args),
 }
 
 fn main() -> Result<()> {
@@ -83,6 +93,7 @@ fn main() -> Result<()> {
         }
         Command::Hook => hook::run_pretooluse_bash(),
         Command::Precompact(args) => rt.block_on(precompact::run(args)),
+        Command::Sessionstart(args) => rt.block_on(sessionstart::run(args)),
     }
 }
 

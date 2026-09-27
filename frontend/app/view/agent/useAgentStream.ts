@@ -50,6 +50,8 @@ import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-qu
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
+import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
+import { MemoryDeliveryApi } from "@/app/store/rpc-api/memory-delivery";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
 import { contextWindowForModel } from "@/app/store/agent-pane-state/context-window";
@@ -297,6 +299,11 @@ export function useAgentStream({
                 message_id: `memreinject_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                 hidden: true,
             }).then(() => undefined),
+        // Claude Code's SessionStart hook now delivers the same memory at a
+        // session start and after a compaction; this fallback fires only when
+        // the hook didn't (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
+        claimFallback: (reason) =>
+            MemoryDeliveryApi.ClaimFallbackCommand(TabRpcClient, { block_id: blockId, reason }).then((r) => r.deliver),
         // Reuses the REAL TurnStart/TurnReset commands unmodified — a hidden
         // reinjection is a completely genuine turn state-machine-wise; only
         // its rendering differs. See memory-reinjection-controller.ts's
@@ -596,6 +603,24 @@ export function useAgentStream({
                                 void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
                             }
                         }
+                    }
+                    continue;
+                }
+
+                // The notice for memory the `SessionStart` hook delivered
+                // (memory-injected.ts, shared with parseHistoryLines.ts). The
+                // model already has the content — this is only the label.
+                // SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
+                if (isMemoryInjectedFrame(rawEvent)) {
+                    parser.flushPending();
+                    const node = buildMemoryInjectedNode(rawEvent, {
+                        contextWindow: contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
+                        now: Date.now(),
+                    });
+                    if (node && !hasNodeId(node.id)) {
+                        addNodeId(node.id);
+                        queue.pushNewNode(node);
+                        queue.scheduleFlush();
                     }
                     continue;
                 }
