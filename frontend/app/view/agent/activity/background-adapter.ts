@@ -55,3 +55,28 @@ export function backgroundTaskActivities(
 ): PinnedActivity[] {
     return tasks.filter((t) => !knownIds.has(t.id)).map(backgroundTaskToActivity);
 }
+
+/** A transcript-derived row still showing `running` takes the registry's
+ *  terminal status when the registry knows the task ended. srv now completes
+ *  registry rows from the CLI's own `task_notification`/`task_updated` lines
+ *  (`background_task_feed.rs`), which arrive even for a task a subagent
+ *  launched; the transcript's `<task-notification>` user message never does
+ *  for those, so without this their dock row ran forever.
+ *  SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md §2.3.
+ *  Pure; returns the same array when nothing changes. */
+export function applyRegistryOutcomes(
+    activities: readonly PinnedActivity[],
+    tasks: readonly BackgroundTaskView[]
+): PinnedActivity[] {
+    const ended = new Map<string, BackgroundTaskView>();
+    for (const t of tasks) if (t.status !== "running") ended.set(t.id, t);
+    if (ended.size === 0) return activities as PinnedActivity[];
+    let changed = false;
+    const out = activities.map((a) => {
+        const t = a.status === "running" ? ended.get(a.id) : undefined;
+        if (!t) return a;
+        changed = true;
+        return { ...a, status: t.status, endedAt: t.ended_at_ms ?? t.last_seen_ms };
+    });
+    return changed ? out : (activities as PinnedActivity[]);
+}

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { backgroundTaskActivities, backgroundTaskToActivity } from "./background-adapter";
+import { applyRegistryOutcomes, backgroundTaskActivities, backgroundTaskToActivity } from "./background-adapter";
+import type { PinnedActivity } from "./types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 function task(overrides: Partial<BackgroundTaskView> = {}): BackgroundTaskView {
@@ -69,5 +70,40 @@ describe("backgroundTaskActivities", () => {
 
     it("returns nothing for an empty task list", () => {
         expect(backgroundTaskActivities([], new Set())).toEqual([]);
+    });
+});
+
+describe("applyRegistryOutcomes", () => {
+    const running = (id: string): PinnedActivity => ({
+        id,
+        kind: "tool",
+        title: "sleep 180",
+        status: "running",
+        startedAt: 1000,
+        canStop: false,
+    });
+
+    it("ends a running transcript row whose registry row has ended", () => {
+        const [a] = applyRegistryOutcomes([running("toolu_1")], [task({ id: "toolu_1", status: "done", ended_at_ms: 181_000 })]);
+        expect(a.status).toBe("done");
+        expect(a.endedAt).toBe(181_000);
+    });
+
+    it("leaves rows alone while the registry still says running, or has no row", () => {
+        const acts = [running("toolu_1"), running("toolu_2")];
+        expect(applyRegistryOutcomes(acts, [task({ id: "toolu_1", status: "running" })])).toBe(acts);
+        expect(applyRegistryOutcomes(acts, [])).toBe(acts);
+    });
+
+    it("never reopens or rewrites a row that already ended on its own", () => {
+        const done: PinnedActivity = { ...running("toolu_1"), status: "error", endedAt: 50 };
+        const [a] = applyRegistryOutcomes([done], [task({ id: "toolu_1", status: "done", ended_at_ms: 90 })]);
+        expect(a).toBe(done);
+    });
+
+    it("falls back to last_seen_ms when a terminal row has no ended_at_ms", () => {
+        const [a] = applyRegistryOutcomes([running("toolu_1")], [task({ id: "toolu_1", status: "stopped", ended_at_ms: null, last_seen_ms: 77 })]);
+        expect(a.status).toBe("stopped");
+        expect(a.endedAt).toBe(77);
     });
 });

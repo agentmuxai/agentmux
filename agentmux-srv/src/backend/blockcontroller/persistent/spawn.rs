@@ -748,6 +748,10 @@ impl PersistentSubprocessController {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             let mut stats = super::super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
+            // The CLI's own `task_started`/`task_updated`/`task_notification`
+            // lines drive the background-task registry, including tasks a
+            // subagent owns (see `background_task_feed.rs`).
+            let mut task_feed = crate::backend::background_task_feed::TaskFeed::default();
 
             // NOTE: OSC window-title extraction is NOT done here.
             // PersistentSubprocessController uses piped stdout with stream-json
@@ -811,6 +815,19 @@ impl PersistentSubprocessController {
                             }
                             continue;
                         }
+                    }
+                    if let Some(store) = mstore_read.as_deref() {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        task_feed.apply(
+                            store,
+                            broker_read.as_deref(),
+                            &block_id_read,
+                            &parsed,
+                            now_ms,
+                        );
                     }
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");

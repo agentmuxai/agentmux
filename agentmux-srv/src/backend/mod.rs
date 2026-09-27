@@ -19,6 +19,7 @@ pub mod user_widgets;
 pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_validate;
+pub mod background_task_feed;
 pub mod dock_snapshot;
 pub mod narrated_events;
 pub mod pending_background_pids;
