@@ -177,7 +177,7 @@ fn all_agentmux_keys() -> Vec<String> {
 /// `sanitize_external_command` for a synchronous `std::process::Command`.
 ///
 /// Needed because not every external spawn is async — `npm install` in
-/// `server/cli_handlers.rs` is a blocking `.output()` call, and it runs
+/// `backend/cli_install.rs` is a blocking `.output()` call, and it runs
 /// arbitrary postinstall scripts.
 pub fn sanitize_external_std_command(cmd: &mut std::process::Command) {
     for key in all_agentmux_keys() {
@@ -280,9 +280,9 @@ mod spawn_site_coverage {
          "sanitized: probe_version runs a third-party binary, strict policy (this PR)"),
         ("src/crash_monitor.rs", "&exe", 1,
          "own-exe: re-spawns OUR OWN binary as the crash monitor; it must stay this instance, so inheritance is the requirement here, not the defect"),
-        ("src/server/cli_handlers.rs", "\"cmd\"", 1,
-         "sanitized: shell wrapper, sanitize_external_std_command"),
-        ("src/server/cli_handlers.rs", "\"npm\"", 1,
+        ("src/backend/cli_install.rs", "\"cmd\"", 1,
+         "sanitized: shell wrapper for npm install, sanitize_external_std_command"),
+        ("src/backend/cli_install.rs", "\"npm\"", 1,
          "sanitized: npm runs arbitrary postinstall scripts, sanitize_external_std_command"),
         ("src/server/cli_handlers.rs", "\"where\"", 2,
          "probe: Windows availability check for npm before install; runs nothing else"),
