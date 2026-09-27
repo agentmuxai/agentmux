@@ -105,11 +105,30 @@ export function pathsMatchFiles(paths: string[], files: File[]): boolean {
     return a.every((n, i) => n === b[i]);
 }
 
-const schedule: (cb: () => void) => void =
-    typeof requestAnimationFrame === "function" ? (cb) => requestAnimationFrame(() => cb()) : (cb) => setTimeout(cb, 16);
+/**
+ * Next animation frame, or 50 ms, whichever comes first. rAF alone isn't
+ * enough: Chromium pauses it for a hidden or occluded window, and a drag's
+ * visuals must still settle (and never leave a render stuck as queued).
+ */
+function schedule(cb: () => void): void {
+    let done = false;
+    const run = () => {
+        if (done) return;
+        done = true;
+        cb();
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    setTimeout(run, 50);
+}
 
-/** No `dragover` for this long ends the visuals (cursor over a native surface, or the drag left). */
-const IDLE_MS = 350;
+/**
+ * No `dragover` for this long ends the visuals (the cursor went over a native
+ * surface, or the drag left without a `dragleave`). Well above the HTML
+ * spec's dragover cadence while the cursor is still (every 350 ms ± 200 ms),
+ * so a user holding a file over a pane never loses the indicator; a missed
+ * leave costs at most this long of a stale highlight.
+ */
+const IDLE_MS = 1200;
 
 // ── Controller ──────────────────────────────────────────────────────────
 
