@@ -244,7 +244,10 @@ fn provider_installed_dirs(provider_id: &str) -> Vec<std::path::PathBuf> {
         return Vec::new();
     };
     let pin = effective_pin(provider_id, "");
+    // The shared dir only once its install is marked complete — a shim alone
+    // may be another instance's install in progress (Codex P2 on #3927).
     crate::backend::cli_install::shared_cli_dir(&paths, provider_id, &pin)
+        .filter(|d| crate::backend::cli_install::is_complete(d))
         .into_iter()
         .chain(std::iter::once(
             crate::backend::cli_install::legacy_cli_dir(&paths, provider_id),
@@ -561,19 +564,37 @@ fn spawn_install_task(
         };
 
         // The shared dir is written by every AgentMux instance on this
-        // machine: serialize on its install lock (held until this task
-        // ends), then reuse an install another instance just finished.
-        let _install_guard = {
+        // machine: serialize on its install lock (held until this task ends).
+        // Waiting for another instance's install must stay cancellable, so
+        // poll the lock and race `install.cancel` instead of blocking in it
+        // (Codex P2 on #3927: a blocking wait ignored cancel, kept the
+        // provider claimed, and could later report success for a cancelled
+        // session).
+        let shared_dir = agentmux_common::DataPaths::from_env()
+            .and_then(|p| crate::backend::cli_install::shared_cli_dir(&p, &provider_id, &pinned_version));
+        let _install_guard = loop {
             let lock_provider = provider_id.clone();
             let lock_pin = pinned_version.clone();
             let res = tokio::task::spawn_blocking(move || {
                 let paths = agentmux_common::DataPaths::from_env()
                     .ok_or_else(|| std::io::Error::other("DataPaths::from_env() failed"))?;
-                crate::backend::cli_install::lock_install(&paths, &lock_provider, &lock_pin)
+                crate::backend::cli_install::try_lock_install(&paths, &lock_provider, &lock_pin)
             })
             .await;
             match res {
-                Ok(Ok(g)) => g,
+                Ok(Ok(Some(g))) => break g,
+                Ok(Ok(None)) => {
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => continue,
+                        _ = &mut cancel_rx => {
+                            tracing::info!(session_id = %session_id, "install.cancel: cancelled while waiting for another instance's install");
+                            emit_done(&broker, false, Some("cancelled".into()));
+                            registry.drop_session(&session_id);
+                            registry.release_provider(&provider_id);
+                            return;
+                        }
+                    }
+                }
                 Ok(Err(e)) => {
                     emit_done(&broker, false, Some(format!("cannot take the CLI install lock: {e}")));
                     registry.drop_session(&session_id);
@@ -588,16 +609,26 @@ fn spawn_install_task(
                 }
             }
         };
-        if installed_bin_in(&provider_dir, &cli_command).is_some() {
-            emit_line(
-                &broker,
-                "already installed by another AgentMux instance".to_string(),
-                "stdout",
-            );
-            emit_done(&broker, true, None);
-            registry.drop_session(&session_id);
-            registry.release_provider(&provider_id);
-            return;
+        // Reuse only a FINISHED install (completion marker, not just a shim
+        // npm may have written early); clear a failed or interrupted one.
+        if let Some(dir) = shared_dir.as_deref() {
+            if crate::backend::cli_install::is_complete(dir) && installed_bin_in(dir, &cli_command).is_some() {
+                emit_line(
+                    &broker,
+                    "already installed by another AgentMux instance".to_string(),
+                    "stdout",
+                );
+                emit_done(&broker, true, None);
+                registry.drop_session(&session_id);
+                registry.release_provider(&provider_id);
+                return;
+            }
+            if let Err(e) = crate::backend::cli_install::clear_incomplete(dir) {
+                emit_done(&broker, false, Some(format!("cannot clear an incomplete install at {}: {e}", dir.display())));
+                registry.drop_session(&session_id);
+                registry.release_provider(&provider_id);
+                return;
+            }
         }
         if let Err(e) = std::fs::create_dir_all(&provider_dir) {
             // The disk-full / permission-denied / path-not-found cases
@@ -727,7 +758,16 @@ fn spawn_install_task(
                         // as an install failure rather than a phantom
                         // launch with a non-existent cmd path.
                         if installed_bin_in(&provider_dir, &cli_command).is_some() {
-                            emit_done(&broker, true, None);
+                            // Still under the install lock: publish the shared
+                            // install to every reader only now that it's verified.
+                            let marked = match shared_dir.as_deref() {
+                                Some(dir) => crate::backend::cli_install::mark_complete(dir, &pinned_version),
+                                None => Ok(()),
+                            };
+                            match marked {
+                                Ok(()) => emit_done(&broker, true, None),
+                                Err(e) => emit_done(&broker, false, Some(format!("cannot mark the install complete: {e}"))),
+                            }
                         } else {
                             emit_done(
                                 &broker,

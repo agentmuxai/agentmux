@@ -24,6 +24,11 @@
 //! the same primitive the agent registry uses) and re-check for a finished
 //! install after acquiring it, so a second instance waits and then reuses
 //! the first one's result instead of running npm into the same directory.
+//! A shared dir only counts as installed once [`COMPLETE_MARKER`] is written,
+//! after npm succeeded and the shim was verified; an unmarked dir is a failed
+//! or in-progress install and is cleared before the next attempt.
+//! `install.start` waits for the lock with [`try_lock_install`] so the wait
+//! stays cancellable.
 
 use std::path::{Path, PathBuf};
 
@@ -99,19 +104,55 @@ pub fn npm_bin(dir: &Path, cli_command: &str) -> PathBuf {
     }
 }
 
-/// The installed CLI binary, if any: shared dir first, then legacy.
+/// Written into a shared install dir only after npm succeeded and the shim was
+/// verified, under the install lock. npm creates `.bin` shims before its
+/// lifecycle scripts and the rest of the install finish, so a shim alone
+/// doesn't mean "installed" — a reader could otherwise run a CLI another
+/// instance is still installing, and a failed install's leftover shim would
+/// poison the shared cache for every later AgentMux version (Codex P2 on #3927).
+pub const COMPLETE_MARKER: &str = ".agentmux-install-complete";
+
+/// Whether `dir` holds a finished, verified install.
+pub fn is_complete(dir: &Path) -> bool {
+    dir.join(COMPLETE_MARKER).is_file()
+}
+
+/// Mark `dir` complete (write-then-rename, so a reader never sees a torn
+/// marker). Call under the install lock, after verifying the shim.
+pub fn mark_complete(dir: &Path, version: &str) -> std::io::Result<()> {
+    let tmp = dir.join(format!("{COMPLETE_MARKER}.tmp"));
+    std::fs::write(&tmp, version)?;
+    std::fs::rename(&tmp, dir.join(COMPLETE_MARKER))
+}
+
+/// Under the install lock, before installing into `dir`: a shared dir that
+/// exists without the completion marker is a failed or interrupted install —
+/// clear it so npm starts clean instead of building on its leftovers. No-op
+/// for a missing or complete dir.
+pub fn clear_incomplete(dir: &Path) -> std::io::Result<()> {
+    if dir.exists() && !is_complete(dir) {
+        std::fs::remove_dir_all(dir)?;
+    }
+    Ok(())
+}
+
+/// The installed CLI binary, if any: the shared dir (only once marked
+/// complete), then the legacy per-version dir (which predates the marker, so
+/// its shim is enough).
 pub fn find_installed(
     paths: &DataPaths,
     provider_id: &str,
     pinned_version: &str,
     cli_command: &str,
 ) -> Option<PathBuf> {
-    let candidates = shared_cli_dir(paths, provider_id, pinned_version)
-        .into_iter()
-        .chain(std::iter::once(legacy_cli_dir(paths, provider_id)));
-    candidates
+    let shared = shared_cli_dir(paths, provider_id, pinned_version)
+        .filter(|d| is_complete(d))
         .map(|d| npm_bin(&d, cli_command))
-        .find(|b| b.is_file())
+        .filter(|b| b.is_file());
+    shared.or_else(|| {
+        let legacy = npm_bin(&legacy_cli_dir(paths, provider_id), cli_command);
+        legacy.is_file().then_some(legacy)
+    })
 }
 
 /// Same, with the pinned version taken from the backend provider registry
@@ -143,8 +184,40 @@ pub fn lock_install(
     provider_id: &str,
     pinned_version: &str,
 ) -> std::io::Result<InstallGuard> {
-    let Some(dir) = shared_cli_dir(paths, provider_id, pinned_version) else {
+    let Some(file) = open_lock_file(paths, provider_id, pinned_version)? else {
         return Ok(InstallGuard { _file: None });
+    };
+    crate::registry::lock_exclusive(&file)?;
+    Ok(InstallGuard { _file: Some(file) })
+}
+
+/// Non-blocking [`lock_install`]: `Ok(None)` while another instance holds
+/// the lock. For waiters that must stay cancellable (`install.start` polls
+/// this and races `install.cancel`, Codex P2 on #3927).
+pub fn try_lock_install(
+    paths: &DataPaths,
+    provider_id: &str,
+    pinned_version: &str,
+) -> std::io::Result<Option<InstallGuard>> {
+    let Some(file) = open_lock_file(paths, provider_id, pinned_version)? else {
+        return Ok(Some(InstallGuard { _file: None }));
+    };
+    if crate::registry::try_lock_exclusive(&file)? {
+        Ok(Some(InstallGuard { _file: Some(file) }))
+    } else {
+        Ok(None)
+    }
+}
+
+/// The shared dir's lock file, opened (created if missing); None for a
+/// provider/pin with no shared dir.
+fn open_lock_file(
+    paths: &DataPaths,
+    provider_id: &str,
+    pinned_version: &str,
+) -> std::io::Result<Option<std::fs::File>> {
+    let Some(dir) = shared_cli_dir(paths, provider_id, pinned_version) else {
+        return Ok(None);
     };
     let parent = dir.parent().unwrap_or(&dir).to_path_buf();
     std::fs::create_dir_all(&parent)?;
@@ -154,8 +227,7 @@ pub fn lock_install(
         .write(true)
         .truncate(false)
         .open(&lock_path)?;
-    crate::registry::lock_exclusive(&file)?;
-    Ok(InstallGuard { _file: Some(file) })
+    Ok(Some(file))
 }
 
 #[cfg(test)]
@@ -231,7 +303,14 @@ mod tests {
             Some(legacy.clone())
         );
 
-        let shared = touch_bin(&shared_cli_dir(&p, "claude", "2.1.280").unwrap(), "claude");
+        let shared_dir = shared_cli_dir(&p, "claude", "2.1.280").unwrap();
+        let shared = touch_bin(&shared_dir, "claude");
+        // A shim alone isn't an install (npm writes it early): still legacy.
+        assert_eq!(
+            find_installed(&p, "claude", "2.1.280", "claude"),
+            Some(legacy.clone())
+        );
+        mark_complete(&shared_dir, "2.1.280").unwrap();
         assert_eq!(
             find_installed(&p, "claude", "2.1.280", "claude"),
             Some(shared)
@@ -248,10 +327,9 @@ mod tests {
     fn an_upgraded_agentmux_version_reuses_the_shared_install() {
         let tmp = tempfile::tempdir().unwrap();
         let old = paths_in(tmp.path());
-        let shared = touch_bin(
-            &shared_cli_dir(&old, "claude", "2.1.280").unwrap(),
-            "claude",
-        );
+        let shared_dir = shared_cli_dir(&old, "claude", "2.1.280").unwrap();
+        let shared = touch_bin(&shared_dir, "claude");
+        mark_complete(&shared_dir, "2.1.280").unwrap();
 
         // Same machine, a different AgentMux version dir, same pinned CLI.
         let mut new = paths_in(tmp.path());
@@ -303,5 +381,69 @@ mod tests {
         let p = paths_in(tmp.path());
         let g = lock_install(&p, "claude", "").unwrap();
         assert!(g._file.is_none());
+    }
+
+    /// Codex P2 on #3927: a shared shim without the completion marker (an
+    /// install in progress in another instance, or one that failed) is never
+    /// handed out, and it doesn't hide an absent install either.
+    #[test]
+    fn a_shim_without_the_completion_marker_is_not_an_install() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = paths_in(tmp.path());
+        let dir = shared_cli_dir(&p, "claude", "2.1.280").unwrap();
+        touch_bin(&dir, "claude");
+        assert!(!is_complete(&dir));
+        assert!(find_installed(&p, "claude", "2.1.280", "claude").is_none());
+    }
+
+    #[test]
+    fn clear_incomplete_removes_leftovers_but_keeps_a_finished_install() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = paths_in(tmp.path());
+        let dir = shared_cli_dir(&p, "claude", "2.1.280").unwrap();
+        touch_bin(&dir, "claude");
+        clear_incomplete(&dir).unwrap();
+        assert!(!dir.exists(), "a partial install is cleared");
+
+        touch_bin(&dir, "claude");
+        mark_complete(&dir, "2.1.280").unwrap();
+        clear_incomplete(&dir).unwrap();
+        assert!(is_complete(&dir), "a finished install is kept");
+        clear_incomplete(&tmp.path().join("missing")).unwrap();
+    }
+
+    #[test]
+    fn try_lock_install_reports_a_held_lock_instead_of_waiting() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = paths_in(tmp.path());
+        let held = lock_install(&p, "claude", "2.1.280").unwrap();
+        let p2 = paths_in(tmp.path());
+        // A second instance's attempt, from another thread (flock/LockFileEx
+        // are per-handle, so a second handle contends like another process).
+        let busy = std::thread::spawn(move || {
+            try_lock_install(&p2, "claude", "2.1.280")
+                .unwrap()
+                .is_none()
+        })
+        .join()
+        .unwrap();
+        assert!(
+            busy,
+            "try_lock_install must report the held lock, not block"
+        );
+        drop(held);
+        let p3 = paths_in(tmp.path());
+        let got = std::thread::spawn(move || {
+            try_lock_install(&p3, "claude", "2.1.280")
+                .unwrap()
+                .is_some()
+        })
+        .join()
+        .unwrap();
+        assert!(got, "acquired once released");
+        assert!(
+            try_lock_install(&p, "claude", "").unwrap().is_some(),
+            "no lock needed without a shared dir"
+        );
     }
 }
