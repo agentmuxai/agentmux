@@ -174,16 +174,21 @@ Each phase is its own PR.
 ## 6. Tests
 
 There is no `focus-block.test.ts` today, and every current caller mocks `focusBlock` out. Phase 1 adds
-`reveal-block.test.ts` against a real `LayoutModel` (the harness `layoutStack.test.ts:29-52` uses):
+`reveal-block.test.ts`, which records calls on a fake layout model with `setActiveBlockInStack` stubbed. What it
+pins is what `revealBlockLocally` adds, the steps and their order; the stack switch itself (including that an
+already-active member writes nothing: no `persistToBackend`) is already covered against a real `LayoutModel` in
+`layout/tests/layoutStack.test.ts` (`setActiveBlockInStack`):
 
-- a background member of a multi-tab pane: after `revealBlockLocally`, `activeBlockId === blockId`, the pane is
-  focused, `giveBlockFocus` called once, **after** the stack switch;
-- the already-active member / single-block pane: no stack write (`persistToBackend` not called), pane focused;
-- a block in another, not-yet-loaded window tab: found via `Tab.blockids`, tab activated, polled until the
-  layout exists;
-- a different pane magnified: un-magnified first;
-- a block not in this window: returns `false`;
-- `focusCaret: false`: no `giveBlockFocus`.
+- a background member of a multi-tab pane: window tab activated, then `setActiveBlockInStack(pane, block)`, then
+  `focusNode(pane)`, then `giveBlockFocus(block)` — the caret strictly **after** the stack switch;
+- a block in a not-yet-loaded window tab: found via `Tab.blockids`, tab activated, polled until the layout exists;
+- a different pane magnified: un-magnified first; the target's own magnify left alone;
+- a block not in this window: returns `false` with no side effects;
+- `focusCaret: false`: no `giveBlockFocus`;
+- a `tabId` hint is tried first.
+
+Swarm's side (`focusedActiveBlockId`) has its own test: the selection follows a tab switch inside the same
+focused pane.
 
 Phase 2: the notification bridge's tests assert it delegates to `revealBlockLocally`. Phase 3: srv tests for
 `block.reveal` (resolves window and tab, activates the stack member in the stored tree, publishes
