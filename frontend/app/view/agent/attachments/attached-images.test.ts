@@ -37,6 +37,32 @@ describe("splitAttachedImages", () => {
         expect(splitAttachedImages(msg)).toEqual({ text: "", attachments: [{ id: A, name: "x.png" }] });
     });
 
+    it("reads <attached_files>: notes are dropped, named copies give the id", () => {
+        const msg = [
+            "compare",
+            "",
+            "<attached_files>",
+            "The user attached 3 files. The numbers match how the user refers to them.",
+            `1. a.png — /s/derived/aa/${A}.v1-e2000.send.png`,
+            `2. report [final].pdf [PDF, 2 pages; text version: /s/derived/cc/${C}.v1-e2000.text.txt] — C:\\s\\named\\${C}\\report [final].pdf`,
+            `3. notes [draft] — /s/named/${A}/notes [draft]`,
+            "</attached_files>",
+        ].join("\n");
+        const r = splitAttachedImages(msg);
+        expect(r.text).toBe("compare");
+        expect(r.attachments).toEqual([
+            { id: A, name: "a.png" },
+            { id: C, name: "report [final].pdf" },
+            // A bare name ending in brackets reads as a note; only the label suffers.
+            { id: A, name: "notes" },
+        ]);
+    });
+
+    it("needs matching open and close tags", () => {
+        const msg = `<attached_files>\n1. x.png — /p/${A}.v1-e2000.send.png\n</attached_images>`;
+        expect(splitAttachedImages(msg).attachments).toEqual([]);
+    });
+
     it("ignores a block the user merely typed mid-message", () => {
         const msg = "what is <attached_images>\nfoo\n</attached_images> doing here?";
         expect(splitAttachedImages(msg).attachments).toEqual([]);

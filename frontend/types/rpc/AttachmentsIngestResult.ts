@@ -4,16 +4,16 @@ import type { AttachmentRejected } from "./AttachmentRejected";
 
 export type AttachmentsIngestResult = { batch_id: string, 
 /**
- * Images accepted into the batch, in order. `index` keys every event.
+ * Files accepted into the batch, in order. `index` keys every event.
  */
 accepted: Array<AttachmentPending>, 
 /**
- * Images refused before processing (limits, unreadable).
+ * Files refused before processing (limits, unreadable).
  */
 rejected: Array<AttachmentRejected>, 
 /**
- * Paths that are not images. The caller keeps its existing handling
- * for these (copy into the working folder and insert `@name`).
+ * Always empty since any file can be attached; kept so a frontend from
+ * the images-only release still reads the result.
  */
 non_images: Array<string>, 
 /**

@@ -1,11 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Image attachments for the agent composer: ingest from paths, process on
+//! Attachments for the agent composer: ingest from paths, process on
 //! a bounded blocking pool, report progress on the event bus, and keep a
 //! content-addressed store with retention by last use.
-//! docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.
+//! docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6,
+//! SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md.
 
+pub mod extract;
+pub mod kind;
 pub mod process;
 pub mod prompt;
 pub mod store;
@@ -26,6 +29,7 @@ use crate::backend::rpc_types::{
 };
 use crate::backend::wconfig::ConfigState;
 
+pub use kind::FileKind;
 pub use store::{is_valid_id, Kind, Store};
 
 pub const DEFAULT_MAX_FILES: u32 = 128;
@@ -44,13 +48,19 @@ const DECODE_BUDGET_MIB: u32 = 2048;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
-/// Extensions treated as images without reading the file. Anything else is
-/// sniffed. SVG is deliberately absent: until it can be rasterized it keeps
-/// the existing "copy into the working folder" behavior, where the agent can
-/// at least read it as text.
-const IMAGE_EXTS: &[&str] = &[
-    "png", "jpg", "jpeg", "jpe", "jfif", "gif", "webp", "bmp", "dib", "tif", "tiff", "heic",
-    "heif", "avif",
+/// Folders skipped when a dropped folder is expanded: dependency, build and
+/// VCS trees that would fill the 128-file limit with noise.
+/// SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §8.
+const SKIPPED_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "bower_components",
 ];
 
 /// Limits and knobs, read from settings on every ingest.
@@ -292,22 +302,37 @@ impl Service {
         if let Some(meta) = self.store.meta(id, &fp) {
             return Some(meta);
         }
-        let (blob, format) = self.store.find_blob(id)?;
+        let (blob, kind) = self.store.find_blob(id)?;
         let _cpu = self.permits.clone().acquire_owned().await.ok()?;
-        let blob_for_dims = blob.clone();
-        let (w, h) = blocking(move || process::header_dimensions(&blob_for_dims))
-            .await
-            .ok()?;
-        let _mem = self.reserve_memory(w, h).await;
         // Another request may have derived it while this one waited.
         if let Some(meta) = self.store.meta(id, &fp) {
             return Some(meta);
         }
+        let name = blob.file_name()?.to_string_lossy().into_owned();
+        self.derive_kind(id, blob, kind, &name, edge).await.ok()
+    }
+
+    /// Derive a placed original. Images reserve decode memory from their
+    /// header first; other files are bounded by the extraction limits
+    /// (`extract.rs`) and PDFs run out of process. The caller holds a CPU slot.
+    async fn derive_kind(
+        self: &Arc<Self>,
+        id: &str,
+        blob: PathBuf,
+        kind: FileKind,
+        name: &str,
+        edge: u32,
+    ) -> Result<store::StoredMeta, process::ProcessError> {
+        let _mem = if matches!(kind, FileKind::Image(_)) {
+            let blob_for_dims = blob.clone();
+            let (w, h) = blocking(move || process::header_dimensions(&blob_for_dims)).await?;
+            self.reserve_memory(w, h).await
+        } else {
+            None
+        };
         let svc = Arc::clone(self);
-        let id = id.to_string();
-        blocking(move || svc.store.derive_and_save(&id, &blob, format, edge))
-            .await
-            .ok()
+        let (id, name) = (id.to_string(), name.to_string());
+        blocking(move || svc.store.derive_and_save(&id, &blob, kind, &name, edge)).await
     }
 
     /// Run `f` with the inline budget left in Claude session `key` (out of
@@ -331,15 +356,28 @@ impl Service {
         out
     }
 
-    /// Resolve an id to the send-copy path and MIME type for delivery,
-    /// marking it used. Doesn't decode: call [`Self::ensure_derived`] first
-    /// so a stale fingerprint is re-derived under the limits.
-    pub fn send_path(&self, id: &str) -> Option<(PathBuf, String)> {
+    /// What the agent gets for attachment `id` sent under the user's `name`,
+    /// marking it used: an image's send-copy, or for any other file a
+    /// freshly made copy named `name`, with a note for the agent's list.
+    /// Doesn't decode: call [`Self::ensure_derived`] first so a stale
+    /// fingerprint is re-derived under the limits.
+    pub fn send_target(&self, id: &str, name: &str) -> Option<SendTarget> {
         let fp = store::fingerprint(self.limits().send_max_edge);
-        let found = self.store.file(id, &fp, Kind::Send)?;
+        let meta = self.store.meta(id, &fp)?;
+        let (path, mime) = if meta.is_image() {
+            self.store.file(id, &fp, Kind::Send)?
+        } else {
+            (self.store.named_link(id, name)?, meta.mime.clone())
+        };
+        let text_path = self.store.file(id, &fp, Kind::Text).map(|(p, _)| p);
         self.store.mark_sent(id);
         self.store.touch(id, &fp);
-        Some(found)
+        Some(SendTarget {
+            path,
+            mime,
+            page_count: meta.page_count,
+            note: file_note(&meta, text_path.as_deref()),
+        })
     }
 
     /// Reserve decode memory for a `w`×`h` image. Held until dropped.
@@ -371,21 +409,15 @@ impl Service {
         let edge = self.limits().send_max_edge;
         let svc = Arc::clone(self);
         let place_id = id.clone();
-        let (blob, format, guard) = blocking(move || svc.place_tracked(&tmp, &place_id)).await?;
+        let place_name = name.clone();
+        let (blob, kind, guard) =
+            blocking(move || svc.place_tracked(&tmp, &place_id, &place_name)).await?;
         let fp = store::fingerprint(edge);
         if let Some(meta) = self.store.meta(&id, &fp) {
             self.store.touch(&id, &fp);
             return Ok(meta.to_info(&id, &name));
         }
-        let result = async {
-            let blob_for_dims = blob.clone();
-            let (w, h) = blocking(move || process::header_dimensions(&blob_for_dims)).await?;
-            let _mem = self.reserve_memory(w, h).await;
-            let svc = Arc::clone(self);
-            let derive_id = id.clone();
-            blocking(move || svc.store.derive_and_save(&derive_id, &blob, format, edge)).await
-        }
-        .await;
+        let result = self.derive_kind(&id, blob, kind, &name, edge).await;
         match result {
             Ok(meta) => Ok(meta.to_info(&id, &name)),
             Err(e) => {
@@ -401,17 +433,18 @@ impl Service {
         &self,
         tmp: &Path,
         id: &str,
-    ) -> Result<(PathBuf, image::ImageFormat, InflightGuard), process::ProcessError> {
+        name: &str,
+    ) -> Result<(PathBuf, FileKind, InflightGuard), process::ProcessError> {
         let mut map = self.inflight.lock().unwrap();
         *map.entry(id.to_string()).or_insert(0) += 1;
         let guard = InflightGuard {
             map: Arc::clone(&self.inflight),
             id: id.to_string(),
         };
-        match self.store.place(tmp, id) {
-            Ok((blob, format)) => {
+        match self.store.place(tmp, id, name) {
+            Ok((blob, kind)) => {
                 drop(map);
-                Ok((blob, format, guard))
+                Ok((blob, kind, guard))
             }
             Err(e) => {
                 drop(map);
@@ -526,7 +559,7 @@ impl Service {
         );
         let placed =
             blocking(move || svc.copy_and_place(&block, &batch, &it, limits, &flag)).await?;
-        let (id, blob, format, guard) = placed;
+        let (id, blob, kind, guard) = placed;
 
         let fp = store::fingerprint(limits.send_max_edge);
         if let Some(meta) = self.store.meta(&id, &fp) {
@@ -535,7 +568,7 @@ impl Service {
         }
 
         let result = self
-            .derive_placed(block_id, batch_id, &item, &id, blob, format, limits, cancel)
+            .derive_placed(block_id, batch_id, &item, &id, blob, kind, limits, cancel)
             .await;
         if result.is_err() {
             // A decode failure or a cancel after the original was stored
@@ -555,7 +588,7 @@ impl Service {
         item: &AttachmentPending,
         id: &str,
         blob: PathBuf,
-        format: image::ImageFormat,
+        kind: FileKind,
         limits: Limits,
         cancel: &Arc<AtomicBool>,
     ) -> Result<AttachmentInfo, process::ProcessError> {
@@ -563,12 +596,6 @@ impl Service {
             code: "cancelled",
             message: "Cancelled.".into(),
         };
-        let blob_for_dims = blob.clone();
-        let (w, h) = blocking(move || process::header_dimensions(&blob_for_dims)).await?;
-        if cancel.load(Ordering::SeqCst) {
-            return Err(cancelled());
-        }
-        let _mem = self.reserve_memory(w, h).await;
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
         }
@@ -583,13 +610,9 @@ impl Service {
                 total_bytes: item.bytes,
             },
         );
-        let svc = Arc::clone(self);
-        let id2 = id.to_string();
-        let meta = blocking(move || {
-            svc.store
-                .derive_and_save(&id2, &blob, format, limits.send_max_edge)
-        })
-        .await?;
+        let meta = self
+            .derive_kind(id, blob, kind, &item.name, limits.send_max_edge)
+            .await?;
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
         }
@@ -605,7 +628,7 @@ impl Service {
         item: &AttachmentPending,
         limits: Limits,
         cancel: &AtomicBool,
-    ) -> Result<(String, PathBuf, image::ImageFormat, InflightGuard), process::ProcessError> {
+    ) -> Result<(String, PathBuf, FileKind, InflightGuard), process::ProcessError> {
         let mut last = Instant::now() - PROGRESS_INTERVAL;
         let copied = self.store.copy_in(Path::new(&item.path), |done| {
             if cancel.load(Ordering::SeqCst) {
@@ -648,8 +671,8 @@ impl Service {
                 message: "Cancelled.".into(),
             });
         }
-        let (blob, format, guard) = self.place_tracked(&tmp, &id)?;
-        Ok((id, blob, format, guard))
+        let (blob, kind, guard) = self.place_tracked(&tmp, &id, &item.name)?;
+        Ok((id, blob, kind, guard))
     }
 
     fn publish<T: Serialize>(&self, block_id: &str, event: &str, data: &T) {
@@ -661,6 +684,53 @@ impl Service {
             data: serde_json::to_value(data).ok(),
         });
     }
+}
+
+/// One attachment as delivered to an agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendTarget {
+    /// The file the agent opens: an image's send-copy, or a named copy.
+    pub path: PathBuf,
+    pub mime: String,
+    pub page_count: Option<u32>,
+    /// Shown in square brackets after the name in the agent's list.
+    pub note: Option<String>,
+}
+
+/// "PDF, 12 pages; text version: /…/text.txt", "Word document; no text
+/// version, save it as .docx", "spreadsheet; contains macros". `None` for
+/// images and for kinds with nothing to add.
+fn file_note(meta: &store::StoredMeta, text_path: Option<&Path>) -> Option<String> {
+    if meta.is_image() {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    let label = match meta.kind.as_str() {
+        "pdf" => "PDF",
+        "word" => "Word document",
+        "excel" => "spreadsheet",
+        "powerpoint" => "presentation",
+        "svg" => "SVG image",
+        "archive" => "archive",
+        "audio" => "audio",
+        "video" => "video",
+        "image_file" => "image (not decoded)",
+        _ => "",
+    };
+    match (label, meta.page_count) {
+        ("", _) => {}
+        (l, Some(n)) => parts.push(format!("{l}, {n} page{}", if n == 1 { "" } else { "s" })),
+        (l, None) => parts.push(l.to_string()),
+    }
+    if let Some(p) = text_path {
+        parts.push(format!("text version: {}", p.display()));
+    } else if let Some(n) = &meta.text_note {
+        parts.push(n.clone());
+    }
+    if meta.macros {
+        parts.push("contains macros".into());
+    }
+    (!parts.is_empty()).then(|| parts.join("; "))
 }
 
 /// Run blocking work off the async workers, turning a panic into an error.
@@ -689,23 +759,10 @@ fn display_name(p: &Path) -> String {
         .unwrap_or_else(|| p.display().to_string())
 }
 
-fn is_image_path(p: &Path) -> bool {
-    let by_ext = p
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase());
-    match by_ext {
-        Some(e) if IMAGE_EXTS.contains(&e.as_str()) => true,
-        Some(e) if e == "svg" => false,
-        _ => !matches!(
-            process::sniff_file(p),
-            Ok(process::Sniffed::NotImage) | Ok(process::Sniffed::Svg) | Err(_)
-        ),
-    }
-}
-
-/// Images under `dir`, depth-first, sorted by name, skipping dot-folders.
-fn images_in_dir(dir: &Path, budget: &mut usize, out: &mut Vec<PathBuf>) {
+/// Files under `dir`, depth-first, sorted by name. Hidden files and folders
+/// (a leading dot: `.git`, `.env`, …) and [`SKIPPED_DIRS`] are left out —
+/// only a file dropped on its own is attached whatever its name.
+fn files_in_dir(dir: &Path, budget: &mut usize, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
@@ -716,20 +773,25 @@ fn images_in_dir(dir: &Path, budget: &mut usize, out: &mut Vec<PathBuf>) {
             return;
         }
         *budget -= 1;
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
         let Ok(ft) = e.file_type() else { continue };
         let path = e.path();
         if ft.is_dir() {
-            if !e.file_name().to_string_lossy().starts_with('.') {
-                images_in_dir(&path, budget, out);
+            if !SKIPPED_DIRS.contains(&name.as_str()) {
+                files_in_dir(&path, budget, out);
             }
-        } else if ft.is_file() && is_image_path(&path) {
+        } else if ft.is_file() {
             out.push(path);
         }
     }
 }
 
-/// Classify paths into images (accepted or refused by the limits) and
-/// non-images. Pure apart from reading file metadata and a few header bytes.
+/// Every dropped file (and every file in a dropped folder) against the
+/// limits. `non_images` is always empty now that any file can be attached;
+/// the field stays for older frontends. Pure apart from reading metadata.
 pub fn plan(paths: &[String], limits: &Limits, existing_count: u32, existing_bytes: u64) -> Plan {
     let mut out = Plan::default();
     let mut count = existing_count;
@@ -740,14 +802,8 @@ pub fn plan(paths: &[String], limits: &Limits, existing_count: u32, existing_byt
     for raw in paths {
         let p = PathBuf::from(raw);
         match std::fs::metadata(&p) {
-            Ok(m) if m.is_dir() => images_in_dir(&p, &mut budget, &mut candidates),
-            Ok(m) if m.is_file() => {
-                if is_image_path(&p) {
-                    candidates.push(p);
-                } else {
-                    out.non_images.push(raw.clone());
-                }
-            }
+            Ok(m) if m.is_dir() => files_in_dir(&p, &mut budget, &mut candidates),
+            Ok(m) if m.is_file() => candidates.push(p),
             _ => out.rejected.push(AttachmentRejected {
                 path: raw.clone(),
                 name: display_name(&p),
@@ -777,7 +833,10 @@ pub fn plan(paths: &[String], limits: &Limits, existing_count: u32, existing_byt
                 path,
                 name,
                 code: "too_many".into(),
-                reason: format!("A prompt can carry at most {} images.", limits.max_files),
+                reason: format!(
+                    "A message can carry at most {} attachments.",
+                    limits.max_files
+                ),
             });
             continue;
         }
@@ -842,8 +901,8 @@ mod tests {
         let (tmp_a, id, _) = svc.store.copy_in(Path::new(&src), |_| true).unwrap();
         let (tmp_b, id_b, _) = svc.store.copy_in(Path::new(&src), |_| true).unwrap();
         assert_eq!(id, id_b);
-        let (blob, _, guard_a) = svc.place_tracked(&tmp_a, &id).unwrap();
-        let (_, _, guard_b) = svc.place_tracked(&tmp_b, &id).unwrap();
+        let (blob, _, guard_a) = svc.place_tracked(&tmp_a, &id, "same.png").unwrap();
+        let (_, _, guard_b) = svc.place_tracked(&tmp_b, &id, "same.png").unwrap();
 
         svc.discard_unprocessed(guard_a).await;
         assert!(blob.is_file(), "job B still needs the shared original");
@@ -879,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_splits_images_from_other_files() {
+    fn plan_accepts_every_file() {
         let d = tempfile::tempdir().unwrap();
         let img = touch_file(d.path(), "a.png", 100);
         let noext = touch_file(d.path(), "screenshot", 100);
@@ -887,13 +946,10 @@ mod tests {
         std::fs::write(&txt, "# hi").unwrap();
         let svg = d.path().join("icon.svg");
         std::fs::write(&svg, "<svg/>").unwrap();
+        let (txt, svg): (String, String) =
+            (txt.to_string_lossy().into(), svg.to_string_lossy().into());
         let p = plan(
-            &[
-                img.clone(),
-                noext.clone(),
-                txt.to_string_lossy().into(),
-                svg.to_string_lossy().into(),
-            ],
+            &[img.clone(), noext.clone(), txt.clone(), svg.clone()],
             &Limits::default(),
             0,
             0,
@@ -903,9 +959,9 @@ mod tests {
                 .iter()
                 .map(|a| a.path.clone())
                 .collect::<Vec<_>>(),
-            vec![img, noext]
+            vec![img, noext, txt, svg]
         );
-        assert_eq!(p.non_images.len(), 2);
+        assert!(p.non_images.is_empty());
         assert!(p.rejected.is_empty());
     }
 
@@ -951,22 +1007,23 @@ mod tests {
     }
 
     #[test]
-    fn plan_expands_folders_sorted_and_skips_dot_folders() {
+    fn plan_expands_folders_sorted_skipping_hidden_and_build_trees() {
         let d = tempfile::tempdir().unwrap();
-        touch_file(d.path(), "shots/b.png", 10);
-        touch_file(d.path(), "shots/a.jpg", 10);
-        touch_file(d.path(), "shots/.cache/x.png", 10);
-        std::fs::write(d.path().join("shots/readme.txt"), "x").unwrap();
+        touch_file(d.path(), "proj/b.png", 10);
+        touch_file(d.path(), "proj/a.jpg", 10);
+        touch_file(d.path(), "proj/.cache/x.png", 10);
+        touch_file(d.path(), "proj/node_modules/m/index.png", 10);
+        touch_file(d.path(), "proj/target/debug/out.png", 10);
+        std::fs::write(d.path().join("proj/readme.txt"), "x").unwrap();
+        std::fs::write(d.path().join("proj/.env"), "SECRET=1").unwrap();
         let p = plan(
-            &[d.path().join("shots").to_string_lossy().into()],
+            &[d.path().join("proj").to_string_lossy().into()],
             &Limits::default(),
             0,
             0,
         );
         let names: Vec<_> = p.accepted.iter().map(|a| a.name.clone()).collect();
-        assert_eq!(names, vec!["a.jpg", "b.png"]);
-        // Non-images inside a dropped folder are ignored, not copied.
-        assert!(p.non_images.is_empty());
+        assert_eq!(names, vec!["a.jpg", "b.png", "readme.txt"]);
     }
 
     #[test]

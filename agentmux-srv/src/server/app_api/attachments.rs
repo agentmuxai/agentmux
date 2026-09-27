@@ -48,6 +48,36 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
+    let copy_svc = svc.clone();
+    let mstore = state.mstore.clone();
+    engine.register_typed(
+        COMMAND_ATTACHMENTS_COPY_TO_WORKDIR,
+        move |req: CommandAttachmentsCopyToWorkdirData, _ctx| {
+            let svc = copy_svc.clone();
+            let mstore = mstore.clone();
+            async move {
+                let block = mstore
+                    .get::<Block>(&req.block_id)
+                    .map_err(|e| format!("attachments.copy-to-workdir: {e}"))?
+                    .ok_or_else(|| "attachments.copy-to-workdir: no such pane".to_string())?;
+                let cwd = obj::meta_get_string(&block.meta, "cmd:cwd", "");
+                if cwd.is_empty() {
+                    return Err("No working folder is set for this agent.".to_string());
+                }
+                let path = tokio::task::spawn_blocking(move || {
+                    svc.store()
+                        .copy_original_to(&req.id, std::path::Path::new(&cwd), &req.name)
+                })
+                .await
+                .map_err(|e| format!("attachments.copy-to-workdir: {e}"))?
+                .map_err(|e| format!("Couldn't copy the file into the working folder: {e}"))?;
+                Ok(AttachmentsCopyToWorkdirResult {
+                    path: path.to_string_lossy().into_owned(),
+                })
+            }
+        },
+    );
+
     let info_svc = svc;
     engine.register_typed(
         COMMAND_ATTACHMENTS_INFO,
