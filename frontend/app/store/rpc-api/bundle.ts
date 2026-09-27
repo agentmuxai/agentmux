@@ -21,6 +21,8 @@ export type { GlobalMemoryImportSource } from "@/types/rpc/GlobalMemoryImportSou
 export type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
 import type { GlobalMemoryImportSources as GlobalMemoryImportSourcesT } from "@/types/rpc/GlobalMemoryImportSources";
 import type { GlobalMemoryImportReport as GlobalMemoryImportReportT } from "@/types/rpc/GlobalMemoryImportReport";
+export type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
+import type { GlobalMemorySection as GlobalMemorySectionT } from "@/types/rpc/GlobalMemorySection";
 import type { CommandGlobalMemoryImportData } from "@/types/rpc/CommandGlobalMemoryImportData";
 
 // The validation report shapes are GENERATED too. The validate HANDLER stays
@@ -205,6 +207,15 @@ export const BundleApi = {
      */
     GlobalMemoryImportSourcesCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryImportSourcesT> {
         return client.rpcCall("globalmemory:import_sources", {}, opts);
+    },
+
+    /**
+     * The Global Memory block agents' startup files carry, as its sections
+     * (Operator Config first) — what memory reinjection re-delivers. See
+     * docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1.
+     */
+    GlobalMemorySectionsCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemorySectionT[]> {
+        return client.rpcCall("globalmemory:sections", {}, opts);
     },
 
     /** Import what source `index` of list `list_id` has that this channel lacks. */

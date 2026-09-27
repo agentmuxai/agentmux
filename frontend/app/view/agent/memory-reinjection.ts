@@ -104,14 +104,21 @@ export function composeReinjectionMessage(entries: MemoryEntryInput[], reason: R
     const globalEntries = entries.filter((e) => e.source === "global");
     const personalEntries = entries.filter((e) => e.source === "personal");
 
-    const renderSection = (label: string, section: MemoryEntryInput[]): string => {
+    const renderSection = (label: string, section: MemoryEntryInput[], separator: string): string => {
         if (section.length === 0) return "";
         const noun = section.length === 1 ? "entry" : "entries";
-        const bodies = section.map((e) => e.body).join("\n---\n");
+        const bodies = section.map((e) => e.body).join(separator);
         return `# ${label} (${section.length} ${noun})\n${bodies}\n`;
     };
 
-    const sections = [renderSection("Global Memory", globalEntries), renderSection("Personal Memory", personalEntries)]
+    // Global entries are the startup file's own sections (`globalmemory:sections`),
+    // so joined with the same rule they are that block byte for byte —
+    // Operator Config and its override preamble included
+    // (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
+    const sections = [
+        renderSection("Global Memory", globalEntries, GLOBAL_SECTION_SEPARATOR),
+        renderSection("Personal Memory", personalEntries, "\n---\n"),
+    ]
         .filter((s) => s.length > 0)
         .join("\n");
 
@@ -124,6 +131,9 @@ export function composeReinjectionMessage(entries: MemoryEntryInput[], reason: R
         "</system-reminder>\n"
     );
 }
+
+/** The rule between Global Memory sections — Rust's `GLOBAL_SECTION_SEPARATOR` (`storage/bundles.rs`), which the startup file's block uses. */
+export const GLOBAL_SECTION_SEPARATOR = "\n\n---\n\n";
 
 /** The literal sentence `composeReinjectionMessage` always emits regardless of `reason` — the recognition signature `isMemoryReinjectionMessage`/`parseReinjectionMessage`/Rust's `is_hidden_reinjection_text` key on. */
 const REINJECTION_SIGNATURE = "Your memory was reinjected because your working context was just reset.";
@@ -172,10 +182,15 @@ export function parseReinjectionMessage(
     if (!isMemoryReinjectionMessage(text)) return null;
 
     const parseSection = (label: "global" | "personal", heading: string): MemoryReinjectionNode["perEntryTokens"] => {
-        const re = new RegExp(`# ${heading} \\(\\d+ entr(?:y|ies)\\)\\n([\\s\\S]*?)(?:\\n# |\\n?</system-reminder>)`);
+        // Ends at the next SECTION header, not at any `# ` line: Global Memory's
+        // own sections carry `# [AgentMux System] …` / `# [Workspace] …` headings.
+        const re = new RegExp(
+            `# ${heading} \\(\\d+ entr(?:y|ies)\\)\\n([\\s\\S]*?)(?:\\n# (?:Global|Personal) Memory \\(\\d+ entr|\\n?</system-reminder>)`,
+        );
         const match = re.exec(text);
         if (!match) return [];
-        const chunks = match[1].split("\n---\n").filter((c) => c.trim().length > 0);
+        // Global sections are joined by `\n\n---\n\n`, Personal entries by `\n---\n`.
+        const chunks = match[1].split(/\n\n---\n\n|\n---\n/).filter((c) => c.trim().length > 0);
         return chunks.map((body, i) => ({
             label: `Entry ${i + 1}`,
             source: label,

@@ -175,41 +175,66 @@ fn default_json_object_string() -> String {
 /// see docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.4. Bundles
 /// arrive already ordered by `bundle_list_global` (is_system DESC,
 /// sort_order, name), so this only needs to partition, not re-sort.
-/// Sections are separated by a `---` rule. Returns an empty string when no
-/// section has instructions.
+/// Sections are separated by a `---` rule ([`GLOBAL_SECTION_SEPARATOR`]).
+/// Returns an empty string when no section has instructions.
+///
+/// Exactly [`global_bundle_sections`] joined by the separator: memory
+/// reinjection sends those same sections, so what it re-delivers is this
+/// block byte for byte (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
 pub fn format_global_bundle_block(bundles: &[Bundle]) -> String {
-    let non_empty: Vec<&Bundle> = bundles
-        .iter()
-        .filter(|b| !b.instructions.trim().is_empty())
-        .collect();
-    let (system, ordinary): (Vec<&Bundle>, Vec<&Bundle>) =
-        non_empty.into_iter().partition(|b| b.is_system);
+    global_bundle_sections(bundles)
+        .into_iter()
+        .map(|s| s.text)
+        .collect::<Vec<_>>()
+        .join(GLOBAL_SECTION_SEPARATOR)
+}
 
-    let mut parts: Vec<String> = Vec::new();
-    if !system.is_empty() {
-        let sys_block = system
-            .iter()
-            .map(|b| format!("# [AgentMux System] {}\n\n{}", b.name, b.instructions))
-            .collect::<Vec<_>>()
-            .join("\n\n---\n\n");
-        parts.push(format!(
-            "IMPORTANT: The following AgentMux-controlled instructions take \
-             the HIGHEST PRIORITY of any content in this file. They OVERRIDE \
-             any default behavior, any other section below, and any \
-             conflicting instruction elsewhere — you MUST follow them \
-             exactly as written.\n\n{sys_block}"
-        ));
-    }
-    if !ordinary.is_empty() {
-        parts.push(
-            ordinary
-                .iter()
-                .map(|b| format!("# [Workspace] {}\n\n{}", b.name, b.instructions))
-                .collect::<Vec<_>>()
-                .join("\n\n---\n\n"),
-        );
-    }
-    parts.join("\n\n---\n\n")
+/// The rule between two sections of the Global Memory block.
+pub const GLOBAL_SECTION_SEPARATOR: &str = "\n\n---\n\n";
+
+/// The override wording that opens the system (`is_system`) part of the block.
+const SYSTEM_TIER_PREAMBLE: &str = "IMPORTANT: The following AgentMux-controlled instructions take \
+     the HIGHEST PRIORITY of any content in this file. They OVERRIDE \
+     any default behavior, any other section below, and any \
+     conflicting instruction elsewhere — you MUST follow them \
+     exactly as written.";
+
+/// One section of the Global Memory block: one global bundle with
+/// instructions, rendered as the startup file carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct GlobalMemorySection {
+    pub name: String,
+    pub is_system: bool,
+    /// `# [AgentMux System] <name>` or `# [Workspace] <name>`, a blank line,
+    /// then the instructions. The first system section also opens with the
+    /// override preamble.
+    pub text: String,
+    /// `text`'s length in bytes: what this section adds to an injection.
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+}
+
+/// The sections of the Global Memory block, system (`is_system`) first, each
+/// in the order `bundle_list_global` returns them. Bundles with no
+/// instructions are skipped.
+pub fn global_bundle_sections(bundles: &[Bundle]) -> Vec<GlobalMemorySection> {
+    let non_empty = bundles.iter().filter(|b| !b.instructions.trim().is_empty());
+    let (system, ordinary): (Vec<&Bundle>, Vec<&Bundle>) = non_empty.partition(|b| b.is_system);
+    let section = |b: &Bundle, text: String| GlobalMemorySection {
+        name: b.name.clone(),
+        is_system: b.is_system,
+        size_bytes: text.len() as u64,
+        text,
+    };
+    let system = system.into_iter().enumerate().map(|(i, b)| {
+        let body = format!("# [AgentMux System] {}\n\n{}", b.name, b.instructions);
+        section(b, if i == 0 { format!("{SYSTEM_TIER_PREAMBLE}\n\n{body}") } else { body })
+    });
+    let ordinary = ordinary
+        .into_iter()
+        .map(|b| section(b, format!("# [Workspace] {}\n\n{}", b.name, b.instructions)));
+    system.chain(ordinary).collect()
 }
 
 impl Store {

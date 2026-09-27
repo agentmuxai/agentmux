@@ -1184,6 +1184,48 @@
         assert_eq!(empty, "");
     }
 
+    /// Memory reinjection re-delivers the sections, so they must join to the
+    /// startup file's block byte for byte — and that block must not change
+    /// shape (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
+    #[test]
+    fn global_sections_join_to_the_startup_block_exactly() {
+        let sys1 = Bundle { is_system: true, instructions: "api".into(), ..mk_system("sys-1", "App API") };
+        let sys2 = Bundle { is_system: true, instructions: "env".into(), ..mk_system("sys-2", "Env") };
+        let blank = Bundle { instructions: "   ".into(), ..mk_ordinary("g-0", "Empty", 0) };
+        let ord1 = mk_ordinary("g-a", "Alpha", 1);
+        let ord2 = mk_ordinary("g-b", "Beta", 2);
+        let bundles = [sys1, sys2, blank, ord1, ord2];
+
+        let block = super::super::format_global_bundle_block(&bundles);
+        let preamble = "IMPORTANT: The following AgentMux-controlled instructions take the HIGHEST \
+                        PRIORITY of any content in this file. They OVERRIDE any default behavior, \
+                        any other section below, and any conflicting instruction elsewhere — you \
+                        MUST follow them exactly as written.";
+        assert_eq!(
+            block,
+            format!(
+                "{preamble}\n\n# [AgentMux System] App API\n\napi\n\n---\n\n# [AgentMux System] Env\n\nenv\
+                 \n\n---\n\n# [Workspace] Alpha\n\nrules for Alpha\n\n---\n\n# [Workspace] Beta\n\nrules for Beta"
+            ),
+            "the startup block's shape is unchanged"
+        );
+
+        let sections = super::super::global_bundle_sections(&bundles);
+        assert_eq!(
+            sections.iter().map(|s| (s.name.as_str(), s.is_system)).collect::<Vec<_>>(),
+            vec![("App API", true), ("Env", true), ("Alpha", false), ("Beta", false)],
+            "system first, empty skipped"
+        );
+        assert!(sections[0].text.starts_with("IMPORTANT:"), "the preamble rides on the first system section");
+        assert!(!sections[1].text.contains("IMPORTANT:"));
+        let joined = sections.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(super::super::bundles::GLOBAL_SECTION_SEPARATOR);
+        assert_eq!(joined, block);
+        for s in &sections {
+            assert_eq!(s.size_bytes, s.text.len() as u64);
+        }
+        assert!(super::super::global_bundle_sections(&[]).is_empty());
+    }
+
     // ---- Registry parallel-write mirror (PR A) ----
 
     fn make_named_inst(id: &str, name: &str, agents_root: &Path) -> AgentInstance {
