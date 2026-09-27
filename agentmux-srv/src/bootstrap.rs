@@ -2303,6 +2303,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                     crate::server::agent_handlers::TurnRegistration::Skip,
                     // Reactive delivery: a jekt, cron, nudge, broadcast, loop.
                     crate::backend::blockcontroller::health::TurnOrigin::Automated,
+                    Vec::new(),
                 ))
             });
             match started {

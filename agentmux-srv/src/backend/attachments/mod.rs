@@ -7,6 +7,7 @@
 //! docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.
 
 pub mod process;
+pub mod prompt;
 pub mod store;
 
 use std::collections::HashMap;
@@ -59,6 +60,10 @@ pub struct Limits {
     pub max_total_bytes: u64,
     pub send_max_edge: u32,
     pub retention: Duration,
+    /// Images Claude gets inline (the rest by path only). 0 = paths only.
+    pub claude_inline_max: usize,
+    /// Base64 bytes Claude may get inline across one session.
+    pub claude_session_inline_bytes: u64,
 }
 
 impl Default for Limits {
@@ -68,6 +73,8 @@ impl Default for Limits {
             max_total_bytes: DEFAULT_MAX_TOTAL_MB * 1024 * 1024,
             send_max_edge: DEFAULT_SEND_MAX_EDGE,
             retention: Duration::from_secs(DEFAULT_RETENTION_DAYS * 24 * 3600),
+            claude_inline_max: prompt::DEFAULT_INLINE_MAX_COUNT,
+            claude_session_inline_bytes: prompt::DEFAULT_SESSION_INLINE_MB * 1024 * 1024,
         }
     }
 }
@@ -94,6 +101,19 @@ impl Limits {
             retention: num("attachments:retentiondays")
                 .map(|n| Duration::from_secs((n * 24.0 * 3600.0) as u64))
                 .unwrap_or(d.retention),
+            // 0 is meaningful here (paths only), so not `num`.
+            claude_inline_max: extra
+                .get("attachments:claudeinlinemax")
+                .and_then(|v| v.as_f64())
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .map(|n| (n as usize).min(100))
+                .unwrap_or(d.claude_inline_max),
+            claude_session_inline_bytes: extra
+                .get("attachments:claudesessioninlinemb")
+                .and_then(|v| v.as_f64())
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .map(|n| (n * 1024.0 * 1024.0) as u64)
+                .unwrap_or(d.claude_session_inline_bytes),
         }
     }
 }
@@ -113,6 +133,10 @@ pub struct Service {
     /// when no other job is still using it. Placing an original and the
     /// discard check both happen under this lock.
     inflight: Arc<Mutex<HashMap<String, usize>>>,
+    /// Serializes the per-session inline-budget read, spend and write, so two
+    /// overlapping turns of one Claude session can't both spend the same
+    /// remaining budget or overwrite each other's count.
+    session_budget: Mutex<()>,
 }
 
 /// One job's claim on an id in [`Service::inflight`], released on drop.
@@ -148,8 +172,8 @@ pub fn init(broker: Arc<Broker>, config: Arc<ConfigState>) -> Arc<Service> {
         .clone()
 }
 
-// Used by prompt delivery (next PR in the stack), which has no AppState.
-#[allow(dead_code)]
+/// The service when it has been initialised (by the RPC or HTTP layer).
+/// Prompt delivery uses this: it has no `AppState` to initialise from.
 pub fn get() -> Option<Arc<Service>> {
     SERVICE.get().cloned()
 }
@@ -170,6 +194,7 @@ impl Service {
             memory: Arc::new(tokio::sync::Semaphore::new(DECODE_BUDGET_MIB as usize)),
             batches: Mutex::new(HashMap::new()),
             inflight: Arc::new(Mutex::new(HashMap::new())),
+            session_budget: Mutex::new(()),
         }
     }
 
@@ -285,10 +310,30 @@ impl Service {
             .ok()
     }
 
+    /// Run `f` with the inline budget left in Claude session `key` (out of
+    /// `max`), and record what it reports spending, as one step under a
+    /// lock. `carry_from` is a per-block key counted before the session had
+    /// an id; its count moves into `key` first. Blocking.
+    pub fn with_session_inline_budget<T>(
+        &self,
+        key: &str,
+        carry_from: Option<&str>,
+        max: u64,
+        f: impl FnOnce(u64) -> (T, u64),
+    ) -> T {
+        let _guard = self.session_budget.lock().unwrap();
+        if let Some(from) = carry_from.filter(|from| *from != key) {
+            self.store.adopt_session_inline_bytes(from, key);
+        }
+        let used = self.store.session_inline_bytes(key);
+        let (out, spent) = f(max.saturating_sub(used));
+        self.store.add_session_inline_bytes(key, spent);
+        out
+    }
+
     /// Resolve an id to the send-copy path and MIME type for delivery,
     /// marking it used. Doesn't decode: call [`Self::ensure_derived`] first
     /// so a stale fingerprint is re-derived under the limits.
-    #[allow(dead_code)] // used by prompt delivery (next PR in the stack)
     pub fn send_path(&self, id: &str) -> Option<(PathBuf, String)> {
         let fp = store::fingerprint(self.limits().send_max_edge);
         let found = self.store.file(id, &fp, Kind::Send)?;
@@ -808,6 +853,32 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_turns_spend_one_session_budget_once() {
+        let d = tempfile::tempdir().unwrap();
+        let svc = Arc::new(Service::new(
+            Store::new(d.path().join("attachments")),
+            Arc::new(Broker::new()),
+            Arc::new(ConfigState::new()),
+        ));
+        // Eight turns race for a 100-byte budget, each wanting up to 30.
+        let turns: Vec<_> = (0..8)
+            .map(|_| {
+                let svc = Arc::clone(&svc);
+                std::thread::spawn(move || {
+                    svc.with_session_inline_budget("session:s", None, 100, |budget| {
+                        std::thread::sleep(Duration::from_millis(2));
+                        ((), budget.min(30))
+                    })
+                })
+            })
+            .collect();
+        for t in turns {
+            t.join().unwrap();
+        }
+        assert_eq!(svc.store().session_inline_bytes("session:s"), 100);
+    }
+
+    #[test]
     fn plan_splits_images_from_other_files() {
         let d = tempfile::tempdir().unwrap();
         let img = touch_file(d.path(), "a.png", 100);
@@ -923,5 +994,12 @@ mod tests {
         assert_eq!(l.max_total_bytes, 50 * 1024 * 1024);
         assert_eq!(l.send_max_edge, 8000);
         assert_eq!(l.retention, Limits::default().retention);
+        assert_eq!(l.claude_inline_max, prompt::DEFAULT_INLINE_MAX_COUNT);
+        extra.insert("attachments:claudeinlinemax".into(), serde_json::json!(0));
+        assert_eq!(
+            Limits::from_settings(&extra).claude_inline_max,
+            0,
+            "0 means paths only"
+        );
     }
 }
