@@ -1,6 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { revealBlockLocally } from "@/app/util/reveal-block";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import {
@@ -32,7 +33,6 @@ import {
     getBlockMetaKeyAtom,
     getSettingsKeyAtom,
     openOrFocusPaneByView,
-    refocusNode,
     MOS,
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -442,7 +442,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // Activating a tab has two cases, both "switch," neither "create": (1)
     // the target block already lives in THIS pane's own block-stack — swap
     // the active member in place; (2) a fork open as its own separate
-    // top-level pane — jump focus to it via refocusNode, same as the
+    // top-level pane — reveal it via revealBlockLocally, same as the
     // picker's "Switch to existing" flow already does.
     const handleTabSwitch = (targetBlockId: string) => {
         if (targetBlockId === activeBlockId()) return;
@@ -462,7 +462,9 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
             // See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
             setActiveBlockInStack(layoutModel, node.id, targetBlockId);
         } else {
-            refocusNode(targetBlockId);
+            // Another pane — switch it to the fork if it's a background tab
+            // there (refocusNode only focused the pane).
+            void revealBlockLocally(targetBlockId);
         }
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).

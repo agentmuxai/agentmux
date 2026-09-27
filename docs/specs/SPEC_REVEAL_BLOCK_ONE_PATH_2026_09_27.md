@@ -2,7 +2,7 @@
 
 **Author:** lark
 **Date:** 2026-09-27
-**Status:** active — Phase 1 (revealBlock, Swarm + token popover) shipped in PR #3961; Phase 2 (move the other callers, delete duplicates), Phase 3 (other windows) and the optional MCP tool not started.
+**Status:** active — Phase 1 (revealBlock, Swarm + token popover) shipped in PR #3961; Phase 2 (notification clicks, AgentPicker, fork pill moved over; focus-block.ts deleted) in PR #3972; Phase 3 (other windows) and the optional MCP tool not started.
 **Related:** `SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md` §2.3 (Swarm select-to-focus),
 `SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md` (token popover → agent pane), the OS-notification
 rich-content spec (`notification:activate`, `os-notify-bridge.ts`), the in-pane tabs work
@@ -119,8 +119,8 @@ does) if the switch visibly flickers in testing.
 |---|---|
 | `focusBlock(blockId)` in Swarm and the token popover | `revealBlock(blockId)` |
 | `activateBlockLocally(blockId, tabId)` / `focusBlockInTab` in `os-notify-bridge.ts` | `revealBlockLocally(blockId, { tabId })`; the local helpers are deleted |
-| `refocusNode(blockId)` when a `blockId` is given (AgentPicker, fork pill, browser) | `revealBlockLocally(blockId)`. `refocusNode()` without an id (re-focus the current pane) stays as it is |
-| `util/focus-block.ts` | deleted; `focusBlock` kept one release as a deprecated re-export of `revealBlock`, then removed |
+| `refocusNode(blockId)` in AgentPicker's "Switch to existing" and the agent fork pill (a fork in another pane) | `revealBlock(blockId)` / `revealBlockLocally(blockId)`: the target may be in another window tab or a background pane tab. The browser pane's own click and `globalRefocus` keep `refocusNode`: they re-focus a pane that is already on screen, which `refocusNode` does correctly and synchronously |
+| `util/focus-block.ts` | Phase 1 kept `focusBlock` as an alias; Phase 2 moves its two callers to `revealBlock` and deletes the file |
 
 `openOrFocusPaneByView` (focus an existing pane of a view type or create one) and direct
 `setActiveBlockInStack` calls for a pane's *own* tabs are different jobs and stay.
