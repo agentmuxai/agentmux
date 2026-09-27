@@ -953,6 +953,104 @@ async function admissionRecipe(pos, opt) {
     for (const d of diagnoses) console.log(`\ndiagnosis: ${d}`);
 }
 
+// ─── opens ───────────────────────────────────────────────────────────────────
+// "How long do agent opens take": the frontend's one `[agent-open]` line per
+// open (frontend/app/view/agent/open-trace.ts), across every instance, then
+// p50/p95 per source (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.6). Times are
+// ms since the click (or the pane's mount); the clock stops at reveal + quiet,
+// so a login prompt after that is never counted.
+export const OPEN_PHASE_KEYS = ["cli", "config", "committed", "history_start", "history_read", "parsed", "painted", "revealed", "quiet"];
+
+// Pure: a log message → the open's fields, or null if it isn't one.
+export function parseAgentOpenLine(message) {
+    const at = String(message ?? "").indexOf("[agent-open]");
+    if (at < 0) return null;
+    const out = {};
+    const re = /(\w+)=("(?:[^"\\]|\\.)*"|\S+)/g;
+    for (const m of String(message).slice(at).matchAll(re)) {
+        let v = m[2];
+        if (v.startsWith('"')) { try { v = JSON.parse(v); } catch { /* keep raw */ } }
+        else if (/^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
+        out[m[1]] = v;
+    }
+    return out.agent !== undefined ? out : null;
+}
+
+// Nearest-rank percentile of a numeric list; null for an empty one.
+export function percentile(values, p) {
+    const xs = values.filter((v) => typeof v === "number").sort((a, b) => a - b);
+    if (!xs.length) return null;
+    return xs[Math.min(xs.length - 1, Math.max(0, Math.ceil((p / 100) * xs.length) - 1))];
+}
+
+// Pure: parsed opens → one summary per source.
+export function summarizeOpens(opens) {
+    const bySource = new Map();
+    for (const o of opens) {
+        const k = o.source ?? "?";
+        if (!bySource.has(k)) bySource.set(k, []);
+        bySource.get(k).push(o);
+    }
+    return [...bySource.entries()].map(([source, list]) => {
+        const outcomes = {};
+        for (const o of list) outcomes[o.outcome ?? "?"] = (outcomes[o.outcome ?? "?"] ?? 0) + 1;
+        const quiet = list.filter((o) => o.outcome === "quiet");
+        return {
+            source,
+            n: list.length,
+            outcomes,
+            installs: list.filter((o) => o.cli_source === "installed").length,
+            painted: { p50: percentile(list.map((o) => o.painted), 50), p95: percentile(list.map((o) => o.painted), 95) },
+            quiet: { p50: percentile(quiet.map((o) => o.quiet), 50), p95: percentile(quiet.map((o) => o.quiet), 95) },
+        };
+    });
+}
+
+const fmtMs = (v) => (typeof v === "number" ? `${v}` : "-");
+
+async function opensRecipe(pos, opt) {
+    const agent = (opt.agent || pos[1] || "").toLowerCase();
+    opt.instances = opt.instances || "all";
+    if (!opt.since) opt.since = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 16);
+    opt.grep = /\[agent-open\]/;
+    opt.all = true;
+    delete opt.agent; // matched on the line's own agent="…" below
+    const groups = await resolveInstanceGroups("host", opt);
+    const { merged } = mergedTimeline(groups, opt);
+    const opens = [];
+    for (const e of merged) {
+        const o = parseAgentOpenLine(msgOf(e.j) || e.raw);
+        if (!o) continue;
+        if (agent && String(o.agent).toLowerCase() !== agent) continue;
+        opens.push({ ...o, ts: e.ts, tag: e.tag });
+    }
+    const title = `opens${agent ? `: ${agent}` : ""} since ${opt.since} (ms since click/mount; stops at reveal + quiet)`;
+    console.log(`=== ${title} ===`);
+    if (!opens.length) {
+        console.log(`\nno [agent-open] lines${agent ? ` for '${agent}'` : ""} since ${opt.since}. They need a build with SPEC_AGENT_OPEN_LATENCY §4.6; try a wider --since.`);
+        return;
+    }
+    const shown = opt.n > 0 ? opens.slice(-opt.n) : opens;
+    console.log(`${"when".padEnd(14)} ${"instance".padEnd(18)} ${"agent".padEnd(16)} ${"source".padEnd(9)} ${"outcome".padEnd(9)} ${"cli".padStart(6)} ${"cli_source".padEnd(13)} ${"painted".padStart(7)} ${"revealed".padStart(8)} ${"quiet".padStart(6)} ${"total".padStart(6)} auth`);
+    for (const o of shown) {
+        const m = String(o.ts).match(/^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+        const when = m ? `${m[1]} ${m[2]}` : "--";
+        console.log(
+            `${when.padEnd(14)} ${String(o.tag).padEnd(18)} ${String(o.agent).slice(0, 16).padEnd(16)} ${String(o.source ?? "-").padEnd(9)} ${String(o.outcome ?? "-").padEnd(9)} ` +
+                `${fmtMs(o.cli).padStart(6)} ${String(o.cli_source ?? "-").padEnd(13)} ${fmtMs(o.painted).padStart(7)} ${fmtMs(o.revealed).padStart(8)} ` +
+                `${fmtMs(o.quiet).padStart(6)} ${fmtMs(o.total).padStart(6)} ${o.auth ?? "-"}`,
+        );
+    }
+    console.log("\nsummary:");
+    for (const s of summarizeOpens(opens)) {
+        const outcomes = Object.entries(s.outcomes).map(([k, v]) => `${k} ${v}`).join(", ");
+        console.log(
+            `  ${s.source.padEnd(9)} ${s.n} open${s.n === 1 ? "" : "s"} (${outcomes}); first row p50 ${fmtMs(s.painted.p50)} p95 ${fmtMs(s.painted.p95)}; ` +
+                `quiet p50 ${fmtMs(s.quiet.p50)} p95 ${fmtMs(s.quiet.p95)}${s.installs ? `; ${s.installs} installed the CLI` : ""}`,
+        );
+    }
+}
+
 // ─── phases ───────────────────────────────────────────────────────────────────
 // Unified turn-phase timeline for ONE agent pane, merged chronologically across
 // the frontend's `[wave-turn]` transition log (host) and the backend's
@@ -1161,6 +1259,8 @@ const HELP = `muxlog — AgentMux log viewer
   muxlog phases [<block-id>]         merged turn-phase timeline (host [wave-turn] + srv [health]) for one pane — defaults to $AGENTMUX_BLOCKID
   muxlog admission [<agent>]         why won't this agent run here: its admission/take-over/lifecycle lines across ALL instances,
                                      merged, then a per-instance verdict + diagnosis — defaults to $AGENTMUX_AGENT_ID, --since 24h ago
+  muxlog opens [<agent>]             how long agent opens took: one row per [agent-open] line across ALL instances
+                                     (ms since click to first row / reveal / quiet), then p50/p95 per source — --since 24h ago
 
 Options (any position):
   -i <substr>   pick the instance whose log path/branch/version matches <substr>
@@ -1281,6 +1381,10 @@ async function main() {
     }
     if (cmd === "admission") {
         await admissionRecipe(pos, opt);
+        return;
+    }
+    if (cmd === "opens") {
+        await opensRecipe(pos, opt);
         return;
     }
 

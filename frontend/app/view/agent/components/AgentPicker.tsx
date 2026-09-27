@@ -57,6 +57,7 @@ import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import { beginAgentOpen, finishAgentOpen } from "../open-trace";
 
 /** This-machine-only preference — no cross-device sync, no existing
  *  localStorage precedent in this component tree to extend (a new small
@@ -441,8 +442,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             return;
         }
         setLaunching(def.id);
+        const openBlockId = props.model.blockId;
+        beginAgentOpen(openBlockId, def.name, "my-agents");
         try {
-            await props.model.launchAgentDefinition(def, {
+            const launched = await props.model.launchAgentDefinition(def, {
                 instanceName: row.instance_name,
                 agentType: (def.agent_type as "host" | "container") || "host",
                 environment: def.agent_type === "container" ? "docker" : "local",
@@ -473,7 +476,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 // "click Maks → startup context replayed" report).
                 continueSessionId: row.session_id ?? "",
             });
+            if (!launched) finishAgentOpen(openBlockId, "failed");
             takeLaunchError();
+        } catch (e) {
+            finishAgentOpen(openBlockId, "failed");
+            throw e;
         } finally {
             setLaunching(null);
         }

@@ -15,6 +15,7 @@ import { Logger } from "@/util/logger";
 import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import { markAgentOpen } from "./open-trace";
 
 /**
  * Check that Node.js and npm are available for a provider installed via
@@ -114,6 +115,7 @@ export async function resolveCliBin(provider: ProviderDefinition, blockId: strin
     if (!result?.cli_path) {
         throw new Error(`ResolveCli returned no CLI path for provider '${provider.id}'`);
     }
+    markAgentOpen(blockId, "cli", { cli_source: result.source });
     return result.cli_path;
 }
 

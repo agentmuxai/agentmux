@@ -29,6 +29,7 @@ import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
+import { markAgentOpen } from "./open-trace";
 
 /** The agent's state behind its native pane tab (`agentPaneTabManifest`,
  *  agent-manifest.tsx). */
@@ -674,6 +675,7 @@ export class AgentViewModel {
                 auto_allocate: autoAllocate,
             });
             const finalWorkDir = writeResult?.working_dir || writeWorkDir;
+            markAgentOpen(blockId, "config");
 
             // Store CLI config in block metadata using the (possibly
             // collision-resolved) finalWorkDir.
@@ -844,6 +846,7 @@ export class AgentViewModel {
                     }),
                 warn: (msg) => Logger.warn("agent", msg),
             });
+            if (committed.ok !== false) markAgentOpen(blockId, "committed");
             if (committed.ok === false) {
                 // Same as the catch below: a launch that didn't happen must
                 // not leave a focus request for a later, unrelated mount.
