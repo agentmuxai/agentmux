@@ -14,8 +14,11 @@
 //! - takes its auth key from `AGENTMUX_AUTH_KEY`, `--auth-key-file`, or
 //!   generates one and writes it to `<data dir>/srv-auth-key` (0600) — the key
 //!   is never printed, only the file's path;
-//! - turns the cloud subscriber off unless asked for (it reads the OS keychain,
-//!   which a container usually doesn't have);
+//! - keeps secrets in owner-only files under the shared dir instead of the OS
+//!   keychain, which a container usually doesn't have (`--secret-store
+//!   keychain` to use the keychain anyway);
+//! - turns the cloud subscriber off: a server doesn't connect to the AgentMux
+//!   cloud relay on its own;
 //! - is not tied to stdin or a parent process (`main` skips those watchers);
 //!   SIGINT/SIGTERM still shut it down.
 //!
@@ -28,7 +31,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::config::CliArgs;
+use crate::config::{CliArgs, SecretStoreKind};
 
 
 /// Set once `prepare_env` succeeded: this process is the headless server.
@@ -125,6 +128,12 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     let data_dir = effective_data_dir(cli.wavedata.as_deref(), &paths.data_dir);
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
     crate::backend::base::acquire_data_dir_lock(&data_dir)?;
+
+    // Secrets: one store per machine, like the keychain, so under the shared
+    // dir rather than any one version's data dir.
+    if cli.secret_store.unwrap_or(SecretStoreKind::File) == SecretStoreKind::File {
+        crate::identity::secret_store::use_file_store(paths.shared_dir.join("secrets"))?;
+    }
 
     let mut generated = None;
     if std::env::var("AGENTMUX_AUTH_KEY").map(|k| k.is_empty()).unwrap_or(true) {
@@ -325,6 +334,14 @@ mod tests {
         assert!(requested_from(&a, None));
         let parsed = <CliArgs as clap::Parser>::try_parse_from(a).unwrap();
         assert_eq!(effective_data_dir(parsed.wavedata.as_deref(), Path::new("/x")).as_os_str(), raw);
+    }
+
+    #[test]
+    fn secret_store_flag_parses() {
+        assert_eq!(cli(&["srv", "--headless"]).secret_store, None);
+        assert_eq!(cli(&["srv", "--headless", "--secret-store", "keychain"]).secret_store, Some(SecretStoreKind::Keychain));
+        assert_eq!(cli(&["srv", "--headless", "--secret-store=file"]).secret_store, Some(SecretStoreKind::File));
+        assert!(<CliArgs as clap::Parser>::try_parse_from(args(&["srv", "--secret-store", "vault"])).is_err());
     }
 
     #[test]
