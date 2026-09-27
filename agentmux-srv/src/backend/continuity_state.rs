@@ -262,35 +262,48 @@ pub(crate) fn with_state_after_compaction(mstore: &Store, block_id: &str, messag
     if !(crate::server::app_api::session::is_hidden_reinjection_text(&message) && message.contains(COMPACTION_CLAUSE)) {
         return message;
     }
-    let state = mstore
-        .get::<Block>(block_id)
-        .ok()
-        .flatten()
-        .and_then(|block| eligible(&block.meta))
-        .and_then(|(zone, _)| latest_state(global_transcript_store()?, &zone));
-    match state {
+    match latest_state_for_block(mstore, block_id) {
         Some(state) => append_state_to_reinjection(message, &state),
         None => message,
     }
 }
 
-/// Inserts the summary as the reinjection's last section. It's a `#`
-/// heading like the memory sections, so the frontend's replay parser
-/// (`parseReinjectionMessage`) still ends the Personal Memory section where
-/// it did.
+/// The agent's running summary as the section a compaction delivery carries
+/// last — the `SessionStart` hook's (`memory_delivery`), formatted exactly as
+/// the hidden reinjection's. `None` when the agent has no summary yet.
+pub(crate) fn running_summary_section(mstore: &Store, block_id: &str) -> Option<String> {
+    latest_state_for_block(mstore, block_id).map(|state| summary_section(&state))
+}
+
+fn latest_state_for_block(mstore: &Store, block_id: &str) -> Option<StateVersion> {
+    mstore
+        .get::<Block>(block_id)
+        .ok()
+        .flatten()
+        .and_then(|block| eligible(&block.meta))
+        .and_then(|(zone, _)| latest_state(global_transcript_store()?, &zone))
+}
+
+/// The summary under its `#` heading, ending in a newline. The frontend's
+/// replay parser ends the Personal Memory section at this heading
+/// (`RUNNING_SUMMARY_HEADING` in `memory-reinjection.ts`).
+fn summary_section(state: &StateVersion) -> String {
+    let written = chrono::DateTime::from_timestamp_millis(state.created_at_ms)
+        .map_or_else(String::new, |t| format!(", written {}", t.format("%Y-%m-%d %H:%M UTC")));
+    format!(
+        "# Running summary of this conversation (kept by AgentMux{written}; your compacted \
+         context wins where it is newer)\n{}\n",
+        defuse_delimiters(state.text.trim()),
+    )
+}
+
+/// Inserts the summary as the reinjection's last section.
 fn append_state_to_reinjection(message: String, state: &StateVersion) -> String {
     const CLOSE: &str = "</system-reminder>";
     let Some(at) = message.rfind(CLOSE) else { return message };
-    let written = chrono::DateTime::from_timestamp_millis(state.created_at_ms)
-        .map_or_else(String::new, |t| format!(", written {}", t.format("%Y-%m-%d %H:%M UTC")));
     let before = &message[..at];
     let separator = if before.ends_with('\n') { "" } else { "\n" };
-    format!(
-        "{before}{separator}# Running summary of this conversation (kept by AgentMux{written}; your compacted \
-         context wins where it is newer)\n{}\n{}",
-        defuse_delimiters(state.text.trim()),
-        &message[at..],
-    )
+    format!("{before}{separator}{}{}", summary_section(state), &message[at..])
 }
 
 /// Called when a turn ends successfully. Returns at once; any update runs in

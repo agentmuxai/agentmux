@@ -72,6 +72,7 @@ pub mod memory_release;
 pub mod global_memory_record;
 pub mod agent_bundle_sidecar;
 pub mod continuity_state;
+pub mod memory_delivery;
 pub mod shellexec;
 pub mod transcript_backfill;
 pub mod blocking;
