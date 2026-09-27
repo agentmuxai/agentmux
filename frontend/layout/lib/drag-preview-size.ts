@@ -107,3 +107,44 @@ export function dragPreviewCursorOffset(size: DragPreviewSize, dpr: number): { x
         y: (size.height * ratio - size.height) / 2 + 10,
     };
 }
+
+/**
+ * How long the pointer must rest on a pane before its drag ghost is
+ * rasterised. `toPng` of a pane costs ~170 ms of main thread
+ * (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4), and it used to run the moment
+ * the pointer entered any pane whose cached ghost was stale — every pane
+ * after a layout change, e.g. opening an agent, as the pointer crossed them.
+ * A pointer just passing through never pays for it now.
+ */
+export const DRAG_PREVIEW_HOVER_MS = 250;
+
+/**
+ * Run `rasterise` once the pointer has rested on the pane for `delayMs`
+ * (`enter`/`leave`), or right away on `press` — a pointer-down on the pane
+ * may start a drag, and the ghost has to exist when it does.
+ */
+export function createDragPreviewIntent(
+    rasterise: () => void,
+    delayMs: number = DRAG_PREVIEW_HOVER_MS
+): { enter: () => void; leave: () => void; press: () => void; dispose: () => void } {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancel = () => {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+    };
+    return {
+        enter: () => {
+            cancel();
+            timer = setTimeout(() => {
+                timer = undefined;
+                rasterise();
+            }, delayMs);
+        },
+        leave: cancel,
+        press: () => {
+            cancel();
+            rasterise();
+        },
+        dispose: cancel,
+    };
+}
