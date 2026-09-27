@@ -222,8 +222,13 @@ yet known (P0).
   - Kimi gets nothing;
   - a user-owned `AGENTS.md`/`GEMINI.md` silently blocks delivery (no side-file
     fallback like D2).
-- **G7 — edits don't reach running agents** until the next launch, compaction or
-  fresh session.
+- **G7 — edits don't reach running agents:**
+  - an ordinary Global Memory edit reaches the model at the next launch,
+    compaction or `fresh` reinjection;
+  - an **Operator Config** edit reaches it only when the startup file is
+    rewritten at the next launch/open. Reinjection filters out `is_system` rows
+    (G3), so compaction and `fresh` don't carry it, and a respawn inside a pane
+    re-reads the old file.
 - **G8 — Personal Memory rides along** with Global Memory in the same hidden
   turn. If only Global Memory is wanted, the two need splitting (open question
   Q3).
@@ -245,25 +250,28 @@ Proposed; not started. Each phase is one PR.
   outcome emit → frontend trigger → hidden send. Fix, or record why it can't
   fire. Also check G4's double-fire risk.
 
-- **P1 — move the trigger into the backend with a Claude `SessionStart` hook.**
+- **P1 — one composition for every path (G3).** Comes before the hook, which
+  needs it.
+  - Add one srv endpoint that returns the composed block from
+    `format_global_bundle_block`, so Operator Config, headings and preamble match
+    the startup file byte for byte.
+  - Switch the existing frontend reinjection (`memory-reinjection-fetch.ts`) to
+    it, which works on its own and closes G3 for the current path.
+  - Decide Q3 (Personal Memory) here.
+
+- **P2 — move the trigger into the backend with a Claude `SessionStart` hook.**
   - Claude Code runs `SessionStart` with `source` = `startup` | `resume` |
     `clear` | `compact` and adds the hook's `additionalContext` to the model's
     context without showing it as a conversation turn. One hook covers new
     session, resume and compaction (G1, G4).
   - Install it next to the existing `PreCompact` hook (`agentmux-bashwrap`
     subcommand; same install sites as §3.5).
-  - The hook asks srv for the composed block (P2) and emits it as
+  - The hook fetches the block from P1's endpoint and emits it as
     `additionalContext`.
   - Verify first: size limits on `additionalContext`, and whether `compact`
     fires after auto-compaction as well as `/compact`.
-  - The `fresh` trigger then becomes redundant for Claude; keep the frontend
-    path only as the fallback until P1 is verified live.
-
-- **P2 — one composition for both paths (G3).**
-  - Reinjection uses `format_global_bundle_block` itself, so Operator Config,
-    headings and preamble match the startup file byte for byte.
-  - Serve it from one srv endpoint used by both the file writer and the hook.
-  - Decide Q3 (Personal Memory) here.
+  - The frontend triggers then become redundant for Claude; keep them only as
+    the fallback until P2 is verified live.
 
 - **P3 — the notice (D6).**
   - srv emits one event per injection (reason, entry names, token counts).
@@ -331,7 +339,7 @@ Proposed; not started. Each phase is one PR.
   for the operator's debugging? (reinjection spec §7 Q4)
 - **Q3 — Personal Memory:** keep reinjecting it alongside Global Memory (today's
   behaviour), or Global Memory only as today's ask reads?
-- **Q4 — on resume:** reinject on a normal `--resume` (P1 would, via
+- **Q4 — on resume:** reinject on a normal `--resume` (P2 would, via
   `source=resume`), or only on startup, clear and compact? Resuming already
   keeps the conversation, so this is purely the "force the read" argument (D4).
 - **Q5 — the delegation action:** should `WorkEnqueue` ever auto-fire, or always
