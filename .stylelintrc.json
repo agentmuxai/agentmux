@@ -12,6 +12,10 @@
                 "auto", "unset", "inherit", "initial"
             ]
         },
+        "declaration-property-value-disallowed-list": [
+            { "font-family": ["/var\\(--fixed-font/", "/var\\(--base-font/"] },
+            { "message": "`--fixed-font` / `--base-font` are `font` SHORTHAND values, invalid in `font-family:` — the declaration is dropped and the element silently inherits. Use `var(--font-mono)` / `var(--font-sans)` (theme.scss; SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §7)." }
+        ],
         "declaration-no-important": [true, {
             "message": "`!important` is forbidden — fix the underlying specificity or selector. If unavoidable, document the reason in a comment AND grandfather the file via `.stylelintignore`."
         }],

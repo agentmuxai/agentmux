@@ -165,7 +165,7 @@
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
     background: var(--main-bg-color);
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     white-space: pre-wrap;
     overflow-wrap: break-word;
@@ -222,7 +222,7 @@
     margin: 0;
     padding: var(--space-2);
     overflow: auto;
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--main-text-color);
     white-space: pre-wrap;
@@ -238,7 +238,7 @@
     border-radius: 0;
     background: var(--main-bg-color);
     color: var(--main-text-color);
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     resize: none;
     outline: none;

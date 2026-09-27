@@ -63,7 +63,7 @@
     }
 
     .cpu-cores-aggregate {
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
         font-size: 12px;
     }
 
@@ -131,7 +131,7 @@
         .cpu-core-label {
             flex: 0 0 auto;
             color: var(--secondary-text-color);
-            font-family: var(--fixed-font, monospace);
+            font-family: var(--font-mono);
             font-size: 11px;
         }
 
@@ -154,7 +154,7 @@
             flex: 0 0 auto;
             min-width: 34px;
             text-align: right;
-            font-family: var(--fixed-font, monospace);
+            font-family: var(--font-mono);
             font-size: 11px;
         }
     }

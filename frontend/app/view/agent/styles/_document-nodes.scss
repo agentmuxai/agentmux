@@ -200,7 +200,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 border: none;
                 color: var(--secondary-text-color);
                 font-size: 11px;
-                font-family: var(--fixed-font, monospace);
+                font-family: var(--font-mono);
                 cursor: default;
                 width: 100%;
                 text-align: left;
@@ -380,7 +380,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 color: var(--accent-color, #2bd4a8);
                 background: rgba(43, 212, 168, 0.08);
                 border-radius: 0;
-                font-family: var(--fixed-font, monospace);
+                font-family: var(--font-mono);
                 font-size: 11px;
                 white-space: nowrap;
                 overflow: hidden;
@@ -466,7 +466,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             max-height: $transcript-preview-max-height;
             min-height: 0;
             overflow: hidden;
-            font-family: var(--fixed-font, monospace);
+            font-family: var(--font-mono);
             font-size: 12px;
             // Overrides the global `tab-size: 4` from reset.scss (inherited
             // by every preview here — Read/Write/Edit/Diff, Shiki and plain-
@@ -614,7 +614,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-dispatch-card-members {
                 color: var(--secondary-text-color);
-                font-family: var(--fixed-font, monospace);
+                font-family: var(--font-mono);
                 font-variant-numeric: tabular-nums;
                 flex-shrink: 0;
             }
@@ -704,7 +704,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-tool-result-pill {
         display: none; // shown via container query at ≥600px
         font-size: 10px;
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
         padding: 1px 5px;
         border-radius: var(--radius-full);
         font-variant-numeric: tabular-nums;
@@ -737,7 +737,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-direction: column;
         gap: 1px;
         font-size: 11px;
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
 
         .agent-tool-glob-file {
             color: var(--term-bright-cyan);
@@ -1590,7 +1590,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border-collapse: collapse;
         width: 100%;
         font-size: 11px;
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
     }
 
     th,
@@ -1688,7 +1688,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-search-source-count {
         flex-shrink: 0;
         opacity: 0.7;
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
         font-size: 10px;
     }
 
@@ -1845,7 +1845,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: 10px;
         opacity: 0.4;
         flex-shrink: 0;
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
     }
 
     .agent-search-card-title {
@@ -1989,7 +1989,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: 10px;
         opacity: 0.5;
         flex-shrink: 0;
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
     }
 
     .agent-tool-write-content {
@@ -2028,7 +2028,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     border-radius: 0;
     padding: var(--space-1) var(--space-1-5);
     margin: var(--space-1) 0 0 0;
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: 11px;
     line-height: 1.45;
 
@@ -2069,7 +2069,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-error-code {
         color: var(--error-color);
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
         font-size: 11px;
         font-weight: 600;
         white-space: nowrap;

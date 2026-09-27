@@ -71,7 +71,7 @@
 // The CLAUDE.md full view's path line — a real disk path, in monospace via
 // the <code> element in the markup.
 code.global-bundle-file-label {
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: 9px;
     color: var(--secondary-text-color);
     white-space: normal;
