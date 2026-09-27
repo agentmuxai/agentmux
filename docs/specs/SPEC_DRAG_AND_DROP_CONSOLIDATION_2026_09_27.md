@@ -197,7 +197,7 @@ Right-click Paste doesn't consult `dnd:enabled`, `dnd:concurrency` or `dnd:agent
 
 | State | When | Look |
 |---|---|---|
-| **Armed** | files are over the window; on every pane that accepts files | 1px dashed accent outline at 50% opacity, inset. No fill, no text. |
+| **Armed** | files are over the window; on every visible pane whose `accept` says ok. Evaluated once when the drag enters the window, and refreshed once when the file names arrive (§5.3), so a pane can switch between Armed and Blocked a few milliseconds in. | 1px dashed accent outline at 50% opacity, inset. No fill, no text. |
 | **Target** | the accepting pane under the cursor | translucent accent tint over the whole pane (`--drop-target-bg`, accent at ~14%) + 2px solid accent inset border + a centred **prompt chip** (icon + "Drop 3 files to attach" / "Copy 3 files to C:\work") |
 | **Blocked** | an accepting pane that can't take this drop right now | no tint; prompt chip in the warning style with the reason ("No working folder for this agent"); cursor no-drop |
 | none | panes that don't accept files, window chrome | nothing; cursor no-drop |
@@ -455,7 +455,7 @@ Each phase is one PR, or a short stack, and is independently shippable.
      - `drag-session` for `"files"` only;
      - `file-drop.ts` and its manifest hook;
      - `DropIndicator` + `drop-indicators.scss`;
-     - `file-drop-actions.ts`;
+     - `file-drop-actions.ts`, whose `copyIntoWorkdir` paths transport is the **existing CEF `copy_file_to_dir`** in this phase (no dependency on phase 2's `files.copy-to-dir`);
      - the agent and terminal hooks;
      - the drone canvas type check;
      - the floater drag handler and the label-keyed stash (§5.4).
