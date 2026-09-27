@@ -7,7 +7,7 @@ import { createStore } from "solid-js/store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi, createBlock } from "@/store/global";
-import { CORE_TOOLS, cliCommandForPlatform, currentPlatform, rowIconClass } from "@/app/view/agent/providers/toolchain-catalog";
+import { CORE_TOOLS, LOCAL_MODEL_TOOLS, cliCommandForPlatform, currentPlatform, rowIconClass, type CoreTool } from "@/app/view/agent/providers/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
 import { resolveDrift } from "@/app/view/agent/providers/version-drift";
@@ -46,7 +46,9 @@ interface ToolRow {
     /** Font Awesome brand icon name — core-tool rows only (provider/widget
      *  rows leave this unset). See `rowIconClass` in toolchain-catalog.ts. */
     brandIcon?: string;
-    kind: "core" | "provider";
+    /** `local` = LOCAL_MODEL_TOOLS: same shape and PATH probe as `core`, but
+     *  its own section and never eligible for the one-click installer. */
+    kind: "core" | "local" | "provider";
     loading: boolean;
     found: boolean;
     version?: string;
@@ -118,13 +120,15 @@ export function ToolchainView(): JSX.Element {
     const [env, setEnv] = createSignal<ToolEnv | null>(null);
     const [showPath, setShowPath] = createSignal(false);
 
-    const coreRows: ToolRow[] = CORE_TOOLS.map((t) => ({
-        id: t.id, label: t.label, icon: t.icon, brandIcon: t.brandIcon, kind: "core",
+    const toolRow = (t: CoreTool, kind: "core" | "local"): ToolRow => ({
+        id: t.id, label: t.label, icon: t.icon, brandIcon: t.brandIcon, kind,
         loading: true, found: false,
         optional: t.optional, minVersion: t.minVersion,
         docsUrl: t.docsUrl, installUrl: t.installUrls[plat],
         installCommand: t.installCommand?.[plat],
-    }));
+    });
+    const coreRows: ToolRow[] = CORE_TOOLS.map((t) => toolRow(t, "core"));
+    const localRows: ToolRow[] = LOCAL_MODEL_TOOLS.map((t) => toolRow(t, "local"));
     const providerRows: ToolRow[] = getProviderList().map((p) => ({
         id: p.id, label: p.displayName, icon: p.icon, kind: "provider",
         loading: true, found: false, docsUrl: p.docsUrl, installUrl: p.docsUrl,
@@ -134,7 +138,7 @@ export function ToolchainView(): JSX.Element {
         // claiming they're current.
         pinnedVersion: p.pinnedVersion || undefined,
     }));
-    const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...providerRows]);
+    const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...localRows, ...providerRows]);
 
     const savedPorts = loadWidgetPorts();
     const [wrows, setWrows] = createStore<WidgetRow[]>(
@@ -181,13 +185,15 @@ export function ToolchainView(): JSX.Element {
     // docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     const probe = async (idx: number, opts?: { force?: boolean }) => {
         const row = rows[idx];
-        const def = row.kind === "core" ? CORE_TOOLS.find((t) => t.id === row.id) : getProviderList().find((p) => p.id === row.id);
+        const def = row.kind === "core" ? CORE_TOOLS.find((t) => t.id === row.id)
+            : row.kind === "local" ? LOCAL_MODEL_TOOLS.find((t) => t.id === row.id)
+            : getProviderList().find((p) => p.id === row.id);
         if (!def) { setRows(idx, { loading: false, found: false }); return; }
         if (row.kind === "core" && (def as any).checkKind === "liveness") {
             await ensureCapability(row.id, { force: opts?.force });
             return; // row update happens via the sync effect, from the shared store
         }
-        const cliCmd = row.kind === "core" ? cliCommandForPlatform(def as any, plat) : (def as any).cliCommand;
+        const cliCmd = row.kind === "provider" ? (def as any).cliCommand : cliCommandForPlatform(def as CoreTool, plat);
         const data = { provider_id: row.id, cli_command: cliCmd, npm_package: "", pinned_version: "", windows_install_command: "", unix_install_command: "" };
         try {
             const r = await RpcApi.ResolveCliCommand(TabRpcClient, data, { timeout: 12000 });
@@ -534,6 +540,11 @@ export function ToolchainView(): JSX.Element {
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">Core tools</h3>
                     <For each={rows.filter((r) => r.kind === "core")}>{renderRow}</For>
+                </section>
+
+                <section class="toolchain-section">
+                    <h3 class="toolchain-section-title">Local models</h3>
+                    <For each={rows.filter((r) => r.kind === "local")}>{renderRow}</For>
                 </section>
 
                 <section class="toolchain-section">
