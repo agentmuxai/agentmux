@@ -373,7 +373,7 @@ interface DragFiles {
 
 | Pane | `accept` | `drop` |
 |---|---|---|
-| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: no cwd / `dnd:enabled` off | tray: `attachmentDraft.ingestPaths(paths)`, then `copyIntoWorkdir` on the paths it hands back (`non_images`; always empty today, but an older images-only backend returns them, `useAgentDropAttach.ts:159-189`) · copy mode: `copyIntoWorkdir` |
+| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: `dnd:enabled` off; **in copy mode only**, no cwd (the tray needs no working folder, as today: `useAgentDropAttach.ts:134-145` rejects a missing cwd only when `!toTray()`) | tray: `attachmentDraft.ingestPaths(paths)`, then `copyIntoWorkdir` on the paths it hands back (`non_images`; always empty today, but an older images-only backend returns them, `useAgentDropAttach.ts:159-189`) · copy mode: `copyIntoWorkdir` |
 | Terminal (`view: "term"`) | "Copy N files to <cwd>" · blocked: no cwd / setting off | `copyIntoWorkdir` (no mention) |
 
 **Later panes:**
