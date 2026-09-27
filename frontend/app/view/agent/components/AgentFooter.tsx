@@ -9,7 +9,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type 
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { atoms, pushNotification } from "@/app/store/global";
+import { MOS, atoms, pushNotification } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
@@ -26,6 +26,9 @@ import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
 import { AttachmentTray } from "../attachments/AttachmentTray";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
+import { attachmentNoun, fileKind } from "../attachments/file-kind";
+import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAttach";
+import { baseName, copyFilesToDir } from "@/util/dnd";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 
 function pickThinkingPhrase(_exclude?: string): string {
@@ -490,8 +493,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // (older/test callers, per the prop's own doc comment), in which case
     // draft persistence below is a no-op rather than an error.
     const draftBlockId = props.viewModel?.blockId;
-    // Images attached to the unsent message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS
-    // _2026_09_26.md §5). Module-level per block, like composerDrafts.
+    // Files attached to the unsent message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS
+    // _2026_09_26.md §5, SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md).
+    // Module-level per block, like composerDrafts.
     const attachmentDraft = draftBlockId ? getAttachmentDraft(draftBlockId) : undefined;
     let focusLastTile: (() => void) | undefined;
     const [sendHint, setSendHint] = createSignal<string | null>(null);
@@ -503,46 +507,69 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     };
     onCleanup(() => clearTimeout(sendHintTimer));
 
-    // Ctrl/Cmd+V with images (a screenshot, or files copied in Explorer or
+    // Ctrl/Cmd+V with files (a screenshot, or files copied in Explorer or
     // Finder): attach them. Never preventDefault — a textarea's default paste
     // only ever inserts text, so the browser still pastes any text part
     // natively (selection handling and undo intact). Spec §6.2.
     // Right-click Paste has no paste event: the native clipboard reader
     // hands over paths (copied files, or a temp file for image data), and
     // they go through the same pipeline as a drop. Spec §5.6.
+    // Container panes' agents can't see the attachment store: their pasted
+    // files are copied into the working folder and mentioned as `@name`, as
+    // a drop does there (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7).
+    const pasteFailed = (err: unknown) => {
+        // Same notice as a failed drop (useAgentDropAttach.ts).
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: "Couldn't attach the files",
+            message: String((err as Error)?.message ?? err),
+            timestamp: new Date().toISOString(),
+            type: "warning",
+            expiration: Date.now() + 8000,
+        });
+    };
+    const mentionPasted = (paths: string[]) => {
+        // Any ancestor holding the composer's textarea will do.
+        const root = textareaRef?.parentElement;
+        if (paths.length > 0 && root) spliceComposerTokens(root, paths.map((p) => `@${baseName(p)}`));
+    };
+    const inContainer = () => !!draftBlockId && isContainerPane(draftBlockId);
+
     const pasteAttachmentsFromMenu = (paths: string[]) => {
         if (!attachmentDraft) return;
-        void attachmentDraft
-            .ingestPaths(paths)
-            .then((nonImages) => {
-                if (nonImages.length > 0) {
-                    pushNotification({
-                        icon: "fa-info-circle",
-                        title: `${nonImages.length} ${nonImages.length === 1 ? "file" : "files"} not attached: not images`,
-                        message: "Only images can be attached. Drop other files onto the pane to copy them into the working folder.",
-                        timestamp: new Date().toISOString(),
-                        type: "info",
-                        expiration: Date.now() + 8000,
-                    });
-                }
-            })
-            .catch((err) => {
-                // Same notice as a failed drop (useAgentDropAttach.ts).
-                pushNotification({
-                    icon: "fa-triangle-exclamation",
-                    title: "Couldn't attach the images",
-                    message: String((err as Error)?.message ?? err),
-                    timestamp: new Date().toISOString(),
-                    type: "warning",
-                    expiration: Date.now() + 8000,
-                });
-            });
+        if (inContainer()) {
+            const cwd = MOS.getObjectValue<Block>(MOS.makeORef("block", draftBlockId!))?.meta?.["cmd:cwd"];
+            if (!cwd) return pasteFailed("No working directory detected for this agent pane.");
+            void copyFilesToDir(paths, cwd)
+                .then((outcome) => {
+                    mentionPasted(outcome.results.filter((r) => r.dest).map((r) => r.dest!));
+                    const failed = outcome.results.filter((r) => r.error);
+                    if (failed.length > 0) pasteFailed(failed.map((f) => `${baseName(f.source)}: ${f.error}`).join("\n"));
+                })
+                .catch(pasteFailed);
+            return;
+        }
+        void attachmentDraft.ingestPaths(paths).catch(pasteFailed);
     };
 
     const handlePaste = (e: ClipboardEvent) => {
         if (!attachmentDraft) return;
         const files = Array.from(e.clipboardData?.files ?? []);
         if (files.length === 0) return;
+        if (inContainer()) {
+            // Each file on its own, like copyFilesToDir: one failure must not
+            // lose the others' @mentions.
+            void Promise.allSettled(files.map((f) => attachmentDraft.uploadToWorkdir(f))).then((results) => {
+                mentionPasted(results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])));
+                const failed = results.flatMap((r, i) =>
+                    r.status === "rejected"
+                        ? [`${files[i].name || "Pasted file"}: ${String((r.reason as Error)?.message ?? r.reason)}`]
+                        : [],
+                );
+                if (failed.length > 0) pasteFailed(failed.join("\n"));
+            });
+            return;
+        }
         attachmentDraft.uploadFiles(files);
     };
 
@@ -916,7 +943,11 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         const message = textareaRef.value;
         const processing = attachmentDraft?.processingCount() ?? 0;
         if (processing > 0) {
-            showSendHint(`Waiting for ${processing} ${processing === 1 ? "image" : "images"} to finish processing`);
+            const kinds = attachmentDraft!
+                .items()
+                .filter((i) => i.status === "processing")
+                .map((i) => fileKind(i.info?.kind, i.name));
+            showSendHint(`Waiting for ${processing} ${attachmentNoun(processing, kinds)} to finish processing`);
             return;
         }
         const attachments = attachmentDraft?.refs() ?? [];

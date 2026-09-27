@@ -9,11 +9,12 @@
  * virtualized transcript scrolling a row out and back doesn't refetch.
  */
 
-import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createResource, createSignal, onCleanup, type Accessor } from "solid-js";
 import { getApi } from "@/app/store/app-api";
 import { getWebServerEndpoint } from "@/util/endpoints";
 
-export type AttachmentFileKind = "thumb" | "send" | "original";
+/** `text` is the extracted text version of a document. */
+export type AttachmentFileKind = "thumb" | "send" | "original" | "text";
 
 interface Entry {
     refs: number;
@@ -86,4 +87,27 @@ export function useAttachmentUrl(
         onCleanup(() => release(value, kind));
     });
     return () => current()?.url();
+}
+
+/**
+ * The text of a stored text file (a text preview, or a document's text
+ * version): undefined while loading, null when it's gone. Read from the
+ * shared object URL, so the tile and the preview fetch it once.
+ */
+export function useAttachmentText(
+    id: Accessor<string | undefined>,
+    kind: AttachmentFileKind,
+): Accessor<string | null | undefined> {
+    const url = useAttachmentUrl(id, kind);
+    const [text] = createResource(
+        () => url() ?? undefined,
+        async (u) => {
+            try {
+                return await (await fetch(u)).text();
+            } catch {
+                return null;
+            }
+        },
+    );
+    return () => (url() === null ? null : text());
 }
