@@ -10,7 +10,11 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const hub = vi.hoisted(() => ({ ingest: vi.fn(), info: vi.fn() }));
+const hub = vi.hoisted(() => ({ ingest: vi.fn(), info: vi.fn(), container: false, splice: vi.fn() }));
+vi.mock("../hooks/useAgentDropAttach", () => ({
+    isContainerPane: () => hub.container,
+    spliceComposerTokens: (...a: unknown[]) => hub.splice(...a),
+}));
 vi.mock("@/app/store/rpc-api", async (orig) => {
     const real = (await orig()) as { RpcApi: Record<string, unknown> };
     return {
@@ -118,6 +122,30 @@ describe("AgentFooter with attachments", () => {
         expect(upload).toHaveBeenCalledWith([file]);
         // The text part of a mixed paste is left to the browser.
         expect(ev.defaultPrevented).toBe(false);
+    });
+
+    it("container panes: a pasted file that fails doesn't lose the others' @mentions", async () => {
+        const { ta, draft } = setup();
+        hub.container = true;
+        hub.splice.mockReset().mockReturnValue(true);
+        const toWorkdir = vi
+            .spyOn(draft, "uploadToWorkdir")
+            .mockResolvedValueOnce("/work/a.txt")
+            .mockRejectedValueOnce(new Error("disk full"))
+            .mockResolvedValueOnce("/work/c.pdf");
+        const tray = vi.spyOn(draft, "uploadFiles");
+        const files = ["a.txt", "b.bin", "c.pdf"].map((n) => new File([new Uint8Array([1])], n));
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { files } });
+        try {
+            ta.dispatchEvent(ev);
+            await vi.waitFor(() => expect(hub.splice).toHaveBeenCalled());
+            expect(hub.splice.mock.calls[0][1]).toEqual(["@a.txt", "@c.pdf"]);
+            expect(toWorkdir).toHaveBeenCalledTimes(3);
+            expect(tray).not.toHaveBeenCalled();
+        } finally {
+            hub.container = false;
+        }
     });
 
     it("keeps the one-argument send for a plain message", async () => {

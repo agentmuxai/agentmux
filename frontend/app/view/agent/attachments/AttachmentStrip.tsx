@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * A sent message's images, above its text in the transcript: the same tiles
- * as the composer, read-only, collapsed to one row with "+N". Spec §5.8.
- * Entries without an id are images the agent was told are no longer
- * available (swept by retention before the send).
+ * A sent message's attachments, above its text in the transcript: the same
+ * tiles as the composer, read-only, collapsed to one row with "+N". Spec §5.8.
+ * Entries without an id are attachments the agent was told are no longer
+ * available (swept by retention before the send). The transcript only keeps
+ * names, so a tile's kind is guessed from the extension.
  */
 
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { AttachmentLightbox, type LightboxItem } from "./AttachmentLightbox";
 import { AttachmentTile, type TileModel } from "./AttachmentTile";
+import { attachmentNoun, fileKind } from "./file-kind";
 import { trayLayout } from "./tray-layout";
 
 export interface StripAttachment {
@@ -34,8 +36,14 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
             id: a.id,
             status: a.id ? "ready" : "error",
             error: a.id ? undefined : "No longer available",
+            kind: fileKind(undefined, a.name),
         })),
     );
+    const noun = (n: number) =>
+        attachmentNoun(
+            n,
+            tiles().map((t) => t.kind),
+        );
     const layout = createMemo(() => trayLayout(tiles().length, width()));
     const shown = createMemo(() => (expanded() ? tiles() : tiles().slice(0, layout().visible)));
     const items = (): LightboxItem[] =>
@@ -45,7 +53,7 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
         <div class="agent-attachment-strip">
             <ul
                 class="agent-attachment-tray__tiles"
-                aria-label={`${tiles().length} attached ${tiles().length === 1 ? "image" : "images"}`}
+                aria-label={`${tiles().length} attached ${noun(tiles().length)}`}
                 ref={(el) => {
                     if (typeof ResizeObserver === "undefined") return;
                     ro?.disconnect();
@@ -61,7 +69,7 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
                         <button
                             type="button"
                             class="agent-attachment-tile__main"
-                            aria-label={`Show all ${tiles().length} images`}
+                            aria-label={`Show all ${tiles().length} ${noun(tiles().length)}`}
                             onClick={() => setExpanded(true)}
                         >
                             <span class="more">+{layout().overflow}</span>

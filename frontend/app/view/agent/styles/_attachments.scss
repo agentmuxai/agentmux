@@ -1,13 +1,63 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Image attachments: the composer tray, transcript strip and preview.
-// docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.
+// Attachments: the composer tray, transcript strip and preview.
+// docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5,
+// SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §5.
 @use "../../../mixins.scss" as mixins;
 
 $tile: 64px;
 $tile-expanded: 88px;
 $gap: 6px;
+
+// Type-icon colors, brand-like by default; themes can override them.
+:root {
+    --attachment-pdf: #e5484d;
+    --attachment-word: #2b7cd3;
+    --attachment-excel: #1f9d55;
+    --attachment-powerpoint: #e8702a;
+    --attachment-archive: #d4a017;
+    --attachment-audio: #8e5bd6;
+    --attachment-video: #d6409f;
+    --attachment-image: #3aa0a8;
+    --attachment-text: var(--secondary-text-color);
+    --attachment-other: var(--secondary-text-color);
+}
+
+@mixin kind-colors {
+    &.is-pdf i {
+        color: var(--attachment-pdf);
+    }
+    &.is-word i {
+        color: var(--attachment-word);
+    }
+    &.is-excel i {
+        color: var(--attachment-excel);
+    }
+    &.is-powerpoint i {
+        color: var(--attachment-powerpoint);
+    }
+    &.is-archive i {
+        color: var(--attachment-archive);
+    }
+    &.is-audio i {
+        color: var(--attachment-audio);
+    }
+    &.is-video i {
+        color: var(--attachment-video);
+    }
+    &.is-image i,
+    &.is-svg i,
+    &.is-image_file i {
+        color: var(--attachment-image);
+    }
+    &.is-text i {
+        color: var(--attachment-text);
+    }
+    &.is-other i {
+        color: var(--attachment-other);
+    }
+}
 
 .agent-view {
     .sr-only {
@@ -181,6 +231,68 @@ $gap: 6px;
             color: var(--secondary-text-color);
         }
 
+        // Icon tiles: the type icon with the extension under it.
+        &__icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            @include kind-colors;
+
+            // Room for the page-count badge under the label.
+            &.has-pages {
+                margin-top: -8px;
+            }
+
+            i {
+                font-size: 24px;
+            }
+            .ext {
+                max-width: $tile - 8px;
+                overflow: hidden;
+                font-size: 9px;
+                font-weight: 600;
+                line-height: 10px;
+                letter-spacing: 0.02em;
+                color: var(--secondary-text-color);
+            }
+        }
+
+        // Text tiles: a mini page with the file's first lines, starting
+        // below the number badge.
+        &__text {
+            position: absolute;
+            inset: 0;
+            padding: 19px 4px 4px 6px;
+            overflow: hidden;
+            font-family: var(--font-mono, monospace);
+            font-size: 5px;
+            line-height: 6px;
+            text-align: left;
+            white-space: pre;
+            color: var(--secondary-text-color);
+            background: var(--main-bg-color);
+        }
+
+        &__pages,
+        &__warn {
+            position: absolute;
+            bottom: 3px;
+            padding: 0 3px;
+            border-radius: 3px;
+            font-size: 9px;
+            line-height: 13px;
+            background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
+        }
+        &__pages {
+            right: 3px;
+            color: var(--main-text-color);
+        }
+        &__warn {
+            left: 3px;
+            color: var(--warning-color);
+        }
+
         &__badge {
             position: absolute;
             top: 3px;
@@ -297,8 +409,13 @@ $gap: 6px;
                 opacity: 0.35;
 
                 .cell {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 12px;
                     background-size: cover;
                     background-position: center;
+                    @include kind-colors;
                 }
             }
 
@@ -363,6 +480,70 @@ $gap: 6px;
         padding: 40px;
         color: var(--secondary-text-color);
         font-size: 12px;
+    }
+
+    // Text files: the first lines, as text.
+    &__text {
+        display: flex;
+        flex-direction: column;
+        width: min(80vw, 900px);
+
+        pre {
+            margin: 0;
+            max-height: calc(92vh - 72px);
+            padding: 12px 14px;
+            overflow: auto;
+            font-family: var(--font-mono, monospace);
+            font-size: 12px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--main-text-color);
+        }
+        .note {
+            padding: 4px 14px 8px;
+            font-size: 11px;
+            color: var(--secondary-text-color);
+        }
+    }
+
+    // Everything else: the big icon and what the agent is told.
+    &__details {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        max-width: 480px;
+        padding: 32px 40px;
+        text-align: center;
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        @include kind-colors;
+
+        .icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+
+            i {
+                font-size: 64px;
+            }
+            .ext {
+                font-size: 11px;
+                font-weight: 600;
+            }
+        }
+        .name {
+            max-width: 100%;
+            overflow-wrap: anywhere;
+            font-size: 14px;
+            color: var(--main-text-color);
+        }
+        .warn {
+            color: var(--warning-color);
+        }
     }
 
     &__bar {

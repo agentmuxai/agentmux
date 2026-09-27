@@ -27,7 +27,7 @@ vi.mock("@/app/store/global", () => ({
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://x" }));
 
-import { AttachmentDraft, pastedImageName } from "./attachment-draft";
+import { AttachmentDraft, pastedFileName } from "./attachment-draft";
 
 const info = (id: string, bytes = 10): AttachmentInfo => ({
     id,
@@ -146,12 +146,14 @@ describe("AttachmentDraft", () => {
     });
 });
 
-describe("pastedImageName", () => {
+describe("pastedFileName", () => {
     it("names clipboard bitmaps by time and keeps real file names", () => {
         const at = new Date(2026, 8, 26, 14, 3, 12);
-        expect(pastedImageName(new File([], "image.png", { type: "image/png" }), at)).toBe(
+        expect(pastedFileName(new File([], "image.png", { type: "image/png" }), at)).toBe(
             "Pasted image 2026-09-26 14.03.12.png",
         );
-        expect(pastedImageName(new File([], "diagram.jpg", { type: "image/jpeg" }), at)).toBe("diagram.jpg");
+        expect(pastedFileName(new File([], "diagram.jpg", { type: "image/jpeg" }), at)).toBe("diagram.jpg");
+        expect(pastedFileName(new File([], "report.pdf", { type: "application/pdf" }), at)).toBe("report.pdf");
+        expect(pastedFileName(new File([], "", { type: "" }), at)).toBe("Pasted file 2026-09-26 14.03.12");
     });
 });

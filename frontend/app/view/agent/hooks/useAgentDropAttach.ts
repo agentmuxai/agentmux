@@ -4,13 +4,15 @@
 /*
  * Drop file(s) onto an agent pane.
  *
- * Images (and folders, for the images inside them) go to the composer's
+ * Files (and folders, for the files inside them) go to the composer's
  * attachment tray: the backend copies and processes them, and they're sent
- * with the next message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.5).
+ * with the next message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.5,
+ * SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §3).
  *
- * Every other file keeps the original behavior: it is copied into the
- * agent's CWD and an `@filename` token is spliced into the composer at the
- * caret, so the agent sees the new file in its next turn
+ * Container agents can't see the attachment store, and attachments can be
+ * turned off: then a drop keeps the original behavior. Each file is copied
+ * into the agent's CWD and an `@filename` token is spliced into the composer
+ * at the caret, so the agent sees the new file in its next turn
  * (SPEC_PANE_FILE_DROP_2026_05_30.md §3.1, §3.6).
  */
 
@@ -36,7 +38,7 @@ interface UseAgentDropAttachResult {
  * tokens at the current caret. If the textarea isn't mounted (rare race
  * during pane init), returns false so the caller can decide to queue.
  */
-function spliceComposerTokens(root: HTMLElement, tokens: string[]): boolean {
+export function spliceComposerTokens(root: HTMLElement, tokens: string[]): boolean {
     const ta = root.querySelector<HTMLTextAreaElement>("textarea.agent-input");
     if (!ta) return false;
     const joined = tokens.join(" ");
@@ -63,6 +65,12 @@ function spliceComposerTokens(root: HTMLElement, tokens: string[]): boolean {
     return true;
 }
 
+/** A container agent's pane: its agent sees only the bind-mounted working folder. */
+export function isContainerPane(blockId: string): boolean {
+    const block = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId));
+    return block?.meta?.["agentMode"] === "container";
+}
+
 export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
     const [isDragOver, setIsDragOver] = createSignal(false);
 
@@ -83,12 +91,12 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
         const block = MOS.getObjectValue<Block>(MOS.makeORef("block", opts.blockId));
         return block?.meta?.["cmd:cwd"];
     };
+    // Container panes copy into the working folder (bind-mounted at /workspace).
+    const toTray = () => attachmentsEnabled() && !isContainerPane(opts.blockId);
 
     const dropMessage = () => {
+        if (toTray()) return "Drop files to attach";
         const c = cwd();
-        if (attachmentsEnabled()) {
-            return c ? `Drop images to attach · other files are copied to ${c}` : "Drop images to attach";
-        }
         return c ? `Copy to ${c}` : "No working directory detected";
     };
 
@@ -124,7 +132,7 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
             e.preventDefault();
             setIsDragOver(false);
             const targetCwd = cwd();
-            if (!targetCwd && !attachmentsEnabled()) {
+            if (!targetCwd && !toTray()) {
                 pushNotification({
                     icon: "fa-triangle-exclamation",
                     title: "Drop failed",
@@ -148,15 +156,16 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
                     });
                     return;
                 }
-                // Images go to the attachment tray; the rest are copied below.
+                // Files go to the attachment tray; anything it doesn't take
+                // (an older backend's non-images) is copied below.
                 let paths = dropped;
-                if (attachmentsEnabled()) {
+                if (toTray()) {
                     try {
                         paths = await getAttachmentDraft(opts.blockId).ingestPaths(dropped);
                     } catch (err) {
                         pushNotification({
                             icon: "fa-triangle-exclamation",
-                            title: "Couldn't attach the images",
+                            title: "Couldn't attach the files",
                             message: String((err as Error)?.message ?? err),
                             timestamp: new Date().toISOString(),
                             type: "warning",
@@ -170,7 +179,7 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
                     pushNotification({
                         icon: "fa-triangle-exclamation",
                         title: "Files not copied",
-                        message: `No working directory detected for this agent pane, so ${paths.length} non-image ${paths.length === 1 ? "file was" : "files were"} not copied.`,
+                        message: `No working directory detected for this agent pane, so ${paths.length} ${paths.length === 1 ? "file was" : "files were"} not copied.`,
                         timestamp: new Date().toISOString(),
                         type: "warning",
                         expiration: Date.now() + 8000,

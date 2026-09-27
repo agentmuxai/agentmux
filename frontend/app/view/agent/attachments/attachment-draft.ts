@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The images attached to an agent pane's unsent message: what the composer's
+ * The files attached to an agent pane's unsent message: what the composer's
  * tray shows, and what goes out with the next send.
- * docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5, §6.
+ * docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5, §6;
+ * SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md (any file, not only images).
  *
  * Module-level and keyed by blockId, like the composer's text draft
  * (AgentFooter's composerDrafts): the footer unmounts on every pane-tab
@@ -35,6 +36,7 @@ import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEven
 import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { AttachmentRejected } from "@/types/rpc/AttachmentRejected";
+import { attachmentNoun, fileKind } from "./file-kind";
 
 /** Fallback limits until the backend reports its own (settings-driven) ones. */
 export const DEFAULT_MAX_FILES = 128;
@@ -67,19 +69,29 @@ export interface RemovedAttachment {
 let keySeq = 0;
 const nextKey = () => `att-${Date.now().toString(36)}-${(keySeq++).toString(36)}`;
 
-/** Clipboard bitmaps arrive as "image.png"; give them a readable, sortable name. */
-export function pastedImageName(file: File, now = new Date()): string {
+/**
+ * Clipboard bitmaps arrive as "image.png"; give them a readable, sortable
+ * name. Copied files keep theirs.
+ */
+export function pastedFileName(file: File, now = new Date()): string {
     if (file.name && file.name !== "image.png") return file.name;
     const pad = (n: number) => String(n).padStart(2, "0");
     const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}.${pad(now.getMinutes())}.${pad(now.getSeconds())}`;
+    if (!file.name && !file.type.startsWith("image/")) return `Pasted file ${stamp}`;
     const ext = file.type === "image/jpeg" ? "jpg" : (file.type.split("/")[1] ?? "png");
     return `Pasted image ${stamp}.${ext}`;
 }
 
-/** Whether a pasted/dropped File is worth sending to the image pipeline. */
-export function looksLikeImage(file: File): boolean {
-    if (file.type.startsWith("image/")) return true;
-    return /\.(png|jpe?g|jfif|gif|webp|bmp|dib|tiff?|heic|heif|avif)$/i.test(file.name);
+/** POST one file to the upload route; resolves with its stored info. */
+export async function uploadFile(file: File, name: string): Promise<AttachmentInfo> {
+    const res = await fetch(`${getWebServerEndpoint()}/api/v1/attachments/upload?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { "X-AuthKey": getApi()?.getAuthKey?.() ?? "" },
+        body: file,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.id) throw new Error(body?.error ?? `Upload failed (${res.status}).`);
+    return body as AttachmentInfo;
 }
 
 export class AttachmentDraft {
@@ -146,8 +158,9 @@ export class AttachmentDraft {
     // ── Adding ────────────────────────────────────────────────────────────
 
     /**
-     * Hand dropped paths to the backend. Resolves with the paths that aren't
-     * images, which the caller keeps handling the old way (copy + `@name`).
+     * Hand dropped paths to the backend. Resolves with the paths it didn't
+     * take (`non_images`): always none since any file can be attached, but a
+     * backend from the images-only release still reports them.
      */
     async ingestPaths(paths: string[]): Promise<string[]> {
         if (paths.length === 0) return [];
@@ -203,15 +216,13 @@ export class AttachmentDraft {
 
     /** Stream pasted Files to the upload route, one request each. */
     uploadFiles(files: File[]): void {
-        const images = files.filter(looksLikeImage);
-        const skipped = files.length - images.length;
         const rejected: AttachmentRejected[] = [];
         let count = this.count();
         let bytes = this.totalBytes();
-        for (const file of images) {
-            const name = pastedImageName(file);
+        for (const file of files) {
+            const name = pastedFileName(file);
             if (count >= this.maxFiles()) {
-                rejected.push({ path: name, name, code: "too_many", reason: `A prompt can carry at most ${this.maxFiles()} images.` });
+                rejected.push({ path: name, name, code: "too_many", reason: `A message can carry at most ${this.maxFiles()} attachments.` });
                 continue;
             }
             if (bytes + file.size > this.maxTotalBytes()) {
@@ -223,9 +234,22 @@ export class AttachmentDraft {
             this.startUpload(file, name);
         }
         this.reportRejected(rejected);
-        if (skipped > 0) {
-            this.toast("info", `${skipped} ${skipped === 1 ? "file" : "files"} skipped: not images`, "Only images can be attached. Drop other files onto the pane to copy them into the working folder.");
-        }
+    }
+
+    /**
+     * Container panes: their agents can't see the attachment store, so a
+     * pasted file is stored and then copied into the pane's working folder.
+     * Resolves with the path it landed at. Spec §7.
+     */
+    async uploadToWorkdir(file: File): Promise<string> {
+        const name = pastedFileName(file);
+        const info = await uploadFile(file, name);
+        const res = await RpcApi.AttachmentsCopyToWorkdirCommand(TabRpcClient, {
+            block_id: this.blockId,
+            id: info.id,
+            name,
+        });
+        return res.path;
     }
 
     private startUpload(file: File, name: string): void {
@@ -319,7 +343,7 @@ export class AttachmentDraft {
         this.setItems((prev) => prev.filter((i) => i.status !== "processing"));
     }
 
-    /** Put a recalled (un-queued) message's images back in the tray. */
+    /** Put a recalled (un-queued) message's attachments back in the tray. */
     async restoreRefs(refs: AttachmentRef[]): Promise<void> {
         if (refs.length === 0) return;
         const res = await RpcApi.AttachmentsInfoCommand(TabRpcClient, { ids: refs.map((r) => r.id) }).catch(() => null);
@@ -437,7 +461,7 @@ export class AttachmentDraft {
         const title =
             rejected.length === 1
                 ? `${first.name} wasn't attached`
-                : `${rejected.length} images weren't attached`;
+                : `${rejected.length} ${attachmentNoun(rejected.length, rejected.map((r) => fileKind(undefined, r.name)))} weren't attached`;
         const lines = rejected.slice(0, 5).map((r) => (rejected.length === 1 ? r.reason : `${r.name}: ${r.reason}`));
         if (rejected.length > 5) lines.push(`…and ${rejected.length - 5} more.`);
         this.toast("warning", title, lines.join("\n"));
