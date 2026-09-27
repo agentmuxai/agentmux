@@ -1,7 +1,15 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-.notification {
+// Shared by both item variants. It used to be scoped to `.notification`
+// alone, which compiled every rule — the toast card's own included — to
+// `.notification .notification-bubble`, `.notification .notification-inner`,
+// …: selectors that need a `.notification` ANCESTOR. The toast
+// (`.notification-bubble`, the only variant still rendered — see
+// notificationbubbles.tsx) has none, so it drew as bare, unstyled text over
+// the status bar.
+.notification,
+.notification-bubble {
     &.hovered {
         // Slight lift from `--modal-bg-color` so the row's hover state
         // is visibly distinct from the popover surface beneath it
@@ -67,28 +75,6 @@
         color: rgb(from var(--main-text-color) r g b / 0.5);
     }
 
-    .notification {
-        width: 100%;
-        color: var(--main-text-color);
-        padding: var(--space-3) 10px;
-        display: flex;
-        flex-direction: column;
-        position: relative;
-    }
-
-    .notification-bubble {
-        position: relative;
-        display: flex;
-        width: 380px;
-        padding: var(--space-4) var(--space-6) var(--space-4) var(--space-4);
-        align-items: flex-start;
-        gap: var(--space-3);
-        border-radius: 0;
-        border: 0.5px solid rgba(255, 255, 255, 0.12);
-        background: var(--modal-bg-color);
-        box-shadow: 0px 8px 32px 0px rgba(0, 0, 0, 0.25);
-    }
-
     .notification-inner {
         display: flex;
         align-items: flex-start;
@@ -123,4 +109,29 @@
             margin-bottom: 7px;
         }
     }
+}
+
+// The two variants' own boxes, at top level so they match the item itself.
+.notification {
+    width: 100%;
+    color: var(--main-text-color);
+    padding: var(--space-3) 10px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+// The floating toast card.
+.notification-bubble {
+    position: relative;
+    display: flex;
+    width: 380px;
+    padding: var(--space-4) var(--space-6) var(--space-4) var(--space-4);
+    align-items: flex-start;
+    gap: var(--space-3);
+    border-radius: 0;
+    border: 0.5px solid rgba(255, 255, 255, 0.12);
+    background: var(--modal-bg-color);
+    color: var(--main-text-color);
+    box-shadow: 0px 8px 32px 0px rgba(0, 0, 0, 0.25);
 }

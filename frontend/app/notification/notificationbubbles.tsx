@@ -28,7 +28,9 @@ const NotificationBubbles = (): JSX.Element => {
     const floatingStyles = {
         position: "fixed",
         right: "58px",
-        bottom: "10px",
+        // Clear of the status bar (~23px) at the window's bottom edge, plus a
+        // gap; at 10px the bottom toast sat on top of it.
+        bottom: "34px",
         top: "auto",
         left: "auto",
     };

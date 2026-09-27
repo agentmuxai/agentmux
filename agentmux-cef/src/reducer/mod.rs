@@ -1098,7 +1098,7 @@ pub(crate) fn background_attention_transition_for_test(
     currently_unattended: bool,
     live_after: usize,
 ) -> Option<bool> {
-    quit::background_attention_transition(enabled, currently_unattended, live_after)
+    quit::background_attention_transition(enabled, false, currently_unattended, live_after)
 }
 
 pub(crate) use quit::{count_live_user_windows, live_user_window_labels};
@@ -1244,6 +1244,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         // every transition, instead of N sites that each have to remember.
         out.background_attention = quit::background_attention_transition(
             state.background_service_enabled,
+            !matches!(state.quit_state, crate::state::QuitState::Running),
             state.background_unattended,
             quit::count_live_user_windows(state),
         );

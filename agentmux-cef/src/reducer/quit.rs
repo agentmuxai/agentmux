@@ -211,14 +211,21 @@ pub(crate) fn live_user_window_labels(state: &HostState) -> Vec<String> {
 ///
 /// Only meaningful in background-service mode: without it, reaching zero user
 /// windows means the app is exiting, not resting, so there is no unattended
-/// period to report. Pure and separate from its caller for the usual reason —
-/// it is a decision, and decisions in this module are unit-tested.
+/// period to report. The same holds once a quit has begun (`quitting`: the
+/// quit state is past `Running`): every quit path dispatches `BeginDrain`
+/// before it closes the windows, so the last window closing then is the app
+/// exiting, not going to the background. Recording it left a `went_unattended`
+/// with no `observed` after it, and the next launch told the user AgentMux
+/// "kept running in the background" since the moment they quit. Pure and
+/// separate from its caller for the usual reason — it is a decision, and
+/// decisions in this module are unit-tested.
 pub(crate) fn background_attention_transition(
     background_service_enabled: bool,
+    quitting: bool,
     currently_unattended: bool,
     live_after: usize,
 ) -> Option<bool> {
-    if !background_service_enabled {
+    if !background_service_enabled || quitting {
         return None;
     }
     let now_unattended = live_after == 0;
