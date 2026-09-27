@@ -443,7 +443,7 @@ interface DragFiles {
      - Linux X11: `_NET_CLIENT_LIST_STACKING`;
      - **native Wayland** (the default when `WAYLAND_DISPLAY` is set, `agentmux-cef/src/app/mod.rs:667-708`): **no cross-window target lookup at all.** Wayland withholds both global cursor coordinates and absolute window positions (`SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md:119`). Focus order could rank windows but can't tell which one is under the cursor. So the resolver returns "unknown" there, and phase 5 keeps today's native-Wayland behaviour unchanged: no cross-window drop target, and a release outside the window does what it does today. Under XWayland (`--ozone-platform=x11`), the X11 stacking path applies. This is an explicit limitation; a compositor-supported signal can lift it later.
   2. Adds a test with two overlapping windows, where the front one must win.
-  3. Only then points `update_cross_drag` at it, and deletes `hit_test_windows` (`drag.rs:193-222`) and the frontend `isInsideWindow`. macOS/Linux gain target detection.
+  3. Only then points `update_cross_drag` at it, and deletes `hit_test_windows` (`drag.rs:193-222`). The frontend `isInsideWindow` (`pane-tab-tearoff.ts:48`, used at `:73-75`) is deleted **only where the resolver can identify the source window**. It stays on native Wayland, where the resolver returns "unknown". Without it, releasing a pane tab over empty space inside its own window would look like a release outside every window and tear the pane off. §5.8 gets a row for this: a native-Wayland release inside the source window must not tear off. macOS/Linux gain target detection.
 
   The tear-off hook's `WindowFromPoint` path stays: it runs inside a low-level mouse hook, where the resolver's locking isn't safe. That exception is documented in place.
 - **One target-side committer, keeping every route.** Today the two host events cover different drops:
@@ -499,6 +499,7 @@ Today's drag code encodes many deliberate edge cases, and a prose spec can't lis
 | The source renderer disposes the moved tab's `LayoutModel` | `DragOverlay.tsx:126-131` | the model map shrinks after a move-out |
 | Merge-direct and cross-drag-end commit once | `wasTabRecentlyMerged` today | both events with the same `dragId` → one commit |
 | Tearing off an **inactive** pane-tab pill opens at its source pane's size, not 720×480 | `PaneTabStrip.tsx:641` → `pane-tab-tearoff.ts:154` | the floater size matches the captured `paneSize` |
+| On native Wayland, releasing a pane tab inside its own window doesn't tear it off | `pane-tab-tearoff.ts:48`, `:73-75` (`isInsideWindow`) | a release inside the source window with the resolver returning "unknown" |
 | Escape aborts a tab, pane-tab or tile drag | `tab-reorder.ts:148-154`, `PaneTabStrip.tsx:626-649`, `tab-tearoff-events.ts:218` | each kind |
 
 ## 6. Efficiency, before and after
