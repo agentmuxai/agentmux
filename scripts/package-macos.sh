@@ -178,6 +178,7 @@ require() { [ -e "$1" ] || { echo "❌ missing required artifact: $1 — run the
 require dist/cef/agentmux-cef
 require dist/cef/agentmux-launcher
 require target/release/agentmux-mcp
+require target/release/agentmux-bashwrap
 require "$SRV"
 require dist/frontend/index.html
 require dist/schema/settings.json
@@ -224,6 +225,14 @@ cp dist/cef/agentmux-launcher "$APP/Contents/MacOS/agentmux-launcher"
 # On macOS, exe_dir = Contents/MacOS, so tools land at Contents/MacOS/tools/bin/.
 mkdir -p "$APP/Contents/MacOS/tools/bin"
 cp target/release/agentmux-mcp "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
+# Streaming bash wrapper — every agent's PreToolUse/PreCompact hooks run
+# "agentmux-bashwrap ..." by bare name (agent_config.rs). Without it here the
+# hook fails with command-not-found, Claude treats that as a non-blocking hook
+# error, and every Bash call silently runs unwrapped: no streamed output, no
+# idle-timeout guard, no background-task pid or exit reporting. Windows has
+# always shipped it (package-portable.sh); scripts/check-bundled-tools.sh fails
+# CI if a packager drops either tool again.
+cp target/release/agentmux-bashwrap "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
 
 # Frontend is a tree of resource files (HTML/CSS/fonts), NOT code. codesign
 # only allows executables under Contents/MacOS/ — a resource dir there breaks
@@ -441,10 +450,12 @@ done
 #    be signed here, before the bundle seal.
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
-# agentmux-mcp is a nested Mach-O under MacOS/tools/bin/ (Claude's PATH). It must
-# be signed inside-out before the seal or `codesign --verify --deep --strict`
-# fails on the unsigned binary and hardened-runtime/notarization rejects it.
+# agentmux-mcp and agentmux-bashwrap are nested Mach-Os under MacOS/tools/bin/
+# (Claude's PATH). They must be signed inside-out before the seal or `codesign
+# --verify --deep --strict` fails on the unsigned binary and
+# hardened-runtime/notarization rejects it.
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
+"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
 # 5. Seal the .app bundle last. codesign signs the main executable
 #    (agentmux-launcher) as part of sealing; pass the entitlements so the
 #    launcher is hardened-runtime signed identically to the host.

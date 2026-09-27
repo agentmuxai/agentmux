@@ -48,6 +48,7 @@ require dist/cef/agentmux-launcher
 require dist/cef/libcef.so
 require "dist/bin/agentmux-srv-${VERSION}-linux.x64"
 require target/release/agentmux-mcp
+require target/release/agentmux-bashwrap
 require dist/frontend/index.html
 
 # --- Release gate: the bundled libcef.so MUST carry the BeginWindowDrag patch,
@@ -109,6 +110,12 @@ cp "dist/bin/agentmux-srv-${VERSION}-linux.x64" "$STAGING_ROOT/usr/bin/"
 #         usr/bin/tools/bin/. agentmux-mcp is the Shell MCP server; without it
 #         the Shell tool fails with command-not-found on packaged builds. ---
 cp target/release/agentmux-mcp "$STAGING_ROOT/usr/bin/tools/bin/agentmux-mcp"
+#         agentmux-bashwrap is the streaming bash wrapper every agent's
+#         PreToolUse/PreCompact hooks run by bare name (agent_config.rs). Without
+#         it the hook fails with command-not-found, Claude treats that as a
+#         non-blocking hook error, and every Bash call silently runs unwrapped.
+#         scripts/check-bundled-tools.sh fails CI if either tool is dropped.
+cp target/release/agentmux-bashwrap "$STAGING_ROOT/usr/bin/tools/bin/agentmux-bashwrap"
 
 # --- 4. CEF runtime (libcef.so, GL libs, paks, snapshots, sandbox) ---
 for f in libcef.so libEGL.so libGLESv2.so chrome-sandbox chrome_crashpad_handler \
