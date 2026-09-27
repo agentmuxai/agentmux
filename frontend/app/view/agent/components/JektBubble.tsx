@@ -16,16 +16,11 @@
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
  */
 
-import clsx from "clsx";
-import { Show, createMemo, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
-import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
-import { useTick } from "@/app/hook/useTick";
-import { useNodePeek } from "../hooks/useNodePeek";
-import { PeekOverlay } from "./PeekOverlay";
+import { CollapsibleMessage } from "./CollapsibleMessage";
 
 interface JektBubbleProps {
     node: JektMessageNode;
@@ -47,49 +42,27 @@ function formatHeldFor(secs: number): string {
     return m ? `${h} h ${m} min` : `${h} h`;
 }
 
-export const JektBubble = (props: JektBubbleProps): JSX.Element => {
-    // Don't destructure props — see AgentMessageBlock/MarkdownBlock
-    // for why (codex P1 on PR #786 + family of virt-redesign issues).
-    // Same reactivity discipline applies here.
-
-    // Peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25).
-    // Not gated on `props.collapsed` — the expanded view's own timestamp
-    // line is plain `toLocaleString()`, no relative "ago"; the peek adds
-    // that even when already expanded.
-    const peekTick = useTick(1000);
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
-    const peekTimeText = createMemo(() => {
-        if (!isPeeking()) return null;
-        peekTick();
-        return `${formatExactTime(props.node.timestamp)} · ${formatTimeAgo(props.node.timestamp)}`;
-    });
-    const peekEstimateText = createMemo(() => {
-        const count = estimateTokenCount(props.node.message);
-        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
-    });
-
-    return (
-        <div
-            ref={setPeekRowEl}
-            class={clsx("agent-jekt-bubble", {
-                incoming: props.node.direction === "incoming",
-                outgoing: props.node.direction === "outgoing",
-                collapsed: props.collapsed,
-                [`tier-${props.node.tier}`]: true,
-            })}
-            onClick={props.onToggle}
-            onMouseEnter={handlePeekEnter}
-            onMouseLeave={handlePeekLeave}
-        >
-            <div class="agent-jekt-summary">
-                <span class="agent-jekt-chevron">{props.collapsed ? "▸" : "▾"}</span>
-                <span class="agent-jekt-direction-icon">
-                    {props.node.direction === "incoming" ? "📥" : "📤"}
-                </span>
+export const JektBubble = (props: JektBubbleProps): JSX.Element => (
+    // Don't destructure props — see CollapsibleMessage for why. The row,
+    // toggle, chevron and peek come from there; the peek adds a relative
+    // time, which the expanded view's toLocaleString() line lacks.
+    <CollapsibleMessage
+        rootClass="agent-jekt-bubble"
+        classPrefix="agent-jekt"
+        classes={{
+            incoming: props.node.direction === "incoming",
+            outgoing: props.node.direction === "outgoing",
+            [`tier-${props.node.tier}`]: true,
+        }}
+        collapsed={props.collapsed}
+        onToggle={props.onToggle}
+        peekText={props.node.message}
+        timestamp={props.node.timestamp}
+        summary={
+            <>
+                <span class="agent-jekt-direction-icon">{props.node.direction === "incoming" ? "📥" : "📤"}</span>
                 <span class="agent-jekt-peer">
-                    {props.node.direction === "incoming"
-                        ? `From ${props.node.from}`
-                        : `To ${props.node.to}`}
+                    {props.node.direction === "incoming" ? `From ${props.node.from}` : `To ${props.node.to}`}
                 </span>
                 <span class="agent-jekt-tier-badge" title={`Tier: ${props.node.tier}`}>
                     {JEKT_TIER_ICONS[props.node.tier]} {props.node.tier}
@@ -100,44 +73,36 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                 >
                     {JEKT_DELIVERY_ICONS[props.node.deliveryTier]} {props.node.deliveryTier}
                 </span>
-            </div>
-            <Show when={!props.collapsed}>
-                <div class="agent-jekt-content" onClick={(e) => e.stopPropagation()}>
-                    <pre class="agent-jekt-body">
-                        <LinkifiedText text={props.node.message} />
-                    </pre>
-                    <div class="agent-jekt-meta">
-                        <span class="agent-jekt-meta-item">From: {props.node.from}</span>
-                        <span class="agent-jekt-meta-item">To: {props.node.to}</span>
-                        <span class="agent-jekt-meta-item">MSGID: {props.node.msgId || "—"}</span>
-                        <span class="agent-jekt-meta-item">Trust: {props.node.trust}</span>
-                        <span class="agent-jekt-meta-item">Priority: {props.node.priority}</span>
-                        <span class="agent-jekt-meta-item">{formatTimestamp(props.node.timestamp)}</span>
-                        <Show when={props.node.heldForSecs !== undefined}>
-                            <span
-                                class="agent-jekt-meta-item"
-                                title="The recipient was not running; this was held and delivered when it started"
-                            >
-                                Held for {formatHeldFor(props.node.heldForSecs ?? 0)}
-                            </span>
-                        </Show>
-                    </div>
-                    <details class="agent-jekt-raw">
-                        <summary>Raw payload</summary>
-                        <pre>{props.node.raw}</pre>
-                    </details>
+            </>
+        }
+        body={
+            <>
+                <pre class="agent-jekt-body">
+                    <LinkifiedText text={props.node.message} />
+                </pre>
+                <div class="agent-jekt-meta">
+                    <span class="agent-jekt-meta-item">From: {props.node.from}</span>
+                    <span class="agent-jekt-meta-item">To: {props.node.to}</span>
+                    <span class="agent-jekt-meta-item">MSGID: {props.node.msgId || "—"}</span>
+                    <span class="agent-jekt-meta-item">Trust: {props.node.trust}</span>
+                    <span class="agent-jekt-meta-item">Priority: {props.node.priority}</span>
+                    <span class="agent-jekt-meta-item">{formatTimestamp(props.node.timestamp)}</span>
+                    <Show when={props.node.heldForSecs !== undefined}>
+                        <span
+                            class="agent-jekt-meta-item"
+                            title="The recipient was not running; this was held and delivered when it started"
+                        >
+                            Held for {formatHeldFor(props.node.heldForSecs ?? 0)}
+                        </span>
+                    </Show>
                 </div>
-            </Show>
-            <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
-                <Show when={peekTimeText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                </Show>
-                <Show when={peekEstimateText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                </Show>
-            </PeekOverlay>
-        </div>
-    );
-};
+                <details class="agent-jekt-raw">
+                    <summary>Raw payload</summary>
+                    <pre>{props.node.raw}</pre>
+                </details>
+            </>
+        }
+    />
+);
 
 JektBubble.displayName = "JektBubble";
