@@ -404,6 +404,17 @@ fn prepend_user_hook_array(
     }
 }
 
+/// The `SessionStart` hook entry: one `agentmux-bashwrap sessionstart --part N`
+/// command per memory part, `N` = 1..=`HOOK_PARTS`
+/// (`backend::memory_delivery`). The commands run in parallel, and each
+/// prints its own part (or nothing).
+fn agentmux_sessionstart_entry() -> serde_json::Value {
+    let commands: Vec<serde_json::Value> = (1..=crate::backend::memory_delivery::HOOK_PARTS)
+        .map(|n| json!({ "type": "command", "command": format!("agentmux-bashwrap sessionstart --part {n}") }))
+        .collect();
+    json!({ "hooks": commands })
+}
+
 /// Build `.claude/settings.json` content with the auto-injected
 /// PreToolUse Bash hook and PreCompact hooks (under the `"hooks"`
 /// key). PreToolUse redirects Bash invocations into the streaming
@@ -465,9 +476,19 @@ pub fn build_settings_with_hooks(
             }
         ]
     });
+    // `SessionStart`: one command per memory part, so the agent's memory
+    // reaches the model at every new session, `/clear` and compaction
+    // without a visible turn — see
+    // docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2. The CLI
+    // delivers about 10,000 characters of `additionalContext` per hook
+    // command, so the memory is split into parts and each command asks the
+    // sidecar for its own. No matcher: the sidecar itself answers "nothing"
+    // for `resume` and `fork` (the conversation is intact, D10).
+    let agentmux_sessionstart = agentmux_sessionstart_entry();
     let mut hooks_obj = serde_json::Map::new();
     let mut pretooluse_entries: Vec<Value> = Vec::new();
     let mut precompact_entries: Vec<Value> = Vec::new();
+    let mut sessionstart_entries: Vec<Value> = Vec::new();
 
     // Start with user hooks if present + parseable. Parse failures or
     // non-Object top-levels are logged at WARN so the diagnostic trail
@@ -491,6 +512,14 @@ pub fn build_settings_with_hooks(
                         } else {
                             tracing::warn!(
                                 "agent_config: user hooks.PreCompact is not an array; dropped"
+                            );
+                        }
+                    } else if k == "SessionStart" {
+                        if let Value::Array(arr) = v {
+                            sessionstart_entries.extend(arr);
+                        } else {
+                            tracing::warn!(
+                                "agent_config: user hooks.SessionStart is not an array; dropped"
                             );
                         }
                     } else {
@@ -520,6 +549,8 @@ pub fn build_settings_with_hooks(
     precompact_entries.push(agentmux_precompact_manual);
     precompact_entries.push(agentmux_precompact_auto);
     hooks_obj.insert("PreCompact".to_string(), Value::Array(precompact_entries));
+    sessionstart_entries.push(agentmux_sessionstart);
+    hooks_obj.insert("SessionStart".to_string(), Value::Array(sessionstart_entries));
 
     // Build the settings.json object: start from user-supplied settings.json
     // (if any), then overlay our hooks key. User keys other than `hooks`
@@ -559,10 +590,11 @@ pub fn build_settings_with_hooks(
     // auto-injected too — the exact bug class this file already guards
     // PreToolUse against. See
     // `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
-    // §4.2.
+    // §4.2. SessionStart joins them for the same reason now that it is
+    // auto-injected too (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
     if let Some(Value::Object(existing_hooks)) = settings_obj.get("hooks").cloned() {
         for (k, v) in existing_hooks {
-            if k == "PreToolUse" || k == "PreCompact" {
+            if k == "PreToolUse" || k == "PreCompact" || k == "SessionStart" {
                 prepend_user_hook_array(&mut hooks_obj, &k, v);
                 continue;
             }
@@ -2164,6 +2196,41 @@ mod tests {
             Some("my-settings-precompact"),
             "user PreCompact entries must prepend before AgentMux's own"
         );
+    }
+
+    /// SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2: one SessionStart
+    /// entry, a command per memory part, no matcher; a user's own
+    /// SessionStart hooks survive both merge paths, before ours.
+    #[test]
+    fn test_build_settings_injects_sessionstart_memory_parts_and_keeps_user_hooks() {
+        let ours: Vec<String> = (1..=crate::backend::memory_delivery::HOOK_PARTS)
+            .map(|n| format!("agentmux-bashwrap sessionstart --part {n}"))
+            .collect();
+        let commands = |entry: &Value| -> Vec<String> {
+            entry["hooks"].as_array().unwrap().iter().map(|h| h["command"].as_str().unwrap().to_string()).collect()
+        };
+        let session_start = |settings: Option<&str>, hooks: Option<&str>| -> Vec<Value> {
+            let parsed: Value = serde_json::from_str(&build_settings_with_hooks(settings, hooks).unwrap()).unwrap();
+            parsed["hooks"]["SessionStart"].as_array().unwrap().clone()
+        };
+
+        let plain = session_start(None, None);
+        assert_eq!(plain.len(), 1);
+        assert!(plain[0].get("matcher").is_none(), "the sidecar answers per source; no matcher");
+        assert_eq!(commands(&plain[0]), ours);
+
+        let legacy = session_start(None, Some(r#"{"SessionStart":[{"hooks":[{"type":"command","command":"my-start"}]}]}"#));
+        assert_eq!(legacy.len(), 2);
+        assert_eq!(commands(&legacy[0]), vec!["my-start"]);
+        assert_eq!(commands(&legacy[1]), ours);
+
+        let settings = session_start(
+            Some(r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"my-settings-start"}]}]}}"#),
+            None,
+        );
+        assert_eq!(settings.len(), 2, "a settings.json SessionStart hook is kept, not dropped");
+        assert_eq!(commands(&settings[0]), vec!["my-settings-start"]);
+        assert_eq!(commands(&settings[1]), ours);
     }
 
     #[test]

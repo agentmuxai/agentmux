@@ -361,3 +361,72 @@ describe("createMemoryReinjectionController — pane becomes busy DURING the fet
         expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
     });
 });
+
+// SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2: once Claude Code's
+// SessionStart hook delivers memory, this fallback asks before it fires.
+describe("createMemoryReinjectionController — claimFallback (the SessionStart hook may have delivered)", () => {
+    function withClaim(claimFallback: (reason: "compaction" | "fresh_session") => Promise<boolean>, busy: () => boolean = () => false) {
+        const dispatchTurnStart = vi.fn<(content: string, hidden: boolean) => void>();
+        const sendRpc = vi.fn<(message: string) => Promise<void>>().mockResolvedValue(undefined);
+        const isPaneWorking = vi.fn<() => boolean>().mockImplementation(busy);
+        const claim = vi.fn(claimFallback);
+        const controller = createMemoryReinjectionController({
+            contextWindow: () => 10_000,
+            now: () => 0,
+            isPaneWorking,
+            dispatchTurnStart,
+            dispatchTurnReset: vi.fn(),
+            sendRpc,
+            fetchEntries: vi.fn<() => Promise<MemoryEntryInput[]>>().mockResolvedValue([globalEntry("g1", "body")]),
+            claimFallback: claim,
+        });
+        return { controller, dispatchTurnStart, sendRpc, claim, isPaneWorking };
+    }
+
+    it("stands down when the hook already delivered: nothing hidden, dispatched or sent", async () => {
+        const { controller, dispatchTurnStart, sendRpc, claim } = withClaim(async () => false);
+        await controller.trigger("2026-09-27T10:00:00.000Z", "compaction");
+        expect(claim).toHaveBeenCalledWith("compaction");
+        expect(dispatchTurnStart).not.toHaveBeenCalled();
+        expect(sendRpc).not.toHaveBeenCalled();
+        expect(controller.isHiding()).toBe(false);
+    });
+
+    it("delivers when the claim says so", async () => {
+        const { controller, dispatchTurnStart, sendRpc } = withClaim(async () => true);
+        await controller.trigger(null, "fresh_session");
+        expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+        expect(controller.isHiding()).toBe(true);
+    });
+
+    it("delivers when the claim fails: a duplicate beats no memory", async () => {
+        const { controller, sendRpc } = withClaim(async () => {
+            throw new Error("rpc down");
+        });
+        await controller.trigger(null, "compaction");
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+    });
+
+    it("never claims while the pane is busy — it defers, and claims only when it really fires", async () => {
+        let busy = true;
+        const { controller, claim, sendRpc } = withClaim(async () => true, () => busy);
+        await controller.trigger(null, "compaction");
+        expect(claim).not.toHaveBeenCalled();
+        busy = false;
+        controller.maybeFireDeferred();
+        await vi.waitFor(() => expect(sendRpc).toHaveBeenCalledTimes(1));
+        expect(claim).toHaveBeenCalledTimes(1);
+    });
+
+    it("defers instead of firing if a real turn started during the claim round trip", async () => {
+        let busy = false;
+        const { controller, sendRpc } = withClaim(async () => {
+            busy = true;
+            return true;
+        }, () => busy);
+        await controller.trigger(null, "compaction");
+        expect(sendRpc).not.toHaveBeenCalled();
+        expect(controller.isHiding()).toBe(false);
+    });
+});

@@ -2,7 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { buildConfigFiles, buildSettingsWithHooks, deriveSlug, renderSkillMd, sanitizeTrigger, uniqueSkillSlug } from "./agent-config-builder";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+    buildConfigFiles,
+    buildSettingsWithHooks,
+    deriveSlug,
+    renderSkillMd,
+    sanitizeTrigger,
+    SESSION_START_HOOK_PARTS,
+    uniqueSkillSlug,
+} from "./agent-config-builder";
 import type { AgentSkill } from "@/app/store/rpc-api";
 
 function makeSkill(over: Partial<AgentSkill> = {}): AgentSkill {
@@ -279,5 +290,44 @@ describe("buildSettingsWithHooks — PreCompact auto-injection", () => {
         // Malformed user value is dropped (warned), but AgentMux's own
         // two entries must still be present.
         expect(preCompact).toHaveLength(2);
+    });
+});
+
+// SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2: memory delivered through
+// Claude Code's SessionStart hook, one command per part. Mirrors the Rust
+// builder's coverage (agent_config.rs).
+describe("buildSettingsWithHooks — SessionStart memory delivery", () => {
+    const commands = (entry: any) => entry.hooks.map((h: any) => h.command);
+    const ours = Array.from({ length: SESSION_START_HOOK_PARTS }, (_, i) => `agentmux-bashwrap sessionstart --part ${i + 1}`);
+
+    it("injects one SessionStart entry with a command per part, and no matcher", () => {
+        const sessionStart = JSON.parse(buildSettingsWithHooks(undefined, undefined)!).hooks.SessionStart;
+        expect(sessionStart).toHaveLength(1);
+        expect(sessionStart[0].matcher).toBeUndefined();
+        expect(commands(sessionStart[0])).toEqual(ours);
+    });
+
+    it("keeps a user SessionStart hook from legacy content_map hooks, ours last", () => {
+        const userHooks = JSON.stringify({ SessionStart: [{ hooks: [{ type: "command", command: "my-session-start" }] }] });
+        const sessionStart = JSON.parse(buildSettingsWithHooks(undefined, userHooks)!).hooks.SessionStart;
+        expect(sessionStart).toHaveLength(2);
+        expect(commands(sessionStart[0])).toEqual(["my-session-start"]);
+        expect(commands(sessionStart[1])).toEqual(ours);
+    });
+
+    it("keeps a user SessionStart hook from settings.json's own hooks key instead of dropping it", () => {
+        const userSettings = JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "my-settings-start" }] }] } });
+        const sessionStart = JSON.parse(buildSettingsWithHooks(userSettings, undefined)!).hooks.SessionStart;
+        expect(sessionStart).toHaveLength(2);
+        expect(commands(sessionStart[0])).toEqual(["my-settings-start"]);
+        expect(commands(sessionStart[1])).toEqual(ours);
+    });
+
+    it("SESSION_START_HOOK_PARTS equals memory_delivery.rs's HOOK_PARTS", () => {
+        const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+        const source = readFileSync(resolve(repoRoot, "agentmux-srv/src/backend/memory_delivery.rs"), "utf8");
+        const match = /pub const HOOK_PARTS: usize = (\d+);/.exec(source);
+        if (!match) throw new Error("HOOK_PARTS not found in agentmux-srv/src/backend/memory_delivery.rs");
+        expect(SESSION_START_HOOK_PARTS).toBe(Number(match[1]));
     });
 });

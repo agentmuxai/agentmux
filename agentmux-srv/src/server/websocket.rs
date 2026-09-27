@@ -1817,6 +1817,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Native memory file browser (agent:memory:list / read_file / write_file)
     super::native_memory_handlers::register_native_memory_handlers(engine, &state);
 
+    // Memory delivery: the hidden reinjection's claim against the
+    // SessionStart hook (memorydelivery:claim_fallback).
+    super::memory_delivery_handlers::register_memory_delivery_handlers(engine);
+
     // OS notification Router (notify.emit / focus / ack / test / takeactivation
     // — docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §3.3).
     super::notify_handlers::register_notify_handlers(engine, &state, conn_id.clone());
