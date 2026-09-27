@@ -129,8 +129,9 @@ pub(crate) fn floater_hwnd_for_label(label: &str) -> Option<isize> {
 // A tacked floater is HWND_TOPMOST only while this process is the active app:
 // that keeps it above every window of this instance without floating over
 // other applications (or another AgentMux instance). `floating_pane_wndproc`
-// flips it on WM_ACTIVATEAPP. Tacked floaters are ordinary peers of each other
-// inside the topmost band.
+// re-stacks on WM_ACTIVATEAPP. Tacked floaters are ordinary peers of each
+// other inside the topmost band, and every re-stack preserves their existing
+// relative order (Codex P2 on #3970).
 // ---------------------------------------------------------------------------
 
 /// Outer HWNDs of tacked floaters. Read on the UI thread in the wndproc, so
@@ -139,31 +140,14 @@ static TACKED_FLOATERS: LazyLock<Mutex<std::collections::HashSet<isize>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
 /// Windows that must stay ABOVE tacked floaters — the approval pages
-/// (credential / memory-adoption), label → top-level HWND. They are topmost
-/// too, but topmost windows stack by most-recent assertion, so every time a
-/// floater (re)enters the topmost band these are re-raised over it
-/// (`apply_z_action`). Otherwise switching apps and back while one is open
-/// would put the floater over a security prompt (ReAgent P1 on #3970).
+/// (credential / memory-adoption), label → top-level HWND. They are made
+/// topmost only while tacked floaters are (`keep_above_should_be_topmost`),
+/// and re-raised over them on every re-stack: topmost windows stack by the
+/// most recent assertion, so without that an app switch back would put a
+/// floater over a security prompt (ReAgent P1 on #3970). Outside that window
+/// they are ordinary windows — never desktop-topmost (Codex P2 on #3970).
 static KEEP_ABOVE_FLOATERS: LazyLock<Mutex<HashMap<String, isize>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Register a window that must never be covered by a tacked floater.
-pub(crate) fn register_keep_above_floaters(label: String, hwnd: isize) {
-    if let Ok(mut m) = KEEP_ABOVE_FLOATERS.lock() {
-        m.insert(label, hwnd);
-    }
-}
-
-/// Forget it (window closing). No-op if absent.
-pub(crate) fn unregister_keep_above_floaters(label: &str) {
-    if let Ok(mut m) = KEEP_ABOVE_FLOATERS.lock() {
-        m.remove(label);
-    }
-}
-
-fn keep_above_hwnds() -> Vec<isize> {
-    KEEP_ABOVE_FLOATERS.lock().map(|m| m.values().copied().collect()).unwrap_or_default()
-}
 
 /// Open host file dialogs (nesting count). While > 0, tacked floaters step
 /// down to the normal band so a picker can't end up behind one (spec §3.1).
@@ -214,8 +198,26 @@ pub(crate) fn z_action(event: ZEvent, tacked: bool, app_active: bool, dialog_ope
     }
 }
 
-/// Record a floater's tack state (by outer HWND). Returns nothing; callers
-/// follow up with `apply_z_action`.
+/// Pure: should the keep-above windows (approval pages) be topmost right now?
+/// Exactly while tacked floaters are topmost — otherwise they'd float over
+/// other applications for no reason.
+pub(crate) fn keep_above_should_be_topmost(any_tacked: bool, app_active: bool, dialog_open: bool) -> bool {
+    any_tacked && app_active && !dialog_open
+}
+
+/// Pure: the order to re-stack tacked floaters in so their relative z-order
+/// survives. `z_top_to_bottom` is the current window z-order (topmost first);
+/// the result is the tacked ones, BOTTOM first. Every insert — `HWND_TOPMOST`,
+/// `HWND_NOTOPMOST`, or "directly under window X" — lands the window above the
+/// previous one from the same pass, so bottom-first reproduces the order.
+pub(crate) fn restack_order(
+    z_top_to_bottom: &[isize],
+    tacked: &std::collections::HashSet<isize>,
+) -> Vec<isize> {
+    z_top_to_bottom.iter().rev().copied().filter(|h| tacked.contains(h)).collect()
+}
+
+/// Record a floater's tack state (by outer HWND).
 pub(crate) fn set_floater_tacked(hwnd: isize, on: bool) {
     if let Ok(mut s) = TACKED_FLOATERS.lock() {
         if on {
@@ -230,8 +232,33 @@ fn is_floater_tacked(hwnd: isize) -> bool {
     TACKED_FLOATERS.lock().map(|s| s.contains(&hwnd)).unwrap_or(false)
 }
 
+fn tacked_snapshot() -> std::collections::HashSet<isize> {
+    TACKED_FLOATERS.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
 fn host_dialog_open() -> bool {
     HOST_DIALOGS_OPEN.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+/// Register a window that must never be covered by a tacked floater (an
+/// approval page), and bring it above them now if they are on top.
+#[cfg(target_os = "windows")]
+pub(crate) fn register_keep_above_floaters(label: String, hwnd: isize) {
+    if let Ok(mut m) = KEEP_ABOVE_FLOATERS.lock() {
+        m.insert(label, hwnd);
+    }
+    sync_keep_above(this_app_is_active(), false);
+}
+
+/// Forget it (window closing). No-op if absent.
+pub(crate) fn unregister_keep_above_floaters(label: &str) {
+    if let Ok(mut m) = KEEP_ABOVE_FLOATERS.lock() {
+        m.remove(label);
+    }
+}
+
+fn keep_above_hwnds() -> Vec<isize> {
+    KEEP_ABOVE_FLOATERS.lock().map(|m| m.values().copied().collect()).unwrap_or_default()
 }
 
 /// Is the foreground window one of this process's windows?
@@ -251,20 +278,27 @@ pub(crate) fn this_app_is_active() -> bool {
     }
 }
 
-/// Apply `action` to `hwnd`. `asynchronous` (SWP_ASYNCWINDOWPOS) for callers
-/// off the UI thread, so they never block on it.
 #[cfg(target_os = "windows")]
-pub(crate) fn apply_z_action(hwnd: isize, action: ZAction, asynchronous: bool) {
-    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+fn swp_flags(asynchronous: bool) -> u32 {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowLongW, GetWindowThreadProcessId, SetWindowPos, GWL_EXSTYLE,
-        HWND_NOTOPMOST, HWND_TOPMOST, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-        WS_EX_TOPMOST,
+        SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     };
     let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
     if asynchronous {
         flags |= SWP_ASYNCWINDOWPOS;
     }
+    flags
+}
+
+/// Apply `action` to `hwnd`. `asynchronous` (SWP_ASYNCWINDOWPOS) for callers
+/// off the UI thread, so they never block on it.
+#[cfg(target_os = "windows")]
+fn apply_z_action(hwnd: isize, action: ZAction, asynchronous: bool) {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowLongW, GetWindowThreadProcessId, SetWindowPos, GWL_EXSTYLE,
+        HWND_NOTOPMOST, HWND_TOPMOST, WS_EX_TOPMOST,
+    };
     let h = hwnd as windows_sys::Win32::Foundation::HWND;
     // SAFETY: SetWindowPos on a stale HWND fails harmlessly; the other calls
     // are plain queries.
@@ -298,24 +332,75 @@ pub(crate) fn apply_z_action(hwnd: isize, action: ZAction, asynchronous: bool) {
                 }
             }
         };
-        SetWindowPos(h, insert_after, 0, 0, 0, 0, flags);
-        // The floater is now the most recent topmost window, i.e. in front of
-        // every other topmost window — re-raise the windows that must stay
-        // above it (approval pages). Stale HWNDs fail harmlessly.
-        if action == ZAction::MakeTopmost {
-            for above in keep_above_hwnds() {
-                SetWindowPos(
-                    above as windows_sys::Win32::Foundation::HWND,
-                    HWND_TOPMOST,
-                    0,
-                    0,
-                    0,
-                    0,
-                    flags,
-                );
-            }
+        SetWindowPos(h, insert_after, 0, 0, 0, 0, swp_flags(asynchronous));
+    }
+}
+
+/// Bring the keep-above windows (approval pages) into line with the floaters:
+/// topmost and raised over them while tacked floaters are on top, ordinary
+/// windows otherwise. Call after any change to the floaters' band.
+#[cfg(target_os = "windows")]
+fn sync_keep_above(app_active: bool, asynchronous: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST};
+    let on_top = keep_above_should_be_topmost(!tacked_snapshot().is_empty(), app_active, host_dialog_open());
+    let insert_after = if on_top { HWND_TOPMOST } else { HWND_NOTOPMOST };
+    for above in keep_above_hwnds() {
+        // SAFETY: stale HWNDs fail harmlessly.
+        unsafe {
+            SetWindowPos(
+                above as windows_sys::Win32::Foundation::HWND,
+                insert_after,
+                0,
+                0,
+                0,
+                0,
+                swp_flags(asynchronous),
+            );
         }
     }
+}
+
+/// Current z-order of this process's top-level windows, topmost first.
+#[cfg(target_os = "windows")]
+fn our_top_levels_top_to_bottom() -> Vec<isize> {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetTopWindow, GetWindow, GetWindowThreadProcessId, GW_HWNDNEXT,
+    };
+    let mut out = Vec::new();
+    // SAFETY: z-order walk with plain queries; bounded to guard against a
+    // pathological list mutating under us.
+    unsafe {
+        let me = GetCurrentProcessId();
+        let mut h = GetTopWindow(std::ptr::null_mut());
+        let mut guard = 0;
+        while !h.is_null() && guard < 10_000 {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(h, &mut pid);
+            if pid == me {
+                out.push(h as isize);
+            }
+            h = GetWindow(h, GW_HWNDNEXT);
+            guard += 1;
+        }
+    }
+    out
+}
+
+/// Re-stack every tacked floater for `event`, preserving their relative order,
+/// then bring the approval pages into line. Idempotent: WM_ACTIVATEAPP reaches
+/// every tacked floater, and each one's handler producing the same order is
+/// what keeps the pass from scrambling it (Codex P2 on #3970).
+#[cfg(target_os = "windows")]
+pub(crate) fn restack_tacked(event: ZEvent, app_active: bool, asynchronous: bool) {
+    let tacked = tacked_snapshot();
+    if !tacked.is_empty() {
+        let action = z_action(event, true, app_active, host_dialog_open());
+        for hwnd in restack_order(&our_top_levels_top_to_bottom(), &tacked) {
+            apply_z_action(hwnd, action, asynchronous);
+        }
+    }
+    sync_keep_above(app_active, asynchronous);
 }
 
 /// Tack or untack floater `label` now (spec §5). Returns false if the floater
@@ -326,9 +411,20 @@ pub(crate) fn set_floater_always_on_top(label: &str, on: bool) -> bool {
         return false;
     };
     set_floater_tacked(hwnd, on);
-    let action = z_action(ZEvent::TackToggled, on, this_app_is_active(), host_dialog_open());
-    apply_z_action(hwnd, action, false);
+    let active = this_app_is_active();
+    apply_z_action(hwnd, z_action(ZEvent::TackToggled, on, active, host_dialog_open()), false);
+    sync_keep_above(active, false);
     true
+}
+
+/// A floater is being destroyed: drop its tack, and if it was the last
+/// tacked one, let the approval pages go back to being ordinary windows.
+#[cfg(target_os = "windows")]
+fn forget_destroyed_floater(hwnd: isize) {
+    if is_floater_tacked(hwnd) {
+        set_floater_tacked(hwnd, false);
+        sync_keep_above(this_app_is_active(), false);
+    }
 }
 
 /// Held while a host file dialog is open: tacked floaters step down to the
@@ -340,9 +436,7 @@ impl HostDialogGuard {
     pub(crate) fn new() -> Self {
         HOST_DIALOGS_OPEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         #[cfg(target_os = "windows")]
-        for_each_tacked(|hwnd| {
-            apply_z_action(hwnd, z_action(ZEvent::DialogOpened, true, true, true), true)
-        });
+        restack_tacked(ZEvent::DialogOpened, this_app_is_active(), true);
         HostDialogGuard
     }
 }
@@ -352,47 +446,20 @@ impl Drop for HostDialogGuard {
         let left = HOST_DIALOGS_OPEN.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
         #[cfg(target_os = "windows")]
         if left == 0 {
-            let active = this_app_is_active();
-            for_each_tacked(|hwnd| {
-                apply_z_action(hwnd, z_action(ZEvent::DialogClosed, true, active, false), true)
-            });
+            restack_tacked(ZEvent::DialogClosed, this_app_is_active(), true);
         }
         #[cfg(not(target_os = "windows"))]
         let _ = left;
     }
 }
 
-#[cfg(target_os = "windows")]
-fn for_each_tacked(mut f: impl FnMut(isize)) {
-    let hwnds: Vec<isize> = TACKED_FLOATERS.lock().map(|s| s.iter().copied().collect()).unwrap_or_default();
-    for h in hwnds {
-        f(h);
-    }
-}
-
 #[cfg(test)]
 mod always_on_top_tests {
     use super::{
-        keep_above_hwnds, register_keep_above_floaters, unregister_keep_above_floaters, z_action,
-        ZAction, ZEvent,
+        keep_above_hwnds, keep_above_should_be_topmost, restack_order, unregister_keep_above_floaters,
+        z_action, ZAction, ZEvent, KEEP_ABOVE_FLOATERS,
     };
-
-    #[test]
-    fn keep_above_registry_tracks_open_approval_windows() {
-        // Process-global registry shared with parallel tests: unique labels,
-        // and assert containment rather than equality.
-        register_keep_above_floaters("approval-test-a".into(), 0x7a01);
-        register_keep_above_floaters("approval-test-b".into(), 0x7a02);
-        let hs = keep_above_hwnds();
-        assert!(hs.contains(&0x7a01) && hs.contains(&0x7a02));
-
-        unregister_keep_above_floaters("approval-test-a");
-        let hs = keep_above_hwnds();
-        assert!(!hs.contains(&0x7a01), "a closed approval window is no longer re-raised");
-        assert!(hs.contains(&0x7a02));
-        unregister_keep_above_floaters("approval-test-b");
-        unregister_keep_above_floaters("approval-test-b"); // idempotent
-    }
+    use std::collections::HashSet;
 
     #[test]
     fn tacking_while_active_goes_topmost() {
@@ -434,6 +501,54 @@ mod always_on_top_tests {
         // Dialog closed while another app is active: stay down until we're active.
         assert_eq!(z_action(ZEvent::DialogClosed, true, false, false), ZAction::None);
         assert_eq!(z_action(ZEvent::DialogOpened, false, true, true), ZAction::None);
+    }
+
+    #[test]
+    fn restack_goes_bottom_first_so_the_order_survives() {
+        // z-order, topmost first: A(tacked) main B(tacked) other C(tacked)
+        let (a, main, b, other, c) = (1, 2, 3, 4, 5);
+        let tacked: HashSet<isize> = [a, b, c].into_iter().collect();
+        // Bottom-first: C, then B, then A — each insert lands above the last,
+        // so A ends up on top again, then B, then C.
+        assert_eq!(restack_order(&[a, main, b, other, c], &tacked), vec![c, b, a]);
+    }
+
+    #[test]
+    fn restack_is_the_same_whichever_floater_runs_it() {
+        // Every tacked floater's WM_ACTIVATEAPP runs the pass; it must depend
+        // only on the z-order, not on who runs it. After one pass the order
+        // is unchanged, so a second pass computes the same sequence.
+        let tacked: HashSet<isize> = [10, 20].into_iter().collect();
+        let first = restack_order(&[20, 7, 10], &tacked);
+        let second = restack_order(&[20, 7, 10], &tacked);
+        assert_eq!(first, vec![10, 20]);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn approval_pages_are_topmost_only_while_tacked_floaters_are() {
+        assert!(keep_above_should_be_topmost(true, true, false));
+        assert!(!keep_above_should_be_topmost(false, true, false), "no tacked floaters → ordinary window");
+        assert!(!keep_above_should_be_topmost(true, false, false), "another app active → not over it");
+        assert!(!keep_above_should_be_topmost(true, true, true), "floaters stepped down for a dialog");
+    }
+
+    #[test]
+    fn keep_above_registry_tracks_open_approval_windows() {
+        // Process-global registry shared with parallel tests: unique labels,
+        // containment checks. Insert directly (registration's Win32 sync is
+        // not what's under test).
+        KEEP_ABOVE_FLOATERS.lock().unwrap().insert("approval-test-a".into(), 0x7a01);
+        KEEP_ABOVE_FLOATERS.lock().unwrap().insert("approval-test-b".into(), 0x7a02);
+        let hs = keep_above_hwnds();
+        assert!(hs.contains(&0x7a01) && hs.contains(&0x7a02));
+
+        unregister_keep_above_floaters("approval-test-a");
+        let hs = keep_above_hwnds();
+        assert!(!hs.contains(&0x7a01), "a closed approval window is no longer re-raised");
+        assert!(hs.contains(&0x7a02));
+        unregister_keep_above_floaters("approval-test-b");
+        unregister_keep_above_floaters("approval-test-b"); // idempotent
     }
 }
 
@@ -966,20 +1081,22 @@ unsafe extern "system" fn floating_pane_wndproc(
         // longer tries to show/hide/z-order a destroyed HWND.
         WM_DESTROY => {
             crate::floating_pane::unregister_floater_by_hwnd(hwnd as isize);
-            set_floater_tacked(hwnd as isize, false);
+            forget_destroyed_floater(hwnd as isize);
         }
         // "Always on top": sent to every top-level window of this thread when
         // activation moves to or from another process (another app, or another
         // AgentMux instance). A tacked floater is topmost only while we are the
         // active app. SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.
         WM_ACTIVATEAPP => {
+            // Every tacked floater gets this; each runs the same
+            // order-preserving pass over all of them (idempotent).
             if is_floater_tacked(hwnd as isize) {
                 let (event, active) = if wparam != 0 {
                     (ZEvent::AppActivated, true)
                 } else {
                     (ZEvent::AppDeactivated, false)
                 };
-                apply_z_action(hwnd as isize, z_action(event, true, active, host_dialog_open()), false);
+                restack_tacked(event, active, false);
             }
         }
         // Resize the floater's FRONTEND browser (header + layout) to fill the

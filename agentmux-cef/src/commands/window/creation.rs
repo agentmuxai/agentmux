@@ -431,10 +431,6 @@ pub fn open_subwindow(
     if is_approval_view(initial_view) {
         if let Some(label) = opened.as_str() {
             state.approval_windows.lock().insert(label.to_string());
-            // Keep it above "Always on top" floaters (spec
-            // SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.1). If the window
-            // doesn't exist yet this no-ops and `on_after_created` applies it.
-            crate::ui_tasks::post_set_always_on_top(state, label);
         }
     }
     Ok(opened)
