@@ -1464,23 +1464,22 @@ fn no_attention_transition_once_quitting() {
     assert_eq!(t(true, true, true, 1), None);
 }
 
-/// End to end through `update`: a drain begun before the last window closes
-/// records no unattended period.
+/// The reducer's own wiring (`attention_after`, what `update` calls): the last
+/// user window going away (`live_after` 0) after a real `BeginDrain` through
+/// `update` records nothing, while the same drop with the app still running
+/// records `went_unattended`. The window count is passed in because unit tests
+/// can't register a live window (a `BrowserHandle` needs a real `cef::Browser`).
 #[test]
-fn closing_the_last_window_during_a_drain_is_not_going_unattended() {
-    let mut state = HostState::default();
-    state.background_service_enabled = true;
-    update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LauncherRequested });
-    assert!(!matches!(state.quit_state, crate::state::QuitState::Running));
-    assert_eq!(
-        super::quit::background_attention_transition(
-            state.background_service_enabled,
-            !matches!(state.quit_state, crate::state::QuitState::Running),
-            state.background_unattended,
-            super::quit::count_live_user_windows(&state),
-        ),
-        None
-    );
+fn the_last_window_closing_during_a_drain_is_not_going_unattended() {
+    let mut running = HostState::default();
+    running.background_service_enabled = true;
+    assert_eq!(super::attention_after(&running, 0), Some(true), "control: no quit, so it IS going unattended");
+
+    let mut draining = HostState::default();
+    draining.background_service_enabled = true;
+    update(&mut draining, HostCommand::BeginDrain { reason: QuitReason::LauncherRequested });
+    assert_eq!(super::attention_after(&draining, 0), None);
+    assert!(!draining.background_unattended);
 }
 
 /// With background-service mode off, reaching zero windows means the app is
