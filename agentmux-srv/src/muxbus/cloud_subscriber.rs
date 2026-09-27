@@ -44,7 +44,8 @@ use crate::broker::RefreshErrorKind;
 // exactly /{stage}. No path suffix here: the domain root maps directly to
 // the API's default stage. Full design/history in the agentmux-cloud repo's
 // muxbus/ directory (search for the WebSocket relay redesign writeup).
-const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
+/// Fallback when the cloud publishes no settings (`discovery::ws_url`).
+pub(crate) const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 pub(crate) const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
@@ -438,7 +439,6 @@ async fn run_loop(
             }
         };
 
-        tracing::info!("cloud_subscriber: connecting to {}", MUXBUS_WS_URL);
         let session_start = std::time::Instant::now();
 
         match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &mstore, &http).await {
@@ -516,8 +516,12 @@ async fn connect_and_run(
     // from the `Uri` (generating the required headers, including a fresh
     // `Sec-WebSocket-Key`) and layers `with_header` calls on top, so nothing
     // required is ever missing.
+    // The cloud's published WebSocket URL, else the compiled one
+    // (docs/specs/SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md).
+    let ws_url = super::discovery::ws_url(http).await;
+    tracing::info!("cloud_subscriber: connecting to {}", ws_url);
     let uri: tokio_tungstenite::tungstenite::http::Uri =
-        MUXBUS_WS_URL.parse().map_err(|e| format!("parse url: {e}"))?;
+        ws_url.parse().map_err(|e| format!("parse url: {e}"))?;
     let request = ClientRequestBuilder::new(uri)
         .with_header("Authorization", format!("Bearer {}", token));
 
