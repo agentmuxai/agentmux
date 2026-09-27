@@ -193,7 +193,17 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     tracing::info!(block_id = %block_id_install, package = %package_arg, prefix = %prefix_dir, "running npm install");
 
                     let broker_npm = broker.clone();
+                    // The blocking task owns the install lock and publishes the
+                    // completion marker itself. If the RPC times out, this
+                    // handler future is dropped but npm keeps running in the
+                    // task; the lock must stay held until npm exits, or a retry
+                    // or another instance clears the dir and runs a second npm
+                    // over it (Codex P2 on #3927).
+                    let task_shared_dir = shared_dir.clone();
+                    let task_npm_bin = npm_bin.clone();
+                    let task_pinned = pinned_version.clone();
                     let exit_status = tokio::task::spawn_blocking(move || {
+                        let _install_guard = install_guard;
                         let result = {
                             #[cfg(windows)]
                             {
@@ -263,6 +273,15 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                         }
                                     }
                                 }
+                                // Publish the shared install to every reader
+                                // only once npm succeeded and the shim exists.
+                                if out.status.success() && std::path::Path::new(&task_npm_bin).is_file() {
+                                    if let Some(dir) = task_shared_dir.as_deref() {
+                                        crate::backend::cli_install::mark_complete(dir, &task_pinned).map_err(|e| {
+                                            format!("cannot mark the CLI install complete at {}: {e}", dir.display())
+                                        })?;
+                                    }
+                                }
                                 Ok(out.status)
                             }
                             Err(e) => Err(format!("failed to run npm install: {e}")),
@@ -287,13 +306,6 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Verify npm binary exists
                     if std::path::Path::new(&npm_bin).exists() {
                         let version = get_cli_version(&npm_bin).await;
-                        // Still under the install lock: publish the shared
-                        // install to every reader only now that it's verified.
-                        if let Some(dir) = shared_dir.as_deref() {
-                            crate::backend::cli_install::mark_complete(dir, &pinned_version)
-                                .map_err(|e| format!("cannot mark the CLI install complete at {}: {e}", dir.display()))?;
-                        }
-                        drop(install_guard);
                         tracing::info!(path = %npm_bin, version = %version, "CLI installed (npm)");
                         return Ok(ResolveCliResult {
                             cli_path: npm_bin,
