@@ -168,7 +168,9 @@ describe("AgentRow — select-to-focus", () => {
         expect(down.defaultPrevented).toBe(true);
     });
 
-    it("pressing the card's checkbox is also covered, and the checkbox still toggles on click", () => {
+    it("pressing the card's checkbox keeps native focus (so Space toggles it), and it still toggles on click", () => {
+        // Codex P2 on #3955: cancelling mousedown on the checkbox too would stop
+        // it taking focus.
         registerPane(BLOCK);
         const toggleSelected = vi.fn();
         const model = { ...modelStub(false), toggleSelected } as unknown as SwarmViewModel;
@@ -176,9 +178,18 @@ describe("AgentRow — select-to-focus", () => {
         const box = container.querySelector(".swarm-agent-card input[type=checkbox]") as HTMLInputElement;
         const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
         box.dispatchEvent(down);
-        expect(down.defaultPrevented).toBe(true);
+        expect(down.defaultPrevented).toBe(false);
         fireEvent.click(box);
         expect(toggleSelected).toHaveBeenCalled();
+    });
+
+    it("pressing the card's name text (not a control) is covered", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const row = container.querySelector(".swarm-agent-card .swarm-agent-row") as HTMLElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        row.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
     });
 
     it("a press outside any agent card is left alone, so it still selects the Swarm pane", () => {

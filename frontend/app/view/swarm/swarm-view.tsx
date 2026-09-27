@@ -326,9 +326,16 @@ export function AgentRow({
                 // mousedown's default keeps focus where it is until the click
                 // picks the agent's pane. Only the agent card does this: the
                 // header and empty space still focus (select) the Swarm pane.
-                // The checkbox and chevron inside act on click, so they still
-                // work. SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.3.
-                onMouseDown={(e) => e.preventDefault()}
+                // Focusable controls inside the card (the fleet checkbox) are
+                // left alone: they need real focus (Space toggles a focused
+                // checkbox), and pressing one is a Swarm action, not "select
+                // this agent" (Codex P2 on #3955).
+                // SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.3.
+                onMouseDown={(e) => {
+                    const target = e.target as Element | null;
+                    if (target?.closest("input, button, select, textarea, a[href], [tabindex]")) return;
+                    e.preventDefault();
+                }}
                 onContextMenu={handleAgentRowContextMenu}
                 title={node.agentName}
             >
