@@ -44,10 +44,11 @@ export function estimateTextHeight(
     content: string,
     chars = TEXT_CHARS_PER_LINE,
     lineHeight = TEXT_LINE_HEIGHT_PX,
+    max = TEXT_MAX_ESTIMATE_PX,
 ): number {
     if (!content) return TEXT_MIN_HEIGHT_PX;
     const lines = Math.ceil(content.length / chars);
-    return Math.min(Math.max(lines * lineHeight, TEXT_MIN_HEIGHT_PX), TEXT_MAX_ESTIMATE_PX);
+    return Math.min(Math.max(lines * lineHeight, TEXT_MIN_HEIGHT_PX), max);
 }
 
 /**
@@ -135,7 +136,9 @@ export function jektExpandedMaxEstimatePx(): number {
 }
 
 export function estimateExpandedJekt(message: string): number {
-    return Math.min(estimateTextHeight(message), jektExpandedMaxEstimatePx());
+    // The jekt cap bounds it, not the text estimate's own 320 px ceiling —
+    // on a tall window the cap is higher (Codex P2 on #3934).
+    return estimateTextHeight(message, TEXT_CHARS_PER_LINE, TEXT_LINE_HEIGHT_PX, jektExpandedMaxEstimatePx());
 }
 
 const SHELL_COLLAPSED_PX = 32;

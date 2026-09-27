@@ -43,7 +43,7 @@ import {
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
 import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
-import { estimateNode, estimateNodeForState } from "./renderers";
+import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
 import {
@@ -598,10 +598,35 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // nodeIds with EstimateSet pushed for both states; pruned in lockstep
         // with the slice so a removed-then-re-added node gets fresh values.
         const estimatesPushed = new Set<string>();
+        // Capped rows' estimates follow the window height (renderers.ts
+        // previewCapPx). An estimate is pushed once per row, so when the cap
+        // changes (window resize), push them all again: an unmeasured row
+        // would otherwise keep the old window's estimate (Codex P2 on #3934).
+        // Measured heights are kept separately and are not affected.
+        // Debounced: dragging a window edge fires resize every frame.
+        const [capPx, setCapPx] = createSignal(Math.round(previewCapPx()));
+        let lastCapPx = capPx();
+        onMount(() => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const onResize = (): void => {
+                clearTimeout(timer);
+                timer = setTimeout(() => setCapPx(Math.round(previewCapPx())), 150);
+            };
+            window.addEventListener("resize", onResize);
+            onCleanup(() => {
+                clearTimeout(timer);
+                window.removeEventListener("resize", onResize);
+            });
+        });
         createEffect(() => {
             const blockId = props.blockId!;
             const vnodes = partition().virtualizedNodes;
             const docState = props.documentState();
+            const cap = capPx();
+            if (cap !== lastCapPx) {
+                lastCapPx = cap;
+                estimatesPushed.clear();
+            }
             const ids = vnodes.map((n) => n.id);
             // `dispatchLayoutIfRegistered` synchronously calls the slot's
             // `proj.layout(view)` callback — which IS `setLayoutView`, a real
