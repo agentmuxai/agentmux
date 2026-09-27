@@ -12,7 +12,7 @@ started.
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at the repo
 owner's request: "lets consolidate all the docs … lets get a single source of
 truth for this vector of work."
-**Tracking issue:** see §8.
+**Tracking issue:** #3925
 
 This is the one doc for **how Global Memory gets into an agent's context**:
 at launch, after compaction, and on a new or restarted session. It replaces
@@ -316,8 +316,8 @@ Proposed; not started. Each phase is one PR.
 
 ### 8.3 Issues
 
-- **Tracking issue for this doc's gaps and plan:** opened with the PR that adds
-  this doc. It is the only issue for this vector.
+- **Tracking issue for this doc's gaps and plan:** #3925. It is the only
+  issue for this vector.
 - **Related, separate:** #3477 (Global Memory writes invisible to another
   instance) and #3148 (portability tracking).
 - No other open issue covers delivery or reinjection; none were found closed
