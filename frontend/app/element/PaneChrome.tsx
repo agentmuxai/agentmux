@@ -18,7 +18,7 @@
  * §4.1/§4.5.
  */
 
-import { createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type JSX } from "solid-js";
 import {
     computeBlockActiveBorderColor,
     computeBlockColorBg,
@@ -39,6 +39,8 @@ import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import type { PaneTabColors } from "./PaneTabStrip";
+import { DropIndicator } from "@/app/drag/DropIndicator";
+import { paneDropState } from "@/app/drag/file-drop";
 
 function sameIds(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
@@ -381,6 +383,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // follow the active tab's model, so a switch between view types never
     // moves the (kept-alive) content in the DOM.
     const contentRegion = <div class={model()?.contentClass ?? "pane-stack-content"}>{content}</div>;
+    // File drop feedback for this pane (SPEC_DRAG_AND_DROP_CONSOLIDATION §4).
+    const dropState = paneDropState(activeBlockId);
 
     return (
         <div
@@ -395,6 +399,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             }}
             style={{ "--pane-ring-color": ringBorderColor() }}
             data-blockid={activeBlockId()}
+            data-file-drop={dropState()?.state}
             onClick={() => nodeModel.focusNode()}
             onFocusIn={() => nodeModel.focusNode()}
         >
@@ -407,6 +412,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                 {model()?.renderBehindContent?.()}
                 {contentRegion}
             </div>
+            <Show when={dropState()}>{(s) => <DropIndicator state={s()} />}</Show>
         </div>
     );
 }

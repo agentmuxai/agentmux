@@ -94,6 +94,18 @@ export async function uploadFile(file: File, name: string): Promise<AttachmentIn
     return body as AttachmentInfo;
 }
 
+/**
+ * Put a file's bytes into a pane's working folder (`cmd:cwd`): stored like an
+ * attachment, then copied there by srv. For files that arrive as bytes with
+ * no host path (Ctrl+V, virtual or pathless drops). Resolves with the path.
+ */
+export async function uploadFileToWorkdir(blockId: string, file: File): Promise<string> {
+    const name = pastedFileName(file);
+    const info = await uploadFile(file, name);
+    const res = await RpcApi.AttachmentsCopyToWorkdirCommand(TabRpcClient, { block_id: blockId, id: info.id, name });
+    return res.path;
+}
+
 export class AttachmentDraft {
     readonly blockId: string;
     readonly items: Accessor<DraftAttachment[]>;
@@ -242,14 +254,7 @@ export class AttachmentDraft {
      * Resolves with the path it landed at. Spec §7.
      */
     async uploadToWorkdir(file: File): Promise<string> {
-        const name = pastedFileName(file);
-        const info = await uploadFile(file, name);
-        const res = await RpcApi.AttachmentsCopyToWorkdirCommand(TabRpcClient, {
-            block_id: this.blockId,
-            id: info.id,
-            name,
-        });
-        return res.path;
+        return uploadFileToWorkdir(this.blockId, file);
     }
 
     private startUpload(file: File, name: string): void {

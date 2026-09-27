@@ -64,6 +64,7 @@ import {
     startLauncherEventReducer,
 } from "@/app/store/launcher-event-reducer";
 import { startSingletonCrashRelease } from "@/app/store/singleton-modal";
+import { installFileDropController } from "@/app/drag/file-drop";
 import { MuxInitFatalError, requireLoaded } from "@/app/init/require-loaded";
 
 // Deferred — assigned inside initApp() after window.api is ready.
@@ -640,6 +641,8 @@ async function initAppInner() {
     // comment). No dependency on window.api / host state, so there's no
     // reason to delay it.
     installGlobalDropGuard();
+    // Pane file-drop targets and their indicator (SPEC_DRAG_AND_DROP_CONSOLIDATION §5.3).
+    installFileDropController();
 
     // Phase 3 voice input — surface permission errors via the existing
     // notification system. `useVoiceInput.ts` dispatches `voice-input-error`
