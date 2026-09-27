@@ -17,6 +17,13 @@ const calls: string[] = [];
 let ws: { oid: string; pinnedtabids: string[]; tabids: string[] } | null;
 let tabs: Record<string, { blockids: string[] }>;
 let models: Record<string, any>;
+/** Slow-path doubles: srv's block.reveal, the host window API, legacy fallback. */
+let blockReveal: (d: { block_id: string }) => Promise<{ found: boolean; window_id?: string }>;
+let otherWorkspaces: any[];
+const windowInstances = [
+    { label: "main", windowId: "win-here" },
+    { label: "second", windowId: "win-other" },
+];
 
 vi.mock("@/app/store/global", () => ({
     workspace: () => ws,
@@ -26,18 +33,31 @@ vi.mock("@/app/store/global", () => ({
         reloadMuxObject: async (id: string) => tabs[id],
     },
     setActiveTab: async (tabId: string) => calls.push(`setActiveTab:${tabId}`),
-    getApi: () => ({}),
+    getApi: () => ({
+        listWindowInstances: async () => windowInstances,
+        focusWindow: async (label: string) => calls.push(`focusWindow:${label}`),
+    }),
 }));
 vi.mock("@/app/store/focusManager", () => ({ giveBlockFocus: (id: string) => calls.push(`caret:${id}`) }));
 vi.mock("@/layout/index", () => ({
     setActiveBlockInStack: (_m: unknown, nodeId: string, blockId: string) => calls.push(`stack:${nodeId}:${blockId}`),
 }));
 vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForTabById: (id: string) => models[id] }));
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        BlockRevealCommand: async (_c: unknown, d: { block_id: string }) => {
+            calls.push(`block.reveal:${d.block_id}`);
+            return blockReveal(d);
+        },
+        WorkspaceListCommand: async () => otherWorkspaces,
+    },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/services", () => ({ WorkspaceService: {} }));
+vi.mock("@/app/store/services", () => ({
+    WorkspaceService: { SetActiveTab: async (ws: string, tab: string) => calls.push(`SetActiveTab:${ws}:${tab}`) },
+}));
 
-import { revealBlockLocally } from "./reveal-block";
+import { revealBlock, revealBlockLocally } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
 function modelWithPane(nodeId: string, members: string[], magnified?: string) {
@@ -54,6 +74,8 @@ beforeEach(() => {
     ws = { oid: "ws", pinnedtabids: [], tabids: ["t1", "t2"] };
     tabs = { t1: { blockids: ["a"] }, t2: { blockids: ["agentA", "agentB"] } };
     models = { t1: modelWithPane("n1", ["a"]), t2: modelWithPane("pane", ["agentA", "agentB"]) };
+    blockReveal = async () => ({ found: false });
+    otherWorkspaces = [];
 });
 afterEach(() => vi.useRealTimers());
 
@@ -103,5 +125,37 @@ describe("revealBlockLocally", () => {
         models.t1 = modelWithPane("n1", ["agentB"]);
         await revealBlockLocally("agentB", { tabId: "t2" });
         expect(calls[0]).toBe("setActiveTab:t2");
+    });
+});
+
+describe("revealBlock — a block in another window (spec §4.3)", () => {
+    it("asks srv to reveal it there, then raises the window srv named", async () => {
+        blockReveal = async () => ({ found: true, window_id: "win-other" });
+        await revealBlock("remote");
+        expect(calls).toEqual(["block.reveal:remote", "focusWindow:second"]);
+    });
+
+    it("a block in this window never reaches srv", async () => {
+        await revealBlock("agentB");
+        expect(calls.some((c) => c.startsWith("block.reveal"))).toBe(false);
+    });
+
+    it("not found: falls back to activating its tab in the other workspace and raising that window", async () => {
+        tabs.t9 = { blockids: ["remote"] };
+        otherWorkspaces = [{ workspacedata: { oid: "ws2", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
+        await revealBlock("remote");
+        expect(calls).toEqual(["block.reveal:remote", "SetActiveTab:ws2:t9", "focusWindow:second"]);
+    });
+
+    it("an older srv without block.reveal: the same fallback", async () => {
+        blockReveal = async () => {
+            throw new Error("unknown command block.reveal");
+        };
+        tabs.t9 = { blockids: ["remote"] };
+        otherWorkspaces = [{ workspacedata: { oid: "ws2", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await revealBlock("remote");
+        warn.mockRestore();
+        expect(calls).toEqual(["block.reveal:remote", "SetActiveTab:ws2:t9", "focusWindow:second"]);
     });
 });

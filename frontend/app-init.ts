@@ -1243,6 +1243,11 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     const { installOsNotifyBridge } = await import("@/app/notification/os/os-notify-bridge");
     installOsNotifyBridge();
 
+    // `block:reveal`: srv asks THIS window to reveal a block another window's
+    // revealBlock couldn't reach. SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3.
+    const { installBlockRevealEvents } = await import("@/app/util/reveal-block-events");
+    installBlockRevealEvents();
+
     // Refresh the Claude model catalog from the authoritative /v1/models list
     // (backend `providers.models`, account OAuth token). Fire-and-forget: the
     // model drop-up shows the curated static list until this resolves, then
