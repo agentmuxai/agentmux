@@ -71,6 +71,7 @@ pub(super) fn handle_toggle_floating_maximize(
             .or_insert(PaneWindowState {
                 placement: WindowPlacement::Normal,
                 last_known_normal_rect: None,
+                always_on_top: false,
             });
         match entry.placement {
             WindowPlacement::Maximized => {
@@ -99,6 +100,25 @@ pub(super) fn handle_toggle_floating_maximize(
             restore_rect,
             version,
         }],
+        ..Default::default()
+    }
+}
+
+/// Set a floater's "Always on top" flag
+/// (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §5). Inserts a default entry
+/// if the floater has none yet, and leaves placement untouched. Pure: the
+/// IPC handler applies the Win32 z-order after dispatch. Emits an event even
+/// when the value doesn't change, so a re-apply (the frontend re-sends a
+/// stored `true` when a floater loads) still reaches the handler.
+pub(super) fn handle_set_floating_always_on_top(
+    state: &mut HostState,
+    label: String,
+    on: bool,
+) -> DispatchOutput {
+    state.pane_window_states.entry(label.clone()).or_default().always_on_top = on;
+    let version = state.bump_version();
+    DispatchOutput {
+        events: vec![HostEvent::FloatingAlwaysOnTopChanged { label, on, version }],
         ..Default::default()
     }
 }
@@ -183,6 +203,7 @@ mod tests {
             PaneWindowState {
                 placement: WindowPlacement::Minimized,
                 last_known_normal_rect: None,
+                always_on_top: false,
             },
         );
         update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
@@ -240,7 +261,11 @@ mod tests {
         let mut state = HostState::default();
         state.pane_window_states.insert(
             LBL.into(),
-            PaneWindowState { placement: WindowPlacement::Maximized, last_known_normal_rect: None },
+            PaneWindowState {
+                placement: WindowPlacement::Maximized,
+                last_known_normal_rect: None,
+                always_on_top: true,
+            },
         );
         assert!(placement_of(&state, LBL).is_some());
 
@@ -251,6 +276,56 @@ mod tests {
 
         assert!(placement_of(&state, LBL).is_none(), "placement must be evicted on close");
         assert!(out.events.is_empty(), "eviction is internal cleanup; emits no event");
+    }
+
+    fn always_on_top_of(state: &HostState, label: &str) -> Option<bool> {
+        state.pane_window_states.get(label).map(|e| e.always_on_top)
+    }
+
+    #[test]
+    fn set_always_on_top_inserts_entry_without_touching_placement() {
+        let mut state = HostState::default();
+        let out = update(
+            &mut state,
+            HostCommand::SetFloatingAlwaysOnTop { label: LBL.into(), on: true },
+        );
+        assert_eq!(always_on_top_of(&state, LBL), Some(true));
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
+        assert!(matches!(
+            out.events.as_slice(),
+            [HostEvent::FloatingAlwaysOnTopChanged { on: true, .. }]
+        ));
+    }
+
+    #[test]
+    fn set_always_on_top_keeps_maximize_state_and_vice_versa() {
+        let mut state = HostState::default();
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        update(&mut state, HostCommand::SetFloatingAlwaysOnTop { label: LBL.into(), on: true });
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        assert_eq!(always_on_top_of(&state, LBL), Some(true), "maximize/restore keeps the tack");
+        update(&mut state, HostCommand::SetFloatingAlwaysOnTop { label: LBL.into(), on: false });
+        assert_eq!(always_on_top_of(&state, LBL), Some(false));
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
+    }
+
+    #[test]
+    fn re_applying_the_same_value_still_emits() {
+        // The frontend re-sends a stored `true` when a floater (re)loads; the
+        // handler must still get an event to apply the z-order to the HWND.
+        let mut state = HostState::default();
+        update(&mut state, HostCommand::SetFloatingAlwaysOnTop { label: LBL.into(), on: true });
+        let again = update(&mut state, HostCommand::SetFloatingAlwaysOnTop { label: LBL.into(), on: true });
+        assert_eq!(again.events.len(), 1);
+    }
+
+    #[test]
+    fn evict_drops_the_tack_with_the_entry() {
+        let mut state = HostState::default();
+        update(&mut state, HostCommand::SetFloatingAlwaysOnTop { label: LBL.into(), on: true });
+        update(&mut state, HostCommand::EvictFloatingPaneWindowState { label: LBL.into() });
+        assert_eq!(always_on_top_of(&state, LBL), None);
     }
 
     #[test]

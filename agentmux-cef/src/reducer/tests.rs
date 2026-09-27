@@ -113,6 +113,7 @@ fn version_increments_monotonically() {
         HostEvent::WindowOpacityApplied { version, .. } => *version,
         HostEvent::WindowOpacityCleared { version, .. } => *version,
         HostEvent::PaneWindowStateChanged { version, .. } => *version,
+        HostEvent::FloatingAlwaysOnTopChanged { version, .. } => *version,
         HostEvent::Effect { version, .. } => *version,
         HostEvent::Error { version, .. } => *version,
     };

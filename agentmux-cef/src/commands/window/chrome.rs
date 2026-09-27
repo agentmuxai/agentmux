@@ -291,3 +291,66 @@ pub fn toggle_floating_maximize(
 
     Ok(serde_json::json!({ "placement": placement_str }))
 }
+
+/// "Always on top" for a floating pane — the header tack
+/// (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §5). Args:
+/// `{ "label": "floating-…", "on": bool, "block_id"?: string }`.
+///
+/// 1. Pure reducer dispatch (`SetFloatingAlwaysOnTop`) records the flag.
+/// 2. Windows: applies the z-order via `floating_pane::set_floater_always_on_top`
+///    (topmost while this app is active; `floating_pane_wndproc` keeps it that
+///    way on app switches).
+/// 3. Writes `pane:floating_ontop` through to the block's meta in the
+///    background (`true`, or removed when off) so the frontend can re-apply it
+///    when the floater reloads.
+///
+/// Phase 1 is Windows-only; elsewhere the frontend doesn't show the tack
+/// (`HostCaps.floatingAlwaysOnTop`), and this returns an error.
+pub fn set_floating_always_on_top(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "set_floating_always_on_top: label is required".to_string())?
+        .to_string();
+    let on = args
+        .get("on")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| "set_floating_always_on_top: on (bool) is required".to_string())?;
+    let block_id = args.get("block_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (state, block_id);
+        return Err(format!(
+            "set_floating_always_on_top: not supported on this platform yet (label={label}, on={on})"
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        state.host_dispatch(crate::reducer::HostCommand::SetFloatingAlwaysOnTop {
+            label: label.clone(),
+            on,
+        });
+        let applied = crate::floating_pane::set_floater_always_on_top(&label, on);
+        if !applied {
+            tracing::warn!(label = %label, on, "[ontop] set_floating_always_on_top: floater not found");
+        }
+
+        if let Some(block_id) = block_id {
+            let meta_patch = serde_json::json!({
+                "pane:floating_ontop": if on { serde_json::Value::Bool(true) } else { serde_json::Value::Null }
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            std::thread::spawn(move || {
+                crate::client::backend_update_block_meta(&web_endpoint, &auth_key, &block_id, meta_patch);
+            });
+        }
+
+        Ok(serde_json::json!({ "on": on, "applied": applied }))
+    }
+}

@@ -240,6 +240,7 @@ async fn route_command(
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),
+        "set_floating_always_on_top" => commands::window::set_floating_always_on_top(state, args),
         "set_zoom_factor" => commands::window::set_zoom_factor(state, args),
         "is_main_window" => Ok(commands::window::is_main_window(args)),
         "get_window_label" => Ok(commands::window::get_window_label(args)),
