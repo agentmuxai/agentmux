@@ -317,6 +317,31 @@ export function AgentRow({
                     e.stopPropagation();
                     if (node.blockId) void focusBlock(node.blockId);
                 }}
+                // ...and the Swarm pane must not flash selected first. The
+                // Swarm root is focusable (tabIndex={-1}), so a press anywhere
+                // inside it moves DOM focus there on MOUSEDOWN, before this
+                // click runs; that focusin bubbles to PaneChrome / BlockFrame,
+                // which select the Swarm pane, and the click then hands focus to
+                // the agent's pane — a highlight-unhighlight blink. Cancelling
+                // mousedown's default keeps focus where it is until the click
+                // picks the agent's pane. Only the agent card does this: the
+                // header and empty space still focus (select) the Swarm pane.
+                // Focusable controls inside the card (the fleet checkbox) are
+                // left alone: they need real focus (Space toggles a focused
+                // checkbox), and pressing one is a Swarm action, not "select
+                // this agent" (Codex P2 on #3955).
+                // SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.3.
+                onMouseDown={(e) => {
+                    // Only controls INSIDE this card count: closest() also walks
+                    // ancestors, and the Swarm root above every card has a
+                    // tabindex, so an unbounded match would always hit it and
+                    // skip the guard entirely (reagentx P0 on #3955).
+                    const control = (e.target as Element | null)?.closest(
+                        "input, button, select, textarea, a[href], [tabindex]"
+                    );
+                    if (control && control !== e.currentTarget && e.currentTarget.contains(control)) return;
+                    e.preventDefault();
+                }}
                 onContextMenu={handleAgentRowContextMenu}
                 title={node.agentName}
             >

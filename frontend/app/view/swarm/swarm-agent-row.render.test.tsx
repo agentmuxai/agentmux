@@ -80,8 +80,13 @@ function modelStub(collapsed: boolean, toggleAgentCollapsed: () => void = () => 
 }
 
 function renderRow(collapsed: boolean, model: SwarmViewModel = modelStub(collapsed)) {
+    // Inside a focusable root, like production's `.swarm-view` (tabIndex={-1}):
+    // the card's mousedown guard must not be fooled by that ancestor
+    // (reagentx P0 on #3955 — a guard that matched it never ran).
     return render(() => (
-        <AgentRow node={treeNode()} focusedBlockId={() => null} model={model} />
+        <div class="swarm-view" tabIndex={-1}>
+            <AgentRow node={treeNode()} focusedBlockId={() => null} model={model} />
+        </div>
     ));
 }
 
@@ -153,6 +158,52 @@ describe("AgentRow — select-to-focus", () => {
 
         expect(toggle).not.toHaveBeenCalled();
         expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK);
+    });
+
+    // The Swarm root is focusable, so a press would move DOM focus into the
+    // Swarm pane on mousedown — selecting it (PaneChrome's focusin) a moment
+    // before the click selects the agent's pane: a border blink. The card
+    // cancels mousedown's default so focus never enters the Swarm pane.
+    it("pressing the agent card does not move focus into the Swarm pane", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const card = container.querySelector(".swarm-agent-card") as HTMLElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        card.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+    });
+
+    it("pressing the card's checkbox keeps native focus (so Space toggles it), and it still toggles on click", () => {
+        // Codex P2 on #3955: cancelling mousedown on the checkbox too would stop
+        // it taking focus.
+        registerPane(BLOCK);
+        const toggleSelected = vi.fn();
+        const model = { ...modelStub(false), toggleSelected } as unknown as SwarmViewModel;
+        const { container } = renderRow(false, model);
+        const box = container.querySelector(".swarm-agent-card input[type=checkbox]") as HTMLInputElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        box.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(false);
+        fireEvent.click(box);
+        expect(toggleSelected).toHaveBeenCalled();
+    });
+
+    it("pressing the card's name text (not a control) is covered", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const row = container.querySelector(".swarm-agent-card .swarm-agent-row") as HTMLElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        row.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+    });
+
+    it("a press outside any agent card is left alone, so it still selects the Swarm pane", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const outside = container.querySelector(".swarm-view") as HTMLElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        outside.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(false);
     });
 
     it("clicking the chevron toggles collapse without focusing the pane", () => {
