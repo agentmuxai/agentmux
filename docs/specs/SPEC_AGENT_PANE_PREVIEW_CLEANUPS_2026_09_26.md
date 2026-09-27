@@ -1,7 +1,7 @@
 # Spec: Agent-pane preview cleanups (message shell, scroll hand-off, cap estimates, file preview)
 
 **Date:** 2026-09-26
-**Status:** proposed
+**Status:** active — §1 implemented in #3932; §2 in #3933, §3 in #3934, §4 in #3936
 **Scope:** `frontend/app/view/agent/` — message blocks, capped preview boxes,
 row-height estimates, file previews
 **Verified against:** `main` @ `6b7b74ef1`
