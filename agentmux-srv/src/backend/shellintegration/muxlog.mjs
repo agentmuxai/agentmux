@@ -109,7 +109,18 @@ function discover(target) {
             }
         }
     }
-    return out.sort((a, b) => b.mtime - a.mtime);
+    return out.sort(newestLogFirst);
+}
+
+// Newest mtime first; on a tie, the later rotation date in the name. Two daily
+// files written within the same mtime tick (a rollover, or a test writing both)
+// otherwise came out in readdir order — older date first.
+export function newestLogFirst(a, b) {
+    const byMtime = b.mtime - a.mtime;
+    if (byMtime) return byMtime;
+    const da = logNameParts(path.basename(a.file))?.date ?? "";
+    const db = logNameParts(path.basename(b.file))?.date ?? "";
+    return db < da ? -1 : db > da ? 1 : 0;
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
@@ -363,7 +374,7 @@ export function groupInstances(cands, spec, liveByDir = {}) {
         if (!groups.has(key)) groups.set(key, { key, dir: path.dirname(e.file), source: e.source, version: e.version, tag: instanceTag(e), files: [], newest: e });
         const g = groups.get(key);
         g.files.push(e.file);
-        if (e.mtime > g.newest.mtime) g.newest = e;
+        if (newestLogFirst(e, g.newest) < 0) g.newest = e;
     }
     let out = [...groups.values()];
     if (spec === "live") out = out.filter((g) => liveByDir[g.dir] !== "dead");
