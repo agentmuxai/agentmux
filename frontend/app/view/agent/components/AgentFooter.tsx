@@ -526,7 +526,17 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     });
                 }
             })
-            .catch(() => {});
+            .catch((err) => {
+                // Same notice as a failed drop (useAgentDropAttach.ts).
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "Couldn't attach the images",
+                    message: String((err as Error)?.message ?? err),
+                    timestamp: new Date().toISOString(),
+                    type: "warning",
+                    expiration: Date.now() + 8000,
+                });
+            });
     };
 
     const handlePaste = (e: ClipboardEvent) => {
