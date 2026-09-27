@@ -1,0 +1,451 @@
+# SPEC: Drag and drop: audit, one facility, one drop indicator
+
+**Date:** 2026-09-27
+**Status:** proposed; nothing in this spec is implemented. It supersedes `SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md`: its window-level controller and `fileDrop` manifest hook carry over as §5.3, and its thick-border look is replaced by §4. It revives the unlanded `SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md` as phase 4. Written against `main` @ `135251326`; spot-verify file:line citations before trusting them.
+**Author:** Korp@narko
+**Related:** `SPEC_PANE_FILE_DROP_2026_05_30.md` (OS file drop: the CEF drag handler and the path stash), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (what an agent pane does with files), `SPEC_TAB_WINDOW_DRAG_CONSOLIDATION_2026_07_13.md` (landed-vs-open map of window drags), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (pane tabs, and `pane-tab-tearoff.ts`, the pattern §5.6 generalises), `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md` (shelved), `docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md`.
+
+---
+
+## 0. The ask
+
+> when dragging any file over a pane, we want to highlight the pane … for now only agent panes will be supported, but we will have future pane support too, like media and editor.
+
+> get terminal panes in too … I didnt see the faint dashed border when I did a dnd before, lets consolidate everything there into one facility. … do the best practice as far as indicator, the pattern is well established
+
+> do an audit of the area, ID ops for DRY, perhaps rethink a more efficient architecture, write spec to file
+
+## 1. Summary
+
+**Drag and drop in AgentMux today:**
+- Seven drag systems run on three mechanisms: pragmatic-dnd, native HTML5, and host-native loops.
+- About ten separate stores all mean "a drag is in progress".
+- There are nine visual drop treatments in three colour sources, two of them hard-coded green.
+- Each pane handles OS file drops by hand.
+
+**What users see:**
+- The one file-drop indicator never shows. It is the "faint dashed border" you didn't see.
+- Dropping into a floating pane on Windows fails.
+- The drone canvas shows a copy cursor for a file drop and then swallows it.
+
+**What it costs:**
+- One `dragover` runs N+4 window listeners (N = open window tabs).
+- Every pane in every tab runs a DOM query every 100 ms, even with no drag.
+
+**The plan:**
+- **One drag facility per window.** It owns:
+  - the drag session (what is being dragged);
+  - one set of window listeners;
+  - hit-testing;
+  - one drop-indicator component and one set of tokens.
+- **Panes opt in to file drops** with a manifest hook: agent and terminal in phase 1; media and editor later.
+- **The indicator follows the established pattern** (§4): valid drop zones are outlined as soon as files enter the window; the zone under the cursor gets a translucent accent tint, an accent border and a prompt saying what will happen; invalid zones say why before you let go.
+- **Five independently shippable phases** (§7). Phase 1 is the user-visible file-drop work. The rest is consolidation that each phase proves with tests before deleting old code.
+
+## 2. Audit
+
+### 2.1 OS file drops
+
+**The indicator is dead.**
+- `DragOverlay` (`frontend/app/element/dragoverlay.tsx:11`) destructures `({ message, visible })`. In SolidJS that reads `visible` once, at creation, when it is `false`.
+- The agent and terminal panes both render it (`agent-view.tsx:2552`, `term.tsx:452`). Neither has ever shown it.
+- It also uses Tailwind's `border-accent`, which is `--color-accent`: a fixed `rgb(65,159,224)` (`tailwindsetup.css:35`) that themes don't override.
+
+**The agent and terminal handlers are hand-copied twins.** `useAgentDropAttach.ts` vs `term.tsx`:
+
+| Logic | Agent | Terminal |
+|---|---|---|
+| settings atoms + concurrency normalisation | 77-88 | 324-330 |
+| `hostHas("nativeFileDrop")` gate + listener add/remove | 104, 261-268 | 377, 430-437 |
+| inline `types.includes("Files")` instead of `isFileDrag` (`util/dnd.ts:87`) | 112-113 | 386-387 |
+| `dragleave` `relatedTarget` containment | 125-126 | 397-398 |
+| no-cwd toast | 136 (**before** consuming the stash) | 336 (after) |
+| empty-stash toast (byte-identical) | 149 | 420 |
+| `copyFilesToDir` + success / "Copy failed" toasts | 189-256 | 346-370 |
+| overlay message (same strings) | 97-101 | 441-444 |
+
+**Every notice is written by hand.**
+- 13 hand-written `pushNotification` literals cover drop, copy and paste: 7 in `useAgentDropAttach.ts`, 4 in `term.tsx`, 1 in `AgentFooter.tsx:522`, 1 in `attachment-draft.ts:471`.
+- Each repeats `icon` / `timestamp` / `type` / `expiration` by hand.
+- The failure line `` `${baseName(f.source)}: ${f.error}` `` appears 5 times.
+- The `cmd:cwd` lookup appears 5 times: `useAgentDropAttach.ts:90-93`, `term.tsx:333`, `term.tsx:442`, `AgentFooter.tsx:541`, `app_api/attachments.rs:63`.
+
+**Three routes put a file into a container pane's working folder:**
+- a drop: CEF `copy_file_to_dir` (`useAgentDropAttach.ts:178-257`);
+- right-click Paste: CEF, a separate copy (`AgentFooter.tsx:540-550`);
+- Ctrl+V: HTTP upload then srv `attachments.copy-to-workdir` (`attachment-draft.ts:244-253`).
+
+Right-click Paste ignores `dnd:enabled`, `dnd:concurrency` and `dnd:agentinserttoken`.
+
+**Copying into a folder is written twice in Rust:**
+- **CEF, `providers.rs:161-263`:**
+  - it runs synchronously inside the async IPC router (`ipc.rs:434`), unlike its `spawn_blocking` neighbours;
+  - de-conflicting checks with `exists()` and then copies with `std::fs::copy`, which is racy and overwrites;
+  - it has no `dot > 0` guard, so `.env` becomes `_1.env`;
+  - it has no tests.
+- **srv, `store.rs` `copy_original_to`:** race-free (`create_new`), sanitised, tested.
+- The comment at `util/dnd.ts:40` promises `report (1).csv`; both produce `report_1.csv`.
+
+**Other problems:**
+- **Floaters on Windows:** they are built with `is_browser_pane = true` (`agentmux-cef/src/floating_pane.rs:246-250`, `:468-472`), so `drag_handler()` returns `None` (`client/handlers.rs:57-60`). Paths are never stashed.
+- **The path stash:** it is one process-wide slot with no window key (`drag_stash.rs:24`).
+- **The drone canvas:** `onDragOver` always calls `preventDefault` with `dropEffect = "copy"` (`drone-view.tsx:288-291`), so an OS file shows a copy cursor and is swallowed.
+- **Dead setting:** `dnd:maxfilesizemb` (`settings-template.jsonc:23`) is read nowhere.
+- **Untested:** the terminal drop path, `installGlobalDropGuard`, `on_drag_enter`, and the CEF copy.
+
+### 2.2 In-app drags
+
+| System | Mechanism | Where |
+|---|---|---|
+| Pane (tile) move | pragmatic-dnd | `layout/lib/TileLayout.core.tsx:449`, `tilelayout-shared.tsx:318,436` |
+| Window tab reorder / tear-off | pragmatic-dnd | `app/tab/droppable-tab.tsx:88,220`, `tab-reorder.ts` |
+| Pane-tab pills | pragmatic-dnd | `app/element/PaneTabStrip.tsx:361,670,687` |
+| Drone chip → canvas | native HTML5 + pointer events | `app/view/drone/drone-view.tsx` |
+| Global-memory list reorder | native HTML5 | `global-bundle-manager.tsx:83-116` |
+| Cross-window tear-off | dragend monitors ×3 platforms | `app/drag/CrossWindowDragMonitor.*.tsx` |
+| Floater move / redock | host native loop | `workspace/floating-pane-workspace.tsx`, `app-init.ts:117-270` |
+
+**"A drag is in flight" is stored many times over:**
+- **A tile drag** is recorded in six places at once:
+  - `dragState.nodeId` (`tilelayout-drag-state.ts:21`)
+  - `tileDragInFlight` (`dragInFlight.ts:20`)
+  - `layoutModel.activeDrag` (`layoutModel.ts:249`)
+  - the payload `kind: "tile"`
+  - `elementDragInFlight()` (`element-drag-state.ts:22`)
+  - the tile's own `isDragging`
+- **A window-tab drag** is recorded in five: `globalDragTabId`, `isDragging`, payload `"tab"`, `elementDragInFlight`, and host `setJsDragActive`.
+- **`dragInFlight.ts` exists only** because the payload is cleared at drop, before `dragend`.
+- **Four separate nets catch a swallowed `dragend`:**
+  1. `TileLayout.win32.tsx:87`, once per TileLayout
+  2. `element-drag-state.ts:36`
+  3. `tab-reorder.ts:343-363`
+  4. the win32 monitor's 800 ms poll
+- **`dragEscaped`** lives in the tab module (`tabbar-dnd.ts:31`) but gates tile and pane-tab payloads in all three monitors, and nothing sets it during a tile drag.
+
+**Per-event cost:**
+- **One `dragover` runs N+4 app-level window listeners:**
+  - pragmatic's lifecycle and honey-pot fix (2);
+  - the file-drop guard (`app-init.ts:1029`);
+  - **one per mounted TileLayout** (`TileLayout.core.tsx:249-258`; every window tab stays mounted), each resetting a 100 ms debounce that then calls `getBoundingClientRect`;
+  - the win32 tab listener (`tab-reorder.ts:132`) or the darwin/linux monitor's document listener.
+- **With no drag at all:** each pane re-registers its draggable by polling `setInterval(register, 100)` for its whole life (`TileLayout.core.tsx:522`). That is 10 × (panes in all tabs) `querySelector` calls a second.
+- **Type checks are scattered:**
+  - three type tags live in three modules (`tilelayout-shared.tsx:42`, `tabbar-dnd.ts:6`, `PaneTabStrip.tsx:46`);
+  - `source.data.type === tileItemType` is repeated 5 times.
+
+### 2.3 Cross-window drags
+
+**The three monitors are mostly copies.**
+- `CrossWindowDragMonitor.{win32,darwin,linux}.tsx` (464 / 302 / 351 lines) share roughly 140–175 lines per pair. darwin and linux are nearly identical.
+- Copied three times: `DragItemPayload` and its getter and setter, `handleCrossWindowDragEnd`, and `performTearOff` (whose floater-open retry appears **six** times).
+- Every drag makes an unused `listWindows()` IPC call (win32:203-207, result never read), and `performCrossWindowDrop` is an empty function (win32:269-276).
+- `app/drag/pane-tab-tearoff.ts` already does this right: one module with a `platform` parameter and a de-duplicated `openFloatingPaneWindow` retry (:195-213).
+
+**"Which window is under the cursor" is answered five times:**
+- `commands/drag.rs:193` (Windows only, map order rather than Z-order; returns `None` on macOS/Linux, `:220`);
+- `window/motion.rs:280` with `ui_tasks/window.rs:1500` (cross-platform, Z-ordered);
+- `tear_off_hook.rs:703`;
+- the macOS CGWindowList path;
+- the frontend `pane-tab-tearoff.ts:48` `isInsideWindow`, which exists only because of the `None` at `drag.rs:220`.
+
+**A cross-window tab drop commits twice.** Both `DragOverlay.tsx:84-123` and `tab-tearoff-events.ts:231` commit it, and they are de-duplicated at runtime by `wasTabRecentlyMerged` (`tabbar-dnd.ts:196`).
+
+**Dead host surface:**
+- `set_js_drag_active` is a no-op (`drag.rs:537-540`), called only from `TileLayout.linux.tsx`.
+- `set_drag_cursor` / `restore_drag_cursor` have no callers.
+- `tear_off_sc_move_handshake` is unreachable because `skipScMove` is always true (`tab-tearoff-rpc.ts:309`).
+- The `stubs.rs:14-19` comment is stale.
+
+### 2.4 Visual feedback
+
+| Treatment | Colour | Shape |
+|---|---|---|
+| `drop-target-hover` mixin (`drop-feedback.scss:59-69`) | `--accent-color`, pulsing to hard-coded green `rgba(34,197,94,.5)` (`:21`) | 2px outline, invert strobe ×2 + pulse |
+| Tile placeholder (`tilelayout.scss:232-260`) | `rgba(accent,.2)` fill, `.5` border | 1px |
+| Floater redock ghost (`app.scss:54-62`) | `accent/.18` fill | 2px |
+| Cross-window overlay (`drag/drag-overlay.scss:4-33`) | accent border, hard-coded green fill `rgba(34,197,94,.08)` (`:14`) | 2px dashed |
+| File-drop overlay (`element/dragoverlay.tsx`) | Tailwind fixed blue, black scrim + blur | 2px dashed |
+| Pill insertion (`PaneTabStrip.scss:356-362`), memory card (`native-memory-manager.scss:562-565`), tab gap (`droppable-tab.tsx:69-78`) | accent | 2px inset / padding gap |
+
+**Other inconsistencies:**
+- **Being dragged:** four different treatments for the dragged source (tile blur 8px; tab opacity .35; pill .4; memory card .5).
+- **Keyframes:** `drop-feedback.scss`'s keyframes are emitted twice, once per `@use`.
+- **Two components are named `DragOverlay`:** `app/drag/DragOverlay.tsx` (cross-window) and `app/element/dragoverlay.tsx` (file drop).
+
+## 3. Goals
+
+1. **One facility per window** owns drag state, window listeners, hit-testing and drop indication. Features plug into it; they don't reimplement it.
+2. **File drops use the established indicator pattern (§4)** and are handled once. Agent and terminal panes are in phase 1. Any pane type opts in by declaring a hook.
+3. **No behaviour regressions** in the fragile internal-drag paths. Each consolidation step lands behind characterisation tests of today's behaviour before old code is deleted.
+4. **Measurably cheaper:**
+   - one app-level `dragover` listener per window (plus pragmatic's own);
+   - no idle polling;
+   - no wasted IPC per drag.
+5. **One Rust implementation per job:** one "copy into a folder" and one "window under the cursor".
+
+## 4. The drop indicator: best practice
+
+**What the sources converge on.** For file drops into a region of an app, NN/g, design systems and desktop apps agree:
+- **Show valid drop zones as soon as a drag starts.** Dotted or dashed borders are "especially common in file uploads"; show "a visual signifier when the dragged object is within the active drop zone" [NN/g].
+- **Mark the zone under the cursor with a fill.** VS Code covers the target editor group with a semi-transparent overlay (`editorGroup.dropBackground`, required to be translucent so content shows through) and floats a text prompt over it (`editorGroup.dropIntoPromptForeground/Background`) [VS Code].
+- **Change the border as well.** Carbon's uploader changes the border's colour and thickness when files are over it [Carbon].
+- **Animate briefly** (~100 ms) [Smart Interface Design Patterns].
+- **Warn about an invalid drop while hovering, not after** [Pencil & Paper].
+- **Make the target big**, e.g. Slack's whole-pane zone. A whole pane is the target here, which satisfies this.
+
+**Decision:**
+
+| State | When | Look |
+|---|---|---|
+| **Armed** | files are over the window; on every pane that accepts files | 1px dashed accent outline at 50% opacity, inset. No fill, no text. |
+| **Target** | the accepting pane under the cursor | translucent accent tint over the whole pane (`--drop-target-bg`, accent at ~14%) + 2px solid accent inset border + a centred **prompt chip** (icon + "Drop 3 files to attach" / "Copy 3 files to C:\work") |
+| **Blocked** | an accepting pane that can't take this drop right now | no tint; prompt chip in the warning style with the reason ("No working folder for this agent"); cursor no-drop |
+| none | panes that don't accept files, window chrome | nothing; cursor no-drop |
+
+**Details of the look:**
+- **Why the tint, not a thicker border:** the tint is what makes the target unmistakable against every pane border, focused or not. The border only frames it, so it keeps the standard 2px width.
+- **Alone in its tab:** the indicator draws on a layer above the pane content inside `.pane-stack`, not on the focus-ring pseudo-element. It shows even when the pane is alone in its tab and the ring is hidden (`PaneChrome.scss:68-70`).
+- **Motion:** 100 ms fade in and out, and nothing under `prefers-reduced-motion`. No strobe or pulse on the file-drop states, because a file drag can last seconds.
+- **Tokens:** one partial, `frontend/app/drag/drop-indicators.scss`, defines them, all derived from the theme's `--accent-color` / `--accent-color-rgb` and `--warning-color`:
+  - `--drop-zone-armed-border`
+  - `--drop-target-bg`
+  - `--drop-target-border`
+  - `--drop-prompt-bg` / `--drop-prompt-fg`
+  - `--drop-blocked-fg`
+- **Phase 3** moves every internal drop treatment in §2.4 onto the same tokens: the tile placeholder, the redock ghost, the cross-window overlay and the pane-tab foreign hover. That deletes both hard-coded greens and emits the keyframes once. Their shapes (insertion line, tab gap, placeholder) stay; only colour and motion unify.
+- **Accessibility:** pointer-only, like every drag. The prompt text is real text, so the target is not signalled by colour alone. Keyboard users keep the existing non-drag routes (attach via Ctrl+V; copy via the file picker, where a pane has one).
+
+Sources: [NN/g: Drag-and-drop](https://www.nngroup.com/articles/drag-drop/) · [VS Code theme colours](https://code.visualstudio.com/api/references/theme-color) · [Carbon: file uploader](https://carbondesignsystem.com/components/file-uploader/usage/) · [Smart Interface Design Patterns: drag-and-drop UX](https://smart-interface-design-patterns.com/articles/drag-and-drop-ux/) · [Pencil & Paper: drag & drop](https://www.pencilandpaper.io/articles/ux-pattern-drag-and-drop)
+
+## 5. Architecture
+
+Everything below lives under `frontend/app/drag/` unless noted. A module is created once per renderer: each main window, tear-off and floater has its own.
+
+### 5.1 `drag-session.ts`: one answer to "what is being dragged"
+
+```ts
+type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "drone-kind" | "list-item";
+interface DragSession {
+    kind: DragKind;
+    source?: { nodeId?; tabId?; blockId?; wsId? };
+    escaped: boolean;
+    startedAt: number;
+}
+session(): DragSession | null        // reactive
+begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "watchdog"
+```
+
+- **Writers:**
+  - the pragmatic `onDragStart` / `onDrop` sites (tile, window tab, pane tab);
+  - the drone chip;
+  - the list reorder;
+  - the file-drop controller (§5.3), on the first `dragenter` whose types include `"Files"`.
+- **It replaces:**
+  - `dragInFlight.ts`;
+  - `element-drag-state.ts`;
+  - the three `_currentDragPayload` copies;
+  - `globalDragTabId`;
+  - `dragEscaped`;
+  - the ad-hoc `isDragging` locals, which become `session()?.source.nodeId === mine`.
+- **`layoutModel.activeDrag` stays a per-tab atom** that other code reads. It is now written from one place: a session subscriber.
+- **One safety net** replaces the four: a `dragend` listener plus a 2 s watchdog with no drag events, which ends any session left open.
+- **The drag tags** (`tileItemType`, `tabItemType`, `paneTabItemType`) move to one `drag-types.ts`, with `isTileSource(source)` style helpers.
+
+### 5.2 `window-drag-events.ts`: one set of window listeners
+
+- **One set of capture-phase `dragenter` / `dragover` / `dragleave` / `drop` / `dragend` listeners per window.** Subscribers register with a kind filter:
+
+  ```ts
+  onWindowDrag({ kinds: ["tile"], over(e), leave(e), drop(e) })
+  ```
+
+- **`dragover` is coalesced to one dispatch per animation frame.** A subscriber gets the latest event; `preventDefault` / `dropEffect` are applied synchronously by the hub from the subscriber's last answer.
+- **It replaces:**
+  - `installGlobalDropGuard` (`app-init.ts:1029`), whose guard becomes the hub's "files and nobody accepted → prevent default";
+  - the per-TileLayout window `dragover` (×N);
+  - `tab-reorder.ts`'s win32 listener;
+  - the darwin/linux monitors' document `dragover`.
+- **Result:** one app listener per event, however many window tabs are open.
+
+### 5.3 `file-drop.ts`: the file-drop facility
+
+It carries over from the superseded spec, with the §4 look.
+
+**How a pane opts in:**
+
+```ts
+// PaneTabManifest.capabilities
+fileDrop?: true;
+
+// returned from manifest.create(ctx)
+fileDrop?: {
+    accept(drag: { count: number }): { ok: true; message: string; icon?: string } | { ok: false; reason: string };
+    drop(paths: string[], files: FileList): void | Promise<void>;
+};
+```
+
+**How a drag is handled:**
+- **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → view (`resolvePaneTabView`) → the instance hook. Signals change only when the pane under the cursor changes, so `accept` runs once per pane entered, not per `dragover`.
+- **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, watchdog). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
+- **On drop over a Target:**
+  1. `consumeDragPaths()`;
+  2. if it's empty, one "couldn't read the dropped files' paths" notice;
+  3. otherwise call the hook's `drop`.
+- **A drop anywhere in the pane counts**, including its header and tab strip; today only the content does.
+- **The indicator** is rendered by `PaneChrome` as `<DropIndicator state message />`, from a per-window `Map<blockId, state>` signal. It replaces `element/dragoverlay.tsx`, which is deleted along with its name clash.
+
+**Shared helpers, so pane hooks stay a few lines** (`file-drop-actions.ts`):
+- `paneWorkdir(blockId)`: the one `cmd:cwd` lookup.
+- `copyDroppedToWorkdir(blockId, paths, { mention })`: copy (§5.5) + results + `@name` mentions + notices. The terminal pane, the agent pane's copy mode and **both** container paste routes all use it. That collapses the three routes in §2.1 to one, and right-click Paste now respects the `dnd:*` settings.
+- `notifyDrop.{noCwd, noPaths, copied, copyFailed, attachFailed}`: one builder per message, replacing the 13 literals, with consistent expirations.
+
+**Pane hooks in phase 1:**
+
+| Pane | `accept` | `drop` |
+|---|---|---|
+| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: no cwd / `dnd:enabled` off | `attachmentDraft.ingestPaths` or `copyDroppedToWorkdir` |
+| Terminal (`view: "term"`) | "Copy N files to <cwd>" · blocked: no cwd / setting off | `copyDroppedToWorkdir` (no mention) |
+
+**Later panes:**
+
+| Pane | `accept` | `drop` |
+|---|---|---|
+| Media (`view: "media"`) | ok for one image, video or audio file ("Open here"); blocked otherwise | point the pane at the file |
+| Editor (`view: "editor"`) | ok for text files ("Open N files"); blocked for binaries | open as editor tabs |
+
+**The drone canvas** checks its own MIME type before accepting (`drone-view.tsx:288`). It then stops advertising "copy" for OS files; the hub's guard handles them.
+
+### 5.4 Floaters and the path stash (CEF)
+
+- **Give floater clients the drag handler.** Split `is_browser_pane` so "no context menu / no drag handler" applies only to real browser panes, and set a `drag_capture` flag for floater and pane-pool clients (`floating_pane.rs:246-250`, `:468-472`). `client/navigation.rs:374-383` notes that the flag is inherited when clients are cloned; keep that behaviour for browser panes.
+- **Key the stash by browser id**, so `take()` returns only paths from a drag that entered *this* window: `put(browser_id, paths)` / `take(browser_id)`. The window-less slot (`drag_stash.rs:24`) goes away.
+
+### 5.5 One "copy into a folder"
+
+- **One Rust implementation**, in `agentmux-common`: `copy_into_dir(src, dir, name) -> PathBuf`. It covers:
+  - `create_new` de-conflicting (`name_1.ext`, with the `dot > 0` guard);
+  - `safe_file_name`;
+  - streaming with progress and cancel;
+  - recursive directories.
+
+  srv's `copy_original_to` and a new srv RPC `files.copy-to-dir {paths, dir}` both call it.
+- **The frontend's `copyFilesToDir`** calls the RPC instead of CEF `copy_file_to_dir`. The CEF IPC and its untested `providers.rs:161-263` are deleted.
+- **Why srv:** it already knows about container working folders, runs the copy off any UI thread, and has the tested code.
+- **Settings:** `dnd:maxfilesizemb` is either wired into the RPC or removed from the settings template. Decide in phase 2 (open question 4).
+
+### 5.6 Cross-window drags
+
+- **One `CrossWindowDragMonitor.tsx`** with a small platform adapter:
+  - `listen(onEnd)`: win32 OLE `dragleave`/`dragenter` plus the button-state fallback; or darwin/linux `dragend`;
+  - `cursorPoint(e)`: physical pixels vs DIP;
+  - `tabAnchor(...)`.
+
+  This follows `pane-tab-tearoff.ts`. The floater-open retry becomes that module's `openFloatingPaneWindow`, used by every tear-off.
+- **Removed:**
+  - the unused `listWindows()` call;
+  - `performCrossWindowDrop`;
+  - the duplicated `DragItemPayload`, now in `drag-session.ts`.
+- **One Z-ordered hit-test for every platform:** `update_cross_drag` uses `resolve_window_at_cursor` (`window/motion.rs:280`). `hit_test_windows` (`drag.rs:193-222`) and the frontend `isInsideWindow` are deleted, and macOS/Linux gain target detection. The tear-off hook's `WindowFromPoint` path stays; it runs inside a low-level mouse hook, where `resolve_window_at_cursor`'s locking isn't safe. That exception is documented in place.
+- **One target-side commit path** for a cross-window tab drop. `tab-tearoff-events.ts`'s `merge-direct` handler becomes the only committer. `DragOverlay.tsx` only draws, and `wasTabRecentlyMerged` is deleted.
+- **Dead host surface deleted:**
+  - `set_js_drag_active` and its Linux caller;
+  - `set_drag_cursor` / `restore_drag_cursor`;
+  - `tear_off_sc_move_handshake` and `HookMode::TearOff`, if the maintainers confirm they're shelved for good (open question 3);
+  - the stale `stubs.rs` comment.
+
+### 5.7 Tile draggable registration without polling
+
+- **Replace the 100 ms poll** (`TileLayout.core.tsx:522`) with registration from the header element's own lifecycle. The pane header component calls `registerTileDragHandle(nodeId, el)` in its `ref` and unregisters in `onCleanup`.
+- **This keeps the poll's two jobs:** first mount, and re-registration when a `Show` gate replaces the header. It does both at the moment they happen instead of within 100 ms.
+- **The "never tear down mid-drag" rule** (`:438`) moves into the registrar, keyed on `session()`.
+
+## 6. Efficiency, before and after
+
+| | Today | After |
+|---|---|---|
+| App-level window listeners run per `dragover` | N+4 (N = mounted window tabs) | 1 (+ pragmatic's own 2) |
+| Idle DOM queries per second | 10 × panes across all tabs | 0 |
+| IPC per cross-window drag | +1 unused `listWindows` | 0 wasted |
+| Stores meaning "a drag is in flight" | ~10 | 1 session (+ `activeDrag`, derived) |
+| `dragend` safety nets | 4 | 1 |
+| Cross-window monitor code | 3 files, ~140–175 shared lines per pair | 1 module + 3 small adapters |
+| Window hit-tests (Rust + frontend) | 5 | 2 (general + the mouse-hook exception) |
+| Rust "copy into folder" | 2 | 1 |
+| Routes into a container working folder | 3 | 1 |
+| Drop/copy notice literals | 13 | 5 builders |
+| Drop colour sources | 3 (+2 hard-coded greens) | 1 token set |
+
+## 7. Phases
+
+Each phase is one PR, or a short stack, and is independently shippable.
+
+1. **Phase 1: file drops**
+   - **Build:**
+     - `drag-session` for `"files"` only;
+     - `file-drop.ts` and its manifest hook;
+     - `DropIndicator` + `drop-indicators.scss`;
+     - `file-drop-actions.ts`;
+     - the agent and terminal hooks;
+     - the drone canvas type check;
+     - the floater drag handler and the browser-keyed stash (§5.4).
+   - **Delete:** `element/dragoverlay.tsx` and the per-pane drop listeners.
+   - **User-visible:** the indicator; terminals get feedback; floaters accept drops; header drops work.
+   - The hub (§5.2) can start as just the file subscriber, keeping `installGlobalDropGuard` until phase 4.
+2. **Phase 2: copy and paste**
+   - one Rust copy + the `files.copy-to-dir` RPC (§5.5);
+   - both container paste routes on `copyDroppedToWorkdir`;
+   - CEF `copy_file_to_dir` deleted;
+   - the `dnd:maxfilesizemb` decision.
+3. **Phase 3: one look**
+   - every internal drop treatment in §2.4 moves onto the §4 tokens;
+   - the hard-coded greens go;
+   - keyframes are emitted once;
+   - `app/drag/DragOverlay.tsx` is renamed `CrossWindowDropOverlay.tsx`.
+4. **Phase 4: session and hub**
+   - `drag-session.ts` takes over tile, window-tab, pane-tab, drone and list drags;
+   - `window-drag-events.ts` replaces the window listeners and the global guard;
+   - one safety net;
+   - `drag-types.ts`;
+   - no polling (§5.7);
+   - `dragInFlight.ts` and `element-drag-state.ts` deleted.
+
+   This is the 2026-07-11 drag-session refactor, done incrementally: one drag system per commit, each behind its own characterisation tests.
+5. **Phase 5: cross-window**
+   - the single monitor + adapters;
+   - one hit-test;
+   - one commit path;
+   - the dead host surface removed (§5.6).
+
+Phases 2–5 have no user-visible features. They're worth doing because every future drag feature (media and editor drops, drag-to-reorder attachment tiles) otherwise adds another copy of each pattern.
+
+## 8. Tests
+
+- **Phase 1:**
+  - **Controller unit tests** (jsdom, synthetic `DragEvent`s): Armed / Target / Blocked / none by pane; `accept` called once per pane entered; clear on each end reason including the watchdog; drop dispatch with stashed paths; empty stash → one notice; internal drags ignored.
+  - **Per-pane `accept` tables** for agent and terminal.
+  - **`DropIndicator`** renders each state; the reactivity bug in §2.1 gets a regression test.
+  - **`copyDroppedToWorkdir`:** mentions, partial failure, notices.
+  - **CEF:** the stash keyed by browser, and floater clients getting a drag handler.
+- **Phase 2:** Rust `copy_into_dir`: de-conflicting under a race (two threads), `.env`, directories, cancel.
+- **Phase 4, before each system moves:** characterisation tests of today's behaviour — tile move, window-tab reorder and tear-off, pane-tab reorder and tear-off, Escape abort, swallowed `dragend`. After it moves, the same tests pass unchanged.
+- **Phase 5:** hit-test parity on Windows; a new macOS/Linux target-detection test with the host resolver stubbed.
+- **Manual on Windows each phase:** main window, floater, two windows, Esc mid-drag, drag across a browser pane, window tabs mounted in the background.
+
+## 9. Risks
+
+- **Drag code has broken often** (see the retros and the 07-11 / 07-13 specs). Phases 4–5 touch those paths. Mitigations:
+  - characterisation tests first;
+  - one drag system per commit;
+  - the per-platform adapters stay where the platforms genuinely differ (win32 OLE `dragleave`, DIP vs physical pixels).
+- **rAF-coalesced `dragover`:** a subscriber sees at most one event per frame. The hub still answers `preventDefault` / `dropEffect` synchronously on every event, from the last decision, so the browser never falls back to its default action between frames.
+- **Moving the copy to srv:**
+  - srv is local, so latency is small;
+  - progress for big copies improves, because srv streams with progress;
+  - srv must be reachable, which it is whenever panes are.
+
+## 10. Open questions
+
+1. **Armed outline on panes in other window tabs?** They aren't visible, so no. Only the visible layout is armed.
+2. **Blocked panes:** show the prompt with the reason (recommended), or nothing?
+3. **SC_MOVE / `HookMode::TearOff`:** is it shelved for good? If yes, phase 5 deletes it; if not, it stays with a comment.
+4. **`dnd:maxfilesizemb`:** wire a per-file cap into `files.copy-to-dir`, or drop the setting? Recommendation: drop it. The attachment store already has its own limits, and a copy into a working folder is the user's explicit act.
