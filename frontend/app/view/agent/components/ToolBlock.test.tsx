@@ -806,3 +806,31 @@ describe("ToolBlock — Grep pill", () => {
         expect(pill("No files found")).toBe("0 files");
     });
 });
+
+// SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4: a restored history mounts many
+// collapsed tool rows; their bodies (shiki-highlighted diffs, previews, Bash
+// output) must not be built until a row is first opened, and must then stay.
+describe("ToolBlock — panel body mounts on first open, then stays", () => {
+    it("a collapsed row never opened has no body", () => {
+        const { container } = render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-panel")).not.toBeNull();
+        expect(container.querySelector(".agent-tool-overlay")).toBeNull();
+    });
+
+    it("an open-at-mount row has its body at once", () => {
+        const { container } = render(() => <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-overlay")).not.toBeNull();
+    });
+
+    it("opening mounts the body; collapsing again keeps it", () => {
+        const [pinned, setPinned] = createSignal(false);
+        const { container } = render(() => <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-tool-overlay")).toBeNull();
+        setPinned(true);
+        const body = container.querySelector(".agent-tool-overlay");
+        expect(body).not.toBeNull();
+        setPinned(false);
+        expect(container.querySelector(".agent-tool-panel")!.classList.contains("agent-tool-panel--hidden")).toBe(true);
+        expect(container.querySelector(".agent-tool-overlay")).toBe(body);
+    });
+});
