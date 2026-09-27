@@ -1,9 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     computeDragPreviewSize,
+    createDragPreviewIntent,
+    DRAG_PREVIEW_HOVER_MS,
     dragPreviewCursorOffset,
     DRAG_PREVIEW_FALLBACK,
     DRAG_PREVIEW_MAX_PX,
@@ -102,5 +104,61 @@ describe("dragPreviewCursorOffset", () => {
         for (const bad of [0, -1, NaN, undefined as unknown as number]) {
             expect(dragPreviewCursorOffset({ width: 300, height: 200 }, bad)).toEqual({ x: 10, y: 10 });
         }
+    });
+});
+
+describe("createDragPreviewIntent", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("a pointer passing through a pane never rasterises it", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS - 1);
+        intent.leave();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).not.toHaveBeenCalled();
+    });
+
+    it("a resting hover rasterises once", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+    });
+
+    it("re-entering restarts the wait", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS - 10);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS - 10);
+        expect(rasterise).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(10);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+    });
+
+    it("a press rasterises at once, a drag may follow, and doesn't repeat when the timer would have fired", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        intent.press();
+        expect(rasterise).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+    });
+
+    it("dispose cancels a pending rasterise", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        intent.dispose();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).not.toHaveBeenCalled();
     });
 });

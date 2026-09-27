@@ -41,6 +41,7 @@ import { clearCrossTabDrop } from "./crossTabDrag";
 import { dragState } from "./tilelayout-drag-state";
 import {
     computeDragPreviewSize,
+    createDragPreviewIntent,
     dragPreviewCursorOffset,
     DRAG_PREVIEW_FALLBACK,
     type DragPreviewSize,
@@ -391,6 +392,11 @@ export function createTileLayout(platform: TileLayoutPlatform) {
             }
         };
 
+        // Rasterise on a resting hover or a press, not on every pointer that
+        // crosses the pane — see DRAG_PREVIEW_HOVER_MS.
+        const previewIntent = createDragPreviewIntent(generatePreviewImage);
+        onCleanup(previewIntent.dispose);
+
         // Register pragmatic-dnd draggable on the HEADER element directly.
         // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
         // commits the drag, so SolidJS reactive state updates won't cause
@@ -584,7 +590,14 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                 ref={tileNodeRef}
                 id={props.node.id}
                 style={tileStyle()}
-                onPointerEnter={generatePreviewImage}
+                onPointerEnter={previewIntent.enter}
+                onPointerLeave={previewIntent.leave}
+                onPointerDown={(event) => {
+                    // Only a press on the header can start a pane drag.
+                    if ((event.target as Element | null)?.closest?.('[data-role="block-header"]')) {
+                        previewIntent.press();
+                    }
+                }}
                 onPointerOver={(event) => event.stopPropagation()}
             >
                 {leafContent()}
