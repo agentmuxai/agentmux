@@ -340,6 +340,7 @@ partial list.
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
 | [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
 | [`SPEC_MONOLITH_MODULE_SPLITS_2026_09_22`](SPEC_MONOLITH_MODULE_SPLITS_2026_09_22.md) | SPEC — Split the two largest `agentmux-srv` files into directory modules |
+| [`SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27`](SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md) | SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here" |
 | [`SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22`](SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md) | SPEC: `muxlog swarm -d/--dispatch` — a correlated dispatch-lifecycle verdict |
 | [`SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22`](SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md) | SPEC: `muxspect find` — cross-instance block/agent lookup |
 | [`SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06`](SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md) | SPEC — `muxspect dock`: diagnose and clear stuck Activity Dock entries |
@@ -654,7 +655,6 @@ partial list.
 | [`SPEC_MULTIWINDOW_TASKBAR_GROUPING`](SPEC_MULTIWINDOW_TASKBAR_GROUPING.md) | SPEC: Multi-Window Taskbar Behaviour — Full Instances + Sub-Windows |
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
 | [`SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20`](SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md) | SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP) |
-| [`SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27`](SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md) | SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here" |
 | [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
 | [`SPEC_NAMED_AGENT_CONTINUATION_2026_05_12`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) | Spec: Named agent continuation — launch modal dropdown of existing agents |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
