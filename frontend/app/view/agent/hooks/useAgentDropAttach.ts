@@ -2,35 +2,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Drop file(s) onto an agent pane.
+ * Drop file(s) onto an agent pane: the pane's file-drop hook
+ * (SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §5.3). The window-level
+ * controller (app/drag/file-drop.ts) hit-tests, draws the indicator and
+ * dispatches; this decides what the drop means for this pane.
  *
- * Files (and folders, for the files inside them) go to the composer's
- * attachment tray: the backend copies and processes them, and they're sent
- * with the next message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.5,
- * SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §3).
- *
- * Container agents can't see the attachment store, and attachments can be
- * turned off: then a drop keeps the original behavior. Each file is copied
- * into the agent's CWD and an `@filename` token is spliced into the composer
- * at the caret, so the agent sees the new file in its next turn
- * (SPEC_PANE_FILE_DROP_2026_05_30.md §3.1, §3.6).
+ * Files go to the composer's attachment tray: the backend copies and
+ * processes them, and they're sent with the next message
+ * (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md). Container agents can't
+ * see the attachment store, and attachments can be turned off: then each file
+ * is copied into the agent's working folder and an `@filename` token is
+ * spliced into the composer (SPEC_PANE_FILE_DROP_2026_05_30.md §3.1, §3.6).
+ * Without host paths (virtual files, a host without native file drop) the
+ * files' bytes are used instead.
  */
 
-import { createSignal, onCleanup, onMount } from "solid-js";
-import { hostHas } from "@/app/host/host-caps";
-import { getSettingsKeyAtom, pushNotification, MOS } from "@/app/store/global";
-import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
+import { onCleanup, onMount } from "solid-js";
+import { copyIntoWorkdir, fileCount, notifyDrop, paneWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
+import { registerFileDropTarget, type FileDropHook } from "@/app/drag/file-drop";
+import { getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
 
 interface Opts {
     blockId: string;
-    /** Returns the agent-view DOM root that should listen for drop events. */
+    /** The agent-view root; holds the composer the `@name` tokens go into. */
     rootRef: () => HTMLElement | undefined;
-}
-
-interface UseAgentDropAttachResult {
-    isDragOver: () => boolean;
-    dropMessage: () => string;
 }
 
 /**
@@ -71,9 +67,8 @@ export function isContainerPane(blockId: string): boolean {
     return block?.meta?.["agentMode"] === "container";
 }
 
-export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
-    const [isDragOver, setIsDragOver] = createSignal(false);
-
+/** Register this agent pane as a file-drop target for as long as it's mounted. */
+export function useAgentDropAttach(opts: Opts): void {
     const enabledAtom = getSettingsKeyAtom("dnd:enabled");
     const insertTokenAtom = getSettingsKeyAtom("dnd:agentinserttoken");
     const concurrencyAtom = getSettingsKeyAtom("dnd:concurrency");
@@ -81,192 +76,54 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
 
     const enabled = () => (enabledAtom() ?? true) !== false;
     const insertToken = () => (insertTokenAtom() ?? true) !== false;
-    const attachmentsEnabled = () => (attachmentsAtom() ?? true) !== false;
     const concurrency = () => {
         const v = concurrencyAtom();
         return typeof v === "number" && v > 0 ? v : undefined;
     };
-
-    const cwd = (): string | undefined => {
-        const block = MOS.getObjectValue<Block>(MOS.makeORef("block", opts.blockId));
-        return block?.meta?.["cmd:cwd"];
-    };
     // Container panes copy into the working folder (bind-mounted at /workspace).
-    const toTray = () => attachmentsEnabled() && !isContainerPane(opts.blockId);
+    const toTray = () => (attachmentsAtom() ?? true) !== false && !isContainerPane(opts.blockId);
 
-    const dropMessage = () => {
-        if (toTray()) return "Drop files to attach";
-        const c = cwd();
-        return c ? `Copy to ${c}` : "No working directory detected";
+    const copy = (source: CopySource) =>
+        copyIntoWorkdir(opts.blockId, source, {
+            paneKind: "agent pane",
+            concurrency: concurrency(),
+            mentionIn: insertToken() ? (opts.rootRef() ?? null) : null,
+            splice: spliceComposerTokens,
+        });
+
+    const hook: FileDropHook = {
+        accept(drag) {
+            if (!enabled()) return { ok: false, reason: "File drop is turned off (dnd:enabled)" };
+            const what = drag.count > 0 ? fileCount(drag.count) : "files";
+            if (toTray()) return { ok: true, message: `Drop ${what} to attach`, icon: "fa-paperclip" };
+            const cwd = paneWorkdir(opts.blockId);
+            return cwd
+                ? { ok: true, message: `Copy ${what} to ${cwd}`, icon: "fa-copy" }
+                : { ok: false, reason: "No working folder for this agent" };
+        },
+        async drop({ paths, files }) {
+            if (!toTray()) {
+                await copy(paths.length > 0 ? { paths } : { files });
+                return;
+            }
+            const draft = getAttachmentDraft(opts.blockId);
+            if (paths.length === 0) {
+                draft.uploadFiles(files);
+                return;
+            }
+            try {
+                // Anything the tray doesn't take (an older, images-only
+                // backend's non-images) is copied like before.
+                const rest = await draft.ingestPaths(paths);
+                if (rest.length > 0) await copy({ paths: rest });
+            } catch (err) {
+                notifyDrop.attachFailed(err);
+            }
+        },
     };
 
     onMount(() => {
-        if (!hostHas("nativeFileDrop")) return;
-        const root = opts.rootRef();
-        if (!root) return;
-
-        const onDragOver = (e: DragEvent) => {
-            if (!enabled()) return;
-            // Only treat file drags as drop targets — text/url drops keep
-            // the browser default (paste into composer).
-            const types = e.dataTransfer?.types;
-            if (!types || !Array.from(types).includes("Files")) return;
-            e.preventDefault();
-            setIsDragOver(true);
-        };
-        const onDragLeave = (e: DragEvent) => {
-            // Only clear when the drag actually leaves the root, not when it
-            // crosses an inner element boundary. `relatedTarget` is where the
-            // cursor is *going*; if it's null or not contained in the root,
-            // the drag has left for real. The previous `e.target === root`
-            // check stuck the overlay open whenever the cursor exited via a
-            // child element (which is most of the time, since the pane is
-            // densely populated with children).
-            const next = e.relatedTarget as Node | null;
-            if (!next || !root.contains(next)) setIsDragOver(false);
-        };
-        const onDrop = (e: DragEvent) => {
-            if (!enabled()) return;
-            const files = e.dataTransfer?.files;
-            if (!files || files.length === 0) return;
-            e.preventDefault();
-            setIsDragOver(false);
-            const targetCwd = cwd();
-            if (!targetCwd && !toTray()) {
-                pushNotification({
-                    icon: "fa-triangle-exclamation",
-                    title: "Drop failed",
-                    message: "No working directory detected for this agent pane.",
-                    timestamp: new Date().toISOString(),
-                    type: "warning",
-                    expiration: Date.now() + 8000,
-                });
-                return;
-            }
-            void (async () => {
-                const dropped = await consumeDragPaths();
-                if (dropped.length === 0) {
-                    pushNotification({
-                        icon: "fa-triangle-exclamation",
-                        title: "Drop failed",
-                        message: `Couldn't read the OS paths for ${files.length} dropped file(s). Try again.`,
-                        timestamp: new Date().toISOString(),
-                        type: "warning",
-                        expiration: Date.now() + 6000,
-                    });
-                    return;
-                }
-                // Files go to the attachment tray; anything it doesn't take
-                // (an older backend's non-images) is copied below.
-                let paths = dropped;
-                if (toTray()) {
-                    try {
-                        paths = await getAttachmentDraft(opts.blockId).ingestPaths(dropped);
-                    } catch (err) {
-                        pushNotification({
-                            icon: "fa-triangle-exclamation",
-                            title: "Couldn't attach the files",
-                            message: String((err as Error)?.message ?? err),
-                            timestamp: new Date().toISOString(),
-                            type: "warning",
-                            expiration: Date.now() + 8000,
-                        });
-                        return;
-                    }
-                }
-                if (paths.length === 0) return;
-                if (!targetCwd) {
-                    pushNotification({
-                        icon: "fa-triangle-exclamation",
-                        title: "Files not copied",
-                        message: `No working directory detected for this agent pane, so ${paths.length} ${paths.length === 1 ? "file was" : "files were"} not copied.`,
-                        timestamp: new Date().toISOString(),
-                        type: "warning",
-                        expiration: Date.now() + 8000,
-                    });
-                    return;
-                }
-                const outcome = await copyFilesToDir(paths, targetCwd, { concurrency: concurrency() });
-                const successes = outcome.results.filter((r) => r.dest);
-                const failures = outcome.results.filter((r) => r.error);
-
-                if (successes.length > 0) {
-                    // Track whether the composer actually received tokens. The
-                    // toast wording differs: "Attached" implies the agent will
-                    // see the file via the spliced @-token in its next turn;
-                    // "Copied" is just "the bytes are on disk now — mention
-                    // them yourself."
-                    let tokensInserted = false;
-                    if (insertToken()) {
-                        const tokens = successes.map((r) => `@${baseName(r.dest!)}`);
-                        tokensInserted = spliceComposerTokens(root, tokens);
-                        if (!tokensInserted) {
-                            // Composer not mounted (rare race during pane init).
-                            // Surface a hint so the user knows the file is on
-                            // disk and can mention it manually.
-                            const names = successes.map((r) => baseName(r.dest!)).join(", ");
-                            pushNotification({
-                                icon: "fa-info-circle",
-                                title: "Files copied",
-                                message: `${names} → ${targetCwd}. Mention them in your next message.`,
-                                timestamp: new Date().toISOString(),
-                                type: "info",
-                                expiration: Date.now() + 6000,
-                            });
-                            return;
-                        }
-                    }
-                    const verb = tokensInserted ? "Attached" : "Copied";
-                    const title =
-                        successes.length === 1
-                            ? `${verb} ${baseName(successes[0].dest!)}`
-                            : `${verb} ${successes.length} files`;
-                    // When tokens weren't spliced (user disabled the setting),
-                    // surface the same "mention them in your next message" hint
-                    // that the composer-not-mounted branch above shows — same
-                    // root cause from the user's POV: the agent won't see the
-                    // file unless they reference it explicitly. Failures still
-                    // take precedence in the message body.
-                    const failureLines = failures
-                        .map((f) => `${baseName(f.source)}: ${f.error}`)
-                        .join("\n");
-                    const hint = !tokensInserted
-                        ? `Files are in ${targetCwd}. Mention them in your next message.`
-                        : "";
-                    const message = failureLines || hint;
-                    pushNotification({
-                        icon: "fa-check",
-                        title:
-                            failures.length > 0 ? `${title} (${failures.length} failed)` : title,
-                        message,
-                        timestamp: new Date().toISOString(),
-                        type: failures.length > 0 ? "warning" : "info",
-                        expiration: Date.now() + 5000,
-                    });
-                } else if (failures.length > 0) {
-                    pushNotification({
-                        icon: "fa-triangle-exclamation",
-                        title: `Copy failed (${failures.length} file${failures.length === 1 ? "" : "s"})`,
-                        message: failures
-                            .map((f) => `${baseName(f.source)}: ${f.error}`)
-                            .join("\n"),
-                        timestamp: new Date().toISOString(),
-                        type: "error",
-                        expiration: Date.now() + 12000,
-                    });
-                }
-            })();
-        };
-
-        root.addEventListener("dragover", onDragOver);
-        root.addEventListener("dragleave", onDragLeave);
-        root.addEventListener("drop", onDrop);
-        onCleanup(() => {
-            root.removeEventListener("dragover", onDragOver);
-            root.removeEventListener("dragleave", onDragLeave);
-            root.removeEventListener("drop", onDrop);
-        });
+        const dispose = registerFileDropTarget(opts.blockId, hook);
+        onCleanup(dispose);
     });
-
-    return { isDragOver, dropMessage };
 }

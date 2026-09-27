@@ -285,11 +285,19 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
             y: (clientY - rect.top - v.y) / v.zoom,
         };
     };
+    // Only a node chip's drag is accepted here. Anything else (OS files, a
+    // pane or tab being moved) is left to its own handlers; the canvas used to
+    // show a copy cursor for files and then swallow them
+    // (SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §2.1).
+    const isNodeDrag = (e: DragEvent) =>
+        dragKind() != null || Array.from(e.dataTransfer?.types ?? []).includes("application/x-drone-kind");
     const onDragOver = (e: DragEvent) => {
+        if (!isNodeDrag(e)) return;
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     };
     const onDrop = (e: DragEvent) => {
+        if (!isNodeDrag(e)) return;
         e.preventDefault();
         const kind =
             dragKind() ??

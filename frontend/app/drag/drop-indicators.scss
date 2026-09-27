@@ -1,0 +1,77 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// File-drop indicator tokens and states.
+// docs/specs/SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §4. Everything
+// derives from the theme's accent and warning colours so themes restyle it.
+
+:root {
+    --drop-zone-armed-border: rgba(var(--accent-color-rgb), 0.5);
+    --drop-target-bg: rgba(var(--accent-color-rgb), 0.14);
+    --drop-target-border: var(--accent-color);
+    --drop-prompt-bg: rgb(0 0 0 / 72%);
+    --drop-prompt-fg: #fff;
+    --drop-blocked-fg: var(--warning-color);
+    --zindex-file-drop: 60; // above the focused pane ring (50)
+}
+
+.drop-indicator {
+    position: absolute;
+    inset: 0;
+    z-index: var(--zindex-file-drop);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    border-radius: var(--block-border-radius);
+    animation: drop-indicator-in 100ms ease-out;
+
+    &--armed {
+        outline: 1px dashed var(--drop-zone-armed-border);
+        outline-offset: -3px;
+    }
+
+    &--target {
+        background: var(--drop-target-bg);
+        box-shadow: inset 0 0 0 2px var(--drop-target-border);
+    }
+
+    &__prompt {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        max-width: calc(100% - 32px);
+        padding: 8px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--drop-prompt-fg);
+        background: var(--drop-prompt-bg);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+
+        i {
+            flex-shrink: 0;
+        }
+
+        &--blocked {
+            color: var(--drop-blocked-fg);
+        }
+    }
+}
+
+@keyframes drop-indicator-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .drop-indicator {
+        animation: none;
+    }
+}
