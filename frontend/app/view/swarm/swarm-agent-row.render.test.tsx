@@ -80,8 +80,13 @@ function modelStub(collapsed: boolean, toggleAgentCollapsed: () => void = () => 
 }
 
 function renderRow(collapsed: boolean, model: SwarmViewModel = modelStub(collapsed)) {
+    // Inside a focusable root, like production's `.swarm-view` (tabIndex={-1}):
+    // the card's mousedown guard must not be fooled by that ancestor
+    // (reagentx P0 on #3955 — a guard that matched it never ran).
     return render(() => (
-        <AgentRow node={treeNode()} focusedBlockId={() => null} model={model} />
+        <div class="swarm-view" tabIndex={-1}>
+            <AgentRow node={treeNode()} focusedBlockId={() => null} model={model} />
+        </div>
     ));
 }
 
@@ -195,7 +200,7 @@ describe("AgentRow — select-to-focus", () => {
     it("a press outside any agent card is left alone, so it still selects the Swarm pane", () => {
         registerPane(BLOCK);
         const { container } = renderRow(false);
-        const outside = container.querySelector(".swarm-agent-group") as HTMLElement;
+        const outside = container.querySelector(".swarm-view") as HTMLElement;
         const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
         outside.dispatchEvent(down);
         expect(down.defaultPrevented).toBe(false);

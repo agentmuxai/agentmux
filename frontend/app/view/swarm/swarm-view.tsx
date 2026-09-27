@@ -332,8 +332,14 @@ export function AgentRow({
                 // this agent" (Codex P2 on #3955).
                 // SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.3.
                 onMouseDown={(e) => {
-                    const target = e.target as Element | null;
-                    if (target?.closest("input, button, select, textarea, a[href], [tabindex]")) return;
+                    // Only controls INSIDE this card count: closest() also walks
+                    // ancestors, and the Swarm root above every card has a
+                    // tabindex, so an unbounded match would always hit it and
+                    // skip the guard entirely (reagentx P0 on #3955).
+                    const control = (e.target as Element | null)?.closest(
+                        "input, button, select, textarea, a[href], [tabindex]"
+                    );
+                    if (control && control !== e.currentTarget && e.currentTarget.contains(control)) return;
                     e.preventDefault();
                 }}
                 onContextMenu={handleAgentRowContextMenu}
