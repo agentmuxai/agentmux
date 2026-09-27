@@ -219,24 +219,37 @@ fn is_safe_cli_command(s: &str) -> bool {
         && !s.contains("..")
 }
 
-/// Canonical install directory for a provider —
-/// `<agentmux_home>/instances/v<version>/cli/<provider>/`. This is the
-/// same path the frontend uses to launch the agent
-/// (`agent-model.ts::resolveCliDir`), so the bin we drop in
-/// `node_modules/.bin/` is what the launch path will execute.
-/// Honors portable / installed mode + the `AGENTMUX_HOME_OVERRIDE`
-/// test override via `DataPaths::from_env()`.
-fn provider_install_dir(provider_id: &str) -> Option<std::path::PathBuf> {
+/// The pinned CLI version an install of `provider_id` uses: the backend
+/// provider registry's pin (the source of truth), else the caller's.
+fn effective_pin(provider_id: &str, requested: &str) -> String {
+    crate::backend::providers::get_provider(provider_id)
+        .map(|p| p.pinned_version.to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| requested.to_string())
+}
+
+/// Where a new install of `provider_id` goes: the shared, pinned-version dir
+/// (`backend::cli_install`), which is also what `resolvecli` and the launch
+/// path look in first. Honors portable / installed mode + the
+/// `AGENTMUX_HOME_OVERRIDE` test override via `DataPaths::from_env()`.
+fn provider_install_dir(provider_id: &str, pinned_version: &str) -> Option<std::path::PathBuf> {
     let paths = agentmux_common::DataPaths::from_env()?;
-    let version = env!("CARGO_PKG_VERSION");
-    Some(
-        paths
-            .home_dir
-            .join("instances")
-            .join(format!("v{version}"))
-            .join("cli")
-            .join(provider_id),
-    )
+    Some(crate::backend::cli_install::install_dir(&paths, provider_id, pinned_version))
+}
+
+/// Every dir an existing install of `provider_id` may be in, in lookup order:
+/// the shared pinned-version dir, then the legacy per-AgentMux-version one.
+fn provider_installed_dirs(provider_id: &str) -> Vec<std::path::PathBuf> {
+    let Some(paths) = agentmux_common::DataPaths::from_env() else {
+        return Vec::new();
+    };
+    let pin = effective_pin(provider_id, "");
+    crate::backend::cli_install::shared_cli_dir(&paths, provider_id, &pin)
+        .into_iter()
+        .chain(std::iter::once(
+            crate::backend::cli_install::legacy_cli_dir(&paths, provider_id),
+        ))
+        .collect()
 }
 
 /// Returns the path to the installed CLI binary if present in the
@@ -287,30 +300,36 @@ fn find_on_path(tool: &str, path: Option<&std::ffi::OsStr>) -> Option<String> {
 /// Scoped names (`@scope/name`) are legitimate and produce one nested
 /// directory; the helper splits on `/` and `\` and handles them.
 fn read_installed_version(provider_id: &str, npm_package: &str) -> Option<String> {
-    let dir = provider_install_dir(provider_id)?;
-    let base = dir.join("node_modules");
-    let pkg_dir = crate::backend::base::safe_join_within_base(&base, npm_package).ok()?;
-    let manifest = pkg_dir.join("package.json");
-    let raw = std::fs::read_to_string(manifest).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    parsed.get("version")?.as_str().map(|s| s.to_string())
+    for dir in provider_installed_dirs(provider_id) {
+        let base = dir.join("node_modules");
+        let pkg_dir = crate::backend::base::safe_join_within_base(&base, npm_package).ok()?;
+        let manifest = pkg_dir.join("package.json");
+        let Ok(raw) = std::fs::read_to_string(manifest) else {
+            continue;
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        return parsed.get("version")?.as_str().map(|s| s.to_string());
+    }
+    None
 }
 
-fn resolve_installed_bin(provider_id: &str, cli_command: &str) -> Option<std::path::PathBuf> {
-    let dir = provider_install_dir(provider_id)?;
+fn installed_bin_in(dir: &std::path::Path, cli_command: &str) -> Option<std::path::PathBuf> {
     let bin_dir = dir.join("node_modules").join(".bin");
     let candidates: &[&str] = if cfg!(windows) {
         &[".cmd", ".exe", ""]
     } else {
         &["", ".cmd"]
     };
-    for suffix in candidates {
-        let p = bin_dir.join(format!("{cli_command}{suffix}"));
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
+    candidates
+        .iter()
+        .map(|suffix| bin_dir.join(format!("{cli_command}{suffix}")))
+        .find(|p| p.is_file())
+}
+
+fn resolve_installed_bin(provider_id: &str, cli_command: &str) -> Option<std::path::PathBuf> {
+    provider_installed_dirs(provider_id)
+        .iter()
+        .find_map(|dir| installed_bin_in(dir, cli_command))
 }
 
 pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -514,7 +533,10 @@ fn spawn_install_task(
             broker.publish(event);
         };
 
-        let provider_dir = match provider_install_dir(&provider_id) {
+        // One pin decides both the dir and the package version, so an
+        // install can never put version X in a dir named for version Y.
+        let pinned_version = effective_pin(&provider_id, &pinned_version);
+        let provider_dir = match provider_install_dir(&provider_id, &pinned_version) {
             Some(p) => p,
             None => {
                 emit_done(&broker, false, Some("cannot determine home directory".into()));
@@ -523,6 +545,46 @@ fn spawn_install_task(
                 return;
             }
         };
+
+        // The shared dir is written by every AgentMux instance on this
+        // machine: serialize on its install lock (held until this task
+        // ends), then reuse an install another instance just finished.
+        let _install_guard = {
+            let lock_provider = provider_id.clone();
+            let lock_pin = pinned_version.clone();
+            let res = tokio::task::spawn_blocking(move || {
+                let paths = agentmux_common::DataPaths::from_env()
+                    .ok_or_else(|| std::io::Error::other("DataPaths::from_env() failed"))?;
+                crate::backend::cli_install::lock_install(&paths, &lock_provider, &lock_pin)
+            })
+            .await;
+            match res {
+                Ok(Ok(g)) => g,
+                Ok(Err(e)) => {
+                    emit_done(&broker, false, Some(format!("cannot take the CLI install lock: {e}")));
+                    registry.drop_session(&session_id);
+                    registry.release_provider(&provider_id);
+                    return;
+                }
+                Err(e) => {
+                    emit_done(&broker, false, Some(format!("install lock task panicked: {e}")));
+                    registry.drop_session(&session_id);
+                    registry.release_provider(&provider_id);
+                    return;
+                }
+            }
+        };
+        if installed_bin_in(&provider_dir, &cli_command).is_some() {
+            emit_line(
+                &broker,
+                "already installed by another AgentMux instance".to_string(),
+                "stdout",
+            );
+            emit_done(&broker, true, None);
+            registry.drop_session(&session_id);
+            registry.release_provider(&provider_id);
+            return;
+        }
         if let Err(e) = std::fs::create_dir_all(&provider_dir) {
             // The disk-full / permission-denied / path-not-found cases
             // route to the typed catalog so the frontend renders a
@@ -650,7 +712,7 @@ fn spawn_install_task(
                         // rename or provider-config mismatch surfaces
                         // as an install failure rather than a phantom
                         // launch with a non-existent cmd path.
-                        if resolve_installed_bin(&provider_id, &cli_command).is_some() {
+                        if installed_bin_in(&provider_dir, &cli_command).is_some() {
                             emit_done(&broker, true, None);
                         } else {
                             emit_done(

@@ -28,6 +28,7 @@ pub mod mcp_seed;
 pub mod layout;
 pub mod project_instructions;
 pub mod providers;
+pub mod cli_install;
 pub mod model_catalog;
 pub mod config_watcher_fs;
 pub mod editor_file_watcher;
