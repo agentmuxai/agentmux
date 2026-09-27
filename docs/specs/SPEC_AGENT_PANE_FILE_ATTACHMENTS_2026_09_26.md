@@ -65,9 +65,9 @@ Classification is by **content first, extension second** (a `.txt` that is reall
 | **SVG** | `<svg` / `<?xml … <svg` | **thumbnail**: the file itself in an `<img>` from a blob URL. `<img>` never runs SVG scripts or loads external resources, so this is safe. Previously refused; the agent also gets it as text. |
 | **Text-like** | extension in the text list (txt, md, markdown, csv, tsv, json, jsonl, yaml, yml, toml, ini, xml, html, htm, css, log, and source code: rs, ts, tsx, js, jsx, mjs, py, go, java, kt, c, h, cpp, hpp, cs, rb, php, swift, sh, ps1, bat, sql, …), **or** no extension match but the first 8 KB is valid UTF-8 with no NUL bytes | **thumbnail**: a mini page showing the first lines in a small monospace font, rendered from a `preview` file srv derives (first 40 lines, ≤ 2 KB) |
 | **PDF** | `%PDF-` | icon `fa-file-pdf` (red) + page-count badge ("12 p") |
-| **Word** | OOXML `word/document.xml`, or `.doc/.odt/.rtf` | icon `fa-file-word` (blue) |
-| **Excel** | OOXML `xl/workbook.xml`, or `.xls/.ods` | icon `fa-file-excel` (green) |
-| **PowerPoint** | OOXML `ppt/presentation.xml`, or `.ppt/.odp` | icon `fa-file-powerpoint` (orange) |
+| **Word** | OOXML ZIP with `word/document.xml`; ODF ZIP whose `mimetype` is `…opendocument.text`; an OLE2 compound file (`D0 CF 11 E0…`) named `.doc`; RTF (`{\rtf`). **Never by extension alone**: an executable renamed `payload.doc` has no such signature and is "Other". | icon `fa-file-word` (blue) |
+| **Excel** | OOXML ZIP with `xl/workbook.xml`; ODF spreadsheet ZIP; OLE2 named `.xls` | icon `fa-file-excel` (green) |
+| **PowerPoint** | OOXML ZIP with `ppt/presentation.xml`; ODF presentation ZIP; OLE2 named `.ppt` | icon `fa-file-powerpoint` (orange) |
 | **CSV/TSV** | (text-like, but gets its own icon when previews are off) | thumbnail as text; `fa-file-csv` fallback |
 | **Archive** | ZIP (non-OOXML), gz, tar, 7z, rar | icon `fa-file-zipper` (amber) |
 | **Audio** | mp3, wav, flac, m4a, ogg | icon `fa-file-audio` (purple) |
@@ -84,7 +84,8 @@ Classification is by **content first, extension second** (a `.txt` that is reall
 
 Same pipeline, CPU and memory limits, cancel, dedup by SHA-256 and retention as images. New per kind:
 
-- **Store:** the original keeps a sanitized version of its real extension (`<sha256>.pdf`, `.docx`, …) so agents' tools recognise it. Metadata gains `kind`, `ext`, `page_count?`, `text_ext?`, `macros?`, `preview_ext?`.
+- **Store:** the original is stored as `<sha256>.<ext>` with an extension derived **from the content** (`pdf`, `docx`, `xlsx`, `pptx`, `odt`, `rtf`, `zip`, image formats, …) or `bin` when the content doesn't determine one (text, code, other). Metadata gains `kind`, `page_count?`, `text_ext?`, `macros?`, `preview_ext?`. The same bytes arriving under different names (`notes.txt`, `script.py`) are one attachment: the content decides the kind, and each reference keeps its own name.
+- **Named links for delivery:** agents recognise files by extension, and the real name is more useful to them than a hash. At send time each attachment gets a hard link (a copy where links aren't possible) at `<store>/named/<sha256>/<sanitized name>` — the name the reference carries, with path separators and control characters removed. Two references with different names get two links to the same bytes. `named/` is swept on the same retention rules.
 - **Text-like:** derive `preview.txt` (first 40 lines, ≤ 2 KB, cut at a UTF-8 boundary).
 - **PDF:** page count with `lopdf` (pure Rust, MIT), and a **text version** from `lopdf`'s text extraction. PDF parsers can panic or recurse deeply on malformed input, so both run in a **separate process**: srv re-runs its own executable with a hidden `__extract-pdf` argument, with a 30-second timeout after which the child is killed. A PDF it can't read (scanned, encrypted, malformed) is attached by path only and says so. PDFs over 100 MB get neither.
 - **DOCX / PPTX / ODT / ODP:** open the ZIP and stream only the parts needed through `quick-xml`: `word/document.xml` (plus headers, footers, footnotes); `ppt/slides/slideN.xml` in the order `presentation.xml` lists them; ODF `content.xml`. Emit `<w:t>` / `<a:t>` / `<text:p>` text, newlines at paragraph ends, tabs for `<w:tab/>`. Output a `text.txt` derived file with a short header ("Text extracted from report.docx by AgentMux. Formatting, images and embedded objects are not included.").
@@ -102,16 +103,16 @@ The `<attached_images>` block becomes `<attached_files>` (the replay parser keep
 <attached_files>
 The user attached 5 files. The numbers match how the user refers to them. …
 1. screenshot.png — /…/ab….v1-e2000.send.png
-2. spec.pdf [PDF, 12 pages; text version: /…/cd….text.txt] — /…/cd….pdf
-5. notes.doc [Word document; no text version, save it as .docx] — /…/34….doc
-3. report.docx [Word document; text version: /…/ef….text.txt] — /…/ef….docx
-4. data.csv — /…/12….csv
+2. spec.pdf [PDF, 12 pages; text version: /…/cd….text.txt] — /…/named/cd…/spec.pdf
+5. notes.doc [Word document; no text version, save it as .docx] — /…/named/34…/notes.doc
+3. report.docx [Word document; text version: /…/ef….text.txt] — /…/named/ef…/report.docx
+4. data.csv — /…/named/12…/data.csv
 </attached_files>
 ```
 
 - **Claude (persistent stream-json):** images inline as now. **PDFs inline as `document` blocks** (base64, `application/pdf`, `title` = the file name) within the same per-message (20 MB) and per-session (50 MB) inline budgets, and only for PDFs of ≤ 100 pages. Everything else by path. The intro line says which files are shown above.
 - **Codex, Gemini, Qwen, Kimi, ACP:** the list only, which includes the text versions of Office files and PDFs (ACP `resource_link` blocks are a later refinement).
-- **Container agents:** no attachments; the pane keeps the copy-to-working-folder behavior (§3).
+- **Container agents:** no attachments; the pane keeps the copy-to-working-folder behavior (§3). For a **drop**, that is today's path copy. For **Ctrl+V / right-click Paste**, whose files arrive as bytes, the file is stored like any attachment first, then a new RPC `attachments.copy-to-workdir {block_id, id, name}` has srv copy the original into the pane's working folder (`cmd:cwd`, name de-conflicted as `name (1).ext`) and return the path; the composer inserts `@name` like a drop.
 - Stored copies drop `document` blocks exactly like `image` blocks (`persisted_line`).
 
 ## 8. Frontend
@@ -132,6 +133,7 @@ The user attached 5 files. The numbers match how the user refers to them. …
 ## 10. Tests
 
 - srv: classification table (content vs extension, renamed ZIP as `.txt`, OOXML detection, macros via content types); DOCX/PPTX/ODT/XLSX/RTF extraction on small fixtures; PDF text via the child process, including a malformed PDF and a killed-on-timeout child; a zip bomb (high ratio, many entries, forged sizes) refused within limits; PDF page count on a fixture and a malformed PDF; text preview cut at a UTF-8 boundary; list lines for each kind; Claude line with a `document` block and its stored form.
+- The replay parser takes the attachment id from either form of path: a file name starting `<sha256>.` or a `named/<sha256>/` directory.
 - frontend: tile kind → icon/thumbnail; text preview rendered as text; summary wording for mixed attachments; parser reads `<attached_files>` and the old `<attached_images>`.
 
 ## 11. Rollout
