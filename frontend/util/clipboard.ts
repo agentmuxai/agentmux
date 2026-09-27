@@ -7,6 +7,11 @@ export async function readText(): Promise<string> {
     return getApi().readClipboardText();
 }
 
+/** Text plus file/image paths on the clipboard (see readClipboardAttachments). */
+export async function readAttachments(): Promise<{ text: string; paths: string[] }> {
+    return getApi().readClipboardAttachments();
+}
+
 export async function writeText(text: string): Promise<void> {
     await getApi().writeClipboardText(text);
 }
