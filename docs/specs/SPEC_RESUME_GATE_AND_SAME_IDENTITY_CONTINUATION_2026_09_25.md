@@ -194,8 +194,9 @@ Preconditions, all required. Any failure means **Refuse** (fresh + packet):
 
 Action:
 1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>`, write the marker
-   `<dest>.jsonl.<token>.agentmux-relocated` (owner UID, source path, size), then rename to
-   `<dest>.jsonl`. The CLI never sees a partial file (H5), and never sees a copy without its
+   `<dest>.jsonl.<token>.agentmux-relocated` (owner UID, source path, size), then hard-link to
+   `<dest>.jsonl` (which fails if the name exists, so of two concurrent relocations only one
+   places a copy) and remove the temp name. The CLI never sees a partial file (H5), and never sees a copy without its
    marker, so a crash can't leave an unmarked duplicate (I4).
 2. Spawn with `--resume <head> --fork-session`. The original stays untouched (I3), and the new
    id is captured by the existing adoption path.

@@ -106,13 +106,21 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
     let record = serde_json::json!({ "owner_uid": owner_uid, "source": src.to_string_lossy(), "bytes": bytes });
     let placed = std::fs::write(&marker, record.to_string())
         .map_err(|e| format!("marker {}: {e}", marker.display()))
-        .and_then(|()| std::fs::rename(&tmp, &dest).map_err(|e| format!("rename into {}: {e}", dest.display())));
+        .and_then(|()| place(&tmp, &dest).map_err(|e| format!("place {}: {e}", dest.display())));
+    let _ = std::fs::remove_file(&tmp);
     if let Err(e) = placed {
-        let _ = std::fs::remove_file(&tmp);
         let _ = std::fs::remove_file(&marker);
         return Err(e);
     }
     Ok(Relocated { copy: dest, marker })
+}
+
+/// Give the finished copy its real name, only if nothing has it: two spawns
+/// relocating the same head at once both pass the `exists` check, and a
+/// rename would let the second replace the first's copy under both markers
+/// (codex P1 on #3924). A hard link fails on an existing name, atomically.
+fn place(tmp: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::hard_link(tmp, dest)
 }
 
 /// Remove a copy [`relocate`] placed, and its marker, if it is still this
@@ -286,6 +294,18 @@ mod tests {
         assert!(!remove(&old));
         assert!(new.copy.exists() && new.marker.exists(), "the replacement's copy is still its own");
         assert!(unmark(&new));
+    }
+
+    /// The loser of two concurrent relocations of one head fails to place its
+    /// copy instead of replacing the winner's.
+    #[test]
+    fn placing_never_replaces_a_copy_already_there() {
+        let d = cfg();
+        let dest = write_session(d.path(), "head", "{\"winner\":true}\n");
+        let tmp = dest.with_file_name("head.jsonl.agentmux-tmp-uid-2");
+        std::fs::write(&tmp, "{\"loser\":true}\n").unwrap();
+        assert_eq!(place(&tmp, &dest).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "{\"winner\":true}\n");
     }
 
     #[test]
