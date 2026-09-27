@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RpcApi } from "@/app/store/rpc-api";
-import type { FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
+import type { BackgroundTaskView, FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
@@ -11,6 +11,7 @@ import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
 import { readActivitySummary } from "@/app/store/activitySummary";
 import { createSignal, type Accessor, type Setter } from "solid-js";
+import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,11 @@ export interface ActiveSubagent {
     // until a client expands this subagent's row for the first time — see
     // `subagent.GenerateName` / the `subagent:named` event below.
     display_name: string | null;
+    /** The Agent call that spawned this subagent (SubAgent.tool_use_id, from
+     *  its meta.json). Joins it to the background tasks it launched
+     *  (`BackgroundTaskView.owner_tool_use_id`). Null until the sidecar is
+     *  readable; absent from older srv builds. */
+    tool_use_id?: string | null;
 }
 
 /**
@@ -220,6 +226,11 @@ export interface AgentTreeNode {
      *  Complements `activitySummary`: that is a Haiku paraphrase of the last
      *  ~20s, this is the literal call in flight. */
     currentTool: string | null;
+    /** This agent's background tasks from the durable registry, split into
+     *  the ones each solo subagent row owns and the rest (see
+     *  swarm-background.ts). Unfiltered by time: the view applies the
+     *  finished-row retention on its own clock. */
+    backgroundTasks: AgentBackgroundTasks;
 }
 
 /** One checklist entry, as published by the backend progress watcher. */
@@ -882,6 +893,13 @@ export class SwarmViewModel {
     cronsAtom: Accessor<ActiveCron[]> = this._crons[0];
     private setCrons: Setter<ActiveCron[]> = this._crons[1];
 
+    // Background tasks for the whole fleet, from the durable registry —
+    // fetched via ListBackgroundTasksCommand (empty blockid); buildTree()
+    // groups by block_id and nests each under the subagent that owns it.
+    private _backgroundTasks = createSignal<BackgroundTaskView[]>([]);
+    backgroundTasksAtom: Accessor<BackgroundTaskView[]> = this._backgroundTasks[0];
+    private setBackgroundTasks: Setter<BackgroundTaskView[]> = this._backgroundTasks[1];
+
     // Per-block todo checklist + in-flight tool, pushed by the backend's
     // `agent:progress` sweep. Push-only (no fetch-on-open counterpart): the
     // watcher republishes whenever the payload changes, so a Swarm opened
@@ -1072,6 +1090,11 @@ export class SwarmViewModel {
     private loadCronsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_CRONS_DEBOUNCE_MS = 150;
 
+    // Same debounce shape again, for background-task-updated bursts (a
+    // subagent can start or finish several background commands at once).
+    private loadBackgroundTasksDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+    private static readonly LOAD_BACKGROUND_TASKS_DEBOUNCE_MS = 150;
+
     // Bounded self-healing safety net for trackedBlockIdsAtom — see the
     // comment at this timer's setInterval call site (in the constructor)
     // for why it exists alongside the five event-based refresh triggers.
@@ -1170,6 +1193,15 @@ export class SwarmViewModel {
             handler: () => this.scheduleLoadCrons(),
         });
         if (unsubCronChanged) this.unsubs.push(unsubCronChanged);
+
+        // Background tasks. Payload-free invalidation, scoped to the block
+        // whose registry changed; the Swarm listens to every block (no scope)
+        // and reloads the fleet list.
+        const unsubBackgroundTask = muxEventSubscribe({
+            eventType: WpsEvent.BackgroundTaskUpdated,
+            handler: () => this.scheduleLoadBackgroundTasks(),
+        });
+        if (unsubBackgroundTask) this.unsubs.push(unsubBackgroundTask);
 
         // Todo checklist + in-flight tool. Unlike the buckets above this
         // carries its whole payload on the event, so there's nothing to
@@ -1291,6 +1323,7 @@ export class SwarmViewModel {
                 this.loadShells(),
                 this.loadCrons(),
                 this.loadFleetGroups(),
+                this.loadBackgroundTasks(),
             ]);
             // codex P2 on PR #2677: a transient ListActive/ListDispatches
             // failure is swallowed by its own loader (silent catch below),
@@ -1379,6 +1412,25 @@ export class SwarmViewModel {
         } catch {
             // silently ignore
         }
+    };
+
+    loadBackgroundTasks = async (): Promise<void> => {
+        try {
+            const result = await RpcApi.ListBackgroundTasksCommand(TabRpcClient, { blockid: "" });
+            this.setBackgroundTasks(result ?? []);
+        } catch {
+            // silently ignore — same posture as the other loaders
+        }
+    };
+
+    scheduleLoadBackgroundTasks = (): void => {
+        if (this.loadBackgroundTasksDebounceTimer !== undefined) {
+            clearTimeout(this.loadBackgroundTasksDebounceTimer);
+        }
+        this.loadBackgroundTasksDebounceTimer = setTimeout(() => {
+            this.loadBackgroundTasksDebounceTimer = undefined;
+            void this.loadBackgroundTasks();
+        }, SwarmViewModel.LOAD_BACKGROUND_TASKS_DEBOUNCE_MS);
     };
 
     // Coalesces a burst of subagent:spawned/subagent:completed/dispatch:
@@ -1904,6 +1956,7 @@ export class SwarmViewModel {
         const dispatches = this.dispatchesAtom();
         const shells = this.shellsAtom();
         const crons = this.cronsAtom();
+        const backgroundTasks = this.backgroundTasksAtom();
         const statuses = this.agentStatusesAtom();
         const progressByBlock = this.progressAtom();
 
@@ -1954,6 +2007,12 @@ export class SwarmViewModel {
             const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => workflowRetireSignal(w));
             const shellRows = buildShellRows(shells, blockId);
             const cronRows = buildCronRows(crons, blockId);
+            // Nested only under solo subagent rows that are actually shown;
+            // anything else stays visible at the agent level.
+            const shownSubagentToolUseIds = new Set(
+                agentToolRows.map((s) => s.tool_use_id).filter((id): id is string => !!id)
+            );
+            const backgroundRows = groupBackgroundTasks(backgroundTasks, blockId, shownSubagentToolUseIds);
             const progress = progressByBlock.get(blockId);
             return {
                 blockId,
@@ -1974,6 +2033,7 @@ export class SwarmViewModel {
                 // would read as "still doing this" (the payload is push-only,
                 // so nothing else clears it on stop).
                 currentTool: agentStatus === "running" ? (progress?.currentTool ?? null) : null,
+                backgroundTasks: backgroundRows,
             };
         });
 
@@ -1998,6 +2058,10 @@ export class SwarmViewModel {
         if (this.loadCronsDebounceTimer !== undefined) {
             clearTimeout(this.loadCronsDebounceTimer);
             this.loadCronsDebounceTimer = undefined;
+        }
+        if (this.loadBackgroundTasksDebounceTimer !== undefined) {
+            clearTimeout(this.loadBackgroundTasksDebounceTimer);
+            this.loadBackgroundTasksDebounceTimer = undefined;
         }
         if (this.trackedBlocksPollTimer !== undefined) {
             clearInterval(this.trackedBlocksPollTimer);

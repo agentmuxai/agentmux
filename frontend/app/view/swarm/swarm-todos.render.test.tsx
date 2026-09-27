@@ -21,6 +21,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 import { __resetAllSlots, registerPane } from "@/app/store/agent-document-store";
 import { AgentRow, agentChildRowCount } from "./swarm-view";
 import type { AgentTreeNode, SwarmViewModel, TodoItem } from "./swarm-model";
+import { NO_BACKGROUND_TASKS } from "./swarm-background";
 
 afterEach(() => {
     cleanup();
@@ -45,6 +46,7 @@ function treeNode(over: Partial<AgentTreeNode> = {}): AgentTreeNode {
         todosTruncated: 0,
         todosPartial: false,
         currentTool: null,
+        backgroundTasks: NO_BACKGROUND_TASKS,
         ...over,
     } as AgentTreeNode;
 }

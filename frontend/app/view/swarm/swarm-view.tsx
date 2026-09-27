@@ -21,6 +21,8 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock } from "@/util/format-time";
 import { revealBlock } from "@/app/util/reveal-block";
+import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
+import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
@@ -268,11 +270,24 @@ export function AgentRow({
     // Ticks in the view rather than the model because promotion is time-based:
     // the list changes with the clock, not only with backend events.
     const tick = useTick(1000);
+    // A background call the registry tracks is shown by the Background
+    // bucket (or under its subagent) with its real status, so the
+    // transcript-derived "Running" bucket skips it rather than showing it
+    // twice — and, for a subagent's call, running forever.
+    const registryTaskIds = new Set(
+        [...node.backgroundTasks.own, ...[...node.backgroundTasks.bySubagent.values()].flat()].map((t) => t.id)
+    );
     const longRunningRows = createMemo(() => {
         tick();
-        return longRunningToolRows(node.blockId, Date.now());
+        return longRunningToolRows(node.blockId, Date.now()).filter((r) => !registryTaskIds.has(r.id));
     });
-    const totalRows = createMemo(() => agentChildRowCount(node, longRunningRows().length));
+    const ownBackgroundRows = createMemo(() => {
+        tick();
+        return visibleBackgroundTasks(node.backgroundTasks.own, Date.now());
+    });
+    const totalRows = createMemo(() =>
+        agentChildRowCount(node, longRunningRows().length, ownBackgroundRows().length)
+    );
     const hasChildren = createMemo(() => totalRows() > 0);
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
@@ -430,11 +445,17 @@ export function AgentRow({
                         truncated={node.todosTruncated}
                         partial={node.todosPartial}
                     />
-                    <AgentToolBucket rows={node.agentToolRows} model={model} parentAgentStatus={node.agentStatus} />
+                    <AgentToolBucket
+                        rows={node.agentToolRows}
+                        model={model}
+                        parentAgentStatus={node.agentStatus}
+                        backgroundBySubagent={node.backgroundTasks.bySubagent}
+                    />
                     <WorkflowBucket rows={node.workflowRows} model={model} />
                     <ShellBucket rows={node.shellRows} />
                     <CronBucket rows={node.cronRows} />
                     <LongRunningBucket rows={longRunningRows()} />
+                    <BackgroundTaskBucket tasks={ownBackgroundRows()} />
                 </div>
             </Show>
         </div>
@@ -525,10 +546,13 @@ function AgentToolBucket({
     rows,
     model,
     parentAgentStatus,
+    backgroundBySubagent,
 }: {
     rows: ActiveSubagent[];
     model: SwarmViewModel;
     parentAgentStatus: "running" | "idle";
+    /** Background tasks keyed by the owning subagent's `tool_use_id`. */
+    backgroundBySubagent: Map<string, BackgroundTaskView[]>;
 }): JSX.Element {
     return (
         <Show when={rows.length > 0}>
@@ -538,7 +562,14 @@ function AgentToolBucket({
                     <span class="swarm-bucket-count">{rows.length}</span>
                 </div>
                 <For each={rows}>
-                    {(sub) => <SubagentRow sub={sub} model={model} parentAgentStatus={parentAgentStatus} />}
+                    {(sub) => (
+                        <SubagentRow
+                            sub={sub}
+                            model={model}
+                            parentAgentStatus={parentAgentStatus}
+                            backgroundTasks={sub.tool_use_id ? backgroundBySubagent.get(sub.tool_use_id) : undefined}
+                        />
+                    )}
                 </For>
             </div>
         </Show>
@@ -650,7 +681,7 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
  * A future sixth bucket must be added here too; the test file enumerates each
  * one so forgetting is a failing test rather than an invisible feature.
  */
-export function agentChildRowCount(node: AgentTreeNode, longRunningCount: number): number {
+export function agentChildRowCount(node: AgentTreeNode, longRunningCount: number, backgroundCount = 0): number {
     return (
         // Todos count like any other bucket, and must: this total drives
         // `hasChildren()`, which gates BOTH the expand affordance and the
@@ -663,7 +694,12 @@ export function agentChildRowCount(node: AgentTreeNode, longRunningCount: number
         node.workflowRows.length +
         node.shellRows.length +
         node.cronRows.length +
-        longRunningCount
+        longRunningCount +
+        // The agent-level Background bucket, already narrowed to the rows
+        // still shown (time-based, like longRunningCount). Tasks nested
+        // under a subagent need no count of their own: their subagent row
+        // is already counted.
+        backgroundCount
     );
 }
 
@@ -1026,10 +1062,13 @@ function SubagentRow({
     sub,
     model,
     parentAgentStatus,
+    backgroundTasks,
 }: {
     sub: ActiveSubagent;
     model: SwarmViewModel;
     parentAgentStatus: "running" | "idle";
+    /** Background tasks this subagent launched (swarm-background.ts). */
+    backgroundTasks?: BackgroundTaskView[];
 }): JSX.Element {
     // Unified with WorkflowDispatchRow onto the same expandedIds/
     // dispatchDetailCache mechanism (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_
@@ -1094,6 +1133,13 @@ function SubagentRow({
     const handleMouseEnter = () => model.pauseCountdown(rowKey());
     const handleMouseLeave = () => model.resumeCountdown(rowKey());
 
+    // Shown whether or not the row is expanded: what a subagent left running
+    // is the thing to see at a glance, and it outlives the subagent's turn.
+    const visibleBackground = createMemo(() => {
+        countdownTick();
+        return visibleBackgroundTasks(backgroundTasks ?? [], Date.now());
+    });
+
     return (
         <div class={`swarm-subagent-group swarm-subagent-group--${dimVariant()}`}>
             <div
@@ -1126,6 +1172,7 @@ function SubagentRow({
                     </button>
                 </Show>
             </div>
+            <SubagentBackgroundTasks tasks={visibleBackground()} />
             <Show when={expanded()}>
                 <DispatchActivityFeed
                     rowKey={rowKey()}
