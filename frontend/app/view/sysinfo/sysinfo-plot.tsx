@@ -8,7 +8,7 @@ import type { JSX } from "solid-js";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import type { DataItem } from "./sysinfo-types";
-import { computeAutoMaxY, resolveDomainBound } from "./sysinfo-util";
+import { buildPlotAxisLabelOptions, computeAutoMaxY, computePlotMargins, resolveDomainBound } from "./sysinfo-util";
 
 type SingleLinePlotProps = {
     plotData: Array<DataItem>;
@@ -204,15 +204,22 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         // round domain already.
         const niceY = yvalMeta?.autoMaxY && hardCapY == null;
 
+        // Tight, panel-appropriate margins and origin-aligned axis labels —
+        // see computePlotMargins/buildPlotAxisLabelOptions for the rationale.
+        const margins = computePlotMargins(sparkline, title);
+        const axisLabels = buildPlotAxisLabelOptions();
+
         const plot = Plot.plot({
             axis: !sparkline,
+            ...margins,
             x: {
                 grid: true,
                 label: "time",
+                labelAnchor: axisLabels.x.labelAnchor,
                 tickFormat: (d: number) => dayjs.unix(d / 1000).format("h:mm A"),
                 domain: [minX, maxX],
             },
-            y: { label: labelY, domain: [minY, maxY], nice: niceY },
+            y: { label: labelY, labelAnchor: axisLabels.y.labelAnchor, domain: [minY, maxY], nice: niceY },
             width: pw,
             height: ph,
             marks: marks,
