@@ -1,7 +1,8 @@
 # SPEC: Highlight the pane a dragged file will land in
 
 **Date:** 2026-09-27
-**Status:** proposed — nothing in this spec is implemented. Written against `main` @ `ade4ea16f`; file:line citations are from that commit.
+**Status:** superseded by `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (same day): the window-level controller and `fileDrop` manifest hook carry over there as §5.3, terminal panes join phase 1, and the thick-border look is replaced by the established drop-zone pattern (§4 there). Kept for history. Written against `main` @ `ade4ea16f`; file:line citations are from that commit.
+**Superseded-by:** ./SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md
 **Author:** Korp@narko
 **Related:** `SPEC_PANE_FILE_DROP_2026_05_30.md` (OS file drop into Terminal and Agent panes: the CEF drag handler, the path stash, copy to the working folder), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` and `SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md` (what an agent pane does with a drop), `docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md` (why a window-level drop guard exists), `SPEC_PANE_TAB_CONTRACT_V1` (the pane manifest this extends).
 
