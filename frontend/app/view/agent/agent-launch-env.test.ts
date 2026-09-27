@@ -341,6 +341,32 @@ describe("resolveCliBin", () => {
         expect(String(caught)).toContain("AMX-CLI-001");
     });
 
+    // ReAgent P1 on #3939: a quick fork resolves the CLI with the source pane's
+    // block id but launches into another block; the `cli` phase belongs to
+    // the launch target's [agent-open] trace, not the source pane's.
+    it("marks the cli phase on the trace block, not the ResolveCli block", async () => {
+        const trace = await import("./open-trace");
+        const lines: string[] = [];
+        const savedLog = trace.openTraceEnv.log;
+        trace.openTraceEnv.log = (l) => lines.push(l);
+        try {
+            trace.beginAgentOpen("source-pane", "Src", "my-agents");
+            trace.beginAgentOpen("fork-target", "Fork", "my-agents");
+            resolveCli.mockResolvedValue({ cli_path: channelCli, version: "x", source: "installed" });
+            await resolveCliBin(provider, "source-pane", "fork-target");
+            expect(resolveCli.mock.calls[0][1].block_id).toBe("source-pane");
+            trace.finishAgentOpen("source-pane", "closed");
+            trace.finishAgentOpen("fork-target", "closed");
+            expect(lines[0]).toContain('agent="Src"');
+            expect(lines[0]).not.toContain("cli=");
+            expect(lines[1]).toContain('agent="Fork"');
+            expect(lines[1]).toContain("cli_source=installed");
+        } finally {
+            trace.openTraceEnv.log = savedLog;
+            trace.resetAgentOpenTracesForTests();
+        }
+    });
+
     it("no longer exports the host-home path builder", () => {
         expect((launchEnv as Record<string, unknown>).resolveCliDir).toBeUndefined();
     });
