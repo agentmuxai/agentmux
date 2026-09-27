@@ -143,7 +143,7 @@ Right-click Paste ignores `dnd:enabled`, `dnd:concurrency` and `dnd:agentinsertt
 
 **"Which window is under the cursor" is answered five times:**
 - `commands/drag.rs:193` (Windows only, map order rather than Z-order; returns `None` on macOS/Linux, `:220`);
-- `window/motion.rs:280` with `ui_tasks/window.rs:1500` (cross-platform, Z-ordered);
+- `window/motion.rs:280` with `ui_tasks/window.rs:1500`: a Z-ordered walk on Windows only. On macOS/Linux, `ResolveWindowAtCursorTask` (`ui_tasks/window.rs:1448`) tests CEF window bounds and, among overlapping non-main windows, picks the **lexicographically smallest label**, not the one on top;
 - `tear_off_hook.rs:703`;
 - the macOS CGWindowList path;
 - the frontend `pane-tab-tearoff.ts:48` `isInsideWindow`, which exists only because of the `None` at `drag.rs:220`.
@@ -318,7 +318,12 @@ fileDrop?: {
 ### 5.4 Floaters and the path stash (CEF)
 
 - **Give floater clients the drag handler.** Split `is_browser_pane` so "no context menu / no drag handler" applies only to real browser panes, and set a `drag_capture` flag for floater and pane-pool clients (`floating_pane.rs:246-250`, `:468-472`). `client/navigation.rs:374-383` notes that the flag is inherited when clients are cloned; keep that behaviour for browser panes.
-- **Key the stash by browser id**, so `take()` returns only paths from a drag that entered *this* window: `put(browser_id, paths)` / `take(browser_id)`. The window-less slot (`drag_stash.rs:24`) goes away.
+- **Key the stash by window label**, so `take()` returns only paths from a drag that entered *this* window. The key has to be something both ends know:
+  - `consume_drag_paths` is served by the process-wide IPC router with no CEF browser context, and the renderer never sees the native browser id;
+  - `on_drag_enter` maps its browser to a label with `window_label_for` (`client/mod.rs:243`) and calls `put(label, paths)`;
+  - the frontend passes its own label, `currentWindowLabel()` from `?windowLabel=` (`pane-overlay.ts`), as an argument: `consume_drag_paths {windowLabel}` → `take(label)`.
+
+  A browser the host can't map yet (a window mid-registration) stores under an unlabelled slot, which `take` falls back to. The single process-wide slot (`drag_stash.rs:24`) otherwise goes away.
 
 ### 5.5 One "copy into a folder"
 
@@ -345,8 +350,25 @@ fileDrop?: {
   - the unused `listWindows()` call;
   - `performCrossWindowDrop`;
   - the duplicated `DragItemPayload`, now in `drag-session.ts`.
-- **One Z-ordered hit-test for every platform:** `update_cross_drag` uses `resolve_window_at_cursor` (`window/motion.rs:280`). `hit_test_windows` (`drag.rs:193-222`) and the frontend `isInsideWindow` are deleted, and macOS/Linux gain target detection. The tear-off hook's `WindowFromPoint` path stays; it runs inside a low-level mouse hook, where `resolve_window_at_cursor`'s locking isn't safe. That exception is documented in place.
-- **One target-side commit path** for a cross-window tab drop. `tab-tearoff-events.ts`'s `merge-direct` handler becomes the only committer. `DragOverlay.tsx` only draws, and `wasTabRecentlyMerged` is deleted.
+- **One hit-test, made truly Z-ordered first.** The resolver is Z-ordered only on Windows today; elsewhere it picks the lexicographically smallest overlapping label (§2.3). Reusing it as-is would drop into a window hidden behind another. Phase 5 therefore:
+  1. **Makes `resolve_window_at_cursor` stack-aware on every platform:**
+     - macOS: front-to-back order from `CGWindowListCopyWindowInfo`, already used by the tear-off hook's macOS module;
+     - Linux X11: `_NET_CLIENT_LIST_STACKING`;
+     - Wayland, which exposes no global stacking order: the most recently focused AgentMux window among those under the cursor. The host already sees focus changes. This is a documented limitation.
+  2. Adds a test with two overlapping windows, where the front one must win.
+  3. Only then points `update_cross_drag` at it, and deletes `hit_test_windows` (`drag.rs:193-222`) and the frontend `isInsideWindow`. macOS/Linux gain target detection.
+
+  The tear-off hook's `WindowFromPoint` path stays: it runs inside a low-level mouse hook, where the resolver's locking isn't safe. That exception is documented in place.
+- **One target-side committer, keeping every route.** Today the two host events cover different drops:
+  - `cross-drag-end` → `DragOverlay.tsx:77-123` is the **only** path for a pane dropped on another window (`MoveBlockToTab`) and for a tab dropped on window content (`MoveTabToWorkspace`);
+  - `tabdrag:merge-direct` (`tab-tearoff-events.ts:231`) handles only a tab released over the tab strip. It rejects coordinates outside the strip (`:251-255`) and inserts at an index.
+
+  So neither can simply be made the only committer. Both event handlers instead call one `commitCrossWindowDrop(drop)` in `app/drag/cross-window-commit.ts`, which routes by kind and position:
+  - a pane → `MoveBlockToTab`;
+  - a tab over the strip → an insert at the index;
+  - a tab over content → `MoveTabToWorkspace`.
+
+  It de-duplicates by the host drag-session id, which is added to both events, instead of the time window in `wasTabRecentlyMerged` (deleted). `DragOverlay.tsx` then only draws, and becomes `CrossWindowDropOverlay.tsx` in phase 3. A characterisation test for each of the three routes lands before the move.
 - **Dead host surface deleted:**
   - `set_js_drag_active` and its Linux caller;
   - `set_drag_cursor` / `restore_drag_cursor`;
@@ -369,7 +391,7 @@ fileDrop?: {
 | Stores meaning "a drag is in flight" | ~10 | 1 session (+ `activeDrag`, derived) |
 | `dragend` safety nets | 4 | 1 |
 | Cross-window monitor code | 3 files, ~140–175 shared lines per pair | 1 module + 3 small adapters |
-| Window hit-tests (Rust + frontend) | 5 | 2 (general + the mouse-hook exception) |
+| Window hit-tests (Rust + frontend) | 5 (one Z-ordered on Windows only) | 2, both Z-aware (general + the mouse-hook exception) |
 | Rust "copy into folder" | 2 | 1 |
 | Routes into a container working folder | 3 | 1 |
 | Drop/copy notice literals | 13 | 5 builders |
@@ -387,7 +409,7 @@ Each phase is one PR, or a short stack, and is independently shippable.
      - `file-drop-actions.ts`;
      - the agent and terminal hooks;
      - the drone canvas type check;
-     - the floater drag handler and the browser-keyed stash (§5.4).
+     - the floater drag handler and the label-keyed stash (§5.4).
    - **Delete:** `element/dragoverlay.tsx` and the per-pane drop listeners.
    - **User-visible:** the indicator; terminals get feedback; floaters accept drops; header drops work.
    - The hub (§5.2) can start as just the file subscriber, keeping `installGlobalDropGuard` until phase 4.
@@ -425,10 +447,10 @@ Phases 2–5 have no user-visible features. They're worth doing because every fu
   - **Per-pane `accept` tables** for agent and terminal.
   - **`DropIndicator`** renders each state; the reactivity bug in §2.1 gets a regression test.
   - **`copyDroppedToWorkdir`:** mentions, partial failure, notices.
-  - **CEF:** the stash keyed by browser, and floater clients getting a drag handler.
+  - **CEF:** the stash keyed by window label (a put from window A isn't taken by window B; the unlabelled fallback), and floater clients getting a drag handler.
 - **Phase 2:** Rust `copy_into_dir`: de-conflicting under a race (two threads), `.env`, directories, cancel.
 - **Phase 4, before each system moves:** characterisation tests of today's behaviour — tile move, window-tab reorder and tear-off, pane-tab reorder and tear-off, Escape abort, swallowed `dragend`. After it moves, the same tests pass unchanged.
-- **Phase 5:** hit-test parity on Windows; a new macOS/Linux target-detection test with the host resolver stubbed.
+- **Phase 5:** hit-test parity on Windows; overlapping-window tests (front window wins) for the stack-aware resolver on each platform; one characterisation test per cross-window commit route (pane → content, tab → strip, tab → content), run before and after the committer moves.
 - **Manual on Windows each phase:** main window, floater, two windows, Esc mid-drag, drag across a browser pane, window tabs mounted in the background.
 
 ## 9. Risks
