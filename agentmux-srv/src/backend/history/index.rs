@@ -489,6 +489,17 @@ pub(crate) fn normalize_working_dir(dir: &str) -> String {
     }
 }
 
+/// Outcome of [`SessionIndex::try_first_build`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum FirstBuild {
+    /// This call ran the first build.
+    Built { discovered: u32 },
+    /// Another caller already finished it.
+    AlreadyBuilt,
+    /// A refresh (possibly the first build) is running right now.
+    Busy,
+}
+
 /// In-memory index of discovered sessions.
 pub struct SessionIndex {
     /// session_id -> SessionMeta
@@ -591,6 +602,23 @@ impl SessionIndex {
             Err(std::sync::TryLockError::WouldBlock) => return None,
         };
         Some(self.refresh_holding(guard))
+    }
+
+    /// The first build, unless one isn't needed or can't start now: never
+    /// waits on the refresh lock, and checks "already built" while holding it
+    /// (`refreshed_at_ms` is stored under the lock), so it can't follow
+    /// another caller's first build with a second full pass.
+    pub fn try_first_build(&self) -> FirstBuild {
+        let guard = match self.refresh_lock.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return FirstBuild::Busy,
+        };
+        if self.refreshed_at_ms() > 0 {
+            return FirstBuild::AlreadyBuilt;
+        }
+        let (discovered, _, _) = self.refresh_holding(guard);
+        FirstBuild::Built { discovered }
     }
 
     /// True if `path` lives under an AgentMux-isolated provider home and is
@@ -1983,5 +2011,21 @@ mod refresh_tests {
         a.problems.lock().unwrap().clear();
         idx.refresh();
         assert_eq!(idx.discovery_problems().len(), 1, "each refresh replaces the last one's problems");
+    }
+
+    /// The first build never waits on, or repeats, another caller's
+    /// (Codex P2 on #3930).
+    #[test]
+    fn try_first_build_skips_when_busy_or_already_built() {
+        let idx = SessionIndex::with_isolated_roots(vec![], vec![]);
+        {
+            let _running = idx.refresh_lock.lock().unwrap();
+            assert_eq!(idx.try_first_build(), FirstBuild::Busy);
+        }
+        assert_eq!(idx.try_first_build(), FirstBuild::Built { discovered: 0 });
+        let built_at = idx.refreshed_at_ms();
+        assert!(built_at > 0);
+        assert_eq!(idx.try_first_build(), FirstBuild::AlreadyBuilt);
+        assert_eq!(idx.refreshed_at_ms(), built_at);
     }
 }
