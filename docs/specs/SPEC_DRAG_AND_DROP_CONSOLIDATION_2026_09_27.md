@@ -373,7 +373,7 @@ interface DragFiles {
 
 | Pane | `accept` | `drop` |
 |---|---|---|
-| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: `dnd:enabled` off; **in copy mode only**, no cwd (the tray needs no working folder, as today: `useAgentDropAttach.ts:134-145` rejects a missing cwd only when `!toTray()`) | tray: `attachmentDraft.ingestPaths(paths)`, then `copyIntoWorkdir` on the paths it hands back (`non_images`; always empty today, but an older images-only backend returns them, `useAgentDropAttach.ts:159-189`) · copy mode: `copyIntoWorkdir` |
+| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: `dnd:enabled` off; **in copy mode only**, no cwd (the tray needs no working folder, as today: `useAgentDropAttach.ts:134-145` rejects a missing cwd only when `!toTray()`) | **with paths**, tray: `attachmentDraft.ingestPaths(paths)`, then `copyIntoWorkdir` on the paths it hands back (`non_images`; always empty today, but an older images-only backend returns them, `useAgentDropAttach.ts:159-189`) · **with paths**, copy mode: `copyIntoWorkdir(blockId, { paths })` · **without paths** (virtual files, no `nativeFileDrop`), tray: `attachmentDraft.uploadFiles(files)` · **without paths**, copy mode: `copyIntoWorkdir(blockId, { files })`, the upload + `attachments.copy-to-workdir` transport |
 | Terminal (`view: "term"`) | "Copy N files to <cwd>" · blocked: no cwd / setting off | `copyIntoWorkdir` (no mention) |
 
 **Later panes:**
@@ -413,7 +413,7 @@ interface DragFiles {
 
 - **One Rust implementation**, in `agentmux-common`: `copy_into_dir(src, dir, name) -> PathBuf`. It covers:
   - `create_new` de-conflicting (`name_1.ext`, with the `dot > 0` guard);
-  - a **copy naming rule** that preserves valid source names, dotfiles included. It removes only path separators and control characters, and suffixes Windows reserved names (`CON`, `NUL`, …). It is **not** the attachment store's `safe_file_name`, which strips leading dots (`store.rs:934`) and would turn `.env` into `env`. That function stays as is for the store's own `named/` copies. Test: dropping `.env` twice gives `.env` and `.env_1`;
+  - a **copy naming rule** that preserves valid source names, dotfiles included. It replaces path separators, control characters and, on Windows, `: * ? " < > |` with `_`, and on Windows trims trailing dots and spaces. It suffixes Windows reserved names (`CON`, `NUL`, …) and **keeps a leading dot**. The same rule applies to `copy_original_to`'s request-supplied name, so a name that today passes through `safe_file_name` can't reach `create_new` invalid. It is **not** the attachment store's `safe_file_name`, which strips leading dots (`store.rs:934`) and would turn `.env` into `env`. That function stays as is for the store's own `named/` copies. Test: dropping `.env` twice gives `.env` and `.env_1`;
   - streaming with progress and cancel;
   - recursive directories.
 
