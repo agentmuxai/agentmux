@@ -5,7 +5,7 @@
 and on a `fresh` session outcome shipped in #3502 and #3512, with the running
 summary appended in #3673. P0 (§4: why a real `fresh` session got nothing) is
 done, and P1 (reinjection re-delivers the startup file's own block, Operator
-Config included) shipped with it. Remaining: a brand-new session gets no
+Config included) shipped with it in #3942. Remaining: a brand-new session gets no
 reinjection (P2); only Claude is covered; the trigger lives in the frontend; and
 reinjection has not yet been seen working live. The plan is in §7, P2–P5.
 **Date:** 2026-09-27
@@ -419,4 +419,5 @@ P0 and P1 are done; P2–P5 not started. Each phase is one PR.
 | 09-22 | #3502, #3512 | Hidden reinjection after compaction; also on a `fresh` outcome |
 | 09-24 | #3643, #3673 | Continuation packet on fresh sessions; running summary appended after compaction |
 | 09-25–26 | #3810, #3811, #3812 | Global Memory's own record; import into isolated channels; bundle id follows the agent |
-| 09-27 | this doc | Consolidation; D8 (new sessions); live check finds G2 |
+| 09-27 | #3926 | Consolidation; D8 (new sessions); live check finds G2 |
+| 09-27 | #3942 | P0 (the fresh path had nothing to send: G3) and P1 (reinjection = the startup block, Operator Config included); D9–D11; G11 |
