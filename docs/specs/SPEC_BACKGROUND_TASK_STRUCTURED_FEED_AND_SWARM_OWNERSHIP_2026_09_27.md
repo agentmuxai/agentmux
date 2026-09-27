@@ -5,7 +5,7 @@
 
 **Date:** 2026-09-27
 **Author:** AgentO
-**Status:** active — Phase 1 (§2) is implemented by the PR that adds this doc. Phases 2-4 (§3-§5) are not started.
+**Status:** active — Phase 1 (§2) is implemented by #3953, the PR that adds this doc. Phases 2-4 (§3-§5) are not started. Phase 4's bashwrap packaging prerequisite is #3952.
 **Builds on:** `SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md` (registry list RPC + invalidation event), `SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` (pid capture), `STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md` (one registry that the dock, `attachedTask` and Swarm all read)
 
 ## 1. Problem
