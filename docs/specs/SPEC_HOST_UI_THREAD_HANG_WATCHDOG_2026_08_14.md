@@ -1,6 +1,6 @@
 # SPEC: Host UI-thread hang detection, forensic dump, and auto-recovery
 
-**Status:** proposed — not built as of 2026-09-26. Written 2026-08-14 and checked in on 2026-09-26 unchanged apart from this header; re-verify "Current state" below before implementing.
+**Status:** active — §1 detection + §2 external hang dump implemented in PR #3913 (launcher `host_hang_dump.rs`; dumps once the UI thread misses 2 consecutive 60 s probes, nothing is killed). Not built: automatic kill + respawn (§1 last step), §3 eventbus escalation, §4 per-instance log tags, §5 docs.
 **Motivated by:** incident on 2026-08-14 — main portable window (host process,
 `agentmux-0.55.6.exe`) deadlocked for ~16 minutes with zero CPU usage while
 one pane/window remained open. The postmortem was written in the investigating
