@@ -1126,22 +1126,28 @@ function SubagentRow({
 
 // ── Status chip ──────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<AgentDisplayStatus, string> = {
-    working:      "working",
-    tools:        "tools",
-    stopping:     "stopping",
-    idle:         "idle",
-    error:        "error",
-    disconnected: "offline",
-    unknown:      "unknown",
-    interrupted:  "interrupted",
-};
+/**
+ * The chip shows exactly two states (user, 2026-09-27): **working** — the
+ * agent is mid-turn, whether generating, running tools, or stopping — in red,
+ * and **idle** — everything else — in green. The finer-grained
+ * AgentDisplayStatus is still computed and still drives other logic (e.g. which
+ * subagent rows can be retired); only what the chip shows collapses.
+ */
+export type ChipStatus = "working" | "idle";
 
-function AgentStatusChip({ status }: { status: AgentDisplayStatus }): JSX.Element {
+export function chipStatus(status: AgentDisplayStatus): ChipStatus {
+    return status === "working" || status === "tools" || status === "stopping" ? "working" : "idle";
+}
+
+// Reads `props.status`, not a destructured `status`: in Solid a destructured
+// prop is read once at creation, so the chip would never follow the agent from
+// working to idle.
+export function AgentStatusChip(props: { status: AgentDisplayStatus }): JSX.Element {
+    const chip = () => chipStatus(props.status);
     return (
-        <span class={`swarm-status-chip swarm-status-chip--${status}`}>
-            <span class={`swarm-status-dot swarm-status-dot--${status}`} />
-            {STATUS_LABEL[status]}
+        <span class={`swarm-status-chip swarm-status-chip--${chip()}`}>
+            <span class={`swarm-status-dot swarm-status-dot--${chip()}`} />
+            {chip()}
         </span>
     );
 }
