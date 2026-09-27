@@ -1043,6 +1043,7 @@ wrap_browser_process_handler! {
                 *client = Some(AgentMuxClient::new(
                     AgentMuxHandler::new(self.state.clone()),
                     false, // is_browser_pane = false — main browser takes focus normally
+                    true,  // drag_capture — OS file drops into panes
                 ));
             }
 

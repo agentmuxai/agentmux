@@ -244,8 +244,10 @@ declare global {
          *  composer's right-click Paste, which has no `paste` event. */
         readClipboardAttachments(): Promise<{ text: string; paths: string[] }>;
         writeClipboardText(text: string): Promise<void>;
-        /** Local paths of the files an OS drag just dropped (`nativeFileDrop`). */
+        /** Local paths of the files an OS drag just dropped into this window (`nativeFileDrop`). */
         consumeDroppedFilePaths(): Promise<string[]>;
+        /** The same paths while the drag is still hovering; doesn't consume them. */
+        peekDroppedFilePaths?(): Promise<string[]>;
         /** Copy a local file into a directory; resolves to the destination path. */
         copyFileToDir(sourcePath: string, targetDir: string): Promise<string>;
         /** Show AgentMux's data folder in the OS file manager. */

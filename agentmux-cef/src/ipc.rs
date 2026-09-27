@@ -432,7 +432,16 @@ async fn route_command(
         "open_in_editor" => commands::platform::open_in_editor(args),
         "open_in_file_manager" => commands::platform::open_in_file_manager(state, args),
         "copy_file_to_dir" => commands::providers::copy_file_to_dir(args),
-        "consume_drag_paths" => Ok(serde_json::json!(crate::drag_stash::take())),
+        // Paths of the OS file drag that entered the caller's window. The
+        // renderer passes its own `?windowLabel=`; see drag_stash.rs.
+        "consume_drag_paths" => {
+            let label = args.get("windowLabel").and_then(|v| v.as_str());
+            Ok(serde_json::json!(crate::drag_stash::take(label)))
+        }
+        "peek_drag_paths" => {
+            let label = args.get("windowLabel").and_then(|v| v.as_str());
+            Ok(serde_json::json!(crate::drag_stash::peek(label)))
+        }
 
         // ---- Command palette ----
         "run_command" => commands::palette::run_command(state, args),

@@ -247,7 +247,7 @@ wrap_task! {
                 self.state.clone(),
                 true,
             );
-            let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
+            let mut client = Some(crate::client::AgentMuxClient::new(handler, true, /* drag_capture: a floater renders panes that take file drops */ true));
 
             let url_cef = CefString::from(self.url.as_str());
             let mut settings = BrowserSettings::default();
@@ -469,7 +469,7 @@ wrap_task! {
                 self.state.clone(),
                 true,
             );
-            let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
+            let mut client = Some(crate::client::AgentMuxClient::new(handler, true, /* drag_capture: a floater renders panes that take file drops */ true));
             let url_cef = CefString::from(self.url.as_str());
             let mut settings = BrowserSettings::default();
             // Opaque dark base (theme #1e1e2e) so the browser surface paints
