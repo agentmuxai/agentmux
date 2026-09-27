@@ -472,41 +472,32 @@ async fn open_agent_inner(
 
                 // 5. Resolve CLI path.
                 //
-                // Use the SAME canonical location as `resolvecli` /
-                // `install.start` / `install.check` and the frontend's
-                // `agent-model.ts::resolveCliDir`:
-                //   <agentmux_home>/instances/v<version>/cli/<provider>/
+                // The SAME lookup as `resolvecli` / `install.start` /
+                // `install.check`: the shared pinned-version dir, then the
+                // legacy per-AgentMux-version one (`backend::cli_install`).
                 //
-                // This used to hand-roll `$HOME/.agentmux/<version>/cli/...`,
-                // which is wrong three ways: it omits `instances/`, omits the
-                // `v` prefix on the version, and reads `$HOME`/`$USERPROFILE`
-                // directly instead of `DataPaths`, so it ignored
-                // `AGENTMUX_HOME_OVERRIDE` and portable layouts entirely. The
-                // path it built has never existed, so `agent.open` failed with
-                // `CLI_NOT_AVAILABLE: ... Open an agent pane in the UI to
-                // trigger installation` for EVERY agent even when the CLI was
-                // installed — and because that message blames a missing
-                // install, it masked whatever the caller was actually doing.
-                // Verified live 2026-09-01: the binary was present at
-                // `instances/v0.55.29/cli/claude/...` while this reported it
-                // missing at `.agentmux/0.55.29/cli/claude/...`.
-                let version = env!("CARGO_PKG_VERSION");
+                // History worth keeping: this once hand-rolled
+                // `$HOME/.agentmux/<version>/cli/...` — a path that never
+                // existed — so `agent.open` failed with `CLI_NOT_AVAILABLE`
+                // for every agent even with the CLI installed (verified live
+                // 2026-09-01). One shared resolver is what keeps the launch
+                // paths from drifting apart again.
                 let paths = agentmux_common::DataPaths::from_env()
                     .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
-                let provider_dir = paths
-                    .home_dir
-                    .join("instances")
-                    .join(format!("v{version}"))
-                    .join("cli")
-                    .join(&provider.id)
-                    .to_string_lossy()
-                    .to_string();
-                let npm_bin = if cfg!(windows) {
-                    format!("{}/node_modules/.bin/{}.cmd", provider_dir, provider.cli_command)
-                } else {
-                    format!("{}/node_modules/.bin/{}", provider_dir, provider.cli_command)
-                };
-                let mut resolved_cli_path = npm_bin.clone();
+                let npm_bin = crate::backend::cli_install::npm_bin(
+                    &crate::backend::cli_install::install_dir(&paths, &provider.id, provider.pinned_version),
+                    provider.cli_command,
+                )
+                .to_string_lossy()
+                .to_string();
+                let mut resolved_cli_path = crate::backend::cli_install::find_installed(
+                    &paths,
+                    &provider.id,
+                    provider.pinned_version,
+                    provider.cli_command,
+                )
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| npm_bin.clone());
                 if !std::path::Path::new(&resolved_cli_path).exists() {
                     // Fallback: provider not installed via npm — try system PATH.
                     // This is used for Python-based CLIs like Kimi that are not

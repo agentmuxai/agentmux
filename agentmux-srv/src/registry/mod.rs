@@ -22,6 +22,9 @@ mod def_migrate;
 mod def_schema;
 mod def_store;
 mod leases;
+/// Blocking, exclusive, cross-process file lock (flock / LockFileEx), also
+/// used by `backend::cli_install` to serialize installs into the shared CLI dir.
+pub(crate) use leases::{lock_exclusive, try_lock_exclusive};
 mod migrate;
 mod paths;
 mod schema;
