@@ -97,7 +97,14 @@ export function agentmuxHome(): string {
  * failed every spawn with "The system cannot find the path specified" (Agent3
  * on 0.57.0, 2026-09-24) while panes seeded by the backend kept working.
  */
-export async function resolveCliBin(provider: ProviderDefinition, blockId: string): Promise<string> {
+export async function resolveCliBin(
+    provider: ProviderDefinition,
+    blockId: string,
+    // The pane whose open this is part of, for its `[agent-open]` line
+    // (open-trace.ts) — the launch target, which a quick fork makes a
+    // different block from `blockId` (ReAgent P1 on #3939).
+    traceBlockId: string = blockId,
+): Promise<string> {
     const result = await RpcApi.ResolveCliCommand(
         TabRpcClient,
         {
@@ -115,7 +122,7 @@ export async function resolveCliBin(provider: ProviderDefinition, blockId: strin
     if (!result?.cli_path) {
         throw new Error(`ResolveCli returned no CLI path for provider '${provider.id}'`);
     }
-    markAgentOpen(blockId, "cli", { cli_source: result.source });
+    markAgentOpen(traceBlockId, "cli", { cli_source: result.source });
     return result.cli_path;
 }
 
