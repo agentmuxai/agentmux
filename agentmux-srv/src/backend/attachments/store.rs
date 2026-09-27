@@ -257,6 +257,12 @@ impl Store {
     /// panes, whose agents can't see the store
     /// (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7).
     pub fn copy_original_to(&self, id: &str, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+        if !is_valid_id(id) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid attachment id",
+            ));
+        }
         let blob = self.existing_blob(id).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "attachment not found")
         })?;
@@ -695,12 +701,7 @@ impl Store {
             }
             FileKind::Word | FileKind::Excel | FileKind::PowerPoint => {
                 meta.macros = extract::has_macros(blob);
-                let result = if meta.ext == "rtf" {
-                    extract::rtf_text(blob, name).map(Some)
-                } else {
-                    extract::office_text(blob, kind, name)
-                };
-                match result {
+                match extract::document_text_isolated(blob, kind, name) {
                     Ok(Some(t)) => text = Some(t),
                     Ok(None) => {
                         meta.text_note = Some(match meta.ext.as_str() {

@@ -42,8 +42,8 @@ async fn main() {
     //     may start in this mode.
     {
         let args: Vec<String> = std::env::args().collect();
-        if args.get(1).map(String::as_str) == Some(backend::attachments::extract::PDF_CHILD_ARG) {
-            std::process::exit(backend::attachments::extract::run_pdf_child(&args[2..]));
+        if args.get(1).map(String::as_str) == Some(backend::attachments::extract::CHILD_ARG) {
+            std::process::exit(backend::attachments::extract::run_child(&args[2..]));
         }
     }
     // -1. Crash monitor branch — must be checked before any other initialization.

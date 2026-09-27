@@ -11,6 +11,11 @@
 //! all parts (the zip crate never reads past an entry's declared size, so the
 //! declared sizes bound the work), quick-xml with predefined entities only,
 //! a cap on the text produced, and a wall-clock deadline.
+//!
+//! Parsing runs in a child process ([`CHILD_ARG`]): srv re-runs its own
+//! executable, reads the result from its stdout and kills it after
+//! [`DEADLINE`]. Whatever a hostile file does to a parser (panic, deep
+//! recursion, a sheet that loads for minutes, memory) happens to the child.
 
 use std::io::Read;
 use std::path::Path;
@@ -62,13 +67,14 @@ pub struct PdfFacts {
     pub text: Option<String>,
 }
 
-/// The hidden argument srv re-executes itself with to read a PDF in a
-/// separate process (see [`pdf_facts_isolated`] and `main.rs`).
-pub const PDF_CHILD_ARG: &str = "__extract-pdf";
+/// The hidden argument srv re-executes itself with to read a document in a
+/// separate process: `srv __extract <pdf|text> <kind> <path> <name>` (see
+/// [`run_child`] and `main.rs`).
+pub const CHILD_ARG: &str = "__extract";
 
 /// Page count and text of a PDF, in this process. PDF parsers can panic or
 /// recurse deeply on malformed input: production code calls
-/// [`pdf_facts_isolated`], which runs this in a child process.
+/// [`pdf_facts_isolated`], which runs this in the child process.
 pub fn pdf_facts_in_process(path: &Path, name: &str) -> PdfFacts {
     if std::fs::metadata(path).map(|m| m.len()).unwrap_or(u64::MAX) > MAX_PDF_BYTES_FOR_COUNT {
         return PdfFacts::default();
@@ -94,19 +100,18 @@ pub fn pdf_facts_in_process(path: &Path, name: &str) -> PdfFacts {
     .unwrap_or_default()
 }
 
-/// [`pdf_facts_in_process`] in a child process: srv re-runs its own
-/// executable with [`PDF_CHILD_ARG`], reads JSON from its stdout, and kills
-/// it after [`DEADLINE`]. A crash or timeout just means no facts.
-pub fn pdf_facts_isolated(path: &Path, name: &str) -> PdfFacts {
-    use std::process::{Command, Stdio};
-    let Ok(exe) = std::env::current_exe() else {
-        return PdfFacts::default();
-    };
-    let mut cmd = Command::new(exe);
-    cmd.arg(PDF_CHILD_ARG)
-        .arg(path)
-        .arg(name)
-        .stdin(Stdio::null())
+/// How a child run ended.
+#[derive(Debug, PartialEq, Eq)]
+enum ChildRun {
+    Output(Vec<u8>),
+    TimedOut,
+    Failed,
+}
+
+/// Run `cmd` with stdout piped, killing it after `deadline`.
+fn run_with_deadline(mut cmd: std::process::Command, deadline: Duration) -> ChildRun {
+    use std::process::Stdio;
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     #[cfg(windows)]
@@ -116,7 +121,7 @@ pub fn pdf_facts_isolated(path: &Path, name: &str) -> PdfFacts {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let Ok(mut child) = cmd.spawn() else {
-        return PdfFacts::default();
+        return ChildRun::Failed;
     };
     // Read stdout on a thread so a large text can't fill the pipe and stall
     // the child while we wait on it.
@@ -133,32 +138,149 @@ pub fn pdf_facts_isolated(path: &Path, name: &str) -> PdfFacts {
     let started = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if started.elapsed() > DEADLINE => {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return ChildRun::Failed,
+            Ok(None) if started.elapsed() > deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return PdfFacts::default();
+                return ChildRun::TimedOut;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(_) => return PdfFacts::default(),
+            Err(_) => return ChildRun::Failed,
         }
     }
-    let out = reader.join().unwrap_or_default();
-    serde_json::from_slice(&out).unwrap_or_default()
+    ChildRun::Output(reader.join().unwrap_or_default())
 }
 
-/// Entry point for the child process: `srv __extract-pdf <path> <name>`.
-/// Prints [`PdfFacts`] as JSON.
-pub fn run_pdf_child(args: &[String]) -> i32 {
-    let (Some(path), Some(name)) = (args.first(), args.get(1)) else {
+/// `srv __extract <mode> <kind> <path> <name>` with the deadline.
+#[cfg(not(test))]
+fn run_isolated(mode: &str, kind: FileKind, path: &Path, name: &str) -> ChildRun {
+    let Ok(exe) = std::env::current_exe() else {
+        return ChildRun::Failed;
+    };
+    let mut cmd = std::process::Command::new(exe);
+    // It only reads one file: none of this instance's identity goes with it.
+    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+    cmd.arg(CHILD_ARG)
+        .arg(mode)
+        .arg(kind.as_str())
+        .arg(path)
+        .arg(name);
+    run_with_deadline(cmd, DEADLINE)
+}
+
+/// Under `cargo test` the current executable is the test harness, which
+/// would read `__extract …` as test filters: run the child's code in-process.
+#[cfg(test)]
+fn run_isolated(mode: &str, kind: FileKind, path: &Path, name: &str) -> ChildRun {
+    match child_output(mode, kind.as_str(), path, name) {
+        Some(json) => ChildRun::Output(json.into_bytes()),
+        None => ChildRun::Failed,
+    }
+}
+
+/// [`pdf_facts_in_process`] in the child process. A crash or timeout just
+/// means no facts.
+pub fn pdf_facts_isolated(path: &Path, name: &str) -> PdfFacts {
+    match run_isolated("pdf", FileKind::Pdf, path, name) {
+        ChildRun::Output(out) => serde_json::from_slice(&out).unwrap_or_default(),
+        _ => PdfFacts::default(),
+    }
+}
+
+/// What the child reports for a text version: the text, none for this
+/// kind, or why it failed.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct TextOutcome {
+    text: Option<String>,
+    error: Option<String>,
+}
+
+/// [`document_text`] in the child process.
+pub fn document_text_isolated(
+    path: &Path,
+    kind: FileKind,
+    name: &str,
+) -> Result<Option<String>, ExtractError> {
+    match run_isolated("text", kind, path, name) {
+        ChildRun::Output(out) => match serde_json::from_slice::<TextOutcome>(&out) {
+            Ok(TextOutcome { error: Some(e), .. }) => Err(err(e)),
+            Ok(TextOutcome { text, .. }) => Ok(text),
+            Err(_) => Err(err("the document couldn't be read")),
+        },
+        ChildRun::TimedOut => Err(err("extraction took too long")),
+        ChildRun::Failed => Err(err("the document couldn't be read")),
+    }
+}
+
+/// Text version of a Word/Excel/PowerPoint/RTF document, in this process.
+/// Production code calls [`document_text_isolated`].
+pub fn document_text(
+    path: &Path,
+    kind: FileKind,
+    name: &str,
+) -> Result<Option<String>, ExtractError> {
+    let is_rtf = std::fs::File::open(path)
+        .and_then(|mut f| {
+            let mut head = [0u8; 5];
+            f.read_exact(&mut head).map(|_| &head == b"{\\rtf")
+        })
+        .unwrap_or(false);
+    if is_rtf {
+        rtf_text(path, name).map(Some)
+    } else {
+        office_text(path, kind, name)
+    }
+}
+
+fn kind_from_str(s: &str) -> Option<FileKind> {
+    Some(match s {
+        "pdf" => FileKind::Pdf,
+        "word" => FileKind::Word,
+        "excel" => FileKind::Excel,
+        "powerpoint" => FileKind::PowerPoint,
+        _ => return None,
+    })
+}
+
+/// Entry point for the child process: `srv __extract <mode> <kind> <path>
+/// <name>`. Prints [`PdfFacts`] (`pdf`) or a text outcome (`text`) as JSON.
+pub fn run_child(args: &[String]) -> i32 {
+    let (Some(mode), Some(kind), Some(path), Some(name)) =
+        (args.first(), args.get(1), args.get(2), args.get(3))
+    else {
         return 2;
     };
-    let facts = pdf_facts_in_process(Path::new(path), name);
-    println!(
-        "{}",
-        serde_json::to_string(&facts).unwrap_or_else(|_| "{}".into())
-    );
-    0
+    match child_output(mode, kind, Path::new(path), name) {
+        Some(json) => {
+            println!("{json}");
+            0
+        }
+        None => 2,
+    }
+}
+
+/// What the child prints for one request; `None` for a malformed request.
+fn child_output(mode: &str, kind: &str, path: &Path, name: &str) -> Option<String> {
+    let json = match (mode, kind_from_str(kind)) {
+        ("pdf", _) => serde_json::to_string(&pdf_facts_in_process(path, name)),
+        ("text", Some(kind)) => {
+            let outcome = match std::panic::catch_unwind(|| document_text(path, kind, name)) {
+                Ok(Ok(text)) => TextOutcome { text, error: None },
+                Ok(Err(e)) => TextOutcome {
+                    text: None,
+                    error: Some(e.0),
+                },
+                Err(_) => TextOutcome {
+                    text: None,
+                    error: Some("the document couldn't be read".into()),
+                },
+            };
+            serde_json::to_string(&outcome)
+        }
+        _ => return None,
+    };
+    Some(json.unwrap_or_else(|_| "{}".into()))
 }
 
 /// Plain text of an RTF document: control words dropped, `{\*…}` and a few
@@ -172,8 +294,10 @@ pub fn rtf_text(path: &Path, name: &str) -> Result<String, ExtractError> {
         .read_to_end(&mut raw)
         .map_err(|e| err(e.to_string()))?;
     let deadline = Instant::now() + DEADLINE;
-    let src = String::from_utf8_lossy(&raw);
-    let chars: Vec<char> = src.chars().collect();
+    // RTF is 7-bit: anything else arrives as `\'hh` or `\uN`. A stray high
+    // byte reads as Latin-1, like `\'hh` does. Byte-wise, so a big file
+    // costs its own size and nothing more.
+    let chars: &[u8] = &raw;
     let mut out = String::new();
     // Group depths at which a skipped destination started.
     let mut skip_from: Option<usize> = None;
@@ -186,11 +310,11 @@ pub fn rtf_text(path: &Path, name: &str) -> Result<String, ExtractError> {
         }
         let c = chars[i];
         match c {
-            '{' => {
+            b'{' => {
                 depth += 1;
                 i += 1;
                 // `{\*\dest …}` and known non-text destinations are skipped whole.
-                let rest: String = chars[i..chars.len().min(i + 12)].iter().collect();
+                let rest = &chars[i..chars.len().min(i + 12)];
                 if skip_from.is_none()
                     && [
                         "\\*",
@@ -203,28 +327,28 @@ pub fn rtf_text(path: &Path, name: &str) -> Result<String, ExtractError> {
                         "\\footer",
                     ]
                     .iter()
-                    .any(|d| rest.starts_with(d))
+                    .any(|d| rest.starts_with(d.as_bytes()))
                 {
                     skip_from = Some(depth);
                 }
             }
-            '}' => {
+            b'}' => {
                 if skip_from == Some(depth) {
                     skip_from = None;
                 }
                 depth = depth.saturating_sub(1);
                 i += 1;
             }
-            '\\' => {
+            b'\\' => {
                 i += 1;
                 let Some(&n) = chars.get(i) else { break };
-                if n == '\'' {
-                    let hex: String = chars
+                if n == b'\'' {
+                    let hex = chars
                         .get(i + 1..i + 3)
-                        .map(|s| s.iter().collect())
+                        .and_then(|s| std::str::from_utf8(s).ok())
                         .unwrap_or_default();
                     if skip_from.is_none() {
-                        if let Ok(b) = u8::from_str_radix(&hex, 16) {
+                        if let Ok(b) = u8::from_str_radix(hex, 16) {
                             if uc_skip > 0 {
                                 uc_skip -= 1;
                             } else {
@@ -237,8 +361,8 @@ pub fn rtf_text(path: &Path, name: &str) -> Result<String, ExtractError> {
                 }
                 if !n.is_ascii_alphabetic() {
                     // `\\`, `\{`, `\}` are literals; other control symbols drop.
-                    if skip_from.is_none() && matches!(n, '\\' | '{' | '}') {
-                        out.push(n);
+                    if skip_from.is_none() && matches!(n, b'\\' | b'{' | b'}') {
+                        out.push(n as char);
                     }
                     i += 1;
                     continue;
@@ -247,22 +371,24 @@ pub fn rtf_text(path: &Path, name: &str) -> Result<String, ExtractError> {
                 while chars.get(i).is_some_and(|c| c.is_ascii_alphabetic()) {
                     i += 1;
                 }
-                let word: String = chars[start..i].iter().collect();
+                let word = std::str::from_utf8(&chars[start..i]).unwrap_or_default();
                 let num_start = i;
-                if chars.get(i) == Some(&'-') {
+                if chars.get(i) == Some(&b'-') {
                     i += 1;
                 }
                 while chars.get(i).is_some_and(|c| c.is_ascii_digit()) {
                     i += 1;
                 }
-                let num: Option<i32> = chars[num_start..i].iter().collect::<String>().parse().ok();
-                if chars.get(i) == Some(&' ') {
+                let num: Option<i32> = std::str::from_utf8(&chars[num_start..i])
+                    .ok()
+                    .and_then(|n| n.parse().ok());
+                if chars.get(i) == Some(&b' ') {
                     i += 1;
                 }
                 if skip_from.is_some() {
                     continue;
                 }
-                match word.as_str() {
+                match word {
                     "par" | "line" | "sect" | "page" => out.push('\n'),
                     "tab" => out.push('\t'),
                     "u" => {
@@ -278,13 +404,13 @@ pub fn rtf_text(path: &Path, name: &str) -> Result<String, ExtractError> {
                     _ => {}
                 }
             }
-            '\r' | '\n' => i += 1,
+            b'\r' | b'\n' => i += 1,
             _ => {
                 if skip_from.is_none() && depth > 0 {
                     if uc_skip > 0 {
                         uc_skip -= 1;
                     } else {
-                        out.push(c);
+                        out.push(c as char);
                     }
                 }
                 i += 1;
@@ -641,6 +767,8 @@ fn relationship_targets(rels: &str) -> Vec<(String, String)> {
 /// Every sheet as tab-separated rows under a `## Sheet` heading. A ZIP
 /// workbook is checked with the same limits first; calamine then reads
 /// through the zip crate, which stops at each entry's declared size.
+/// Loading one sheet can't be interrupted, which is why this runs in the
+/// child process ([`document_text_isolated`]) that is killed at the deadline.
 fn spreadsheet_text(path: &Path, deadline: Instant) -> Result<String, ExtractError> {
     use calamine::{open_workbook_auto, Reader as _};
     open_checked_zip(path)?;
@@ -659,7 +787,7 @@ fn spreadsheet_text(path: &Path, deadline: Instant) -> Result<String, ExtractErr
             let cells: Vec<String> = row.iter().map(|c| c.to_string()).collect();
             out.push_str(cells.join("\t").trim_end());
             out.push('\n');
-            if out.len() > MAX_TEXT_BYTES {
+            if out.len() > MAX_TEXT_BYTES || Instant::now() > deadline {
                 break;
             }
         }
@@ -673,6 +801,47 @@ mod tests {
     use super::*;
     use std::io::Write;
     use zip::write::SimpleFileOptions;
+
+    /// Run as a child by `slow_child_is_killed_at_the_deadline`.
+    #[test]
+    #[ignore]
+    fn sleeping_child() {
+        std::thread::sleep(Duration::from_secs(20));
+    }
+
+    #[test]
+    fn slow_child_is_killed_at_the_deadline() {
+        let harness = std::env::current_exe().unwrap();
+        let mut cmd = std::process::Command::new(harness);
+        cmd.args([
+            "--ignored",
+            "--exact",
+            "backend::attachments::extract::tests::sleeping_child",
+        ]);
+        let started = Instant::now();
+        assert_eq!(
+            run_with_deadline(cmd, Duration::from_millis(500)),
+            ChildRun::TimedOut
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn child_output_reports_text_or_why_not() {
+        let d = tempfile::tempdir().unwrap();
+        let rtf = d.path().join("a.rtf");
+        std::fs::write(&rtf, r"{\rtf1 Hello\par}").unwrap();
+        let ok = document_text_isolated(&rtf, FileKind::Word, "a.rtf")
+            .unwrap()
+            .unwrap();
+        assert!(ok.contains("Hello"), "{ok}");
+        let broken = d.path().join("b.docx");
+        std::fs::write(&broken, b"PK\x03\x04 not really").unwrap();
+        assert!(
+            document_text_isolated(&broken, FileKind::Word, "b.docx").is_ok_and(|t| t.is_none())
+        );
+        assert_eq!(child_output("text", "archive", &rtf, "a.rtf"), None);
+    }
 
     fn zip_file(dir: &Path, name: &str, parts: &[(&str, &str)]) -> std::path::PathBuf {
         let p = dir.join(name);
