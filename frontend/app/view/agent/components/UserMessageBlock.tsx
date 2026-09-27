@@ -45,6 +45,7 @@ import clsx from "clsx";
 import { Show, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import type { UserMessageNode } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
+import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
@@ -196,7 +197,12 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                     {props.pinned ? "✕" : "📌"}
                 </button>
             </Show>
-            <pre><LinkifiedText text={props.node.message} /></pre>
+            <Show when={props.node.attachments?.length}>
+                <AttachmentStrip attachments={props.node.attachments!} />
+            </Show>
+            <Show when={props.node.message}>
+                <pre><LinkifiedText text={props.node.message} /></pre>
+            </Show>
         </>
     );
 

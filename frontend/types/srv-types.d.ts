@@ -1143,6 +1143,13 @@ declare global {
         "dnd:enabled"?: boolean;
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;
+        "attachments:enabled"?: boolean;
+        "attachments:maxfiles"?: number;
+        "attachments:maxtotalmb"?: number;
+        "attachments:sendmaxedge"?: number;
+        "attachments:claudeinlinemax"?: number;
+        "attachments:claudesessioninlinemb"?: number;
+        "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:turnscopedtail"?: boolean;
         "agent:livefeed"?: boolean;

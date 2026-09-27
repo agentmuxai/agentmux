@@ -91,6 +91,9 @@ export interface PendingMessage {
      * docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1.
      */
     flushing?: boolean;
+    /** Images sent with this message, carried to its transcript node on
+     *  acceptance (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.8). */
+    attachments?: { id: string; name: string }[];
 }
 
 /**
