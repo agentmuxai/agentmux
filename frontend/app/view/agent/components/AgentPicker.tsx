@@ -37,7 +37,8 @@ import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { atoms, refocusNode } from "@/app/store/global";
+import { atoms } from "@/app/store/global";
+import { revealBlock } from "@/app/util/reveal-block";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -534,8 +535,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
+    // The agent may be in another window tab, or a background tab of a
+    // multi-tab pane: revealBlock switches to it (SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md).
     const handleSwitchToExisting = (blockId: string): void => {
-        refocusNode(blockId);
+        void revealBlock(blockId);
     };
 
     // My Agents row menu → View History (docs/specs/SPEC_AGENT_DELETE_2026_09_16.md

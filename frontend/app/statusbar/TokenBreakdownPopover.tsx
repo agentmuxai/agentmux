@@ -21,7 +21,7 @@ import { computeMenuPosition } from "@/app/util/menu-position";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
-import { focusBlock } from "@/app/util/focus-block";
+import { revealBlock } from "@/app/util/reveal-block";
 import {
     getAgentBreakdown,
     getAgentCacheHitRate,
@@ -157,7 +157,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
 
     const handleAgentClick = (row: AgentUsage) => {
         if (!row.blockId) return;
-        void focusBlock(row.blockId);
+        void revealBlock(row.blockId);
         props.onClose();
     };
 

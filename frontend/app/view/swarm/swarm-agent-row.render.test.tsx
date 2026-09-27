@@ -19,7 +19,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 const focusBlockMock = vi.fn();
-vi.mock("@/app/util/focus-block", () => ({ focusBlock: (...args: unknown[]) => focusBlockMock(...args) }));
+vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...args: unknown[]) => focusBlockMock(...args) }));
 
 import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-document-store";
 import { AgentRow } from "./swarm-view";

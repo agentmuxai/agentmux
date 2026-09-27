@@ -119,8 +119,8 @@ does) if the switch visibly flickers in testing.
 |---|---|
 | `focusBlock(blockId)` in Swarm and the token popover | `revealBlock(blockId)` |
 | `activateBlockLocally(blockId, tabId)` / `focusBlockInTab` in `os-notify-bridge.ts` | `revealBlockLocally(blockId, { tabId })`; the local helpers are deleted |
-| `refocusNode(blockId)` when a `blockId` is given (AgentPicker, fork pill, browser) | `revealBlockLocally(blockId)`. `refocusNode()` without an id (re-focus the current pane) stays as it is |
-| `util/focus-block.ts` | deleted; `focusBlock` kept one release as a deprecated re-export of `revealBlock`, then removed |
+| `refocusNode(blockId)` in AgentPicker's "Switch to existing" and the agent fork pill (a fork in another pane) | `revealBlock(blockId)` / `revealBlockLocally(blockId)`: the target may be in another window tab or a background pane tab. The browser pane's own click and `globalRefocus` keep `refocusNode`: they re-focus a pane that is already on screen, which `refocusNode` does correctly and synchronously |
+| `util/focus-block.ts` | Phase 1 kept `focusBlock` as an alias; Phase 2 moves its two callers to `revealBlock` and deletes the file |
 
 `openOrFocusPaneByView` (focus an existing pane of a view type or create one) and direct
 `setActiveBlockInStack` calls for a pane's *own* tabs are different jobs and stay.
