@@ -23,6 +23,7 @@ import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contrac
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";
+import { attachScrollHandoff } from "./scroll-handoff";
 import { renderCompactDefault } from "./tool-renderers/builtins";
 import { registerToolRenderers } from "./tool-renderers";
 import { resolveToolRenderer, type ToolRenderContext } from "./tool-renderers/registry";
@@ -132,42 +133,11 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         return "empty";
     };
 
-    // Scroll-chaining handoff to the outer pane (SPEC_TOOL_PREVIEW_SCROLL_
-    // CHAINING_2026_07_03.md Phase 2). This box carries `overscroll-behavior:
-    // contain` (_tool-overlay-portal.scss) so the browser's native chaining —
-    // which would otherwise hand excess wheel delta to `.agent-document` once
-    // this box hits its scroll limit — never fires; `contain` blocks that
-    // relay unconditionally, regardless of any JS listener. Verified live via
-    // CDP: with only the CSS (Phase 1), reaching either boundary of this box
-    // hard-dead-ends further wheel ticks — `.agent-document`'s scrollTop never
-    // moves. So the handoff has to be done by hand: once this box can't
-    // consume more scroll in the wheel's direction, forward the same delta to
-    // the outer pane directly (not "let it bubble" — bubbling the event
-    // doesn't help, `contain` isn't an event-propagation setting).
+    // Scroll hand-off to the outer pane once this box can't scroll further
+    // (scroll-handoff.ts; this box carries `overscroll-behavior: contain` in
+    // _tool-overlay-portal.scss).
     onMount(() => {
-        const el = scrollRef;
-        if (!el) return;
-        const onWheel = (e: WheelEvent) => {
-            // Ctrl+wheel is a ZOOM gesture, not a scroll — never scroll-chain
-            // it. It used to belong to the preview's own font-zoom
-            // (ToolBlock.tsx); that was removed 2026-09-06 and it now falls
-            // through to the pane zoom in app.tsx. The guard is still
-            // required either way: without it, a Ctrl+wheel at this box's
-            // scroll boundary would zoom the pane AND scroll it at the same
-            // time.
-            if (e.ctrlKey) return;
-            const atTop = el.scrollTop <= 0;
-            const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
-            const scrollingUp = e.deltaY < 0;
-            const scrollingDown = e.deltaY > 0;
-            if (!((atTop && scrollingUp) || (atBottom && scrollingDown))) return;
-            const outerPane = el.closest<HTMLElement>(".agent-document");
-            if (!outerPane) return;
-            e.preventDefault();
-            outerPane.scrollTop += e.deltaY;
-        };
-        el.addEventListener("wheel", onWheel, { passive: false });
-        onCleanup(() => el.removeEventListener("wheel", onWheel));
+        if (scrollRef) onCleanup(attachScrollHandoff(scrollRef));
     });
 
     // Track whether the overlay panel is collapsed (content-visibility: hidden).

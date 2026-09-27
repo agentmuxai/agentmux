@@ -74,8 +74,15 @@ describe("jekt message height", () => {
         expect(body).toMatch(/^\s*overflow-y:\s*auto;/m);
     });
 
-    it("the jekt body never sets overscroll-behavior (native wheel chaining to the pane)", () => {
+    // Reversed from #3861's native chaining: native chaining latches a wheel
+    // gesture to the inner box, which is what
+    // SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03 replaced with a JS
+    // hand-off. Both jekt boxes now contain and hand off like a tool preview
+    // (SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2; scroll-handoff.ts).
+    it("the jekt body and raw payload contain their scroll (the JS hand-off moves the pane)", () => {
         const body = ruleBody(scss, /^ {12}\.agent-jekt-body\s*\{/m);
-        expect(body).not.toMatch(/overscroll-behavior\s*:/);
+        expect(body).toMatch(/^\s*overscroll-behavior:\s*contain;/m);
+        const fromRaw = scss.slice(scss.indexOf(".agent-jekt-raw {"));
+        expect(ruleBody(fromRaw, /^ {16}pre\s*\{/m)).toMatch(/^\s*overscroll-behavior:\s*contain;/m);
     });
 });
