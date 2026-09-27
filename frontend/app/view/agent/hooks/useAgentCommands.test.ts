@@ -3206,3 +3206,89 @@ describe("useAgentCommands — /btw overlay askId (reagentx P1 on PR #3440)", ()
         });
     });
 });
+
+describe("sendMessage with image attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26)", () => {
+    const refs = [{ id: "a".repeat(64), name: "shot.png" }];
+    const commandsFor = (model: ReturnType<typeof registerPane>) =>
+        useAgentCommands({
+            blockId: BLOCK_ID,
+            model,
+            block: () => undefined,
+            provider: () => undefined,
+            documentNodes: () => [],
+            log: () => {},
+            setAuthUrl: () => {},
+            canRetry: () => false,
+            loginWaiting: () => false,
+            setAuthNotice: () => {},
+            notifyControllerHealthy: () => {},
+            forceControllerRefresh: async () => true,
+            beginRecoveryFlow: () => {},
+            endRecoveryFlow: () => {},
+            isCancelled: () => false,
+            resetCancelled: () => {},
+            isBackendTurnActive: () => false,
+            isBackendTurnConfirmedIdle: () => true,
+            backToPicker: async () => {},
+        });
+
+    it("carries the images to AgentInputCommand and onto the pending entry", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockClear();
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("look", false, null, refs);
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "look", attachments: refs }),
+            );
+            const pending = paneSnapshot(BLOCK_ID)?.pending ?? [];
+            expect(pending.find((p) => p.text === "look")?.attachments).toEqual(refs);
+            dispose();
+        });
+    });
+
+    it("never treats a message with images as a slash command", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockClear();
+            hub.dispatchSlashCommand.mockClear();
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/help me read this", false, null, refs);
+            expect(hub.dispatchSlashCommand).not.toHaveBeenCalled();
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "/help me read this", attachments: refs }),
+            );
+            dispose();
+        });
+    });
+
+    it("keeps a held message's images until it is flushed", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("first", false);
+            await commands.sendMessage("with images", true, null, refs);
+            expect(commands.hasHeldMessages()).toBe(true);
+            hub.agentInput.mockClear();
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            await commands.flushHeldMessages();
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "with images", attachments: refs }),
+            );
+            dispose();
+        });
+    });
+});

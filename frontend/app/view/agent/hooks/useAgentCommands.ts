@@ -1189,6 +1189,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // Reject immediately instead of queueing it to be rejected
                 // later. codex P2 on PR #2338 (twenty-fourth re-review).
                 opts.log("auth", "message not sent — not logged in", "warn");
+                attachmentsByMessage.delete(messageId);
                 opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
                 return;
             }
@@ -1459,6 +1460,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                         : "Not logged in — run /login to sign in, then send again.",
                 );
             }
+            attachmentsByMessage.delete(messageId);
             opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,
@@ -1759,6 +1761,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                         "system",
                     );
                     }
+                    attachmentsByMessage.delete(item.id);
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
                 }
