@@ -1,0 +1,149 @@
+# SPEC: Attach any file in the agent composer (PDF, Office, text, code, …)
+
+**Date:** 2026-09-26
+**Status:** proposed — nothing in this spec is implemented. Extends the shipped image attachments (`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md`; #3910, #3917, #3918, #3920). Written against `main` @ `6b7b74ef1`.
+**Author:** Korp@narko
+
+---
+
+## 0. The ask
+
+> we also want to support other files too, like pdf, docx, etc
+
+Follow-ups from the repo owner (2026-09-26):
+
+- Dropped or pasted documents go **in the tray, like images** — stored outside the repo and sent with the message; the working folder is no longer touched.
+- **Any file** can be attached. Documents agents can't read natively also get a text version.
+- > get the most popular icon types. for complex files, just use an icon. For files that have easy previews, use a thumbnail
+
+## 1. What happens today
+
+- The tray, store and delivery are image-only. `attachments.ingest` classifies paths with `is_image_path` and returns everything else as `non_images` (`agentmux-srv/src/backend/attachments/mod.rs:692`, `:748`).
+- The frontend keeps the old behavior for those: `useAgentDropAttach` copies non-images into the agent's `cmd:cwd` and types `@name` (`frontend/app/view/agent/hooks/useAgentDropAttach.ts`). Ctrl+V and right-click Paste skip non-images with a "not images" note (`attachment-draft.ts:206`, `AgentFooter.tsx:517`).
+- HEIC, AVIF and SVG are refused as "not supported yet" (`process.rs:145`).
+
+## 2. What agents can do with documents (research, 2026-09-26)
+
+| Agent | PDF | DOCX / XLSX / PPTX | Text and code |
+|---|---|---|---|
+| **Claude (API)** | `document` block (base64): each page becomes text + a page image; ≤ 100 pages per request on < 1M-context models, 32 MB request cap | **Not supported** — "must be converted to text or PDF first" | `document` block with `text/plain`, or just read the file |
+| **Claude Code** | Read tool reads PDFs; over 10 pages needs `pages` (≤ 20 per call), which shells out to poppler's `pdftoppm` and fails without it | Read refuses binary files | Read |
+| **Codex** | No file input type (app-server `UserInput` is text/image/localImage/audio/skill/mention; `exec` has only `-i`); no native PDF reader | none | shell tools |
+| **Gemini CLI** | `@path` reads PDFs natively (≤ 20 MB) | "Cannot display content of binary file" | yes |
+| **Qwen Code** | native, or `pdftotext` fallback | no | yes |
+| **ACP** (Copilot CLI) | `resource_link` always; embedded `resource` when `promptCapabilities.embeddedContext` | same | same |
+
+Sources: https://platform.claude.com/docs/en/build-with-claude/pdf-support · https://code.claude.com/docs/en/tools-reference · https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2/turn.rs · https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/utils/fileUtils.ts · https://agentclientprotocol.com/protocol/content
+
+**Conclusions:**
+
+1. The **numbered path list** already sent for images is the only route that works for every agent, so every file goes there.
+2. **Office files need a text version made by AgentMux** — no agent reads them. (claude.ai does the same: "for non-PDF files Claude extracts text only".)
+3. **PDFs** go inline to Claude as `document` blocks within the existing inline budgets (so Claude sees them without a tool call, and without poppler), and by path to everyone else **plus an extracted text version** — Codex has no way to read a PDF at all. Stream-json `document` blocks are undocumented, so this needs a smoke test against the pinned CLI before relying on it (§11).
+
+## 3. Goals
+
+1. Drop, Ctrl+V or right-click Paste **any file** into the composer; it gets a tile in the tray and is sent with the message. Same limits as images: 128 attachments and 1 GB per message.
+2. **Tiles:** a real thumbnail when the preview is cheap and safe; a colored type icon for everything else (§5).
+3. Every agent can reach every file; Office documents also come with an extracted text version; Claude gets PDFs inline.
+4. Nothing is written into the working folder — except for **container agents**, which can't see host paths: their panes keep today's copy-into-the-working-folder behavior for every dropped or pasted file (the working folder is bind-mounted at `/workspace`): a drop copies the OS paths as today, and a Ctrl+V or right-click Paste goes through `attachments.copy-to-workdir` (§7). This lasts until attachments are uploaded into containers (image spec phase 3).
+
+## 4. Non-goals
+
+- Rendering PDF or Office pages as thumbnails (needs a PDF/Office renderer; CEF's internal pdfium has no API). Possible later with PDF.js in the renderer or `hayro` in srv.
+- Video and audio playback or first-frame thumbnails (the store route needs an auth header an `<video>` element can't send, and fetching a whole video for one frame is wasteful). Later.
+- OCR of scanned PDFs, spreadsheet formulas, embedded images inside Office files.
+- Opening attachments in external apps from the tray.
+
+## 5. Tiles
+
+Classification is by **content first, extension second** (a `.txt` that is really a ZIP is not text).
+
+| Kind | Detected by | Tile |
+|---|---|---|
+| **Image** | magic bytes (unchanged) | thumbnail (unchanged) |
+| **SVG** | `<svg` / `<?xml … <svg` | **thumbnail**: the file itself in an `<img>` from a blob URL. `<img>` never runs SVG scripts or loads external resources, so this is safe. Previously refused; the agent also gets it as text. |
+| **Text-like** | **text content** — the first 8 KB is valid UTF-8 with no NUL bytes — **and** either an extension in the text list (txt, md, markdown, csv, tsv, json, jsonl, yaml, yml, toml, ini, xml, html, htm, css, log, and source code: rs, ts, tsx, js, jsx, mjs, py, go, java, kt, c, h, cpp, hpp, cs, rb, php, swift, sh, ps1, bat, sql, …) or no known binary extension. A binary renamed `.txt` fails the content check and is "Other". | **thumbnail**: a mini page showing the first lines in a small monospace font, rendered from a `preview` file srv derives (first 40 lines, ≤ 2 KB) |
+| **PDF** | `%PDF-` | icon `fa-file-pdf` (red) + page-count badge ("12 p") |
+| **Word** | OOXML ZIP with `word/document.xml`; ODF ZIP whose `mimetype` is `…opendocument.text`; an OLE2 compound file (`D0 CF 11 E0…`) named `.doc`; RTF (`{\rtf`). **Never by extension alone**: an executable renamed `payload.doc` has no such signature and is "Other". | icon `fa-file-word` (blue) |
+| **Excel** | OOXML ZIP with `xl/workbook.xml`; ODF spreadsheet ZIP; OLE2 named `.xls` | icon `fa-file-excel` (green) |
+| **PowerPoint** | OOXML ZIP with `ppt/presentation.xml`; ODF presentation ZIP; OLE2 named `.ppt` | icon `fa-file-powerpoint` (orange) |
+| **CSV/TSV** | (text-like, but gets its own icon when previews are off) | thumbnail as text; `fa-file-csv` fallback |
+| **Archive** | ZIP (non-OOXML), gz, tar, 7z, rar | icon `fa-file-zipper` (amber) |
+| **Audio** | mp3, wav, flac, m4a, ogg | icon `fa-file-audio` (purple) |
+| **Video** | mp4, mov, webm, mkv, avi | icon `fa-file-video` (pink) |
+| **HEIC / AVIF** | ftyp brands (unchanged sniff) | icon `fa-file-image`; attached as a file instead of refused |
+| **Other** | anything else | icon `fa-file` (neutral) |
+
+- Every icon tile shows the **extension label** (`DOCX`, `ZIP`, …) under the icon. Colors are CSS variables with brand-like defaults (`--attachment-pdf`, …) so themes can override them.
+- A **macro-enabled** Office file (`[Content_Types].xml` declares a `vbaProject` part, whatever the extension) gets a small warning badge and the tooltip "Contains macros". Nothing ever opens it.
+- The lightbox (click a tile) shows: images and SVGs as now; **text-like files as a scrolling text view** of the preview; everything else as the large icon with type, size, page count, "Text version extracted (N KB)" and the macro warning.
+- The size summary counts all attachments: "12 attachments · 214 MB / 1 GB" (just "images" when they all are).
+
+## 6. Processing (srv)
+
+Same pipeline, CPU and memory limits, cancel, dedup by SHA-256 and retention as images. New per kind:
+
+- **Store:** the original is stored as `<sha256>.<ext>` with an extension derived **from the content** (`pdf`, `docx`, `xlsx`, `pptx`, `odt`, `rtf`, `zip`, image formats, …) or `bin` when the content doesn't determine one (text, code, other). Metadata gains `kind`, `page_count?`, `text_ext?`, `macros?`, `preview_ext?`. The same bytes arriving under different names (`notes.txt`, `script.py`) are one attachment: the content decides the kind, and each reference keeps its own name.
+- **Named links for delivery:** agents recognise files by extension, and the real name is more useful to them than a hash. At send time each attachment gets a **copy** at `<store>/named/<sha256>/<sanitized name>` — never a hard link, since an agent that edits the file it was given must not change the content-addressed original — re-copied on every delivery so an earlier edit never reaches a later message — the name the reference carries, with path separators and control characters removed. Two references with different names get two copies of the same bytes. `named/` is swept on the same retention rules.
+- **Text-like:** derive `preview.txt` (first 40 lines, ≤ 2 KB, cut at a UTF-8 boundary).
+- **PDF:** page count with `lopdf` (pure Rust, MIT), and a **text version** from `lopdf`'s text extraction. PDF parsers can panic or recurse deeply on malformed input, so both run in a **separate process**: srv re-runs its own executable with a hidden `__extract-pdf` argument, with a 30-second timeout after which the child is killed. A PDF it can't read (scanned, encrypted, malformed) is attached by path only and says so. PDFs over 100 MB get neither.
+- **DOCX / PPTX / ODT / ODP:** open the ZIP and stream only the parts needed through `quick-xml`: `word/document.xml` (plus headers, footers, footnotes); `ppt/slides/slideN.xml` in the order `presentation.xml` lists them; ODF `content.xml`. Emit `<w:t>` / `<a:t>` / `<text:p>` text, newlines at paragraph ends, tabs for `<w:tab/>`. Output a `text.txt` derived file with a short header ("Text extracted from report.docx by AgentMux. Formatting, images and embedded objects are not included.").
+- **RTF:** a small control-word stripper (skip `{\*…}` destinations, map `\par` / `\line` / `\tab`, decode `\'hh` and `\uN`).
+- **Legacy binary `.doc` / `.ppt`:** no text version (reading the OLE binary formats is out of scope). The tile and the agent's list say "no text version — save it as .docx/.pptx" instead of implying one exists.
+- **XLSX / ODS / XLS:** `calamine` (pure Rust, MIT); each sheet as tab-separated rows under a `## Sheet name` heading.
+- **Extraction limits** (research §7): ≤ 10,000 ZIP entries; a shared decompressed-bytes budget of 200 MB enforced with `.take()` (declared sizes can lie); refuse entries whose declared ratio exceeds 100:1; never follow nested archives; quick-xml resolves only predefined entities; extracted text capped at 2 MB (Codex's prompt limit is ~1M characters) with a "[truncated]" line; a 30-second wall-clock deadline per file. Any failure leaves the attachment attached by path only, with the tile note "No text version: <reason>".
+- **SVG:** no derived files; the thumbnail is the original.
+
+## 7. Delivery
+
+The `<attached_images>` block becomes `<attached_files>` (the replay parser keeps reading the old name). Each line keeps the form `N. name — path`, with an optional note in square brackets after the name:
+
+```
+<attached_files>
+The user attached 5 files. The numbers match how the user refers to them. …
+1. screenshot.png — /…/ab….v1-e2000.send.png
+2. spec.pdf [PDF, 12 pages; text version: /…/cd….text.txt] — /…/named/cd…/spec.pdf
+5. notes.doc [Word document; no text version, save it as .docx] — /…/named/34…/notes.doc
+3. report.docx [Word document; text version: /…/ef….text.txt] — /…/named/ef…/report.docx
+4. data.csv — /…/named/12…/data.csv
+</attached_files>
+```
+
+- **Claude (persistent stream-json):** images inline as now. **PDFs inline as `document` blocks** (base64, `application/pdf`, `title` = the file name) within the same per-message (20 MB) and per-session (50 MB) inline budgets, and only for PDFs of ≤ 100 pages. Everything else by path. The intro line says which files are shown above.
+- **Codex, Gemini, Qwen, Kimi, ACP:** the list only, which includes the text versions of Office files and PDFs (ACP `resource_link` blocks are a later refinement).
+- **Container agents:** no attachments; the pane keeps the copy-to-working-folder behavior (§3). For a **drop**, that is today's path copy. For **Ctrl+V / right-click Paste**, whose files arrive as bytes, the file is stored like any attachment first, then a new RPC `attachments.copy-to-workdir {block_id, id, name}` has srv copy the original into the pane's working folder (`cmd:cwd`, name de-conflicted as `name (1).ext`) and return the path; the composer inserts `@name` like a drop.
+- Stored copies drop `document` blocks exactly like `image` blocks (`persisted_line`).
+
+## 8. Frontend
+
+- `attachments.ingest` stops returning non-images; the drop hook sends everything to the tray. `dnd:agentinserttoken` and the copy-to-cwd path stay only for `attachments:enabled = false`.
+- Folder drops attach every file, skipping dot-folders and `node_modules`, `target`, `dist`, `build`, `.git`, `__pycache__`, `.venv`, within the 128 limit and the existing 10,000-entry walk cap.
+- Ctrl+V and right-click Paste accept any file.
+- **Container panes** (`agentMode: container`): the tray is off. A drop copies into the working folder as today; a pasted file is uploaded, then `attachments.copy-to-workdir` copies it into the working folder and the composer inserts `@name` (§7).
+- Tiles (`AttachmentTile`) get a `kind`; icon tiles use FontAwesome classes from §5. `AttachmentInfo` gains `kind`, `ext`, `page_count`, `text_bytes`, `macros`.
+
+## 9. Security
+
+- Classification by content, never by the claimed name; a renamed executable is "Other", never "Text".
+- ZIP and XML limits in §6; extraction never executes anything and never follows external references.
+- SVG is only ever shown via `<img>` (no inline markup).
+- Text previews are shown as text (`textContent`), never as HTML — including `.html` files.
+- Macro-enabled documents are flagged; AgentMux never opens attachments with other applications.
+
+## 10. Tests
+
+- srv: classification table (content vs extension, renamed ZIP as `.txt`, OOXML detection, macros via content types); DOCX/PPTX/ODT/XLSX/RTF extraction on small fixtures; PDF text via the child process, including a malformed PDF and a killed-on-timeout child; a zip bomb (high ratio, many entries, forged sizes) refused within limits; PDF page count on a fixture and a malformed PDF; text preview cut at a UTF-8 boundary; list lines for each kind; Claude line with a `document` block and its stored form.
+- The replay parser takes the attachment id from either form of path: a file name starting `<sha256>.` or a `named/<sha256>/` directory.
+- frontend: tile kind → icon/thumbnail; text preview rendered as text; summary wording for mixed attachments; parser reads `<attached_files>` and the old `<attached_images>`.
+
+## 11. Rollout
+
+1. **srv:** classification, per-kind processing and extraction, store/metadata changes, `<attached_files>` list, Claude PDF `document` blocks behind a smoke test (a unit test that the stream-json line is well-formed, plus a manual check against the pinned CLI; if the CLI rejects it, PDFs fall back to path-only).
+2. **frontend:** tiles, lightbox views, all-files ingest, summary wording.
+
+## 12. Open questions
+
+1. PDF thumbnails (first page via PDF.js) — worth the ~1 MB renderer bundle? Deferred.
+2. Video first-frame thumbnails — needs a token-authenticated range route. Deferred.
+3. Should very large text files (logs) also go inline to Claude as text `document` blocks? This spec says no: the path is enough and keeps the transcript small.
