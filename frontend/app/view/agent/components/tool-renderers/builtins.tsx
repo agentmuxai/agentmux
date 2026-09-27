@@ -20,7 +20,7 @@ import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "../
 import { detectLanguage } from "../detectLanguage";
 import { HighlightedCode } from "../HighlightedCode";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
-import { capText, MAX_TOOL_OUTPUT_LINES } from "../output-cap";
+import { capText, MAX_TOOL_OUTPUT_LINES, type CappedText } from "../output-cap";
 import { terminalText } from "../terminal-text";
 import { anyTool, byKind, type ToolRendererEntry } from "./registry";
 
@@ -35,6 +35,60 @@ function renderEdit(node: ToolNode): JSX.Element {
 
 function renderBash(node: ToolNode): JSX.Element {
     return <BashOutputViewer params={node.params as any} result={node.result as any} />;
+}
+
+const isMarkdownPath = (path: string): boolean => path.endsWith(".md") || path.endsWith(".mdx");
+
+/**
+ * The file-preview pipeline Read and Write share
+ * (SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §4): a markdown file renders
+ * as markdown, anything else as highlighted code, then the hidden-lines
+ * marker for a head-capped file. Each caller formats the text its own way
+ * (see renderRead / renderWrite for why they differ); `classPrefix` keeps
+ * each tool's class names.
+ */
+function FilePreview(props: {
+    path: string;
+    /** The head-capped raw text (language sniffing reads its first line). */
+    capped: CappedText;
+    /** What the highlighted-code view shows. */
+    code: string;
+    /** What the markdown view shows. */
+    markdown: string;
+    classPrefix: "agent-tool-read" | "agent-tool-write";
+}): JSX.Element {
+    return (
+        <>
+            <Show
+                when={isMarkdownPath(props.path)}
+                fallback={
+                    <HighlightedCode
+                        code={props.code}
+                        // Language detection reads the RAW (non-dedented) first
+                        // line — shebang/content sniffing should see the file
+                        // as-is; only the displayed text is dedented.
+                        lang={detectLanguage(props.path, props.capped.text.split("\n")[0])}
+                        class={`${props.classPrefix}-content`}
+                    />
+                }
+            >
+                <div class={`${props.classPrefix}-content ${props.classPrefix}-md`}>
+                    {/* scrollable={false}, same as MarkdownBlock: this
+                        preview lives inside the virtualized document,
+                        which owns the scroll. `scrollable` defaults to
+                        true, and each mount then constructs an
+                        OverlayScrollbars instance — getComputedStyle +
+                        scrollLeft probes that each force a layout of the
+                        whole pane. Measured at 46% of `flushPendingNodes`
+                        under load (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2). */}
+                    <Markdown text={props.markdown} scrollable={false} />
+                </div>
+            </Show>
+            <Show when={props.capped.hiddenLines > 0}>
+                <OutputHiddenMarker hidden={props.capped.hiddenLines} noun="line" from="head" />
+            </Show>
+        </>
+    );
 }
 
 function renderRead(node: ToolNode): JSX.Element {
@@ -53,9 +107,6 @@ function renderRead(node: ToolNode): JSX.Element {
     // took at every digit-count boundary (9→10, 999→1000) — see dedent.ts's
     // module header and docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
     const preview = capped ? formatReadPreview(capped.text) : null;
-    // Render markdown files as formatted markdown, matching renderWrite. Without
-    // this a .md Read shows raw source instead of a rendered preview.
-    const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-read">
             <div class="agent-tool-file-path">{filePath}</div>
@@ -67,40 +118,17 @@ function renderRead(node: ToolNode): JSX.Element {
                     </Show>
                 }
             >
-                <Show
-                    when={isMarkdown}
-                    fallback={
-                        <HighlightedCode
-                            code={preview!.withGutter}
-                            // Language detection reads the RAW (non-dedented) first
-                            // line — shebang/content sniffing should see the file
-                            // as-is; only the displayed text is dedented.
-                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
-                            class="agent-tool-read-content"
-                        />
-                    }
-                >
-                    <div class="agent-tool-read-content agent-tool-read-md">
-                        {/* `body`, not `withGutter`: a line-number column is
-                            meaningless in rendered markdown and actively
-                            corrupts it (a "1\t# Title" line is not a heading).
-                            SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2.1 flagged
-                            this in August and deferred it; this is the fix.
-
-                            scrollable={false}, same as MarkdownBlock: this
-                            preview lives inside the virtualized document,
-                            which owns the scroll. `scrollable` defaults to
-                            true, and each mount then constructs an
-                            OverlayScrollbars instance — getComputedStyle +
-                            scrollLeft probes that each force a layout of the
-                            whole pane. Measured at 46% of `flushPendingNodes`
-                            under load (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2). */}
-                        <Markdown text={preview!.body} scrollable={false} />
-                    </div>
-                </Show>
-                <Show when={capped!.hiddenLines > 0}>
-                    <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
-                </Show>
+                {/* Markdown gets `body`, not `withGutter`: a line-number column
+                    is meaningless in rendered markdown and actively corrupts it
+                    (a "1\t# Title" line is not a heading;
+                    SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2.1). */}
+                <FilePreview
+                    path={filePath}
+                    capped={capped!}
+                    code={preview!.withGutter}
+                    markdown={preview!.body}
+                    classPrefix="agent-tool-read"
+                />
             </Show>
         </div>
     );
@@ -117,21 +145,6 @@ function renderWrite(node: ToolNode): JSX.Element {
     const content: string | undefined = (node.params as any).content;
     const bytes: number | undefined = (node.result as any)?.bytesWritten;
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    // Plain dedent + narrow, NOT the Read-specific gutter-aware variant
-    // (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) — Write content has no
-    // CLI-added "<N>\t" line-number prefix, so formatReadPreview's numbered
-    // heuristic would misfire on a genuine tab-delimited file (TSV/BED/GTF)
-    // whose every non-blank line happens to start with digits+tab, silently
-    // dropping that real leading column. formatCodePreview has no such
-    // ambiguity, and its dedent half is a no-op for the common already-flush
-    // case anyway (a whole file starts at column 0) — which is exactly why the
-    // narrowing half matters here: it's the only part that fires on a Write.
-    const dedentedText = capped ? formatCodePreview(capped.text) : "";
-    // Markdown is indentation-sensitive — four leading spaces are a code
-    // block, and rescaling them to two turns it into prose. Dedent only for
-    // that path (codex P2 on PR #2958); `formatMarkdownPreview` documents why.
-    const markdownText = capped ? formatMarkdownPreview(capped.text) : "";
-    const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-write">
             <div class="agent-tool-file-path-row">
@@ -141,24 +154,27 @@ function renderWrite(node: ToolNode): JSX.Element {
                 </Show>
             </div>
             <Show when={capped} fallback={<div class="agent-tool-write-info">No content written.</div>}>
-                <Show
-                    when={isMarkdown}
-                    fallback={
-                        <HighlightedCode
-                            code={dedentedText}
-                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
-                            class="agent-tool-write-content"
-                        />
-                    }
-                >
-                    <div class="agent-tool-write-content agent-tool-write-md">
-                        {/* scrollable={false} — see renderRead's markdown branch. */}
-                        <Markdown text={markdownText} scrollable={false} />
-                    </div>
-                </Show>
-                <Show when={capped!.hiddenLines > 0}>
-                    <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
-                </Show>
+                <FilePreview
+                    path={filePath}
+                    capped={capped!}
+                    // Plain dedent + narrow, NOT the Read-specific gutter-aware
+                    // variant (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) —
+                    // Write content has no CLI-added "<N>\t" line-number prefix,
+                    // so formatReadPreview's numbered heuristic would misfire on
+                    // a genuine tab-delimited file (TSV/BED/GTF) whose every
+                    // non-blank line happens to start with digits+tab, silently
+                    // dropping that real leading column. Its dedent half is a
+                    // no-op for the common already-flush case (a whole file
+                    // starts at column 0), which is why the narrowing half is
+                    // the part that fires on a Write.
+                    code={formatCodePreview(capped!.text)}
+                    // Markdown is indentation-sensitive — four leading spaces
+                    // are a code block, and rescaling them to two turns it into
+                    // prose. Dedent only for that path (codex P2 on PR #2958);
+                    // `formatMarkdownPreview` documents why.
+                    markdown={formatMarkdownPreview(capped!.text)}
+                    classPrefix="agent-tool-write"
+                />
             </Show>
         </div>
     );
