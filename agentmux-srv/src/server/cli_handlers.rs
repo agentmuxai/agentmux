@@ -165,15 +165,23 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .await
                     .map_err(|e| format!("install lock task panicked: {e}"))?
                     .map_err(|e| format!("cannot take the CLI install lock: {e}"))?;
-                    if std::path::Path::new(&npm_bin).is_file() {
-                        drop(install_guard);
-                        let version = get_cli_version(&npm_bin).await;
-                        tracing::info!(path = %npm_bin, version = %version, "CLI installed by another instance while waiting");
-                        return Ok(ResolveCliResult {
-                            cli_path: npm_bin,
-                            version,
-                            source: "local_install".to_string(),
-                        });
+                    // Reuse only a FINISHED install (completion marker, not
+                    // just a shim npm may have written early); clear a failed
+                    // or interrupted one so npm starts clean (Codex P2 on #3927).
+                    let shared_dir = crate::backend::cli_install::shared_cli_dir(&paths, &cmd.provider_id, &pinned_version);
+                    if let Some(dir) = shared_dir.as_deref() {
+                        if crate::backend::cli_install::is_complete(dir) && std::path::Path::new(&npm_bin).is_file() {
+                            drop(install_guard);
+                            let version = get_cli_version(&npm_bin).await;
+                            tracing::info!(path = %npm_bin, version = %version, "CLI installed by another instance while waiting");
+                            return Ok(ResolveCliResult {
+                                cli_path: npm_bin,
+                                version,
+                                source: "local_install".to_string(),
+                            });
+                        }
+                        crate::backend::cli_install::clear_incomplete(dir)
+                            .map_err(|e| format!("cannot clear an incomplete CLI install at {}: {e}", dir.display()))?;
                     }
 
                     // Collect all npm output after completion via .output().
@@ -279,6 +287,13 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Verify npm binary exists
                     if std::path::Path::new(&npm_bin).exists() {
                         let version = get_cli_version(&npm_bin).await;
+                        // Still under the install lock: publish the shared
+                        // install to every reader only now that it's verified.
+                        if let Some(dir) = shared_dir.as_deref() {
+                            crate::backend::cli_install::mark_complete(dir, &pinned_version)
+                                .map_err(|e| format!("cannot mark the CLI install complete at {}: {e}", dir.display()))?;
+                        }
+                        drop(install_guard);
                         tracing::info!(path = %npm_bin, version = %version, "CLI installed (npm)");
                         return Ok(ResolveCliResult {
                             cli_path: npm_bin,
