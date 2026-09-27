@@ -36,6 +36,16 @@ use server::build_routers;
 
 #[tokio::main]
 async fn main() {
+    // -2. PDF reading child: srv re-runs itself to read an attached PDF out
+    //     of process, since PDF parsers can crash on malformed input
+    //     (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §6). Nothing else
+    //     may start in this mode.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.get(1).map(String::as_str) == Some(backend::attachments::extract::PDF_CHILD_ARG) {
+            std::process::exit(backend::attachments::extract::run_pdf_child(&args[2..]));
+        }
+    }
     // -1. Crash monitor branch — must be checked before any other initialization.
     if bootstrap::maybe_run_crash_monitor() {
         return;

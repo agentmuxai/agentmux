@@ -73,6 +73,12 @@ sha2 = "0.10"
 # (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.4). Same 0.25 line the
 # workspace already locks for agentmux-mcp.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
+# Any-file attachments (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §6):
+# text from DOCX/PPTX/ODT (quick-xml over the zip parts), spreadsheets
+# (calamine), PDF page count (lopdf). All pure Rust.
+quick-xml = "0.39"
+calamine = { version = "0.36", default-features = false }
+lopdf = { version = "0.45", default-features = false }
 hex = "0.4"
 # HMAC-SHA256 for the WhatsApp Cloud API webhook signature check
 # (X-Hub-Signature-256). `Mac::verify_slice` is constant-time internally

@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wire types for image attachments in the agent composer
-//! (docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6).
+//! Wire types for attachments in the agent composer
+//! (docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6,
+//! SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md).
 
 use serde::{Deserialize, Serialize};
 
@@ -32,12 +33,12 @@ pub struct CommandAttachmentsIngestData {
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AttachmentsIngestResult {
     pub batch_id: String,
-    /// Images accepted into the batch, in order. `index` keys every event.
+    /// Files accepted into the batch, in order. `index` keys every event.
     pub accepted: Vec<AttachmentPending>,
-    /// Images refused before processing (limits, unreadable).
+    /// Files refused before processing (limits, unreadable).
     pub rejected: Vec<AttachmentRejected>,
-    /// Paths that are not images. The caller keeps its existing handling
-    /// for these (copy into the working folder and insert `@name`).
+    /// Always empty since any file can be attached; kept so a frontend from
+    /// the images-only release still reads the result.
     pub non_images: Vec<String>,
     /// Sum of `accepted[].bytes`.
     #[ts(type = "number")]
@@ -73,6 +74,25 @@ pub struct AttachmentRejected {
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandAttachmentsCancelData {
     pub batch_id: String,
+}
+
+/// `attachments.copy-to-workdir` — copy a stored attachment into the pane's
+/// working folder (`cmd:cwd`). Container panes use this for pasted files:
+/// their agents can't see the store.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandAttachmentsCopyToWorkdirData {
+    pub block_id: String,
+    pub id: String,
+    /// The user's file name; de-conflicted in the folder.
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct AttachmentsCopyToWorkdirResult {
+    /// Where the file landed.
+    pub path: String,
 }
 
 /// `attachments.info` — look up processed attachments by id (transcript
@@ -113,6 +133,27 @@ pub struct AttachmentInfo {
     /// Set when the original was an animated GIF (only the first frame is sent).
     #[serde(default)]
     pub first_frame_only: bool,
+    /// What the file is: `image`, `svg`, `text`, `pdf`, `word`, `excel`,
+    /// `powerpoint`, `archive`, `audio`, `video`, `image_file` (an image
+    /// format that isn't decoded, e.g. HEIC) or `other`. The tile shows a
+    /// thumbnail for image/svg/text and a type icon for the rest.
+    /// SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §5.
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_count: Option<u32>,
+    /// Size of the extracted text version; 0 when there is none.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub text_bytes: u64,
+    /// Why a document has no text version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text_note: Option<String>,
+    /// An Office file carrying a VBA project.
+    #[serde(default)]
+    pub macros: bool,
 }
 
 /// An attachment as carried by a message: the id plus the name the user saw.

@@ -55,9 +55,7 @@ pub(super) async fn handle_attachment_file(
     let found = if kind == Kind::Original {
         // The original is served straight from blobs/: it must not depend on
         // the derive pipeline succeeding.
-        svc.store()
-            .find_blob(&id)
-            .map(|(path, format)| (path, attachments::process::mime_of(format).to_string()))
+        svc.store().original(&id)
     } else {
         // Re-derives (under the service's limits) when the fingerprint
         // changed since the attachment was processed.
