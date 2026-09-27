@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-27
 **Author:** AgentY (agent, narko), at operator request
-**Status:** root cause found; fix in progress (agentmux-cloud `POST /agents/lease/take` + desktop Take over)
+**Status:** active — root cause found; fix in #3921 (desktop Take over) and agentmux-cloud #100 (`POST /agents/lease/take`)
 **Related:** `docs/specs/SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md` (§4.5 relay lease, §4.6 Take over),
 #3742 (Take over), #3897 (relay subscription leak), #3899 (Take over reaches a relay-only holder),
 agentmux-cloud #92 (agent leases).
