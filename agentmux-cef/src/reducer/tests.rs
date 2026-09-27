@@ -1445,12 +1445,41 @@ fn reconcile_quit_never_drains_when_background_service_enabled() {
 fn attention_transition_fires_only_on_a_real_crossing() {
     use super::quit::background_attention_transition as t;
     // attended -> no windows left
-    assert_eq!(t(true, false, 0), Some(true));
+    assert_eq!(t(true, false, false, 0), Some(true));
     // unattended -> a window opened
-    assert_eq!(t(true, true, 1), Some(false));
+    assert_eq!(t(true, false, true, 1), Some(false));
     // Already in that state: not a new event.
-    assert_eq!(t(true, true, 0), None);
-    assert_eq!(t(true, false, 3), None);
+    assert_eq!(t(true, false, true, 0), None);
+    assert_eq!(t(true, false, false, 3), None);
+}
+
+/// Quitting closes every window, but that is the app exiting, not going to the
+/// background: no `went_unattended`. Otherwise the next launch reports the quit
+/// as "kept running in the background since <quit time>" (seen 2026-09-27 on a
+/// dev build restarted with task dev, whose launcher-requested quit drains).
+#[test]
+fn no_attention_transition_once_quitting() {
+    use super::quit::background_attention_transition as t;
+    assert_eq!(t(true, true, false, 0), None);
+    assert_eq!(t(true, true, true, 1), None);
+}
+
+/// The reducer's own wiring (`attention_after`, what `update` calls): the last
+/// user window going away (`live_after` 0) after a real `BeginDrain` through
+/// `update` records nothing, while the same drop with the app still running
+/// records `went_unattended`. The window count is passed in because unit tests
+/// can't register a live window (a `BrowserHandle` needs a real `cef::Browser`).
+#[test]
+fn the_last_window_closing_during_a_drain_is_not_going_unattended() {
+    let mut running = HostState::default();
+    running.background_service_enabled = true;
+    assert_eq!(super::attention_after(&running, 0), Some(true), "control: no quit, so it IS going unattended");
+
+    let mut draining = HostState::default();
+    draining.background_service_enabled = true;
+    update(&mut draining, HostCommand::BeginDrain { reason: QuitReason::LauncherRequested });
+    assert_eq!(super::attention_after(&draining, 0), None);
+    assert!(!draining.background_unattended);
 }
 
 /// With background-service mode off, reaching zero windows means the app is
@@ -1459,8 +1488,8 @@ fn attention_transition_fires_only_on_a_real_crossing() {
 #[test]
 fn no_attention_transitions_when_background_service_is_off() {
     use super::quit::background_attention_transition as t;
-    assert_eq!(t(false, false, 0), None);
-    assert_eq!(t(false, true, 1), None);
+    assert_eq!(t(false, false, false, 0), None);
+    assert_eq!(t(false, false, true, 1), None);
 }
 
 /// Idempotent: once draining, reconcile is a no-op (no double-drain).
