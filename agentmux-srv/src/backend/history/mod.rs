@@ -207,7 +207,9 @@ pub const WARM_DELAY: std::time::Duration = std::time::Duration::from_secs(20);
 fn lower_current_thread_priority() {
     #[cfg(windows)]
     unsafe {
-        use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN};
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+        };
         let _ = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     }
     #[cfg(target_os = "linux")]
@@ -275,7 +277,10 @@ impl HistoryService {
     }
 
     /// [`Self::warm_in_background`] with an explicit delay (tests use zero).
-    pub fn warm_in_background_after(&self, delay: std::time::Duration) -> std::thread::JoinHandle<()> {
+    pub fn warm_in_background_after(
+        &self,
+        delay: std::time::Duration,
+    ) -> std::thread::JoinHandle<()> {
         let index = self.index.clone();
         let pending = self.warm_pending.clone();
         pending.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -952,7 +957,9 @@ mod search_freshness_tests {
     #[test]
     fn warm_in_background_builds_the_index() {
         let svc = empty_service();
-        svc.warm_in_background_after(std::time::Duration::ZERO).join().unwrap();
+        svc.warm_in_background_after(std::time::Duration::ZERO)
+            .join()
+            .unwrap();
         assert!(svc.index.refreshed_at_ms() > 0);
         assert!(!svc.warm_pending.load(std::sync::atomic::Ordering::SeqCst));
     }
@@ -967,7 +974,11 @@ mod search_freshness_tests {
         let _warm = svc.warm_in_background_after(std::time::Duration::from_secs(3600));
         let err = svc.refresh_for_search().unwrap_err();
         assert!(matches!(err, HistorySearchError::IndexBuilding), "{err}");
-        assert_eq!(svc.index.refreshed_at_ms(), 0, "the search must not have built the index");
+        assert_eq!(
+            svc.index.refreshed_at_ms(),
+            0,
+            "the search must not have built the index"
+        );
     }
 
     /// Codex P2 on #3930: an on-demand build during the delay makes the
@@ -980,13 +991,20 @@ mod search_freshness_tests {
         let built_at = svc.index.refreshed_at_ms();
         assert!(built_at > 0);
         warm.join().unwrap();
-        assert_eq!(svc.index.refreshed_at_ms(), built_at, "the deferred build must not refresh again");
+        assert_eq!(
+            svc.index.refreshed_at_ms(),
+            built_at,
+            "the deferred build must not refresh again"
+        );
         assert!(!svc.warm_pending.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
     fn the_first_build_waits_out_the_startup_window() {
-        assert!(WARM_DELAY >= std::time::Duration::from_secs(10), "{WARM_DELAY:?}");
+        assert!(
+            WARM_DELAY >= std::time::Duration::from_secs(10),
+            "{WARM_DELAY:?}"
+        );
     }
 }
 
