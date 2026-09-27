@@ -403,6 +403,10 @@ interface DragFiles {
   - the watchdog fires on a pause in drag events, which also happens over a native child surface or during a renderer stall while the OS drag is still live, so clearing then would lose the only copy of the paths;
   - a stale entry is harmless, because the next drag that enters the window replaces it before any drop can consume it.
 
+  - **Every drag entry replaces the slot, even with zero paths.** Today `on_drag_enter` stashes only `if !paths.is_empty()` (`client/handlers.rs:162-178`), so a pathless drag (virtual or browser-originated files) leaves the previous drag's paths in place, and its drop would ingest or copy the wrong file. Now an empty list writes an empty entry (a tombstone) for that label and also clears the unlabelled fallback.
+  - **Defence in depth at drop:** the controller checks the stashed paths' base names against the drop event's `FileList` names. On a mismatch it ignores the paths and dispatches the bytes (§5.3 step 3).
+  - Regression test: a cancelled path drag, then a pathless drop, must dispatch the new drag's `FileList` and never the old paths.
+
   A long backstop TTL (10 min) only guards against a leak. `peek_drag_paths` never shortens it. The single process-wide slot (`drag_stash.rs:24`) otherwise goes away.
 
 ### 5.5 One "copy into a folder"
