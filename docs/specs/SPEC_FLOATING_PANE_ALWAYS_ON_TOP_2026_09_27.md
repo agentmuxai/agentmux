@@ -127,7 +127,7 @@ choice:
 |---|---|---|
 | A. Ownership | make the floater owned by main | **Rejected.** One owner only: it stays above main but not above `window-*` windows. It also brings back #1560's permanent pinning and the owner minimize/destroy cascade #1677 removed. |
 | B. Re-raise on activation | on every activation of one of our windows, re-raise tacked floaters with `SetWindowPos(HWND_TOP)` (#1574's approach) | **Rejected.** It needs hooks on every top-level (the WRR hook filters floaters out), it flickers (the activated window paints on top first), and it races drags. |
-| **C. Topmost while we're the active app** | `HWND_TOPMOST` while this process is the foreground app; drop out of the topmost band when another app is activated | **Chosen.** One message, a stable z-band, no flicker. Tacked-vs-tacked is plain topmost-band behaviour, which gives §1.2 for free. |
+| **C. Topmost while we're the active app** | `HWND_TOPMOST` while this process is the foreground app; drop out of the topmost band when another app is activated | **Chosen.** One message, a stable z-band, no flicker. Tacked-vs-tacked is plain topmost-band behaviour, which gives §1.2. Every app switch re-stacks all tacked floaters together, bottom first in their current order, so the pass (run by each floater's `WM_ACTIVATEAPP`) preserves their relative order instead of each one jumping to the front (Codex P2 on #3970). |
 
 **C in detail.** Each floater's `floating_pane_wndproc` handles `WM_ACTIVATEAPP`,
 which Windows sends to every top-level window of a thread when activation moves
@@ -162,13 +162,15 @@ Consequences to accept or handle:
    exceptions:
    - **Credential-approval and memory-adoption approval windows**
      (`initialView=credential-approval` / `memory-adoption-approval`) must never
-     be hidden behind a floater. They are security prompts. When one opens, make
-     it topmost as well, so it sits above the floaters. Required, Phase 1.
-     Topmost windows stack by the most recent assertion, so making it topmost
-     once isn't enough: switching apps and back re-asserts the floater's topmost
-     state and would put it in front. Open approval windows are therefore kept
-     in a registry, and every time a floater (re)enters the topmost band they
-     are re-raised over it (ReAgent P1 on #3970).
+     be hidden behind a floater. They are security prompts. Required, Phase 1.
+     Open approval windows are kept in a registry (Windows) and are topmost
+     **exactly while tacked floaters are** (any tacked, this app active, no
+     file dialog open), re-raised over the floaters on every re-stack.
+     Topmost windows stack by the most recent assertion, so making one topmost
+     once isn't enough: an app switch back re-asserts the floaters and would
+     put them in front (ReAgent P1 on #3970). Outside that window they are
+     ordinary windows, so they never float over other applications, and on
+     macOS/Linux nothing changes (Codex P2 on #3970).
    - **Native file pickers** (`rfd::FileDialog`, `commands/platform.rs:1058-1190`)
      run on a worker thread with no owner, so a tacked floater can cover them.
      Phase 1: while a host file dialog is open, temporarily move tacked floaters to
