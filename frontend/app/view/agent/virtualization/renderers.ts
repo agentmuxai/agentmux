@@ -82,8 +82,26 @@ export function estimateUnwrappedTextHeight(
 // Per-kind constants — tuned empirically. Phase 3 perf-probe HUD
 // flags any kind whose p50 actual diverges > 30% from estimate.
 const TOOL_COLLAPSED_PX = 32;
-const TOOL_EXPANDED_PX = 200;
 const COLLAPSED_MESSAGE_PX = 32;
+
+/**
+ * The CSS preview cap, `$transcript-preview-max-height: calc(50vh / 3)`, in
+ * unzoomed CSS px (≈ 233 on a 1400 px window). Every capped row's expanded
+ * estimate is this plus that row's chrome, so the estimates follow the window
+ * height the way the rendered boxes do
+ * (SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §3). Falls back to a
+ * 1400 px window where there is none.
+ */
+export function previewCapPx(): number {
+    const h = typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : 1400;
+    return h / 6;
+}
+
+/** A pinned tool's panel: its typical 200 px, but never more than the cap
+ *  plus the header allows (a small window). */
+export function toolExpandedPx(): number {
+    return Math.min(200, Math.round(previewCapPx() + 40));
+}
 
 // ── Per-kind estimator functions ────────────────────────────────────────────
 //
@@ -97,24 +115,27 @@ export function estimateMarkdown(node: MarkdownNode): number {
 }
 
 /**
- * A content-first tool (WebSearch) renders expanded by default, its body
- * capped by CSS at `$transcript-preview-max-height` (≈ 233 px on a 1400 px
- * window), plus the header row and padding. Same approximation as
- * JEKT_EXPANDED_MAX_ESTIMATE_PX; the measured height replaces it on render.
+ * A content-first tool (WebSearch) renders expanded by default: the capped
+ * body plus the header row and padding (280 at a 1400 px window). The
+ * measured height replaces it on render.
  */
-export const CONTENT_FIRST_TOOL_ESTIMATE_PX = 280;
+export function contentFirstToolEstimatePx(): number {
+    return Math.round(previewCapPx() + 47);
+}
 
 /**
- * An expanded jekt's body is capped by CSS (`$transcript-preview-max-height`,
- * `calc(50vh / 3)` ≈ 233 px on a 1400 px window) and scrolls inside its box,
- * so a long message no longer needs `TEXT_MAX_ESTIMATE_PX`. An approximation
- * is enough: the measured height replaces it once the row renders. The extra
- * ~60 px is the summary and metadata lines around the body.
+ * An expanded jekt's body is capped by CSS and scrolls inside its box, so a
+ * long message no longer needs `TEXT_MAX_ESTIMATE_PX`: the cap plus the
+ * summary and metadata lines around the body (290 at a 1400 px window). An
+ * approximation is enough; the measured height replaces it once the row
+ * renders.
  */
-export const JEKT_EXPANDED_MAX_ESTIMATE_PX = 290;
+export function jektExpandedMaxEstimatePx(): number {
+    return Math.round(previewCapPx() + 57);
+}
 
 export function estimateExpandedJekt(message: string): number {
-    return Math.min(estimateTextHeight(message), JEKT_EXPANDED_MAX_ESTIMATE_PX);
+    return Math.min(estimateTextHeight(message), jektExpandedMaxEstimatePx());
 }
 
 const SHELL_COLLAPSED_PX = 32;
@@ -206,7 +227,7 @@ export function estimateNodeForState(
     switch (node.type) {
         // A content-first tool's body is capped at the preview height, like a
         // jekt's; everything else pinned open uses the generic tool size.
-        case "tool":              return isContentFirstTool(node) ? CONTENT_FIRST_TOOL_ESTIMATE_PX : TOOL_EXPANDED_PX;
+        case "tool":              return isContentFirstTool(node) ? contentFirstToolEstimatePx() : toolExpandedPx();
         case "agent_message":     return estimateTextHeight(node.message);
         case "jekt_message":      return estimateExpandedJekt(node.message);
         case "user_message":      return estimateUnwrappedTextHeight(node.message);
