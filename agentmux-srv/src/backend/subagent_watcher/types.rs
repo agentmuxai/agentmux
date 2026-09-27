@@ -56,6 +56,14 @@ pub struct SubAgent {
     /// grandchild of another SubAgent, not a direct member of its nominal
     /// `dispatch_id`.
     pub spawned_from_agent_id: Option<String>,
+    /// The parent-side `tool_use_id` of the Agent call that spawned this
+    /// subagent, from its `agent-<id>.meta.json` sidecar (`toolUseId`). It
+    /// is also the `parent_tool_use_id` on every line this subagent writes
+    /// to the parent's stream, so it joins the subagent to the background
+    /// tasks it launched (`db_background_tasks.owner_tool_use_id`). `None`
+    /// until the sidecar is readable, or for transcripts that predate it.
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

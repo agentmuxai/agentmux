@@ -455,7 +455,13 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        for up to 24 h and replayed when it registers, with the trust
 ///        verdicts it was accepted with as explicit columns.
 ///        `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` Phase 1.
-pub const OBJECT_SCHEMA_VERSION: i64 = 40;
+///   v41 — db_background_tasks.owner_tool_use_id: the `tool_use_id` of the
+///        Agent call whose subagent launched this background task (the
+///        `parent_tool_use_id` on the stream line that issued the Bash call);
+///        NULL for the agent's own tasks. Joins a task to its subagent, whose
+///        `meta.json` records the same id. Phase 2 of
+///        `SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 41;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -1342,6 +1348,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // v39: identity M4c-1 — the Global Memory writer's UID beside its
         // name. See OBJECT_SCHEMA_VERSION's v39 doc comment above.
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
+        // v41: the subagent that owns a background task. See
+        // OBJECT_SCHEMA_VERSION's v41 doc comment above.
+        "ALTER TABLE db_background_tasks ADD COLUMN owner_tool_use_id TEXT",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

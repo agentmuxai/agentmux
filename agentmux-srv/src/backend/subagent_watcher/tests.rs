@@ -56,6 +56,7 @@ fn fixture_state(parent_agent: &str, agent_id: &str, session_id: &str) -> Subage
             dispatch_id: solo_dispatch_id(agent_id),
             display_name: None,
             spawned_from_agent_id: None,
+            tool_use_id: None,
         },
         file_offset: 0,
         events: Vec::new(),
@@ -459,6 +460,40 @@ fn process_jsonl_change_marks_completed_on_result_event() {
             SubagentEventType::Result { .. }
         ));
     }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The subagent's parent-side tool_use_id comes from its `.meta.json`
+/// sidecar, and is picked up on a later change when the sidecar lands after
+/// the transcript (the CLI writes them separately).
+#[test]
+fn process_jsonl_change_reads_the_spawning_tool_use_id_from_the_sidecar() {
+    let dir = std::env::temp_dir().join(format!("amx-subagent-test-owner-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-o.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let tool_use_id = |w: &SubagentWatcher| {
+        let sessions = w.sessions.lock().unwrap();
+        sessions.values().next().unwrap().subagents.get("sub-o").unwrap().info.tool_use_id.clone()
+    };
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert_eq!(tool_use_id(&watcher), None, "no sidecar yet");
+
+    std::fs::write(
+        dir.join("agent-sub-o.meta.json"),
+        r#"{"agentType":"general-purpose","toolUseId":"toolu_spawn","spawnDepth":1}"#,
+    )
+    .unwrap();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert_eq!(tool_use_id(&watcher).as_deref(), Some("toolu_spawn"));
 
     std::fs::remove_dir_all(&dir).ok();
 }

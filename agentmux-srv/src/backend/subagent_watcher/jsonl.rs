@@ -172,11 +172,17 @@ impl SubagentWatcher {
                         dispatch_id: dispatch_id.clone(),
                         display_name: None,
                         spawned_from_agent_id: None,
+                        tool_use_id: super::completion::tool_use_id_for(jsonl_path),
                     },
                     file_offset: 0,
                     events: Vec::new(),
                 }
             });
+            // The CLI can write the `.meta.json` sidecar a moment after the
+            // transcript itself; keep trying until it is readable.
+            if state.info.tool_use_id.is_none() {
+                state.info.tool_use_id = super::completion::tool_use_id_for(jsonl_path);
+            }
 
             // A live observation outranks a replay's inference.
             //

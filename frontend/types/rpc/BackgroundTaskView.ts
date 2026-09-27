@@ -10,4 +10,10 @@ pid: number | null, started_at_ms: number,
  * `string` for a `&'static str` and drop the union the hand-written
  * declaration carried.
  */
-status: "running" | "done" | "error" | "stopped", last_seen_ms: number, ended_at_ms: number | null, };
+status: "running" | "done" | "error" | "stopped", last_seen_ms: number, ended_at_ms: number | null, 
+/**
+ * The Agent call (`tool_use_id`) whose subagent launched this task —
+ * the same id as that subagent's `tool_use_id` in Swarm. Null for the
+ * agent's own tasks. Always present, like `pid`.
+ */
+owner_tool_use_id: string | null, };
