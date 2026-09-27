@@ -100,10 +100,25 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore_login.clone();
             let http = http_client_login.clone();
             async move {
-
-                match crate::muxbus::pkce::run_pkce_login(
+                // The cloud's published sign-in settings win over the build's
+                // compiled ones in the request, so a new user pool reaches
+                // installed builds (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.2).
+                let discovered = crate::muxbus::discovery::cloud_settings(&http).await;
+                let (cognito_domain, client_id) = match crate::muxbus::discovery::resolve_login(
+                    discovered.as_ref(),
                     &req.cognito_domain,
                     &req.client_id,
+                ) {
+                    Ok(pair) => pair,
+                    // Same shape as a failed PKCE flow, so the UI shows it the same way.
+                    Err(e) => {
+                        return Ok(MuxBusLoginResp { success: false, email: String::new(), error: Some(e) });
+                    }
+                };
+
+                match crate::muxbus::pkce::run_pkce_login(
+                    &cognito_domain,
+                    &client_id,
                     &http,
                 )
                 .await
