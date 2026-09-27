@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
     buildMemoryReinjectionNode,
     buildMemoryReinjectionNodeFromReplay,
@@ -360,5 +363,21 @@ describe("Global Memory as the startup block's sections", () => {
             ["[Workspace] Alpha", workspace.sizeBytes],
         ]);
         expect(node.totalSizeBytes.global).toBe(system.sizeBytes + workspace.sizeBytes);
+    });
+});
+
+// The "byte for byte" guarantee rests on this constant matching Rust's, which
+// `format_global_bundle_block` joins the startup block with. Read it out of the
+// Rust source (same approach as provider-id-aliases.test.ts) so the two can't
+// drift silently.
+describe("GLOBAL_SECTION_SEPARATOR — frontend/backend consistency", () => {
+    it("equals storage/bundles.rs's GLOBAL_SECTION_SEPARATOR", () => {
+        const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+        const source = readFileSync(resolve(repoRoot, "agentmux-srv/src/backend/storage/bundles.rs"), "utf8");
+        const match = /pub const GLOBAL_SECTION_SEPARATOR: &str = "((?:[^"\\]|\\.)*)";/.exec(source);
+        if (!match) throw new Error("GLOBAL_SECTION_SEPARATOR not found in agentmux-srv/src/backend/storage/bundles.rs");
+        // Only the escapes a Rust string literal like this one uses.
+        const rust = match[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+        expect(GLOBAL_SECTION_SEPARATOR).toBe(rust);
     });
 });

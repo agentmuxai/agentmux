@@ -160,7 +160,8 @@ export function isMemoryReinjectionMessage(text: string): boolean {
  * fabricating them:
  *
  * - **Per-entry labels.** `composeReinjectionMessage` never writes them
- *   into the message (only raw bodies, joined by `\n---\n`) — replayed
+ *   into the message (only the bodies: Global sections joined by
+ *   `GLOBAL_SECTION_SEPARATOR`, Personal entries by `\n---\n`) — replayed
  *   entries get synthetic `"Entry N"` labels instead of their real names.
  * - **Real on-disk `sizeBytes`.** The live node's byte totals come from
  *   `agent_native_memory`'s stored `size_bytes` / Global Memory's
@@ -168,9 +169,9 @@ export function isMemoryReinjectionMessage(text: string): boolean {
  *   recovered text chunk's own `.length` is available, which is a real
  *   approximation (not necessarily equal to the original on-disk size).
  *
- * Splitting on `\n---\n` is itself approximate: a body that happens to
- * contain that exact literal sequence on its own line would be split
- * mid-entry. Acceptable for a replay DISPLAY approximation (this feeds a
+ * Splitting on either separator (`\n\n---\n\n` or `\n---\n`) is itself
+ * approximate: a body that happens to contain a `---` rule on its own line
+ * would be split mid-entry. Acceptable for a replay DISPLAY approximation (this feeds a
  * label-only row, never anything sent back to a model) — flagged here so
  * it isn't mistaken for a guarantee.
  *
