@@ -302,7 +302,11 @@ It carries over from the superseded spec, with the §4 look.
 ```ts
 interface FileDropHook {
     accept(drag: DragFiles): { ok: true; message: string; icon?: string } | { ok: false; reason: string };
-    drop(paths: string[], files: FileList): void | Promise<void>;
+    /** paths: host paths from the stash; empty when the host has none (no nativeFileDrop,
+     *  virtual files). files: the drop event's FileList, always present. */
+    drop(input: { paths: string[]; files: FileList }): void | Promise<void>;
+    /** true only if the hook cannot work from bytes alone. Default false. */
+    needsPaths?: boolean;
 }
 
 // file-drop.ts: a per-window registry of live hooks, keyed by block id
@@ -341,7 +345,15 @@ interface DragFiles {
 
      Nothing is taken from the last Target state or the cached hover verdict. A file that looked unknown while hovering but turns out unsupported is refused here, before the stash is consumed.
   2. If the pane doesn't accept, or its verdict is Blocked: `preventDefault` (the window guard) and nothing else. The stash isn't consumed; it expires on its TTL.
-  3. Otherwise `consumeDragPaths()`. If that's empty, show one "couldn't read the dropped files' paths" notice; if not, call that pane's `drop`.
+  3. Otherwise `consumeDragPaths()`, then call the pane's `drop({ paths, files })`:
+     - **with paths:** the normal case;
+     - **without paths:** still dispatched, with the event's `FileList`, unless the hook declared `needsPaths`. A `needsPaths` hook gets one "couldn't read the dropped files' paths" notice instead.
+     - **Byte fallbacks:**
+       - the agent pane uses the bytes path its paste already has (`uploadFiles` into the tray; the upload + `attachments.copy-to-workdir` transport of `copyIntoWorkdir` in copy mode);
+       - the terminal pane uses the same bytes transport;
+       - media and editor panes can read the `File` directly.
+
+       So no phase-1 hook needs `needsPaths`.
 - **A drop anywhere in the pane counts**, including its header and tab strip; today only the content does.
 - **The indicator** is rendered by `PaneChrome` as `<DropIndicator state message />`, from a per-window `Map<blockId, state>` signal. It replaces `element/dragoverlay.tsx`, which is deleted along with its name clash.
 
@@ -423,7 +435,7 @@ interface DragFiles {
   1. **Makes `resolve_window_at_cursor` stack-aware on every platform:**
      - macOS: front-to-back order from `CGWindowListCopyWindowInfo`, already used by the tear-off hook's macOS module;
      - Linux X11: `_NET_CLIENT_LIST_STACKING`;
-     - Wayland, which exposes no global stacking order: the most recently focused AgentMux window among those under the cursor. The host already sees focus changes. This is a documented limitation.
+     - **native Wayland** (the default when `WAYLAND_DISPLAY` is set, `agentmux-cef/src/app/mod.rs:667-708`): **no cross-window target lookup at all.** Wayland withholds both global cursor coordinates and absolute window positions (`SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md:119`). Focus order could rank windows but can't tell which one is under the cursor. So the resolver returns "unknown" there, and phase 5 keeps today's native-Wayland behaviour unchanged: no cross-window drop target, and a release outside the window does what it does today. Under XWayland (`--ozone-platform=x11`), the X11 stacking path applies. This is an explicit limitation; a compositor-supported signal can lift it later.
   2. Adds a test with two overlapping windows, where the front one must win.
   3. Only then points `update_cross_drag` at it, and deletes `hit_test_windows` (`drag.rs:193-222`) and the frontend `isInsideWindow`. macOS/Linux gain target detection.
 
