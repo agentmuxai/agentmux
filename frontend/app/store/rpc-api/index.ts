@@ -12,6 +12,7 @@
 // `this`, so composing them into one plain object is behaviour-preserving.
 
 import { AgentApi } from "./agent";
+import { AttachmentsApi } from "./attachments";
 import { BlockApi } from "./block";
 import { BookmarksApi } from "./bookmarks";
 import { BrowserStartPageApi } from "./browser-start-page";
@@ -311,4 +312,5 @@ export const RpcApi = {
     ...BrowserStartPageApi,
     ...VoiceApi,
     ...NotifyApi,
+    ...AttachmentsApi,
 };

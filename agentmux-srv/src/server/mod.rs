@@ -30,6 +30,7 @@ mod shell_handlers;
 mod tool_handlers;
 mod providers_handlers;
 mod voice;
+mod attachments;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
 mod drone_handlers;
@@ -546,6 +547,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // backend and return the transcript. Key stays server-side.
         // See SPEC_VOICE_STT_ENGINE_2026_06_20.md and #1591.
         .route("/api/v1/voice/transcribe", post(voice::handle_voice_transcribe))
+        // Image attachments in the agent composer: serve stored files and
+        // accept the paste fallback's streamed upload.
+        // SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.2, §6.5.
+        .route("/api/v1/attachments/upload", post(attachments::handle_attachment_upload))
+        .route("/api/v1/attachments/:id/:kind", get(attachments::handle_attachment_file))
         // First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md).
         // `GET /api/v1/self?block_id=` resolves the caller's place in the tree;
         // `POST /api/v1/window/name` sets the window display name (taskbar title).

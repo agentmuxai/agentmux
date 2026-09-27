@@ -36,6 +36,14 @@ pub const EVENT_USER_INPUT: &str = "userinput";
 /// promote pending `PendingMessage` entries into the conversation
 /// document. Payload: `{ block_id, message_id }`.
 pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
+/// Image attachment processing (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md
+/// §6.5). Scoped `block:<id>` of the pane that started the batch. Payloads are
+/// `AttachmentProgressEvent` / `AttachmentReadyEvent` / `AttachmentFailedEvent`
+/// / `AttachmentBatchDoneEvent` in `rpc_types::attachments`.
+pub const EVENT_ATTACHMENT_PROGRESS: &str = "attachment:progress";
+pub const EVENT_ATTACHMENT_READY: &str = "attachment:ready";
+pub const EVENT_ATTACHMENT_FAILED: &str = "attachment:failed";
+pub const EVENT_ATTACHMENT_BATCH_DONE: &str = "attachment:batch-done";
 #[allow(dead_code)]
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
 pub const EVENT_BLOCK_STATS: &str = "blockstats";

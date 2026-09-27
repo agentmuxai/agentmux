@@ -375,6 +375,11 @@ pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
 /// Returns `AgentProcessListResult`. Consumed by the swarm activity
 /// panel. See `backend::process_tracker`.
 pub const COMMAND_AGENT_PROCESS_LIST: &str = "agent.process-list";
+// Image attachments in the agent composer
+// (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6).
+pub const COMMAND_ATTACHMENTS_INGEST: &str = "attachments.ingest";
+pub const COMMAND_ATTACHMENTS_CANCEL: &str = "attachments.cancel";
+pub const COMMAND_ATTACHMENTS_INFO: &str = "attachments.info";
 /// List every block currently tracked (for the swarm aggregate view).
 /// Returns `AgentTrackedBlocksResult`.
 pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";

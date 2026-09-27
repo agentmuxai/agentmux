@@ -65,6 +65,7 @@ mod layout;
 mod browser_start_page;
 mod voice;
 pub(crate) mod fleet;
+mod attachments;
 
 /// Register all App API handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -84,6 +85,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     browser_start_page::register(engine, state);
     voice::register(engine, state);
     fleet::register(engine, state);
+    attachments::register(engine, state);
 }
 
 /// Core `pane.open` logic, shared by the WebSocket RPC handler
