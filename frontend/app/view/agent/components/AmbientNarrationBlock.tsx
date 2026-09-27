@@ -23,6 +23,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AmbientNarrationNode } from "../types";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 import "./AmbientNarrationBlock.scss";
 
 export const AMBIENT_TAG_LABEL = "ambient";
@@ -59,10 +60,8 @@ export const AmbientNarrationBlock = (props: AmbientNarrationBlockProps): JSX.El
                 </span>
             </div>
             <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
-                <Show when={peekTimeText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                </Show>
-                <div class="agent-node-peek-tooltip-meta">
+                <PeekMetaRow time={peekTimeText()} />
+                <div class="agent-node-peek-tooltip-note">
                     AgentMux ambient narration ({props.node.kind}) — not written by the model
                 </div>
             </PeekOverlay>

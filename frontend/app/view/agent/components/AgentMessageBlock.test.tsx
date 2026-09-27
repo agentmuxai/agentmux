@@ -43,9 +43,10 @@ describe("AgentMessageBlock — peek tooltip", () => {
             ));
             hover(container);
             const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
-            expect(metaLines.length).toBe(2);
-            expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
-            expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
+            // One line: time and tokens side by side (PeekMetaRow).
+            expect(metaLines.length).toBe(1);
+            expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")?.textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
+            expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(/~\d+ tok \(est\.\)/);
         } finally {
             vi.useRealTimers();
         }

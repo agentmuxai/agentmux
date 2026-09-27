@@ -21,6 +21,7 @@ import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStarti
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode, ToolLogChunk } from "../types";
@@ -202,13 +203,8 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                 </div>
             </div>
             <PeekOverlay show={isPeeking() && !expanded()} rowEl={peekRowEl}>
-                <Show when={peekTimeText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                </Show>
-                <Show when={peekEstimateText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                </Show>
-                <div class="agent-node-peek-tooltip-body">{props.node.cmd}</div>
+                <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
+                <div class="agent-node-peek-tooltip-body agent-node-peek-tooltip-body--shell">{props.node.cmd}</div>
             </PeekOverlay>
         </div>
     );
