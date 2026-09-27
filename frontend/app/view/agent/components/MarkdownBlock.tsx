@@ -15,6 +15,7 @@ import { useNodePeek } from "../hooks/useNodePeek";
 import { useAgentDormant } from "../agent-dormancy";
 import type { MarkdownNode } from "../types";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 import { rowDisclosure } from "../virtualization/disclosure";
 
 interface MarkdownBlockProps {
@@ -180,12 +181,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                         show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
                         rowEl={peekRowEl}
                     >
-                        <Show when={peekTimeText()}>
-                            <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                        </Show>
-                        <Show when={peekEstimateText()}>
-                            <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                        </Show>
+                        <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
                     </PeekOverlay>
                 </div>
             }

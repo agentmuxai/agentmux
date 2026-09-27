@@ -53,6 +53,7 @@ import { PEEK_ENTER_DELAY_MS } from "./hover-anchor";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 import { rowDisclosure } from "../virtualization/disclosure";
 
 interface UserMessageBlockProps {
@@ -269,12 +270,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                     show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
                     rowEl={peekRowEl}
                 >
-                    <Show when={peekTimeText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                    </Show>
-                    <Show when={peekEstimateText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                    </Show>
+                    <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
                 </PeekOverlay>
             </Show>
         </div>

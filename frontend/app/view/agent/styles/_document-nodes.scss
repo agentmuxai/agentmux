@@ -3,6 +3,26 @@
 
 @use "../../../mixins.scss";
 
+// Per-tool colour of a tool call's name and detail (command / path / query).
+// One table for two consumers so they can't drift: the collapsed tool row
+// (`.agent-tool-block[data-tool=…] .agent-tool-name`, inside `.agent-view`) and
+// the hover peek popover's command line (`.agent-node-peek-tooltip-body
+// [data-tool=…]`, Portal-rendered outside the row, so it can't inherit the
+// row's colour). A tool with no entry keeps the default text colour.
+// SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §4.2.
+$tool-name-colors: (
+    "bash": var(--term-bright-green),
+    "read": var(--accent-color),
+    "write": var(--warning-color),
+    "edit": var(--warning-color),
+    "grep": var(--term-bright-cyan),
+    "glob": var(--term-bright-cyan),
+    "agent": var(--term-bright-magenta),
+    "task": var(--secondary-text-color),
+    "workflow": var(--term-bright-magenta),
+    "other": var(--secondary-text-color),
+);
+
 // Tallest a tool preview or an expanded jekt body gets before it scrolls
 // inside its own box: one third of half the window height (~13 lines on a
 // 1400 px window), relative to window height. Shorter content renders at
@@ -653,16 +673,10 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     // Per-tool-type color on the collapsed summary name.
     // Requires data-tool attribute on .agent-tool-block (ToolBlock.tsx).
-    .agent-tool-block[data-tool="bash"]   .agent-tool-name { color: var(--term-bright-green); }
-    .agent-tool-block[data-tool="read"]   .agent-tool-name { color: var(--accent-color); }
-    .agent-tool-block[data-tool="write"]  .agent-tool-name { color: var(--warning-color); }
-    .agent-tool-block[data-tool="edit"]   .agent-tool-name { color: var(--warning-color); }
-    .agent-tool-block[data-tool="grep"]   .agent-tool-name { color: var(--term-bright-cyan); }
-    .agent-tool-block[data-tool="glob"]   .agent-tool-name { color: var(--term-bright-cyan); }
-    .agent-tool-block[data-tool="agent"]  .agent-tool-name { color: var(--term-bright-magenta); }
-    .agent-tool-block[data-tool="task"]   .agent-tool-name { color: var(--secondary-text-color); }
-    .agent-tool-block[data-tool="workflow"] .agent-tool-name { color: var(--term-bright-magenta); }
-    .agent-tool-block[data-tool="other"]  .agent-tool-name { color: var(--secondary-text-color); }
+    // Colours live in $tool-name-colors (top of file), shared with the peek popover.
+    @each $tool, $color in $tool-name-colors {
+        .agent-tool-block[data-tool="#{$tool}"] .agent-tool-name { color: $color; }
+    }
 
     // Per-tool left-border identity colors — terminal (non-running, non-failed, non-pinned) state.
     // Running → warning, failed → error, pinned → accent (all set above).
@@ -2402,20 +2416,50 @@ $transcript-preview-max-height: calc(50vh / 3);
 // .agent-tool-cmd-tooltip (11px, cramped) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
 // §2.2a: sized to read as comfortably as a native browser tooltip, not as a
 // shrunk-down technical readout.
+// Time and tokens on ONE line, pinned to the panel's right edge (PeekMetaRow).
+// SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §4.1.
 .agent-node-peek-tooltip-meta {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
     font-size: 13px;
     line-height: 1.4;
     color: var(--secondary-text-color);
     white-space: nowrap;
 }
 
+// A secondary line that isn't time/tokens (ambient narration's provenance
+// note): the old meta styling, left-aligned, on its own line.
+.agent-node-peek-tooltip-note {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+// The full command / path / query, in the tool row's monospace font and its
+// per-tool colour. The panel is Portal-rendered at document.body, outside
+// `.agent-view`'s `font-family: var(--font-mono)`, so the family must be set
+// here — and with `--font-mono`, not `--fixed-font`: that one is a `font`
+// SHORTHAND value, invalid in `font-family:`, so the declaration was dropped
+// and the text inherited the app's sans font. `break-all` breaks a long path
+// at whatever character reaches the edge, filling every line.
+// SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §3, §4.2.
 .agent-node-peek-tooltip-body {
     white-space: pre-wrap;
-    overflow-wrap: break-word;
-    font-family: var(--fixed-font, monospace);
+    word-break: break-all;
+    font-family: var(--font-mono);
     font-size: 13px;
     line-height: 1.6;
     color: var(--main-text-color);
+
+    @each $tool, $color in $tool-name-colors {
+        &[data-tool="#{$tool}"] { color: $color; }
+    }
+
+    // A persistent shell's row shows its command as `.agent-shell-header-cmd`
+    // in the secondary text colour; the popover matches it.
+    &--shell { color: var(--secondary-text-color); }
 }
 
 // Visual chrome only — position/left/top/width/max-height are all set

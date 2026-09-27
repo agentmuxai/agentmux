@@ -48,6 +48,7 @@ import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
@@ -457,14 +458,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 (Bash's only appears once the result lands; most tools never
                 show all their params), and the header stays truncated. */}
                 <PeekOverlay show={isPeeking() && hasAnyPeekContent()} rowEl={peekRowEl}>
-                    <Show when={peekTimeText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                    </Show>
-                    <Show when={peekEstimateText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                    </Show>
+                    <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
                     <Show when={cmdText()}>
-                        <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
+                        <div class="agent-node-peek-tooltip-body" data-tool={props.node.tool.toLowerCase()}>
+                            {cmdText()}
+                        </div>
                     </Show>
                 </PeekOverlay>
                 {/* Panel — three render modes per `panelMode()`:

@@ -7,8 +7,8 @@
  * type (the model did not write the line), so it is asserted, not assumed.
  */
 
-import { cleanup, render } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AmbientNarrationNode } from "../types";
 import { AMBIENT_TAG_LABEL, AMBIENT_TAG_TITLE, AmbientNarrationBlock } from "./AmbientNarrationBlock";
@@ -47,6 +47,25 @@ describe("AmbientNarrationBlock", () => {
         const { container } = render(() => <AmbientNarrationBlock node={node} />);
         const block = container.querySelector(".agent-markdown-block") as HTMLElement;
         expect(block.textContent).toBe(`${node.text} ${AMBIENT_TAG_LABEL}`);
+    });
+
+    // SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §4.1: the time sits in
+    // the shared meta row; the provenance note is its own line, not part of it.
+    it("peek: time in the meta row, provenance note on its own line", () => {
+        vi.useFakeTimers();
+        try {
+            const { container } = render(() => <AmbientNarrationBlock node={node} />);
+            fireEvent.mouseEnter(container.querySelector(".agent-markdown-peek-anchor") as HTMLElement);
+            vi.advanceTimersByTime(100);
+            const meta = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+            expect(meta.length).toBe(1);
+            expect(meta[0].querySelector(".agent-node-peek-tooltip-time")).not.toBeNull();
+            const note = document.body.querySelector(".agent-node-peek-tooltip-note");
+            expect(note?.textContent).toMatch(/ambient narration \(background_task\)/);
+            expect(meta[0].contains(note)).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("renders text as plain text, not markdown or HTML", () => {

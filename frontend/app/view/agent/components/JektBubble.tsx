@@ -26,6 +26,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 
 interface JektBubbleProps {
     node: JektMessageNode;
@@ -129,12 +130,7 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                 </div>
             </Show>
             <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
-                <Show when={peekTimeText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                </Show>
-                <Show when={peekEstimateText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                </Show>
+                <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
             </PeekOverlay>
         </div>
     );
