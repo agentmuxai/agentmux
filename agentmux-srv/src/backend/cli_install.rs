@@ -241,6 +241,299 @@ fn open_lock_file(
     Ok(Some(file))
 }
 
+// ─── installing ─────────────────────────────────────────────────────────────
+
+/// What to install: `npm_package@pinned_version`, whose shim is `cli_command`.
+#[derive(Debug, Clone)]
+pub struct NpmInstallRequest {
+    pub provider_id: String,
+    pub npm_package: String,
+    pub pinned_version: String,
+    pub cli_command: String,
+    /// Run npm below normal priority (the startup warm-up, not an open
+    /// someone is waiting on).
+    pub background: bool,
+}
+
+/// What `npm install` produced.
+#[derive(Debug)]
+pub struct NpmRun {
+    pub success: bool,
+    pub code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub enum InstallOutcome {
+    /// This call ran npm; the shim is here.
+    Installed(PathBuf),
+    /// A finished install was already there — typically another instance's,
+    /// completed while this one waited for the lock.
+    AlreadyInstalled(PathBuf),
+}
+
+#[derive(Debug)]
+pub enum InstallError {
+    Lock(std::io::Error),
+    Clear(PathBuf, std::io::Error),
+    Spawn(std::io::Error),
+    NpmFailed { code: Option<i32> },
+    ShimMissing { expected: PathBuf },
+    Mark(PathBuf, std::io::Error),
+}
+
+impl std::fmt::Display for InstallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InstallError::Lock(e) => write!(f, "cannot take the CLI install lock: {e}"),
+            InstallError::Clear(d, e) => write!(
+                f,
+                "cannot clear an incomplete CLI install at {}: {e}",
+                d.display()
+            ),
+            InstallError::Spawn(e) => write!(f, "failed to run npm install: {e}"),
+            InstallError::NpmFailed { code } => {
+                write!(f, "npm install exited {}", code.unwrap_or(-1))
+            }
+            InstallError::ShimMissing { expected } => {
+                write!(f, "npm install left no CLI shim at {}", expected.display())
+            }
+            InstallError::Mark(d, e) => write!(
+                f,
+                "cannot mark the CLI install complete at {}: {e}",
+                d.display()
+            ),
+        }
+    }
+}
+
+/// Install `req` into its install dir, **blocking** — call it from
+/// `spawn_blocking` or a plain thread. The one install routine for
+/// `resolvecli` and the startup warm-up ([`warm_used_providers`]):
+///
+/// 1. Take the cross-instance lock, and hold it until this returns — so npm
+///    never outlives the lock (Codex P2 on #3927: a timed-out RPC used to
+///    drop its guard while npm kept writing).
+/// 2. A valid install already there (another instance finished while this
+///    one waited): reuse it. Otherwise clear leftovers, marker and all.
+/// 3. `npm install --prefix <dir> <pkg>@<pin>`; every output line goes to
+///    `on_line(stream, line)`.
+/// 4. Verify the shim, then publish with [`COMPLETE_MARKER`].
+pub fn install_pinned_cli(
+    paths: &DataPaths,
+    req: &NpmInstallRequest,
+    on_line: &dyn Fn(&'static str, &str),
+) -> Result<InstallOutcome, InstallError> {
+    install_pinned_cli_with(paths, req, on_line, run_npm_install)
+}
+
+/// [`install_pinned_cli`] with the npm runner injected (tests).
+pub fn install_pinned_cli_with(
+    paths: &DataPaths,
+    req: &NpmInstallRequest,
+    on_line: &dyn Fn(&'static str, &str),
+    run_npm: impl FnOnce(&Path, &str, bool) -> std::io::Result<NpmRun>,
+) -> Result<InstallOutcome, InstallError> {
+    let dir = install_dir(paths, &req.provider_id, &req.pinned_version);
+    let bin = npm_bin(&dir, &req.cli_command);
+    let _guard =
+        lock_install(paths, &req.provider_id, &req.pinned_version).map_err(InstallError::Lock)?;
+    let shared = shared_cli_dir(paths, &req.provider_id, &req.pinned_version);
+    if let Some(d) = shared.as_deref() {
+        if is_valid_install(d, &req.cli_command) {
+            return Ok(InstallOutcome::AlreadyInstalled(bin));
+        }
+        clear_unless_valid(d, &req.cli_command)
+            .map_err(|e| InstallError::Clear(d.to_path_buf(), e))?;
+    }
+    let package = format!("{}@{}", req.npm_package, req.pinned_version);
+    tracing::info!(package = %package, prefix = %dir.display(), background = req.background, "running npm install");
+    let run = run_npm(&dir, &package, req.background).map_err(InstallError::Spawn)?;
+    tracing::info!(
+        exit_code = run.code.unwrap_or(-1),
+        stdout_bytes = run.stdout.len(),
+        stderr_bytes = run.stderr.len(),
+        "npm install output collected"
+    );
+    // stderr first: npm writes progress and errors there.
+    for (stream, bytes) in [("stderr", &run.stderr), ("stdout", &run.stdout)] {
+        for line in String::from_utf8_lossy(bytes).lines() {
+            if !line.trim().is_empty() {
+                on_line(stream, line);
+            }
+        }
+    }
+    if !run.success {
+        return Err(InstallError::NpmFailed { code: run.code });
+    }
+    if !bin.is_file() {
+        return Err(InstallError::ShimMissing { expected: bin });
+    }
+    if let Some(d) = shared.as_deref() {
+        mark_complete(d, &req.pinned_version)
+            .map_err(|e| InstallError::Mark(d.to_path_buf(), e))?;
+    }
+    Ok(InstallOutcome::Installed(bin))
+}
+
+/// Run `npm install --prefix <dir> <package>` to completion.
+///
+/// Output is collected after exit (`.output()`): pipe-based streaming
+/// (async IOCP and sync blocking alike) receives nothing from `cmd.exe /C`
+/// batch children on Windows until the process exits.
+fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Result<NpmRun> {
+    let out = {
+        #[cfg(windows)]
+        {
+            // npm on Windows is a .cmd batch script — it must run via
+            // `cmd /C`. `raw_arg` passes the command string verbatim: with
+            // `.args(["/C", s])` Rust quotes `s` and escapes inner quotes as
+            // `\"`, which cmd.exe takes literally, corrupting the path
+            // (CWD + \"C:\path\" → ENOENT).
+            use std::os::windows::process::CommandExt;
+            // No console flash from a GUI process (CREATE_NO_WINDOW); the
+            // warm-up also runs below normal priority.
+            const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+            let mut flags = agentmux_common::win32::CREATE_NO_WINDOW;
+            if background {
+                flags |= BELOW_NORMAL_PRIORITY_CLASS;
+            }
+            let prefix = dir.to_string_lossy().replace('/', "\\");
+            let cmdline = format!(
+                "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{prefix}\" {package}"
+            );
+            let mut c = std::process::Command::new("cmd");
+            // `npm install` runs arbitrary postinstall scripts — no instance
+            // identity for those.
+            crate::backend::pane_env::sanitize_external_std_command(&mut c);
+            c.arg("/C")
+                .raw_arg(&cmdline)
+                .creation_flags(flags)
+                .env("CI", "true")
+                .env("FORCE_COLOR", "0")
+                .output()?
+        }
+        #[cfg(not(windows))]
+        {
+            let mut c = std::process::Command::new("npm");
+            crate::backend::pane_env::sanitize_external_std_command(&mut c);
+            c.args([
+                "install",
+                "--loglevel=http",
+                "--no-audit",
+                "--no-fund",
+                "--no-progress",
+                "--prefix",
+            ])
+            .arg(dir)
+            .arg(package)
+            .env("CI", "true")
+            .env("FORCE_COLOR", "0");
+            if background {
+                use std::os::unix::process::CommandExt;
+                // SAFETY: setpriority is async-signal-safe; nothing else runs
+                // between fork and exec here.
+                unsafe {
+                    c.pre_exec(|| {
+                        let _ = libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+                        Ok(())
+                    });
+                }
+            }
+            c.output()?
+        }
+    };
+    Ok(NpmRun {
+        success: out.status.success(),
+        code: out.status.code(),
+        stdout: out.stdout,
+        stderr: out.stderr,
+    })
+}
+
+// ─── startup warm-up ────────────────────────────────────────────────────────
+
+/// How long after srv start the warm-up begins: after the first IPC traffic,
+/// well before most users open an agent.
+pub const WARM_INSTALL_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The npm-installed providers among `provider_ids` whose pinned CLI has no
+/// install yet, deduplicated, in first-seen order. Pure over the registry and
+/// the filesystem.
+pub fn providers_needing_install(
+    paths: &DataPaths,
+    provider_ids: &[String],
+) -> Vec<NpmInstallRequest> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for id in provider_ids {
+        let Some(p) = crate::backend::providers::get_provider(id) else {
+            continue;
+        };
+        if p.npm_package.is_empty() || !seen.insert(p.id) {
+            continue;
+        }
+        if find_installed(paths, p.id, p.pinned_version, p.cli_command).is_some() {
+            continue;
+        }
+        out.push(NpmInstallRequest {
+            provider_id: p.id.to_string(),
+            npm_package: p.npm_package.to_string(),
+            pinned_version: p.pinned_version.to_string(),
+            cli_command: p.cli_command.to_string(),
+            background: true,
+        });
+    }
+    out
+}
+
+/// SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.1: install the pinned CLI of every
+/// provider the user's agents use, in the background, so the first open
+/// after a pin bump doesn't wait on npm. Only providers in `provider_ids`
+/// (the user's own agent definitions — not every template's), only pins with
+/// no install yet, one at a time, npm below normal priority. An open that
+/// arrives mid-install waits on the same lock and then reuses the result.
+/// Failures (no npm, offline) are logged and left for the open to report.
+pub fn warm_used_providers(
+    paths: DataPaths,
+    provider_ids: Vec<String>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("cli-install-warm".into())
+        .spawn(move || {
+            std::thread::sleep(WARM_INSTALL_DELAY);
+            let todo = providers_needing_install(&paths, &provider_ids);
+            if todo.is_empty() {
+                tracing::info!(
+                    providers = provider_ids.len(),
+                    "cli warm-up: every used provider's pinned CLI is installed"
+                );
+                return;
+            }
+            for req in todo {
+                let started = std::time::Instant::now();
+                let quiet = |_: &'static str, _: &str| {};
+                match install_pinned_cli(&paths, &req, &quiet) {
+                    Ok(outcome) => tracing::info!(
+                        provider = %req.provider_id,
+                        pinned_version = %req.pinned_version,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        outcome = ?outcome,
+                        "cli warm-up: installed"
+                    ),
+                    Err(e) => tracing::info!(
+                        provider = %req.provider_id,
+                        pinned_version = %req.pinned_version,
+                        error = %e,
+                        "cli warm-up: install failed; the first open will retry and report it"
+                    ),
+                }
+            }
+        })
+        .expect("spawn cli-install-warm thread")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,5 +773,170 @@ mod tests {
             try_lock_install(&p, "claude", "").unwrap().is_some(),
             "no lock needed without a shared dir"
         );
+    }
+
+    fn claude_req(background: bool) -> NpmInstallRequest {
+        NpmInstallRequest {
+            provider_id: "claude".into(),
+            npm_package: "@anthropic-ai/claude-code".into(),
+            pinned_version: "2.1.280".into(),
+            cli_command: "claude".into(),
+            background,
+        }
+    }
+
+    /// A fake npm: writes the shim unless told not to, and reports `success`.
+    fn fake_npm(
+        write_shim: bool,
+        success: bool,
+    ) -> impl FnOnce(&Path, &str, bool) -> std::io::Result<NpmRun> {
+        move |dir: &Path, _pkg: &str, _bg: bool| {
+            if write_shim {
+                let bin = npm_bin(dir, "claude");
+                std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+                std::fs::write(&bin, "").unwrap();
+            }
+            Ok(NpmRun {
+                success,
+                code: Some(if success { 0 } else { 1 }),
+                stdout: b"added 3 packages\n".to_vec(),
+                stderr: b"npm http fetch\n\n".to_vec(),
+            })
+        }
+    }
+
+    #[test]
+    fn install_runs_npm_verifies_the_shim_and_marks_it_complete() {
+        let _tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(_tmp.path());
+        let lines = std::sync::Mutex::new(Vec::new());
+        let on_line = |s: &'static str, l: &str| lines.lock().unwrap().push(format!("{s}:{l}"));
+        let out =
+            install_pinned_cli_with(&paths, &claude_req(false), &on_line, fake_npm(true, true))
+                .unwrap();
+        let dir = shared_cli_dir(&paths, "claude", "2.1.280").unwrap();
+        assert!(matches!(out, InstallOutcome::Installed(ref b) if *b == npm_bin(&dir, "claude")));
+        assert!(is_valid_install(&dir, "claude"));
+        assert_eq!(
+            *lines.lock().unwrap(),
+            vec!["stderr:npm http fetch", "stdout:added 3 packages"]
+        );
+    }
+
+    #[test]
+    fn a_finished_install_is_reused_without_running_npm() {
+        let _tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(_tmp.path());
+        install_pinned_cli_with(&paths, &claude_req(true), &|_, _| {}, fake_npm(true, true))
+            .unwrap();
+        let out = install_pinned_cli_with(
+            &paths,
+            &claude_req(false),
+            &|_, _| {},
+            |_: &Path, _: &str, _: bool| -> std::io::Result<NpmRun> {
+                panic!("npm must not run again")
+            },
+        )
+        .unwrap();
+        assert!(matches!(out, InstallOutcome::AlreadyInstalled(_)));
+    }
+
+    #[test]
+    fn a_failed_npm_leaves_no_marker_and_the_next_attempt_starts_clean() {
+        let _tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(_tmp.path());
+        let dir = shared_cli_dir(&paths, "claude", "2.1.280").unwrap();
+        // npm wrote a shim but exited non-zero: not an install.
+        let err = install_pinned_cli_with(
+            &paths,
+            &claude_req(false),
+            &|_, _| {},
+            fake_npm(true, false),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InstallError::NpmFailed { code: Some(1) }));
+        assert!(!is_complete(&dir));
+        assert!(find_installed(&paths, "claude", "2.1.280", "claude").is_none());
+        // The retry clears the leftover before npm runs.
+        let retry = install_pinned_cli_with(
+            &paths,
+            &claude_req(false),
+            &|_, _| {},
+            |d: &Path, p: &str, b: bool| {
+                assert!(
+                    !npm_bin(d, "claude").exists(),
+                    "leftover shim must be cleared first"
+                );
+                fake_npm(true, true)(d, p, b)
+            },
+        );
+        assert!(matches!(retry, Ok(InstallOutcome::Installed(_))));
+    }
+
+    #[test]
+    fn npm_success_without_a_shim_is_an_error_and_unmarked() {
+        let _tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(_tmp.path());
+        let err = install_pinned_cli_with(
+            &paths,
+            &claude_req(false),
+            &|_, _| {},
+            fake_npm(false, true),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InstallError::ShimMissing { .. }));
+        assert!(!is_complete(
+            &shared_cli_dir(&paths, "claude", "2.1.280").unwrap()
+        ));
+    }
+
+    #[test]
+    fn the_install_holds_the_lock_until_npm_returns() {
+        let _tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(_tmp.path());
+        let p2 = paths.clone();
+        install_pinned_cli_with(
+            &paths,
+            &claude_req(false),
+            &|_, _| {},
+            move |d: &Path, pk: &str, b: bool| {
+                // While npm "runs", nobody else can take the lock.
+                assert!(try_lock_install(&p2, "claude", "2.1.280")
+                    .unwrap()
+                    .is_none());
+                fake_npm(true, true)(d, pk, b)
+            },
+        )
+        .unwrap();
+        assert!(try_lock_install(&paths, "claude", "2.1.280")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn warm_up_picks_used_npm_providers_with_no_install_once_each() {
+        let _tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(_tmp.path());
+        let ids: Vec<String> = ["claude", "claude", "codex", "not-a-provider"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let todo: Vec<String> = providers_needing_install(&paths, &ids)
+            .into_iter()
+            .map(|r| r.provider_id)
+            .collect();
+        assert_eq!(todo, vec!["claude", "codex"]);
+        assert!(providers_needing_install(&paths, &ids)
+            .iter()
+            .all(|r| r.background));
+
+        // Installed → no longer needed.
+        install_pinned_cli_with(&paths, &claude_req(true), &|_, _| {}, fake_npm(true, true))
+            .unwrap();
+        let todo: Vec<String> = providers_needing_install(&paths, &ids)
+            .into_iter()
+            .map(|r| r.provider_id)
+            .collect();
+        assert_eq!(todo, vec!["codex"]);
     }
 }

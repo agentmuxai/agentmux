@@ -1484,6 +1484,30 @@ pub fn spawn_background_subsystems(
     let history_service = Arc::new(backend::history::HistoryService::new());
     history_service.warm_in_background();
 
+    // Install the pinned CLI of every provider the user's own agents use, in
+    // the background, so the first open after a pin bump doesn't wait on npm
+    // (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.1). Templates don't count:
+    // they span every provider. AGENTMUX_NO_CLI_WARM=1 turns it off.
+    if std::env::var("AGENTMUX_NO_CLI_WARM").map_or(true, |v| v != "1") {
+        match (
+            agentmux_common::DataPaths::from_env(),
+            mstore.agent_def_list(),
+        ) {
+            (Some(paths), Ok(defs)) => {
+                let providers: Vec<String> = defs
+                    .into_iter()
+                    .filter(|d| d.is_seeded != 1)
+                    .map(|d| d.provider)
+                    .collect();
+                backend::cli_install::warm_used_providers(paths, providers);
+            }
+            (_, Err(e)) => {
+                tracing::warn!(error = %e, "cli warm-up: cannot list agent definitions; skipped")
+            }
+            (None, _) => tracing::warn!("cli warm-up: no data paths; skipped"),
+        }
+    }
+
     // Session archiver — auto-archive sessions inactive for >7 days, cap at 2 GB.
     // Skip if home directory can't be determined (would otherwise fall back to a
     // relative path and create archives under the current working directory).
