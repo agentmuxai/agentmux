@@ -1,7 +1,7 @@
 # SPEC: Paste and drop images into the agent pane input
 
 **Date:** 2026-09-26
-**Status:** proposed — nothing in this spec is implemented. Written against `main` @ `be7e05af5`. Every file:line citation was read on that commit; spot-verify before trusting.
+**Status:** active — shipped: #3910 (store, processing pipeline, RPCs and HTTP routes), #3917 (delivery to agents: `<attached_images>` list for every provider, Claude inline within per-message and per-session budgets), #3918 (composer tray, drop, Ctrl+V, transcript thumbnails, right-click Cut/Copy/Paste fix), #3920 (right-click Paste of clipboard images). Remaining (phase 3): HEIC/AVIF/SVG decoding, Codex App Server `localImage` and `exec -i` inputs, container agents, a drop overlay that counts files before the drop, drag-to-reorder tiles. Written against `main` @ `be7e05af5`; spot-verify file:line citations before trusting.
 **Author:** Korp@narko
 **Related:** `docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md` (today's drop → copy-to-cwd → `@name` flow, which this spec narrows for images), `docs/specs/SPEC_UNIFIED_CLIPBOARD_2026_05_18.md` (text-only clipboard bridge; §6 puts images out of scope), `docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md` (why drop handling is guarded at window level).
 
