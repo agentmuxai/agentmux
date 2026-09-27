@@ -54,12 +54,16 @@ import {
     makeAgentMatcher,
     matchesOwnChannel,
     mergeTimelines,
+    newestLogFirst,
+    parseAgentOpenLine,
+    percentile,
     pickCandidate,
     printLastLines,
     renderLine,
     selectWindowNames,
     siblingCandidateDirs,
     summarizeInstance,
+    summarizeOpens,
 } from "./muxlog.mjs";
 
 let root;
@@ -553,6 +557,16 @@ describe("muxlog rotated files (§3.1)", () => {
         expect(out).toContain("00:00:05");
     });
 
+    it("breaks an mtime tie between daily files by the later date in the name", () => {
+        const f = (date) => ({ file: `/l/agentmuxsrv-v0.58.0.log.${date}`, mtime: 5 });
+        expect([f("2026-09-26"), f("2027-01-01"), f("2026-09-27")].sort(newestLogFirst).map((e) => e.file.slice(-10))).toEqual([
+            "2027-01-01",
+            "2026-09-27",
+            "2026-09-26",
+        ]);
+        expect(newestLogFirst({ file: "/l/a.log.2026-09-26", mtime: 9 }, { file: "/l/a.log.2026-09-27", mtime: 5 })).toBeLessThan(0);
+    });
+
     it("without --since still reads only the newest file", () => {
         writeIncident(root);
         const out = runMuxlog(root, ["srv", "-i", "6addbd3a", "cat"]);
@@ -664,5 +678,74 @@ describe("muxlog admission (§3.4)", () => {
         const body = (s) => s.split("\n").slice(1).join("\n");
         expect(body(outs[1])).toBe(body(out));
         expect(body(outs[2])).toBe(body(out));
+    });
+});
+
+describe("muxlog opens (SPEC_AGENT_OPEN_LATENCY §4.6)", () => {
+    const OPEN_LAZO =
+        '[agent-open] agent="Lazo" block=1a2b3c4d source=my-agents outcome=quiet total=1341 cli=180 cli_source=installed ' +
+        "config=402 history_read=610 history_lines=5000 painted=812 revealed=815 quiet=1341 auth=authenticated";
+    const OPEN_RESTORED = '[agent-open] agent="Agent A" block=99887766 source=mount outcome=unsettled total=15500 painted=300 revealed=320 hidden=1';
+    const hostLine = (ts, message) =>
+        JSON.stringify({ timestamp: ts, level: "INFO", fields: { message: `[fe] ${message}`, module: "console", data: "Some(Null)" }, target: "agentmux_cef::commands::backend" });
+    function writeHostLog(home, chan, ver, date, lines) {
+        const dir = path.join(home, ".agentmux", "channels", chan, "versions", ver, "logs");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, `agentmux-host-v${ver}.log.${date}`), lines.join("\n") + "\n");
+    }
+
+    it("parses an open line, with quoted names and numbers", () => {
+        expect(parseAgentOpenLine(`[fe] ${OPEN_LAZO}`)).toMatchObject({
+            agent: "Lazo", block: "1a2b3c4d", source: "my-agents", outcome: "quiet",
+            total: 1341, cli: 180, cli_source: "installed", history_lines: 5000, painted: 812, quiet: 1341, auth: "authenticated",
+        });
+        expect(parseAgentOpenLine(OPEN_RESTORED)).toMatchObject({ agent: "Agent A", outcome: "unsettled", hidden: 1 });
+        expect(parseAgentOpenLine("[fe] [agent] Launching agent definition Lazo")).toBeNull();
+    });
+
+    it("takes nearest-rank percentiles, ignoring missing values", () => {
+        expect(percentile([5, 1, 3, undefined, 2, 4], 50)).toBe(3);
+        expect(percentile([5, 1, 3, 2, 4], 95)).toBe(5);
+        expect(percentile([], 50)).toBeNull();
+    });
+
+    it("summarizes per source; quiet percentiles only count opens that went quiet", () => {
+        const opens = [
+            { source: "my-agents", outcome: "quiet", painted: 800, quiet: 1300, cli_source: "installed" },
+            { source: "my-agents", outcome: "quiet", painted: 400, quiet: 900, cli_source: "local_install" },
+            { source: "my-agents", outcome: "unsettled", painted: 600 },
+            { source: "mount", outcome: "quiet", painted: 200, quiet: 700 },
+        ];
+        const [mine, mount] = summarizeOpens(opens);
+        expect(mine).toMatchObject({ source: "my-agents", n: 3, installs: 1, outcomes: { quiet: 2, unsettled: 1 } });
+        expect(mine.painted).toEqual({ p50: 600, p95: 800 });
+        expect(mine.quiet).toEqual({ p50: 900, p95: 1300 });
+        expect(mount).toMatchObject({ source: "mount", n: 1 });
+    });
+
+    it("end to end: rows from every instance, filtered by agent, then the summary", () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), "muxlog-opens-test-"));
+        try {
+            writeHostLog(home, "local-main-b28b7a-7a8245ae", "0.58.0", "2026-09-27", [
+                hostLine("2026-09-27T04:01:57.100000Z", OPEN_LAZO),
+                hostLine("2026-09-27T04:02:10.000000Z", "[perf] long-task 91ms"),
+            ]);
+            writeHostLog(home, "local-main-b28b7a-6addbd3a", "0.58.1", "2026-09-27", [hostLine("2026-09-27T05:00:00.000000Z", OPEN_RESTORED)]);
+            const all = runMuxlog(home, ["opens", "--since", "2026-09-27T00:00"]);
+            expect(all).toContain("v0.58.0/7a8245ae");
+            expect(all).toContain("v0.58.1/6addbd3a");
+            expect(all).toMatch(/Lazo\s+my-agents\s+quiet\s+180 installed\s+812\s+815\s+1341\s+1341 authenticated/);
+            expect(all).toContain("Agent A");
+            expect(all).toMatch(/my-agents 1 open \(quiet 1\); first row p50 812 p95 812; quiet p50 1341 p95 1341; 1 installed the CLI/);
+            expect(all).not.toContain("long-task");
+
+            const one = runMuxlog(home, ["opens", "lazo", "--since", "2026-09-27T00:00"]);
+            expect(one).toContain("Lazo");
+            expect(one).not.toContain("Agent A");
+
+            expect(runMuxlog(home, ["opens", "nobody", "--since", "2026-09-27T00:00"])).toContain("no [agent-open] lines for 'nobody'");
+        } finally {
+            fs.rmSync(home, { recursive: true, force: true });
+        }
     });
 });

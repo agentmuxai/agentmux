@@ -153,6 +153,7 @@ import { createAgentAtoms } from "./state";
 import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
+import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "./open-trace";
 
 // Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
 // pattern). Used by sanitizeLogTextForTerminal below to strip escape sequences
@@ -861,6 +862,10 @@ const AgentPresentationView = ({
     //   assembling → covered, not yet fading   (was: !historyLoaded && showOverlay)
     //   revealing  → covered, fading            (was:  historyLoaded && showOverlay)
     //   live       → unmounted                  (was: !showOverlay)
+    // Before useHistoryPagination below, so a pane mounting without a My
+    // Agents click (startup restore) still records its history phases.
+    beginAgentOpenOnMount(model.blockId, agentName());
+    onCleanup(() => finishAgentOpen(model.blockId, "closed"));
     const readiness = createPaneReadiness({ label: `block:${model.blockId}` });
     const releaseHistoryGate = readiness.gate("history");
     const releaseAuthGate = readiness.gate("auth");
@@ -923,6 +928,7 @@ const AgentPresentationView = ({
                 // queued as of the first one's frame has been painted.
                 settlePaintRaf1 = requestAnimationFrame(() => {
                     settlePaintRaf2 = requestAnimationFrame(() => {
+                        markAgentOpen(model.blockId, "painted");
                         setHistoryPainted(true);
                     });
                 });
@@ -1390,6 +1396,12 @@ const AgentPresentationView = ({
     // as one visual unit with the spinner instead of vanishing mid-transition.
     createEffect(() => {
         if (readiness.phase() === "revealing") {
+            // Where the open landed: `first-login`/`auth-expired` means the
+            // pane now waits on the user, which the open's time excludes.
+            noteAgentOpen(model.blockId, {
+                auth: untrack(() => status.launchPhase()?.kind ?? status.authStatus()),
+            });
+            agentOpenRevealed(model.blockId);
             loadingOverlayFadeTimeout = setTimeout(() => readiness.revealComplete(), 220);
         }
     });

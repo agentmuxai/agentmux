@@ -40,6 +40,7 @@ import { lastFreshBoundaryIndex } from "../session-outcome";
 import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 
 import type { DocumentState, FilterState, LogFn } from "../types";
+import { markAgentOpen } from "../open-trace";
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
@@ -242,6 +243,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).
         opts.model.dispatchPane({ type: "InitStart" });
+        markAgentOpen(opts.blockId, "history_start");
         (async () => {
             // Fast path: try the reducer-state snapshot first. If it exists
             // and the schema version matches, restore wholesale and skip
@@ -357,7 +359,9 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             limit: hwm - windowStart,
                         }, { timeout: 30_000 });
                         if (!mounted) return;
+                        markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
                         const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
+                        markAgentOpen(opts.blockId, "parsed");
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Right after the dispatch, before anything else can
                         // run: live records must land after these nodes.
@@ -507,8 +511,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     limit,
                 }, { timeout: 15000 });
                 if (!mounted) return;
+                markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
 
                 const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
+                markAgentOpen(opts.blockId, "parsed");
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
                 }
