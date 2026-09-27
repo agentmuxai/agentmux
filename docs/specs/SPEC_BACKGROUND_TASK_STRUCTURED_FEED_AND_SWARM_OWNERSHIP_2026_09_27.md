@@ -32,7 +32,7 @@ Meanwhile the CLI already emits a **structured task feed** on the parent agent's
 {"type":"system","subtype":"task_notification","task_id":"b6p74mfn6","tool_use_id":"toolu_…","status":"completed","summary":"Background command \"Background wait for agents\" completed (exit code 0)"}
 ```
 
-Measured in one agent's record (all sessions): 2,553 `task_started`, 1,335 `task_updated`, 2,555 `task_notification`, 13,769 `task_progress`. `task_type` is `local_bash`, `local_agent` or `local_workflow`. `task_updated` patches are `{status, end_time}` (`completed`, `failed`, `killed`) or `{is_backgrounded: true}` when a running command is moved to the background. For the 11 stuck tasks, 10 have both `task_started` and `task_notification` in the parent stream; the 11th (a watch loop) has only `task_started`.
+Measured in one agent's record (all sessions): 2,553 `task_started`, 1,335 `task_updated`, 2,555 `task_notification`, 13,769 `task_progress`. `task_type` is `local_bash`, `local_agent` or `local_workflow`. `task_updated` patches are `{status, end_time}` (`completed`, `failed`, `killed`) or `{is_backgrounded: true}` when a running command is moved to the background. All 11 stuck tasks have their start and their end in the parent stream: 10 end with `task_notification`, the 11th (a watch loop) with `task_updated {status: completed}`. Replaying that session's 3,046 recorded task lines through Phase 1's `TaskFeed` yields 33 background-task rows, all terminal (31 done, 1 error, 1 stopped), the 11 among them.
 
 A subagent's own stream lines carry `parent_tool_use_id` = the `tool_use_id` of the Agent call that spawned it, which is also the `toolUseId` in that subagent's `agent-<id>.meta.json`. That is the join key from a background task to the subagent that owns it, at any spawn depth.
 
@@ -60,7 +60,7 @@ The renderer's existing `docknodestatus`/completion pushes are unchanged; every 
 ### 2.4 Not covered by Phase 1
 
 - Non-persistent controllers (one-shot subprocess, containers) keep today's renderer-only path.
-- Tasks the CLI never reports ending (the watch loop above; a CLI that dies mid-task; `kill -9`). See Phase 4.
+- Tasks the CLI never reports ending (a CLI that dies mid-task, `kill -9`). See Phase 4.
 
 ## 3. Phase 2 — ownership
 
