@@ -236,3 +236,169 @@ export const CORE_TOOLS: CoreTool[] = [
         brewFormula: "uv",
     },
 ];
+
+/**
+ * Local-model toolchain — inference runtimes and local-capable agent CLIs,
+ * rendered in the Toolchain pane's own "Local models" section. Detection
+ * only (PATH probe via `resolvecli`): none of these are in the backend's
+ * system-install catalog, so each row offers the copyable command and the
+ * install link, never the one-click install. Kept out of `CORE_TOOLS` so
+ * `toolchain-capabilities.ts` and the one-click installer never treat them
+ * as tools AgentMux itself needs.
+ *
+ * The agent entries (OpenCode, Goose, Crush, Aider) are NOT launchable as
+ * AgentMux panes yet — they are listed so users can see what's installed.
+ */
+export const LOCAL_MODEL_TOOLS: CoreTool[] = [
+    {
+        id: "ollama",
+        cliCommand: "ollama",
+        label: "Ollama",
+        icon: "server",
+        optional: true,
+        description: "Local model runtime — serves OpenAI- and Anthropic-compatible APIs on :11434.",
+        docsUrl: "https://docs.ollama.com/",
+        installUrls: {
+            windows: "https://ollama.com/download/windows",
+            macos: "https://ollama.com/download/mac",
+            linux: "https://docs.ollama.com/linux",
+        },
+        installCommand: {
+            windows: "winget install --id Ollama.Ollama -e",
+            macos: "brew install ollama",
+            linux: "curl -fsSL https://ollama.com/install.sh | sh",
+        },
+    },
+    {
+        id: "llama-cpp",
+        cliCommand: "llama-server",
+        label: "llama.cpp",
+        icon: "microchip",
+        optional: true,
+        description: "Inference engine — llama-server serves GGUF models over OpenAI- and Anthropic-compatible APIs.",
+        docsUrl: "https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md",
+        installUrls: {
+            windows: "https://github.com/ggml-org/llama.cpp/releases",
+            macos: "https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md",
+            linux: "https://github.com/ggml-org/llama.cpp/releases",
+        },
+        installCommand: {
+            windows: "winget install llama.cpp",
+            macos: "brew install llama.cpp",
+            linux: "brew install llama.cpp",
+        },
+    },
+    {
+        id: "lmstudio",
+        cliCommand: "lms",
+        label: "LM Studio",
+        icon: "desktop",
+        optional: true,
+        description: "Local model runtime (desktop app or headless daemon) — serves OpenAI, Responses, and Anthropic APIs on :1234.",
+        docsUrl: "https://lmstudio.ai/docs/developer/core/headless",
+        installUrls: {
+            windows: "https://lmstudio.ai/download",
+            macos: "https://lmstudio.ai/download",
+            linux: "https://lmstudio.ai/download",
+        },
+        installCommand: {
+            windows: "irm https://lmstudio.ai/install.ps1 | iex",
+            macos: "curl -fsSL https://lmstudio.ai/install.sh | bash",
+            linux: "curl -fsSL https://lmstudio.ai/install.sh | bash",
+        },
+    },
+    {
+        id: "llmfit",
+        cliCommand: "llmfit",
+        label: "llmfit",
+        icon: "gauge-high",
+        optional: true,
+        description: "Hardware check — recommends which local models fit this machine's GPU/RAM.",
+        docsUrl: "https://github.com/AlexsJones/llmfit",
+        installUrls: {
+            windows: "https://github.com/AlexsJones/llmfit#installation",
+            macos: "https://github.com/AlexsJones/llmfit#installation",
+            linux: "https://github.com/AlexsJones/llmfit#installation",
+        },
+        installCommand: {
+            windows: "scoop install llmfit",
+            macos: "brew install llmfit",
+            linux: "curl -fsSL https://llmfit.axjns.dev/install.sh | sh",
+        },
+    },
+    {
+        id: "opencode",
+        cliCommand: "opencode",
+        label: "OpenCode",
+        icon: "terminal",
+        optional: true,
+        description: "Open-source coding agent with built-in Ollama / LM Studio / llama.cpp support. Not yet launchable as an AgentMux pane.",
+        docsUrl: "https://opencode.ai/docs/",
+        installUrls: {
+            windows: "https://opencode.ai/docs/",
+            macos: "https://opencode.ai/docs/",
+            linux: "https://opencode.ai/docs/",
+        },
+        installCommand: {
+            windows: "npm install -g opencode-ai",
+            macos: "brew install anomalyco/tap/opencode",
+            linux: "curl -fsSL https://opencode.ai/install | bash",
+        },
+    },
+    {
+        id: "goose",
+        cliCommand: "goose",
+        label: "Goose",
+        icon: "feather",
+        optional: true,
+        description: "Open-source coding agent (Agentic AI Foundation) with native Ollama support. Not yet launchable as an AgentMux pane.",
+        docsUrl: "https://goose-docs.ai/docs/getting-started/installation/",
+        installUrls: {
+            windows: "https://goose-docs.ai/docs/getting-started/installation/",
+            macos: "https://goose-docs.ai/docs/getting-started/installation/",
+            linux: "https://goose-docs.ai/docs/getting-started/installation/",
+        },
+        installCommand: {
+            macos: "brew install block-goose-cli",
+            linux: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash",
+        },
+    },
+    {
+        id: "crush",
+        cliCommand: "crush",
+        label: "Crush",
+        icon: "wand-magic-sparkles",
+        optional: true,
+        description: "Terminal coding agent with Ollama / LM Studio / llama.cpp provider types. Not yet launchable as an AgentMux pane.",
+        docsUrl: "https://github.com/charmbracelet/crush",
+        installUrls: {
+            windows: "https://github.com/charmbracelet/crush#installation",
+            macos: "https://github.com/charmbracelet/crush#installation",
+            linux: "https://github.com/charmbracelet/crush#installation",
+        },
+        installCommand: {
+            windows: "winget install charmbracelet.crush",
+            macos: "brew install charmbracelet/tap/crush",
+            linux: "npm install -g @charmland/crush",
+        },
+    },
+    {
+        id: "aider",
+        cliCommand: "aider",
+        label: "Aider",
+        icon: "user-pen",
+        optional: true,
+        description: "Terminal pair programmer; runs local models via Ollama. Not yet launchable as an AgentMux pane.",
+        docsUrl: "https://aider.chat/docs/install.html",
+        installUrls: {
+            windows: "https://aider.chat/docs/install.html",
+            macos: "https://aider.chat/docs/install.html",
+            linux: "https://aider.chat/docs/install.html",
+        },
+        installCommand: {
+            windows: 'powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 | iex"',
+            macos: "curl -LsSf https://aider.chat/install.sh | sh",
+            linux: "curl -LsSf https://aider.chat/install.sh | sh",
+        },
+    },
+];
