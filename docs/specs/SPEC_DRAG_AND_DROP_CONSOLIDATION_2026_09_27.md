@@ -336,7 +336,7 @@ interface DragFiles {
 - `paneWorkdir(blockId)`: the one `cmd:cwd` lookup.
 - `copyIntoWorkdir(blockId, source, { mention, concurrency })`: the copy, the results, the `@name` mentions and the notices.
   - **Two transports, because the inputs differ:**
-    - `source` of `{ paths }` (a drop, right-click Paste) → in **phase 1** the existing CEF `copy_file_to_dir` (via `util/dnd.ts` `copyFilesToDir`), so phase 1 ships on its own; in **phase 2** swapped for `files.copy-to-dir` (§5.5) inside the helper, with no caller changes;
+    - `source` of `{ paths }` (a drop, right-click Paste) → CEF `copy_file_to_dir` over the **host-only** IPC (via `util/dnd.ts` `copyFilesToDir`) in every phase. Phase 2 replaces the implementation behind that IPC (§5.5), not the channel, so callers never change;
     - `source` of `{ files: File[] }` (Ctrl+V, where the browser supplies bytes, not paths) → the existing upload + `attachments.copy-to-workdir`, kept (`AgentFooter.tsx:555-563`, `attachment-draft.ts:244-253`).
   - The three routes in §2.1 become **one helper with two transports**, so results, mentions and notices are written once.
   - **The helper doesn't read any setting.** Callers pass `mention` and `concurrency`:
@@ -368,7 +368,13 @@ interface DragFiles {
   - `on_drag_enter` maps its browser to a label with `window_label_for` (`client/mod.rs:243`) and calls `put(label, paths)`;
   - the frontend passes its own label, `currentWindowLabel()` from `?windowLabel=` (`pane-overlay.ts`), as an argument: `consume_drag_paths {windowLabel}` → `take(label)`.
 
-  A browser the host can't map yet (a window mid-registration) stores under an unlabelled slot, which `take` falls back to. The single process-wide slot (`drag_stash.rs:24`) otherwise goes away.
+  A browser the host can't map yet (a window mid-registration) stores under an unlabelled slot, which `take` falls back to.
+- **The stash lives as long as the drag.** Today's 5 s TTL (`drag_stash.rs:12-22`, `:35-38`) expires under a user who hovers longer before dropping, so the drop then reports "couldn't read the paths" mid-drag. The entry is kept until one of:
+  - it is consumed;
+  - a new drag entering that window replaces it (`on_drag_enter`);
+  - the renderer's file session ends without a drop (leave, Esc, idle), which sends `clear_drag_paths {windowLabel}`.
+
+  A long backstop TTL (10 min) only guards against a leak. `peek_drag_paths` never shortens it. The single process-wide slot (`drag_stash.rs:24`) otherwise goes away.
 
 ### 5.5 One "copy into a folder"
 
@@ -378,10 +384,11 @@ interface DragFiles {
   - streaming with progress and cancel;
   - recursive directories.
 
-  srv's `copy_original_to` and a new srv RPC `files.copy-to-dir {paths, dir}` both call it.
-- **The frontend's `copyFilesToDir`** calls the RPC instead of CEF `copy_file_to_dir`. The CEF IPC and its untested `providers.rs:161-263` are deleted.
-- **Why srv:** it already knows about container working folders, runs the copy off any UI thread, and has the tested code.
-- **Settings:** `dnd:maxfilesizemb` is either wired into the RPC or removed from the settings template. Decide in phase 2 (open question 4).
+  srv's `copy_original_to` and CEF's `copy_file_to_dir` both call it.
+- **The channel stays host-only.** An arbitrary source-path + destination copy must **not** become a srv RPC. srv's full-auth surface is also reachable by agent processes, which are given `AGENTMUX_AUTH_KEY` (`agent_handlers/input.rs:548-564`), and the container exec denylist (`container.rs:231-245`) doesn't remove it. A caller-supplied `{paths, dir}` RPC would let an agent copy host files into its own working folder.
+  - The copy therefore stays behind CEF's renderer-only IPC (`copy_file_to_dir`, `ipc.rs:434`), and only its implementation changes: it calls `agentmux_common::copy_into_dir` inside `spawn_blocking`, instead of the racy, synchronous `providers.rs:161-263`.
+  - The one implementation is shared by crate, not by moving the call to srv.
+- **Settings:** `dnd:maxfilesizemb` is either enforced in the CEF copy or removed from the settings template. Decide in phase 2 (open question 4).
 
 ### 5.6 Cross-window drags
 
@@ -482,7 +489,7 @@ Each phase is one PR, or a short stack, and is independently shippable.
      - `drag-session` for `"files"` only;
      - `file-drop.ts` and its manifest hook;
      - `DropIndicator` + `drop-indicators.scss`;
-     - `file-drop-actions.ts`, whose `copyIntoWorkdir` paths transport is the **existing CEF `copy_file_to_dir`** in this phase (no dependency on phase 2's `files.copy-to-dir`);
+     - `file-drop-actions.ts`, whose `copyIntoWorkdir` paths transport is the **existing CEF `copy_file_to_dir`** in this phase (the same host-only IPC every phase uses);
      - the agent and terminal hooks;
      - the drone canvas type check;
      - the floater drag handler and the label-keyed stash (§5.4).
@@ -490,10 +497,10 @@ Each phase is one PR, or a short stack, and is independently shippable.
    - **User-visible:** the indicator; terminals get feedback; floaters accept drops; header drops work.
    - The hub (§5.2) can start as just the file subscriber, keeping `installGlobalDropGuard` until phase 4.
 2. **Phase 2: copy and paste**
-   - one Rust copy + the `files.copy-to-dir` RPC (§5.5);
-   - `copyIntoWorkdir`'s paths transport switched from CEF `copy_file_to_dir` to the RPC; phase 1 used the CEF IPC, so it depends on nothing new;
+   - one Rust copy, `agentmux_common::copy_into_dir`, behind the existing host-only CEF IPC and in srv's `copy_original_to` (§5.5);
+   - no transport change for callers: `copyIntoWorkdir` keeps the CEF IPC, and only the code behind it is replaced;
    - both container paste routes on `copyIntoWorkdir` (paths and bytes transports; paste keeps ignoring `dnd:*`);
-   - CEF `copy_file_to_dir` deleted;
+   - CEF's old `copy_recursive` / `deconflict_path` deleted, replaced by the shared function;
    - the `dnd:maxfilesizemb` decision.
 3. **Phase 3: one look**
    - every internal drop treatment in §2.4 moves onto the §4 tokens;
@@ -537,14 +544,19 @@ Phases 2–5 have no user-visible features. They're worth doing because every fu
   - one drag system per commit;
   - the per-platform adapters stay where the platforms genuinely differ (win32 OLE `dragleave`, DIP vs physical pixels).
 - **Coalescing:** only visuals are batched per animation frame. `preventDefault` / `dropEffect` and the `drop` authorisation are computed synchronously from the pane actually under the pointer on every event (§5.2, §5.3). A test covers releasing over a blocked pane within the same frame as leaving a Target: nothing is dispatched.
-- **Moving the copy to srv:**
-  - srv is local, so latency is small;
-  - progress for big copies improves, because srv streams with progress;
-  - srv must be reachable, which it is whenever panes are.
+- **Host file access through the shared auth key (found while reviewing this spec, outside its scope).**
+  - Agents get the full `AGENTMUX_AUTH_KEY`, and container agents keep it (§5.5).
+  - With it, existing routes already read arbitrary host paths:
+    - `/agentmux/stream-local-file` (`server/files.rs:199`, the media pane);
+    - `readeditorfile`;
+    - `attachments.ingest {paths}` together with `attachments.copy-to-workdir` or the attachment HTTP route.
+  - If a container can reach srv, the container boundary therefore does not protect host files today.
+
+  This spec adds no new route of that kind (§5.5 keeps the copy host-only). The existing ones need their own spec: an agent-scoped key without file-path RPCs, or a host-minted capability token per operation. That is tracked as a follow-up, not here.
 
 ## 10. Open questions
 
 1. **Armed outline on panes in other window tabs?** They aren't visible, so no. Only the visible layout is armed.
 2. **Blocked panes:** show the prompt with the reason (recommended), or nothing?
 3. **SC_MOVE / `HookMode::TearOff`:** is it shelved for good? If yes, phase 5 deletes it; if not, it stays with a comment.
-4. **`dnd:maxfilesizemb`:** wire a per-file cap into `files.copy-to-dir`, or drop the setting? Recommendation: drop it. The attachment store already has its own limits, and a copy into a working folder is the user's explicit act.
+4. **`dnd:maxfilesizemb`:** enforce a per-file cap in the host-only CEF copy, or drop the setting? Recommendation: drop it. The attachment store already has its own limits, and a copy into a working folder is the user's explicit act.
