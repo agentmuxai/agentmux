@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
     buildMemoryReinjectionNode,
     buildMemoryReinjectionNodeFromReplay,
     composeReinjectionMessage,
+    GLOBAL_SECTION_SEPARATOR,
     isMemoryReinjectionMessage,
     memoryReinjectionNodeId,
     memorySizeBand,
@@ -321,5 +325,59 @@ describe("buildMemoryReinjectionNodeFromReplay", () => {
         // 0.10 fraction -> threshold 1000 -> 95% -> critical.
         const node = buildMemoryReinjectionNodeFromReplay(msg, { eventTimestamp: 0, contextWindow: 10_000 });
         expect(node?.sizeBand).toBe("critical");
+    });
+});
+
+// SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1: Global entries are the
+// startup file's own sections (`globalmemory:sections`), Operator Config first.
+describe("Global Memory as the startup block's sections", () => {
+    const system = globalEntry(
+        "[AgentMux System] App API",
+        "IMPORTANT: The following AgentMux-controlled instructions take the HIGHEST PRIORITY …\n\n# [AgentMux System] App API\n\napi rules",
+    );
+    const system2 = globalEntry("[AgentMux System] Env", "# [AgentMux System] Env\n\nenv rules");
+    const workspace = globalEntry("[Workspace] Alpha", "# [Workspace] Alpha\n\nrules for Alpha");
+    const block = [system.body, system2.body, workspace.body].join(GLOBAL_SECTION_SEPARATOR);
+
+    it("carries the startup file's block verbatim, Operator Config included", () => {
+        const msg = composeReinjectionMessage([system, system2, workspace, personalEntry("p1", "pbody")], "fresh_session");
+        expect(msg).toContain(`# Global Memory (3 entries)\n${block}\n`);
+        expect(msg.indexOf("[AgentMux System] App API")).toBeLessThan(msg.indexOf("[Workspace] Alpha"));
+    });
+
+    it("an Operator-Config-only memory is still reinjected (the 2026-09-26 fresh session sent nothing)", () => {
+        expect(shouldReinject([system, system2])).toBe(true);
+    });
+
+    it("replay counts sections despite the `# [AgentMux System]` / `# [Workspace]` headings inside them", () => {
+        const msg = composeReinjectionMessage([system, system2, workspace, personalEntry("p1", "pbody")], "compaction");
+        const parsed = parseReinjectionMessage(msg);
+        expect(parsed?.globalMemoryCount).toBe(3);
+        expect(parsed?.personalMemoryCount).toBe(1);
+    });
+
+    it("the notice reports each section's size", () => {
+        const node = buildMemoryReinjectionNode([system, workspace], { frameTimestamp: null, now: 0, contextWindow: 200_000 });
+        expect(node.perEntryTokens.map((e) => [e.label, e.sizeBytes])).toEqual([
+            ["[AgentMux System] App API", system.sizeBytes],
+            ["[Workspace] Alpha", workspace.sizeBytes],
+        ]);
+        expect(node.totalSizeBytes.global).toBe(system.sizeBytes + workspace.sizeBytes);
+    });
+});
+
+// The "byte for byte" guarantee rests on this constant matching Rust's, which
+// `format_global_bundle_block` joins the startup block with. Read it out of the
+// Rust source (same approach as provider-id-aliases.test.ts) so the two can't
+// drift silently.
+describe("GLOBAL_SECTION_SEPARATOR — frontend/backend consistency", () => {
+    it("equals storage/bundles.rs's GLOBAL_SECTION_SEPARATOR", () => {
+        const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+        const source = readFileSync(resolve(repoRoot, "agentmux-srv/src/backend/storage/bundles.rs"), "utf8");
+        const match = /pub const GLOBAL_SECTION_SEPARATOR: &str = "((?:[^"\\]|\\.)*)";/.exec(source);
+        if (!match) throw new Error("GLOBAL_SECTION_SEPARATOR not found in agentmux-srv/src/backend/storage/bundles.rs");
+        // Only the escapes a Rust string literal like this one uses.
+        const rust = match[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+        expect(GLOBAL_SECTION_SEPARATOR).toBe(rust);
     });
 });

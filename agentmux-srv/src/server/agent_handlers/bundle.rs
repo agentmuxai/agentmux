@@ -14,8 +14,8 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     COMMAND_GLOBAL_MEMORY_HISTORY, COMMAND_GLOBAL_MEMORY_DIFF, COMMAND_GLOBAL_MEMORY_REVERT,
-    COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES, COMMAND_GLOBAL_MEMORY_IMPORT,
-    CommandGlobalMemoryImportSourcesData, CommandGlobalMemoryImportData,
+    COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES, COMMAND_GLOBAL_MEMORY_IMPORT, COMMAND_GLOBAL_MEMORY_SECTIONS,
+    CommandGlobalMemoryImportSourcesData, CommandGlobalMemoryImportData, CommandGlobalMemorySectionsData,
     CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
     CommandListBundlesData, CommandGetClaudeGlobalConfigData, ReorderGlobalBundlesResult,
     CommandUpsertBundleData, CommandGlobalMemoryHistoryData, CommandGlobalMemoryDiffData,
@@ -29,6 +29,7 @@ use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_global_memory_import(engine, state);
+    register_global_memory_sections(engine, state);
     // ---- Bundle CRUD ----
 
     let mstore = state.id_store.clone();
@@ -346,6 +347,26 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// The Armory's "Bring Global Memory from…" step for an isolated channel
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). Registered with the
 /// others below.
+/// `globalmemory:sections`: the Global Memory block an agent's startup file
+/// carries, from the same store (`id_store`) and formatter the startup-file
+/// writers use — so memory reinjection re-delivers it byte for byte,
+/// Operator Config included (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
+pub(crate) fn register_global_memory_sections(engine: &WshRpcEngine, state: &AppState) {
+    let id_store = state.id_store.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_SECTIONS,
+        move |_cmd: CommandGlobalMemorySectionsData, _ctx| {
+            let store = id_store.clone();
+            async move {
+                let bundles = store.bundle_list_global().map_err(|e| format!("globalmemory:sections: {e}"))?;
+                Ok::<Vec<crate::backend::storage::GlobalMemorySection>, String>(
+                    crate::backend::storage::global_bundle_sections(&bundles),
+                )
+            }
+        },
+    );
+}
+
 pub(crate) fn register_global_memory_import(engine: &WshRpcEngine, state: &AppState) {
     let id_store = state.id_store.clone();
     engine.register_typed(

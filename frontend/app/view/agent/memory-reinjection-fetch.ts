@@ -11,8 +11,8 @@
  * that needs a real `RpcClient` and is verified by direct reading rather
  * than unit tests — it's thin, typed pass-through, not logic.
  *
- * Global Memory (`BundleApi.ListBundlesCommand`) returns full body content
- * inline (`Bundle.instructions`) — no second round-trip needed. Personal/
+ * Global Memory (`BundleApi.GlobalMemorySectionsCommand`) returns each
+ * section's full text inline — no second round-trip needed. Personal/
  * native memory (`NativeMemoryApi.NativeMemoryListCommand`) returns
  * metadata only (`NativeMemoryFileMeta` — no content field), so each
  * non-index file needs a follow-up `NativeMemoryReadFileCommand` call.
@@ -27,22 +27,23 @@ import type { RpcClient } from "@/app/store/rpc-client";
 import type { MemoryEntryInput } from "./memory-reinjection";
 
 /**
- * Global Memory entries — agent-writable tier only (`is_global && !is_system`),
- * matching `SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md` §2.1's own
- * scope decision for the same distinction (system-tier is AgentMux-authored
- * and reaches every install through the normal release channel, not
- * something a reinjection needs to re-deliver).
+ * Global Memory entries — the sections of the block agents' startup files
+ * carry, Operator Config first, from the same store and formatter the
+ * startup-file writers use (`globalmemory:sections`). Joined by
+ * `GLOBAL_SECTION_SEPARATOR` they are that block byte for byte, so a
+ * reinjection re-delivers exactly what the agent launched with. Operator
+ * Config used to be left out here; with only Operator Config present, that
+ * left nothing to send, and a fresh session got no reinjection at all
+ * (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §4, §7 P1).
  */
 export async function fetchGlobalMemoryEntries(client: RpcClient): Promise<MemoryEntryInput[]> {
-    const bundles = await BundleApi.ListBundlesCommand(client, {});
-    return bundles
-        .filter((b) => b.is_global && !b.is_system && b.instructions.trim().length > 0)
-        .map((b) => ({
-            label: b.name,
-            source: "global" as const,
-            body: b.instructions,
-            sizeBytes: b.instructions.length,
-        }));
+    const sections = await BundleApi.GlobalMemorySectionsCommand(client);
+    return sections.map((s) => ({
+        label: `${s.is_system ? "[AgentMux System]" : "[Workspace]"} ${s.name}`,
+        source: "global" as const,
+        body: s.text,
+        sizeBytes: s.size_bytes,
+    }));
 }
 
 /**

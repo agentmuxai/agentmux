@@ -3,11 +3,11 @@
 **Status:** active — delivery via the startup-instructions file shipped
 (#1584, #2747, #2782, #2788, #2854, #3244). Hidden reinjection after compaction
 and on a `fresh` session outcome shipped in #3502 and #3512, with the running
-summary appended in #3673. Remaining: a brand-new session and a normal resume
-get no reinjection; Operator Config is left out; only Claude is covered; the
-trigger lives in the frontend; and the path has never been seen working live.
-One live check (§4) found it did not fire. The plan is in §7, P0–P5, none
-started.
+summary appended in #3673. P0 (§4: why a real `fresh` session got nothing) is
+done, and P1 (reinjection re-delivers the startup file's own block, Operator
+Config included) shipped with it in #3942. Remaining: a brand-new session gets no
+reinjection (P2); only Claude is covered; the trigger lives in the frontend; and
+reinjection has not yet been seen working live. The plan is in §7, P2–P5.
 **Date:** 2026-09-27
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at the repo
 owner's request: "lets consolidate all the docs … lets get a single source of
@@ -132,9 +132,12 @@ The model gets the full text as a real user turn; the pane shows only a label.
   twice at once, and defers while a turn is running.
 - **Content** (`memory-reinjection-fetch.ts`, `memory-reinjection.ts`
   `composeReinjectionMessage`):
-  - Global Memory entries filtered to `is_global && !is_system`, so **Operator
-    Config is excluded**;
-  - plus Personal Memory files (without the `MEMORY.md` index);
+  - Global Memory as the startup file's own sections (`globalmemory:sections`,
+    `global_bundle_sections` in `storage/bundles.rs`), **Operator Config
+    included**. Joined by `GLOBAL_SECTION_SEPARATOR` they are the block
+    `format_global_bundle_block` writes, byte for byte (P1). Before P1 this
+    filtered to `is_global && !is_system` and dropped the headings;
+  - plus Personal Memory files (without the `MEMORY.md` index), per D9;
   - wrapped in a system-reminder block that opens with the fixed sentence
     "Your memory was reinjected because your working context was just reset."
 - **Send:** `AgentInputCommand` with `hidden: true`. The server handler
@@ -173,7 +176,7 @@ reducer's own session events, not Claude Code hooks.)
 |---|---|---|---|
 | Brand-new agent / new session | startup file only | nothing | yes (the file is present) |
 | Normal resume | startup file (rewritten at open) | nothing | yes |
-| Resume refused or failed → `fresh` | startup file + hidden reinjection **(designed)** | label | **no, and one check says it did not fire** |
+| Resume refused or failed → `fresh` | startup file + hidden reinjection | label | the trigger fired, but it had nothing to send before P1 (below); not yet seen after P1 |
 | After compaction (Claude) | startup file + hidden reinjection + summary | label | no: no compaction observed since #3502 |
 | After compaction (other providers) | startup file only | a compaction node, no reinjection | — |
 | Kimi, any case | nothing | nothing | — |
@@ -185,8 +188,23 @@ reducer's own session events, not Claude Code hooks.)
 - no transcript on the host since 2026-09-22 contains the reinjection signature
   sentence, including that session (`61a700ea…`).
 
-So the fresh-session reinjection never reached the model there. Root cause not
-yet known (P0).
+So the fresh-session reinjection never reached the model there.
+
+**Why (P0, 2026-09-27).** The plumbing worked; the suppression rule stopped it.
+- srv emitted the disclosure: `spawned with no --resume while prior history
+  exists — disclosing a fresh start` at 12:49:50Z, so the pane received a `fresh`
+  outcome.
+- The pane was busy with that session's first turn, so the controller deferred,
+  then fetched after the turn ended.
+- The fetch read `listmemories` from `id_store` (`identity-store.db`), the same
+  store the startup file is composed from. That channel held **only the two
+  Operator Config rows**, which the fetch filtered out (`!is_system`).
+- Personal Memory was empty: the login was new at 12:49.
+- With no entries, `shouldReinject` returned false and nothing was sent,
+  silently.
+
+So G3 was the cause: the only memory present was the tier reinjection excluded.
+P1 fixes it.
 
 ## 5. Decisions of record
 
@@ -200,18 +218,20 @@ yet known (P0).
 | D6 | The user sees a label only; content goes to the model as a hidden turn | owner, 2026-09-22 |
 | D7 | No size cap; a graduated warning with compress/delegate advice instead | reinjection spec §3.4, §7 Q2 |
 | D8 | Reinject on every new session too, not just compaction and `fresh` | **owner, 2026-09-27: new, not yet built** |
+| D9 | Keep reinjecting Personal Memory alongside Global Memory (Q3) | owner, 2026-09-27 |
+| D10 | No reinjection on a normal resume (Q4): the conversation is intact and the startup file still carries the memory | owner, 2026-09-27 |
+| D11 | The notice shows the size of each injection: total tokens, plus each entry's bytes and tokens | owner, 2026-09-27; shipped for the current path (the label and its hover breakdown), and P2's delivery event must carry it too |
 
 ## 6. Gaps
 
-- **G1 — new sessions:** a brand-new session and a normal resume get no
-  reinjection or notice. The trigger fires only on `outcome === "fresh"`
-  (conflicts with D8).
-- **G2 — fresh path unverified and apparently broken:** §4's live check found no
-  reinjection in a real `fresh` session.
-- **G3 — Operator Config left out:** reinjection filters out `is_system`, and it
-  drops the `[AgentMux System]`/`[Workspace]` headings and preamble. So the
-  reinjected text is not what the startup file says, and the highest-priority
-  tier is the one not reinjected.
+- **G1 — new sessions:** a brand-new session gets no reinjection or notice. The
+  trigger fires only on `outcome === "fresh"` (conflicts with D8). A normal
+  resume is deliberately excluded (D10).
+- **G2 — resolved (P0):** the `fresh` path did fire; it had nothing to send
+  because of G3 (§4).
+- **G3 — resolved (P1):** reinjection now re-delivers the startup file's own
+  block, Operator Config and the `[AgentMux System]`/`[Workspace]` headings and
+  preamble included.
 - **G4 — frontend-owned trigger:** it fires only while a pane's `useAgentStream`
   is mounted and subscribed. Background or headless agents get nothing, and a
   re-subscribe that replays a `compact_boundary` frame may fire it twice (not
@@ -222,16 +242,10 @@ yet known (P0).
   - Kimi gets nothing;
   - a user-owned `AGENTS.md`/`GEMINI.md` silently blocks delivery (no side-file
     fallback like D2).
-- **G7 — edits don't reach running agents:**
-  - an ordinary Global Memory edit reaches the model at the next launch,
-    compaction or `fresh` reinjection;
-  - an **Operator Config** edit reaches it only when the startup file is
-    rewritten at the next launch/open. Reinjection filters out `is_system` rows
-    (G3), so compaction and `fresh` don't carry it, and a respawn inside a pane
-    re-reads the old file.
-- **G8 — Personal Memory rides along** with Global Memory in the same hidden
-  turn. If only Global Memory is wanted, the two need splitting (open question
-  Q3).
+- **G7 — edits don't reach running agents:** a Global Memory edit, Operator
+  Config included since P1, reaches the model at the next launch, compaction or
+  `fresh` reinjection. A respawn inside a pane re-reads the old startup file.
+- **G8 — resolved (D9):** Personal Memory stays in the same hidden turn.
 - **G9 — never built:**
   - the opt-out setting (reinjection spec §7 Q1);
   - the `WorkEnqueue` delegation action (§3.4.3);
@@ -240,31 +254,44 @@ yet known (P0).
 - **G10 — double carry on fresh:** the continuation packet (#3643) and the
   memory reinjection both arrive on a fresh session. Nobody has checked for
   overlap or ordering problems.
+- **G11 — seeded default Global Memory never reaches agents:** found during P0.
+  - `agentmux-srv/agent-seed.json` seeds two global entries, "Agent Memory" and
+    "Workspace Rules" (the second described as "injected into all agents").
+  - `agent_seed::seed_agents` writes them to `mstore` (`objects.db`), but Global
+    Memory has been read from `id_store` (`identity-store.db`) since at least
+    #3287, both for the startup file and for reinjection.
+  - So neither the startup file nor reinjection carries them. Whether they
+    should reach every agent is an owner call before anyone moves them.
 
 ## 7. Plan
 
-Proposed; not started. Each phase is one PR.
+P0 and P1 are done; P2–P5 not started. Each phase is one PR.
 
-- **P0 — explain G2.** Reproduce a `fresh` outcome on a current build (open an
-  agent whose head is under another account). Trace
-  outcome emit → frontend trigger → hidden send. Fix, or record why it can't
-  fire. Also check G4's double-fire risk.
+- **P0 — explain G2. Done:** see §4. The `fresh` trigger fired, and G3 left it
+  nothing to send. G4's double-fire risk moves to P2's claim design.
 
-- **P1 — one composition for every path (G3).** Comes before the hook, which
-  needs it.
-  - Add one srv endpoint that returns the composed block from
-    `format_global_bundle_block`, so Operator Config, headings and preamble match
-    the startup file byte for byte.
-  - Switch the existing frontend reinjection (`memory-reinjection-fetch.ts`) to
-    it, which works on its own and closes G3 for the current path.
-  - Decide Q3 (Personal Memory) here.
+- **P1 — one composition for every path (G3). Done.**
+  - `global_bundle_sections` (`storage/bundles.rs`) renders the Global Memory
+    block as sections. `format_global_bundle_block` is exactly those sections
+    joined by `GLOBAL_SECTION_SEPARATOR`, so the startup file's output is
+    unchanged (pinned by `global_sections_join_to_the_startup_block_exactly`).
+  - `globalmemory:sections` serves them from `id_store`, the startup-file
+    writers' store. The frontend reinjection (`memory-reinjection-fetch.ts`) uses
+    them, so the Global section of a reinjection is the startup block verbatim,
+    Operator Config included.
+  - Each section's `size_bytes` is what it adds to an injection, and feeds the
+    notice's per-entry breakdown (D11). Personal Memory is unchanged (D9).
+  - History replay now ends a section at the next `# Global/Personal Memory (N
+    entries)` header rather than at any `# ` line, which the sections'
+    own headings would otherwise trip.
+  - P2's hook will read the same endpoint.
 
 - **P2 — move the trigger into the backend with a Claude `SessionStart` hook.**
   - Claude Code runs `SessionStart` with `source` = `startup` | `resume` |
     `clear` | `compact` and adds the hook's `additionalContext` to the model's
     context without showing it as a conversation turn. One hook covers new
-    session and compaction (G1, G4), and normal resume if Q4 says so. Q4 is a
-    prerequisite for this phase.
+    session, `/clear` and compaction (G1, G4). It does nothing for
+    `source=resume` (D10).
   - Install it next to the existing `PreCompact` hook (`agentmux-bashwrap`
     subcommand; same install sites as §3.5).
   - The hook fetches the block from P1's endpoint and emits it as
@@ -293,7 +320,8 @@ Proposed; not started. Each phase is one PR.
       wrote bad output) expires, and the waiting fallback takes it over.
     Without this gate, every compaction injects the memory twice.
   - **The notice ships with the hook (D6).**
-    - srv emits one event per delivery (reason, entry names, token counts);
+    - srv emits one event per delivery (reason, entry names, and each entry's
+      bytes and tokens: D11);
     - the pane renders the existing `MemoryReinjectionNode` from that event, not
       from the frontend's hidden turn.
     - the event is **persisted** to the block's durable history with a stable
@@ -307,10 +335,8 @@ Proposed; not started. Each phase is one PR.
     fires after auto-compaction as well as `/compact`.
 
 - **P3 — retire the frontend triggers for Claude.** Only after P2 is verified
-  live: the hook fires for `startup`, `clear` and `compact`, and for `resume`
-  only if Q4 is answered "yes" (Q4 must be answered before P2 starts, since it
-  decides whether the hook acts on `source=resume`); the
-  running summary arrives on compaction; the notice appears every time; and
+  live: the hook fires for `startup`, `clear` and `compact`, and never delivers
+  on `resume` (D10); the running summary arrives on compaction; the notice appears every time; and
   nothing was injected twice. Keep the hidden-turn primitive: P5 needs it.
 
 - **P4 — providers other than Claude (G5, G6).**
@@ -372,11 +398,9 @@ Proposed; not started. Each phase is one PR.
   (carried from the reinjection spec §7 Q1)
 - **Q2 — expandable notice:** should the notice expand to show what was injected,
   for the operator's debugging? (reinjection spec §7 Q4)
-- **Q3 — Personal Memory:** keep reinjecting it alongside Global Memory (today's
-  behaviour), or Global Memory only as today's ask reads?
-- **Q4 — on resume:** reinject on a normal `--resume` (P2 would, via
-  `source=resume`), or only on startup, clear and compact? Resuming already
-  keeps the conversation, so this is purely the "force the read" argument (D4).
+- **Q3 — answered (D9):** keep reinjecting Personal Memory alongside Global
+  Memory.
+- **Q4 — answered (D10):** no reinjection on a normal resume.
 - **Q5 — the delegation action:** should `WorkEnqueue` ever auto-fire, or always
   ask? (reinjection spec §3.4.4)
 
@@ -395,4 +419,5 @@ Proposed; not started. Each phase is one PR.
 | 09-22 | #3502, #3512 | Hidden reinjection after compaction; also on a `fresh` outcome |
 | 09-24 | #3643, #3673 | Continuation packet on fresh sessions; running summary appended after compaction |
 | 09-25–26 | #3810, #3811, #3812 | Global Memory's own record; import into isolated channels; bundle id follows the agent |
-| 09-27 | this doc | Consolidation; D8 (new sessions); live check finds G2 |
+| 09-27 | #3926 | Consolidation; D8 (new sessions); live check finds G2 |
+| 09-27 | #3942 | P0 (the fresh path had nothing to send: G3) and P1 (reinjection = the startup block, Operator Config included); D9–D11; G11 |
