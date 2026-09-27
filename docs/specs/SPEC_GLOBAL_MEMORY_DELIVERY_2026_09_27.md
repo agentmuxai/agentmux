@@ -274,19 +274,28 @@ Proposed; not started. Each phase is one PR.
     same way. Otherwise retiring the hidden turn drops the backstop against
     commitments the provider's own summary left out.
   - **Only one path per event.** srv records each delivery (session, reason,
-    compaction boundary). While the frontend triggers remain as a fallback,
-    their hidden send checks that record, and srv drops it if the hook already
-    delivered for that session start or compaction. Without this, every
-    compaction injects the memory twice.
+    compaction boundary). While the frontend triggers remain as a fallback, the
+    controller asks srv **before** it hides output or dispatches `TurnStart`:
+    - if the hook already delivered for that session start or compaction, srv
+      answers `skipped`, and the controller stays idle;
+    - a skip must never be a silent accept. The controller sets `hiding` and a
+      pending node before `sendRpc`, and clears them only on a rejected RPC or
+      the hidden turn's `session_end`, so a silent drop would leave the pane
+      busy and suppressing output.
+    Without this gate, every compaction injects the memory twice.
+  - **The notice ships with the hook (D6).**
+    - srv emits one event per delivery (reason, entry names, token counts);
+    - the pane renders the existing `MemoryReinjectionNode` from that event, not
+      from the frontend's hidden turn.
+    Otherwise every hook delivery would be silent, because today the label is
+    produced only when the frontend's own hidden turn ends.
   - Verify first: size limits on `additionalContext`, and whether `compact`
     fires after auto-compaction as well as `/compact`.
-  - The frontend triggers become redundant for Claude; remove them only once
-    P2 is verified live, including the summary on compaction.
 
-- **P3 — the notice (D6).**
-  - srv emits one event per injection (reason, entry names, token counts).
-  - The pane renders the existing `MemoryReinjectionNode` from that event, so the
-    label no longer depends on the frontend having sent the turn.
+- **P3 — retire the frontend triggers for Claude.** Only after P2 is verified
+  live: the hook fires for `startup`, `resume`, `clear` and `compact`; the
+  running summary arrives on compaction; the notice appears every time; and
+  nothing was injected twice. Keep the hidden-turn primitive: P5 needs it.
 
 - **P4 — providers other than Claude (G5, G6).**
   - Use each provider's equivalent hook where one exists; otherwise the startup
