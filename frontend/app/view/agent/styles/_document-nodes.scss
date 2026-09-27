@@ -13,6 +13,13 @@
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
 $transcript-preview-max-height: calc(50vh / 3);
 
+// The ▸/▾ in a collapsible message's summary line (CollapsibleMessage.tsx),
+// shared by agent messages and jekts.
+@mixin message-chevron {
+    color: var(--secondary-text-color);
+    font-size: 10px;
+}
+
 // Markdown rendered inside a tool preview (a WebSearch answer, an Agent
 // report). The box is capped at about 13 lines, and document-size headings
 // (2em / 1.5em with a rule) spent most of it on one "## Heading"; here they
@@ -982,8 +989,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             user-select: none;
 
             .agent-message-chevron {
-                color: var(--secondary-text-color);
-                font-size: 10px;
+                @include message-chevron;
             }
 
             .agent-message-icon {
@@ -1051,8 +1057,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             user-select: none;
 
             .agent-jekt-chevron {
-                color: var(--secondary-text-color);
-                font-size: 10px;
+                @include message-chevron;
             }
 
             .agent-jekt-peer {
