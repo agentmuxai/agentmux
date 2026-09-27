@@ -2,7 +2,7 @@
 
 **Author:** lark
 **Date:** 2026-09-27
-**Status:** active — §1–§6 (incl. §4.2a) shipped in PR #3922; §7 (the same font bug in 46 other rules) not started.
+**Status:** implemented — §1–§6 (incl. §4.2a) shipped in PR #3922; §7 (the same font bug in 45 other rules, plus stylelint and vitest guards) in PR #3947.
 **Related:** `SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md` (the peek on every node kind),
 `SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md` (the panel pinned right that follows the mouse's vertical
 position), `SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md` §1 (the command line in the peek).
@@ -231,7 +231,7 @@ popover body). The one non-popover source edit, moving the row colours into the 
 
 ---
 
-## 7. Follow-up (separate change): the same font bug elsewhere
+## 7. Follow-up: the same font bug elsewhere (done in PR #3947)
 
 The popover body is one of **47** declarations in 20 stylesheets that pass a `font` shorthand token
 (`--fixed-font` or `--base-font`) to `font-family:`, which is invalid (§3). Examples: `.agent-tool-panel`,

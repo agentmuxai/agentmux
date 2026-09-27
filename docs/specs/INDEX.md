@@ -373,6 +373,7 @@ partial list.
 | [`SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md) | SPEC: Pane tab strip — compact (shrink-to-fit) sizing + double-click rename |
 | [`SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12`](SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md) | SPEC: Frosted-glass backdrop for the agent pane tab strip's trailing space |
 | [`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) | SPEC: Switching in-pane tabs must not repaint the pane header or tab bar |
+| [`SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27`](SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md) | SPEC: hover peek panel — time and tokens on one right-aligned line, command in the tool call's colour and monospace font |
 | [`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20`](SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md) | SPEC — Eagerly resume a persistent agent controller that already has a session, instead of waiting for the next message |
 | [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md) | SPEC — Wire failure classification + auto-retry into the persistent controller (Claude 429/overloaded) |
 | [`SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09`](SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md) | SPEC — Persistent controller race cluster: gap audit + remaining fixes |
@@ -540,7 +541,6 @@ partial list.
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
 | [`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24`](SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md) | SPEC: Pane Tab contract v1 — one general interface for every pane tab (and future user-loaded widgets), starting with the Help "ghost" fix |
-| [`SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27`](SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md) | SPEC: hover peek panel — time and tokens on one right-aligned line, command in the tool call's colour and monospace font |
 | [`SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11`](SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11.md) | SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification |
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
