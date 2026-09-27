@@ -21,7 +21,8 @@ already out of date when it was posted.
   **partly delivered**, and their bodies still describe the full original
   scope.
 - **11 issues can be closed by folding them into another issue**, or
-  transferred to another repo (§1). That takes 68 to 57.
+  transferred to another repo (§1). That takes 68 to 57. As applied it was 58:
+  #3061 couldn't be transferred (see §1).
 - **16 issue bodies are out of date.** They should be rewritten down to what's
   actually left (§2).
 - **Some need something other than code** (§3):
@@ -45,7 +46,7 @@ already out of date when it was posted.
 | #1814 long-running commands tracker | #2979 | Items 2 and 4 are done, and 1 and 5 can be dropped. The one real gap: shells started with `Shell()` aren't stopped when their pane closes (no saga touches `shell_sessions`). That's a sibling of #2979's teardown-on-close, so retitle #2979 to "block teardown on close". |
 | #2718 whole-window scrollHeight → 0 px | #2648 | The 251 px lead is closed by analysis. The 0 px collapse hasn't recurred, and since #3652 it's cosmetic. |
 | #3473 SearchHistory opaque error | close | Error reporting was fixed in #3693, with a "reopen the agent" hint. The premise is shaky: the repro sent no auth header, and a 401 can't produce reqwest's "error sending request". Accept "reopen the agent" as the design. |
-| #3061 muxbus calls a failed review "minor notes" | **transfer to agentmux-cloud** | Valid bug, but the code is in the cloud repo: `muxbus/consumers/github/events/review.ts:249-276` maps any other state to "minor notes" and never reads `review.body`. |
+| #3061 muxbus calls a failed review "minor notes" | **transfer to agentmux-cloud** (not done: the auditing account has no access to that repo; commented instead, still open) | Valid bug, but the code is in the cloud repo: `muxbus/consumers/github/events/review.ts:249-276` maps any other state to "minor notes" and never reads `review.body`. |
 | #3943 seeded Global Memory never reaches agents | keep, child of #3925 | Not a close. Listed here because it belongs under #3925. Keep it separate until the owner decides (§3). |
 
 ## 2. Rewrite to what's actually left
@@ -56,7 +57,7 @@ already out of date when it was posted.
 | #3497 retire the slug | The body says "nothing implemented". Delivered: #3500, #3504, #3508, then M0–M4d-1 (#3543…#3633) and #3845. | M4d-2 to M4d-6 and M5. `db_agents.slug` still has no UNIQUE index. |
 | #3477 Global Memory per-instance | The banner and import shipped (#3811), and the tool description now names the scope (#3835). | Only cross-machine sync, which is M5 of `SPEC_MEMORY_FOLLOWS_THE_AGENT`. Retitle to that. |
 | #3667 bindings across instances | The session-continuity half is delivered (#3643, #3673, #3817, #3833, #3839, #3841, #3850, #3864). | A notice **before** the first message. "Bind account" exists only on the failure row. |
-| #3925 Global Memory delivery | The checklist order changed in the comments. P0 and P1 are done (#3942). | P2 (a SessionStart hook; #3949 and #3951 merged since the audit baseline was taken) through P5. |
+| #3925 Global Memory delivery | The checklist order changed in the comments. P0–P2 are done: #3942, then the SessionStart hook in #3949 and #3951 (`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` §7). | Live verification of P2, then P3–P5. Not commented on: it's under active work. |
 | #3148 portability tracker | Phases 0–3 are done. | Format debt: `$schema` says v0.2 but `version` is 0.1.0. `DefinitionRecordV1` has no `memory_id`. Phase 4 now lives in `SPEC_MEMORY_FOLLOWS_THE_AGENT`. |
 | #950 bulletproof terminals | Mostly superseded by PtyShell/PtyShellInput (#3177). | A 5 s open timeout with a structured spawn-error UI (G1/G5), and benchmark isolation. |
 | #2977 tray + background service | Tray on all three OSes, on by default (#3785). Start at login (#3788, #3854). | macOS `SMAppService`, Windows code signing, the WS3 panel, and live Linux and packaged-macOS runs. |
