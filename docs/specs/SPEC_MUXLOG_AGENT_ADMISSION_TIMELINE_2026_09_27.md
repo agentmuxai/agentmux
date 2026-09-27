@@ -1,7 +1,7 @@
 # SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here"
 
 **Date:** 2026-09-27
-**Status:** implemented — branch `manoz/muxlog-admission` (see §7 for where the implementation differs from the first draft)
+**Status:** implemented — #3919 (spec #3916; see §7 for where the implementation differs from the first draft)
 **Author:** Manoz
 **Repos touched:** `agentmux` (`agentmux-srv/src/backend/shellintegration/muxlog.mjs`, `docs/MUXLOG.md`)
 **Related:** `docs/MUXLOG.md`; `SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md` (same "recipe + verdict" pattern); the one-live-instance-per-agent work and its take-over fixes (#3897, #3899, #3903, #3908)
