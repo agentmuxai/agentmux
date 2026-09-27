@@ -24,6 +24,7 @@ muxlog swarm -d <id> # same, filtered to one dispatch + a match-count verdict
 muxlog auth         # provider auth/identity trace — login, OAuth dir wiring, unlink/logout
 muxlog phases       # merged turn-phase timeline for one pane — defaults to your own ($AGENTMUX_BLOCKID)
 muxlog admission AgentA  # why won't this agent run here — across ALL instances, with a verdict
+muxlog opens        # how long agent opens took — one row per open, then p50/p95
 muxlog help         # full usage
 ```
 
@@ -99,6 +100,7 @@ muxlog srv --since 2026-06-15T23:30 cat        # a time window
 | `muxlog auth` | provider auth / identity lifecycle — the login flow (`auth.start` / `auth.spawn` child start+exit / `auth.cancel`), OAuth config-dir wiring, `auth success (direct-account)` persistence, `CheckCliAuth` + the one-time `claude auth:` credential import, and the logout side (`identity.unlink:` provider unlinks, `identity.delete:` account + keychain removal). Auth events span multiple srv modules, so this filters on the **message** vocabulary rather than a tracing target — pass your own `--grep` to override, or combine `--since`/`--level`/`-i` as usual. Ideal for repeated login/logout stress runs |
 | `muxlog phases [<block-id>]` | **Merged, chronological turn-phase timeline for one agent pane** — combines the frontend's `[wave-turn]` transition log (host) with the backend's `[health] turn_active flip` log (srv) into a single, correctly-ordered stream, instead of the two separate files you'd otherwise have to cross-reference by hand. Defaults to your own pane via `$AGENTMUX_BLOCKID` (already set in every agent's shell env) — pass an explicit block id to look at a different pane. Host and srv logs are resolved by actually checking which log **contains** this pane's lines (not just picking "most recently active"), so this stays correct even with several instances — or several retained dev builds of the same branch — running at once. `[health]` lines show their `active`/`was_active`/`exit_code` fields inline (the srv side's whole reason for being in the timeline — those never live in the message text). A `watchdog: tick #N` heartbeat line appears every ~60s as direct proof the recovery watchdog is alive, not just inferred from silence. Every generic option (`--grep`, `--level`, `--target`, `-a`) composes on top of the recipe's own per-pane filter, same as `swarm`/`auth`/`bridge`; `--raw` emits the original NDJSON for matched lines only. See `docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md` |
 | `muxlog admission [<agent>]` | **Why won't this agent run here.** The agent's admission, take-over and lifecycle lines (`agent_admission.*`, `registry: … changed hands`, `self-quit`, `persistent process spawned`, `turn_active flip (process exited)`, muxbus registration/lease lines) from **every instance**, merged into one timeline, with `holder`/`released`/`epoch`/`block_id`/`why`/`to` shown inline. Ends with a per-instance verdict (last admission state, who the relay names as holder, whether that instance still has a live pane for the agent) and, when it recognizes the pattern, a **diagnosis** that names the fix PRs and how to recover. Implies `srv`, `--instances all`, `--agent <agent>` (default `$AGENTMUX_AGENT_ID`) and `--since` 24 h ago (override with your own). See `docs/specs/SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md` |
+| `muxlog opens [<agent>]` | **How long agent opens take.** One row per `[agent-open]` line — the frontend logs one per open (`frontend/app/view/agent/open-trace.ts`) — from **every instance**: when, instance, agent, `source` (`my-agents` = a My Agents click, `mount` = a pane that mounted without one, e.g. startup restore), `outcome` (`quiet`, `unsettled`, `failed`, `timeout`, `closed`, `superseded`), and ms since the click/mount for ResolveCli (with `cli_source`: `installed` means npm ran), the first history row painted, the reveal and quiet (no frame gap > 50 ms for 1.5 s). The clock stops at reveal + quiet, so a login or account prompt the pane shows afterwards is never counted as latency; `auth` records the phase the pane landed in. Ends with p50/p95 to first row and to quiet, per source. Defaults to `--instances all` and `--since` 24 h ago; `-n` caps the rows. See `docs/specs/SPEC_AGENT_OPEN_LATENCY_2026_09_27.md` §4.6 |
 
 ### Worked example: a stuck agent whose Take over does nothing
 
@@ -117,6 +119,23 @@ diagnosis: stale relay lease: the relay names v0.57.6/7a8245ae as holder, but v0
 ```
 
 `agenta` or the agent's uid give the same result.
+
+### Worked example: are agent opens slow?
+
+```bash
+muxlog opens            # every agent, last 24 h
+muxlog opens Lazo --since 2026-09-27T04:00
+```
+
+```
+when           instance           agent            source    outcome      cli cli_source    painted revealed  quiet  total auth
+09-27 04:01:57 v0.58.0/7a8245ae   Lazo             my-agents quiet        180 installed         812      815   1341   1341 authenticated
+
+summary:
+  my-agents 1 open (quiet 1); first row p50 812 p95 812; quiet p50 1341 p95 1341; 1 installed the CLI
+```
+
+Read a slow row left to right: a large `cli` with `cli_source=installed` is an npm install on the open path (F1); a gap between `revealed` and `quiet` is main-thread work after the pane appeared (F3/F4); `auth=first-login` means the pane ended at a login prompt, which the clock doesn't count. `outcome=unsettled` means the page never went quiet within 15 s (often a hidden window: `hidden=1`).
 
 ---
 

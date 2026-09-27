@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
     AgentMessageNode,
     DocumentState,
@@ -12,13 +12,15 @@ import type {
     UserMessageNode,
 } from "../types";
 import {
-    JEKT_EXPANDED_MAX_ESTIMATE_PX,
+    jektExpandedMaxEstimatePx,
     estimateMarkdown,
     estimateNode,
     estimateNodeForState,
     estimateTextHeight,
     estimateUnwrappedTextHeight,
-    CONTENT_FIRST_TOOL_ESTIMATE_PX,
+    contentFirstToolEstimatePx,
+    previewCapPx,
+    toolExpandedPx,
     STREAMING_CAPABLE,
 } from "./renderers";
 import { rowDisclosureIn } from "./disclosure";
@@ -36,6 +38,15 @@ const baseDocState = (): DocumentState => ({
         showIncoming: true,
         showOutgoing: true,
     },
+});
+
+// The capped estimates follow the window height (previewCapPx). The
+// expectations below were written for a 1400 px window; jsdom defaults to 768.
+beforeEach(() => {
+    vi.stubGlobal("innerHeight", 1400);
+});
+afterEach(() => {
+    vi.unstubAllGlobals();
 });
 
 describe("estimateTextHeight", () => {
@@ -123,7 +134,7 @@ describe("per-kind estimators", () => {
         // the preview height, so a history row must not be laid out at 32 px.
         it("returns the capped content-first size for a finished WebSearch, 32 px once collapsed", () => {
             const search: ToolNode = { ...tool, id: "ws", tool: "Other", toolName: "WebSearch", params: {} };
-            expect(estimateNode(search, baseDocState())).toBe(CONTENT_FIRST_TOOL_ESTIMATE_PX);
+            expect(estimateNode(search, baseDocState())).toBe(contentFirstToolEstimatePx());
             const state = baseDocState();
             state.collapsedNodes.add("ws");
             expect(estimateNode(search, state)).toBe(32);
@@ -329,7 +340,7 @@ describe("estimateJektMessage (expanded jekt body is height-capped)", () => {
 
     it("a very long expanded jekt is clamped, not estimated at the text maximum", () => {
         const est = estimateNode(jekt("x".repeat(50_000)), baseDocState());
-        expect(est).toBe(JEKT_EXPANDED_MAX_ESTIMATE_PX);
+        expect(est).toBe(jektExpandedMaxEstimatePx());
         expect(est).toBeLessThan(estimateTextHeight("x".repeat(50_000)));
     });
 
@@ -345,7 +356,27 @@ describe("estimateJektMessage (expanded jekt body is height-capped)", () => {
 
     it("estimateNodeForState agrees with the clamp when expanded", () => {
         expect(estimateNodeForState(jekt("x".repeat(50_000)), "expanded", baseDocState())).toBe(
-            JEKT_EXPANDED_MAX_ESTIMATE_PX,
+            jektExpandedMaxEstimatePx(),
         );
+    });
+});
+
+// SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §3.
+describe("estimates follow the preview cap (window height / 6)", () => {
+    const at = (h: number) => {
+        vi.stubGlobal("innerHeight", h);
+        return { cap: previewCapPx(), cf: contentFirstToolEstimatePx(), jekt: jektExpandedMaxEstimatePx(), tool: toolExpandedPx() };
+    };
+
+    it("reproduces the old fixed values at a 1400 px window", () => {
+        expect(at(1400)).toEqual({ cap: 1400 / 6, cf: 280, jekt: 290, tool: 200 });
+    });
+
+    it("shrinks on a small window, including the generic tool panel", () => {
+        expect(at(700)).toEqual({ cap: 700 / 6, cf: 164, jekt: 174, tool: 157 });
+    });
+
+    it("grows on a tall window; the generic tool panel stays at its typical 200", () => {
+        expect(at(2400)).toEqual({ cap: 400, cf: 447, jekt: 457, tool: 200 });
     });
 });

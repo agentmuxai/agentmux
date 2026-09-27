@@ -81,10 +81,11 @@ impl PersistentSubprocessController {
                 .filter(|sid| self.session_held_elsewhere(sid).is_none());
             }
         }
-        // Whatever id the paths above settled on, only the head of the
-        // agent's chain is resumed natively
-        // (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2).
-        self.apply_resume_gate(&config, unreachable_history_session);
+        // Claim the agent's single-live-instance lease, then — under it — let
+        // the resume gate decide which session is resumed. Any early return
+        // after this point drops the handle, which releases the lease.
+        let gfs = crate::backend::agent_session::global_transcript_store();
+        let agent_lease = self.lease_then_gate(&config, gfs.map(|g| &**g), unreachable_history_session)?;
 
         // Append `--resume <sid>` when we have a session id and the provider
         // supports simple-flag resume — same construction as
@@ -149,18 +150,10 @@ impl PersistentSubprocessController {
                 return Err(held_elsewhere_error(&other, closing));
             }
         }
-        // One live instance per agent, across every AgentMux instance on this
-        // host (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md Phase 1). The
-        // check above only sees this process; this lease is host-global.
-        // Claimed here — the one point all four spawn paths pass — and held
-        // for this process's lifetime (stored below once the child runs).
-        // A refusal returns before anything is spawned; any early return
-        // after this point drops the handle, which releases the lease.
-        let agent_lease = self.acquire_agent_lease(&config, requested_sid.as_deref())?;
         // Set when the resume gate relocated the session this spawn resumes
         // (spec §4.3): the copy it placed, which the fork reads and never
         // writes.
-        let mut relocated_copy: Option<std::path::PathBuf> = None;
+        let mut relocated_copy: Option<crate::backend::continuity_relocate::Relocated> = None;
         // This spawn resumes with `--fork-session` (relocated, or the session
         // grew outside AgentMux, spec §4.4).
         let mut forked = false;
@@ -1081,13 +1074,21 @@ impl PersistentSubprocessController {
                                 forked_from_read.as_deref(),
                                 &sid_string,
                             );
-                            if should_capture || kept_relocated_id {
+                            if should_capture {
                                 super::segments::record_segment_session(&segment_read, &sid_string);
                                 // The fork has its own session now; the copy it
-                                // read from goes (spec §4.3 (3), I4). Kept under
-                                // the attempted id, the copy is the live session.
+                                // read from goes (spec §4.3 (3), I4).
                                 if let Some(copy) = relocated_copy_read.take() {
                                     super::segments::settle_relocated_copy(&block_id_read, &copy, forked_from_read.as_deref(), &sid_string);
+                                }
+                            } else if kept_relocated_id {
+                                // Kept under the attempted id, the copy is the live
+                                // session: recorded only while it is still this
+                                // spawn's, never a replacement's at the same path.
+                                if let Some(copy) = relocated_copy_read.take() {
+                                    if super::segments::settle_relocated_copy(&block_id_read, &copy, forked_from_read.as_deref(), &sid_string) {
+                                        super::segments::record_segment_session(&segment_read, &sid_string);
+                                    }
                                 }
                             }
                             // reagentx P0 on PR #2373: resolving tracking

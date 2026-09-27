@@ -58,6 +58,7 @@ import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
 import type { ResolveCliResult } from "@/app/store/rpc-api";
+import { markAgentOpen } from "../open-trace";
 
 export interface LaunchFlowOptions {
     blockId: string;
@@ -255,6 +256,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         return "fatal";
     }
     unsubInstall();
+    markAgentOpen(blockId, "cli", { cli_source: cliResult.source });
 
     if (cliResult.source === "installed") {
         log("cli", `installed ${provider.npmPackage} (${cliResult.version})`);

@@ -33,6 +33,13 @@ $tool-name-colors: (
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
 $transcript-preview-max-height: calc(50vh / 3);
 
+// The ▸/▾ in a collapsible message's summary line (CollapsibleMessage.tsx),
+// shared by agent messages and jekts.
+@mixin message-chevron {
+    color: var(--secondary-text-color);
+    font-size: 10px;
+}
+
 // Markdown rendered inside a tool preview (a WebSearch answer, an Agent
 // report). The box is capped at about 13 lines, and document-size headings
 // (2em / 1.5em with a rule) spent most of it on one "## Heading"; here they
@@ -996,8 +1003,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             user-select: none;
 
             .agent-message-chevron {
-                color: var(--secondary-text-color);
-                font-size: 10px;
+                @include message-chevron;
             }
 
             .agent-message-icon {
@@ -1065,8 +1071,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             user-select: none;
 
             .agent-jekt-chevron {
-                color: var(--secondary-text-color);
-                font-size: 10px;
+                @include message-chevron;
             }
 
             .agent-jekt-peer {
@@ -1103,12 +1108,13 @@ $transcript-preview-max-height: calc(50vh / 3);
                 // A long jekt scrolls inside its own box instead of pushing
                 // the conversation off-screen. Only the body is capped, so the
                 // metadata line (sender / trust / MSGID) below it stays in
-                // view. No `overscroll-behavior` on purpose: the default lets
-                // the wheel chain to `.agent-document` natively at either end
-                // (the tool box needs a JS hand-off only because it sets
-                // `contain`).
+                // view. At either end the wheel hands off to the pane on the
+                // next tick (scroll-handoff.ts), like a tool preview: native
+                // chaining latches mid-gesture, which is what
+                // SPEC_TOOL_PREVIEW_SCROLL_CHAINING replaced.
                 max-height: $transcript-preview-max-height;
                 overflow-y: auto;
+                overscroll-behavior: contain;
             }
 
             .agent-jekt-meta {
@@ -1139,6 +1145,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                     // marker, so it takes the same cap.
                     max-height: $transcript-preview-max-height;
                     overflow-y: auto;
+                    overscroll-behavior: contain;
                 }
             }
         }

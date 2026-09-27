@@ -90,9 +90,11 @@ Related failure modes this spec must also handle:
 | Resume preflight (the pane's "will this resume?" verdict) | `resume_preflight.rs:150`, via `app_api/session.rs` | **No** |
 | Recovery after a rejected resume | `find_recovery_session_id` (`resume_retry.rs:231`) | **Yes** (`resume_retry.rs:251`, `recovery_allowed`) |
 
-The first two converge in `spawn_process` just before `requested_sid` is read
-(`spawn.rs:94`). That single point also runs the held-elsewhere refusal (`spawn.rs:132`) and
-the host-wide single-live-instance lease (`spawn.rs:144`).
+The first two converge in `spawn_process` just before `requested_sid` is read, in
+`lease_then_gate` (`segments.rs`): the host-wide single-live-instance lease is claimed first,
+and the gate runs under it (§4.3, "One spawn per agent"). The lease takes only the pre-gate
+candidate as an informational hint and no longer reads `requested_sid`. The held-elsewhere
+refusal follows, on whatever id the gate left.
 
 ### 2.4 The CLI (Claude Code 2.1.280, `claude --help`)
 - `-r, --resume [value]`: "Resume a conversation by session ID". It continues **the same id and
@@ -173,8 +175,8 @@ as before. This is the rebuild case where the new pane or block carries no sessi
 existing no-`--resume` path then applies: fresh + continuation packet, rung `Virtualized` when
 a record exists, and the pane outcome line with `attempted_sid` = the refused id.
 
-**Redirect** sets `inner.session_id` to the head. The held-elsewhere refusal and the lease
-still run on the head, unchanged. So a head that is live in another pane or instance is
+**Redirect** sets `inner.session_id` to the head. The held-elsewhere refusal still runs on the
+head, unchanged, and the lease was already claimed before the gate. So a head that is live in another pane or instance is
 refused exactly as today (H2).
 
 ### 4.3 Same-identity relocation (the durable-memory spec's R2)
@@ -193,9 +195,11 @@ Preconditions, all required. Any failure means **Refuse** (fresh + packet):
    a leftover would look reachable and be resumed in place without a fork.
 
 Action:
-1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>`, write the marker
-   `<dest>.jsonl.agentmux-relocated` (owner UID, source path, size), then rename to
-   `<dest>.jsonl`. The CLI never sees a partial file (H5), and never sees a copy without its
+1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>.<token>` (the relocation's own token: once
+   linked, the temp name aliases the copy, so it must never be shared), write the marker
+   `<dest>.jsonl.<token>.agentmux-relocated` (owner UID, source path, size), then hard-link to
+   `<dest>.jsonl` (which fails if the name exists, so of two concurrent relocations only one
+   places a copy) and remove the temp name. The CLI never sees a partial file (H5), and never sees a copy without its
    marker, so a crash can't leave an unmarked duplicate (I4).
 2. Spawn with `--resume <head> --fork-session`. The original stays untouched (I3), and the new
    id is captured by the existing adoption path.
@@ -222,6 +226,35 @@ Without it, the head stays the source segment, and the next spawn relocates agai
 same-id case of step 3 is settled on its own once a result frame confirms the resume, since
 capture never adopts an id the controller already holds: the id is recorded on the segment
 and the copy's marker goes.
+
+Each relocation's marker has its own name (`<sid>.jsonl.<token>.agentmux-relocated`), and
+the spawn holds that marker. Settling (step 3) deletes the spawn's own marker first, and
+touches the copy or records the session only if that succeeded. A superseded spawn's
+late settle therefore can't unmark or remove a replacement's copy placed at the same path
+after a sweep. Markers from before tokens (`<sid>.jsonl.agentmux-relocated`) still sweep.
+
+**One spawn per agent.** Sweep, relocation and settle all run inside the agent's host-wide
+single-live-instance lease (`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`).
+
+- `lease_then_gate` (`segments.rs`) claims the lease **before** the gate. A second controller
+  of the same agent, in this process or another instance, is refused before it can sweep or
+  place anything.
+- Before this, the gate ran ahead of the lease, and two controllers of one agent could race
+  each other's copy and marker. #3907 and #3924 closed individual windows (per-relocation
+  tokens, `hard_link` placement, ownership-checked settle), and Codex kept finding narrower
+  ones.
+- **The lease serializes spawns of different controllers only.** Within one controller, a
+  restart reuses its lease (`acquire_agent_lease` keeps an earlier generation's). So a
+  superseded generation's late settle and the new generation's gate can still overlap, and
+  they are guarded only by the per-relocation token and `holds_current_session`. Those are
+  load-bearing and must stay.
+- The session the lease records is only a hint (the lease is keyed by agent), so claiming it
+  before the gate settles the id changes nothing about who holds it.
+- If the lease is refused because another pane of this process holds the agent (whatever
+  session either pane holds), or because the candidate session is live or still closing
+  there, the refusal is still reported as held-elsewhere, naming that pane. Callers never
+  answer that refusal with a fresh session.
+- Without a lease store or an agent UID, the gate runs unguarded, as before.
 
 ### 4.4 Fork when the file changed outside AgentMux (H4)
 Each segment's `End` records `provider_bytes_end`: the size of the provider session file when

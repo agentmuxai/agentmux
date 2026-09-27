@@ -436,22 +436,10 @@ pub(crate) fn backlog_naming_semaphore() -> &'static tokio::sync::Semaphore {
 /// an unknown provider or a CLI that isn't already available either way;
 /// the caller treats that the same as any other unresolvable case.
 async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<String> {
-    const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
     let provider = crate::backend::providers::get_provider(provider_id)?;
     let paths = agentmux_common::DataPaths::from_env()?;
-    let provider_dir = paths
-        .home_dir
-        .join("instances")
-        .join(format!("v{AGENTMUX_VERSION}"))
-        .join("cli")
-        .join(provider.id);
-    let npm_bin = if cfg!(windows) {
-        provider_dir.join("node_modules").join(".bin").join(format!("{}.cmd", provider.cli_command))
-    } else {
-        provider_dir.join("node_modules").join(".bin").join(provider.cli_command)
-    };
-    if npm_bin.exists() {
-        return Some(npm_bin.to_string_lossy().to_string());
+    if let Some(bin) = crate::backend::cli_install::find_installed_for_provider(&paths, provider.id) {
+        return Some(bin.to_string_lossy().to_string());
     }
     crate::server::cli_handlers::resolve_cli_on_path(provider.cli_command).await
 }

@@ -39,6 +39,54 @@ fn zone_size(zone: &str) -> Option<i64> {
 }
 
 impl PersistentSubprocessController {
+    /// Claims this agent's single-live-instance lease, then runs the resume
+    /// gate ([`apply_resume_gate_with`](Self::apply_resume_gate_with)) under it.
+    ///
+    /// The lease is one live instance per agent across every AgentMux instance
+    /// on this host (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md Phase 1),
+    /// held for the spawned process's lifetime. Claiming it FIRST means the
+    /// gate's sweep, relocation and settle (spec §4.3) run for one spawn of an
+    /// agent at a time: two controllers of one agent racing those steps kept
+    /// opening narrower windows (#3924). The session is only a hint to the
+    /// lease — recorded, not a key — so the gate settling the final id
+    /// afterwards changes nothing about the claim.
+    ///
+    /// When leasing is unavailable (no store, or no agent UID) the gate runs
+    /// unguarded, as it did before Phase 1.
+    pub(super) fn lease_then_gate(
+        &self,
+        config: &PersistentSpawnConfig,
+        gfs: Option<&FileStore>,
+        history_session: Option<String>,
+    ) -> Result<Option<Arc<crate::backend::agent_admission::HeldAgentLease>>, String> {
+        let candidate = if config.resume_flag.is_empty() {
+            None
+        } else {
+            self.inner.lock().unwrap().session_id.clone().or_else(|| history_session.clone())
+        };
+        let lease = match self.acquire_agent_lease(config, candidate.as_deref()) {
+            Ok(lease) => lease,
+            // The agent is open in another pane of this process (it holds the
+            // lease, whatever session either pane holds), or this conversation
+            // is live or still closing there. Report that as the held-elsewhere
+            // refusal it is: callers treat only that one as "don't fall back to
+            // a fresh session" (`is_held_elsewhere_error`), and the wording is
+            // "another pane", not "another instance".
+            Err(e) => {
+                let uid = config.env_vars.get("AGENTMUX_AGENT_UID").map(|u| u.trim()).filter(|u| !u.is_empty());
+                if let Some(other) = uid.and_then(|uid| self.agent_held_by_other_pane(uid)) {
+                    return Err(super::held_elsewhere_error(&other, false));
+                }
+                if let Some((other, closing)) = candidate.as_deref().and_then(|sid| self.session_held_elsewhere(sid)) {
+                    return Err(super::held_elsewhere_error(&other, closing));
+                }
+                return Err(e);
+            }
+        };
+        self.apply_resume_gate_with(config, gfs, history_session);
+        Ok(lease)
+    }
+
     /// The one resume gate
     /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2):
     /// before this spawn passes `--resume`, only the head of the agent's
@@ -47,20 +95,16 @@ impl PersistentSubprocessController {
     /// redirected to the head when this config dir reaches it, and cleared
     /// otherwise, so the spawn goes fresh and carries AgentMux's record.
     /// Runs after every path that sets the id (hydrate from config, first
-    /// spawn onto rendered history), before the held-elsewhere check and the
-    /// lease, which then apply to whatever id survives. Never fails the spawn:
-    /// anything unknown leaves the id as it was.
+    /// spawn onto rendered history) and under the agent's lease
+    /// ([`lease_then_gate`](Self::lease_then_gate)), before the held-elsewhere
+    /// check, which then applies to whatever id survives. Never fails the
+    /// spawn: anything unknown leaves the id as it was.
     ///
     /// `history_session`: on a first spawn holding no id, the session of the
     /// history the pane renders when `--resume` can't reach it here. It is a
     /// candidate for relocation only (a rebuild onto a new login of the same
     /// identity); any other decision leaves the spawn holding no id, as
     /// before.
-    pub(super) fn apply_resume_gate(&self, config: &PersistentSpawnConfig, history_session: Option<String>) {
-        let gfs = crate::backend::agent_session::global_transcript_store();
-        self.apply_resume_gate_with(config, gfs.map(|g| &**g), history_session);
-    }
-
     pub(super) fn apply_resume_gate_with(
         &self,
         config: &PersistentSpawnConfig,
@@ -269,6 +313,7 @@ impl PersistentSubprocessController {
     /// Records the start of the segment this spawn begins. `None` when the
     /// spawn carries no agent UID (quick-launch panes, a continuation that
     /// resumes before its row exists) or the write fails.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn record_segment_start(
         &self,
         agent_uid: &str,
@@ -299,6 +344,7 @@ impl PersistentSubprocessController {
     /// the attempted id names the copy, which is swept if the process dies
     /// first, so as the head it would send the next spawn to `--resume` a
     /// file that is gone instead of relocating again (spec §4.3).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn segment_start(
         &self,
         agent_uid: &str,
@@ -450,17 +496,27 @@ pub(super) fn kept_relocated_id(
 /// Once a relocated resume reports its session: a fork (a new id) never
 /// wrote the copy, so it goes. The same id back means the CLI resumed the
 /// copy in place instead of forking; it is live now, so only its marker
-/// goes, and the duplicate is logged (spec §3 I4).
-pub(super) fn settle_relocated_copy(block_id: &str, copy: &std::path::Path, forked_from: Option<&str>, captured: &str) {
+/// goes, and the duplicate is logged (spec §3 I4). Returns whether the copy
+/// was still this spawn's: a replacement's sweep may have taken it and
+/// placed its own at the same path, which is then left alone.
+pub(super) fn settle_relocated_copy(
+    block_id: &str,
+    copy: &crate::backend::continuity_relocate::Relocated,
+    forked_from: Option<&str>,
+    captured: &str,
+) -> bool {
     if forked_from == Some(captured) {
-        tracing::warn!(
-            target: "continuity",
-            block_id,
-            session_id = captured,
-            "relocated resume did not fork; keeping the copy as the live session"
-        );
-        crate::backend::continuity_relocate::unmark(copy);
+        let owned = crate::backend::continuity_relocate::unmark(copy);
+        if owned {
+            tracing::warn!(
+                target: "continuity",
+                block_id,
+                session_id = captured,
+                "relocated resume did not fork; keeping the copy as the live session"
+            );
+        }
+        owned
     } else {
-        crate::backend::continuity_relocate::remove(copy);
+        crate::backend::continuity_relocate::remove(copy)
     }
 }

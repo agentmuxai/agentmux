@@ -2,19 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentMessageBlock - Displays agent-to-agent communication (mux/ject)
+ * AgentMessageBlock - Displays agent-to-agent communication (mux/ject).
+ * The row, toggle, chevron and peek come from CollapsibleMessage.
  */
 
-import clsx from "clsx";
-import { Show, createMemo, type JSX } from "solid-js";
+import { type JSX } from "solid-js";
 import type { AgentMessageNode } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
-import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
-import { useTick } from "@/app/hook/useTick";
-import { useNodePeek } from "../hooks/useNodePeek";
-import { PeekOverlay } from "./PeekOverlay";
-import { PeekMetaRow } from "./PeekMetaRow";
+import { CollapsibleMessage } from "./CollapsibleMessage";
 
 interface AgentMessageBlockProps {
     node: AgentMessageNode;
@@ -22,65 +17,36 @@ interface AgentMessageBlockProps {
     onToggle: () => void;
 }
 
-export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element => {
-    // Don't destructure — the streaming buffer keeps this row mounted
-    // across token deltas; useAgentStream replaces props.node ref on
-    // each chunk. Destructured `node` would freeze at first ref.
-    // Access props.X reactively at each site. (codex P1 on PR #786 +
-    // family of issues on virt redesign — also fixed in MarkdownBlock.)
-
-    // Peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25) —
-    // this node type never surfaces its own timestamp anywhere, collapsed
-    // or expanded, so the peek isn't gated on `props.collapsed` (unlike
-    // ToolBlock's panel, expanding this block wouldn't make the peek
-    // redundant — the expanded view has no time at all).
-    const peekTick = useTick(1000);
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
-    const peekTimeText = createMemo(() => {
-        if (!isPeeking()) return null;
-        peekTick();
-        return `${formatExactTime(props.node.timestamp)} · ${formatTimeAgo(props.node.timestamp)}`;
-    });
-    const peekEstimateText = createMemo(() => {
-        const count = estimateTokenCount(props.node.message);
-        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
-    });
-
-    return (
-        <div
-            ref={setPeekRowEl}
-            class={clsx("agent-message-block", {
-                incoming: props.node.direction === "incoming",
-                outgoing: props.node.direction !== "incoming",
-                collapsed: props.collapsed,
-                mux: props.node.method === "mux",
-                ject: props.node.method === "ject",
-            })}
-            onClick={props.onToggle}
-            onMouseEnter={handlePeekEnter}
-            onMouseLeave={handlePeekLeave}
-        >
-            <div class="agent-message-summary">
-                <span class="agent-message-chevron">{props.collapsed ? "▸" : "▾"}</span>
-                <span class="agent-message-icon">{props.node.summary}</span>
-            </div>
-            <Show when={!props.collapsed}>
-                <div class="agent-message-content" onClick={(e) => e.stopPropagation()}>
-                    <div class="agent-message-meta">
-                        <span class="agent-message-from">From: {props.node.from}</span>
-                        <span class="agent-message-to">To: {props.node.to}</span>
-                        <span class="agent-message-method">Method: {props.node.method}</span>
-                    </div>
-                    <pre class="agent-message-body">
-                        <LinkifiedText text={props.node.message} />
-                    </pre>
+export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element => (
+    // Don't destructure — the streaming buffer keeps this row mounted across
+    // token deltas; useAgentStream replaces props.node on each chunk.
+    <CollapsibleMessage
+        rootClass="agent-message-block"
+        classPrefix="agent-message"
+        classes={{
+            incoming: props.node.direction === "incoming",
+            outgoing: props.node.direction !== "incoming",
+            mux: props.node.method === "mux",
+            ject: props.node.method === "ject",
+        }}
+        collapsed={props.collapsed}
+        onToggle={props.onToggle}
+        peekText={props.node.message}
+        timestamp={props.node.timestamp}
+        summary={<span class="agent-message-icon">{props.node.summary}</span>}
+        body={
+            <>
+                <div class="agent-message-meta">
+                    <span class="agent-message-from">From: {props.node.from}</span>
+                    <span class="agent-message-to">To: {props.node.to}</span>
+                    <span class="agent-message-method">Method: {props.node.method}</span>
                 </div>
-            </Show>
-            <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
-                <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
-            </PeekOverlay>
-        </div>
-    );
-};
+                <pre class="agent-message-body">
+                    <LinkifiedText text={props.node.message} />
+                </pre>
+            </>
+        }
+    />
+);
 
 AgentMessageBlock.displayName = "AgentMessageBlock";
