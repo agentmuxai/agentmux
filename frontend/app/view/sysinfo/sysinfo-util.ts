@@ -57,6 +57,66 @@ export function getGapThresholdMs(configIntervalSecs: number): number {
  *
  * See docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md.
  */
+/** Layout margins for one panel's `Plot.plot()` call, in pixels. */
+export type PlotMargins = {
+    marginTop: number;
+    marginRight: number;
+    marginBottom: number;
+    marginLeft: number;
+};
+
+/**
+ * Margins tight enough for this panel's actual content, instead of trusting
+ * Observable Plot's auto-computed margins — those are sized for a full-page
+ * chart with room to spare, which is disproportionately wasteful on these
+ * small (as little as ~100px tall) grid panels.
+ *
+ * A sparkline hides its axis entirely (`axis: !sparkline` in SingleLinePlot),
+ * so it needs only a sliver of room to keep the hover dot/tip from clipping
+ * at the edge — no tick text, no axis label.
+ *
+ * A titled panel (`title` — the metric name, top-left) needs enough top
+ * margin to clear that text; an untitled one needs only the same sliver as a
+ * sparkline's top edge.
+ *
+ * With both axis labels moved to sit at the origin (see buildPlotAxisOptions
+ * below), neither one claims its own reserved band past the last tick, so
+ * marginRight/marginBottom only need to fit the tick text itself plus a few
+ * px of clearance for the pointer dot at the data's edge.
+ */
+export function computePlotMargins(sparkline: boolean, title: boolean): PlotMargins {
+    if (sparkline) {
+        return { marginTop: 4, marginRight: 4, marginBottom: 4, marginLeft: 4 };
+    }
+    return {
+        marginTop: title ? 16 : 6,
+        marginRight: 10,
+        // Tick text row + axis line; the x-axis label shares that row (labelAnchor: "left") rather than adding one below it.
+        marginBottom: 20,
+        // Up to 3-digit tick values + a leading "-"; the y-axis label shares that column (labelAnchor: "bottom") rather than adding a band above it.
+        marginLeft: 30,
+    };
+}
+
+/**
+ * x/y scale options that put both axis labels at the origin (the corner
+ * where the lowest x value meets the lowest y value), in the same
+ * alignment the tick VALUES already use there, instead of Plot's default:
+ * the x label past the last tick (`labelAnchor: "right"`, the default for a
+ * quantitative/temporal x scale) and the y label above the first tick
+ * (`labelAnchor: "top"`, the default for a quantitative y scale).
+ *
+ * `labelAnchor: "left"` on x anchors the label at the axis's start (time's
+ * minimum, which sits at the origin) instead of its end; `labelAnchor:
+ * "bottom"` on y anchors it at the axis's start (the domain minimum, at the
+ * origin) instead of its top. Both then read from the same corner as the
+ * first tick's own value, rather than the label living somewhere else on
+ * the axis.
+ */
+export function buildPlotAxisLabelOptions(): { x: { labelAnchor: "left" }; y: { labelAnchor: "bottom" } } {
+    return { x: { labelAnchor: "left" }, y: { labelAnchor: "bottom" } };
+}
+
 export function computeAutoMaxY(
     plotData: DataItem[],
     yval: string,
