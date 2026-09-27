@@ -300,17 +300,31 @@ fn find_on_path(tool: &str, path: Option<&std::ffi::OsStr>) -> Option<String> {
 /// Scoped names (`@scope/name`) are legitimate and produce one nested
 /// directory; the helper splits on `/` and `\` and handles them.
 fn read_installed_version(provider_id: &str, npm_package: &str) -> Option<String> {
-    for dir in provider_installed_dirs(provider_id) {
+    first_installed_version(&provider_installed_dirs(provider_id), npm_package)
+}
+
+/// The version of the first dir (in order) holding a usable manifest for
+/// `npm_package`. Pure over `dirs`, for tests.
+fn first_installed_version(dirs: &[std::path::PathBuf], npm_package: &str) -> Option<String> {
+    for dir in dirs {
         let base = dir.join("node_modules");
         let pkg_dir = crate::backend::base::safe_join_within_base(&base, npm_package).ok()?;
         let manifest = pkg_dir.join("package.json");
-        let Ok(raw) = std::fs::read_to_string(manifest) else {
-            continue;
-        };
-        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-        return parsed.get("version")?.as_str().map(|s| s.to_string());
+        // A missing, unreadable, malformed or version-less manifest in one dir
+        // must not mask a valid install in the next (ReAgent P2 on #3927): skip
+        // it. (The package-name rejection above stays an early return — it
+        // doesn't depend on the dir.)
+        if let Some(version) = manifest_version(&manifest) {
+            return Some(version);
+        }
     }
     None
+}
+
+fn manifest_version(manifest: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(manifest).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    parsed.get("version")?.as_str().map(|s| s.to_string())
 }
 
 fn installed_bin_in(dir: &std::path::Path, cli_command: &str) -> Option<std::path::PathBuf> {
@@ -962,5 +976,44 @@ mod installed_version_tests {
     #[test]
     fn scoped_package_names_are_not_treated_as_escapes() {
         let _ = read_installed_version("claude", "@anthropic-ai/claude-code");
+    }
+
+    /// ReAgent P2 on #3927: a shared-dir manifest that is version-less,
+    /// malformed or missing must not hide the legacy dir's valid install.
+    #[test]
+    fn a_bad_manifest_in_the_first_dir_falls_through_to_the_next() {
+        use super::first_installed_version;
+        let pkg = "@anthropic-ai/claude-code";
+        let write = |dir: &std::path::Path, body: &str| {
+            let p = dir.join("node_modules").join("@anthropic-ai").join("claude-code");
+            std::fs::create_dir_all(&p).unwrap();
+            std::fs::write(p.join("package.json"), body).unwrap();
+        };
+        for bad in [r#"{"name":"x"}"#, "not json", r#"{"version":7}"#] {
+            let tmp = tempfile::tempdir().unwrap();
+            let shared = tmp.path().join("shared");
+            let legacy = tmp.path().join("legacy");
+            write(&shared, bad);
+            write(&legacy, r#"{"version":"2.1.280"}"#);
+            assert_eq!(
+                first_installed_version(&[shared.clone(), legacy.clone()], pkg).as_deref(),
+                Some("2.1.280"),
+                "shared manifest {bad:?} masked the legacy install"
+            );
+        }
+        // No manifest at all in the first dir: same.
+        let tmp = tempfile::tempdir().unwrap();
+        let legacy = tmp.path().join("legacy");
+        write(&legacy, r#"{"version":"2.1.280"}"#);
+        assert_eq!(
+            first_installed_version(&[tmp.path().join("shared"), legacy], pkg).as_deref(),
+            Some("2.1.280")
+        );
+        // The first usable one wins.
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        write(&a, r#"{"version":"1.0.0"}"#);
+        write(&b, r#"{"version":"2.0.0"}"#);
+        assert_eq!(first_installed_version(&[a, b], pkg).as_deref(), Some("1.0.0"));
     }
 }
