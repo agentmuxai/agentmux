@@ -66,11 +66,17 @@ impl PersistentSubprocessController {
         };
         let lease = match self.acquire_agent_lease(config, candidate.as_deref()) {
             Ok(lease) => lease,
-            // The agent's other pane in this process holds the lease because it
-            // has this very conversation open. Report that as the held-elsewhere
+            // The agent is open in another pane of this process (it holds the
+            // lease, whatever session either pane holds), or this conversation
+            // is live or still closing there. Report that as the held-elsewhere
             // refusal it is: callers treat only that one as "don't fall back to
-            // a fresh session" (`is_held_elsewhere_error`).
+            // a fresh session" (`is_held_elsewhere_error`), and the wording is
+            // "another pane", not "another instance".
             Err(e) => {
+                let uid = config.env_vars.get("AGENTMUX_AGENT_UID").map(|u| u.trim()).filter(|u| !u.is_empty());
+                if let Some(other) = uid.and_then(|uid| self.agent_held_by_other_pane(uid)) {
+                    return Err(super::held_elsewhere_error(&other, false));
+                }
                 if let Some((other, closing)) = candidate.as_deref().and_then(|sid| self.session_held_elsewhere(sid)) {
                     return Err(super::held_elsewhere_error(&other, closing));
                 }

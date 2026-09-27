@@ -92,8 +92,9 @@ Related failure modes this spec must also handle:
 
 The first two converge in `spawn_process` just before `requested_sid` is read, in
 `lease_then_gate` (`segments.rs`): the host-wide single-live-instance lease is claimed first,
-and the gate runs under it (§4.3, "One spawn per agent"). The held-elsewhere refusal follows,
-on whatever id the gate left.
+and the gate runs under it (§4.3, "One spawn per agent"). The lease takes only the pre-gate
+candidate as an informational hint and no longer reads `requested_sid`. The held-elsewhere
+refusal follows, on whatever id the gate left.
 
 ### 2.4 The CLI (Claude Code 2.1.280, `claude --help`)
 - `-r, --resume [value]`: "Resume a conversation by session ID". It continues **the same id and
@@ -241,12 +242,18 @@ single-live-instance lease (`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`).
 - Before this, the gate ran ahead of the lease, and two controllers of one agent could race
   each other's copy and marker. #3907 and #3924 closed individual windows (per-relocation
   tokens, `hard_link` placement, ownership-checked settle), and Codex kept finding narrower
-  ones. Those protections stay as defence in depth.
+  ones.
+- **The lease serializes spawns of different controllers only.** Within one controller, a
+  restart reuses its lease (`acquire_agent_lease` keeps an earlier generation's). So a
+  superseded generation's late settle and the new generation's gate can still overlap, and
+  they are guarded only by the per-relocation token and `holds_current_session`. Those are
+  load-bearing and must stay.
 - The session the lease records is only a hint (the lease is keyed by agent), so claiming it
   before the gate settles the id changes nothing about who holds it.
-- If the lease is refused while the candidate session is live in another pane of this
-  process, the refusal is still reported as held-elsewhere, which callers never answer with a
-  fresh session.
+- If the lease is refused because another pane of this process holds the agent (whatever
+  session either pane holds), or because the candidate session is live or still closing
+  there, the refusal is still reported as held-elsewhere, naming that pane. Callers never
+  answer that refusal with a fresh session.
 - Without a lease store or an agent UID, the gate runs unguarded, as before.
 
 ### 4.4 Fork when the file changed outside AgentMux (H4)

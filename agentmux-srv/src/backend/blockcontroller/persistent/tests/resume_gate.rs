@@ -559,3 +559,31 @@ async fn the_other_pane_holding_the_conversation_is_reported_as_held_elsewhere()
 
     assert!(super::super::is_held_elsewhere_error(&err), "got: {err}");
 }
+
+/// Camper on #3935: this pane holds a stale id, and the agent's live pane in
+/// this process — on another session — holds the lease. Still "open in
+/// another pane" (with that pane's block), not "another instance", so the
+/// callers settle queued prompts instead of falling back to a fresh session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stale_pane_refused_by_the_agents_live_pane_is_held_elsewhere() {
+    let f = fixture(&[]);
+    let (_reg, registry) = lease_registry();
+    let store = crate::backend::agent_admission::lease_store_for(Some(Arc::clone(&registry))).unwrap();
+    let live_block = format!("live-{}", uuid::Uuid::new_v4());
+    let held = crate::backend::agent_admission::acquire(&store, UID, "AgentA", &Arc::from("this-srv"), &live_block, None, |_| {}).unwrap();
+    let live = Arc::new(PersistentSubprocessController::new("tab".into(), live_block.clone(), None, None, None, None));
+    {
+        let mut g = live.inner.lock().unwrap();
+        g.session_id = Some(format!("head-{}", uuid::Uuid::new_v4()));
+        g.current_pid = Some(4242);
+        g.agent_lease = Some(Arc::new(held));
+    }
+    crate::backend::blockcontroller::register_controller(&live_block, live.clone());
+
+    let stale = leased(Some(&format!("stale-{}", uuid::Uuid::new_v4())), &registry, "this-srv");
+    let err = stale.lease_then_gate(&f.config, Some(&f.gfs), None).err().expect("refused");
+    crate::backend::blockcontroller::delete_controller(&live_block);
+
+    assert!(super::super::is_held_elsewhere_error(&err), "got: {err}");
+    assert!(err.contains(&live_block), "names the live pane: {err}");
+}

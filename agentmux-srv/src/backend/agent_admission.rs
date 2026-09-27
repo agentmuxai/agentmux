@@ -116,6 +116,11 @@ impl HeldAgentLease {
         self.lease.epoch()
     }
 
+    /// The agent UID this lease is for — its key.
+    pub fn agent_uid(&self) -> &str {
+        self.lease.instance_id()
+    }
+
     /// A cheap handle the agent's output writer checks before each append
     /// to the agent's shared record (spec §4.3, Phase 3).
     pub fn record_fence(&self) -> RecordFence {
