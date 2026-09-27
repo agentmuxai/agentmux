@@ -320,6 +320,41 @@ pub(crate) async fn release(
     true
 }
 
+/// Take over's relay step, after the holder answered its release request:
+/// claim `agent_id`'s lease now, and if the relay still names an instance
+/// **on this computer**, move it with `POST /agents/lease/take` (the relay
+/// allows that only within one account). A holder older than #3899 answers
+/// the release but keeps renewing the lease for as long as it runs, so
+/// without this the new pane is fenced seconds after it starts
+/// (`docs/investigations/INVESTIGATION_TAKE_OVER_OLD_HOLDER_RELAY_LEASE_2026_09_27.md`).
+/// Another computer is never taken from: Take over only works on this one.
+pub(crate) async fn take_over(base: &str, agent_id: &str, token: &str, http: &reqwest::Client) -> Outcome {
+    let op = op_lock(agent_id);
+    let _op = op.lock().await;
+    let claimed = claim_outcome(call(base, agent_id, token, http, "/agents/lease").await);
+    let outcome = match claimed {
+        Outcome::HeldElsewhere(desc) if holder_on_this_computer(&desc) => {
+            match call(base, agent_id, token, http, "/agents/lease/take").await {
+                Some((200..=299, _)) => {
+                    tracing::info!(agent_id, from = %desc, "wan_lease: took the lease over from an instance on this computer");
+                    Outcome::Held
+                }
+                // Refused (409) keeps the holder the relay names now; a relay
+                // without the route (404/405) or no answer keeps the one we
+                // already have. Neither turns the lease tier off.
+                Some((409, body)) => claim_outcome(Some((409, body))),
+                other => {
+                    tracing::warn!(agent_id, answer = ?other.map(|(s, _)| s), "wan_lease: the relay would not take the lease over");
+                    Outcome::HeldElsewhere(desc)
+                }
+            }
+        }
+        other => other,
+    };
+    record(agent_id, &outcome);
+    outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,6 +497,97 @@ mod tests {
         assert_eq!(held_on_another_computer(&other).as_deref(), Some("computer desk, channel stable"));
 
         assert_eq!(held_on_this_computer_by("never-seen"), None);
+    }
+
+    /// A relay stub for [`take_over`]: `claim` and `take` answer with the
+    /// given status and body; each route counts its hits.
+    async fn lease_stub(
+        claim: (u16, serde_json::Value),
+        take: (u16, serde_json::Value),
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (claims, takes) = (std::sync::Arc::new(AtomicUsize::new(0)), std::sync::Arc::new(AtomicUsize::new(0)));
+        let (c, t) = (claims.clone(), takes.clone());
+        let answer = |(status, body): (u16, serde_json::Value)| {
+            (axum::http::StatusCode::from_u16(status).unwrap(), axum::Json(body))
+        };
+        let app = axum::Router::new()
+            .route(
+                "/agents/lease",
+                axum::routing::post(move || {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    let r = answer(claim.clone());
+                    async move { r }
+                }),
+            )
+            .route(
+                "/agents/lease/take",
+                axum::routing::post(move || {
+                    t.fetch_add(1, Ordering::SeqCst);
+                    let r = answer(take.clone());
+                    async move { r }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, claims, takes)
+    }
+
+    fn held_here(channel: &str) -> serde_json::Value {
+        let here = crate::backend::reactive::registry::local_host_label();
+        serde_json::json!({ "error": "held_by_other", "held_by": { "host": here, "channel": channel, "version": "0.57.6" } })
+    }
+
+    // narko 2026-09-27: a 0.57.6 holder answered the release but kept
+    // renewing the relay lease; Take over has to move it itself.
+    #[tokio::test]
+    async fn take_over_takes_a_lease_an_instance_on_this_computer_kept() {
+        use std::sync::atomic::Ordering;
+        let (base, claims, takes) =
+            lease_stub((409, held_here("local-main-old")), (200, serde_json::json!({ "ok": true, "epoch": 6 }))).await;
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        assert_eq!(take_over(&base, &agent, "", &reqwest::Client::new()).await, Outcome::Held);
+        assert_eq!((claims.load(Ordering::SeqCst), takes.load(Ordering::SeqCst)), (1, 1));
+        assert!(is_held(&agent), "recorded, so the lease tick renews it");
+        assert_eq!(held_elsewhere(&agent), None);
+    }
+
+    #[tokio::test]
+    async fn take_over_never_takes_from_another_computer() {
+        use std::sync::atomic::Ordering;
+        let other = serde_json::json!({ "error": "held_by_other", "held_by": { "host": "some-other-desk", "channel": "stable" } });
+        let (base, _, takes) = lease_stub((409, other), (200, serde_json::json!({ "ok": true, "epoch": 6 }))).await;
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        assert_eq!(
+            take_over(&base, &agent, "", &reqwest::Client::new()).await,
+            Outcome::HeldElsewhere("computer some-other-desk, channel stable".into())
+        );
+        assert_eq!(takes.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn take_over_of_a_free_lease_is_a_plain_claim() {
+        use std::sync::atomic::Ordering;
+        let (base, _, takes) = lease_stub((200, serde_json::json!({ "ok": true, "epoch": 1 })), (500, serde_json::Value::Null)).await;
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        assert_eq!(take_over(&base, &agent, "", &reqwest::Client::new()).await, Outcome::Held);
+        assert_eq!(takes.load(Ordering::SeqCst), 0);
+    }
+
+    // A relay deployed before /agents/lease/take answers it 404. That must
+    // keep the holder's refusal, and must not switch the whole lease tier
+    // off the way a 404 on the claim route does.
+    #[tokio::test]
+    async fn take_over_on_a_relay_without_take_keeps_the_refusal_and_the_lease_tier() {
+        let (base, _, _) = lease_stub((409, held_here("local-main-old")), (404, serde_json::Value::Null)).await;
+        let agent = format!("agent-{}", uuid::Uuid::new_v4());
+        let outcome = take_over(&base, &agent, "", &reqwest::Client::new()).await;
+        assert!(matches!(&outcome, Outcome::HeldElsewhere(d) if holder_on_this_computer(d)), "{outcome:?}");
+        assert!(
+            UNSUPPORTED_UNTIL.lock().unwrap().is_none_or(|t| t <= Instant::now()),
+            "a missing take route is not a missing lease tier"
+        );
     }
 
     #[test]

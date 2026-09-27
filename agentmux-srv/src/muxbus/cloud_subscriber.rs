@@ -1353,6 +1353,24 @@ pub(crate) fn is_subscribed(agent: &str) -> bool {
     get_global_subscriber().is_none_or(|s| s.agents.lock().unwrap().contains(&agent.to_lowercase()))
 }
 
+/// Take over's relay step on the requester ([`super::wan_lease::take_over`]),
+/// with a fresh shared token. `Unknown` (fail open) when this instance has no
+/// MuxBus session or no token can be loaded.
+pub(crate) async fn take_over_lease_now(
+    id_store: &Arc<Store>,
+    http: &reqwest::Client,
+    agent: &str,
+) -> super::wan_lease::Outcome {
+    if get_global_subscriber().is_none() || agent.is_empty() {
+        return super::wan_lease::Outcome::Unknown;
+    }
+    let token = shared_token_now(id_store, "").await;
+    if token.is_empty() {
+        return super::wan_lease::Outcome::Unknown;
+    }
+    super::wan_lease::take_over(&super::relay::rest_base_url(), agent, &token, http).await
+}
+
 pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> RelayRelease {
     let Some(sub) = get_global_subscriber() else { return RelayRelease::NotSubscribed };
     sub.release_now(agent, &super::relay::rest_base_url(), shared_token_now(id_store, "")).await
