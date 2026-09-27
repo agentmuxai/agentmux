@@ -1,6 +1,11 @@
 # Memory carry-over: loading and management across the three agent-awareness cases
 
-**Status:** proposed
+**Status:** superseded — the measurements in §2 still stand (compaction keeps
+the startup file, which lives in the system prompt). The recommendation against
+reinjecting (§4.5) and the "index only" non-goal (§5) were overridden by the
+repo owner on 2026-09-22 and shipped otherwise in #3502/#3512. The unbuilt
+§4.3/§4.4 items are carried as G9 in the doc below.
+**Superseded-by:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`
 **Date:** 2026-09-05 (empirical findings added 2026-09-06)
 **Author:** Manoz@Area54
 

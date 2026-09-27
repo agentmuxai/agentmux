@@ -4,6 +4,7 @@
 with_version`, and the `bootstrap.rs` startup hook are all in place and
 tested. §6's open question (what to do with the Claude-only Provider Config
 placeholder) remains genuinely unresolved, deliberately, per that section. — #3244
+**Current delivery state:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
 **Date:** 2026-09-15
 **Related:** `SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (the `is_system`
 isolation this spec builds on top of, unweakened), `SPEC_GLOBAL_MEMORY_
