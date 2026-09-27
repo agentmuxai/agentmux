@@ -195,12 +195,36 @@ pub fn unix_time_to_ms(value: i64) -> i64 {
     }
 }
 
+/// How long after srv start the first index build waits
+/// ([`HistoryService::warm_in_background`]): past the window in which the user
+/// opens their first agents (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F2).
+pub const WARM_DELAY: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Lower the calling thread's scheduling priority for background work. On
+/// Windows, `THREAD_MODE_BACKGROUND_BEGIN` also lowers its I/O and memory
+/// priority — the index build is mostly file reads. On Linux, a nice of 10
+/// for this thread only. Best-effort: a failure leaves normal priority.
+fn lower_current_thread_priority() {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN};
+        let _ = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+    }
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        let _ = libc::setpriority(libc::PRIO_PROCESS, tid, 10);
+    }
+}
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
     /// AgentMux's own record of each agent's conversations — which sessions
     /// are whose, and the content of those whose transcript is gone.
     records: record::AgentRecords,
+    /// A deferred first build is scheduled and hasn't finished yet.
+    warm_pending: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl HistoryService {
@@ -211,6 +235,7 @@ impl HistoryService {
         HistoryService {
             index: Arc::new(SessionIndex::new(adapters)),
             records: record::AgentRecords::global(),
+            warm_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -227,22 +252,47 @@ impl HistoryService {
 
     #[cfg(test)]
     pub(crate) fn from_index_and_records(index: SessionIndex, records: record::AgentRecords) -> Self {
-        HistoryService { index: Arc::new(index), records }
+        HistoryService {
+            index: Arc::new(index),
+            records,
+            warm_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
     }
 
     /// Build the index off-thread at srv start, so the first search doesn't
     /// pay for parsing every transcript on the machine inside the MCP's 10 s
     /// timeout (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.5).
+    ///
+    /// Deferred by [`WARM_DELAY`] and run at background priority: the first
+    /// build reads every transcript on the machine (61,066 sessions in 23.5 s
+    /// on one host) and used to start the moment srv did — exactly when the
+    /// user opens their first agents, competing with them for CPU and disk
+    /// (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F2). A search in the meantime
+    /// answers "index building", as it does during the build itself; the
+    /// History tab's `list`/`get` still build on demand.
     pub fn warm_in_background(&self) -> std::thread::JoinHandle<()> {
+        self.warm_in_background_after(WARM_DELAY)
+    }
+
+    /// [`Self::warm_in_background`] with an explicit delay (tests use zero).
+    pub fn warm_in_background_after(&self, delay: std::time::Duration) -> std::thread::JoinHandle<()> {
         let index = self.index.clone();
+        let pending = self.warm_pending.clone();
+        pending.store(true, std::sync::atomic::Ordering::SeqCst);
         std::thread::Builder::new()
             .name("history-index-warm".into())
             .spawn(move || {
+                lower_current_thread_priority();
+                if !delay.is_zero() {
+                    std::thread::sleep(delay);
+                }
                 let started = std::time::Instant::now();
                 let (discovered, _, _) = index.refresh();
+                pending.store(false, std::sync::atomic::Ordering::SeqCst);
                 tracing::info!(
                     discovered,
                     duration_ms = started.elapsed().as_millis() as u64,
+                    delayed_ms = delay.as_millis() as u64,
                     "history: index built"
                 );
             })
@@ -275,6 +325,12 @@ impl HistoryService {
     /// Concurrent searches share refreshes ([`SessionIndex::refresh_covering_now`]).
     fn refresh_for_search(&self) -> Result<(), HistorySearchError> {
         if self.index.refreshed_at_ms() == 0 {
+            // The deferred first build is scheduled but hasn't finished (or
+            // started): answer "building" rather than running that whole
+            // first scan inside this search — same as while it runs.
+            if self.warm_pending.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(HistorySearchError::IndexBuilding);
+            }
             return match self.index.try_refresh() {
                 Some(_) => Ok(()),
                 None => Err(HistorySearchError::IndexBuilding),
@@ -885,8 +941,27 @@ mod search_freshness_tests {
     #[test]
     fn warm_in_background_builds_the_index() {
         let svc = empty_service();
-        svc.warm_in_background().join().unwrap();
+        svc.warm_in_background_after(std::time::Duration::ZERO).join().unwrap();
         assert!(svc.index.refreshed_at_ms() > 0);
+        assert!(!svc.warm_pending.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F2: the first build is deferred.
+    /// A search in that window must not run the whole first scan itself (it
+    /// would outlast the MCP's 10 s) — it answers "building", like during the
+    /// build.
+    #[test]
+    fn a_search_while_the_deferred_build_is_pending_says_building_without_scanning() {
+        let svc = empty_service();
+        let _warm = svc.warm_in_background_after(std::time::Duration::from_secs(3600));
+        let err = svc.refresh_for_search().unwrap_err();
+        assert!(matches!(err, HistorySearchError::IndexBuilding), "{err}");
+        assert_eq!(svc.index.refreshed_at_ms(), 0, "the search must not have built the index");
+    }
+
+    #[test]
+    fn the_first_build_waits_out_the_startup_window() {
+        assert!(WARM_DELAY >= std::time::Duration::from_secs(10), "{WARM_DELAY:?}");
     }
 }
 
