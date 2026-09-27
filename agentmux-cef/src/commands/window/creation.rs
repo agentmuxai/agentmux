@@ -431,6 +431,10 @@ pub fn open_subwindow(
     if is_approval_view(initial_view) {
         if let Some(label) = opened.as_str() {
             state.approval_windows.lock().insert(label.to_string());
+            // Keep it above "Always on top" floaters — covers the case where
+            // the window was created before the label was recorded here.
+            #[cfg(target_os = "windows")]
+            crate::ui_tasks::post_register_keep_above_floaters(state, label);
         }
     }
     Ok(opened)
