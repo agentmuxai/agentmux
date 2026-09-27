@@ -10,6 +10,7 @@ import {
     buildMemoryReinjectionNodeFromReplay,
     composeReinjectionMessage,
     GLOBAL_SECTION_SEPARATOR,
+    RUNNING_SUMMARY_HEADING,
     isMemoryReinjectionMessage,
     memoryReinjectionNodeId,
     memorySizeBand,
@@ -379,5 +380,27 @@ describe("GLOBAL_SECTION_SEPARATOR — frontend/backend consistency", () => {
         // Only the escapes a Rust string literal like this one uses.
         const rust = match[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
         expect(GLOBAL_SECTION_SEPARATOR).toBe(rust);
+    });
+
+    it("RUNNING_SUMMARY_HEADING is how continuity_state.rs's summary heading starts", () => {
+        const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+        const source = readFileSync(resolve(repoRoot, "agentmux-srv/src/backend/continuity_state.rs"), "utf8");
+        expect(source).toContain(`# ${RUNNING_SUMMARY_HEADING} (`);
+    });
+});
+
+// A compaction reinjection carries AgentMux's running summary as its last
+// section (continuity_state::append_state_to_reinjection). Replay must end the
+// Personal Memory section there, not swallow the summary into its last entry.
+describe("replay of a compaction reinjection that carries the running summary", () => {
+    it("keeps the summary out of the Personal Memory entries", () => {
+        const composed = composeReinjectionMessage([globalEntry("g1", "gbody"), personalEntry("p1", "pbody")], "compaction");
+        const summary = `# ${RUNNING_SUMMARY_HEADING} (kept by AgentMux, written 2026-09-27 00:00 UTC; your compacted context wins where it is newer)\n${"summary text ".repeat(200)}\n`;
+        const withSummary = composed.replace("</system-reminder>", `${summary}</system-reminder>`);
+        const parsed = parseReinjectionMessage(withSummary);
+        expect(parsed?.globalMemoryCount).toBe(1);
+        expect(parsed?.personalMemoryCount).toBe(1);
+        const personal = parsed?.perEntryTokens.find((e) => e.source === "personal");
+        expect(personal?.sizeBytes).toBe("pbody".length);
     });
 });
