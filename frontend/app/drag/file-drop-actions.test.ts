@@ -24,7 +24,7 @@ vi.mock("../view/agent/attachments/attachment-draft", () => ({
     uploadFileToWorkdir: (...a: unknown[]) => hub.upload(...a),
 }));
 
-import { copyIntoWorkdir } from "./file-drop-actions";
+import { copyIntoWorkdir, settleWithLimit } from "./file-drop-actions";
 
 beforeEach(() => {
     hub.cwd = "/work";
@@ -81,5 +81,38 @@ describe("copyIntoWorkdir", () => {
         hub.copy.mockResolvedValue({ results: [{ source: "/a/x", error: "denied" }] });
         await copyIntoWorkdir("b1", { paths: ["/a/x"] }, { paneKind: "terminal pane" });
         expect(titles()).toEqual(["Copy failed (1 file)"]);
+    });
+});
+
+describe("settleWithLimit", () => {
+    it("runs at most `limit` at once and keeps results in order", async () => {
+        let running = 0;
+        let peak = 0;
+        const out = await settleWithLimit([1, 2, 3, 4, 5, 6], 2, async (n) => {
+            running++;
+            peak = Math.max(peak, running);
+            await new Promise((r) => setTimeout(r, 5));
+            running--;
+            if (n === 4) throw new Error("four");
+            return n * 10;
+        });
+        expect(peak).toBe(2);
+        expect(out.map((r) => (r.status === "fulfilled" ? r.value : "x"))).toEqual([10, 20, 30, "x", 50, 60]);
+    });
+
+    it("the bytes transport honours dnd:concurrency", async () => {
+        let running = 0;
+        let peak = 0;
+        hub.upload.mockImplementation(async (_b: string, f: File) => {
+            running++;
+            peak = Math.max(peak, running);
+            await new Promise((r) => setTimeout(r, 5));
+            running--;
+            return `/work/${f.name}`;
+        });
+        const files = Array.from({ length: 6 }, (_, i) => new File(["x"], `f${i}.txt`));
+        const dests = await copyIntoWorkdir("b1", { files }, { paneKind: "terminal pane", concurrency: 3 });
+        expect(peak).toBe(3);
+        expect(dests).toHaveLength(6);
     });
 });

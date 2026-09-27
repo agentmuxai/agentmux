@@ -62,6 +62,31 @@ export const notifyDrop = {
 
 export type CopySource = { paths: string[] } | { files: File[] };
 
+/** Uploads in flight at once for the bytes transport when `dnd:concurrency` isn't set. */
+const UPLOAD_CONCURRENCY = 4;
+
+/** `Promise.allSettled` over `items`, with at most `limit` running at a time. */
+export async function settleWithLimit<T, R>(
+    items: T[],
+    limit: number,
+    run: (item: T) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+    const results: PromiseSettledResult<R>[] = new Array(items.length);
+    let next = 0;
+    const worker = async () => {
+        while (next < items.length) {
+            const i = next++;
+            try {
+                results[i] = { status: "fulfilled", value: await run(items[i]) };
+            } catch (reason) {
+                results[i] = { status: "rejected", reason };
+            }
+        }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+    return results;
+}
+
 export interface CopyOptions {
     /**
      * Agent panes: insert `@name` for each copied file into this composer
@@ -95,7 +120,9 @@ export async function copyIntoWorkdir(blockId: string, source: CopySource, opts:
             else if (r.error) failures.push(`${baseName(r.source)}: ${r.error}`);
         }
     } else {
-        const results = await Promise.allSettled(source.files.map((f) => uploadFileToWorkdir(blockId, f)));
+        const results = await settleWithLimit(source.files, opts.concurrency ?? UPLOAD_CONCURRENCY, (f) =>
+            uploadFileToWorkdir(blockId, f)
+        );
         results.forEach((r, i) => {
             if (r.status === "fulfilled") dests.push(r.value);
             else failures.push(`${source.files[i].name || "file"}: ${String((r.reason as Error)?.message ?? r.reason)}`);
