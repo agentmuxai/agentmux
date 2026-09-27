@@ -41,6 +41,9 @@ const info = (id: string, bytes = 10): AttachmentInfo => ({
     send_width: 10,
     send_height: 10,
     first_frame_only: false,
+    kind: "image",
+    text_bytes: 0,
+    macros: false,
 });
 
 const accepted = (batchId: string, names: string[]) => ({

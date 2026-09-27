@@ -12,6 +12,8 @@
 //! <root>/derived/ab/<sha256>.sent        marker: sent to an agent at least once
 //! <root>/incoming/<uuid>.part          in-flight copy / upload
 //! <root>/sessions/<sha256(key)>.json     base64 inlined into one Claude session
+//! <root>/derived/ab/<sha256>.<fp>.text.txt  text version of a document
+//! <root>/named/<sha256>/<file name>     per-delivery copy of the original
 //! ```
 //!
 //! `<fp>` is the transform fingerprint ([`fingerprint`]): derived bytes
@@ -25,6 +27,8 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::extract;
+use super::kind::{self, FileKind};
 use super::process::{self, Derived};
 use crate::backend::rpc_types::AttachmentInfo;
 
@@ -72,9 +76,34 @@ pub struct StoredMeta {
     pub thumb_ext: String,
     #[serde(default)]
     pub first_frame_only: bool,
+    // ── Any-file attachments (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) ──
+    // Absent in metadata written before files existed: those are images.
+    /// `FileKind::as_str`: image, svg, text, pdf, word, excel, …
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_count: Option<u32>,
+    /// Extension of the derived text version (`text.<ext>`), if one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_ext: Option<String>,
+    #[serde(default)]
+    pub text_bytes: u64,
+    /// Why there is no text version, when one was expected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_note: Option<String>,
+    #[serde(default)]
+    pub macros: bool,
+}
+
+fn default_kind() -> String {
+    "image".to_string()
 }
 
 impl StoredMeta {
+    pub fn is_image(&self) -> bool {
+        self.kind == "image"
+    }
+
     pub fn to_info(&self, id: &str, name: &str) -> AttachmentInfo {
         AttachmentInfo {
             id: id.to_string(),
@@ -88,6 +117,11 @@ impl StoredMeta {
             send_width: self.send_width,
             send_height: self.send_height,
             first_frame_only: self.first_frame_only,
+            kind: self.kind.clone(),
+            page_count: self.page_count,
+            text_bytes: self.text_bytes,
+            text_note: self.text_note.clone(),
+            macros: self.macros,
         }
     }
 }
@@ -96,8 +130,12 @@ impl StoredMeta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Original,
+    /// The tile's preview: the image thumbnail, a text file's first lines,
+    /// or an SVG itself.
     Thumb,
     Send,
+    /// The extracted text version of a document.
+    Text,
 }
 
 impl Kind {
@@ -106,6 +144,7 @@ impl Kind {
             "original" => Some(Kind::Original),
             "thumb" => Some(Kind::Thumb),
             "send" => Some(Kind::Send),
+            "text" => Some(Kind::Text),
             _ => None,
         }
     }
@@ -200,14 +239,89 @@ impl Store {
         self.derived_path(id, fp, "json")
     }
 
-    /// The stored original for `id` and its format, found by content.
-    pub fn find_blob(&self, id: &str) -> Option<(PathBuf, image::ImageFormat)> {
+    /// The stored original for `id` and what kind of file it is.
+    pub fn find_blob(&self, id: &str) -> Option<(PathBuf, FileKind)> {
         if !is_valid_id(id) {
             return None;
         }
+        let path = self.existing_blob(id)?;
+        // The blob's own name carries the extension it was stored with.
+        let name = path.file_name()?.to_string_lossy().into_owned();
+        let kind = kind::classify(&path, &name).ok()?;
+        Some((path, kind))
+    }
+
+    /// Copy the original of `id` into `dir` as `name`, de-conflicted the way a
+    /// drop is (`report_1.pdf`, `report_2.pdf`, …); each candidate is created
+    /// exclusively, so two copies can't race for one name. For container
+    /// panes, whose agents can't see the store
+    /// (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7).
+    pub fn copy_original_to(&self, id: &str, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+        if !is_valid_id(id) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid attachment id",
+            ));
+        }
+        let blob = self.existing_blob(id).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "attachment not found")
+        })?;
+        if !dir.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "working folder not found",
+            ));
+        }
+        let safe = safe_file_name(name);
+        let (stem, ext) = match safe.rfind('.') {
+            Some(dot) if dot > 0 => (&safe[..dot], &safe[dot..]),
+            _ => (safe.as_str(), ""),
+        };
+        for n in 0..100 {
+            let candidate = if n == 0 {
+                dir.join(&safe)
+            } else {
+                dir.join(format!("{stem}_{n}{ext}"))
+            };
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+            {
+                Ok(mut out) => {
+                    let mut input = std::fs::File::open(&blob)?;
+                    if let Err(e) = std::io::copy(&mut input, &mut out) {
+                        drop(out);
+                        let _ = std::fs::remove_file(&candidate);
+                        return Err(e);
+                    }
+                    return Ok(candidate);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "too many files with that name",
+        ))
+    }
+
+    /// The stored original and its MIME type, whatever kind it is.
+    pub fn original(&self, id: &str) -> Option<(PathBuf, String)> {
+        let (path, kind) = self.find_blob(id)?;
+        let mime = match kind {
+            FileKind::Image(f) => process::mime_of(f).to_string(),
+            _ => mime_for(kind, &blob_ext(&path)),
+        };
+        Some((path, mime))
+    }
+
+    /// An existing original for `id`, whatever extension it was stored with.
+    fn existing_blob(&self, id: &str) -> Option<PathBuf> {
         let dir = self.root.join("blobs").join(Self::shard(id));
         let prefix = format!("{id}.");
-        let path = std::fs::read_dir(dir)
+        std::fs::read_dir(dir)
             .ok()?
             .filter_map(Result::ok)
             .map(|e| e.path())
@@ -215,11 +329,35 @@ impl Store {
                 p.file_name()
                     .and_then(|n| n.to_str())
                     .is_some_and(|n| n.starts_with(&prefix))
-            })?;
-        match process::sniff_file(&path).ok()? {
-            process::Sniffed::Image(f) => Some((path, f)),
-            _ => None,
+            })
+    }
+
+    fn named_path(&self, id: &str, name: &str) -> PathBuf {
+        self.root.join("named").join(id).join(safe_file_name(name))
+    }
+
+    /// A copy of the original named as the user's file, for delivery
+    /// (agents recognise files by extension, and the real name reads
+    /// better than a hash). A real copy, never a hard link: an agent that
+    /// edits the file it was given must not change the content-addressed
+    /// original. Re-copied on every delivery, so an earlier edit never
+    /// reaches the next message.
+    pub fn named_link(&self, id: &str, name: &str) -> Option<PathBuf> {
+        if !is_valid_id(id) {
+            return None;
         }
+        let target = self.existing_blob(id)?;
+        let link = self.named_path(id, name);
+        std::fs::create_dir_all(link.parent()?).ok()?;
+        let tmp = link.with_extension(format!("part-{}", uuid::Uuid::new_v4()));
+        std::fs::copy(&target, &tmp).ok()?;
+        if std::fs::rename(&tmp, &link).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            // The old copy may be open in an agent's editor (Windows keeps it
+            // locked); it still holds the right name, so keep serving it.
+            return link.is_file().then_some(link);
+        }
+        Some(link)
     }
 
     pub fn new_incoming_path(&self) -> PathBuf {
@@ -236,29 +374,49 @@ impl Store {
         }
         let text = std::fs::read_to_string(self.meta_path(id, fp)).ok()?;
         let meta: StoredMeta = serde_json::from_str(&text).ok()?;
-        // All three files must still exist; the sweep can race a lookup.
+        // Every file it names must still exist; the sweep can race a lookup.
         let complete = self.blob_path(id, &meta.ext).is_file()
-            && self
-                .derived_path(id, fp, &format!("send.{}", meta.send_ext))
-                .is_file()
-            && self
-                .derived_path(id, fp, &format!("thumb.{}", meta.thumb_ext))
-                .is_file();
+            && self.meta_files(id, fp, &meta).iter().all(|p| p.is_file());
         complete.then_some(meta)
     }
 
-    /// Path and MIME type of one stored file.
+    /// The derived files `meta` says exist (not the original).
+    fn meta_files(&self, id: &str, fp: &str, meta: &StoredMeta) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if meta.is_image() {
+            out.push(self.derived_path(id, fp, &format!("send.{}", meta.send_ext)));
+        }
+        if !meta.thumb_ext.is_empty() {
+            out.push(self.derived_path(id, fp, &format!("thumb.{}", meta.thumb_ext)));
+        }
+        if let Some(ext) = &meta.text_ext {
+            out.push(self.derived_path(id, fp, &format!("text.{ext}")));
+        }
+        out
+    }
+
+    /// Path and MIME type of one stored file. Non-images have no separate
+    /// send-copy (the original is sent) and, except text, no thumbnail file
+    /// (an SVG is its own thumbnail).
     pub fn file(&self, id: &str, fp: &str, kind: Kind) -> Option<(PathBuf, String)> {
         let meta = self.meta(id, fp)?;
+        let original = (self.blob_path(id, &meta.ext), meta.mime.clone());
         Some(match kind {
-            Kind::Original => (self.blob_path(id, &meta.ext), meta.mime),
+            Kind::Original => original,
+            Kind::Send if !meta.is_image() => original,
+            Kind::Send => (
+                self.derived_path(id, fp, &format!("send.{}", meta.send_ext)),
+                meta.send_mime,
+            ),
+            Kind::Thumb if meta.kind == "svg" => original,
+            Kind::Thumb if meta.thumb_ext.is_empty() => return None,
             Kind::Thumb => (
                 self.derived_path(id, fp, &format!("thumb.{}", meta.thumb_ext)),
                 meta.thumb_mime,
             ),
-            Kind::Send => (
-                self.derived_path(id, fp, &format!("send.{}", meta.send_ext)),
-                meta.send_mime,
+            Kind::Text => (
+                self.derived_path(id, fp, &format!("text.{}", meta.text_ext.as_deref()?)),
+                "text/plain; charset=utf-8".to_string(),
             ),
         })
     }
@@ -269,13 +427,13 @@ impl Store {
             return;
         };
         let now = filetime_now();
-        for p in [
+        let mut files = vec![
             self.blob_path(id, &meta.ext),
             self.meta_path(id, fp),
-            self.derived_path(id, fp, &format!("send.{}", meta.send_ext)),
-            self.derived_path(id, fp, &format!("thumb.{}", meta.thumb_ext)),
             self.sent_marker(id),
-        ] {
+        ];
+        files.extend(self.meta_files(id, fp, &meta));
+        for p in files {
             let _ = set_mtime(&p, now);
         }
     }
@@ -381,47 +539,64 @@ impl Store {
     }
 
     /// Move a hashed file from `incoming/` into `blobs/`, or drop it when the
-    /// same bytes are already stored. Refuses anything that isn't a
-    /// decodable image format. Returns the blob path and its format.
+    /// same bytes are already stored (under whatever extension they were
+    /// stored with). `name` is the user's file name, used only to classify.
+    /// Returns the blob path and what kind of file it is.
     pub fn place(
         &self,
         incoming: &Path,
         id: &str,
-    ) -> Result<(PathBuf, image::ImageFormat), process::ProcessError> {
+        name: &str,
+    ) -> Result<(PathBuf, FileKind), process::ProcessError> {
         let cleanup = || {
             let _ = std::fs::remove_file(incoming);
         };
-        let sniffed = process::sniff_file(incoming).map_err(|e| {
+        if let Some(existing) = self.existing_blob(id) {
+            cleanup();
+            let _ = set_mtime(&existing, filetime_now());
+            let stored_name = existing
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let kind = kind::classify(&existing, &stored_name).map_err(io_error)?;
+            return Ok((existing, kind));
+        }
+        let kind = kind::classify(incoming, name).map_err(|e| {
             cleanup();
             io_error(e)
         })?;
-        if let Some(e) = process::unsupported_reason(sniffed) {
-            cleanup();
-            return Err(e);
-        }
-        let process::Sniffed::Image(format) = sniffed else {
-            unreachable!()
-        };
-        let blob = self.blob_path(id, process::ext_of(format));
+        let blob = self.blob_path(id, &stored_extension(kind, name));
         let placed = (|| {
             std::fs::create_dir_all(blob.parent().unwrap())?;
-            if blob.is_file() {
-                std::fs::remove_file(incoming)?;
-                set_mtime(&blob, filetime_now())
-            } else {
-                std::fs::rename(incoming, &blob)
-            }
+            std::fs::rename(incoming, &blob)
         })();
         placed.map_err(|e| {
             cleanup();
             io_error(e)
         })?;
-        Ok((blob, format))
+        Ok((blob, kind))
     }
 
-    /// Decode a stored original and write its thumbnail, send-copy and
-    /// metadata under fingerprint `fingerprint(send_max_edge)`.
+    /// Derive whatever `kind` needs and write the metadata. Images go through
+    /// the image pipeline (decode, thumbnail, send-copy); other files get a
+    /// text preview, a text version or PDF facts.
     pub fn derive_and_save(
+        &self,
+        id: &str,
+        blob: &Path,
+        kind: FileKind,
+        name: &str,
+        send_max_edge: u32,
+    ) -> Result<StoredMeta, process::ProcessError> {
+        match kind {
+            FileKind::Image(format) => self.derive_image(id, blob, format, send_max_edge),
+            _ => self.derive_file(id, blob, kind, name, send_max_edge),
+        }
+    }
+
+    /// Decode a stored image and write its thumbnail, send-copy and
+    /// metadata under fingerprint `fingerprint(send_max_edge)`.
+    fn derive_image(
         &self,
         id: &str,
         blob: &Path,
@@ -434,7 +609,7 @@ impl Store {
         let meta = StoredMeta {
             v: DERIVE_VERSION,
             mime: process::mime_of(format).to_string(),
-            ext: process::ext_of(format).to_string(),
+            ext: blob_ext(blob),
             bytes,
             width: derived.width,
             height: derived.height,
@@ -446,6 +621,12 @@ impl Store {
             thumb_mime: process::mime_of(derived.thumb.format).to_string(),
             thumb_ext: process::ext_of(derived.thumb.format).to_string(),
             first_frame_only: derived.first_frame_only,
+            kind: default_kind(),
+            page_count: None,
+            text_ext: None,
+            text_bytes: 0,
+            text_note: None,
+            macros: false,
         };
         let write_all = || -> std::io::Result<()> {
             let meta_path = self.meta_path(id, &fp);
@@ -465,6 +646,97 @@ impl Store {
         Ok(meta)
     }
 
+    /// Metadata and derived files for a non-image attachment: a preview for
+    /// text, a text version for Office documents and PDFs, a page count and
+    /// macro flag where they apply. Failures to extract never fail the
+    /// attachment; it is still sent by path, with a note.
+    fn derive_file(
+        &self,
+        id: &str,
+        blob: &Path,
+        kind: FileKind,
+        name: &str,
+        send_max_edge: u32,
+    ) -> Result<StoredMeta, process::ProcessError> {
+        let fp = fingerprint(send_max_edge);
+        let bytes = std::fs::metadata(blob).map(|m| m.len()).map_err(io_error)?;
+        let ext = blob_ext(blob);
+        let mime = mime_for(kind, &ext);
+        let mut meta = StoredMeta {
+            v: DERIVE_VERSION,
+            mime: mime.clone(),
+            ext: ext.clone(),
+            bytes,
+            width: 0,
+            height: 0,
+            send_mime: mime,
+            send_ext: ext,
+            send_bytes: bytes,
+            send_width: 0,
+            send_height: 0,
+            thumb_mime: String::new(),
+            thumb_ext: String::new(),
+            first_frame_only: false,
+            kind: kind.as_str().to_string(),
+            page_count: None,
+            text_ext: None,
+            text_bytes: 0,
+            text_note: None,
+            macros: false,
+        };
+        let mut thumb: Option<String> = None;
+        let mut text: Option<String> = None;
+        match kind {
+            FileKind::Text => thumb = extract::text_preview(blob).ok(),
+            FileKind::Pdf => {
+                let facts = extract::pdf_facts_isolated(blob, name);
+                meta.page_count = facts.pages;
+                if facts.text.is_none() {
+                    meta.text_note = Some(
+                        "no text could be read from this PDF (it may be scanned or protected)"
+                            .into(),
+                    );
+                }
+                text = facts.text;
+            }
+            FileKind::Word | FileKind::Excel | FileKind::PowerPoint => {
+                meta.macros = extract::has_macros(blob);
+                match extract::document_text_isolated(blob, kind, name) {
+                    Ok(Some(t)) => text = Some(t),
+                    Ok(None) => {
+                        meta.text_note = Some(match meta.ext.as_str() {
+                            "doc" => "no text version; save it as .docx".to_string(),
+                            "ppt" => "no text version; save it as .pptx".to_string(),
+                            _ => "no text version for this format".to_string(),
+                        })
+                    }
+                    Err(e) => meta.text_note = Some(format!("no text version: {e}")),
+                }
+            }
+            _ => {}
+        }
+        let write_all = |meta: &mut StoredMeta| -> std::io::Result<()> {
+            let meta_path = self.meta_path(id, &fp);
+            std::fs::create_dir_all(meta_path.parent().unwrap())?;
+            if let Some(t) = &thumb {
+                meta.thumb_ext = "txt".into();
+                meta.thumb_mime = "text/plain; charset=utf-8".into();
+                write_atomic(&self.derived_path(id, &fp, "thumb.txt"), t.as_bytes())?;
+            }
+            if let Some(t) = &text {
+                meta.text_ext = Some("txt".into());
+                meta.text_bytes = t.len() as u64;
+                write_atomic(&self.derived_path(id, &fp, "text.txt"), t.as_bytes())?;
+            }
+            write_atomic(
+                &meta_path,
+                serde_json::to_string(&*meta).unwrap().as_bytes(),
+            )
+        };
+        write_all(&mut meta).map_err(io_error)?;
+        Ok(meta)
+    }
+
     /// [`Self::place`] then derive, reusing derived files when they exist.
     /// Test convenience: the service calls the two steps separately so it
     /// can reserve decode memory in between.
@@ -475,13 +747,25 @@ impl Store {
         id: &str,
         send_max_edge: u32,
     ) -> Result<StoredMeta, process::ProcessError> {
-        let (blob, format) = self.place(incoming, id)?;
+        self.commit_named(incoming, id, "file.png", send_max_edge)
+    }
+
+    /// [`Self::commit`] with the user's file name (tests).
+    #[cfg(test)]
+    pub fn commit_named(
+        &self,
+        incoming: &Path,
+        id: &str,
+        name: &str,
+        send_max_edge: u32,
+    ) -> Result<StoredMeta, process::ProcessError> {
+        let (blob, kind) = self.place(incoming, id, name)?;
         let fp = fingerprint(send_max_edge);
         if let Some(meta) = self.meta(id, &fp) {
             self.touch(id, &fp);
             return Ok(meta);
         }
-        self.derive_and_save(id, &blob, format, send_max_edge)
+        self.derive_and_save(id, &blob, kind, name, send_max_edge)
     }
 
     /// Metadata for `id` under the current send edge, re-deriving from the
@@ -494,8 +778,10 @@ impl Store {
         if let Some(meta) = self.meta(id, &fp) {
             return Some(meta);
         }
-        let (blob, format) = self.find_blob(id)?;
-        self.derive_and_save(id, &blob, format, send_max_edge).ok()
+        let (blob, kind) = self.find_blob(id)?;
+        let name = blob.file_name()?.to_string_lossy().into_owned();
+        self.derive_and_save(id, &blob, kind, &name, send_max_edge)
+            .ok()
     }
 
     /// Delete attachment files unused for `retention` (or for
@@ -508,7 +794,7 @@ impl Store {
         let mut sent_cache: std::collections::HashMap<String, bool> =
             std::collections::HashMap::new();
         let mut removed = 0;
-        for sub in ["blobs", "derived", "incoming", "sessions"] {
+        for sub in ["blobs", "derived", "incoming", "sessions", "named"] {
             let dir = self.root.join(sub);
             let Ok(entries) = walk_files(&dir) else {
                 continue;
@@ -516,8 +802,9 @@ impl Store {
             for path in entries {
                 let max_age = if sub == "incoming" {
                     INCOMING_MAX_AGE
-                } else if sub == "sessions" {
-                    // Session counters are named by a hash, not an id.
+                } else if sub == "sessions" || sub == "named" {
+                    // Session counters are named by a hash; named links
+                    // exist only for sent attachments.
                     retention
                 } else {
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -543,10 +830,115 @@ impl Store {
                     .unwrap_or(false);
                 if old && std::fs::remove_file(&path).is_ok() {
                     removed += 1;
+                    if sub == "named" {
+                        // Drop the per-id folder once its last link is gone.
+                        if let Some(dir) = path.parent() {
+                            let _ = std::fs::remove_dir(dir);
+                        }
+                    }
                 }
             }
         }
         removed
+    }
+}
+
+/// The extension a new original is stored under. It follows the content
+/// where the content decides it (image formats, PDF, SVG, RTF), and
+/// otherwise the user's extension if it fits the kind (docx vs odt vs doc,
+/// mp3 vs wav, …). Text and unknown files are `bin`: the same bytes can
+/// arrive as notes.txt and script.py, and agents get a correctly named
+/// link per delivery instead (`named_link`).
+fn stored_extension(kind: FileKind, name: &str) -> String {
+    let user = kind::extension_of(name);
+    let pick = |allowed: &[&str], default: &str| -> String {
+        user.as_deref()
+            .filter(|e| allowed.contains(e))
+            .unwrap_or(default)
+            .to_string()
+    };
+    match kind {
+        FileKind::Image(f) => process::ext_of(f).to_string(),
+        FileKind::Svg => "svg".into(),
+        FileKind::Pdf => "pdf".into(),
+        FileKind::Word => pick(&["docx", "docm", "dotx", "odt", "doc", "rtf"], "docx"),
+        FileKind::Excel => pick(&["xlsx", "xlsm", "xlsb", "xls", "ods"], "xlsx"),
+        FileKind::PowerPoint => pick(&["pptx", "pptm", "ppsx", "odp", "ppt"], "pptx"),
+        FileKind::Archive => pick(
+            &["zip", "gz", "tgz", "tar", "7z", "rar", "bz2", "xz", "zst"],
+            "bin",
+        ),
+        FileKind::Audio => pick(
+            &[
+                "mp3", "wav", "flac", "m4a", "aac", "ogg", "oga", "opus", "wma", "aiff", "aif",
+            ],
+            "bin",
+        ),
+        FileKind::Video => pick(
+            &[
+                "mp4", "m4v", "mov", "webm", "mkv", "avi", "wmv", "flv", "mpg", "mpeg",
+            ],
+            "bin",
+        ),
+        FileKind::ImageFile => pick(&["heic", "heif", "avif"], "bin"),
+        FileKind::Text | FileKind::Other => "bin".into(),
+    }
+}
+
+/// The extension part of a stored blob's file name.
+fn blob_ext(blob: &Path) -> String {
+    blob.extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "bin".into())
+}
+
+/// MIME type of a non-image original.
+fn mime_for(kind: FileKind, ext: &str) -> String {
+    match (kind, ext) {
+        (FileKind::Svg, _) => "image/svg+xml",
+        (FileKind::Pdf, _) => "application/pdf",
+        (FileKind::Text, _) => "text/plain; charset=utf-8",
+        (_, "docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        (_, "xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        (_, "pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        (_, "odt") => "application/vnd.oasis.opendocument.text",
+        (_, "ods") => "application/vnd.oasis.opendocument.spreadsheet",
+        (_, "odp") => "application/vnd.oasis.opendocument.presentation",
+        (_, "doc") => "application/msword",
+        (_, "xls") => "application/vnd.ms-excel",
+        (_, "ppt") => "application/vnd.ms-powerpoint",
+        (_, "rtf") => "application/rtf",
+        (_, "zip") => "application/zip",
+        (FileKind::Audio, e) => return format!("audio/{e}"),
+        (FileKind::Video, e) => return format!("video/{e}"),
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+/// A user's file name made safe as a single path component: separators,
+/// control characters and Windows-reserved characters replaced, leading
+/// dots and trailing dots/spaces trimmed, length bounded.
+pub fn safe_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned
+        .trim_start_matches('.')
+        .trim_end_matches(['.', ' '])
+        .trim();
+    let short: String = trimmed.chars().take(120).collect();
+    if short.is_empty() {
+        "file".to_string()
+    } else {
+        short
     }
 }
 
@@ -659,13 +1051,18 @@ mod tests {
     }
 
     #[test]
-    fn non_image_is_refused_and_leaves_nothing_behind() {
+    fn text_file_is_stored_with_a_preview() {
         let (dir, s) = store();
         let src = dir.path().join("notes.txt");
         std::fs::write(&src, "hello").unwrap();
-        let e = ingest(&s, &src).unwrap_err();
-        assert_eq!(e.code, "unsupported");
-        assert!(walk_files(&s.root()).unwrap().is_empty());
+        let (tmp, id, _) = s.copy_in(&src, |_| true).unwrap();
+        let meta = s.commit_named(&tmp, &id, "notes.txt", 2000).unwrap();
+        assert_eq!(meta.kind, "text");
+        assert!(!meta.is_image());
+        let (thumb, _) = s.file(&id, &fingerprint(2000), Kind::Thumb).unwrap();
+        assert_eq!(std::fs::read_to_string(thumb).unwrap(), "hello");
+        let (send, _) = s.file(&id, &fingerprint(2000), Kind::Send).unwrap();
+        assert_eq!(std::fs::read_to_string(send).unwrap(), "hello");
     }
 
     #[test]
@@ -683,8 +1080,10 @@ mod tests {
         let bytes = std::fs::read(&bad).unwrap();
         std::fs::write(&bad, &bytes[..bytes.len() / 3]).unwrap();
         let (tmp, id, _) = s.copy_in(&bad, |_| true).unwrap();
-        let (blob, format) = s.place(&tmp, &id).unwrap();
-        assert!(s.derive_and_save(&id, &blob, format, 2000).is_err());
+        let (blob, kind) = s.place(&tmp, &id, "bad.png").unwrap();
+        assert!(s
+            .derive_and_save(&id, &blob, kind, "bad.png", 2000)
+            .is_err());
         s.discard_if_unprocessed(&id);
         assert!(walk_files(&s.root().join("blobs")).unwrap().is_empty());
 

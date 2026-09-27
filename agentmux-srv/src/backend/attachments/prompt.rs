@@ -2,17 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Turning a message's attachments into what the agent receives
-//! (docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6):
+//! (docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6,
+//! SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7):
 //!
-//! - every provider gets a numbered list of send-copy paths appended to the
-//!   text, in an `<attached_images>` block, so any agent that can open a
-//!   local file can see every image;
-//! - Claude (stream-json) additionally gets the first images inline as
-//!   `image` content blocks, within a count and size budget.
+//! - every provider gets a numbered list appended to the text, in an
+//!   `<attached_files>` block: each image's send-copy, each other file as a
+//!   copy under its real name, plus notes (type, pages, text version), so
+//!   any agent that can open a local file can reach every attachment;
+//! - Claude (stream-json) additionally gets images inline as `image` blocks
+//!   and PDFs of up to 100 pages as `document` blocks, within a count and
+//!   size budget.
 //!
-//! The `<attached_images>` block is also how the pane rebuilds the
-//! thumbnails on reload: each line names the attachment and ends with the
-//! send-copy path, whose file name starts with the attachment id.
+//! The block is also how the pane rebuilds the tiles on reload: each line
+//! names the attachment and ends with a path that carries the attachment id
+//! (a `<sha256>.` file name or a `named/<sha256>/` folder).
 
 use std::path::PathBuf;
 
@@ -28,9 +31,12 @@ pub const DEFAULT_INLINE_MAX_COUNT: usize = 20;
 /// Inline at most this much base64 across one Claude session. Claude Code
 /// keeps every inline image in its own session transcript.
 pub const DEFAULT_SESSION_INLINE_MB: u64 = 50;
+/// Claude's PDF support takes at most 100 pages per request on models with
+/// less than a 1M-token context; longer PDFs go by path and text version.
+pub const INLINE_PDF_MAX_PAGES: u32 = 100;
 
-pub const BLOCK_OPEN: &str = "<attached_images>";
-pub const BLOCK_CLOSE: &str = "</attached_images>";
+pub const BLOCK_OPEN: &str = "<attached_files>";
+pub const BLOCK_CLOSE: &str = "</attached_files>";
 
 /// One attachment resolved to the file the agent gets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +46,23 @@ pub struct Resolved {
     pub name: String,
     pub path: PathBuf,
     pub mime: String,
+    pub page_count: Option<u32>,
+    /// Shown in square brackets after the name.
+    pub note: Option<String>,
+}
+
+impl Resolved {
+    fn is_image(&self) -> bool {
+        self.mime.starts_with("image/") && self.mime != "image/svg+xml"
+    }
+
+    /// Whether Claude can take this inline: a decoded image, or a PDF short
+    /// enough for its document support.
+    fn inlineable(&self) -> bool {
+        self.is_image()
+            || (self.mime == "application/pdf"
+                && self.page_count.is_some_and(|n| n <= INLINE_PDF_MAX_PAGES))
+    }
 }
 
 /// Everything a turn needs from its attachments.
@@ -47,24 +70,29 @@ pub struct Resolved {
 pub struct Prepared {
     /// Appended to the message text.
     pub list: String,
-    /// Anthropic `image` content blocks, in order. Empty unless asked for.
+    /// Anthropic `image` / `document` content blocks, in order. Empty unless
+    /// asked for.
     pub inline: Vec<serde_json::Value>,
 }
 
-/// Resolve refs to send-copies. Refs whose files are gone (swept, or never
-/// finished processing) come back as names in the second list. Blocking.
+/// Resolve refs to what the agent gets. Refs whose files are gone (swept, or
+/// never finished processing) come back as names in the second list.
+/// Blocking.
 pub fn resolve(svc: &Service, refs: &[AttachmentRef]) -> (Vec<Resolved>, Vec<String>) {
     let mut found = Vec::new();
     let mut missing = Vec::new();
     for (i, r) in refs.iter().enumerate() {
-        match svc.send_path(&r.id) {
-            Some((path, mime)) => found.push(Resolved {
+        let name = clean_name(&r.name);
+        match svc.send_target(&r.id, &name) {
+            Some(t) => found.push(Resolved {
                 number: i + 1,
-                name: clean_name(&r.name),
-                path,
-                mime,
+                name,
+                path: t.path,
+                mime: t.mime,
+                page_count: t.page_count,
+                note: t.note,
             }),
-            None => missing.push(clean_name(&r.name)),
+            None => missing.push(name),
         }
     }
     (found, missing)
@@ -72,8 +100,8 @@ pub fn resolve(svc: &Service, refs: &[AttachmentRef]) -> (Vec<Resolved>, Vec<Str
 
 /// Build the list and (when `inline_max_count > 0`) the inline blocks, using
 /// at most `inline_budget` base64 bytes (further capped at
-/// [`INLINE_MAX_B64_BYTES`] per message). Reads the send-copies from disk
-/// for the inline part. Blocking.
+/// [`INLINE_MAX_B64_BYTES`] per message). Reads the inlined files from disk.
+/// Blocking.
 pub fn prepare(
     items: &[Resolved],
     missing: &[String],
@@ -81,23 +109,37 @@ pub fn prepare(
     inline_budget: u64,
 ) -> Prepared {
     let mut inline = Vec::new();
+    let mut inlined: Vec<usize> = Vec::new();
     let mut budget = (INLINE_MAX_B64_BYTES as u64).min(inline_budget) as usize;
-    for item in items.iter().take(inline_max_count) {
-        let Ok(bytes) = std::fs::read(&item.path) else {
+    for item in items.iter().filter(|i| i.inlineable()) {
+        if inline.len() >= inline_max_count {
             break;
+        }
+        let Ok(bytes) = std::fs::read(&item.path) else {
+            continue;
         };
         let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
         if encoded.len() > budget {
-            break;
+            // A smaller one further down may still fit.
+            continue;
         }
         budget -= encoded.len();
-        inline.push(serde_json::json!({
-            "type": "image",
-            "source": { "type": "base64", "media_type": item.mime, "data": encoded },
-        }));
+        inline.push(if item.is_image() {
+            serde_json::json!({
+                "type": "image",
+                "source": { "type": "base64", "media_type": item.mime, "data": encoded },
+            })
+        } else {
+            serde_json::json!({
+                "type": "document",
+                "source": { "type": "base64", "media_type": "application/pdf", "data": encoded },
+                "title": item.name,
+            })
+        });
+        inlined.push(item.number);
     }
     Prepared {
-        list: list_block(items, missing, inline.len()),
+        list: list_block(items, missing, &inlined),
         inline,
     }
 }
@@ -111,27 +153,38 @@ pub fn inline_bytes(blocks: &[serde_json::Value]) -> u64 {
         .sum()
 }
 
-/// The `<attached_images>` block.
-pub fn list_block(items: &[Resolved], missing: &[String], inline_count: usize) -> String {
+/// The `<attached_files>` block. `inlined` holds the numbers of the items
+/// Claude was also given inline.
+pub fn list_block(items: &[Resolved], missing: &[String], inlined: &[usize]) -> String {
     let total = items.len() + missing.len();
+    let all_images = missing.is_empty() && items.iter().all(|i| i.is_image());
+    let (one, many) = if all_images {
+        ("image", "images")
+    } else {
+        ("file", "files")
+    };
     let mut out = String::new();
     out.push_str(BLOCK_OPEN);
     out.push('\n');
-    let noun = if total == 1 { "image" } else { "images" };
+    let noun = if total == 1 { one } else { many };
     out.push_str(&format!(
         "The user attached {total} {noun}. The numbers match how the user refers to them."
     ));
-    if inline_count > 0 && inline_count == items.len() {
+    if !inlined.is_empty() && inlined.len() == items.len() {
         out.push_str(" They are shown above; the files are listed here too.");
-    } else if inline_count > 0 {
-        // Name the inlined images by their real numbers: a missing
-        // attachment earlier in the list shifts them off 1..=n.
-        let shown: Vec<usize> = items[..inline_count].iter().map(|i| i.number).collect();
-        let noun = if shown.len() == 1 { "Image" } else { "Images" };
-        let verb = if shown.len() == 1 { "is" } else { "are" };
+    } else if !inlined.is_empty() {
+        // Name the inlined ones by their real numbers: a missing or
+        // non-inlined attachment shifts them off 1..=n.
+        let (one, many) = if all_images {
+            ("Image", "Images")
+        } else {
+            ("File", "Files")
+        };
+        let noun = if inlined.len() == 1 { one } else { many };
+        let verb = if inlined.len() == 1 { "is" } else { "are" };
         out.push_str(&format!(
             " {noun} {} {verb} shown above. Open the others from these paths with your file or image viewing tool when you need them.",
-            number_list(&shown)
+            number_list(inlined)
         ));
     } else if !items.is_empty() {
         out.push_str(
@@ -140,8 +193,13 @@ pub fn list_block(items: &[Resolved], missing: &[String], inline_count: usize) -
     }
     out.push('\n');
     for item in items {
+        let note = item
+            .note
+            .as_deref()
+            .map(|n| format!(" [{n}]"))
+            .unwrap_or_default();
         out.push_str(&format!(
-            "{}. {} — {}\n",
+            "{}. {}{note} — {}\n",
             item.number,
             item.name,
             item.path.display()
@@ -258,6 +316,26 @@ mod tests {
             name: name.into(),
             path: path.into(),
             mime: "image/png".into(),
+            page_count: None,
+            note: None,
+        }
+    }
+
+    fn file(
+        n: usize,
+        name: &str,
+        path: &str,
+        mime: &str,
+        pages: Option<u32>,
+        note: Option<&str>,
+    ) -> Resolved {
+        Resolved {
+            number: n,
+            name: name.into(),
+            path: path.into(),
+            mime: mime.into(),
+            page_count: pages,
+            note: note.map(str::to_string),
         }
     }
 
@@ -267,10 +345,13 @@ mod tests {
             item(1, "a.png", "/s/aa.v1-e2000.send.png"),
             item(3, "c.png", "/s/cc.v1-e2000.send.png"),
         ];
-        let list = list_block(&items, &["b.png".into()], 0);
+        let list = list_block(&items, &["b.png".into()], &[]);
         assert!(list.starts_with(BLOCK_OPEN));
         assert!(list.ends_with(BLOCK_CLOSE));
-        assert!(list.contains("The user attached 3 images."));
+        assert!(
+            list.contains("The user attached 3 files."),
+            "a missing one isn't known to be an image"
+        );
         assert!(list.contains("\n1. a.png — /s/aa.v1-e2000.send.png\n"));
         assert!(list.contains("\n3. c.png — /s/cc.v1-e2000.send.png\n"));
         assert!(list.contains("- b.png — (no longer available)"));
@@ -279,18 +360,112 @@ mod tests {
     #[test]
     fn list_says_which_images_are_inline() {
         let items = vec![item(1, "a", "/a"), item(2, "b", "/b")];
-        assert!(list_block(&items, &[], 2).contains("They are shown above"));
-        assert!(list_block(&items, &[], 1).contains("Image 1 is shown above"));
-        assert!(list_block(&items, &[], 0).contains("Open them from these paths"));
+        assert!(list_block(&items, &[], &[1, 2]).contains("They are shown above"));
+        assert!(list_block(&items, &[], &[1]).contains("Image 1 is shown above"));
+        assert!(list_block(&items, &[], &[]).contains("Open them from these paths"));
+        assert!(list_block(&items, &[], &[]).contains("The user attached 2 images."));
     }
 
     #[test]
     fn inline_text_uses_real_numbers_when_an_earlier_image_is_missing() {
         // refs = [missing, #2, #3]; one inlined.
         let items = vec![item(2, "b", "/b"), item(3, "c", "/c")];
-        let list = list_block(&items, &["a".into()], 1);
-        assert!(list.contains("Image 2 is shown above"), "{list}");
-        assert!(!list.contains("Image 1 "));
+        let list = list_block(&items, &["a".into()], &[2]);
+        assert!(list.contains("File 2 is shown above"), "{list}");
+        assert!(!list.contains("File 1 "));
+    }
+
+    #[test]
+    fn files_carry_notes_and_mixed_lists_say_files() {
+        let items = vec![
+            item(1, "shot.png", "/s/aa.v1-e2000.send.png"),
+            file(
+                2,
+                "spec.pdf",
+                "/s/named/cc/spec.pdf",
+                "application/pdf",
+                Some(12),
+                Some("PDF, 12 pages; text version: /t.txt"),
+            ),
+            file(
+                3,
+                "notes.md",
+                "/s/named/dd/notes.md",
+                "text/plain; charset=utf-8",
+                None,
+                None,
+            ),
+        ];
+        let list = list_block(&items, &[], &[1, 2]);
+        assert!(list.contains("The user attached 3 files."), "{list}");
+        assert!(list.contains("Files 1 and 2 are shown above"), "{list}");
+        assert!(
+            list.contains(
+                "\n2. spec.pdf [PDF, 12 pages; text version: /t.txt] — /s/named/cc/spec.pdf\n"
+            ),
+            "{list}"
+        );
+        assert!(
+            list.contains("\n3. notes.md — /s/named/dd/notes.md\n"),
+            "{list}"
+        );
+    }
+
+    #[test]
+    fn short_pdfs_go_inline_as_documents_long_ones_and_text_do_not() {
+        let d = tempfile::tempdir().unwrap();
+        let write = |name: &str| {
+            let p = d.path().join(name);
+            std::fs::write(&p, b"%PDF-1.4 tiny").unwrap();
+            p
+        };
+        let items = vec![
+            file(
+                1,
+                "short.pdf",
+                write("s.pdf").to_str().unwrap(),
+                "application/pdf",
+                Some(3),
+                None,
+            ),
+            file(
+                2,
+                "long.pdf",
+                write("l.pdf").to_str().unwrap(),
+                "application/pdf",
+                Some(250),
+                None,
+            ),
+            file(
+                3,
+                "unknown.pdf",
+                write("u.pdf").to_str().unwrap(),
+                "application/pdf",
+                None,
+                None,
+            ),
+            file(
+                4,
+                "notes.md",
+                write("n.md").to_str().unwrap(),
+                "text/plain; charset=utf-8",
+                None,
+                None,
+            ),
+        ];
+        let p = prepare(&items, &[], 20, u64::MAX);
+        assert_eq!(p.inline.len(), 1);
+        assert_eq!(p.inline[0]["type"], "document");
+        assert_eq!(p.inline[0]["source"]["media_type"], "application/pdf");
+        assert_eq!(p.inline[0]["title"], "short.pdf");
+        assert!(p.list.contains("File 1 is shown above"), "{}", p.list);
+        // The stored line drops document blocks like image blocks.
+        let line = claude_user_line("see".into(), p.inline.clone());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&persisted_line(&line)).unwrap()["message"]
+                ["content"],
+            "see"
+        );
     }
 
     #[test]
@@ -334,6 +509,8 @@ mod tests {
                 name: format!("{i}.png"),
                 path: p.clone(),
                 mime: "image/png".into(),
+                page_count: None,
+                note: None,
             })
             .collect();
         let p = prepare(&items, &[], 2, u64::MAX);

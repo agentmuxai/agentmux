@@ -1,16 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Image attachments in the agent composer: hand paths to the backend for
-// processing, cancel a batch, look up processed attachments. See
+// Attachments in the agent composer: hand paths to the backend for
+// processing, cancel a batch, look up processed attachments, copy one into
+// a container pane's working folder. See
 // docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6 and
 // agentmux-srv/src/server/app_api/attachments.rs. Progress arrives as
 // `attachment:*` events scoped to the pane's block.
 
 import { RpcClient } from "../rpc-client";
+import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
 import type { AttachmentsInfoResult } from "@/types/rpc/AttachmentsInfoResult";
 import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResult";
 import type { CommandAttachmentsCancelData } from "@/types/rpc/CommandAttachmentsCancelData";
+import type { CommandAttachmentsCopyToWorkdirData } from "@/types/rpc/CommandAttachmentsCopyToWorkdirData";
 import type { CommandAttachmentsInfoData } from "@/types/rpc/CommandAttachmentsInfoData";
 import type { CommandAttachmentsIngestData } from "@/types/rpc/CommandAttachmentsIngestData";
 
@@ -34,5 +37,13 @@ export const AttachmentsApi = {
         opts?: RpcOpts,
     ): Promise<AttachmentsInfoResult> {
         return client.rpcCall("attachments.info", data, opts);
+    },
+
+    AttachmentsCopyToWorkdirCommand(
+        client: RpcClient,
+        data: CommandAttachmentsCopyToWorkdirData,
+        opts?: RpcOpts,
+    ): Promise<AttachmentsCopyToWorkdirResult> {
+        return client.rpcCall("attachments.copy-to-workdir", data, opts);
     },
 };

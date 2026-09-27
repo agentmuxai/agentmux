@@ -380,6 +380,9 @@ pub const COMMAND_AGENT_PROCESS_LIST: &str = "agent.process-list";
 pub const COMMAND_ATTACHMENTS_INGEST: &str = "attachments.ingest";
 pub const COMMAND_ATTACHMENTS_CANCEL: &str = "attachments.cancel";
 pub const COMMAND_ATTACHMENTS_INFO: &str = "attachments.info";
+/// Copy a stored attachment into a pane's working folder (container panes,
+/// SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7).
+pub const COMMAND_ATTACHMENTS_COPY_TO_WORKDIR: &str = "attachments.copy-to-workdir";
 /// List every block currently tracked (for the swarm aggregate view).
 /// Returns `AgentTrackedBlocksResult`.
 pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";

@@ -10,7 +10,7 @@
 //! blocking thread.
 
 use std::borrow::Cow;
-use std::io::{BufWriter, Read};
+use std::io::BufWriter;
 use std::path::Path;
 
 use image::codecs::jpeg::JpegEncoder;
@@ -78,22 +78,6 @@ pub fn sniff(head: &[u8]) -> Sniffed {
     Sniffed::NotImage
 }
 
-/// Read enough of a file to sniff it.
-pub fn sniff_file(path: &Path) -> std::io::Result<Sniffed> {
-    let mut f = std::fs::File::open(path)?;
-    let mut head = vec![0u8; 1024];
-    let mut n = 0;
-    while n < head.len() {
-        let r = f.read(&mut head[n..])?;
-        if r == 0 {
-            break;
-        }
-        n += r;
-    }
-    head.truncate(n);
-    Ok(sniff(&head))
-}
-
 pub fn mime_of(format: ImageFormat) -> &'static str {
     match format {
         ImageFormat::Png => "image/png",
@@ -138,26 +122,6 @@ impl ProcessError {
 impl std::fmt::Display for ProcessError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
-    }
-}
-
-/// The user-facing refusal for formats we recognise but can't decode.
-pub fn unsupported_reason(s: Sniffed) -> Option<ProcessError> {
-    match s {
-        Sniffed::Image(_) => None,
-        Sniffed::Heic => Some(ProcessError::new(
-            "heic",
-            "HEIC photos aren't supported yet. Export it as JPEG or PNG and attach that.",
-        )),
-        Sniffed::Avif => Some(ProcessError::new(
-            "unsupported",
-            "AVIF images aren't supported yet. Export it as PNG or JPEG and attach that.",
-        )),
-        Sniffed::Svg => Some(ProcessError::new(
-            "unsupported",
-            "SVG images aren't supported yet. Export it as PNG and attach that.",
-        )),
-        Sniffed::NotImage => Some(ProcessError::new("unsupported", "Not an image.")),
     }
 }
 
@@ -432,13 +396,6 @@ mod tests {
         assert_eq!(sniff(b"<?xml version=\"1.0\"?><svg>"), Sniffed::Svg);
         assert_eq!(sniff(b"fn main() {}"), Sniffed::NotImage);
         assert_eq!(sniff(b""), Sniffed::NotImage);
-    }
-
-    #[test]
-    fn heic_is_refused_with_a_useful_message() {
-        let e = unsupported_reason(Sniffed::Heic).unwrap();
-        assert_eq!(e.code, "heic");
-        assert!(e.message.contains("JPEG"));
     }
 
     #[test]

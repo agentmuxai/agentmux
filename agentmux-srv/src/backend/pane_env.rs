@@ -234,6 +234,10 @@ mod spawn_site_coverage {
     const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
         ("src/agents/runner.rs", "bin", 1,
          "sanitized: agent CLI subprocess, sanitize_process_command"),
+        ("src/backend/attachments/extract.rs", "exe", 1,
+         "sanitized: our own binary re-run as `__extract` to parse one attachment in isolation; it needs no instance identity, so sanitize_external_std_command"),
+        ("src/backend/attachments/extract.rs", "harness", 1,
+         "test: re-runs the test harness as a child that sleeps, to prove the extraction deadline kills it"),
         ("src/backend/blockcontroller/app_server.rs", "fake_server_binary(", 1,
          "test: runs the fixture server built above; lives and dies with the test"),
         ("src/backend/blockcontroller/persistent/tests/eager_resume.rs", "\"taskkill\"", 1,

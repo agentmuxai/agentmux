@@ -16,4 +16,24 @@ send_mime: string, send_bytes: number, send_width: number, send_height: number,
 /**
  * Set when the original was an animated GIF (only the first frame is sent).
  */
-first_frame_only: boolean, };
+first_frame_only: boolean, 
+/**
+ * What the file is: `image`, `svg`, `text`, `pdf`, `word`, `excel`,
+ * `powerpoint`, `archive`, `audio`, `video`, `image_file` (an image
+ * format that isn't decoded, e.g. HEIC) or `other`. The tile shows a
+ * thumbnail for image/svg/text and a type icon for the rest.
+ * SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §5.
+ */
+kind: string, page_count?: number, 
+/**
+ * Size of the extracted text version; 0 when there is none.
+ */
+text_bytes: number, 
+/**
+ * Why a document has no text version.
+ */
+text_note?: string, 
+/**
+ * An Office file carrying a VBA project.
+ */
+macros: boolean, };

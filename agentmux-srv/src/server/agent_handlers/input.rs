@@ -872,11 +872,13 @@ pub async fn run_agent_turn(
     let session_id_field =
         crate::backend::obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
 
-    // Image attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md
-    // §6.6): every provider gets a numbered list of the send-copies appended
-    // to the text; Claude's persistent stream-json path also gets the first
-    // ones inline. Container agents can't reach host paths yet, so they
-    // refuse rather than send a list the agent can't open.
+    // Attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6,
+    // SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7): every provider gets
+    // a numbered list of the files appended to the text; Claude's persistent
+    // stream-json path also gets images and short PDFs inline. Container
+    // agents can't reach host paths yet (their panes copy files into the
+    // working folder instead), so they refuse rather than send a list the
+    // agent can't open.
     let mut inline_images: Vec<serde_json::Value> = Vec::new();
     let message = if attachments.is_empty() {
         message
@@ -885,7 +887,7 @@ pub async fn run_agent_turn(
         // Refusals go through surface_refusal like every other early exit
         // here, so the reason survives a pane reload.
         if agent_mode == "container" {
-            let msg = "Image attachments aren't supported for container agents yet.";
+            let msg = "Attachments aren't supported for container agents yet.";
             surface_refusal(msg);
             return Err(msg.to_string());
         }
