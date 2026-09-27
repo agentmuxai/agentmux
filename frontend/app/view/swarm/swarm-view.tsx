@@ -317,6 +317,18 @@ export function AgentRow({
                     e.stopPropagation();
                     if (node.blockId) void focusBlock(node.blockId);
                 }}
+                // ...and the Swarm pane must not flash selected first. The
+                // Swarm root is focusable (tabIndex={-1}), so a press anywhere
+                // inside it moves DOM focus there on MOUSEDOWN, before this
+                // click runs; that focusin bubbles to PaneChrome / BlockFrame,
+                // which select the Swarm pane, and the click then hands focus to
+                // the agent's pane — a highlight-unhighlight blink. Cancelling
+                // mousedown's default keeps focus where it is until the click
+                // picks the agent's pane. Only the agent card does this: the
+                // header and empty space still focus (select) the Swarm pane.
+                // The checkbox and chevron inside act on click, so they still
+                // work. SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.3.
+                onMouseDown={(e) => e.preventDefault()}
                 onContextMenu={handleAgentRowContextMenu}
                 title={node.agentName}
             >

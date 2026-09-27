@@ -155,6 +155,41 @@ describe("AgentRow — select-to-focus", () => {
         expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK);
     });
 
+    // The Swarm root is focusable, so a press would move DOM focus into the
+    // Swarm pane on mousedown — selecting it (PaneChrome's focusin) a moment
+    // before the click selects the agent's pane: a border blink. The card
+    // cancels mousedown's default so focus never enters the Swarm pane.
+    it("pressing the agent card does not move focus into the Swarm pane", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const card = container.querySelector(".swarm-agent-card") as HTMLElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        card.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+    });
+
+    it("pressing the card's checkbox is also covered, and the checkbox still toggles on click", () => {
+        registerPane(BLOCK);
+        const toggleSelected = vi.fn();
+        const model = { ...modelStub(false), toggleSelected } as unknown as SwarmViewModel;
+        const { container } = renderRow(false, model);
+        const box = container.querySelector(".swarm-agent-card input[type=checkbox]") as HTMLInputElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        box.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+        fireEvent.click(box);
+        expect(toggleSelected).toHaveBeenCalled();
+    });
+
+    it("a press outside any agent card is left alone, so it still selects the Swarm pane", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const outside = container.querySelector(".swarm-agent-group") as HTMLElement;
+        const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        outside.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(false);
+    });
+
     it("clicking the chevron toggles collapse without focusing the pane", () => {
         seedSleepingPane();
         const toggle = vi.fn();
