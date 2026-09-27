@@ -107,6 +107,26 @@ pub(super) async fn handle_agent_takeover(
     // The holder let go: forget the cached relay refusal, or the pane's
     // retry is refused from it for up to 90 s (Codex P1 on #3899).
     crate::muxbus::wan_lease::forget_elsewhere(&name).await;
+    // ...and take the relay lease now. A holder older than #3899 answers the
+    // release but keeps renewing the lease for as long as it runs, so the new
+    // pane would be fenced seconds after starting (narko 2026-09-27; see
+    // docs/investigations/INVESTIGATION_TAKE_OVER_OLD_HOLDER_RELAY_LEASE_2026_09_27.md).
+    // Unknown (no MuxBus session, an unreachable relay) fails open as before.
+    match crate::muxbus::cloud_subscriber::take_over_lease_now(&state.id_store, &state.http_client, &name).await {
+        crate::muxbus::wan_lease::Outcome::HeldElsewhere(where_) => {
+            let error = if crate::muxbus::wan_lease::holder_on_this_computer(&where_) {
+                kept_relay_hold_error(&name, &where_)
+            } else {
+                other_computer_error(&name, &where_)
+            };
+            tracing::warn!(uid = %uid, holder = %where_, "agent_admission.takeover: the relay still names another holder");
+            return (StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response();
+        }
+        crate::muxbus::wan_lease::Outcome::Held => {
+            tracing::info!(uid = %uid, "agent_admission.takeover: relay lease is ours");
+        }
+        crate::muxbus::wan_lease::Outcome::Unknown => {}
+    }
     (
         StatusCode::OK,
         Json(json!({ "ok": true, "released": true, "from_channel": holder.channel })),
@@ -290,6 +310,19 @@ fn wan_takeover_target(agent: &str) -> WanTarget {
 }
 
 /// Take over reaches instances on this computer only.
+/// The instance on this computer let go of the pane but the relay still
+/// names it, and the relay wouldn't move the lease (a relay without
+/// `/agents/lease/take`, or a lease claimed for another account).
+fn kept_relay_hold_error(agent: &str, where_: &str) -> String {
+    let agent = if agent.is_empty() { "this agent" } else { agent };
+    format!(
+        "AgentMux cloud still says {agent} is held by the AgentMux instance on {where_}. \
+         That instance is probably an older version that can't hand it over. \
+         Quit it completely (from the tray, not just its window); its hold ends \
+         within a minute, then try again."
+    )
+}
+
 fn other_computer_error(agent: &str, where_: &str) -> String {
     let agent = if agent.is_empty() { "this agent" } else { agent };
     format!(
