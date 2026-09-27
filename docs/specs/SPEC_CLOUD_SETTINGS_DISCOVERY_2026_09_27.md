@@ -1,7 +1,7 @@
 # SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in
 
 **Date:** 2026-09-27
-**Status:** proposed — slice 1 (§3.1–3.2) implemented on this branch; slices 2–4 not started.
+**Status:** active — slice 1 (§3.1–3.2, discovery used for login and the WebSocket URL) in PR #3954; slices 2–4 not started.
 **Author:** Maricon
 
 ---
