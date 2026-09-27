@@ -73,7 +73,7 @@
     background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
     border: 1px solid var(--border-color);
     border-radius: 0;
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: 11px;
     white-space: pre-wrap;
     word-break: break-word;
@@ -86,7 +86,7 @@
     grid-area: code;
     align-self: flex-start;
     padding: 1px 6px;
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 0.04em;
     background: color-mix(in srgb, var(--main-text-color) 6%, transparent);

@@ -115,7 +115,7 @@
 .agent-identity-username {
     font-size: 11px;
     color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
 }
 
 .agent-identity-none {

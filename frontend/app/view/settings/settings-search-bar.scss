@@ -30,7 +30,7 @@
     outline: none;
     color: var(--main-text-color);
     font-size: 13px;
-    font-family: var(--base-font, inherit);
+    font-family: var(--font-sans);
 
     &::placeholder {
         color: var(--secondary-text-color);

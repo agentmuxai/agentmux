@@ -57,7 +57,7 @@
     ul {
         margin: 0;
         padding-left: var(--space-4);
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
     }
 }
 
@@ -68,7 +68,7 @@
 }
 
 .memory-adoption-approval-dir {
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     color: var(--main-text-color);
     word-break: break-all;
 }
