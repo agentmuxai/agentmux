@@ -579,6 +579,7 @@ partial list.
 | [`SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21`](SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md) | Spec: `OpenPane` — a general-purpose, agent-facing "open any pane" MCP tool |
 | [`SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) | SPEC — Versioned model dropdowns (CLI-aware), Claude CLI pin-to-latest, single-toggle Log |
 | [`SPEC_AGENT_OPEN_LATENCY_2026_09_27`](SPEC_AGENT_OPEN_LATENCY_2026_09_27.md) | SPEC: opening an agent from My Agents should be near-instant — where the time goes, and what to change |
+| [`SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) | SPEC: Attach any file in the agent composer (PDF, Office, text, code, …) |
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |
