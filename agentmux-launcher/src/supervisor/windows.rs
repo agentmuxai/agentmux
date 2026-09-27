@@ -648,6 +648,11 @@ pub(crate) async fn run_windows(
     );
     ui_probe_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut ui_probe_nonce: u64 = 0;
+    // SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14 §1–2 — once the UI thread
+    // has missed HOST_HANG_DUMP_MISSES probes in a row, write an external
+    // minidump of the host (once per episode) so a hang that a person later
+    // kills leaves a stack behind. Detection + evidence only; nothing is killed.
+    let mut hang_dump_latch = crate::host_hang_dump::HangDumpLatch::default();
     // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — armed J0 teardown check.
     // Low-rate poll of the state machine (armed by the IPC server's
     // post-reducer event hook on PoolDrained / OrphanInstance, disarmed on
@@ -711,6 +716,30 @@ pub(crate) async fn run_windows(
                         missed,
                         sent_at.elapsed().as_secs()
                     ));
+                }
+                let misses = crate::ui_liveness::consecutive_misses();
+                if hang_dump_latch.observe(misses) {
+                    match (host_child.id(), crate::host_hang_dump::dump_dir(&dir_hash)) {
+                        (Some(pid), Some(dir)) => {
+                            log(&format!(
+                                "[host-hang] UI thread missed {} consecutive probes — writing a minidump of host pid {} to {}",
+                                misses,
+                                pid,
+                                dir.display()
+                            ));
+                            // A few MB of I/O: off the supervisor loop.
+                            tokio::task::spawn_blocking(move || {
+                                match crate::host_hang_dump::write_hang_dump(pid, &dir) {
+                                    Ok(path) => log(&format!("[host-hang] minidump written: {}", path.display())),
+                                    Err(e) => log(&format!("[host-hang] minidump failed: {}", e)),
+                                }
+                            });
+                        }
+                        (pid, dir) => log(&format!(
+                            "[host-hang] UI thread missed {} consecutive probes — no dump (host pid {:?}, dump dir {:?})",
+                            misses, pid, dir
+                        )),
+                    }
                 }
                 // Fail-fast send (reagent P1, round 2): the default
                 // `send_command` BUFFERS while disconnected and returns Ok,
@@ -810,6 +839,9 @@ pub(crate) async fn run_windows(
                 if crate::teardown_backstop::disarm() {
                     log("[teardown-backstop] disarmed — host exited (supervised-exit path owns it now)");
                 }
+                // Probe state described the host that just exited; its
+                // unanswered probe must not count against a respawned host.
+                crate::ui_liveness::reset();
                 let code = match host_status {
                     Ok(s) => s.code().unwrap_or(1),
                     Err(e) => {

@@ -106,6 +106,14 @@ impl UiLiveness {
     pub fn consecutive_misses(&self) -> u32 {
         self.consecutive_misses
     }
+
+    /// Forget everything about the host this state described. Called when
+    /// the host exits: a probe the old host never answered must not age into
+    /// a miss charged to its replacement (the hang dump in
+    /// `host_hang_dump` would otherwise dump a healthy, just-respawned host).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 fn cell() -> &'static Mutex<UiLiveness> {
@@ -137,6 +145,11 @@ pub fn last_alive() -> Option<Instant> {
 /// See [`UiLiveness::consecutive_misses`]. Process-global instance.
 pub fn consecutive_misses() -> u32 {
     cell().lock().unwrap().consecutive_misses()
+}
+
+/// See [`UiLiveness::reset`]. Process-global instance.
+pub fn reset() {
+    cell().lock().unwrap().reset()
 }
 
 #[cfg(test)]
@@ -198,6 +211,22 @@ mod tests {
         l.record_probe_sent(4);
         l.retract_probe(4);
         l.record_probe_sent(5);
+        assert_eq!(l.consecutive_misses(), 0);
+    }
+
+    #[test]
+    fn reset_drops_the_old_hosts_unanswered_probe() {
+        let mut l = UiLiveness::default();
+        l.record_probe_sent(1);
+        l.record_probe_sent(2);
+        assert_eq!(l.consecutive_misses(), 1);
+        // Host exits and is respawned.
+        l.reset();
+        assert_eq!(l.consecutive_misses(), 0);
+        assert!(l.last_alive().is_none());
+        // The first probe to the NEW host: nothing outstanding to overwrite,
+        // so the old host's silence is not charged to it.
+        assert!(l.record_probe_sent(3).is_none());
         assert_eq!(l.consecutive_misses(), 0);
     }
 
