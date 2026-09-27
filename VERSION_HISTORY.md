@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.58.1 — 2026-09-27
+
+- Windows: when the AgentMux window stops responding (its UI thread misses two liveness checks in a row, 1-2 minutes), the launcher now saves a small diagnostic dump of it to %LOCALAPPDATA%\CrashDumps\agentmux-host-hang\<instance> (newest 5 per instance), so a hang that has to be killed leaves evidence of its cause. Nothing is killed automatically.
+- fix(macos): new windows open centred at 70% of the screen's usable area, below the menu bar and beside the Dock, instead of at a fixed default size
+- Paste (Ctrl+V) or drop images into the agent composer: they show as numbered thumbnails above the text, up to 128 images / 1 GB per message with a size summary and progress bar, and are sent to the agent (Claude sees them inline; every agent gets their file paths). Right-click Cut/Copy/Paste in text boxes now work.
+- feat(muxlog): muxlog admission — why won't this agent run here, across every instance with a verdict; --instances, --agent, --until, and --since now reads older daily log files
+- fix(agents): Take over works against an older AgentMux that still holds the agent's cloud lease
+- A relocated conversation copy is now only cleaned up by the spawn that placed it, so an agent restarted mid-move can't lose the copy a newer spawn is resuming from.
+- perf(agents): provider CLIs install once per pinned CLI version, shared across AgentMux versions — no ~3 s npm install on the first open after every update
+- fix(panes): a pane can no longer be scrolled out of place under the window header (tile containers use overflow: clip)
+- Two copies of one agent opening at the same moment no longer race while carrying its conversation into a new build: only the one that gets the agent moves the conversation.
+- perf(history): the startup history index build waits 60 s and runs at background priority, so it no longer competes with opening your first agents; a search before then starts it early
+- feat(agents): log one [agent-open] line per agent open (time to CLI, history, first row, reveal and quiet) and add `muxlog opens` to report them with p50/p95
+- perf(layout): rasterise a pane's drag ghost only after the pointer rests on it (250 ms) or presses its header, not whenever the pointer crosses it
+- After a compaction or a fresh session, an agent's memory is re-sent exactly as it launched with it, AgentMux's own Operator Config included, and the notice lists each part's size.
+- Attach any file in the agent composer, not only images: PDFs, Word, Excel, PowerPoint, text, code, archives and more. Files show as thumbnails (images, SVG, text) or colored type icons with the extension and a PDF page count; Office and PDF files also get an extracted text version, and Claude reads short PDFs directly. Container agents keep getting files copied into their working folder.
+
 ## 0.58.0 — 2026-09-26
 
 - Tool rows in the agent pane show the status mark and duration once, a cancelled tool no longer keeps an hourglass, and MCP tools read 'server · Tool'
