@@ -182,6 +182,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
                 let finish = |mut result: BlockfileReadRangeResult, gen_after: Option<String>| {
+                    if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
+                        trim_to_last_turns(&mut result, offset as u64, turns as usize);
+                    }
                     if gen_before.is_some() && gen_after == gen_before {
                         result.stream = Some(stream.clone());
                         result.gen = gen_before.clone();
@@ -383,6 +386,193 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
+
+/// Whether `line` starts a turn in a Claude stream-json transcript: the same
+/// rule as the frontend's `ClaudeTranslator.handleUserMessage` producing a
+/// `user_message` — a `user` record whose content is a non-empty string, or
+/// an array with an image and some text and no `tool_result` (a text-only
+/// array is how the CLI records "[Request interrupted by user]" and other
+/// meta lines, never rendered as a turn).
+pub(crate) fn is_claude_turn_start(line: &str) -> bool {
+    use serde_json::Value;
+    if !line.contains("\"user\"") {
+        return false;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    if v.get("type").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    match v.get("message").and_then(|m| m.get("content")) {
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Array(blocks)) => {
+            let ty = |b: &Value| b.get("type").and_then(Value::as_str).map(str::to_owned);
+            let has = |t: &str| blocks.iter().any(|b| ty(b).as_deref() == Some(t));
+            !has("tool_result")
+                && has("image")
+                && blocks.iter().any(|b| {
+                    ty(b).as_deref() == Some("text")
+                        && b.get("text")
+                            .and_then(Value::as_str)
+                            .is_some_and(|t| !t.is_empty())
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Index in `lines` where the last `turns` turns begin; `None` when there
+/// are fewer. Scans from the end and stops at the `turns`-th start.
+pub(crate) fn last_turns_start(lines: &[String], turns: usize) -> Option<usize> {
+    if turns == 0 {
+        return None;
+    }
+    let mut seen = 0;
+    for (i, line) in lines.iter().enumerate().rev() {
+        if is_claude_turn_start(line) {
+            seen += 1;
+            if seen == turns {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// `tail_turns`: drop everything before the last `turns` turns (stamps
+/// with it) and record where `lines` now starts.
+fn trim_to_last_turns(result: &mut BlockfileReadRangeResult, first_line: u64, turns: usize) {
+    if result.gen_mismatch.is_some() {
+        return;
+    }
+    let cut = last_turns_start(&result.lines, turns).unwrap_or(0);
+    if cut > 0 {
+        result.lines.drain(..cut);
+        if let Some(stamps) = result.stamps.as_mut() {
+            stamps.drain(..cut.min(stamps.len()));
+        }
+    }
+    result.offset = Some(first_line + cut as u64);
+}
+
+#[cfg(test)]
+mod tail_turns_tests {
+    use super::*;
+
+    fn user(text: &str) -> String {
+        serde_json::json!({"type": "user", "message": {"role": "user", "content": text}})
+            .to_string()
+    }
+    fn tool_result() -> String {
+        serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]}}).to_string()
+    }
+    fn delta(text: &str) -> String {
+        serde_json::json!({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}}}).to_string()
+    }
+
+    #[test]
+    fn turn_starts_match_what_the_pane_renders_as_a_user_message() {
+        assert!(is_claude_turn_start(&user("deploy now")));
+        assert!(!is_claude_turn_start(&user("")));
+        assert!(!is_claude_turn_start(&tool_result()));
+        assert!(!is_claude_turn_start(&delta("the user said")));
+        let interrupted = serde_json::json!({"type": "user", "message": {"content": [{"type": "text", "text": "[Request interrupted by user]"}]}}).to_string();
+        assert!(!is_claude_turn_start(&interrupted));
+        let with_image = serde_json::json!({"type": "user", "message": {"content": [
+            {"type": "image", "source": {"type": "base64", "data": "AAAA"}},
+            {"type": "text", "text": "what is this?"}
+        ]}})
+        .to_string();
+        assert!(is_claude_turn_start(&with_image));
+        let image_only =
+            serde_json::json!({"type": "user", "message": {"content": [{"type": "image"}]}})
+                .to_string();
+        assert!(!is_claude_turn_start(&image_only));
+        assert!(!is_claude_turn_start("not json \"user\""));
+    }
+
+    fn transcript() -> Vec<String> {
+        // 3 turns: [0..3) [3..6) [6..9)
+        vec![
+            user("one"),
+            delta("a"),
+            tool_result(),
+            user("two"),
+            delta("b"),
+            delta("c"),
+            user("three"),
+            delta("d"),
+            delta("e"),
+        ]
+    }
+
+    #[test]
+    fn finds_where_the_last_turns_begin() {
+        let lines = transcript();
+        assert_eq!(last_turns_start(&lines, 1), Some(6));
+        assert_eq!(last_turns_start(&lines, 2), Some(3));
+        assert_eq!(last_turns_start(&lines, 3), Some(0));
+        assert_eq!(last_turns_start(&lines, 4), None);
+        assert_eq!(last_turns_start(&lines, 0), None);
+    }
+
+    #[test]
+    fn trims_lines_and_stamps_and_reports_the_new_start() {
+        let mut r = BlockfileReadRangeResult {
+            lines: transcript(),
+            total: 109,
+            stamps: Some((0..9).collect()),
+            ..Default::default()
+        };
+        trim_to_last_turns(&mut r, 100, 2);
+        assert_eq!(r.offset, Some(103));
+        assert_eq!(r.lines, transcript()[3..].to_vec());
+        assert_eq!(r.stamps, Some(vec![3, 4, 5, 6, 7, 8]));
+        assert_eq!(r.total, 109, "total is the file's, untouched");
+    }
+
+    #[test]
+    fn fewer_turns_than_asked_returns_the_whole_range() {
+        let mut r = BlockfileReadRangeResult {
+            lines: transcript(),
+            total: 9,
+            ..Default::default()
+        };
+        trim_to_last_turns(&mut r, 0, 7);
+        assert_eq!(r.lines.len(), 9);
+        assert_eq!(r.offset, Some(0));
+    }
+
+    #[test]
+    fn a_generation_mismatch_is_left_alone() {
+        let mut r = BlockfileReadRangeResult {
+            gen_mismatch: Some(true),
+            ..Default::default()
+        };
+        trim_to_last_turns(&mut r, 5, 2);
+        assert_eq!(r.offset, None);
+    }
+
+    #[test]
+    fn the_request_field_is_optional_on_the_wire() {
+        let old: CommandBlockfileReadRangeData = serde_json::from_value(serde_json::json!({
+            "block_id": "b", "filename": "output", "offset": 0, "limit": 10
+        }))
+        .unwrap();
+        assert_eq!(old.tail_turns, None);
+        let new: CommandBlockfileReadRangeData = serde_json::from_value(serde_json::json!({
+            "block_id": "b", "filename": "output", "offset": 0, "limit": 10, "tail_turns": 7
+        }))
+        .unwrap();
+        assert_eq!(new.tail_turns, Some(7));
+        let wire = serde_json::to_value(BlockfileReadRangeResult::default()).unwrap();
+        assert!(
+            wire.get("offset").is_none(),
+            "absent unless tail_turns was asked"
+        );
+    }
 }
 
 fn register_blockfile_read_state(engine: &Arc<WshRpcEngine>, state: &AppState) {

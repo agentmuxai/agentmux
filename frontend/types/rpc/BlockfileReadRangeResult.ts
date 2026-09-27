@@ -22,4 +22,9 @@ stream?: string, gen?: string,
  * `expect_gen` was given and the file is now another generation (or
  * changed during the read): `lines` is empty.
  */
-gen_mismatch?: boolean, };
+gen_mismatch?: boolean, 
+/**
+ * With `tail_turns`: the line number of `lines[0]` — the request's
+ * `offset` when nothing was trimmed. `lines` is contiguous from here.
+ */
+offset?: number, };

@@ -9,4 +9,13 @@ export type CommandBlockfileReadRangeData = { block_id: string, filename: string
  * replaced since (another generation), answer `gen_mismatch` with no
  * lines rather than lines of another file (Phase 5a-3).
  */
-expect_gen?: string, };
+expect_gen?: string, 
+/**
+ * Return only the last `tail_turns` turns of the range (a Claude
+ * stream-json transcript: a turn starts at a user message), and say
+ * where they start in `offset`. The agent pane's restore asks for what
+ * its live feed keeps instead of a fixed window it rolls off at once
+ * (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5). A range holding fewer
+ * turns comes back whole.
+ */
+tail_turns?: number, };
