@@ -138,6 +138,33 @@ pub(crate) fn floater_hwnd_for_label(label: &str) -> Option<isize> {
 static TACKED_FLOATERS: LazyLock<Mutex<std::collections::HashSet<isize>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
+/// Windows that must stay ABOVE tacked floaters — the approval pages
+/// (credential / memory-adoption), label → top-level HWND. They are topmost
+/// too, but topmost windows stack by most-recent assertion, so every time a
+/// floater (re)enters the topmost band these are re-raised over it
+/// (`apply_z_action`). Otherwise switching apps and back while one is open
+/// would put the floater over a security prompt (ReAgent P1 on #3970).
+static KEEP_ABOVE_FLOATERS: LazyLock<Mutex<HashMap<String, isize>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Register a window that must never be covered by a tacked floater.
+pub(crate) fn register_keep_above_floaters(label: String, hwnd: isize) {
+    if let Ok(mut m) = KEEP_ABOVE_FLOATERS.lock() {
+        m.insert(label, hwnd);
+    }
+}
+
+/// Forget it (window closing). No-op if absent.
+pub(crate) fn unregister_keep_above_floaters(label: &str) {
+    if let Ok(mut m) = KEEP_ABOVE_FLOATERS.lock() {
+        m.remove(label);
+    }
+}
+
+fn keep_above_hwnds() -> Vec<isize> {
+    KEEP_ABOVE_FLOATERS.lock().map(|m| m.values().copied().collect()).unwrap_or_default()
+}
+
 /// Open host file dialogs (nesting count). While > 0, tacked floaters step
 /// down to the normal band so a picker can't end up behind one (spec §3.1).
 static HOST_DIALOGS_OPEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -272,6 +299,22 @@ pub(crate) fn apply_z_action(hwnd: isize, action: ZAction, asynchronous: bool) {
             }
         };
         SetWindowPos(h, insert_after, 0, 0, 0, 0, flags);
+        // The floater is now the most recent topmost window, i.e. in front of
+        // every other topmost window — re-raise the windows that must stay
+        // above it (approval pages). Stale HWNDs fail harmlessly.
+        if action == ZAction::MakeTopmost {
+            for above in keep_above_hwnds() {
+                SetWindowPos(
+                    above as windows_sys::Win32::Foundation::HWND,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    flags,
+                );
+            }
+        }
     }
 }
 
@@ -329,7 +372,27 @@ fn for_each_tacked(mut f: impl FnMut(isize)) {
 
 #[cfg(test)]
 mod always_on_top_tests {
-    use super::{z_action, ZAction, ZEvent};
+    use super::{
+        keep_above_hwnds, register_keep_above_floaters, unregister_keep_above_floaters, z_action,
+        ZAction, ZEvent,
+    };
+
+    #[test]
+    fn keep_above_registry_tracks_open_approval_windows() {
+        // Process-global registry shared with parallel tests: unique labels,
+        // and assert containment rather than equality.
+        register_keep_above_floaters("approval-test-a".into(), 0x7a01);
+        register_keep_above_floaters("approval-test-b".into(), 0x7a02);
+        let hs = keep_above_hwnds();
+        assert!(hs.contains(&0x7a01) && hs.contains(&0x7a02));
+
+        unregister_keep_above_floaters("approval-test-a");
+        let hs = keep_above_hwnds();
+        assert!(!hs.contains(&0x7a01), "a closed approval window is no longer re-raised");
+        assert!(hs.contains(&0x7a02));
+        unregister_keep_above_floaters("approval-test-b");
+        unregister_keep_above_floaters("approval-test-b"); // idempotent
+    }
 
     #[test]
     fn tacking_while_active_goes_topmost() {
