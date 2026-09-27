@@ -16,11 +16,12 @@
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
  */
 
-import { Show, type JSX } from "solid-js";
+import { Show, onCleanup, type JSX } from "solid-js";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { CollapsibleMessage } from "./CollapsibleMessage";
+import { attachScrollHandoff } from "./scroll-handoff";
 
 interface JektBubbleProps {
     node: JektMessageNode;
@@ -41,6 +42,12 @@ function formatHeldFor(secs: number): string {
     const m = mins % 60;
     return m ? `${h} h ${m} min` : `${h} h`;
 }
+
+/** Both capped boxes (body, raw payload) hand scroll to the pane at their
+ *  edges, like a tool preview (scroll-handoff.ts). */
+const handoff = (el: HTMLElement): void => {
+    onCleanup(attachScrollHandoff(el));
+};
 
 export const JektBubble = (props: JektBubbleProps): JSX.Element => (
     // Don't destructure props — see CollapsibleMessage for why. The row,
@@ -77,7 +84,7 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => (
         }
         body={
             <>
-                <pre class="agent-jekt-body">
+                <pre class="agent-jekt-body" ref={handoff}>
                     <LinkifiedText text={props.node.message} />
                 </pre>
                 <div class="agent-jekt-meta">
@@ -98,7 +105,7 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => (
                 </div>
                 <details class="agent-jekt-raw">
                     <summary>Raw payload</summary>
-                    <pre>{props.node.raw}</pre>
+                    <pre ref={handoff}>{props.node.raw}</pre>
                 </details>
             </>
         }

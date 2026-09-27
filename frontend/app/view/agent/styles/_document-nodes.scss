@@ -1094,12 +1094,13 @@ $transcript-preview-max-height: calc(50vh / 3);
                 // A long jekt scrolls inside its own box instead of pushing
                 // the conversation off-screen. Only the body is capped, so the
                 // metadata line (sender / trust / MSGID) below it stays in
-                // view. No `overscroll-behavior` on purpose: the default lets
-                // the wheel chain to `.agent-document` natively at either end
-                // (the tool box needs a JS hand-off only because it sets
-                // `contain`).
+                // view. At either end the wheel hands off to the pane on the
+                // next tick (scroll-handoff.ts), like a tool preview: native
+                // chaining latches mid-gesture, which is what
+                // SPEC_TOOL_PREVIEW_SCROLL_CHAINING replaced.
                 max-height: $transcript-preview-max-height;
                 overflow-y: auto;
+                overscroll-behavior: contain;
             }
 
             .agent-jekt-meta {
@@ -1130,6 +1131,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                     // marker, so it takes the same cap.
                     max-height: $transcript-preview-max-height;
                     overflow-y: auto;
+                    overscroll-behavior: contain;
                 }
             }
         }
