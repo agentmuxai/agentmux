@@ -524,21 +524,24 @@ wrap_task! {
         fn execute(&self) {
             // Resolve on the UI thread: for the cold path the window may not
             // have existed when this task was posted. A miss is logged, not
-            // fatal — a panel that is merely not-topmost is still usable,
-            // whereas panicking here would take down the UI thread.
+            // fatal — a window that is merely not-topmost is still usable,
+            // whereas panicking here would take down the UI thread. Used by
+            // the tray panel and by approval windows (the latter post from
+            // both `open_subwindow` and `on_after_created`, so one of the two
+            // missing is expected — hence debug, not warn).
             match super::get_window_on_ui(&self.state, &self.label) {
                 Some(window) => {
                     window.set_always_on_top(1);
                     tracing::info!(
-                        target: "tray:panel",
+                        target: "window:ontop",
                         label = %self.label,
-                        "[panel] set always-on-top"
+                        "[ontop] set always-on-top"
                     );
                 }
-                None => tracing::warn!(
-                    target: "tray:panel",
+                None => tracing::debug!(
+                    target: "window:ontop",
                     label = %self.label,
-                    "[panel] window not resolvable yet — not set always-on-top"
+                    "[ontop] window not resolvable yet — not set always-on-top"
                 ),
             }
         }

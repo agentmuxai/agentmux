@@ -153,3 +153,22 @@ describe("buildPaneContextMenu — omit", () => {
         }
     });
 });
+
+describe("split — the floating 'Always on top' tack is not inherited", () => {
+    it("drops pane:floating_ontop and keeps the rest of the source meta", async () => {
+        const { createBlockSplitVertically } = await import("@/app/store/global");
+        const tacked = {
+            oid: "b9",
+            meta: { view: "term", "pane:floating_ontop": true, "frame:hue": 210 },
+        } as unknown as Block;
+        const splitDown = buildPaneContextMenu(tacked, opts()).find((i) => i.label === "Split Down");
+        splitDown!.click!();
+        await Promise.resolve();
+
+        const [blockDef, targetId] = (createBlockSplitVertically as any).mock.calls.at(-1);
+        expect(targetId).toBe("b9");
+        expect(blockDef.meta).not.toHaveProperty("pane:floating_ontop");
+        expect(blockDef.meta["frame:hue"]).toBe(210);
+        expect(blockDef.meta.view).toBe("term");
+    });
+});

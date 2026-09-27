@@ -107,6 +107,9 @@ export const cefWindows: WindowHostApi = {
     toggleFloatingMaximize: async (windowLabel, blockId) => {
         await invokeCommand("toggle_floating_maximize", { label: windowLabel, block_id: blockId });
     },
+    setFloatingAlwaysOnTop: async (windowLabel, blockId, on) => {
+        await invokeCommand("set_floating_always_on_top", { label: windowLabel, block_id: blockId, on });
+    },
     getFloatingRedockTarget: (windowLabel) =>
         invokeCommand<{ block_id?: string; dir?: number }>("get_floating_redock_target", { window_label: windowLabel }),
     updateFloatingRedockHover: (args) =>

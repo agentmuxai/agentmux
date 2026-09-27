@@ -415,6 +415,16 @@ impl AgentMuxHandler {
                     if pending_kind == WindowKind::Subwindow {
                         unsafe { skip_taskbar(hwnd); }
                     }
+                    // Approval pages (credential / memory-adoption) must never
+                    // sit behind an "Always on top" floater — they are
+                    // security prompts. Make them topmost too; shown last, so
+                    // above the tacked floaters. Also posted from
+                    // `open_subwindow` (whichever runs second finds the
+                    // window); idempotent.
+                    // SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.1.
+                    if self.state.is_approval_window(&label) {
+                        crate::ui_tasks::post_set_always_on_top(&self.state, &label);
+                    }
                 }
             }
         }

@@ -50,6 +50,7 @@ import * as MOS from "@/store/mos";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
 import { createRedockArming } from "./redock-arming";
+import { useReapplyFloatingOnTop } from "@/app/block/floating-ontop";
 import "./floating-pane-workspace.scss";
 
 /**
@@ -77,6 +78,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     const windowLabel = createMemo(() => {
         const params = new URLSearchParams(window.location.search);
         return params.get("windowLabel") ?? "";
+    });
+
+    // "Always on top": re-apply a stored tack to this (fresh) window.
+    // SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §6.2.
+    useReapplyFloatingOnTop(windowLabel, () => {
+        const id = tabId();
+        return id ? MOS.getMuxObjectAtom<Tab>(MOS.makeORef("tab", id))()?.blockids?.[0] : undefined;
     });
 
     // Auto-close the floating window when its only pane is closed.

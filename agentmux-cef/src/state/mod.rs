@@ -1601,6 +1601,13 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             restore_rect = ?restore_rect,
             version,
         ),
+        HostEvent::FloatingAlwaysOnTopChanged { label, on, version } => tracing::info!(
+            target: "host-reducer",
+            event = "FloatingAlwaysOnTopChanged",
+            label = %label,
+            on,
+            version,
+        ),
         // ── Effect carrier ───────────────────────────────────────────────
         HostEvent::Effect { effect, version } => tracing::debug!(
             target: "host-reducer",
