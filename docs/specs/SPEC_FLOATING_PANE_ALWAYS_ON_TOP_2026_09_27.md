@@ -163,8 +163,12 @@ Consequences to accept or handle:
    - **Credential-approval and memory-adoption approval windows**
      (`initialView=credential-approval` / `memory-adoption-approval`) must never
      be hidden behind a floater. They are security prompts. When one opens, make
-     it topmost as well (shown last, so above the floaters) for its lifetime.
-     Required, Phase 1.
+     it topmost as well, so it sits above the floaters. Required, Phase 1.
+     Topmost windows stack by the most recent assertion, so making it topmost
+     once isn't enough: switching apps and back re-asserts the floater's topmost
+     state and would put it in front. Open approval windows are therefore kept
+     in a registry, and every time a floater (re)enters the topmost band they
+     are re-raised over it (ReAgent P1 on #3970).
    - **Native file pickers** (`rfd::FileDialog`, `commands/platform.rs:1058-1190`)
      run on a worker thread with no owner, so a tacked floater can cover them.
      Phase 1: while a host file dialog is open, temporarily move tacked floaters to
