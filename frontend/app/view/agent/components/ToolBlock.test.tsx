@@ -212,7 +212,33 @@ describe("ToolBlock — panel mode", () => {
                 hoverToolName(container);
                 const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
                 expect(tip).not.toBeNull();
-                expect(tip!.textContent).toBe("ls"); // bare params.command, not "Bash ls"
+                expect(tip!.textContent).toBe("Bash ls"); // tool name + bare params.command, not the decorated summary
+                // The name is its own span (bold, same colour) in front of the argument.
+                expect(tip!.querySelector(".agent-node-peek-tooltip-tool")?.textContent).toBe("Bash");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        // SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §4.2: the popover is
+        // Portal-rendered outside the row, so it carries the row's own data-tool to
+        // take the same per-tool colour.
+        it("the popover's command carries the row's data-tool, for the row's colour", () => {
+            vi.useFakeTimers();
+            try {
+                const write: ToolNode = { ...baseTool, id: "tc-w", tool: "Write", params: { file_path: "/a/b.ts" }, summary: "Write b.ts" };
+                for (const node of [baseTool, write]) {
+                    cleanup();
+                    const { container } = render(() => (
+                        <ToolBlock node={node} pinned={false} onTogglePin={() => {}} />
+                    ));
+                    hoverToolName(container);
+                    const row = container.querySelector(".agent-tool-block") as HTMLElement;
+                    const tip = document.body.querySelector(".agent-node-peek-tooltip-body") as HTMLElement;
+                    expect(tip).not.toBeNull();
+                    expect(tip.dataset.tool).toBe(row.dataset.tool);
+                    expect(tip.dataset.tool).toBe(node.tool.toLowerCase());
+                }
             } finally {
                 vi.useRealTimers();
             }
@@ -229,9 +255,10 @@ describe("ToolBlock — panel mode", () => {
                 ));
                 hoverToolName(container);
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
-                expect(metaLines.length).toBe(2);
-                expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
-                expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
+                // One line: time and tokens side by side (PeekMetaRow).
+                expect(metaLines.length).toBe(1);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")?.textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(/~\d+ tok \(est\.\)/);
             } finally {
                 vi.useRealTimers();
             }
@@ -248,7 +275,8 @@ describe("ToolBlock — panel mode", () => {
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 // Still one line: the token estimate (params always give SOME text).
                 expect(metaLines.length).toBe(1);
-                expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(/~\d+ tok \(est\.\)/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")).toBeNull();
             } finally {
                 vi.useRealTimers();
             }
@@ -269,11 +297,12 @@ describe("ToolBlock — panel mode", () => {
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
                 const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
                 expect(tip).not.toBeNull();
-                expect(tip!.textContent).toBe("ls");
+                expect(tip!.textContent).toBe("Bash ls");
                 // baseTool has no timestamp, so just the token estimate line.
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 expect(metaLines.length).toBe(1);
-                expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(/~\d+ tok \(est\.\)/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")).toBeNull();
             } finally {
                 vi.useRealTimers();
             }
@@ -290,7 +319,7 @@ describe("ToolBlock — panel mode", () => {
                 hoverToolName(container);
                 const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
                 expect(tip).not.toBeNull();
-                expect(tip!.textContent).toBe(`cat ${longPath}`);
+                expect(tip!.textContent).toBe(`Bash cat ${longPath}`);
             } finally {
                 vi.useRealTimers();
             }
@@ -312,7 +341,7 @@ describe("ToolBlock — panel mode", () => {
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
                 expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
-                expect(metaLines.length).toBe(2); // time + estimate, both independent of cmdText()
+                expect(metaLines.length).toBe(1); // one row: time + estimate, both independent of cmdText()
             } finally {
                 vi.useRealTimers();
             }
@@ -369,20 +398,20 @@ describe("ToolBlock — panel mode", () => {
                 fireEvent.mouseEnter(row); // cursor arrives while still running (panel auto-expanded)
                 vi.advanceTimersByTime(100);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("Bash ls");
                 setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
                 // Held open by userHolding (engaged at the mouseenter above,
                 // since the panel WAS auto-expanded at that moment).
                 const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
                 expect(panel.classList.contains("agent-tool-panel--flow")).toBe(true);
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("Bash ls");
 
                 // A genuine fresh hover (leave, then re-enter) after the row
                 // has actually collapsed shows it too.
                 fireEvent.mouseLeave(row);
                 fireEvent.mouseEnter(row);
                 vi.advanceTimersByTime(100);
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("Bash ls");
             } finally {
                 vi.useRealTimers();
             }
@@ -399,7 +428,7 @@ describe("ToolBlock — panel mode", () => {
                 expect(document.body.querySelector(".agent-node-peek-tooltip-body")).not.toBeNull();
                 setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("Bash ls");
             } finally {
                 vi.useRealTimers();
             }
@@ -676,7 +705,7 @@ describe("ToolBlock — header row", () => {
             fireEvent.mouseEnter(container.querySelector(".agent-tool-block")!);
             vi.advanceTimersByTime(100);
             const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
-            expect(tip?.textContent).toBe("solid docs");
+            expect(tip?.textContent).toBe("WebSearch solid docs");
         } finally {
             vi.useRealTimers();
         }

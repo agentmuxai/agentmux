@@ -48,10 +48,11 @@ import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
-import { toolPill } from "../tool-meta/tool-descriptors";
+import { mcpDisplayName, toolNameOf, toolPill } from "../tool-meta/tool-descriptors";
 import { rowDisclosure } from "../virtualization/disclosure";
 
 /**
@@ -258,6 +259,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
     const header = createMemo(() => toolHeaderParts(props.node));
     const cmdText = () => header().detail;
+    // The tool's name in front of its argument in the peek popover ("Bash ls",
+    // "Read /a/b.ts"): the row shows an icon instead, so the popover names it.
+    // MCP tools read "server · tool", not their raw mcp__server__tool name.
+    // SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §4.3.
+    const peekToolName = () => {
+        const name = toolNameOf(props.node);
+        return mcpDisplayName(name) ?? name;
+    };
     const authoredSummary = () => hasAuthoredSummary(props.node);
 
     // Peek-tooltip time + estimate lines (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
@@ -457,14 +466,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 (Bash's only appears once the result lands; most tools never
                 show all their params), and the header stays truncated. */}
                 <PeekOverlay show={isPeeking() && hasAnyPeekContent()} rowEl={peekRowEl}>
-                    <Show when={peekTimeText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                    </Show>
-                    <Show when={peekEstimateText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                    </Show>
+                    <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
                     <Show when={cmdText()}>
-                        <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
+                        <div class="agent-node-peek-tooltip-body" data-tool={props.node.tool.toLowerCase()}>
+                            <span class="agent-node-peek-tooltip-tool">{peekToolName()}</span> {cmdText()}
+                        </div>
                     </Show>
                 </PeekOverlay>
                 {/* Panel — three render modes per `panelMode()`:

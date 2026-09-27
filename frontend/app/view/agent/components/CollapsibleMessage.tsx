@@ -23,6 +23,7 @@ import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { PeekOverlay } from "./PeekOverlay";
+import { PeekMetaRow } from "./PeekMetaRow";
 
 interface CollapsibleMessageProps {
     /** The root's own class, e.g. "agent-jekt-bubble". */
@@ -76,12 +77,7 @@ export const CollapsibleMessage = (props: CollapsibleMessageProps): JSX.Element 
                 </div>
             </Show>
             <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
-                <Show when={peekTimeText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                </Show>
-                <Show when={peekEstimateText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                </Show>
+                <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
             </PeekOverlay>
         </div>
     );
