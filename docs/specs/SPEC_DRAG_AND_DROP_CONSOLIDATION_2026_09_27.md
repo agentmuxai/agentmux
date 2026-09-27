@@ -351,7 +351,7 @@ interface DragFiles {
      - **Byte fallbacks:**
        - the agent pane uses the bytes path its paste already has (`uploadFiles` into the tray; the upload + `attachments.copy-to-workdir` transport of `copyIntoWorkdir` in copy mode);
        - the terminal pane uses the same bytes transport;
-       - media and editor panes can read the `File` directly.
+       - media and editor panes don't copy anything, so they never use `copyIntoWorkdir`: they **open** the file, from the path when present and from the `File` otherwise (the media and editor rows below).
 
        So no phase-1 hook needs `needsPaths`.
 - **A drop anywhere in the pane counts**, including its header and tab strip; today only the content does.
@@ -380,8 +380,8 @@ interface DragFiles {
 
 | Pane | `accept` | `drop` |
 |---|---|---|
-| Media (`view: "media"`) | ok when `count === 1` and the type (MIME, else the name's extension) is image, video or audio ("Open here"); blocked otherwise, e.g. "Media panes open one image, video or audio file" | point the pane at the file |
-| Editor (`view: "editor"`) | ok when every name has a text extension, or the MIME is `text/*` or a known text type ("Open N files"); blocked when any is a known binary; unknown types answer ok, and `drop` sniffs the content | open as editor tabs |
+| Media (`view: "media"`) | ok when `count === 1` and the type (MIME, else the name's extension) is image, video or audio ("Open here"); blocked otherwise, e.g. "Media panes open one image, video or audio file" | **with a path:** point the pane at it (today's `/agentmux/stream-local-file` route, which also live-updates) · **without:** show the `File` from an object URL (`URL.createObjectURL`; no live updates), revoked when the pane changes source |
+| Editor (`view: "editor"`) | ok when every name has a text extension, or the MIME is `text/*` or a known text type ("Open N files"); blocked when any is a known binary; unknown types answer ok, and `drop` sniffs the content | **with paths:** open each path as an editor tab (today's `readeditorfile`, save goes back to disk) · **without:** open an untitled tab with `await file.text()`, labelled "(not on disk)" so a save asks where to write |
 
 **The drone canvas** checks its own MIME type before accepting (`drone-view.tsx:288`). It then stops advertising "copy" for OS files; the hub's guard handles them.
 
@@ -436,6 +436,8 @@ interface DragFiles {
   - `performCrossWindowDrop`;
   - the duplicated `DragItemPayload`, now in `drag-session.ts`.
 - **One hit-test, made truly Z-ordered first.** The resolver is Z-ordered only on Windows today; elsewhere it picks the lexicographically smallest overlapping label (§2.3). Reusing it as-is would drop into a window hidden behind another. Phase 5 therefore:
+  **Phase boundary:** nothing uses `resolve_window_at_cursor` for drag targeting before phase 5, and phases 1–4 don't change cross-window hit-testing at all. The file-drop hit-test in §5.3 is a DOM check inside one renderer (`closest('[data-role="pane"]')`) and never asks the host which window is under the cursor. The steps below all belong to phase 5.
+
   1. **Makes `resolve_window_at_cursor` stack-aware on every platform:**
      - macOS: front-to-back order from `CGWindowListCopyWindowInfo`, already used by the tear-off hook's macOS module;
      - Linux X11: `_NET_CLIENT_LIST_STACKING`;
