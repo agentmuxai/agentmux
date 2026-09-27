@@ -140,7 +140,7 @@ export function renderLine(raw, opt) {
         // Non-JSON line (a panic backtrace, a raw println). It has no structured
         // fields, so any structured filter excludes it; a --grep must still match
         // its text. Otherwise pass it through verbatim so nothing is lost.
-        if (opt.level || opt.target || opt.excludeTarget || opt.since) return null;
+        if (opt.level || opt.target || opt.excludeTarget || opt.since || opt.until || opt.agentMatch) return null;
         if (opt.grep && !opt.grep.test(t)) return null;
         return t;
     }
@@ -156,6 +156,8 @@ export function renderLine(raw, opt) {
     if (opt.excludeTarget && target.includes(opt.excludeTarget)) return null;
     if (opt.grep && !opt.grep.test(String(msg))) return null;
     if (opt.since && j.timestamp && j.timestamp < opt.since) return null;
+    if (opt.until && j.timestamp && j.timestamp > opt.until) return null;
+    if (opt.agentMatch && !opt.agentMatch(j)) return null;
 
     if (opt.raw) return t;
     const ts = (j.timestamp || "").replace(/^.*T/, "").replace(/\..*$/, "") || "--:--:--";
@@ -165,8 +167,27 @@ export function renderLine(raw, opt) {
         const extra = { ...fields }; delete extra.message;
         const keys = Object.keys(extra);
         if (keys.length) line += `  ${DIM}${JSON.stringify(extra)}${RESET}`;
+    } else if (opt.inlineFields) {
+        line += inlineFieldsSuffix(fields, opt.inlineFields);
     }
     return line;
+}
+
+// A recipe's chosen structured fields, shown inline without --verbose's full
+// JSON dump (`admission`: holder/released/epoch/… are the facts that matter,
+// and they never appear in the message text). `block_id` is shortened to 8
+// characters and `why` to 120; everything else is shown as-is.
+export function inlineFieldsSuffix(fields, keys) {
+    const parts = [];
+    for (const k of keys) {
+        let v = fields[k];
+        if (v == null || v === "") continue;
+        v = String(v);
+        if (k === "block_id") v = v.slice(0, 8);
+        else if (k === "why" && v.length > 120) v = v.slice(0, 117) + "...";
+        parts.push(`${k}=${v}`);
+    }
+    return parts.length ? `  ${DIM}${parts.join(" ")}${RESET}` : "";
 }
 
 function shortTarget(t) {
@@ -198,13 +219,243 @@ function readForDisplay(file, whole) {
 // nothing and leave the caller to guess whether that means zero matches or
 // a resolution/read failure upstream.
 export function printLastLines(file, n, opt, whole = false) {
+    return printLastLinesMulti([file], n, opt, whole);
+}
+
+// Same, over several files read oldest-first as one stream — a window that
+// spans a daily rotation (see windowFiles below). `--agent`'s matcher is
+// built here, from the very lines about to be printed, so every recipe that
+// prints through this gets it without its own wiring.
+export function printLastLinesMulti(files, n, opt, whole = false) {
+    const lines = [];
+    for (const f of files) for (const l of readForDisplay(f, whole || files.length > 1).split("\n")) lines.push(l);
+    ensureAgentMatcher(lines, opt);
     const rendered = [];
-    for (const l of readForDisplay(file, whole).split("\n")) {
+    for (const l of lines) {
         const r = renderLine(l, opt); if (r != null) rendered.push(r);
     }
     const out = n > 0 ? rendered.slice(-n) : rendered;
     for (const r of out) process.stdout.write(r + "\n");
     return rendered.length;
+}
+
+// ─── rotated files ────────────────────────────────────────────────────────────
+// Sidecar and host logs roll daily by UTC date: `<stem>.log.<YYYY-MM-DD>`.
+// Resolution picks ONE file (the newest), so an incident just before UTC
+// midnight used to be invisible even with --since. With --since/--until, a
+// resolved file is widened to every sibling of the same stem whose date can
+// overlap the window (SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md §3.1).
+// Without either, it stays exactly the one resolved file.
+
+// `agentmuxsrv-v0.57.8.log.2026-09-26` → { stem: "agentmuxsrv-v0.57.8", date: "2026-09-26" };
+// an un-suffixed `….log` has date null (the file being written right now).
+export function logNameParts(name) {
+    const m = name.match(/^(.*)\.log(?:\.(\d{4}-\d{2}-\d{2}))?$/);
+    return m ? { stem: m[1], date: m[2] ?? null } : null;
+}
+
+// Pure: of these file names (one stem), the ones a [since, until] window can
+// touch, oldest first. A file dated D only holds lines from UTC day D, so it
+// can be skipped exactly when D is outside the window's dates; an undated
+// file is always kept.
+export function selectWindowNames(names, since, until) {
+    const sinceDay = since ? since.slice(0, 10) : null;
+    const untilDay = until ? until.slice(0, 10) : null;
+    return names
+        .map((name) => ({ name, parts: logNameParts(name) }))
+        .filter(({ parts }) => parts)
+        .filter(({ parts }) => parts.date == null || ((!sinceDay || parts.date >= sinceDay) && (!untilDay || parts.date <= untilDay)))
+        .sort((a, b) => (a.parts.date ?? "9999") < (b.parts.date ?? "9999") ? -1 : (a.parts.date ?? "9999") > (b.parts.date ?? "9999") ? 1 : 0)
+        .map(({ name }) => name);
+}
+
+// The files to read for `file`: itself alone, or, with --since/--until, its
+// same-stem siblings in the window.
+export function windowFiles(file, opt, strict = false) {
+    if (!opt.since && !opt.until) return [file];
+    const dir = path.dirname(file);
+    const parts = logNameParts(path.basename(file));
+    if (!parts) return [file];
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((n) => logNameParts(n)?.stem === parts.stem); } catch { return [file]; }
+    const picked = selectWindowNames(names, opt.since, opt.until).map((n) => path.join(dir, n));
+    // Single-instance use keeps the resolved file when nothing is dated in the
+    // window (unchanged behavior); a multi-instance merge wants nothing then.
+    return picked.length ? picked : strict ? [] : [file];
+}
+
+// ─── --agent ──────────────────────────────────────────────────────────────────
+// The agent shows up as `fields.agent`, `fields.agent_id`, `fields.uid` or
+// `fields.definition_id`, in whatever case its call site used ("AgentA" in
+// some lines, "agenta" in others), and some of the most important lines —
+// `persistent process spawned`, `turn_active flip (process exited)` — carry
+// only its pane's `block_id`. So: given a name or a uid, collect every id
+// that co-occurs with it on a line (name ↔ uid), then the block ids of those
+// lines, and match a line on any of them. Two passes so a name found only via
+// a uid (or the reverse) is picked up too.
+const ID_FIELDS = ["agent", "agent_id", "uid", "definition_id"];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function expandAgentIds(lines, agent) {
+    const ids = new Set([String(agent).toLowerCase()]);
+    const blocks = new Set();
+    const parsed = [];
+    for (const l of lines) {
+        const t = typeof l === "string" ? l.trim() : "";
+        if (!t || t[0] !== "{") continue;
+        try { parsed.push(JSON.parse(t).fields || {}); } catch { /* not JSON */ }
+    }
+    for (let pass = 0; pass < 2; pass++) {
+        for (const f of parsed) {
+            const vals = ID_FIELDS.map((k) => f[k]).filter((v) => typeof v === "string" && v);
+            if (!vals.some((v) => ids.has(v.toLowerCase()))) continue;
+            for (const v of vals) ids.add(v.toLowerCase());
+            if (typeof f.block_id === "string" && f.block_id) blocks.add(f.block_id.toLowerCase());
+        }
+    }
+    return { ids, blocks };
+}
+
+export function makeAgentMatcher({ ids, blocks }) {
+    const names = [...ids].filter((x) => !UUID_RE.test(x));
+    const uuids = [...ids].filter((x) => UUID_RE.test(x));
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const nameRe = names.length ? new RegExp(`\\b(?:${names.map(esc).join("|")})\\b`, "i") : null;
+    return (j) => {
+        const f = j.fields || {};
+        for (const k of ID_FIELDS) {
+            const v = f[k];
+            if (typeof v === "string" && ids.has(v.toLowerCase())) return true;
+        }
+        if (typeof f.block_id === "string" && blocks.has(f.block_id.toLowerCase())) return true;
+        const text = `${f.message ?? j.message ?? ""} ${f.why ?? ""}`;
+        if (nameRe && nameRe.test(text)) return true;
+        const lower = text.toLowerCase();
+        return uuids.some((u) => lower.includes(u));
+    };
+}
+
+function ensureAgentMatcher(lines, opt) {
+    if (opt.agent && !opt.agentMatch) opt.agentMatch = makeAgentMatcher(expandAgentIds(lines, opt.agent));
+}
+
+// ─── --instances ──────────────────────────────────────────────────────────────
+// Take-over involves a REQUESTER and a HOLDER in different channels, and their
+// lines only make sense interleaved (§3.2). One group per instance: a log
+// directory plus a file stem (the shared root holds several versions' logs
+// side by side, each its own instance).
+
+// `v0.57.6/7a8245ae` — version, then the channel hash (last 8) or dev branch.
+export function instanceTag(e) {
+    const ident = e.source.replace(/^[a-z]+:/i, "");
+    const short = e.source.startsWith("channel:") ? ident.slice(-8) : e.source === "shared" ? "shared" : ident.slice(0, 20);
+    return `v${e.version}/${short}`;
+}
+
+// Pure: group discovered entries into instances, filtered by `spec`
+// ("all", "live", or comma-separated substrings as for -i). Liveness is
+// supplied by the caller (it's an async probe).
+export function groupInstances(cands, spec, liveByDir = {}) {
+    const groups = new Map();
+    for (const e of cands) {
+        const parts = logNameParts(path.basename(e.file));
+        const key = path.dirname(e.file) + "|" + (parts?.stem ?? path.basename(e.file));
+        if (!groups.has(key)) groups.set(key, { key, dir: path.dirname(e.file), source: e.source, version: e.version, tag: instanceTag(e), files: [], newest: e });
+        const g = groups.get(key);
+        g.files.push(e.file);
+        if (e.mtime > g.newest.mtime) g.newest = e;
+    }
+    let out = [...groups.values()];
+    if (spec === "live") out = out.filter((g) => liveByDir[g.dir] !== "dead");
+    else if (spec && spec !== "all") {
+        const needles = spec.split(",").map((s) => s.trim()).filter(Boolean);
+        out = out.filter((g) => needles.some((n) => filterByInstance([{ file: g.newest.file, source: g.source, version: g.version }], n).length));
+    }
+    return out.sort((a, b) => b.newest.mtime - a.newest.mtime);
+}
+
+// The files one instance contributes: its window's files with --since/--until,
+// else just its newest.
+function groupFiles(g, opt) {
+    return opt.since || opt.until ? windowFiles(g.newest.file, opt, true) : [g.newest.file];
+}
+
+// Pure: parse + filter + tag one instance's raw lines into timeline entries.
+export function timelineEntries(lines, tag, opt) {
+    const out = [];
+    for (const l of lines) {
+        const r = renderLine(l, opt);
+        if (r == null) continue;
+        let j = null;
+        try { j = JSON.parse(l.trim()); } catch { /* non-JSON passthrough */ }
+        out.push({ ts: j?.timestamp ?? "", tag, rendered: r, raw: l.trim(), j });
+    }
+    return out;
+}
+
+// Stable chronological merge — equal timestamps keep instance order.
+export function mergeTimelines(lists) {
+    const all = [];
+    lists.forEach((list, li) => list.forEach((e, i) => all.push({ e, li, i })));
+    all.sort((a, b) => (a.e.ts < b.e.ts ? -1 : a.e.ts > b.e.ts ? 1 : a.li - b.li || a.i - b.i));
+    return all.map((x) => x.e);
+}
+
+// `09-26 23:52:19 v0.57.6/7a8245ae INFO …` — a merged timeline can span days,
+// so it shows the date too, then the instance tag, then the usual line.
+export function renderTimelineEntry(e, opt) {
+    if (opt.raw) return `${e.tag}\t${e.raw}`;
+    if (!e.j) return `${DIM}${e.tag}${RESET}  ${e.rendered}`;
+    const m = String(e.ts).match(/^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+    const when = m ? `${m[1]} ${m[2]}` : "--:--:--";
+    const rest = e.rendered.slice(e.rendered.indexOf(RESET) + RESET.length).replace(/^ /, "");
+    return `${DIM}${when}${RESET} ${DIM}${e.tag.padEnd(18)}${RESET} ${rest}`;
+}
+
+async function resolveInstanceGroups(target, opt) {
+    const cands = discover(target);
+    let live = {};
+    if (opt.instances === "live") {
+        const dirs = [...new Set(cands.map((c) => path.dirname(c.file)))];
+        const res = await Promise.all(dirs.map((d) => checkLiveness(d)));
+        live = Object.fromEntries(dirs.map((d, i) => [d, res[i]]));
+    }
+    const groups = groupInstances(cands, opt.instances, live);
+    if (!groups.length) {
+        console.error(`muxlog: no ${target} logs found for --instances ${opt.instances}. Try \`muxlog ls\`.`);
+        process.exit(1);
+    }
+    return groups;
+}
+
+// Read every group's window, build the --agent matcher from ALL of it (the
+// name ↔ uid pairing may only appear in one instance's lines), then merge.
+function mergedTimeline(groups, opt) {
+    const perGroup = groups.filter((g) => groupFiles(g, opt).length).map((g) => {
+        const files = groupFiles(g, opt);
+        const lines = [];
+        for (const f of files) for (const l of readForDisplay(f, true).split("\n")) lines.push(l);
+        return { g, files, lines };
+    });
+    ensureAgentMatcher(perGroup.flatMap((p) => p.lines), opt);
+    const lists = perGroup.map((p) => timelineEntries(p.lines, p.g.tag, opt));
+    return { perGroup, merged: mergeTimelines(lists) };
+}
+
+function printMerged(groups, opt, title) {
+    const { perGroup, merged } = mergedTimeline(groups, opt);
+    console.log(`=== ${title} ===`);
+    // Only the instances that contributed lines — a machine keeps many old
+    // dev/portable logs, and listing every one buries the two that matter.
+    const contributed = new Set(merged.map((e) => e.tag));
+    const shown = perGroup.filter((p) => contributed.has(p.g.tag));
+    for (const p of shown) console.log(`    ${p.g.tag.padEnd(18)} ${p.files.map((f) => path.basename(f)).join(", ")}  (${p.g.dir})`);
+    const quiet = perGroup.length - shown.length;
+    if (quiet) console.log(`    (${quiet} other instance${quiet === 1 ? "" : "s"} read, no matching lines)`);
+    console.log("");
+    const out = opt.n > 0 ? merged.slice(-opt.n) : merged;
+    for (const e of out) console.log(renderTimelineEntry(e, opt));
+    return { perGroup, merged };
 }
 
 function follow(file, opt) {
@@ -460,6 +711,9 @@ function parse(argv) {
         else if (a === "--target") opt.target = argv[++i];
         else if (a === "--exclude-target") opt.excludeTarget = argv[++i];
         else if (a === "--since") opt.since = argv[++i];
+        else if (a === "--until") opt.until = argv[++i];
+        else if (a === "--agent") opt.agent = argv[++i];
+        else if (a === "--instances") opt.instances = argv[++i] || "all";
         else if (a === "--grep") opt.grep = new RegExp(argv[++i], "i");
         else pos.push(a);
     }
@@ -582,6 +836,121 @@ function resolveFile(target, opt) {
         process.exit(1);
     }
     return file;
+}
+
+// ─── admission ────────────────────────────────────────────────────────────────
+// "Why won't this agent run here": one cross-instance timeline of the agent's
+// admission, take-over and lifecycle lines, then a per-instance verdict and a
+// diagnosis from a small rule table
+// (SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md §3.4).
+export const ADMISSION_VOCAB =
+    /agent_admission\.|registry: (shared )?entry changed hands|self-quit|persistent process (spawned|exited)|turn_active flip \(process exited\)|muxbus: auto-registered|muxbus: .*(lease|subscription|RemoveAgent)|provisioned per-agent credential/i;
+export const ADMISSION_FIELDS = ["holder", "holder_channel", "released", "epoch", "block_id", "why", "to"];
+
+const msgOf = (j) => String(j?.fields?.message ?? j?.message ?? "");
+
+// "this computer, channel local-main-b28b7a-7a8245ae, v0.57.6" → "local-main-b28b7a-7a8245ae"
+export function holderChannel(holder) {
+    const m = String(holder ?? "").match(/channel\s+([^,\s]+)/i);
+    return m ? m[1] : null;
+}
+
+// Pure: one instance's entries (already filtered to the agent) → its state.
+export function summarizeInstance(entries) {
+    const s = { state: null, stateTs: null, epoch: null, holder: null, lastSpawn: null, lastStop: null, released0At: null, takeoverRequestedAt: null };
+    for (const e of entries) {
+        const m = msgOf(e.j);
+        const f = e.j?.fields || {};
+        if (/^agent_admission\.granted/.test(m)) { s.state = "granted"; s.stateTs = e.ts; s.epoch = f.epoch ?? null; }
+        else if (/^agent_admission\.fenced/.test(m)) { s.state = "fenced"; s.stateTs = e.ts; if (f.holder) s.holder = f.holder; s.lastStop = e.ts; }
+        else if (/^agent_admission\.denied/.test(m)) { s.state = "denied"; s.stateTs = e.ts; if (f.holder) s.holder = f.holder; }
+        if (/takeover: requesting release/.test(m)) s.takeoverRequestedAt = e.ts;
+        if (/takeover: release handled/.test(m) && Number(f.released) === 0) s.released0At = e.ts;
+        if (/persistent process spawned/.test(m)) s.lastSpawn = e.ts;
+        if (/self-quit|persistent process exited|turn_active flip \(process exited\)/.test(m)) s.lastStop = e.ts;
+    }
+    // Does this instance have a live pane for the agent at the end of the window?
+    // true / false, or null when the window holds no lifecycle lines at all.
+    s.live = s.lastSpawn ? !s.lastStop || s.lastSpawn > s.lastStop : s.lastStop ? false : null;
+    return s;
+}
+
+// Pure: [{ tag, source, file, entries }] → { summaries, diagnoses }.
+// Each diagnosis rule cites the PRs that fixed the failure mode it names.
+export function admissionVerdict(instances) {
+    const summaries = instances.map((i) => ({ ...i, s: summarizeInstance(i.entries) }));
+    const diagnoses = [];
+    for (const r of summaries) {
+        if (r.s.state !== "fenced" && r.s.state !== "denied") continue;
+        const chan = holderChannel(r.s.holder);
+        if (!chan) continue;
+        const h = summaries.find((x) => x !== r && matchesOwnChannel({ source: x.source, file: x.file }, chan));
+        if (!h) {
+            diagnoses.push(
+                `${r.tag}: the relay names "${r.s.holder}" as the holder, and no local log belongs to that instance. ` +
+                `If it's on another computer, run \`muxlog admission\` there.`,
+            );
+            continue;
+        }
+        if (h.s.live === false) {
+            const since = h.s.lastStop ? ` since ${h.s.lastStop}` : "";
+            const released = h.s.released0At ? `, and a take-over there answered released: 0 (${h.s.released0At})` : "";
+            diagnoses.push(
+                `stale relay lease: the relay names ${h.tag} as holder, but ${h.tag} has had no live pane for the agent${since}${released}. ` +
+                `A closed agent's cloud subscription kept renewing its lease (#3897), and a take-over couldn't release a lease ` +
+                `held without a live pane (#3899, #3908). #3897, #3899, #3903 and #3908 are all in v0.58.0. ` +
+                `Recover: quit or restart ${h.tag}; the lease expires ≤ 15 s after renewals stop, then Take over again ` +
+                `(if ${r.tag} predates #3903 it may keep its cached refusal; restart it too).`,
+            );
+        } else if (h.s.live === true) {
+            diagnoses.push(
+                `${h.tag} genuinely runs the agent (a live pane since ${h.s.lastSpawn}). ${r.tag} is refused correctly; ` +
+                `use Take over, or close the agent in ${h.tag}.`,
+            );
+        } else {
+            diagnoses.push(
+                `the relay names ${h.tag} as holder, but its logs in this window have no lifecycle lines for the agent. ` +
+                `Widen --since to see when it last started or stopped it.`,
+            );
+        }
+    }
+    return { summaries, diagnoses };
+}
+
+function describeState(s) {
+    if (!s.state) return "no admission lines";
+    const at = s.stateTs ? ` at ${s.stateTs}` : "";
+    if (s.state === "granted") return `granted${s.epoch != null ? `@epoch ${s.epoch}` : ""}${at}`;
+    return `${s.state}${at}${s.holder ? ` (relay names: ${s.holder})` : ""}`;
+}
+
+async function admissionRecipe(pos, opt) {
+    opt.agent = opt.agent || pos[1] || process.env.AGENTMUX_AGENT_ID;
+    if (!opt.agent) {
+        console.error("muxlog admission: which agent? Pass a name or uid (`muxlog admission AgentA`), or run it from an agent's own shell.");
+        process.exit(1);
+    }
+    opt.instances = opt.instances || "all";
+    if (!opt.since) opt.since = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 16);
+    opt.grep = opt.grep || ADMISSION_VOCAB;
+    opt.inlineFields = ADMISSION_FIELDS;
+    opt.all = true; // the agent's own lifecycle lines can sit under the subprocess targets renderLine drops by default
+    const groups = await resolveInstanceGroups("srv", opt);
+    const { perGroup, merged } = printMerged(groups, opt, `admission: ${opt.agent} since ${opt.since}`);
+    if (!merged.length) {
+        console.log(`\nverdict: no admission/lifecycle lines for '${opt.agent}' in any instance since ${opt.since}. Try a wider --since, or check the name with \`muxlog srv --agent ${opt.agent} cat\`.`);
+        return;
+    }
+    const { summaries, diagnoses } = admissionVerdict(
+        perGroup.map((p) => ({ tag: p.g.tag, source: p.g.source, file: p.g.newest.file, entries: merged.filter((e) => e.tag === p.g.tag) })),
+    );
+    console.log("\nverdict:");
+    for (const x of summaries) {
+        if (!x.entries.length) continue;
+        const live = x.s.live === true ? "live pane" : x.s.live === false ? "no live pane" : "no lifecycle lines";
+        console.log(`  ${x.tag.padEnd(18)} ${describeState(x.s)}; ${live}`);
+    }
+    for (const d of diagnoses) console.log(`\ndiagnosis: ${d}`);
 }
 
 // ─── phases ───────────────────────────────────────────────────────────────────
@@ -790,6 +1159,8 @@ const HELP = `muxlog — AgentMux log viewer
   muxlog swarm -d <dispatch_id>      same, filtered to one dispatch + a match-count verdict — "did this ever get processed here"
   muxlog auth                        provider auth/identity trace (login/OAuth wiring/unlink/account removal, credstate snapshots)
   muxlog phases [<block-id>]         merged turn-phase timeline (host [wave-turn] + srv [health]) for one pane — defaults to $AGENTMUX_BLOCKID
+  muxlog admission [<agent>]         why won't this agent run here: its admission/take-over/lifecycle lines across ALL instances,
+                                     merged, then a per-instance verdict + diagnosis — defaults to $AGENTMUX_AGENT_ID, --since 24h ago
 
 Options (any position):
   -i <substr>   pick the instance whose log path/branch/version matches <substr>
@@ -799,7 +1170,10 @@ Options (any position):
   --grep <re>   filter on the message field only (not the whole JSON line)
   --level a,b   only these levels (error,warn,info,debug)
   --target <s>  only log lines whose target contains <s>
-  --since <ts>  only lines at/after ISO <ts> (e.g. 2026-06-15T23:30)
+  --since <ts>  only lines at/after ISO <ts> (e.g. 2026-06-15T23:30) — also reads the older daily log files the window reaches
+  --until <ts>  only lines at/before ISO <ts> (same file widening)
+  --agent <a>   only lines about agent <a> (name or uid, any case; matches its structured fields and its panes' block ids)
+  --instances all|live|<s1,s2>   merge these instances into one timeline, each line tagged v<version>/<channel>
   --raw         emit the original NDJSON   --verbose  include structured fields`;
 
 async function main() {
@@ -819,7 +1193,7 @@ async function main() {
         // comment above).
         for (const tgt of ["host", "srv"]) {
             const file = pickCandidate(discover(tgt), opt, process.env.AGENTMUX_CHANNEL);
-            if (file) { console.log(`\n=== ${tgt}: ${file} ===`); printLastLines(file, opt.n, opt, true); }
+            if (file) { console.log(`\n=== ${tgt}: ${file} ===`); printLastLinesMulti(windowFiles(file, opt), opt.n, opt, true); }
         }
         return;
     }
@@ -837,7 +1211,7 @@ async function main() {
         opt.target = opt.target || "subagent_watcher";
         const f = resolveFile("srv", opt);
         console.log(`=== swarm trace: ${f} ===`);
-        const matched = printLastLines(f, opt.n, opt, true);
+        const matched = printLastLinesMulti(windowFiles(f, opt), opt.n, opt, true);
         // Ext 6 of docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
         // `-d/--dispatch <id>` productizes the manual correlation this
         // report's whole investigation had to do by hand — "did
@@ -886,7 +1260,7 @@ async function main() {
         opt.grep = opt.grep || /\bauth\.\w+|auth success|auth session|cancel_session|claude auth|CheckCliAuth|OAuth config dir|oauth probe|identity_upsert|identity\.(unlink|delete|self\.|account|spawn)|account\.oauth|keychain delete/i;
         const f = resolveFile("srv", opt);
         console.log(`=== auth trace: ${f} ===`);
-        printLastLines(f, opt.n, opt, true);
+        printLastLinesMulti(windowFiles(f, opt), opt.n, opt, true);
         return;
     }
     if (cmd === "bridge") {
@@ -895,7 +1269,7 @@ async function main() {
         opt.all = true;
         const f = resolveFile("host", opt);
         console.log(`=== bridge trace: ${f} ===`);
-        printLastLines(f, opt.n, opt, true);
+        printLastLinesMulti(windowFiles(f, opt), opt.n, opt, true);
         return;
     }
     if (cmd === "phases") {
@@ -903,6 +1277,10 @@ async function main() {
         // own doc comment for why host+srv need correlated instance
         // resolution and custom (not renderLine's generic) filtering.
         phasesTimeline(pos, opt);
+        return;
+    }
+    if (cmd === "admission") {
+        await admissionRecipe(pos, opt);
         return;
     }
 
@@ -923,11 +1301,20 @@ async function main() {
     if (action === "grep") { const re = pos[pos.indexOf("grep") + 1]; if (re) opt.grep = new RegExp(re, "i"); }
     if (target === "fe") opt.grep = opt.grep || /\[fe\]/;
 
+    if (opt.instances) {
+        // Several instances merged into one timeline: a one-shot print, not a
+        // follow (there's no single file to tail). `tail` keeps its -n cap.
+        const groups = await resolveInstanceGroups(target === "fe" || target === "all" ? "host" : target, opt);
+        if (action === "cat" || action === "grep") opt.n = 0;
+        printMerged(groups, opt, `${target} across ${groups.length} instance${groups.length === 1 ? "" : "s"}`);
+        return;
+    }
+
     const file = resolveFile(target === "fe" ? "host" : target === "all" ? "host" : target, opt);
 
-    if (action === "cat" || action === "grep") { printLastLines(file, 0, opt, true); return; }
+    if (action === "cat" || action === "grep") { printLastLinesMulti(windowFiles(file, opt), 0, opt, true); return; }
     // default: tail -f (print last -n lines, then follow)
-    printLastLines(file, opt.n, opt);
+    printLastLinesMulti(windowFiles(file, opt), opt.n, opt);
     follow(file, opt);
 }
 

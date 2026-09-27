@@ -1,7 +1,7 @@
 # SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here"
 
 **Date:** 2026-09-27
-**Status:** proposed
+**Status:** implemented — #3919 (spec #3916; see §7 for where the implementation differs from the first draft)
 **Author:** Manoz
 **Repos touched:** `agentmux` (`agentmux-srv/src/backend/shellintegration/muxlog.mjs`, `docs/MUXLOG.md`)
 **Related:** `docs/MUXLOG.md`; `SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md` (same "recipe + verdict" pattern); the one-live-instance-per-agent work and its take-over fixes (#3897, #3899, #3903, #3908)
@@ -40,11 +40,11 @@ That table is exactly what one command should print.
 - For a resolved target, collect **all** rotated siblings (`<stem>.log.<date>`, plus the un-suffixed file if present), sorted oldest to newest.
 - With `--since` (or the new `--until`), read every file whose date range can overlap the window. A file named for date D can hold lines from D only, so skip files dated before the `--since` date.
 - Without `--since`, `cat`/`tail` behave as today: newest file only. No behavior change for existing uses.
-- `ls` gains a `FILES` column: the number of rotated files for that target.
+- `ls` is unchanged: it already lists every rotated file as its own row, so no `FILES` column is needed (see §7).
 
 ### 3.2 `--instances all | <substr>[,<substr>…]` (fixes G2)
 
-- Fan out over every instance `ls` lists (default: live only; `--instances all+dead` includes dead ones), or over the ones matching the substrings.
+- Fan out over every instance `ls` lists (`--instances all`, live and stopped alike; `--instances live` drops the ones whose liveness probe says `dead`), or over the ones matching the substrings (see §7).
 - Merge lines chronologically with the same `ts` sort `phasesTimeline` already uses.
 - Prefix each rendered line with a short **instance tag**, `v<version>/<channel hash last 8>` (e.g. `v0.57.6/7a8245ae`), so holder and requester are unambiguous. Right after it, the version shows at a glance whether a known fix applies.
 - `-i` keeps its current single-instance meaning. `--instances` is the multi-instance form.
@@ -89,3 +89,10 @@ That table is exactly what one command should print.
 
 - Instances on **other computers**: their logs aren't readable locally. The verdict says "holder is on `<host>`; run `muxlog admission` there".
 - Changing what the sidecar logs. Everything above uses lines that already exist.
+
+## 7. As built (differences from the first draft)
+
+- **`--instances all` includes stopped instances.** The draft defaulted to live ones only. In a take-over incident the holder has often just been quit, and its lines are the evidence, so `all` means every instance whose logs reach the window, and `live` restricts to the ones the liveness probe doesn't report `dead`. Instances with no file dated inside the window are skipped, and the header lists only the instances that contributed lines.
+- **No `FILES` column in `ls`.** `ls` already lists each rotated file as its own row.
+- **`--agent` also matches the agent's panes.** Lines such as `persistent process spawned` and `turn_active flip (process exited)` carry only a `block_id`, so the block ids seen on the agent's own lines are matched too. Without them, the verdict can't tell whether the holder still has a live pane.
+- **Verified on the real incident logs:** `muxlog admission AgentA --since 2026-09-26T23:50 --until 2026-09-27T00:00` prints the §1 timeline from both instances and the stale-relay-lease diagnosis. `agenta` and the uid give identical output. Existing commands without the new flags (`srv cat`, `srv grep`, `errors`, `swarm`, `auth`, `bridge`, `--raw`, `--verbose --level`) are byte-identical to main.

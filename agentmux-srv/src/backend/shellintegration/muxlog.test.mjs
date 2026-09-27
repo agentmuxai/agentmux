@@ -38,7 +38,29 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkLiveness, filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine, siblingCandidateDirs } from "./muxlog.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+    admissionVerdict,
+    checkLiveness,
+    expandAgentIds,
+    filterByInstance,
+    glob,
+    groupInstances,
+    holderChannel,
+    inlineFieldsSuffix,
+    instanceTag,
+    logNameParts,
+    makeAgentMatcher,
+    matchesOwnChannel,
+    mergeTimelines,
+    pickCandidate,
+    printLastLines,
+    renderLine,
+    selectWindowNames,
+    siblingCandidateDirs,
+    summarizeInstance,
+} from "./muxlog.mjs";
 
 let root;
 
@@ -450,5 +472,197 @@ describe("muxlog checkLiveness", () => {
         await new Promise((resolve) => server.close(resolve));
         fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
         expect(await checkLiveness(logDir)).toBe("dead");
+    });
+});
+
+// ─── SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md ─────────────────────
+// The 2026-09-27 AgentA incident, as fixture lines: two instances on one
+// computer (0.57.6 holds a stale relay lease after AgentA quit there; 0.57.8
+// is fenced, takes over, gets `released: 0`, is fenced again), spanning a
+// UTC-midnight rotation.
+const L = (ts, level, target, fields) => JSON.stringify({ timestamp: ts, level, fields, target });
+const UID = "d76da857-56b7-402f-80a4-1ceb7ab1d457";
+const OLD_CHAN = "local-main-b28b7a-7a8245ae";
+const NEW_CHAN = "local-main-b28b7a-6addbd3a";
+const HOLDER = `this computer, channel ${OLD_CHAN}, v0.57.6`;
+const OLD_BLOCK = "2dd55998-aaaa-bbbb-cccc-000000000001";
+const NEW_BLOCK = "f65742e8-aaaa-bbbb-cccc-000000000002";
+const OLD_LINES = [
+    L("2026-09-26T23:40:00.000000Z", "INFO", "agentmux_srv::backend::blockcontroller::spawn", { message: "persistent process spawned", block_id: OLD_BLOCK, pid: 1 }),
+    L("2026-09-26T23:52:19.355229Z", "INFO", "agentmux_srv::backend::reactive::registry", { message: "registry: entry changed hands since this spawn registered — skipping remove", agent_id: "AgentA", expected_nonce: 2 }),
+    L("2026-09-26T23:52:19.379843Z", "INFO", "agentmux_srv::server::self_quit", { message: "self-quit", block_id: OLD_BLOCK, agent: "AgentA", released_claims: 0 }),
+    L("2026-09-26T23:57:57.171134Z", "INFO", "agentmux_srv::server::agent_takeover", { message: "agent_admission.takeover: release handled", uid: UID, released: 0, to: `channel ${NEW_CHAN}, v0.57.8` }),
+];
+const NEW_LINES_26 = [
+    L("2026-09-26T23:53:11.905461Z", "INFO", "agentmux_srv::backend::agent_admission", { message: "agent_admission.granted", agent: "agenta", uid: UID, block_id: NEW_BLOCK, epoch: 6 }),
+    L("2026-09-26T23:53:11.908446Z", "INFO", "agentmux_srv::backend::blockcontroller::spawn", { message: "persistent process spawned", block_id: NEW_BLOCK, pid: 19584 }),
+    L("2026-09-26T23:56:31.080654Z", "ERROR", "agentmux_srv::backend::agent_admission", { message: "agent_admission.fenced: the muxbus relay says another instance holds this agent — stopping this one", agent: "agenta", holder: HOLDER }),
+    L("2026-09-26T23:57:23.190986Z", "WARN", "agentmux_srv::backend::agent_admission", { message: "agent_admission.denied: the muxbus relay says another instance holds this agent", agent: "AgentA", uid: UID, holder: HOLDER }),
+    L("2026-09-26T23:57:57.170634Z", "INFO", "agentmux_srv::server::agent_takeover", { message: "agent_admission.takeover: requesting release from the holder", uid: UID, block_id: NEW_BLOCK, holder_channel: OLD_CHAN }),
+    L("2026-09-26T23:57:57.311102Z", "INFO", "agentmux_srv::backend::agent_admission", { message: "agent_admission.granted", agent: "AgentA", uid: UID, block_id: NEW_BLOCK, epoch: 7 }),
+    L("2026-09-26T23:57:57.314815Z", "INFO", "agentmux_srv::backend::blockcontroller::spawn", { message: "persistent process spawned", block_id: NEW_BLOCK, pid: 2736 }),
+    L("2026-09-26T23:58:09.290247Z", "ERROR", "agentmux_srv::backend::agent_admission", { message: "agent_admission.fenced: the muxbus relay says another instance holds this agent — stopping this one", agent: "agenta", holder: HOLDER }),
+    L("2026-09-26T23:59:00.000000Z", "INFO", "agentmux_srv::backend::agent_admission", { message: "agent_admission.granted", agent: "SomeoneElse", uid: "00000000-0000-4000-8000-000000000000", block_id: "99999999-aaaa-bbbb-cccc-000000000009", epoch: 1 }),
+];
+const NEW_LINES_27 = [
+    L("2026-09-27T00:00:05.000000Z", "WARN", "agentmux_srv::backend::agent_admission", { message: "agent_admission.denied: the muxbus relay says another instance holds this agent", agent: "AgentA", uid: UID, holder: HOLDER }),
+];
+
+function writeLog(home, chan, ver, date, lines) {
+    const dir = path.join(home, ".agentmux", "channels", chan, "versions", ver, "logs");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `agentmuxsrv-v${ver}.log.${date}`), lines.join("\n") + "\n");
+    return dir;
+}
+
+function writeIncident(home) {
+    writeLog(home, OLD_CHAN, "0.57.6", "2026-09-26", OLD_LINES);
+    writeLog(home, NEW_CHAN, "0.57.8", "2026-09-26", NEW_LINES_26);
+    writeLog(home, NEW_CHAN, "0.57.8", "2026-09-27", NEW_LINES_27);
+    // An unrelated old instance whose only file predates the window.
+    writeLog(home, "local-main-b28b7a-11111111", "0.55.1", "2026-08-01", [NEW_LINES_26[0]]);
+}
+
+const MUXLOG = fileURLToPath(new URL("./muxlog.mjs", import.meta.url));
+function runMuxlog(home, args) {
+    const r = spawnSync(process.execPath, [MUXLOG, ...args], {
+        env: { ...process.env, HOME: home, USERPROFILE: home, AGENTMUX_CHANNEL: "", AGENTMUX_AGENT_ID: "", AGENTMUX_BLOCKID: "" },
+        encoding: "utf8",
+    });
+    return (r.stdout + r.stderr).replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+describe("muxlog rotated files (§3.1)", () => {
+    it("splits a daily-rotated name into stem and date", () => {
+        expect(logNameParts("agentmuxsrv-v0.57.8.log.2026-09-26")).toEqual({ stem: "agentmuxsrv-v0.57.8", date: "2026-09-26" });
+        expect(logNameParts("agentmux-launcher.log")).toEqual({ stem: "agentmux-launcher", date: null });
+        expect(logNameParts("notes.txt")).toBeNull();
+    });
+
+    it("keeps the files a window spanning UTC midnight can touch, oldest first", () => {
+        const names = ["s.log.2026-09-27", "s.log.2026-09-25", "s.log.2026-09-26", "s.log"];
+        expect(selectWindowNames(names, "2026-09-26T23:50", undefined)).toEqual(["s.log.2026-09-26", "s.log.2026-09-27", "s.log"]);
+        expect(selectWindowNames(names, "2026-09-26T23:50", "2026-09-26T23:59")).toEqual(["s.log.2026-09-26", "s.log"]);
+        expect(selectWindowNames(names, undefined, "2026-09-25T12:00")).toEqual(["s.log.2026-09-25", "s.log"]);
+    });
+
+    it("reads yesterday's file when --since reaches it (the incident was invisible before)", () => {
+        writeIncident(root);
+        const out = runMuxlog(root, ["srv", "-i", "6addbd3a", "--since", "2026-09-26T23:50", "--grep", "admission", "cat"]);
+        expect(out).toContain("23:56:31");
+        expect(out).toContain("00:00:05");
+    });
+
+    it("without --since still reads only the newest file", () => {
+        writeIncident(root);
+        const out = runMuxlog(root, ["srv", "-i", "6addbd3a", "cat"]);
+        expect(out).toContain("00:00:05");
+        expect(out).not.toContain("23:56:31");
+    });
+});
+
+describe("muxlog --agent (§3.3)", () => {
+    const lines = [...OLD_LINES, ...NEW_LINES_26];
+
+    it("expands a name to its uid and pane block ids, and a uid back to the name", () => {
+        const byName = expandAgentIds(lines, "AgentA");
+        expect(byName.ids.has(UID)).toBe(true);
+        expect(byName.blocks.has(NEW_BLOCK)).toBe(true);
+        expect(byName.blocks.has(OLD_BLOCK)).toBe(true);
+        expect(expandAgentIds(lines, UID).ids.has("agenta")).toBe(true);
+    });
+
+    it("matches every spelling and block-id-only lines, but not another agent", () => {
+        const m = makeAgentMatcher(expandAgentIds(lines, "agenta"));
+        expect(lines.filter((l) => m(JSON.parse(l))).length).toBe(lines.length - 1);
+        expect(m(JSON.parse(NEW_LINES_26.at(-1)))).toBe(false);
+    });
+
+    it("filters renderLine through the matcher", () => {
+        const agentMatch = makeAgentMatcher(expandAgentIds(lines, "AgentA"));
+        expect(renderLine(NEW_LINES_26[1], { agentMatch })).toContain("persistent process spawned");
+        expect(renderLine(NEW_LINES_26.at(-1), { agentMatch })).toBeNull();
+    });
+});
+
+describe("muxlog --instances (§3.2)", () => {
+    it("tags an instance with its version and channel hash", () => {
+        expect(instanceTag({ source: `channel:${OLD_CHAN}`, version: "0.57.6" })).toBe("v0.57.6/7a8245ae");
+        expect(instanceTag({ source: "dev:my-branch", version: "0.58.0" })).toBe("v0.58.0/my-branch");
+        expect(instanceTag({ source: "shared", version: "0.55.1" })).toBe("v0.55.1/shared");
+    });
+
+    it("groups rotated files per instance and filters by substring or liveness", () => {
+        const c = (dir, name, mtime) => ({ file: path.join(dir, name), source: "channel:" + dir, version: name.match(/v([\d.]+)\.log/)[1], mtime });
+        const cands = [c("a", "agentmuxsrv-v1.0.0.log.2026-09-26", 1), c("a", "agentmuxsrv-v1.0.0.log.2026-09-27", 2), c("b", "agentmuxsrv-v2.0.0.log.2026-09-27", 3)];
+        expect(groupInstances(cands, "all").map((g) => g.files.length)).toEqual([1, 2]);
+        expect(groupInstances(cands, "b").length).toBe(1);
+        expect(groupInstances(cands, "live", { b: "dead" }).map((g) => g.dir)).toEqual(["a"]);
+    });
+
+    it("merges chronologically and keeps instance order for equal timestamps", () => {
+        const a = [{ ts: "2026-09-26T23:57:57.1Z", tag: "a" }, { ts: "2026-09-26T23:58:00Z", tag: "a" }];
+        const b = [{ ts: "2026-09-26T23:52:00Z", tag: "b" }, { ts: "2026-09-26T23:57:57.1Z", tag: "b" }];
+        expect(mergeTimelines([a, b]).map((e) => `${e.tag}@${e.ts.slice(14, 19)}`)).toEqual(["b@52:00", "a@57:57", "b@57:57", "a@58:00"]);
+    });
+});
+
+describe("muxlog admission (§3.4)", () => {
+    const entries = (lines, tag) => lines.map((l) => { const j = JSON.parse(l); return { ts: j.timestamp, tag, j }; });
+    const requester = (lines) => ({ tag: "v0.57.8/6addbd3a", source: `channel:${NEW_CHAN}`, file: "x", entries: entries(lines, "n") });
+    const holder = (lines) => ({ tag: "v0.57.6/7a8245ae", source: `channel:${OLD_CHAN}`, file: "y", entries: entries(lines, "o") });
+
+    it("reads the relay's holder channel", () => {
+        expect(holderChannel(HOLDER)).toBe(OLD_CHAN);
+        expect(holderChannel(undefined)).toBeNull();
+    });
+
+    it("summarizes each side of the incident", () => {
+        const h = summarizeInstance(entries(OLD_LINES, "o"));
+        expect(h.live).toBe(false);
+        expect(h.released0At).toBe("2026-09-26T23:57:57.171134Z");
+        const r = summarizeInstance(entries(NEW_LINES_26.slice(0, -1), "n"));
+        expect(r.state).toBe("fenced");
+        expect(r.holder).toBe(HOLDER);
+        expect(r.live).toBe(false);
+    });
+
+    it("diagnoses the stale relay lease and cites every fix", () => {
+        const { diagnoses } = admissionVerdict([requester(NEW_LINES_26.slice(0, -1)), holder(OLD_LINES)]);
+        expect(diagnoses).toHaveLength(1);
+        expect(diagnoses[0]).toMatch(/^stale relay lease/);
+        expect(diagnoses[0]).toContain("released: 0");
+        for (const pr of ["#3897", "#3899", "#3903", "#3908"]) expect(diagnoses[0]).toContain(pr);
+    });
+
+    it("doesn't call it stale when the holder has a live pane", () => {
+        const { diagnoses } = admissionVerdict([requester(NEW_LINES_26.slice(0, 3)), holder([OLD_LINES[0]])]);
+        expect(diagnoses).toHaveLength(1);
+        expect(diagnoses[0]).toMatch(/genuinely runs the agent/);
+    });
+
+    it("gives no diagnosis on a clean grant", () => {
+        expect(admissionVerdict([requester(NEW_LINES_26.slice(0, 2))]).diagnoses).toEqual([]);
+    });
+
+    it("shows the admission facts inline", () => {
+        const s = inlineFieldsSuffix({ holder: "h", released: 0, block_id: "f65742e8-aaaa", message: "m" }, ["holder", "released", "block_id"]);
+        expect(s.replace(/\x1b\[[0-9;]*m/g, "")).toBe("  holder=h released=0 block_id=f65742e8");
+    });
+
+    it("end to end: one command prints both instances' timeline and the diagnosis, for any spelling of the agent", () => {
+        writeIncident(root);
+        const outs = ["AgentA", "agenta", UID].map((a) => runMuxlog(root, ["admission", a, "--since", "2026-09-26T23:50"]));
+        const out = outs[0];
+        expect(out).toContain("v0.57.6/7a8245ae");
+        expect(out).toContain("v0.57.8/6addbd3a");
+        expect(out).toContain("released=0");
+        expect(out).toContain("00:00:05");
+        expect(out).toMatch(/diagnosis: stale relay lease/);
+        expect(out).not.toContain("v0.55.1");
+        expect(out).not.toContain("SomeoneElse");
+        const body = (s) => s.split("\n").slice(1).join("\n");
+        expect(body(outs[1])).toBe(body(out));
+        expect(body(outs[2])).toBe(body(out));
     });
 });
