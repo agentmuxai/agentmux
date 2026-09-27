@@ -268,10 +268,20 @@ Proposed; not started. Each phase is one PR.
     subcommand; same install sites as §3.5).
   - The hook fetches the block from P1's endpoint and emits it as
     `additionalContext`.
+  - **Keep the running summary on compaction.** Today it is appended only in
+    `agent_handlers/input.rs`, via `continuity_state::with_state_after_compaction`
+    (#3673). When `source=compact`, the endpoint must append that summary the
+    same way. Otherwise retiring the hidden turn drops the backstop against
+    commitments the provider's own summary left out.
+  - **Only one path per event.** srv records each delivery (session, reason,
+    compaction boundary). While the frontend triggers remain as a fallback,
+    their hidden send checks that record, and srv drops it if the hook already
+    delivered for that session start or compaction. Without this, every
+    compaction injects the memory twice.
   - Verify first: size limits on `additionalContext`, and whether `compact`
     fires after auto-compaction as well as `/compact`.
-  - The frontend triggers then become redundant for Claude; keep them only as
-    the fallback until P2 is verified live.
+  - The frontend triggers become redundant for Claude; remove them only once
+    P2 is verified live, including the summary on compaction.
 
 - **P3 — the notice (D6).**
   - srv emits one event per injection (reason, entry names, token counts).
