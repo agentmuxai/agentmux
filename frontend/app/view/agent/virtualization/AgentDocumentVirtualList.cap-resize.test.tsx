@@ -54,7 +54,7 @@ const docState = (): DocumentState => ({
 const jekt: DocumentNode = {
     type: "jekt_message", id: "j0", from: "opaz", to: "agent1", message: "x".repeat(20_000), direction: "incoming",
     tier: "coord", deliveryTier: "wan", trust: "wan-verified", msgId: "m", priority: "normal", timestamp: 0, raw: "",
-} as DocumentNode;
+} as unknown as DocumentNode;
 const md = (i: number): DocumentNode => ({ type: "markdown", id: `md${i}`, content: `text ${i}`, timestamp: i });
 
 function mount() {
