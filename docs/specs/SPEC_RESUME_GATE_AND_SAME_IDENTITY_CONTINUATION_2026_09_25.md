@@ -193,7 +193,8 @@ Preconditions, all required. Any failure means **Refuse** (fresh + packet):
    a leftover would look reachable and be resumed in place without a fork.
 
 Action:
-1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>`, write the marker
+1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>.<token>` (the relocation's own token: once
+   linked, the temp name aliases the copy, so it must never be shared), write the marker
    `<dest>.jsonl.<token>.agentmux-relocated` (owner UID, source path, size), then hard-link to
    `<dest>.jsonl` (which fails if the name exists, so of two concurrent relocations only one
    places a copy) and remove the temp name. The CLI never sees a partial file (H5), and never sees a copy without its

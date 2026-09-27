@@ -100,9 +100,19 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
     }
     let dir = dest.parent().ok_or("destination has no parent")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let tmp = dir.join(format!("{sid}.jsonl{TMP_INFIX}{owner_uid}"));
-    let bytes = std::fs::copy(src, &tmp).map_err(|e| format!("copy {}: {e}", src.display()))?;
-    let marker = marker_for(&dest, &uuid::Uuid::new_v4().simple().to_string());
+    // Both names carry this relocation's token: once placed, the temp name is
+    // a hard link to the copy, so a concurrent relocation reusing it would
+    // write straight into the winner's copy (codex P1 on #3924).
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let tmp = dir.join(format!("{sid}.jsonl{TMP_INFIX}{owner_uid}.{token}"));
+    let bytes = match std::fs::copy(src, &tmp) {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("copy {}: {e}", src.display()));
+        }
+    };
+    let marker = marker_for(&dest, &token);
     let record = serde_json::json!({ "owner_uid": owner_uid, "source": src.to_string_lossy(), "bytes": bytes });
     let placed = std::fs::write(&marker, record.to_string())
         .map_err(|e| format!("marker {}: {e}", marker.display()))
@@ -166,11 +176,13 @@ pub(crate) fn sweep(config_dir: &str, cwd: &str, owner_uid: &str) -> usize {
         return 0;
     };
     let Ok(entries) = std::fs::read_dir(&dir) else { return 0 };
-    let tmp_suffix = format!("{TMP_INFIX}{owner_uid}");
+    // `<sid>.jsonl.agentmux-tmp-<uid>.<token>`, or without the token from
+    // before tokens.
+    let tmp_tag = format!("{TMP_INFIX}{owner_uid}");
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.ends_with(&tmp_suffix) {
+        if name.ends_with(&tmp_tag) || name.contains(&format!("{tmp_tag}.")) {
             let _ = std::fs::remove_file(entry.path());
         } else if let Some(copy_name) = name.strip_suffix(MARKER_SUFFIX).map(copy_name_of) {
             let owner = std::fs::read_to_string(entry.path())
@@ -306,6 +318,36 @@ mod tests {
         std::fs::write(&tmp, "{\"loser\":true}\n").unwrap();
         assert_eq!(place(&tmp, &dest).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "{\"winner\":true}\n");
+    }
+
+    /// Each relocation copies through its own temp name, so none can write
+    /// into another's placed copy through a shared one (codex P1 on #3924).
+    #[test]
+    fn a_relocation_leaves_no_writable_alias_of_its_copy() {
+        let (from, to) = (cfg(), cfg());
+        let src = write_session(from.path(), "head", "{\"turn\":1}\n");
+        let r = relocate(&src, &s(to.path()), CWD, "head", "uid-1").unwrap();
+        let names: Vec<String> = std::fs::read_dir(r.copy.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(!names.iter().any(|n| n.contains(TMP_INFIX)), "no temp name left: {names:?}");
+    }
+
+    #[test]
+    fn half_made_copies_are_swept_with_or_without_a_token_but_only_this_agents() {
+        let to = cfg();
+        let dir = write_session(to.path(), "ordinary", "{}\n").parent().unwrap().to_path_buf();
+        let tokened = dir.join(format!("head.jsonl{TMP_INFIX}uid-1.abc123"));
+        let legacy = dir.join(format!("other.jsonl{TMP_INFIX}uid-1"));
+        let longer_uid = dir.join(format!("head.jsonl{TMP_INFIX}uid-10.abc123"));
+        for p in [&tokened, &legacy, &longer_uid] {
+            std::fs::write(p, "{}").unwrap();
+        }
+        sweep(&s(to.path()), CWD, "uid-1");
+        assert!(!tokened.exists() && !legacy.exists());
+        assert!(longer_uid.exists(), "uid-10's temp file is not uid-1's");
     }
 
     #[test]
