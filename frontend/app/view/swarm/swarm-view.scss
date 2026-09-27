@@ -799,14 +799,19 @@
 
 // ── Status chip ──────────────────────────────────────────────────────────
 
+// Two states only (user, 2026-09-27): working = red and pulsing (mid-turn:
+// generating, running tools, or stopping); idle = green (everything else).
+// swarm-view.tsx's chipStatus() does the collapsing.
 .swarm-status-chip {
     display: flex;
     align-items: center;
     gap: 4px;
     font-size: 11px;
-    color: var(--secondary-text-color);
     flex-shrink: 0;
     white-space: nowrap;
+
+    &--working { color: var(--error-color); }
+    &--idle { color: var(--success-color); }
 }
 
 .swarm-status-dot {
@@ -814,47 +819,9 @@
     height: 6px;
     border-radius: 50%;
     flex-shrink: 0;
+    background: currentColor;
 
-    &--working {
-        background: var(--warning-color, #f5a623);
-        animation: swarm-pulse 1.5s ease-in-out infinite;
-    }
-    &--tools {
-        background: #7c6af5;
-        animation: swarm-pulse 1.2s ease-in-out infinite;
-    }
-    &--stopping {
-        background: var(--warning-color, #f5a623);
-        opacity: 0.7;
-    }
-    &--idle {
-        background: var(--secondary-text-color);
-        opacity: 0.4;
-    }
-    &--error {
-        background: var(--error-color, #e05252);
-    }
-    &--disconnected {
-        background: var(--secondary-text-color);
-        opacity: 0.25;
-    }
-    // A subagent that got cut off (crashed/killed/interrupted by a
-    // restart, or a client-side inference that its parent's turn already
-    // ended — see subagentDisplayStatus) rather than genuinely finishing.
-    // Distinct from both --working (no pulse — nothing is happening) and
-    // --error (this isn't necessarily a failure, just incomplete).
-    &--interrupted {
-        background: var(--warning-color, #f5a623);
-        opacity: 0.5;
-    }
-    // Distinct from --idle: this block has no registered TurnPhase in this
-    // renderer (unmounted pane / other workspace) — we genuinely don't know
-    // its state, so it must not look like a confirmed-idle solid dot.
-    &--unknown {
-        background: transparent;
-        border: 1px solid var(--secondary-text-color);
-        opacity: 0.5;
-    }
+    &--working { animation: swarm-pulse 1.5s ease-in-out infinite; }
 }
 
 @keyframes swarm-pulse {
