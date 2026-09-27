@@ -142,184 +142,75 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         ));
                     }
 
-                    // Use `npm install --prefix <dir> <pkg>@<ver>` to avoid cd+chaining issues.
-                    // On Windows, normalize the prefix path to backslashes so npm handles it correctly.
-                    // npm.cmd must be invoked via cmd /C on Windows — it's a batch script, not an exe.
-                    let prefix_dir = if cfg!(windows) {
-                        provider_dir.replace('/', "\\")
-                    } else {
-                        provider_dir.clone()
+                    // One install routine for this and the startup warm-up
+                    // (`cli_install::install_pinned_cli`): cross-instance lock
+                    // held for npm's whole lifetime — inside the blocking task,
+                    // so a timed-out RPC can't release it early — reuse of an
+                    // install another instance finished while we waited, and
+                    // the completion marker only after the shim is verified.
+                    let req = crate::backend::cli_install::NpmInstallRequest {
+                        provider_id: cmd.provider_id.clone(),
+                        npm_package: cmd.npm_package.clone(),
+                        pinned_version: pinned_version.clone(),
+                        cli_command: cmd.cli_command.clone(),
+                        background: false,
                     };
-                    let package_arg = format!("{}@{}", cmd.npm_package, pinned_version);
-                    tracing::info!(package = %package_arg, prefix = %prefix_dir, "running npm install");
-
-                    // Serialize with any other AgentMux instance installing the
-                    // same pinned CLI into the same shared dir, then re-check:
-                    // if it finished while we waited, reuse its install.
-                    let lock_paths = paths.clone();
-                    let lock_provider = cmd.provider_id.clone();
-                    let lock_pinned = pinned_version.clone();
-                    let install_guard = tokio::task::spawn_blocking(move || {
-                        crate::backend::cli_install::lock_install(&lock_paths, &lock_provider, &lock_pinned)
-                    })
-                    .await
-                    .map_err(|e| format!("install lock task panicked: {e}"))?
-                    .map_err(|e| format!("cannot take the CLI install lock: {e}"))?;
-                    // Reuse only a FINISHED install (completion marker, not
-                    // just a shim npm may have written early); clear a failed
-                    // or interrupted one so npm starts clean (Codex P2 on #3927).
-                    let shared_dir = crate::backend::cli_install::shared_cli_dir(&paths, &cmd.provider_id, &pinned_version);
-                    if let Some(dir) = shared_dir.as_deref() {
-                        if crate::backend::cli_install::is_complete(dir) && std::path::Path::new(&npm_bin).is_file() {
-                            drop(install_guard);
-                            let version = get_cli_version(&npm_bin).await;
-                            tracing::info!(path = %npm_bin, version = %version, "CLI installed by another instance while waiting");
-                            return Ok(ResolveCliResult {
-                                cli_path: npm_bin,
-                                version,
-                                source: "local_install".to_string(),
-                            });
-                        }
-                        crate::backend::cli_install::clear_unless_valid(dir, &cmd.cli_command)
-                            .map_err(|e| format!("cannot clear an incomplete CLI install at {}: {e}", dir.display()))?;
-                    }
-
-                    // Collect all npm output after completion via .output().
-                    // Pipe-based streaming (both async IOCP and sync blocking) does not receive
-                    // data from cmd.exe /C batch script children on Windows — output only becomes
-                    // available after the process exits. We run in spawn_blocking and publish all
-                    // lines at once when done; users see the full install log after it completes.
+                    let install_paths = paths.clone();
                     let block_id_install = cmd.block_id.clone();
-                    tracing::info!(block_id = %block_id_install, package = %package_arg, prefix = %prefix_dir, "running npm install");
-
                     let broker_npm = broker.clone();
-                    // The blocking task owns the install lock and publishes the
-                    // completion marker itself. If the RPC times out, this
-                    // handler future is dropped but npm keeps running in the
-                    // task; the lock must stay held until npm exits, or a retry
-                    // or another instance clears the dir and runs a second npm
-                    // over it (Codex P2 on #3927).
-                    let task_shared_dir = shared_dir.clone();
-                    let task_npm_bin = npm_bin.clone();
-                    let task_pinned = pinned_version.clone();
-                    let exit_status = tokio::task::spawn_blocking(move || {
-                        let _install_guard = install_guard;
-                        let result = {
-                            #[cfg(windows)]
-                            {
-                                // npm on Windows is a .cmd batch script — must be invoked via cmd.exe /C.
-                                // Use raw_arg to pass the command string WITHOUT Rust's CreateProcess
-                                // quoting. With .args(["/C", str]), Rust wraps str in outer quotes and
-                                // escapes inner quotes as \", which cmd.exe treats as literal backslash+quote,
-                                // corrupting paths: CWD + \"C:\path\" → ENOENT.
-                                // raw_arg passes the string verbatim; cmd.exe sees:
-                                //   cmd /C npm install ... --prefix "C:\path with spaces\..." pkg
-                                // and tokenizes "..." as a quoted path correctly.
-                                use std::os::windows::process::CommandExt;
-                                // CREATE_NO_WINDOW (0x08000000): suppress the
-                                // brief cmd.exe console flash that Windows
-                                // shows by default when CreateProcess is
-                                // called from a GUI process. Without this
-                                // flag the user sees a black console
-                                // window pop and disappear during npm
-                                // install — observed during workspace
-                                // setup paths (e.g. tear-off triggering
-                                // CLI install on first agent block).
-                                use agentmux_common::win32::CREATE_NO_WINDOW;
-                                let npm_cmd_str = format!(
-                                    "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{}\" {}",
-                                    prefix_dir, package_arg
+                    let outcome = tokio::task::spawn_blocking(move || {
+                        let on_line = |stream: &'static str, line: &str| {
+                            tracing::info!(stream, line = %line, "npm output");
+                            if !block_id_install.is_empty() {
+                                crate::backend::mps::publish_install_progress(
+                                    &broker_npm,
+                                    &block_id_install,
+                                    line,
                                 );
-                                let mut c = std::process::Command::new("cmd");
-                                // `npm install` runs arbitrary postinstall
-                                // scripts — no instance identity for those.
-                                crate::backend::pane_env::sanitize_external_std_command(&mut c);
-                                c.arg("/C")
-                                    .raw_arg(&npm_cmd_str)
-                                    .creation_flags(CREATE_NO_WINDOW)
-                                    .env("CI", "true")
-                                    .env("FORCE_COLOR", "0")
-                                    .output()
-                            }
-                            #[cfg(not(windows))]
-                            {
-                                let mut c = std::process::Command::new("npm");
-                                // `npm install` runs arbitrary postinstall
-                                // scripts — no instance identity for those.
-                                crate::backend::pane_env::sanitize_external_std_command(&mut c);
-                                c.args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--no-progress", "--prefix", &prefix_dir, &package_arg])
-                                    .env("CI", "true")
-                                    .env("FORCE_COLOR", "0")
-                                    .output()
                             }
                         };
-                        match result {
-                            Ok(out) => {
-                                tracing::info!(exit_code = out.status.code().unwrap_or(-1), stdout_bytes = out.stdout.len(), stderr_bytes = out.stderr.len(), "npm install output collected");
-                                // Publish stderr first (npm writes progress/errors there), then stdout
-                                for line in String::from_utf8_lossy(&out.stderr).lines() {
-                                    if !line.trim().is_empty() {
-                                        tracing::info!(line = %line, "npm stderr");
-                                        if !block_id_install.is_empty() {
-                                            crate::backend::mps::publish_install_progress(&broker_npm, &block_id_install, line);
-                                        }
-                                    }
-                                }
-                                for line in String::from_utf8_lossy(&out.stdout).lines() {
-                                    if !line.trim().is_empty() {
-                                        tracing::info!(line = %line, "npm stdout");
-                                        if !block_id_install.is_empty() {
-                                            crate::backend::mps::publish_install_progress(&broker_npm, &block_id_install, line);
-                                        }
-                                    }
-                                }
-                                // Publish the shared install to every reader
-                                // only once npm succeeded and the shim exists.
-                                if out.status.success() && std::path::Path::new(&task_npm_bin).is_file() {
-                                    if let Some(dir) = task_shared_dir.as_deref() {
-                                        crate::backend::cli_install::mark_complete(dir, &task_pinned).map_err(|e| {
-                                            format!("cannot mark the CLI install complete at {}: {e}", dir.display())
-                                        })?;
-                                    }
-                                }
-                                Ok(out.status)
+                        crate::backend::cli_install::install_pinned_cli(
+                            &install_paths,
+                            &req,
+                            &on_line,
+                        )
+                    })
+                    .await
+                    .map_err(|e| format!("npm install task panicked: {e}"))?;
+
+                    use crate::backend::cli_install::{InstallError, InstallOutcome};
+                    let (bin, source) = match outcome {
+                        Ok(InstallOutcome::Installed(bin)) => (bin, "installed"),
+                        Ok(InstallOutcome::AlreadyInstalled(bin)) => (bin, "local_install"),
+                        Err(InstallError::NpmFailed { code }) => {
+                            return Err(agentmux_common::AgentMuxError::NpmInstallFailed {
+                                package: format!("{}@{}", cmd.npm_package, pinned_version),
+                                message: format!(
+                                    "exit {}; check the output above",
+                                    code.unwrap_or(-1)
+                                ),
                             }
-                            Err(e) => Err(format!("failed to run npm install: {e}")),
+                            .to_wire()
+                            .to_string());
                         }
-                    }).await
-                        .map_err(|e| format!("npm spawn_blocking panicked: {e}"))?
-                        .map_err(|e| e)?;
-                    tracing::info!(exit_code = exit_status.code().unwrap_or(-1), "npm install completed");
-
-                    if !exit_status.success() {
-                        return Err(agentmux_common::AgentMuxError::NpmInstallFailed {
-                            package: format!("{}@{}", cmd.npm_package, pinned_version),
-                            message: format!(
-                                "exit {}; check the output above",
-                                exit_status.code().unwrap_or(-1)
-                            ),
+                        Err(InstallError::ShimMissing { .. }) => {
+                            return Err(agentmux_common::AgentMuxError::CliShimMissing {
+                                provider: cmd.provider_id.clone(),
+                                expected_path: npm_bin.clone(),
+                            }
+                            .to_wire()
+                            .to_string());
                         }
-                        .to_wire()
-                        .to_string());
-                    }
-
-                    // Verify npm binary exists
-                    if std::path::Path::new(&npm_bin).exists() {
-                        let version = get_cli_version(&npm_bin).await;
-                        tracing::info!(path = %npm_bin, version = %version, "CLI installed (npm)");
-                        return Ok(ResolveCliResult {
-                            cli_path: npm_bin,
-                            version,
-                            source: "installed".to_string(),
-                        });
-                    }
-
-                    Err(agentmux_common::AgentMuxError::CliShimMissing {
-                        provider: cmd.provider_id.clone(),
-                        expected_path: npm_bin.clone(),
-                    }
-                    .to_wire()
-                    .to_string())
+                        Err(e) => return Err(e.to_string()),
+                    };
+                    let bin = bin.to_string_lossy().to_string();
+                    let version = get_cli_version(&bin).await;
+                    tracing::info!(path = %bin, version = %version, source, "CLI installed (npm)");
+                    Ok(ResolveCliResult {
+                        cli_path: bin,
+                        version,
+                        source: source.to_string(),
+                    })
                 }
             }
         },
