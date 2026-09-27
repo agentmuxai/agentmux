@@ -195,12 +195,73 @@ pub fn unix_time_to_ms(value: i64) -> i64 {
     }
 }
 
+/// How long after srv start the first index build waits
+/// ([`HistoryService::warm_in_background`]): past the window in which the user
+/// opens their first agents. The spec protects the first 30 s
+/// (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §5), and a cold build can take 25 s
+/// on its own, so a start inside that window would still overlap it (Codex P2
+/// on #3930). A search before then starts the build early
+/// ([`HistoryService::refresh_for_search`]).
+pub const WARM_DELAY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Lower the calling thread's scheduling priority for background work. On
+/// Windows, `THREAD_MODE_BACKGROUND_BEGIN` also lowers its I/O and memory
+/// priority — the index build is mostly file reads. On Linux, a nice of 10
+/// for this thread only. Best-effort: a failure leaves normal priority.
+fn lower_current_thread_priority() {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+        };
+        let _ = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+    }
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        let _ = libc::setpriority(libc::PRIO_PROCESS, tid, 10);
+    }
+}
+
+/// Run the index's first build unless another caller has finished it or is
+/// running it now — never a second full pass right after theirs (Codex P2s on
+/// #3930) — then clear `pending`.
+fn build_first_index(
+    index: &SessionIndex,
+    pending: &std::sync::atomic::AtomicBool,
+    trigger: &'static str,
+) {
+    let started = std::time::Instant::now();
+    match index.try_first_build() {
+        index::FirstBuild::Built { discovered } => tracing::info!(
+            discovered,
+            duration_ms = started.elapsed().as_millis() as u64,
+            trigger,
+            "history: index built"
+        ),
+        index::FirstBuild::AlreadyBuilt => {
+            tracing::info!(trigger, "history: index already built; first build skipped")
+        }
+        index::FirstBuild::Busy => {
+            tracing::info!(
+                trigger,
+                "history: index build already running; first build skipped"
+            )
+        }
+    }
+    pending.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
     /// AgentMux's own record of each agent's conversations — which sessions
     /// are whose, and the content of those whose transcript is gone.
     records: record::AgentRecords,
+    /// A deferred first build is scheduled and hasn't finished yet.
+    warm_pending: Arc<std::sync::atomic::AtomicBool>,
+    /// A search already started the pending first build early.
+    warm_started_early: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl HistoryService {
@@ -211,6 +272,8 @@ impl HistoryService {
         HistoryService {
             index: Arc::new(SessionIndex::new(adapters)),
             records: record::AgentRecords::global(),
+            warm_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            warm_started_early: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -227,26 +290,65 @@ impl HistoryService {
 
     #[cfg(test)]
     pub(crate) fn from_index_and_records(index: SessionIndex, records: record::AgentRecords) -> Self {
-        HistoryService { index: Arc::new(index), records }
+        HistoryService {
+            index: Arc::new(index),
+            records,
+            warm_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            warm_started_early: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
     }
 
     /// Build the index off-thread at srv start, so the first search doesn't
     /// pay for parsing every transcript on the machine inside the MCP's 10 s
     /// timeout (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.5).
+    ///
+    /// Deferred by [`WARM_DELAY`] and run at background priority: the first
+    /// build reads every transcript on the machine (61,066 sessions in 23.5 s
+    /// on one host) and used to start the moment srv did — exactly when the
+    /// user opens their first agents, competing with them for CPU and disk
+    /// (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F2). A search in the meantime
+    /// answers "index building", as it does during the build itself, and
+    /// starts the build now; the History tab's `list`/`get` still build on
+    /// demand.
     pub fn warm_in_background(&self) -> std::thread::JoinHandle<()> {
+        self.warm_in_background_after(WARM_DELAY)
+    }
+
+    /// [`Self::warm_in_background`] with an explicit delay (tests use zero).
+    pub fn warm_in_background_after(
+        &self,
+        delay: std::time::Duration,
+    ) -> std::thread::JoinHandle<()> {
         let index = self.index.clone();
+        let pending = self.warm_pending.clone();
+        pending.store(true, std::sync::atomic::Ordering::SeqCst);
         std::thread::Builder::new()
             .name("history-index-warm".into())
             .spawn(move || {
-                let started = std::time::Instant::now();
-                let (discovered, _, _) = index.refresh();
-                tracing::info!(
-                    discovered,
-                    duration_ms = started.elapsed().as_millis() as u64,
-                    "history: index built"
-                );
+                lower_current_thread_priority();
+                if !delay.is_zero() {
+                    std::thread::sleep(delay);
+                }
+                build_first_index(&index, &pending, "startup");
             })
             .expect("spawn history-index-warm thread")
+    }
+
+    /// A search arrived while the deferred first build is still waiting out
+    /// [`WARM_DELAY`]: someone wants the index now, so build it now, off the
+    /// search's thread. Once.
+    fn start_pending_build_early(&self) {
+        if self
+            .warm_started_early
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+        let index = self.index.clone();
+        let pending = self.warm_pending.clone();
+        let _ = std::thread::Builder::new()
+            .name("history-index-first".into())
+            .spawn(move || build_first_index(&index, &pending, "search"));
     }
 
     /// Build the index if it never has been. Blocking; for callers without a
@@ -275,6 +377,13 @@ impl HistoryService {
     /// Concurrent searches share refreshes ([`SessionIndex::refresh_covering_now`]).
     fn refresh_for_search(&self) -> Result<(), HistorySearchError> {
         if self.index.refreshed_at_ms() == 0 {
+            // The deferred first build is scheduled but hasn't finished (or
+            // started): answer "building" rather than running that whole
+            // first scan inside this search — same as while it runs.
+            if self.warm_pending.load(std::sync::atomic::Ordering::SeqCst) {
+                self.start_pending_build_early();
+                return Err(HistorySearchError::IndexBuilding);
+            }
             return match self.index.try_refresh() {
                 Some(_) => Ok(()),
                 None => Err(HistorySearchError::IndexBuilding),
@@ -885,8 +994,69 @@ mod search_freshness_tests {
     #[test]
     fn warm_in_background_builds_the_index() {
         let svc = empty_service();
-        svc.warm_in_background().join().unwrap();
+        svc.warm_in_background_after(std::time::Duration::ZERO)
+            .join()
+            .unwrap();
         assert!(svc.index.refreshed_at_ms() > 0);
+        assert!(!svc.warm_pending.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F2: the first build is deferred.
+    /// A search in that window must not run the whole first scan itself (it
+    /// would outlast the MCP's 10 s) — it answers "building", like during the
+    /// build — but it starts the build in the background instead of leaving
+    /// the index unbuilt until the delay ends.
+    #[test]
+    fn a_search_while_the_deferred_build_is_pending_starts_it_in_the_background() {
+        let svc = empty_service();
+        let _warm = svc.warm_in_background_after(std::time::Duration::from_secs(3600));
+        let err = svc.refresh_for_search().unwrap_err();
+        assert!(matches!(err, HistorySearchError::IndexBuilding), "{err}");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while svc.index.refreshed_at_ms() == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the early build never ran"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while svc.warm_pending.load(std::sync::atomic::Ordering::SeqCst) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "pending never cleared"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(svc.refresh_for_search().is_ok());
+    }
+
+    /// Codex P2 on #3930: an on-demand build during the delay makes the
+    /// deferred warm-up a no-op instead of a second full discovery pass.
+    #[test]
+    fn an_on_demand_build_during_the_delay_skips_the_deferred_build() {
+        let svc = empty_service();
+        let warm = svc.warm_in_background_after(std::time::Duration::from_millis(300));
+        svc.index.refresh(); // e.g. the History tab's list() during startup
+        let built_at = svc.index.refreshed_at_ms();
+        assert!(built_at > 0);
+        warm.join().unwrap();
+        assert_eq!(
+            svc.index.refreshed_at_ms(),
+            built_at,
+            "the deferred build must not refresh again"
+        );
+        assert!(!svc.warm_pending.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// The spec's protected window is the first 30 s; a cold build can take
+    /// ~25 s, so it must not start inside it.
+    #[test]
+    fn the_first_build_waits_out_the_startup_window() {
+        assert!(
+            WARM_DELAY >= std::time::Duration::from_secs(30),
+            "{WARM_DELAY:?}"
+        );
     }
 }
 
