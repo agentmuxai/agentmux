@@ -1,6 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import {
     snapshot as layoutSnapshot,
@@ -1843,7 +1844,7 @@ const AgentPresentationView = ({
 
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
-    const handleSendMessage = (message: string): Promise<void> => {
+    const handleSendMessage = (message: string, attachments: AttachmentRef[] = []): Promise<void> => {
         // Bang commands (`!cmd`) output writes into the shell terminal (see
         // `log`/`handleShellTermReady` above). Auto-open the details drawer so
         // the shell — and thus the output — is immediately visible; without
@@ -1890,7 +1891,7 @@ const AgentPresentationView = ({
         if (!wasAlreadyWorking) {
             paneModel.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
         }
-        return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve);
+        return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve, attachments);
     };
 
     // Esc on an empty composer. Mirrors Claude Code CLI: if a message is

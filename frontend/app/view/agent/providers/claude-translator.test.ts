@@ -5,6 +5,35 @@ import { describe, expect, it } from "vitest";
 import { ClaudeTranslator } from "./claude-translator";
 
 describe("ClaudeTranslator", () => {
+    // ── User messages sent with images ───────────────────────────────────────
+
+    describe("user message with image blocks", () => {
+        it("becomes a user_message with the text, not the base64", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "user",
+                message: {
+                    role: "user",
+                    content: [
+                        { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+                        { type: "text", text: "what's wrong here?" },
+                    ],
+                },
+            });
+            expect(events).toHaveLength(1);
+            expect(events[0]).toMatchObject({ type: "user_message", message: "what's wrong here?" });
+        });
+
+        it("still ignores a text-only array (e.g. the interrupted marker)", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "user",
+                message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] },
+            });
+            expect(events.filter((e) => e.type === "user_message")).toHaveLength(0);
+        });
+    });
+
     // ── Partial assistant dedup ──────────────────────────────────────────────
 
     describe("partial assistant dedup", () => {

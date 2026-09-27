@@ -127,6 +127,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
                 message: pending.text,
                 timestamp: Date.now(),
                 isStartup: STARTUP_HEADING_RE.test(pending.text),
+                ...(pending.attachments?.length ? { attachments: pending.attachments } : {}),
             };
             if (!opts.hasNodeId(node.id)) {
                 opts.addNodeId(node.id);

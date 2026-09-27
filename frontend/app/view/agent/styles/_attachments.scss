@@ -1,0 +1,440 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Image attachments: the composer tray, transcript strip and preview.
+// docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.
+@use "../../../mixins.scss" as mixins;
+
+$tile: 64px;
+$tile-expanded: 88px;
+$gap: 6px;
+
+.agent-view {
+    .sr-only {
+        @include mixins.sr-only;
+    }
+
+    // ── Composer tray (above the textarea) ──────────────────────────────
+    .agent-attachment-tray {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 4px 6px 6px;
+        background: var(--main-bg-color);
+        border: 1px solid var(--border-color);
+        border-bottom: none;
+
+        &__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            min-height: 16px;
+            font-size: 11px;
+            color: var(--secondary-text-color);
+        }
+
+        &__summary {
+            &.is-warn {
+                color: var(--warning-color);
+            }
+            &.is-over {
+                color: var(--error-color);
+            }
+        }
+
+        &__processing {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+
+            .text {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+        }
+
+        &__bar {
+            flex: 0 0 96px;
+            height: 3px;
+            border-radius: 2px;
+            background: var(--border-color);
+            overflow: hidden;
+
+            .fill {
+                display: block;
+                height: 100%;
+                background: var(--accent-color);
+                transition: width 120ms linear;
+            }
+        }
+
+        &__header-actions {
+            display: flex;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        &__undo {
+            display: flex;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--secondary-text-color);
+        }
+
+        button.link {
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--accent-color);
+            font-size: 11px;
+            cursor: pointer;
+
+            &:hover,
+            &:focus-visible {
+                text-decoration: underline;
+            }
+        }
+
+        & + .agent-attachment-send-hint + textarea.agent-input,
+        & + textarea.agent-input {
+            border-top-color: color-mix(in srgb, var(--border-color) 50%, transparent);
+        }
+
+        &.is-expanded .agent-attachment-tray__tiles {
+            flex-wrap: wrap;
+            max-height: 40vh;
+            overflow-y: auto;
+            padding-top: 6px;
+        }
+
+        &.is-expanded .agent-attachment-tile {
+            width: $tile-expanded;
+            flex-basis: $tile-expanded;
+            contain-intrinsic-size: $tile-expanded ($tile-expanded + 28px);
+
+            .agent-attachment-tile__main {
+                width: $tile-expanded;
+                height: $tile-expanded;
+            }
+        }
+    }
+
+    .agent-attachment-tray__tiles {
+        display: flex;
+        gap: $gap;
+        margin: 0;
+        padding: 6px 0 0;
+        list-style: none;
+        overflow: hidden;
+    }
+
+    .agent-attachment-send-hint {
+        padding: 2px 6px;
+        font-size: 11px;
+        color: var(--warning-color);
+        background: var(--main-bg-color);
+        border-left: 1px solid var(--border-color);
+        border-right: 1px solid var(--border-color);
+    }
+
+    // ── Tile ────────────────────────────────────────────────────────────
+    .agent-attachment-tile {
+        position: relative;
+        flex: 0 0 $tile;
+        width: $tile;
+        // Off-screen tiles in a 128-image grid skip layout and paint.
+        content-visibility: auto;
+        contain-intrinsic-size: $tile $tile;
+
+        &__main {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: $tile;
+            height: $tile;
+            padding: 0;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--panel-bg-color);
+            cursor: zoom-in;
+
+            &:focus-visible {
+                outline: 2px solid var(--accent-color);
+                outline-offset: 1px;
+            }
+
+            img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+        }
+
+        &__placeholder {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--secondary-text-color);
+        }
+
+        &__badge {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            min-width: 14px;
+            padding: 0 3px;
+            border-radius: 3px;
+            font-size: 10px;
+            line-height: 14px;
+            text-align: center;
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
+        }
+
+        &__remove {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            background: var(--main-bg-color);
+            color: var(--secondary-text-color);
+            font-size: 10px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 80ms linear;
+
+            &:hover {
+                color: var(--main-text-color);
+            }
+        }
+
+        &:hover &__remove,
+        &:focus-within &__remove {
+            opacity: 1;
+        }
+
+        &__progress {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: color-mix(in srgb, var(--main-bg-color) 45%, transparent);
+
+            svg {
+                width: 32px;
+                height: 32px;
+                transform: rotate(-90deg);
+
+                circle {
+                    fill: none;
+                    stroke-width: 3;
+                }
+                .track {
+                    stroke: var(--border-color);
+                }
+                .bar {
+                    stroke: var(--accent-color);
+                    stroke-linecap: round;
+                    transition: stroke-dashoffset 120ms linear;
+                }
+                &.is-indeterminate {
+                    animation: agent-attachment-spin 900ms linear infinite;
+                }
+            }
+        }
+
+        &__caption {
+            display: flex;
+            flex-direction: column;
+            margin-top: 3px;
+            font-size: 10px;
+            line-height: 12px;
+
+            .name {
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                color: var(--main-text-color);
+            }
+            .size {
+                color: var(--secondary-text-color);
+            }
+        }
+
+        &.is-error &__main {
+            border-color: var(--error-color);
+        }
+        &.is-error &__placeholder {
+            color: var(--error-color);
+        }
+
+        &.is-flash &__main {
+            animation: agent-attachment-flash 900ms ease-out;
+        }
+
+        // "+N": the next few thumbnails, dimmed, under the count.
+        &--more &__main {
+            cursor: pointer;
+
+            .mosaic {
+                position: absolute;
+                inset: 0;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                grid-template-rows: 1fr 1fr;
+                opacity: 0.35;
+
+                .cell {
+                    background-size: cover;
+                    background-position: center;
+                }
+            }
+
+            .more {
+                position: relative;
+                font-size: 15px;
+                font-weight: 600;
+                color: var(--main-text-color);
+            }
+        }
+    }
+
+    // ── Transcript strip (read-only, above a sent message's text) ───────
+    .agent-attachment-strip {
+        margin-bottom: 4px;
+
+        .agent-attachment-tray__tiles {
+            padding-top: 2px;
+        }
+    }
+}
+
+// ── Preview (portalled to <body>, so not under .agent-view) ────────────
+.agent-attachment-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    // A dimming scrim reads the same in every theme.
+    background: rgb(0 0 0 / 72%);
+
+    &__dialog {
+        display: flex;
+        flex-direction: column;
+        max-width: 92vw;
+        max-height: 92vh;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--modal-bg-color);
+        outline: none;
+    }
+
+    &__image {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 320px;
+        min-height: 200px;
+
+        img {
+            display: block;
+            max-width: 92vw;
+            max-height: calc(92vh - 40px);
+            object-fit: contain;
+        }
+    }
+
+    &__missing {
+        padding: 40px;
+        color: var(--secondary-text-color);
+        font-size: 12px;
+    }
+
+    &__bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 10px;
+        border-top: 1px solid var(--border-color);
+        font-size: 12px;
+    }
+
+    &__title {
+        display: flex;
+        gap: 6px;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        color: var(--main-text-color);
+
+        .num {
+            color: var(--secondary-text-color);
+        }
+    }
+
+    &__meta {
+        white-space: nowrap;
+        color: var(--secondary-text-color);
+    }
+
+    &__actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+
+        button {
+            padding: 2px 6px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: none;
+            color: var(--main-text-color);
+            cursor: pointer;
+
+            &:hover {
+                background: var(--hover-bg-color);
+            }
+            &.remove {
+                color: var(--error-color);
+            }
+        }
+
+        .pos {
+            color: var(--secondary-text-color);
+        }
+    }
+}
+
+@keyframes agent-attachment-spin {
+    from {
+        transform: rotate(-90deg);
+    }
+    to {
+        transform: rotate(270deg);
+    }
+}
+
+@keyframes agent-attachment-flash {
+    0% {
+        box-shadow: 0 0 0 0 var(--accent-color);
+    }
+    100% {
+        box-shadow: 0 0 0 6px transparent;
+    }
+}

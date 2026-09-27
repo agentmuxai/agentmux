@@ -2,17 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Drop file(s) onto an agent pane → copy them into the agent's CWD AND
- * splice `@filename` tokens into the composer textarea at the caret, so the
- * agent sees the new file in its next turn.
+ * Drop file(s) onto an agent pane.
  *
- * Spec: docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md §3.1, §3.6.
+ * Images (and folders, for the images inside them) go to the composer's
+ * attachment tray: the backend copies and processes them, and they're sent
+ * with the next message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.5).
+ *
+ * Every other file keeps the original behavior: it is copied into the
+ * agent's CWD and an `@filename` token is spliced into the composer at the
+ * caret, so the agent sees the new file in its next turn
+ * (SPEC_PANE_FILE_DROP_2026_05_30.md §3.1, §3.6).
  */
 
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { hostHas } from "@/app/host/host-caps";
 import { getSettingsKeyAtom, pushNotification, MOS } from "@/app/store/global";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
+import { getAttachmentDraft } from "../attachments/attachment-draft";
 
 interface Opts {
     blockId: string;
@@ -63,9 +69,11 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
     const enabledAtom = getSettingsKeyAtom("dnd:enabled");
     const insertTokenAtom = getSettingsKeyAtom("dnd:agentinserttoken");
     const concurrencyAtom = getSettingsKeyAtom("dnd:concurrency");
+    const attachmentsAtom = getSettingsKeyAtom("attachments:enabled");
 
     const enabled = () => (enabledAtom() ?? true) !== false;
     const insertToken = () => (insertTokenAtom() ?? true) !== false;
+    const attachmentsEnabled = () => (attachmentsAtom() ?? true) !== false;
     const concurrency = () => {
         const v = concurrencyAtom();
         return typeof v === "number" && v > 0 ? v : undefined;
@@ -78,6 +86,9 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
 
     const dropMessage = () => {
         const c = cwd();
+        if (attachmentsEnabled()) {
+            return c ? `Drop images to attach · other files are copied to ${c}` : "Drop images to attach";
+        }
         return c ? `Copy to ${c}` : "No working directory detected";
     };
 
@@ -113,7 +124,7 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
             e.preventDefault();
             setIsDragOver(false);
             const targetCwd = cwd();
-            if (!targetCwd) {
+            if (!targetCwd && !attachmentsEnabled()) {
                 pushNotification({
                     icon: "fa-triangle-exclamation",
                     title: "Drop failed",
@@ -125,8 +136,8 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
                 return;
             }
             void (async () => {
-                const paths = await consumeDragPaths();
-                if (paths.length === 0) {
+                const dropped = await consumeDragPaths();
+                if (dropped.length === 0) {
                     pushNotification({
                         icon: "fa-triangle-exclamation",
                         title: "Drop failed",
@@ -134,6 +145,35 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
                         timestamp: new Date().toISOString(),
                         type: "warning",
                         expiration: Date.now() + 6000,
+                    });
+                    return;
+                }
+                // Images go to the attachment tray; the rest are copied below.
+                let paths = dropped;
+                if (attachmentsEnabled()) {
+                    try {
+                        paths = await getAttachmentDraft(opts.blockId).ingestPaths(dropped);
+                    } catch (err) {
+                        pushNotification({
+                            icon: "fa-triangle-exclamation",
+                            title: "Couldn't attach the images",
+                            message: String((err as Error)?.message ?? err),
+                            timestamp: new Date().toISOString(),
+                            type: "warning",
+                            expiration: Date.now() + 8000,
+                        });
+                        return;
+                    }
+                }
+                if (paths.length === 0) return;
+                if (!targetCwd) {
+                    pushNotification({
+                        icon: "fa-triangle-exclamation",
+                        title: "Files not copied",
+                        message: `No working directory detected for this agent pane, so ${paths.length} non-image ${paths.length === 1 ? "file was" : "files were"} not copied.`,
+                        timestamp: new Date().toISOString(),
+                        type: "warning",
+                        expiration: Date.now() + 8000,
                     });
                     return;
                 }

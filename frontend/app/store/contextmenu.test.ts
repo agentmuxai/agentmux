@@ -13,16 +13,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
     showContextMenu: vi.fn(),
     writeText: vi.fn(() => Promise.resolve()),
+    readText: vi.fn(() => Promise.resolve("")),
 }));
 
-vi.mock("@/util/clipboard", () => ({ writeText: mocks.writeText, readText: () => Promise.resolve("") }));
+vi.mock("@/util/clipboard", () => ({ writeText: mocks.writeText, readText: () => mocks.readText() }));
 vi.mock("@/app/store/global", () => ({
     openLink: vi.fn(),
     getApi: () => ({ showContextMenu: mocks.showContextMenu }),
     atoms: { workspace: () => ({ oid: "ws1" }) },
 }));
 
-import { ContextMenuModel, showCopyContextMenu } from "./contextmenu";
+import { ContextMenuModel, showCopyContextMenu, showTextInputContextMenu } from "./contextmenu";
 
 afterEach(() => vi.clearAllMocks());
 
@@ -77,5 +78,42 @@ describe("showCopyContextMenu", () => {
         expect(e.defaultPrevented).toBe(false);
         expect(stop).not.toHaveBeenCalled();
         expect(mocks.showContextMenu).not.toHaveBeenCalled();
+    });
+});
+
+describe("showTextInputContextMenu", () => {
+    const clickItem = (label: string) => {
+        const items = mocks.showContextMenu.mock.calls.at(-1)![1] as { label: string; id: string }[];
+        ContextMenuModel.handleContextMenuClick(items.find((i) => i.label === label)!.id);
+    };
+
+    it("Paste inserts the clipboard text at the selection of the input that had focus", async () => {
+        const ta = document.createElement("textarea");
+        document.body.appendChild(ta);
+        ta.value = "abcd";
+        ta.focus();
+        ta.setSelectionRange(2, 2);
+        // The menu reads the clipboard once to offer "Open Clipboard URL" too.
+        mocks.readText.mockResolvedValue("XY");
+        await showTextInputContextMenu(rightClick());
+        expect(shownLabels()).toContain("Paste");
+        // Clicking a menu row can move focus away; the paste still lands.
+        ta.blur();
+        clickItem("Paste");
+        await vi.waitFor(() => expect(ta.value).toBe("abXYcd"));
+        mocks.readText.mockResolvedValue("");
+        ta.remove();
+    });
+
+    it("Copy writes the input's selected text", async () => {
+        const ta = document.createElement("textarea");
+        document.body.appendChild(ta);
+        ta.value = "hello world";
+        ta.focus();
+        ta.setSelectionRange(0, 5);
+        await showTextInputContextMenu(rightClick());
+        clickItem("Copy");
+        expect(mocks.writeText).toHaveBeenCalledWith("hello");
+        ta.remove();
     });
 });

@@ -41,6 +41,7 @@ import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../comm
 import { parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
 import type { DocumentNode } from "../types";
+import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { LogFn } from "./useAgentControllerStatus";
 
 /**
@@ -308,6 +309,7 @@ export interface UseAgentCommands {
         message: string,
         wasAlreadyWorking?: boolean,
         authFailureToPreserve?: PaneFailure | null,
+        attachments?: AttachmentRef[],
     ) => Promise<void>;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
@@ -322,7 +324,7 @@ export interface UseAgentCommands {
      * the Claude-Code-CLI ArrowUp "un-queue" gesture. Returns null if the
      * queue is empty. The message was never sent, so this is a true un-send.
      */
-    recallLatestHeld: () => { text: string } | null;
+    recallLatestHeld: () => { text: string; attachments?: AttachmentRef[] } | null;
     /** True when there are queued-while-busy messages awaiting delivery. */
     hasHeldMessages: () => boolean;
     /** Return to the agent picker by clearing the agent-identity meta keys. */
@@ -431,6 +433,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // at the next tool-call boundary, or recalled un-sent via `recallLatestHeld`
     // (ArrowUp). Holding — rather than sending immediately — is what makes the
     // recall a true un-send and lets the message land at a clean boundary.
+    // Images sent with a message, by message id. Kept beside the queue
+    // rather than in every queue entry: a held message is delivered later by
+    // the flush loop under the same id, and deliverToBackend looks it up
+    // there. Removed once the message is delivered or dropped.
+    // SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6.
+    const attachmentsByMessage = new Map<string, AttachmentRef[]>();
+
     const heldQueue: Array<{
         id: string;
         text: string;
@@ -946,6 +955,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         message: string,
         wasAlreadyWorking = false,
         authFailureToPreserve: PaneFailure | null = null,
+        /** Images from the composer's tray, in order. A message with images is
+         *  never a `!` or `/` command. */
+        attachments: AttachmentRef[] = [],
     ): Promise<void> => {
         // Crash trace: this is the entry point for "user pressed send."
         // The boundary dumps this trail when a renderer fault catches —
@@ -1022,7 +1034,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
         };
 
-        const bangCommand = parseBangCommand(trimmed);
+        const bangCommand = attachments.length > 0 ? null : parseBangCommand(trimmed);
         if (bangCommand !== null) {
             try {
                 await dispatchBangCommand(bangCommand, opts.blockId, buildCommandContext(wasAlreadyWorking));
@@ -1042,7 +1054,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             return;
         }
 
-        if (trimmed.startsWith("/")) {
+        if (attachments.length === 0 && trimmed.startsWith("/")) {
             let outcome;
             // Tracks whether THIS command's own handler resolved the
             // captured failure (only /login does, via ctx.clearAuthFailure()
@@ -1105,6 +1117,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // and `useAgentStream` uses that to promote the pending entry
         // into a real `user_message` document node.
         const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        if (attachments.length > 0) attachmentsByMessage.set(messageId, attachments);
 
         // Append to the pending zone. No direct write to `document` —
         // the acceptance event promotes it. This is the architecture
@@ -1121,6 +1134,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 text: message,
                 at: Date.now(),
                 enqueuedWhileBusy: wasAlreadyWorking,
+                ...(attachments.length > 0 ? { attachments } : {}),
             },
             "user",
         );
@@ -1175,6 +1189,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // Reject immediately instead of queueing it to be rejected
                 // later. codex P2 on PR #2338 (twenty-fourth re-review).
                 opts.log("auth", "message not sent — not logged in", "warn");
+                attachmentsByMessage.delete(messageId);
                 opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
                 return;
             }
@@ -1445,6 +1460,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                         : "Not logged in — run /login to sign in, then send again.",
                 );
             }
+            attachmentsByMessage.delete(messageId);
             opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,
@@ -1532,12 +1548,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // PR #1484). The cmd:args round-trip above already completed, so the 30s
         // expiry below still measures backend acceptance time. Codex P2 on PR #752.
         try {
+            const attachments = attachmentsByMessage.get(messageId);
             await RpcApi.AgentInputCommand(TabRpcClient, {
                 blockid: opts.blockId,
                 message,
                 message_id: messageId,
+                ...(attachments?.length ? { attachments } : {}),
             });
+            attachmentsByMessage.delete(messageId);
         } catch (err: any) {
+            attachmentsByMessage.delete(messageId);
             opts.log("error", err?.message ?? String(err), "error");
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never received.
@@ -1741,6 +1761,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                         "system",
                     );
                     }
+                    attachmentsByMessage.delete(item.id);
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
                 }
@@ -1782,7 +1803,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
      * entry, and return its text so the composer can restore it (ArrowUp
      * un-queue). Null if nothing is held. The message was never sent.
      */
-    const recallLatestHeld = (): { text: string } | null => {
+    const recallLatestHeld = (): { text: string; attachments?: AttachmentRef[] } | null => {
         const item = heldQueue.pop();
         if (!item) return null;
         // Roll back the OPTIMISTIC TurnStart handleSendMessage already
@@ -1815,7 +1836,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     );
         }
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
-        return { text: item.text };
+        const attachments = attachmentsByMessage.get(item.id);
+        attachmentsByMessage.delete(item.id);
+        return attachments?.length ? { text: item.text, attachments } : { text: item.text };
     };
 
     const hasHeldMessages = (): boolean => heldQueue.length > 0;

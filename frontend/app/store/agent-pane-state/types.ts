@@ -708,6 +708,8 @@ export type AgentPaneCommand =
           id: string;
           text: string;
           at: number;
+          /** Images sent with the message (ids + names, tray order). */
+          attachments?: { id: string; name: string }[];
           /**
            * True when the user sent this message while a turn was already
            * in-flight (isWorking was true before TurnStart). False for

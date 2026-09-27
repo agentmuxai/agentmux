@@ -400,6 +400,49 @@
           "default": true,
           "description": "Insert a file-reference token into the composer on drop (in addition to attaching the file). Default true."
         },
+        "attachments:enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Paste or drop images into the agent composer as attachments (thumbnails above the text). False restores the old behavior: dropped images are copied into the working folder like any other file. Default true. See docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md."
+        },
+        "attachments:maxfiles": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 128,
+          "description": "Most images one message can carry. Default 128."
+        },
+        "attachments:maxtotalmb": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1024,
+          "description": "Most megabytes of images (original sizes) one message can carry. Default 1024 (1 GB)."
+        },
+        "attachments:sendmaxedge": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 8000,
+          "default": 2000,
+          "description": "Long edge, in pixels, of the copy of each image the agent receives. Default 2000, the most Claude accepts once a request has more than 20 images."
+        },
+        "attachments:claudeinlinemax": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 20,
+          "description": "Images Claude receives inline in one message; the rest are listed by path for it to open. 0 sends paths only. Default 20."
+        },
+        "attachments:claudesessioninlinemb": {
+          "type": "number",
+          "minimum": 0,
+          "default": 50,
+          "description": "Megabytes of inline images (base64) one Claude session may receive; after that images go by path only. Bounds the size of Claude Code's own transcript. Default 50."
+        },
+        "attachments:retentiondays": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 30,
+          "description": "Days an attachment's files are kept after last use. Images that were never sent are removed after 7 days (or this, if shorter). Default 30."
+        },
         "app:runinbackground": {
           "type": "boolean",
           "default": true,

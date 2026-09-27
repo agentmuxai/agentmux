@@ -394,6 +394,10 @@ export interface UserMessageNode {
      * Spec:
      * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`. */
     isStartup?: boolean;
+    /** Images sent with the message, in the order the agent numbered them.
+     *  An entry without `id` was no longer available when it was sent.
+     *  SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.8. */
+    attachments?: { id?: string; name: string }[];
 }
 
 /**
