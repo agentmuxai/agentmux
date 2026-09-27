@@ -613,6 +613,7 @@ partial list.
 | [`SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25`](SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) | SPEC: Default fresh-start widgets — Agent, Swarm, Armory, Sysinfo |
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
 | [`SPEC_DOCS_CLEANUP_AUDIT_2026_08_22`](SPEC_DOCS_CLEANUP_AUDIT_2026_08_22.md) | SPEC — Docs cleanup audit: what's stale, duplicated, or mis-shelved |
+| [`SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27`](SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md) | SPEC: Drag and drop: audit, one facility, one drop indicator |
 | [`SPEC_EARLY_ALPHA_WARNING_2026_06_05`](SPEC_EARLY_ALPHA_WARNING_2026_06_05.md) | SPEC: Early Alpha Warning — README & Microsoft Store Partner Center |
 | [`SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21`](SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21.md) | SPEC — Editor Markdown Live Preview Panel |
 | [`SPEC_ERROR_COPY_EVERYWHERE_2026_09_24`](SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md) | SPEC: every error surface can be copied, errors and traces in one click |
@@ -665,7 +666,6 @@ partial list.
 | [`SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23`](SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23.md) | SPEC: The pane-close confirmation names the processes it will stop |
 | [`SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18`](SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md) | SPEC: panes should not hold the instance's API credential |
 | [`SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20`](SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20.md) | SPEC: Permanently blank agent panes after recovery — the hoist deadlock, and the wrong-tab registration that triggers it |
-| [`SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27`](SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md) | SPEC: Highlight the pane a dragged file will land in |
 | [`SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21`](SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21.md) | SPEC — Pane Minimize Button + Failed Tool Call Immediate Collapse |
 | [`SPEC_PANE_MINIMIZE_CARET_BUG_2026_06_24`](SPEC_PANE_MINIMIZE_CARET_BUG_2026_06_24.md) | SPEC — Pane Minimize Caret Not Flipping |
 | [`SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27`](SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md) | SPEC — Pane Minimize: Column Dissolve on Full-Column Collapse |
@@ -1074,6 +1074,7 @@ partial list.
 | [`SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22`](SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md) | Spec: Hidden memory reinjection after compaction |
 | [`SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10`](SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10.md) | SPEC: Defer jekt / inter-agent message delivery until a safe turn boundary — never truncate an in-progress explanation |
 | [`SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05`](SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md) | Memory carry-over: loading and management across the three agent-awareness cases |
+| [`SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27`](SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md) | SPEC: Highlight the pane a dragged file will land in |
 
 ### no status line
 
