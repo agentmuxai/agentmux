@@ -13,6 +13,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { MOS, atoms } from "@/app/store/global";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
+import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { recordTurn } from "@/app/store/token-usage";
 import { useTick } from "@/app/hook/useTick";
@@ -23,6 +24,14 @@ import { focusBlock } from "@/app/util/focus-block";
 import { swarmRowColors } from "./swarm-row-colors";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
+
+/** The block shown in the focused pane — for a multi-tab pane, its active
+ *  tab. Reactive to tab switches inside the pane, not just pane focus. */
+export function focusedActiveBlockId(layoutModel: Pick<LayoutModel, "localTreeStateAtom" | "focusedNode">): string | null {
+    layoutModel.localTreeStateAtom();
+    const data = layoutModel.focusedNode()?.data;
+    return data?.activeBlockId || data?.blockId || null;
+}
 
 export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContext }): JSX.Element {
     const model = props.model;
@@ -83,14 +92,19 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
     const clearableCount = createMemo(() => collectClearableRows(tree()).length);
 
     // Derive the currently-focused block ID from the active tab's layout model.
-    // focusedNode is already a reactive memo on LayoutModel, so this updates
-    // automatically when the user clicks any tile or switches tabs.
+    // Switching a multi-tab pane to another tab keeps the SAME focused node and
+    // only changes its active member, so focusedNode() (a memo returning the
+    // node object) doesn't signal and a read of `.data.blockId` would stay on
+    // the previous tab — the selection border stuck on one agent. Subscribing
+    // to localTreeStateAtom (which every tab switch republishes) and reading
+    // the active member the way the pane's own node model does
+    // (layoutNodeModels.ts activeBlockId) keeps it current.
     const focusedBlockId = createMemo<string | null>(() => {
         const tabId = atoms.activeTabId();
         if (!tabId) return null;
         const layoutModel = getLayoutModelForTabById(tabId);
         if (!layoutModel) return null;
-        return layoutModel.focusedNode()?.data?.blockId ?? null;
+        return focusedActiveBlockId(layoutModel);
     });
 
     return (

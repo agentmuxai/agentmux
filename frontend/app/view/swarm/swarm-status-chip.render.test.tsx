@@ -52,3 +52,29 @@ describe("AgentStatusChip", () => {
         expect(chip().textContent).toBe("working");
     });
 });
+
+// The selection border follows the focused pane's ACTIVE tab: switching a
+// multi-tab pane to another agent keeps the same focused node, so reading the
+// node alone left the border stuck on the previous agent (user, 2026-09-27).
+describe("focusedActiveBlockId", () => {
+    it("follows a tab switch inside the same focused pane", async () => {
+        const { createRoot, createMemo } = await import("solid-js");
+        const { focusedActiveBlockId } = await import("./swarm-view");
+        const [tree, setTree] = createSignal(0);
+        const node = { data: { blockId: "agentA", activeBlockId: "agentA", blockStack: ["agentA", "agentB"] } };
+        const model = {
+            localTreeStateAtom: () => tree(),
+            // Same node object before and after the switch, like LayoutModel's memo.
+            focusedNode: () => node,
+        } as any;
+        createRoot((dispose) => {
+            const focused = createMemo(() => focusedActiveBlockId(model));
+            expect(focused()).toBe("agentA");
+            node.data.activeBlockId = "agentB";
+            node.data.blockId = "agentB";
+            setTree(1); // setActiveBlockInStack republishes the tree state
+            expect(focused()).toBe("agentB");
+            dispose();
+        });
+    });
+});
