@@ -244,7 +244,7 @@ fn the_head_under_another_login_of_the_same_identity_is_relocated_to_fork_from()
     c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
 
     assert_eq!(held(&c).as_deref(), Some("s2"));
-    let copy = c.inner.lock().unwrap().fork_copy.clone().expect("a copy to fork from");
+    let copy = c.inner.lock().unwrap().fork_copy.clone().expect("a copy to fork from").copy;
     assert_eq!(copy, here(&f, "s2"));
     assert_eq!(std::fs::read(&copy).unwrap(), std::fs::read(old.path().join("projects").join(crate::backend::claude_layout::project_dir_name(WORK)).join("s2.jsonl")).unwrap());
 }
@@ -377,16 +377,37 @@ fn the_copy_goes_once_the_fork_has_its_own_id() {
     let src = old.path().join("projects").join(crate::backend::claude_layout::project_dir_name(WORK)).join("s2.jsonl");
     let dest_dir = f.config.env_vars["CLAUDE_CONFIG_DIR"].clone();
 
-    let copy = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
-    settle_relocated_copy("block", &copy, Some("s2"), "s3");
-    assert!(!copy.exists(), "forked: the copy goes");
+    let r = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
+    assert!(settle_relocated_copy("block", &r, Some("s2"), "s3"));
+    assert!(!r.copy.exists(), "forked: the copy goes");
 
     // The CLI resumed the copy in place (no fork): it is the live session now.
-    let copy = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
-    settle_relocated_copy("block", &copy, Some("s2"), "s2");
-    assert!(copy.exists());
+    let r = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
+    assert!(settle_relocated_copy("block", &r, Some("s2"), "s2"));
+    assert!(r.copy.exists());
     assert_eq!(crate::backend::continuity_relocate::sweep(&dest_dir, WORK, UID), 0, "no longer marked as a copy");
     assert!(src.exists(), "the original is never touched");
+}
+
+/// Codex P1 on #3907 (round 3): a superseded spawn's reader settles late,
+/// after a replacement swept its copy and relocated its own to the same
+/// path. It must neither unmark nor remove the replacement's copy.
+#[test]
+fn a_late_settle_leaves_a_replacements_copy_alone() {
+    use super::super::segments::settle_relocated_copy;
+    let f = fixture(&[]);
+    let old = other_login("acc-1", "org-1", "s2");
+    let src = old.path().join("projects").join(crate::backend::claude_layout::project_dir_name(WORK)).join("s2.jsonl");
+    let dest_dir = f.config.env_vars["CLAUDE_CONFIG_DIR"].clone();
+
+    let stale = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
+    crate::backend::continuity_relocate::sweep(&dest_dir, WORK, UID);
+    let _replacement = crate::backend::continuity_relocate::relocate(&src, &dest_dir, WORK, "s2", UID).unwrap();
+
+    assert!(!settle_relocated_copy("block", &stale, Some("s2"), "s2"), "kept in place: not its copy any more");
+    assert!(!settle_relocated_copy("block", &stale, Some("s2"), "s3"), "forked: not its copy any more");
+    assert!(stale.copy.exists());
+    assert_eq!(crate::backend::continuity_relocate::sweep(&dest_dir, WORK, UID), 1, "the replacement's copy is still marked");
 }
 
 

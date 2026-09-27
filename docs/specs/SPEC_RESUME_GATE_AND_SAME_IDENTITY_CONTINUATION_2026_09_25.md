@@ -193,9 +193,11 @@ Preconditions, all required. Any failure means **Refuse** (fresh + packet):
    a leftover would look reachable and be resumed in place without a fork.
 
 Action:
-1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>`, write the marker
-   `<dest>.jsonl.agentmux-relocated` (owner UID, source path, size), then rename to
-   `<dest>.jsonl`. The CLI never sees a partial file (H5), and never sees a copy without its
+1. Copy to `<dest>.jsonl.agentmux-tmp-<agent-uid>.<token>` (the relocation's own token: once
+   linked, the temp name aliases the copy, so it must never be shared), write the marker
+   `<dest>.jsonl.<token>.agentmux-relocated` (owner UID, source path, size), then hard-link to
+   `<dest>.jsonl` (which fails if the name exists, so of two concurrent relocations only one
+   places a copy) and remove the temp name. The CLI never sees a partial file (H5), and never sees a copy without its
    marker, so a crash can't leave an unmarked duplicate (I4).
 2. Spawn with `--resume <head> --fork-session`. The original stays untouched (I3), and the new
    id is captured by the existing adoption path.
@@ -222,6 +224,12 @@ Without it, the head stays the source segment, and the next spawn relocates agai
 same-id case of step 3 is settled on its own once a result frame confirms the resume, since
 capture never adopts an id the controller already holds: the id is recorded on the segment
 and the copy's marker goes.
+
+Each relocation's marker has its own name (`<sid>.jsonl.<token>.agentmux-relocated`), and
+the spawn holds that marker. Settling (step 3) deletes the spawn's own marker first, and
+touches the copy or records the session only if that succeeded. A superseded spawn's
+late settle therefore can't unmark or remove a replacement's copy placed at the same path
+after a sweep. Markers from before tokens (`<sid>.jsonl.agentmux-relocated`) still sweep.
 
 ### 4.4 Fork when the file changed outside AgentMux (H4)
 Each segment's `End` records `provider_bytes_end`: the size of the provider session file when
