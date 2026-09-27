@@ -88,7 +88,7 @@ Right-click Paste doesn't consult `dnd:enabled`, `dnd:concurrency` or `dnd:agent
 
 **Other problems:**
 - **Floaters on Windows:** they are built with `is_browser_pane = true` (`agentmux-cef/src/floating_pane.rs:246-250`, `:468-472`), so `drag_handler()` returns `None` (`client/handlers.rs:57-60`). Paths are never stashed.
-- **The path stash:** it is one process-wide slot with no window key (`drag_stash.rs:24`).
+- **The path stash:** it is one process-wide slot with no window key (`drag_stash.rs:24`). **Fix: §5.4 keys it by window label; the renderer passes `consume_drag_paths {windowLabel}`.**
 - **The drone canvas:** `onDragOver` always calls `preventDefault` with `dropEffect = "copy"` (`drone-view.tsx:288-291`), so an OS file shows a copy cursor and is swallowed.
 - **Dead setting:** `dnd:maxfilesizemb` (`settings-template.jsonc:23`) is read nowhere.
 - **Untested:** the terminal drop path, `installGlobalDropGuard`, `on_drag_enter`, and the CEF copy.
@@ -143,7 +143,7 @@ Right-click Paste doesn't consult `dnd:enabled`, `dnd:concurrency` or `dnd:agent
 
 **"Which window is under the cursor" is answered five times:**
 - `commands/drag.rs:193` (Windows only, map order rather than Z-order; returns `None` on macOS/Linux, `:220`);
-- `window/motion.rs:280` with `ui_tasks/window.rs:1500`: a Z-ordered walk on Windows only. On macOS/Linux, `ResolveWindowAtCursorTask` (`ui_tasks/window.rs:1448`) tests CEF window bounds and, among overlapping non-main windows, picks the **lexicographically smallest label**, not the one on top;
+- `window/motion.rs:280` with `ui_tasks/window.rs:1500`: a Z-ordered walk on Windows only. On macOS/Linux, `ResolveWindowAtCursorTask` (`ui_tasks/window.rs:1448`) tests CEF window bounds and, among overlapping non-main windows, picks the **lexicographically smallest label**, not the one on top. **Fix: §5.6 step 1 makes it stack-aware before anything reuses it;**
 - `tear_off_hook.rs:703`;
 - the macOS CGWindowList path;
 - the frontend `pane-tab-tearoff.ts:48` `isInsideWindow`, which exists only because of the `None` at `drag.rs:220`.
