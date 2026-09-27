@@ -480,6 +480,7 @@ partial list.
 | [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
+| [`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md) | SPEC: Paste and drop images into the agent pane input |
 | [`SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26`](SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md) | Spec: One open/closed model for agent-pane rows |
 | [`SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24`](SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md) | Agent pane scroll-follow: one owner, one intent-based state machine |
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
@@ -577,7 +578,6 @@ partial list.
 | [`SPEC_AGENT_DELETE_2026_09_16`](SPEC_AGENT_DELETE_2026_09_16.md) | SPEC: Agent Row Actions Menu — Delete + Duplicate (My Agents picker) |
 | [`SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21`](SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md) | Spec: `OpenPane` — a general-purpose, agent-facing "open any pane" MCP tool |
 | [`SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) | SPEC — Versioned model dropdowns (CLI-aware), Claude CLI pin-to-latest, single-toggle Log |
-| [`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md) | SPEC: Paste and drop images into the agent pane input |
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |

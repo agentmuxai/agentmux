@@ -14,9 +14,14 @@ const mocks = vi.hoisted(() => ({
     showContextMenu: vi.fn(),
     writeText: vi.fn(() => Promise.resolve()),
     readText: vi.fn(() => Promise.resolve("")),
+    readAttachments: vi.fn(() => Promise.resolve({ text: "", paths: [] as string[] })),
 }));
 
-vi.mock("@/util/clipboard", () => ({ writeText: mocks.writeText, readText: () => mocks.readText() }));
+vi.mock("@/util/clipboard", () => ({
+    writeText: mocks.writeText,
+    readText: () => mocks.readText(),
+    readAttachments: () => mocks.readAttachments(),
+}));
 vi.mock("@/app/store/global", () => ({
     openLink: vi.fn(),
     getApi: () => ({ showContextMenu: mocks.showContextMenu }),
@@ -102,6 +107,20 @@ describe("showTextInputContextMenu", () => {
         clickItem("Paste");
         await vi.waitFor(() => expect(ta.value).toBe("abXYcd"));
         mocks.readText.mockResolvedValue("");
+        ta.remove();
+    });
+
+    it("Paste with onPasteAttachments inserts the text and hands over the clipboard's paths", async () => {
+        const ta = document.createElement("textarea");
+        document.body.appendChild(ta);
+        ta.value = "";
+        ta.focus();
+        mocks.readAttachments.mockResolvedValueOnce({ text: "see", paths: ["C:/tmp/clipboard-1.png"] });
+        const onPasteAttachments = vi.fn();
+        await showTextInputContextMenu(rightClick(), undefined, { onPasteAttachments });
+        clickItem("Paste");
+        await vi.waitFor(() => expect(onPasteAttachments).toHaveBeenCalledWith(["C:/tmp/clipboard-1.png"]));
+        expect(ta.value).toBe("see");
         ta.remove();
     });
 

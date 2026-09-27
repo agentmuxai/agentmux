@@ -9,7 +9,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type 
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { atoms } from "@/app/store/global";
+import { atoms, pushNotification } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
@@ -507,6 +507,38 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // Finder): attach them. Never preventDefault — a textarea's default paste
     // only ever inserts text, so the browser still pastes any text part
     // natively (selection handling and undo intact). Spec §6.2.
+    // Right-click Paste has no paste event: the native clipboard reader
+    // hands over paths (copied files, or a temp file for image data), and
+    // they go through the same pipeline as a drop. Spec §5.6.
+    const pasteAttachmentsFromMenu = (paths: string[]) => {
+        if (!attachmentDraft) return;
+        void attachmentDraft
+            .ingestPaths(paths)
+            .then((nonImages) => {
+                if (nonImages.length > 0) {
+                    pushNotification({
+                        icon: "fa-info-circle",
+                        title: `${nonImages.length} ${nonImages.length === 1 ? "file" : "files"} not attached: not images`,
+                        message: "Only images can be attached. Drop other files onto the pane to copy them into the working folder.",
+                        timestamp: new Date().toISOString(),
+                        type: "info",
+                        expiration: Date.now() + 8000,
+                    });
+                }
+            })
+            .catch((err) => {
+                // Same notice as a failed drop (useAgentDropAttach.ts).
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "Couldn't attach the images",
+                    message: String((err as Error)?.message ?? err),
+                    timestamp: new Date().toISOString(),
+                    type: "warning",
+                    expiration: Date.now() + 8000,
+                });
+            });
+    };
+
     const handlePaste = (e: ClipboardEvent) => {
         if (!attachmentDraft) return;
         const files = Array.from(e.clipboardData?.files ?? []);
@@ -1228,7 +1260,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     // here silently shows a useless disabled-Copy menu instead
                     // of letting the user paste. See
                     // docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
-                    onContextMenu={(e) => void showTextInputContextMenu(e, composerUndoItems())}
+                    onContextMenu={(e) =>
+                        void showTextInputContextMenu(
+                            e,
+                            composerUndoItems(),
+                            attachmentDraft ? { onPasteAttachments: pasteAttachmentsFromMenu } : undefined,
+                        )
+                    }
                     rows={1}
                 />
                 {/* Pinned to the composer's right edge instead of the pane's

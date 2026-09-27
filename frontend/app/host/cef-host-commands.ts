@@ -149,6 +149,8 @@ export const cefHostMisc = {
         await invokeCommand("open_external", { url });
     },
     readClipboardText: () => invokeCommand<string>("read_clipboard", {}),
+    readClipboardAttachments: () =>
+        invokeCommand<{ text: string; paths: string[] }>("read_clipboard_attachments", {}),
     writeClipboardText: async (text: string) => {
         await invokeCommand("write_clipboard", { text });
     },
