@@ -22,13 +22,27 @@ export interface DropOutcome {
 }
 
 /**
- * Read the OS paths captured by the CEF DragHandler stash. Returns an empty
- * array if the stash has expired or wasn't populated (non-CEF host, drop
- * with no files, etc.). The caller is expected to fall back gracefully.
+ * Read the OS paths captured by the CEF DragHandler stash for this window's
+ * current drag. Returns an empty array if there are none (non-CEF host,
+ * virtual files, a drag with no files). The caller is expected to fall back
+ * gracefully, e.g. to the dropped files' bytes.
  */
 export async function consumeDragPaths(): Promise<string[]> {
     try {
         const paths = await getApi().consumeDroppedFilePaths();
+        return Array.isArray(paths) ? paths : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * The same paths while a drag is still hovering, without consuming them: lets
+ * a pane decide by file name before the drop. Empty when unavailable.
+ */
+export async function peekDragPaths(): Promise<string[]> {
+    try {
+        const paths = await getApi().peekDroppedFilePaths?.();
         return Array.isArray(paths) ? paths : [];
     } catch {
         return [];

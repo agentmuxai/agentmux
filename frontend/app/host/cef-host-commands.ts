@@ -154,7 +154,10 @@ export const cefHostMisc = {
     writeClipboardText: async (text: string) => {
         await invokeCommand("write_clipboard", { text });
     },
-    consumeDroppedFilePaths: () => invokeCommand<string[]>("consume_drag_paths", {}),
+    // The host keeps one entry per window; name ours (drag_stash.rs).
+    consumeDroppedFilePaths: () =>
+        invokeCommand<string[]>("consume_drag_paths", { windowLabel: ownWindowLabel() }),
+    peekDroppedFilePaths: () => invokeCommand<string[]>("peek_drag_paths", { windowLabel: ownWindowLabel() }),
     copyFileToDir: (sourcePath: string, targetDir: string) =>
         invokeCommand<string>("copy_file_to_dir", { sourcePath, targetDir }),
     openDataDirInFileManager: async () => {
@@ -166,3 +169,12 @@ export const cefHostMisc = {
     },
     takeBackgroundAudit: () => invokeCommand<unknown>("background_audit_take", {}),
 } satisfies Partial<AppApi>;
+
+/** This window's label, as set by the host on its startup URL (`?windowLabel=`). */
+function ownWindowLabel(): string {
+    try {
+        return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+    } catch {
+        return "main";
+    }
+}

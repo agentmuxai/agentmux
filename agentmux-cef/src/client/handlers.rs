@@ -20,6 +20,13 @@ wrap_client! {
     pub struct AgentMuxClient {
         inner: Arc<Mutex<AgentMuxHandler>>,
         is_browser_pane: bool,
+        // Capture OS file-drag paths (the drag handler). Every client that
+        // renders the AgentMux frontend wants it: main windows, tear-offs and
+        // floating panes. Real browser panes don't, since their pages handle
+        // their own drops. Separate from `is_browser_pane` because Windows
+        // floaters are built as browser-pane clients for everything else
+        // (SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §5.4).
+        drag_capture: bool,
     }
 
     impl Client {
@@ -55,7 +62,7 @@ wrap_client! {
         }
 
         fn drag_handler(&self) -> Option<DragHandler> {
-            if self.is_browser_pane {
+            if !self.drag_capture {
                 return None;
             }
             Some(AgentMuxDragHandler::new(self.inner.clone()))
@@ -161,7 +168,7 @@ wrap_drag_handler! {
         // run unchanged. Spec: docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md §3.3.
         fn on_drag_enter(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             drag_data: Option<&mut DragData>,
             _mask: DragOperationsMask,
         ) -> ::std::os::raw::c_int {
@@ -169,10 +176,19 @@ wrap_drag_handler! {
                 let mut list = CefStringList::new();
                 let _ = dd.file_paths(Some(&mut list));
                 let paths: Vec<String> = list.into_iter().filter(|p| !p.is_empty()).collect();
+                // Key by the window the drag entered; the renderer asks with
+                // its own `?windowLabel=`. Stored even when empty, so a
+                // pathless drag replaces the previous drag's entry.
+                let state = self.inner.lock().state.clone();
+                let label = browser.and_then(|b| super::window_label_for_state(&state, b));
                 if !paths.is_empty() {
-                    tracing::info!("[drag] captured {} file path(s) via OnDragEnter", paths.len());
-                    crate::drag_stash::put(paths);
+                    tracing::info!(
+                        label = label.as_deref().unwrap_or("<unmapped>"),
+                        "[drag] captured {} file path(s) via OnDragEnter",
+                        paths.len()
+                    );
                 }
+                crate::drag_stash::put(label.as_deref(), paths);
             }
             0
         }

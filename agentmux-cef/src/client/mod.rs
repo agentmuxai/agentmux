@@ -241,14 +241,7 @@ impl AgentMuxHandler {
     /// which would re-register/route the recovered window as the wrong one).
     /// (codex P2 on #1229.)
     fn window_label_for(&self, browser: &mut Browser) -> Option<String> {
-        self.state
-            .list_browsers()
-            .into_iter()
-            .find(|(_, b)| {
-                let mut b = b.clone();
-                b.is_same(Some(&mut *browser)) != 0
-            })
-            .map(|(k, _)| k)
+        window_label_for_state(&self.state, browser)
     }
 
     /// Best navigation target for bringing a crashed window back. Prefers the
@@ -276,4 +269,18 @@ impl AgentMuxHandler {
         let label = self.window_label_for(owned);
         recovery_pages::recovery_navigation_url(base_url, self.resolved_ipc_port(), &self.state.ipc_token, label.as_deref())
     }
+}
+
+/// This browser's window label, by object identity in the reducer's browsers
+/// map. Shared by crash recovery ([`AgentMuxHandler::window_label_for`]) and
+/// the drag handler, which calls it without holding the handler lock.
+pub(crate) fn window_label_for_state(state: &AppState, browser: &mut Browser) -> Option<String> {
+    state
+        .list_browsers()
+        .into_iter()
+        .find(|(_, b)| {
+            let mut b = b.clone();
+            b.is_same(Some(&mut *browser)) != 0
+        })
+        .map(|(k, _)| k)
 }

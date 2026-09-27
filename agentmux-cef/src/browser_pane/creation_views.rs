@@ -121,7 +121,7 @@ pub fn create_browser_pane_view(
 
     // 3. Build the per-pane CEF Client (handler with is_browser_pane = true).
     let handler = crate::client::AgentMuxHandler::new_with_browser_pane(state.clone(), true);
-    let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
+    let mut client = Some(crate::client::AgentMuxClient::new(handler, true, false));
 
     // 4. BrowserViewDelegate. Reuse the same delegate as the main browser —
     //    its on_popup_browser_view_created behavior (popups → new top-level
@@ -138,8 +138,7 @@ pub fn create_browser_pane_view(
     let url_cef = CefString::from(url.as_str());
 
     // 5. Resolve the parent window's RequestContext. Critical for the
-    //    multi-window observer-list crash fix (see spec
-    //    docs/specs/pane-shares-window-request-context-linux-2026-05-13.md):
+    //    multi-window observer-list crash fix:
     //    every isolated RequestContext yields a different `Profile*` pointer
     //    but they all share one `ThemeService` instance (chrome's
     //    `ThemeServiceFactory` redirects to the original profile). The pane
