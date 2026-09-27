@@ -160,7 +160,7 @@ impl PersistentSubprocessController {
         // Set when the resume gate relocated the session this spawn resumes
         // (spec §4.3): the copy it placed, which the fork reads and never
         // writes.
-        let mut relocated_copy: Option<std::path::PathBuf> = None;
+        let mut relocated_copy: Option<crate::backend::continuity_relocate::Relocated> = None;
         // This spawn resumes with `--fork-session` (relocated, or the session
         // grew outside AgentMux, spec §4.4).
         let mut forked = false;
@@ -1081,13 +1081,21 @@ impl PersistentSubprocessController {
                                 forked_from_read.as_deref(),
                                 &sid_string,
                             );
-                            if should_capture || kept_relocated_id {
+                            if should_capture {
                                 super::segments::record_segment_session(&segment_read, &sid_string);
                                 // The fork has its own session now; the copy it
-                                // read from goes (spec §4.3 (3), I4). Kept under
-                                // the attempted id, the copy is the live session.
+                                // read from goes (spec §4.3 (3), I4).
                                 if let Some(copy) = relocated_copy_read.take() {
                                     super::segments::settle_relocated_copy(&block_id_read, &copy, forked_from_read.as_deref(), &sid_string);
+                                }
+                            } else if kept_relocated_id {
+                                // Kept under the attempted id, the copy is the live
+                                // session: recorded only while it is still this
+                                // spawn's, never a replacement's at the same path.
+                                if let Some(copy) = relocated_copy_read.take() {
+                                    if super::segments::settle_relocated_copy(&block_id_read, &copy, forked_from_read.as_deref(), &sid_string) {
+                                        super::segments::record_segment_session(&segment_read, &sid_string);
+                                    }
                                 }
                             }
                             // reagentx P0 on PR #2373: resolving tracking

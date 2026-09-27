@@ -269,6 +269,7 @@ impl PersistentSubprocessController {
     /// Records the start of the segment this spawn begins. `None` when the
     /// spawn carries no agent UID (quick-launch panes, a continuation that
     /// resumes before its row exists) or the write fails.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn record_segment_start(
         &self,
         agent_uid: &str,
@@ -299,6 +300,7 @@ impl PersistentSubprocessController {
     /// the attempted id names the copy, which is swept if the process dies
     /// first, so as the head it would send the next spawn to `--resume` a
     /// file that is gone instead of relocating again (spec §4.3).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn segment_start(
         &self,
         agent_uid: &str,
@@ -450,17 +452,27 @@ pub(super) fn kept_relocated_id(
 /// Once a relocated resume reports its session: a fork (a new id) never
 /// wrote the copy, so it goes. The same id back means the CLI resumed the
 /// copy in place instead of forking; it is live now, so only its marker
-/// goes, and the duplicate is logged (spec §3 I4).
-pub(super) fn settle_relocated_copy(block_id: &str, copy: &std::path::Path, forked_from: Option<&str>, captured: &str) {
+/// goes, and the duplicate is logged (spec §3 I4). Returns whether the copy
+/// was still this spawn's: a replacement's sweep may have taken it and
+/// placed its own at the same path, which is then left alone.
+pub(super) fn settle_relocated_copy(
+    block_id: &str,
+    copy: &crate::backend::continuity_relocate::Relocated,
+    forked_from: Option<&str>,
+    captured: &str,
+) -> bool {
     if forked_from == Some(captured) {
-        tracing::warn!(
-            target: "continuity",
-            block_id,
-            session_id = captured,
-            "relocated resume did not fork; keeping the copy as the live session"
-        );
-        crate::backend::continuity_relocate::unmark(copy);
+        let owned = crate::backend::continuity_relocate::unmark(copy);
+        if owned {
+            tracing::warn!(
+                target: "continuity",
+                block_id,
+                session_id = captured,
+                "relocated resume did not fork; keeping the copy as the live session"
+            );
+        }
+        owned
     } else {
-        crate::backend::continuity_relocate::remove(copy);
+        crate::backend::continuity_relocate::remove(copy)
     }
 }
