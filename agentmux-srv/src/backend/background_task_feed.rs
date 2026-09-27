@@ -169,7 +169,7 @@ impl TaskFeed {
                 backgrounded,
             } => {
                 let observed =
-                    backgrounded && observe(store, block_id, &tool_use_id, &label, now_ms);
+                    backgrounded && observe(store, block_id, &tool_use_id, &label, now_ms, now_ms);
                 self.pending.insert(
                     task_id,
                     Pending {
@@ -184,7 +184,15 @@ impl TaskFeed {
             TaskFeedEvent::Backgrounded { task_id } => match self.pending.get_mut(&task_id) {
                 Some(p) if !p.backgrounded => {
                     p.backgrounded = true;
-                    observe(store, block_id, &p.tool_use_id, &p.label, p.started_at_ms)
+                    // Started when the CLI first reported it; seen now.
+                    observe(
+                        store,
+                        block_id,
+                        &p.tool_use_id,
+                        &p.label,
+                        p.started_at_ms,
+                        now_ms,
+                    )
                 }
                 _ => false,
             },
@@ -234,9 +242,9 @@ fn observe(
     tool_use_id: &str,
     label: &str,
     started_at_ms: i64,
+    seen_at_ms: i64,
 ) -> bool {
-    match store.background_task_observe(tool_use_id, block_id, label, started_at_ms, started_at_ms)
-    {
+    match store.background_task_observe(tool_use_id, block_id, label, started_at_ms, seen_at_ms) {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!(target: "background_tasks", block_id, node_id = %tool_use_id, error = %e,
@@ -414,9 +422,10 @@ mod tests {
             20
         ));
         let row = store.background_task_get("toolu_mv").unwrap().unwrap();
+        // Started when the CLI first reported it, seen when it was backgrounded.
         assert_eq!(
-            (row.status, row.started_at_ms),
-            (BackgroundTaskStatus::Running, 10)
+            (row.status, row.started_at_ms, row.last_seen_ms),
+            (BackgroundTaskStatus::Running, 10, 20)
         );
 
         // task_updated names only the task_id; the feed resolves it.
