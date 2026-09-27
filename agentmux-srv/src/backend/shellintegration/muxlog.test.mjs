@@ -54,6 +54,7 @@ import {
     makeAgentMatcher,
     matchesOwnChannel,
     mergeTimelines,
+    newestLogFirst,
     parseAgentOpenLine,
     percentile,
     pickCandidate,
@@ -554,6 +555,16 @@ describe("muxlog rotated files (§3.1)", () => {
         const out = runMuxlog(root, ["srv", "-i", "6addbd3a", "--since", "2026-09-26T23:50", "--grep", "admission", "cat"]);
         expect(out).toContain("23:56:31");
         expect(out).toContain("00:00:05");
+    });
+
+    it("breaks an mtime tie between daily files by the later date in the name", () => {
+        const f = (date) => ({ file: `/l/agentmuxsrv-v0.58.0.log.${date}`, mtime: 5 });
+        expect([f("2026-09-26"), f("2027-01-01"), f("2026-09-27")].sort(newestLogFirst).map((e) => e.file.slice(-10))).toEqual([
+            "2027-01-01",
+            "2026-09-27",
+            "2026-09-26",
+        ]);
+        expect(newestLogFirst({ file: "/l/a.log.2026-09-26", mtime: 9 }, { file: "/l/a.log.2026-09-27", mtime: 5 })).toBeLessThan(0);
     });
 
     it("without --since still reads only the newest file", () => {
