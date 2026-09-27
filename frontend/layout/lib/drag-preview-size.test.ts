@@ -1,13 +1,16 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     computeDragPreviewSize,
-    dragPreviewCursorOffset,
+    createDragPreviewIntent,
     DRAG_PREVIEW_FALLBACK,
+    DRAG_PREVIEW_HOVER_MS,
     DRAG_PREVIEW_MAX_PX,
     DRAG_PREVIEW_MIN_PX,
+    dragPreviewCursorOffset,
+    pressCanStartPaneDrag,
 } from "./drag-preview-size";
 
 const ratio = (s: { width: number; height: number }) => s.width / s.height;
@@ -102,5 +105,90 @@ describe("dragPreviewCursorOffset", () => {
         for (const bad of [0, -1, NaN, undefined as unknown as number]) {
             expect(dragPreviewCursorOffset({ width: 300, height: 200 }, bad)).toEqual({ x: 10, y: 10 });
         }
+    });
+});
+
+describe("createDragPreviewIntent", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("a pointer passing through a pane never rasterises it", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS - 1);
+        intent.leave();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).not.toHaveBeenCalled();
+    });
+
+    it("a resting hover rasterises once", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+    });
+
+    it("re-entering restarts the wait", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS - 10);
+        intent.enter();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS - 10);
+        expect(rasterise).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(10);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+    });
+
+    it("a press rasterises at once, a drag may follow, and doesn't repeat when the timer would have fired", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        intent.press();
+        expect(rasterise).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).toHaveBeenCalledTimes(1);
+    });
+
+    it("dispose cancels a pending rasterise", () => {
+        const rasterise = vi.fn();
+        const intent = createDragPreviewIntent(rasterise);
+        intent.enter();
+        intent.dispose();
+        vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
+        expect(rasterise).not.toHaveBeenCalled();
+    });
+});
+
+describe("pressCanStartPaneDrag", () => {
+    const header = () => {
+        document.body.innerHTML =
+            '<div data-role="block-header"><span class="title">T</span>' +
+            '<div class="pane-tab"><button class="close">x</button></div>' +
+            '<button class="pane-tab-strip-add">+</button></div><div class="body"><p>text</p></div>';
+        return (sel: string) => document.querySelector(sel);
+    };
+
+    it("a press on the header's own area can start a pane drag", () => {
+        const q = header();
+        expect(pressCanStartPaneDrag(q(".title"))).toBe(true);
+        expect(pressCanStartPaneDrag(q('[data-role="block-header"]'))).toBe(true);
+    });
+
+    it("a press on a tab pill, its close button, or + can't (ReAgent P1 on #3940)", () => {
+        const q = header();
+        expect(pressCanStartPaneDrag(q(".pane-tab"))).toBe(false);
+        expect(pressCanStartPaneDrag(q(".pane-tab .close"))).toBe(false);
+        expect(pressCanStartPaneDrag(q(".pane-tab-strip-add"))).toBe(false);
+    });
+
+    it("a press in the pane body can't", () => {
+        const q = header();
+        expect(pressCanStartPaneDrag(q(".body p"))).toBe(false);
+        expect(pressCanStartPaneDrag(null)).toBe(false);
     });
 });
