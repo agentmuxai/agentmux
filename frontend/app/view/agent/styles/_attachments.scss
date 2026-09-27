@@ -239,6 +239,11 @@ $gap: 6px;
             gap: 3px;
             @include kind-colors;
 
+            // Room for the page-count badge under the label.
+            &.has-pages {
+                margin-top: -8px;
+            }
+
             i {
                 font-size: 24px;
             }
@@ -253,13 +258,14 @@ $gap: 6px;
             }
         }
 
-        // Text tiles: a mini page with the file's first lines.
+        // Text tiles: a mini page with the file's first lines, starting
+        // below the number badge.
         &__text {
             position: absolute;
             inset: 0;
-            padding: 4px 4px 4px 6px;
+            padding: 19px 4px 4px 6px;
             overflow: hidden;
-            font-family: var(--fixed-font, monospace);
+            font-family: var(--font-mono, monospace);
             font-size: 5px;
             line-height: 6px;
             text-align: left;
@@ -487,7 +493,7 @@ $gap: 6px;
             max-height: calc(92vh - 72px);
             padding: 12px 14px;
             overflow: auto;
-            font-family: var(--fixed-font, monospace);
+            font-family: var(--font-mono, monospace);
             font-size: 12px;
             line-height: 1.45;
             white-space: pre-wrap;

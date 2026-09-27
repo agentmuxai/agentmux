@@ -54,6 +54,8 @@ export function AttachmentLightbox(props: Props) {
     const kind = () => fileKind(info()?.kind, item()?.name ?? "");
     const url = useAttachmentUrl(() => (isPicture(kind()) ? item()?.id : undefined), "send");
     const preview = useAttachmentText(() => (kind() === "text" ? item()?.id : undefined), "thumb");
+    // The preview drops a final newline; anything more means it was cut.
+    const previewBytes = () => new TextEncoder().encode(preview() ?? "").length;
     const noun = () => (kind() === "image" ? "image" : "file");
     const missing = () => item()?.error ?? `This ${noun()} is no longer available.`;
 
@@ -134,7 +136,7 @@ export function AttachmentLightbox(props: Props) {
                                 >
                                     <div class="agent-attachment-lightbox__text">
                                         <pre>{preview()}</pre>
-                                        <Show when={info() && info()!.bytes > (preview()?.length ?? 0)}>
+                                        <Show when={info() && info()!.bytes > previewBytes() + 1}>
                                             <span class="note">
                                                 The first lines. The agent gets the whole file.
                                             </span>

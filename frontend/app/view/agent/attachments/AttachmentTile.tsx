@@ -65,7 +65,10 @@ const RING_C = 2 * Math.PI * RING_R;
 /** The type icon with the extension under it. */
 function FileIcon(props: { tile: TileModel }) {
     return (
-        <span class={`agent-attachment-tile__icon is-${props.tile.kind}`} aria-hidden="true">
+        <span
+            class={clsx(`agent-attachment-tile__icon is-${props.tile.kind}`, { "has-pages": !!props.tile.pageCount })}
+            aria-hidden="true"
+        >
             <i class={`fa-solid ${kindIcon(props.tile.kind, props.tile.name)}`} />
             <Show when={extLabel(props.tile.name)}>
                 <span class="ext">{extLabel(props.tile.name)}</span>
