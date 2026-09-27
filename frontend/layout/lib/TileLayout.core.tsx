@@ -42,6 +42,8 @@ import { dragState } from "./tilelayout-drag-state";
 import {
     computeDragPreviewSize,
     createDragPreviewIntent,
+    PANE_DRAG_EXCLUDED,
+    pressCanStartPaneDrag,
     dragPreviewCursorOffset,
     DRAG_PREVIEW_FALLBACK,
     type DragPreviewSize,
@@ -467,7 +469,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                         // overflows, PaneTabStrip.tsx) is deliberately NOT
                         // in this selector — it stays part of this region.
                         const atPoint = document.elementFromPoint(input.clientX, input.clientY);
-                        if (atPoint?.closest(".pane-tab, .pane-tab-strip-add")) return false;
+                        if (atPoint?.closest(PANE_DRAG_EXCLUDED)) return false;
                         return true;
                     },
                     getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
@@ -593,10 +595,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                 onPointerEnter={previewIntent.enter}
                 onPointerLeave={previewIntent.leave}
                 onPointerDown={(event) => {
-                    // Only a press on the header can start a pane drag.
-                    if ((event.target as Element | null)?.closest?.('[data-role="block-header"]')) {
-                        previewIntent.press();
-                    }
+                    if (pressCanStartPaneDrag(event.target as Element | null)) previewIntent.press();
                 }}
                 onPointerOver={(event) => event.stopPropagation()}
             >

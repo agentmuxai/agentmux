@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     computeDragPreviewSize,
     createDragPreviewIntent,
-    DRAG_PREVIEW_HOVER_MS,
-    dragPreviewCursorOffset,
     DRAG_PREVIEW_FALLBACK,
+    DRAG_PREVIEW_HOVER_MS,
     DRAG_PREVIEW_MAX_PX,
     DRAG_PREVIEW_MIN_PX,
+    dragPreviewCursorOffset,
+    pressCanStartPaneDrag,
 } from "./drag-preview-size";
 
 const ratio = (s: { width: number; height: number }) => s.width / s.height;
@@ -160,5 +161,34 @@ describe("createDragPreviewIntent", () => {
         intent.dispose();
         vi.advanceTimersByTime(DRAG_PREVIEW_HOVER_MS * 4);
         expect(rasterise).not.toHaveBeenCalled();
+    });
+});
+
+describe("pressCanStartPaneDrag", () => {
+    const header = () => {
+        document.body.innerHTML =
+            '<div data-role="block-header"><span class="title">T</span>' +
+            '<div class="pane-tab"><button class="close">x</button></div>' +
+            '<button class="pane-tab-strip-add">+</button></div><div class="body"><p>text</p></div>';
+        return (sel: string) => document.querySelector(sel);
+    };
+
+    it("a press on the header's own area can start a pane drag", () => {
+        const q = header();
+        expect(pressCanStartPaneDrag(q(".title"))).toBe(true);
+        expect(pressCanStartPaneDrag(q('[data-role="block-header"]'))).toBe(true);
+    });
+
+    it("a press on a tab pill, its close button, or + can't (ReAgent P1 on #3940)", () => {
+        const q = header();
+        expect(pressCanStartPaneDrag(q(".pane-tab"))).toBe(false);
+        expect(pressCanStartPaneDrag(q(".pane-tab .close"))).toBe(false);
+        expect(pressCanStartPaneDrag(q(".pane-tab-strip-add"))).toBe(false);
+    });
+
+    it("a press in the pane body can't", () => {
+        const q = header();
+        expect(pressCanStartPaneDrag(q(".body p"))).toBe(false);
+        expect(pressCanStartPaneDrag(null)).toBe(false);
     });
 });
