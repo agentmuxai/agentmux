@@ -227,7 +227,17 @@ Everything below lives under `frontend/app/drag/` unless noted. A module is crea
 type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "drone-kind" | "list-item";
 interface DragSession {
     kind: DragKind;
+    dragId: string;                 // minted at begin (§5.6)
     source?: { nodeId?; tabId?; blockId?; wsId? };
+    /** Kind-specific data captured at drag start that can't be re-derived later. */
+    payload?: {
+        // pane-tab: the visible pane's rect at start (PaneTabStrip.tsx:641). A background
+        // pill has no [data-blockid] element to measure at tear-off time, so without this
+        // pane-tab-tearoff.ts:154 falls back to 720×480.
+        paneSize?: { width: number; height: number };
+        // window-tab: the lone-tab eligibility flag (§5.1)
+        crossWindow?: boolean;
+    };
     escaped: boolean;
     startedAt: number;
 }
@@ -259,6 +269,7 @@ begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "bu
 
   **Internal sessions have no inactivity timeout.** A drag held over another window for any length of time sends the source renderer no events, and that is normal. The only inactivity watchdog is the file-drop one (§5.3), and it applies only to `"files"` sessions. There it clears visuals only: the path stash is untouched, and re-entering the window begins a new session.
 - **The drag tags** (`tileItemType`, `tabItemType`, `paneTabItemType`) move to one `drag-types.ts`, with `isTileSource(source)` style helpers.
+- **Every field today's payloads carry moves into the session**, not only the ids. When phase 4 retires a payload, the characterisation tests (§5.8) must show each of its fields is still delivered to its consumer. `paneSize` is the known case.
 
 ### 5.2 `window-drag-events.ts`: one set of window listeners
 
@@ -462,6 +473,7 @@ Today's drag code encodes many deliberate edge cases, and a prose spec can't lis
 | A swallowed `dragend` on Windows is caught by the button poll | win32 monitor | the session ends and `activeDrag` resets |
 | The source renderer disposes the moved tab's `LayoutModel` | `DragOverlay.tsx:126-131` | the model map shrinks after a move-out |
 | Merge-direct and cross-drag-end commit once | `wasTabRecentlyMerged` today | both events with the same `dragId` → one commit |
+| Tearing off an **inactive** pane-tab pill opens at its source pane's size, not 720×480 | `PaneTabStrip.tsx:641` → `pane-tab-tearoff.ts:154` | the floater size matches the captured `paneSize` |
 | Escape aborts a tab, pane-tab or tile drag | `tab-reorder.ts:148-154`, `PaneTabStrip.tsx:626-649`, `tab-tearoff-events.ts:218` | each kind |
 
 ## 6. Efficiency, before and after
