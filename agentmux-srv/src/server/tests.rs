@@ -6640,3 +6640,62 @@ async fn the_lan_router_never_serves_the_frontend() {
         assert!(body.contains("\"status\":\"ok\""), "{uri}: {body}");
     }
 }
+
+/// P2a (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7): the `SessionStart`
+/// hook's memory delivery through the real router — parts first, then exactly
+/// one persisted notice once every part is acknowledged.
+#[tokio::test]
+async fn memory_session_start_serves_parts_then_one_notice_after_every_ack() {
+    let (state, token) = m4c1_state();
+    let bundle: crate::backend::storage::store::Bundle = serde_json::from_value(serde_json::json!({
+        "id": "g-rules", "name": "Rules", "is_global": true, "instructions": "workspace rules",
+    }))
+    .unwrap();
+    state.id_store.bundle_upsert(&bundle).unwrap();
+    let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+    let session = format!("sess-{}", uuid::Uuid::new_v4());
+    let req = |part: usize, source: &str| {
+        serde_json::json!({"block_id": block_id, "session_id": session, "source": source, "part": part})
+    };
+    let output = || {
+        state
+            .filestore
+            .read_file(&block_id, crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT)
+            .unwrap()
+            .map(|b| String::from_utf8(b).unwrap())
+    };
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req(1, "startup")).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["of"], 1, "{v}");
+    let text = v["text"].as_str().unwrap();
+    assert!(text.starts_with("[AgentMux memory — part 1 of 1]\n"), "{text}");
+    assert!(text.contains("# [Workspace] Rules\n\nworkspace rules"), "{text}");
+
+    let (_, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req(2, "startup")).await;
+    assert!(v["text"].is_null() && v["of"] == 1, "past the last part: {v}");
+    let (_, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req(1, "resume")).await;
+    assert!(v["text"].is_null() && v["of"] == 0, "D10: a resume gets nothing: {v}");
+    assert_eq!(output(), None, "no notice before the part is written");
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/ack", req(1, "startup")).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["complete"], true, "{v}");
+    let written = output().expect("the notice");
+    assert_eq!(written.lines().count(), 1, "{written}");
+    let frame: serde_json::Value = serde_json::from_str(written.trim()).unwrap();
+    assert_eq!(frame["subtype"], "agentmux_memory_injected");
+    assert_eq!(frame["reason"], "startup");
+    let rules = frame["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["label"] == "[Workspace] Rules")
+        .expect("the workspace entry");
+    assert_eq!(rules["source"], "global");
+    assert_eq!(rules["size_bytes"], "# [Workspace] Rules\n\nworkspace rules".len());
+
+    let (_, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/ack", req(1, "startup")).await;
+    assert_eq!(v["complete"], false, "one notice per delivery: {v}");
+    assert_eq!(output().unwrap().lines().count(), 1);
+}
