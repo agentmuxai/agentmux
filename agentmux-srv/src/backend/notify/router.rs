@@ -33,6 +33,19 @@ pub const EVENT_NOTIFICATION_ACTIVATE: &str = "notification:activate";
 /// Tray snapshot (`TrayState`), published on change with persist=1 so a
 /// presenter that (re)subscribes gets the current state immediately.
 pub const EVENT_NOTIFICATION_STATE: &str = "notification:state";
+/// `block.reveal`: the named window's renderer reveals the block itself
+/// (`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md` §4.3). Payload: `BlockRevealEvent`.
+pub const EVENT_BLOCK_REVEAL: &str = "block:reveal";
+
+/// Where `block.reveal` reveals a block — also the `block:reveal` payload.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct BlockRevealEvent {
+    pub block_id: String,
+    pub tab_id: String,
+    /// The open window showing the block's workspace; only it acts.
+    pub window_id: String,
+}
 
 /// srv-internal sources, fed from places that must not block (the broker's
 /// publish path, the jekt delivery path) and drained by the router's task.
@@ -171,6 +184,15 @@ pub fn may_take_pending(pending: &PendingActivation, workspace_id: Option<&str>,
         (Some(want), Some(have)) => want == have,
         _ => true,
     }
+}
+
+/// Of `window_ids` (a workspace's windows), the one a connected frontend
+/// reports open. Two open windows on one workspace: prefer the one the user
+/// was last in.
+fn pick_open_window(p: &PolicyState, window_ids: &[String]) -> Option<String> {
+    let raise = p.raise_window();
+    let open: Vec<&String> = window_ids.iter().filter(|w| p.window_open(w)).collect();
+    open.iter().find(|w| Some(w.as_str()) == raise.as_deref()).or(open.first()).map(|w| (*w).clone())
 }
 
 const AGENT_NAME_MAX: usize = 32;
@@ -740,11 +762,8 @@ impl Router {
         let target = activated.as_ref().and_then(|(_, block_id)| resolve_click_target(&self.store, block_id));
         let (open_window, raise, any_window) = {
             let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
-            let raise = p.raise_window();
-            let open: Vec<&String> = target.iter().flat_map(|t| t.window_ids.iter()).filter(|w| p.window_open(w)).collect();
-            // Two windows on one workspace: prefer the one the user was last in.
-            let pick = open.iter().find(|w| Some(w.as_str()) == raise.as_deref()).or(open.first()).map(|w| (*w).clone());
-            (pick, raise, p.has_window())
+            let pick = target.as_ref().and_then(|t| pick_open_window(&p, &t.window_ids));
+            (pick, p.raise_window(), p.has_window())
         };
         let mut outcome = AckOutcome { known, window_id: None, workspace_id: None, has_window: any_window };
         match (activated, target) {
@@ -784,6 +803,26 @@ impl Router {
             (None, _) => {}
         }
         outcome
+    }
+
+    /// `block.reveal`: the block's tab and the open window showing it,
+    /// resolved exactly as a toast click is (`resolve_click_target` + the
+    /// same open-window pick). `None` when the block is gone or its
+    /// workspace is open in no window.
+    ///
+    /// BLOCKING (store reads) — call from `spawn_blocking`.
+    pub fn reveal_target(&self, block_id: &str) -> Option<BlockRevealEvent> {
+        let t = resolve_click_target(&self.store, block_id)?;
+        let window_id = {
+            let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
+            pick_open_window(&p, &t.window_ids)
+        }?;
+        Some(BlockRevealEvent { block_id: t.block_id, tab_id: t.tab_id, window_id })
+    }
+
+    /// Tell `target.window_id`'s renderer to reveal the block.
+    pub fn publish_block_reveal(&self, target: &BlockRevealEvent) {
+        self.publish_event(EVENT_BLOCK_REVEAL, serde_json::to_value(target).ok());
     }
 
     /// One-shot: the pane a click asked for while its workspace was open in

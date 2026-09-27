@@ -2,7 +2,7 @@
 
 **Author:** lark
 **Date:** 2026-09-27
-**Status:** active — Phase 1 (revealBlock, Swarm + token popover) shipped in PR #3961; Phase 2 (notification clicks, AgentPicker, fork pill moved over; focus-block.ts deleted) in PR #3972; Phase 3 (other windows) and the optional MCP tool not started.
+**Status:** active — Phase 1 (revealBlock, Swarm + token popover) shipped in PR #3961; Phase 2 (notification clicks, AgentPicker, fork pill moved over; focus-block.ts deleted) in PR #3972; Phase 3 (block.reveal RPC + block:reveal event) in PR #3973; the optional MCP tool not started.
 **Related:** `SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md` §2.3 (Swarm select-to-focus),
 `SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md` (token popover → agent pane), the OS-notification
 rich-content spec (`notification:activate`, `os-notify-bridge.ts`), the in-pane tabs work
@@ -127,27 +127,51 @@ does) if the switch visibly flickers in testing.
 
 ### 4.3 Another window
 
-Today's slow path activates the tab in the other window and raises it, but can't select the pane or its tab: a
-renderer can't drive another window's layout model. The OS-notification path already has the working pattern:
-**srv resolves which window shows the block and tells only that window's renderer to reveal it itself.** Reuse
-it rather than adding a second mechanism:
+A renderer can't drive another window's layout model, so the Phase 1 slow path could only activate the window
+tab in the other window and raise it, not select the pane or its tab. The OS-notification path already has the
+working pattern: **srv resolves which window shows the block and tells only that window's renderer to reveal it
+itself.** Phase 3 reuses it rather than adding a second mechanism.
 
-- New RPC `block.reveal { block_id }` in srv. It resolves the block's tab / workspace / open window with the
-  resolver notifications already use (`notify/router.rs` `resolve_click_target`), then:
-  - **Window open:** publish an event `block:reveal { block_id, tab_id, window_id }`. The named window's renderer
-    handles it with `revealBlockLocally(block_id, { tabId })`. srv also raises that window (the same path
-    notification clicks take through the launcher).
-  - **Workspace open nowhere:** open it the same way a notification click does (park and open), then reveal on
-    arrival.
-- **The stack member is also switched server-side**, before the event goes out, through the existing
-  `LayoutStackActivate` reducer command (`reducer/layout.rs:571-581`, `backend/layout/mod.rs:235-248`). The
-  stored tree then already has the right member active, so a window that loads the tab fresh shows the right tab
-  even before it handles the event. (`pane.moveTab` with `block_id == target_block_id, activate: true` reaches
-  the same function today, but it's a reorder API; a named call is clearer.)
-- `notification:activate`'s handler can then route through the same `revealBlockLocally`, so there is one
-  receiving path too.
+**RPC `block.reveal`** (`agentmux-srv/src/server/notify_handlers.rs`, registered next to
+`notify.takeactivation`; params `BlockRevealParams { block_id }`, result
+`BlockRevealResult { found: bool, window_id?: string }`, both ts-rs generated into `frontend/types/rpc/`,
+client `RpcApi.BlockRevealCommand` in `rpc-api/notify.ts`). It lives with the notification Router because the
+Router is what knows which windows are open (each window's `notify.focus` reports):
 
-`revealBlock` = `revealBlockLocally` first; if that returns `false`, call `block.reveal`.
+1. `Router::reveal_target` resolves the target exactly as a toast click does: `resolve_click_target` (block →
+   tab → workspace → that workspace's `Window` objects), then `pick_open_window`, the open-window pick shared
+   with `Router::ack` (windows a connected frontend reports open, preferring the one the user was last in).
+   Block gone, or its workspace open in no window → `found: false`, nothing changed, no event.
+2. **The stack member is switched server-side first:** `LayoutStackActivate` through the reducer, applied to
+   mstore and published (the same dispatch → apply → publish shape as `pane.moveTab`). The stored tree then has
+   the right member active, so a window that loads the tab fresh shows the right tab even before it handles
+   the event. Best-effort: if the reducer can't apply it (no tree for the tab), the renderer's own switch still
+   happens.
+3. `Router::publish_block_reveal` publishes **`block:reveal`** with payload `BlockRevealEvent { block_id,
+   tab_id, window_id }` (also ts-rs generated), like `notification:activate`: no scopes, not persisted.
+4. Returns `{ found: true, window_id }`.
+
+**Raising the window stays with the caller.** srv has no way to raise a window itself — for toast clicks the
+launcher does it from the `notify.ack` response — so `revealBlock` raises the returned window through
+`getApi().focusWindow(label)`, the label found by matching `windowId` in `getApi().listWindowInstances()`.
+The caller is the foreground window, which is also the one the OS lets hand focus over.
+
+**Receiving side** (`frontend/app/util/reveal-block-events.ts`, installed once per window in `app-init.ts`
+next to the notification bridge): subscribes to `block:reveal` and acts only when `window_id` equals this
+window's `windowId()`, calling `revealBlockLocally(block_id, { tabId: tab_id })`.
+
+**`revealBlock`** = `revealBlockLocally` first; if that returns `false`, `block.reveal`. Found → raise that
+window. Not found, or an older srv without the RPC → the Phase 1 fallback: `WorkspaceService.SetActiveTab` on
+the workspace whose tab holds the block, then raise that workspace's window — so nothing regresses.
+
+Not done here:
+
+- **Workspace open in no window** (the notification path parks the click and opens a window on it): out of
+  scope; `found: false` and the fallback above, which finds no window to raise.
+- **`notification:activate`'s receiving side** was not merged into the `block:reveal` handler. Since Phase 2
+  it already ends in `revealBlockLocally`, so there is one reveal path; the handlers differ in what they check
+  (a click's age, an older srv's payload without `window_id`, re-raising itself after the launcher did), and
+  folding those together isn't a trivial change.
 
 ### 4.4 Agents (MCP), optional
 
@@ -193,9 +217,14 @@ never for the already-active tab or a single-block pane (a `persistToBackend` sp
 Swarm's side (`focusedActiveBlockId`) has its own test: the selection follows a tab switch inside the same
 focused pane.
 
-Phase 2: the notification bridge's tests assert it delegates to `revealBlockLocally`. Phase 3: srv tests for
-`block.reveal` (resolves window and tab, activates the stack member in the stored tree, publishes
-`block:reveal` naming only that window), plus a renderer test for the event handler.
+Phase 2: the notification bridge's tests assert it delegates to `revealBlockLocally`. Phase 3:
+`notify_handlers.rs` `block_reveal_tests` (a two-tab pane with the block in the background, a window on its
+workspace reported open): resolves the tab and window, activates the stack member in the stored tree (reducer
+and `db_layout`), publishes exactly one `block:reveal` naming that window; an unknown block and a workspace
+open in no window both return `found: false` with no event and an untouched tree. `reveal-block-events.test.ts`:
+the handler acts only for its own `window_id`, through `revealBlockLocally(block_id, { tabId })`.
+`reveal-block.test.ts`: the slow path calls `block.reveal` and raises the named window; not found and an RPC
+error both fall back to `SetActiveTab` + raise; a block in this window never reaches srv.
 
 Live check (Phase 1) in a dev build: put two agents as tabs in one pane, leave agent A's tab showing, click agent
 B in the Swarm. Pane B's tab is shown and focused, the caret is in B's composer, and no Swarm border flashes (the

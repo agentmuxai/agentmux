@@ -12,7 +12,8 @@
  * `focusNode` never switches a pane's active tab, so the pane was selected but
  * kept showing another agent. This adds that step.
  *
- * SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.1 (Phase 1).
+ * SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.1 (this window), §4.3 (another
+ * window).
  */
 
 import { giveBlockFocus } from "@/app/store/focusManager";
@@ -92,11 +93,11 @@ export async function revealBlockLocally(blockId: string, opts: RevealOptions = 
 }
 
 /**
- * Reveal `blockId` wherever it is: in this window if it's here, else activate
- * its tab in the window that holds it and raise that window. (Selecting the
- * pane and its tab in ANOTHER window needs that window's own renderer —
- * spec §4.3, Phase 3; until then the other window shows the right window tab
- * but not necessarily the right pane tab.)
+ * Reveal `blockId` wherever it is: in this window if it's here, else in the
+ * window that shows it. A renderer can't drive another window's layout, so
+ * srv (`block.reveal`) tells THAT window's renderer to reveal it
+ * (`block:reveal`, reveal-block-events.ts) and this one raises that window.
+ * Spec §4.3.
  */
 export async function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<void> {
     if (await revealBlockLocally(blockId, opts)) return;
@@ -104,6 +105,30 @@ export async function revealBlock(blockId: string, opts: RevealOptions = {}): Pr
 }
 
 async function revealInOtherWindow(blockId: string): Promise<void> {
+    try {
+        const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId });
+        if (r?.found && r.window_id) {
+            await raiseWindowById(r.window_id);
+            return;
+        }
+    } catch (e) {
+        // An older srv without block.reveal: fall back below.
+        console.warn("[reveal-block] block.reveal failed", { blockId, error: String(e) });
+    }
+    await activateTabInOtherWorkspace(blockId);
+}
+
+/** Raise the window whose `Window` oid is `windowId`. */
+async function raiseWindowById(windowId: string): Promise<void> {
+    const instances = await getApi().listWindowInstances();
+    const instance = instances.find((i) => i.windowId === windowId);
+    if (instance?.label) await getApi().focusWindow(instance.label);
+}
+
+/** Fallback when srv can't name an open window for the block: activate its
+ *  tab in the workspace that holds it and raise that workspace's window.
+ *  Selects the window tab, not the pane or its tab. */
+async function activateTabInOtherWorkspace(blockId: string): Promise<void> {
     // We need Tab.blockids to find which tab holds the block: layout models for
     // other windows' tabs aren't available in this renderer.
     const ws = workspace();
@@ -117,9 +142,7 @@ async function revealInOtherWindow(blockId: string): Promise<void> {
             const tab = MOS.getObjectValue<Tab>(oref) ?? (await MOS.reloadMuxObject<Tab>(oref));
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
-            const instances = await getApi().listWindowInstances();
-            const instance = instances.find((i) => i.windowId === wsInfo.windowid);
-            if (instance?.label) await getApi().focusWindow(instance.label);
+            if (wsInfo.windowid) await raiseWindowById(wsInfo.windowid);
             return;
         }
     }

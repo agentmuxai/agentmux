@@ -11,6 +11,10 @@
 //! - `notify.test`   Settings "Send test notification".
 //! - `notify.takeactivation` new window → router: a click that arrived while
 //!                   no window was open.
+//! - `block.reveal`  any renderer → router: reveal a block that lives in
+//!                   ANOTHER window. Same target resolution as a toast click,
+//!                   so it lives with the Router, which knows which windows
+//!                   are open (`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md` §4.3).
 //!
 //! `conn_id` is captured per connection so focus reports are keyed by window
 //! and dropped on disconnect (see `websocket.rs`'s disconnect path).
@@ -121,8 +125,80 @@ pub struct NotifyOk {
     pub ok: bool,
 }
 
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct BlockRevealParams {
+    pub block_id: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct BlockRevealResult {
+    /// The block exists and its workspace is open in a window, which was
+    /// told to reveal it (`block:reveal`).
+    pub found: bool,
+    /// That window (a connected frontend's `Window` oid) — the caller raises it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub window_id: Option<String>,
+}
+
 fn router_for(state: &AppState) -> Arc<router::Router> {
     router::init(state.broker.clone(), state.config_watcher.clone(), state.mstore.clone(), state.reactive_handler)
+}
+
+/// `block.reveal`: resolve the block's tab and open window like a toast
+/// click, make the block its pane's visible tab in the STORED layout (so a
+/// window that loads the tab fresh already shows it), then tell only that
+/// window's renderer to reveal it (`block:reveal`). A workspace open in no
+/// window is out of scope: `found: false`, nothing changed.
+pub(crate) async fn reveal_block(
+    state: &AppState,
+    r: &Arc<router::Router>,
+    block_id: String,
+) -> Result<BlockRevealResult, String> {
+    if block_id.is_empty() {
+        return Err("block.reveal: block_id required".to_string());
+    }
+    let rr = r.clone();
+    let target = tokio::task::spawn_blocking(move || rr.reveal_target(&block_id))
+        .await
+        .map_err(|e| format!("block.reveal: {e}"))?;
+    let Some(target) = target else {
+        return Ok(BlockRevealResult { found: false, window_id: None });
+    };
+    activate_in_stored_layout(state, &target.tab_id, &target.block_id).await;
+    r.publish_block_reveal(&target);
+    Ok(BlockRevealResult { found: true, window_id: Some(target.window_id) })
+}
+
+/// `LayoutStackActivate` through the reducer, then mstore — the same
+/// dispatch → apply → publish shape as `pane.moveTab`. Best-effort: the
+/// renderer switches the pane itself on `block:reveal`, so a reducer that
+/// can't apply it (no tree for the tab yet) only costs the head start.
+async fn activate_in_stored_layout(state: &AppState, tab_id: &str, block_id: &str) {
+    let events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::LayoutStackActivate {
+            tab_id: tab_id.to_string(),
+            block_id: block_id.to_string(),
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    if let Some(msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        tracing::debug!(block_id, "block.reveal: stored layout not updated: {msg}");
+        return;
+    }
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore) {
+            tracing::warn!(block_id, "block.reveal: mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &events);
 }
 
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
@@ -192,7 +268,7 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
         }
     });
 
-    let rr = r;
+    let rr = r.clone();
     engine.register_typed("notify.takeactivation", move |p: NotifyTakeActivationParams, _ctx| {
         let r = rr.clone();
         async move {
@@ -203,6 +279,166 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
             })
         }
     });
+
+    let rr = r;
+    let st = state.clone();
+    engine.register_typed("block.reveal", move |p: BlockRevealParams, _ctx| {
+        let r = rr.clone();
+        let st = st.clone();
+        async move { reveal_block(&st, &r, p.block_id).await }
+    });
+}
+
+#[cfg(test)]
+mod block_reveal_tests {
+    use std::sync::{Arc, Mutex};
+
+    use agentmux_common::ipc::{Command, Event};
+
+    use crate::backend::mps::MuxEvent;
+    use crate::backend::notify::policy::FocusReport;
+    use crate::backend::notify::router::{self, BlockRevealEvent, EVENT_BLOCK_REVEAL};
+    use crate::backend::obj::Window;
+    use crate::server::AppState;
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        for ev in &evs {
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
+        }
+        evs
+    }
+
+    struct Fixture {
+        state: AppState,
+        router: Arc<router::Router>,
+        tab_id: String,
+        /// Pane tabs, `a` showing, `b` in the background.
+        a: String,
+        b: String,
+        window_id: String,
+        reveals: Arc<Mutex<Vec<serde_json::Value>>>,
+    }
+
+    /// A workspace with one tab holding a two-tab pane [a, b] (a showing), a
+    /// `Window` object on that workspace, and a recorder for `block:reveal`.
+    /// `open`: a connected frontend reports being that window.
+    async fn fixture(open: bool) -> Fixture {
+        let state = crate::server::tests::test_state();
+        let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let id = dispatch_apply(&state, Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null })
+                .await
+                .iter()
+                .find_map(|e| match e {
+                    Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        let (a, b) = (ids[0].clone(), ids[1].clone());
+        dispatch_apply(
+            &state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "pane".into(),
+                    data: Some(agentmux_common::LayoutNodeData {
+                        block_id: a.clone(),
+                        block_stack: vec![a.clone(), b.clone()],
+                        active_block_id: a.clone(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+        // A window showing that workspace (the seeded one shows another).
+        let mut window = state.mstore.get_all::<Window>().unwrap().into_iter().next().expect("seeded window");
+        window.oid = uuid::Uuid::new_v4().to_string();
+        window.workspaceid = ws_id;
+        state.mstore.insert(&mut window).unwrap();
+
+        let reveals = Arc::new(Mutex::new(Vec::new()));
+        let rec = reveals.clone();
+        state.broker.add_observer(Arc::new(move |ev: &MuxEvent| {
+            if ev.event == EVENT_BLOCK_REVEAL {
+                rec.lock().unwrap().push(ev.data.clone().unwrap_or_default());
+            }
+        }));
+        let r = super::router_for(&state);
+        if open {
+            r.focus("conn-1", FocusReport { window_focused: false, block_id: None, window_id: Some(window.oid.clone()) });
+        }
+        Fixture { state, router: r, tab_id, a, b, window_id: window.oid, reveals }
+    }
+
+    #[tokio::test]
+    async fn reveals_a_background_pane_tab_in_the_window_showing_it() {
+        let f = fixture(true).await;
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone()).await.unwrap();
+        assert!(res.found);
+        assert_eq!(res.window_id.as_deref(), Some(f.window_id.as_str()));
+
+        // The stored tree shows b — in the reducer and in mstore.
+        let tree = f.state.srv_state.lock().await.tabs[&f.tab_id].rootnode.clone().unwrap();
+        let data = tree.data.as_ref().unwrap();
+        assert_eq!((data.block_id.as_str(), data.active_block_id.as_str()), (f.b.as_str(), f.b.as_str()));
+        let tab = f.state.mstore.must_get::<crate::backend::obj::Tab>(&f.tab_id).unwrap();
+        let layout = f.state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+        assert_eq!(layout.rootnode.as_ref(), Some(&tree), "db_layout has b active");
+
+        // Only that window is told, with the tab it should switch to.
+        let reveals = f.reveals.lock().unwrap().clone();
+        assert_eq!(reveals.len(), 1, "{reveals:?}");
+        let ev: BlockRevealEvent = serde_json::from_value(reveals[0].clone()).unwrap();
+        assert_eq!(ev, BlockRevealEvent { block_id: f.b.clone(), tab_id: f.tab_id.clone(), window_id: f.window_id.clone() });
+    }
+
+    #[tokio::test]
+    async fn unknown_block_is_not_found_and_publishes_nothing() {
+        let f = fixture(true).await;
+        let res = super::reveal_block(&f.state, &f.router, "no-such-block".into()).await.unwrap();
+        assert!(!res.found);
+        assert_eq!(res.window_id, None);
+        assert!(f.reveals.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn workspace_open_in_no_window_is_not_found_and_changes_nothing() {
+        let f = fixture(false).await;
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone()).await.unwrap();
+        assert!(!res.found);
+        assert!(f.reveals.lock().unwrap().is_empty());
+        let tree = f.state.srv_state.lock().await.tabs[&f.tab_id].rootnode.clone().unwrap();
+        assert_eq!(tree.data.as_ref().unwrap().active_block_id, f.a, "stored tree untouched");
+    }
+
+    #[tokio::test]
+    async fn empty_block_id_is_an_error() {
+        let f = fixture(true).await;
+        assert!(super::reveal_block(&f.state, &f.router, String::new()).await.is_err());
+    }
 }
 
 #[cfg(test)]
