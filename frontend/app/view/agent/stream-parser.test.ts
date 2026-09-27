@@ -77,6 +77,31 @@ describe("text accumulation", () => {
     });
 });
 
+// ── User messages sent with images ───────────────────────────────────────────
+
+describe("user message with attached images", () => {
+    test("shows the user's text and turns the <attached_images> list into attachments", () => {
+        const id = "f".repeat(64);
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: `why is this red?
+
+<attached_images>
+The user attached 1 image.
+1. err.png — /s/${id}.v1-e2000.send.png
+</attached_images>`,
+        }) as any;
+        expect(node.type).toBe("user_message");
+        expect(node.message).toBe("why is this red?");
+        expect(node.attachments).toEqual([{ id, name: "err.png" }]);
+    });
+
+    test("a plain message has no attachments field", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: "Hello" }) as any;
+        expect(node.attachments).toBeUndefined();
+    });
+});
+
 // ── Thinking accumulation ───────────────────────────────────────────────────
 
 describe("thinking accumulation", () => {

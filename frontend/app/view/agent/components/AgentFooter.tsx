@@ -24,6 +24,9 @@ import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
+import { AttachmentTray } from "../attachments/AttachmentTray";
+import { getAttachmentDraft } from "../attachments/attachment-draft";
+import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 
 function pickThinkingPhrase(_exclude?: string): string {
     return "Working";
@@ -360,7 +363,8 @@ interface AgentFooterProps {
      * in `agent-view.tsx` (see the log() call on line 380).
      */
     agentName: string;
-    onSendMessage?: (message: string) => void | Promise<void>;
+    /** `attachments`: ready images from the tray, in order (may be empty). */
+    onSendMessage?: (message: string, attachments?: AttachmentRef[]) => void | Promise<void>;
     /**
      * Called when the user types in the composer. Used to tell the document
      * view to scroll to the latest content so the composer input is visually
@@ -387,7 +391,7 @@ interface AgentFooterProps {
      * Returns the recalled message text (and removes it from the queue), or
      * null when nothing is queued. The composer restores the text for editing.
      */
-    onRecallLatestQueued?: () => { text: string } | null;
+    onRecallLatestQueued?: () => { text: string; attachments?: AttachmentRef[] } | null;
     /**
      * Slash command completions. When the textarea value matches
      * `^/\w*$` (no space), AgentFooter calls this with the prefix
@@ -486,6 +490,29 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // (older/test callers, per the prop's own doc comment), in which case
     // draft persistence below is a no-op rather than an error.
     const draftBlockId = props.viewModel?.blockId;
+    // Images attached to the unsent message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS
+    // _2026_09_26.md §5). Module-level per block, like composerDrafts.
+    const attachmentDraft = draftBlockId ? getAttachmentDraft(draftBlockId) : undefined;
+    let focusLastTile: (() => void) | undefined;
+    const [sendHint, setSendHint] = createSignal<string | null>(null);
+    let sendHintTimer: ReturnType<typeof setTimeout> | undefined;
+    const showSendHint = (text: string) => {
+        setSendHint(text);
+        clearTimeout(sendHintTimer);
+        sendHintTimer = setTimeout(() => setSendHint(null), 3000);
+    };
+    onCleanup(() => clearTimeout(sendHintTimer));
+
+    // Ctrl/Cmd+V with images (a screenshot, or files copied in Explorer or
+    // Finder): attach them. Never preventDefault — a textarea's default paste
+    // only ever inserts text, so the browser still pastes any text part
+    // natively (selection handling and undo intact). Spec §6.2.
+    const handlePaste = (e: ClipboardEvent) => {
+        if (!attachmentDraft) return;
+        const files = Array.from(e.clipboardData?.files ?? []);
+        if (files.length === 0) return;
+        attachmentDraft.uploadFiles(files);
+    };
 
     // ── Sent-message history (shell-style ArrowUp / ArrowDown recall) ──
     // Per-pane, in-memory, capped. The component body runs once (SolidJS), so
@@ -855,15 +882,27 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     const handleSend = () => {
         if (!textareaRef) return;
         const message = textareaRef.value;
-        if (!message.trim()) return;
+        const processing = attachmentDraft?.processingCount() ?? 0;
+        if (processing > 0) {
+            showSendHint(`Waiting for ${processing} ${processing === 1 ? "image" : "images"} to finish processing`);
+            return;
+        }
+        const attachments = attachmentDraft?.refs() ?? [];
+        if (!message.trim() && attachments.length === 0) return;
         if (props.onSendMessage) {
             // agent-submit span per SPEC_INPUT_RESPONSIVENESS §7.1. Includes
             // the synchronous onSendMessage cost (WS send, slice dispatch).
             markStart("agent-submit");
-            props.onSendMessage(message);
+            // Plain messages keep the one-argument call.
+            if (attachments.length > 0) {
+                props.onSendMessage(message, attachments);
+                attachmentDraft?.clearAfterSend();
+            } else {
+                props.onSendMessage(message);
+            }
             // Record in shell-style history (skip a consecutive duplicate) and
             // reset the navigation cursor back to the live (now empty) draft.
-            if (message !== sentHistory[sentHistory.length - 1]) {
+            if (message.trim() && message !== sentHistory[sentHistory.length - 1]) {
                 sentHistory.push(message);
                 if (sentHistory.length > HISTORY_MAX) sentHistory.shift();
             }
@@ -903,6 +942,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // events without setting `isComposing`. Both checks are
         // load-bearing. See SPEC_INPUT_RESPONSIVENESS §6.2.
         if (e.isComposing || e.keyCode === 229) return;
+        // Backspace at the very start of the text, with nothing selected,
+        // moves into the attachment tray (Slack's pattern) instead of doing
+        // nothing. Spec §5.9.
+        if (
+            e.key === "Backspace" &&
+            textareaRef &&
+            textareaRef.selectionStart === 0 &&
+            textareaRef.selectionEnd === 0 &&
+            (attachmentDraft?.count() ?? 0) > 0 &&
+            focusLastTile
+        ) {
+            e.preventDefault();
+            focusLastTile();
+            return;
+        }
         // PageUp/PageDown: this textarea is a flex sibling of
         // .agent-document-scroll-region, not a descendant of it (see
         // .agent-composer-region in styles/_control-bar.scss) — and
@@ -1045,6 +1099,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 if (recalled) {
                     e.preventDefault();
                     setComposerValue(recalled.text);
+                    if (recalled.attachments?.length) void attachmentDraft?.restoreRefs(recalled.attachments);
                     return;
                 }
             }
@@ -1129,6 +1184,18 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     return (
         <div class="agent-footer">
             <div class="agent-input-container">
+                <Show when={attachmentDraft}>
+                    <AttachmentTray
+                        draft={attachmentDraft!}
+                        focusComposer={() => textareaRef?.focus()}
+                        registerFocusLast={(fn) => (focusLastTile = fn)}
+                    />
+                </Show>
+                <Show when={sendHint()}>
+                    <div class="agent-attachment-send-hint" role="status">
+                        {sendHint()}
+                    </div>
+                </Show>
                 <Show when={autocompletePrefix() !== null && completions().length > 0}>
                     <SlashAutocomplete
                         completions={completions()}
@@ -1144,6 +1211,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     spellcheck={false}
                     onKeyDown={handleKeyDown}
                     onInput={handleInput}
+                    onPaste={handlePaste}
                     onCompositionStart={() => {
                         composingRef = true;
                     }}

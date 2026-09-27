@@ -89,17 +89,45 @@ function canEnablePaste(): boolean {
     return activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA" || isContentEditableBeingEdited();
 }
 
+// window.getSelection() doesn't see a selection inside an <input> or
+// <textarea> in Chromium, so read the focused input's own selection.
 function canEnableCopy(): boolean {
-    const sel = window.getSelection();
-    return !util.isBlank(sel?.toString());
+    return !util.isBlank(selectedTextIn(document.activeElement));
 }
 
 function canEnableCut(): boolean {
-    const sel = window.getSelection();
     if (document.activeElement?.classList.contains("xterm-helper-textarea")) {
         return false;
     }
-    return !util.isBlank(sel?.toString()) && canEnablePaste();
+    return !util.isBlank(selectedTextIn(document.activeElement)) && canEnablePaste();
+}
+
+/** The text an input's (or the page's) selection covers. */
+function selectedTextIn(el: Element | null): string {
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+        const start = el.selectionStart ?? 0;
+        const end = el.selectionEnd ?? start;
+        return el.value.slice(start, end);
+    }
+    return window.getSelection()?.toString() ?? "";
+}
+
+/**
+ * Replace `el`'s selection with `text` the way a real paste would.
+ * `execCommand("insertText")` is deprecated, but it is the one API that
+ * records the edit in Chromium's native undo history, and AgentMux only runs
+ * on Chromium; `setRangeText` + an `input` event is the fallback.
+ */
+function insertIntoInput(el: HTMLElement | null, text: string): void {
+    if (!el) return;
+    el.focus();
+    if (typeof document.execCommand === "function" && document.execCommand("insertText", false, text)) return;
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+        const start = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? start;
+        el.setRangeText(text, start, end, "end");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
 }
 
 async function getClipboardURL(): Promise<URL | null> {
@@ -141,14 +169,43 @@ async function showTextInputContextMenu(e: MouseEvent, leadingItems?: ContextMen
             menu.push({ type: "separator" });
         }
     }
+    // The JS context menu never executes an item's `role` (only `click`), so
+    // Cut/Copy/Paste do the work themselves, against the element that had
+    // focus when the menu opened: clicking a menu row can move focus away.
+    const target = document.activeElement as HTMLElement | null;
     if (canCut) {
-        menu.push({ label: "Cut", role: "cut" });
+        menu.push({
+            label: "Cut",
+            role: "cut",
+            click: () => {
+                const text = selectedTextIn(target);
+                void clipboardWriteText(text).then(() => {
+                    target?.focus();
+                    if (typeof document.execCommand === "function" && document.execCommand("delete")) return;
+                    insertIntoInput(target, "");
+                });
+            },
+        });
     }
     if (canCopy) {
-        menu.push({ label: "Copy", role: "copy" });
+        menu.push({
+            label: "Copy",
+            role: "copy",
+            click: () => void clipboardWriteText(selectedTextIn(target)),
+        });
     }
     if (canPaste) {
-        menu.push({ label: "Paste", role: "paste" });
+        menu.push({
+            label: "Paste",
+            role: "paste",
+            click: () => {
+                void clipboardReadText()
+                    .then((text) => {
+                        if (text) insertIntoInput(target, text);
+                    })
+                    .catch(() => {});
+            },
+        });
     }
     if (clipboardURL) {
         menu.push({ type: "separator" });

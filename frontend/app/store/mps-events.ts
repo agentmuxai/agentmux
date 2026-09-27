@@ -24,6 +24,13 @@ export const WpsEvent = {
     Config: "config",
     UserInput: "userinput",
     AgentMessageAccepted: "agent-message-accepted",
+    // Image attachment processing, scoped `block:<id>` of the pane that
+    // started the batch. Payloads in frontend/types/rpc/Attachment*Event.ts;
+    // see docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.5.
+    AttachmentProgress: "attachment:progress",
+    AttachmentReady: "attachment:ready",
+    AttachmentFailed: "attachment:failed",
+    AttachmentBatchDone: "attachment:batch-done",
     RouteGone: "route:gone",
     BlockStats: "blockstats",
     AgentFailure: "agentfailure",

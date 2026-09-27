@@ -31,6 +31,7 @@ import {
     UserMessageEvent,
 } from "./types";
 import { buildMemoryReinjectionNodeFromReplay } from "./memory-reinjection";
+import { splitAttachedImages } from "./attachments/attached-images";
 import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
 
 /**
@@ -671,10 +672,14 @@ export class ClaudeCodeStreamParser {
         if (jekt) return jekt;
 
         const isStartup = STARTUP_HEADING_RE.test(event.message);
+        // A message sent with images carries the backend's <attached_images>
+        // list; show the user's own text with thumbnails instead.
+        const { text, attachments } = splitAttachedImages(event.message);
         return {
             type: "user_message",
             id: this.nextIdOf("user"),
-            message: event.message,
+            message: text,
+            ...(attachments.length > 0 ? { attachments } : {}),
             // Replay: no invented "now" — parseHistoryLines fills the line's
             // stored receive time (ReAgent P1, #3620).
             timestamp: event.timestamp || (this.isReplay ? undefined : Date.now()),

@@ -323,6 +323,25 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Handle array content with tool_result blocks
         if (Array.isArray(content)) {
+            // A user message sent with images: image blocks, then its text.
+            // The text carries the <attached_images> list, which the stream
+            // parser turns back into thumbnails; the base64 itself is not
+            // rendered. SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.7.
+            // Only when an image block is present: text-only arrays are also
+            // how Claude Code records "[Request interrupted by user]" and
+            // other meta lines, which were never rendered as user messages.
+            const hasToolResult = content.some((b: any) => b?.type === "tool_result");
+            const hasImage = content.some((b: any) => b?.type === "image");
+            if (!hasToolResult && hasImage) {
+                const text = content
+                    .filter((b: any) => b?.type === "text" && typeof b.text === "string")
+                    .map((b: any) => b.text as string)
+                    .join("\n\n");
+                if (text) {
+                    return [{ type: "user_message", message: text, timestamp: this.opts.replay ? undefined : Date.now() }];
+                }
+                return [];
+            }
             const results = this.buildToolResults(content, structuredResult);
             return results;
         }
