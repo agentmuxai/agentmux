@@ -24,7 +24,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { callBackendService } from "@/app/store/mos";
 import { recordTurn } from "@/app/store/token-usage";
 import { ActivityRow } from "./ActivityRow";
-import { backgroundTaskActivities } from "../activity/background-adapter";
+import { applyRegistryOutcomes, backgroundTaskActivities } from "../activity/background-adapter";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
@@ -106,7 +106,11 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         // still visible in THIS session's transcript isn't rendered twice.
         // See activity/background-adapter.ts's doc comment.
         const knownIds = new Set(transcriptDerived.map((a) => a.id));
-        return [...transcriptDerived, ...backgroundTaskActivities(props.backgroundTasksAtom(), knownIds)];
+        const tasks = props.backgroundTasksAtom();
+        // A task srv has seen end (the CLI's own task feed) closes its
+        // transcript row too, even when no <task-notification> ever reaches
+        // this pane — the case for every task a subagent launched.
+        return [...applyRegistryOutcomes(transcriptDerived, tasks), ...backgroundTaskActivities(tasks, knownIds)];
     });
 
     const activityById = createMemo(() => {
