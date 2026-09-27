@@ -27,14 +27,14 @@ import { createEffect, createRoot, on } from "solid-js";
 
 import { addEventListener as addPaneListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
-import { focusManager, giveBlockFocus } from "@/app/store/focusManager";
-import { getApi, getSettingsKeyAtom, MOS, setActiveTab, workspace } from "@/app/store/global";
+import { focusManager } from "@/app/store/focusManager";
+import { getApi, getSettingsKeyAtom, workspace } from "@/app/store/global";
+import { revealBlockLocally } from "@/app/util/reveal-block";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { windowId } from "@/app/store/window-identity";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { NotifyPaneEvent } from "@/types/rpc/NotifyPaneEvent";
 
 export const EVENT_NOTIFICATION_ACTIVATE = "notification:activate";
@@ -111,46 +111,22 @@ export function shouldActivateHere(d: ActivatePayload | undefined, myWindowId: s
     return !d.window_id || d.window_id === myWindowId;
 }
 
-async function focusBlockInTab(tabId: string, blockId: string): Promise<void> {
-    await setActiveTab(tabId);
-    // The layout model for a not-yet-visited tab exists only after the
-    // switch renders — retry briefly.
-    for (let i = 0; i < 10; i++) {
-        const node = getLayoutModelForTabById(tabId)?.getNodeByBlockId(blockId);
-        if (node?.id != null) {
-            getLayoutModelForTabById(tabId)!.focusNode(node.id);
-            break;
-        }
-        await new Promise((r) => setTimeout(r, 50));
-    }
-    // focusNode no-ops when the pane is already the tab's focused node, which
-    // leaves the caret wherever it was — put it in the pane's composer.
-    giveBlockFocus(blockId);
-}
-
 /**
- * Focus `blockId` if it lives in THIS window's workspace. With `tabId` (srv
- * resolved it) the tab is used directly; without, the workspace's tabs are
- * searched via `Tab.blockids`, which also finds tabs whose layout model
- * hasn't been created yet. Returns whether the block was found here.
+ * Focus `blockId` if it lives in THIS window's workspace, through the one shared
+ * reveal path (SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md Phase 2): it finds the
+ * tab via `Tab.blockids` (so tabs whose layout isn't built yet are found), uses
+ * `tabId` first when srv resolved it, switches a multi-tab pane to the block,
+ * and puts the caret in it. Returns whether the block was found here.
  */
 export async function activateBlockLocally(blockId: string, tabId?: string): Promise<boolean> {
-    const ws = workspace();
-    if (!ws) return false;
-    const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
-    const candidates = tabId && tabIds.includes(tabId) ? [tabId] : tabIds;
-    for (const id of candidates) {
-        const oref = MOS.makeORef("tab", id);
-        const tab = MOS.getObjectValue<Tab>(oref) ?? (await MOS.reloadMuxObject<Tab>(oref));
-        if (!tab?.blockids?.includes(blockId)) continue;
-        await focusBlockInTab(id, blockId);
-        // The launcher already raised this window; this is a second try that
-        // is harmless when it already worked.
-        await raiseThisWindow();
-        return true;
+    if (!(await revealBlockLocally(blockId, { tabId }))) {
+        console.warn("[os-notify] activation: block not in this window's workspace", { blockId, tabId });
+        return false;
     }
-    console.warn("[os-notify] activation: block not in this window's workspace", { blockId, tabId });
-    return false;
+    // The launcher already raised this window; this is a second try that
+    // is harmless when it already worked.
+    await raiseThisWindow();
+    return true;
 }
 
 /** Count of on-screen "needs you" notifications in a Router snapshot. */

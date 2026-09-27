@@ -29,8 +29,8 @@ vi.mock("@/app/util/menu-position", () => ({
     })),
 }));
 const focusBlockMock = vi.fn(async (_blockId: string) => {});
-vi.mock("@/app/util/focus-block", () => ({
-    focusBlock: (blockId: string) => focusBlockMock(blockId),
+vi.mock("@/app/util/reveal-block", () => ({
+    revealBlock: (blockId: string) => focusBlockMock(blockId),
 }));
 
 import { TokenBreakdownPopover } from "./TokenBreakdownPopover";

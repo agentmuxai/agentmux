@@ -20,7 +20,7 @@ import { useTick } from "@/app/hook/useTick";
 import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock } from "@/util/format-time";
-import { focusBlock } from "@/app/util/focus-block";
+import { revealBlock } from "@/app/util/reveal-block";
 import { swarmRowColors } from "./swarm-row-colors";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
@@ -329,7 +329,7 @@ export function AgentRow({
                 // "selects the pane" behavior for non-agent-entry clicks.
                 onClick={(e) => {
                     e.stopPropagation();
-                    if (node.blockId) void focusBlock(node.blockId);
+                    if (node.blockId) void revealBlock(node.blockId);
                 }}
                 // ...and the Swarm pane must not flash selected first. The
                 // Swarm root is focusable (tabIndex={-1}), so a press anywhere
