@@ -286,6 +286,17 @@ impl HistoryService {
                 if !delay.is_zero() {
                     std::thread::sleep(delay);
                 }
+                // Something built it on demand during the delay (History tab
+                // list/get, an export): don't follow it with another full
+                // discovery/stat pass (Codex P2 on #3930).
+                if index.refreshed_at_ms() > 0 {
+                    pending.store(false, std::sync::atomic::Ordering::SeqCst);
+                    tracing::info!(
+                        delayed_ms = delay.as_millis() as u64,
+                        "history: index already built on demand; startup build skipped"
+                    );
+                    return;
+                }
                 let started = std::time::Instant::now();
                 let (discovered, _, _) = index.refresh();
                 pending.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -957,6 +968,20 @@ mod search_freshness_tests {
         let err = svc.refresh_for_search().unwrap_err();
         assert!(matches!(err, HistorySearchError::IndexBuilding), "{err}");
         assert_eq!(svc.index.refreshed_at_ms(), 0, "the search must not have built the index");
+    }
+
+    /// Codex P2 on #3930: an on-demand build during the delay makes the
+    /// deferred warm-up a no-op instead of a second full discovery pass.
+    #[test]
+    fn an_on_demand_build_during_the_delay_skips_the_deferred_build() {
+        let svc = empty_service();
+        let warm = svc.warm_in_background_after(std::time::Duration::from_millis(300));
+        svc.index.refresh(); // e.g. the History tab's list() during startup
+        let built_at = svc.index.refreshed_at_ms();
+        assert!(built_at > 0);
+        warm.join().unwrap();
+        assert_eq!(svc.index.refreshed_at_ms(), built_at, "the deferred build must not refresh again");
+        assert!(!svc.warm_pending.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
