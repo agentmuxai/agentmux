@@ -39,6 +39,48 @@ fn zone_size(zone: &str) -> Option<i64> {
 }
 
 impl PersistentSubprocessController {
+    /// Claims this agent's single-live-instance lease, then runs the resume
+    /// gate ([`apply_resume_gate_with`](Self::apply_resume_gate_with)) under it.
+    ///
+    /// The lease is one live instance per agent across every AgentMux instance
+    /// on this host (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md Phase 1),
+    /// held for the spawned process's lifetime. Claiming it FIRST means the
+    /// gate's sweep, relocation and settle (spec §4.3) run for one spawn of an
+    /// agent at a time: two controllers of one agent racing those steps kept
+    /// opening narrower windows (#3924). The session is only a hint to the
+    /// lease — recorded, not a key — so the gate settling the final id
+    /// afterwards changes nothing about the claim.
+    ///
+    /// When leasing is unavailable (no store, or no agent UID) the gate runs
+    /// unguarded, as it did before Phase 1.
+    pub(super) fn lease_then_gate(
+        &self,
+        config: &PersistentSpawnConfig,
+        gfs: Option<&FileStore>,
+        history_session: Option<String>,
+    ) -> Result<Option<Arc<crate::backend::agent_admission::HeldAgentLease>>, String> {
+        let candidate = if config.resume_flag.is_empty() {
+            None
+        } else {
+            self.inner.lock().unwrap().session_id.clone().or_else(|| history_session.clone())
+        };
+        let lease = match self.acquire_agent_lease(config, candidate.as_deref()) {
+            Ok(lease) => lease,
+            // The agent's other pane in this process holds the lease because it
+            // has this very conversation open. Report that as the held-elsewhere
+            // refusal it is: callers treat only that one as "don't fall back to
+            // a fresh session" (`is_held_elsewhere_error`).
+            Err(e) => {
+                if let Some((other, closing)) = candidate.as_deref().and_then(|sid| self.session_held_elsewhere(sid)) {
+                    return Err(super::held_elsewhere_error(&other, closing));
+                }
+                return Err(e);
+            }
+        };
+        self.apply_resume_gate_with(config, gfs, history_session);
+        Ok(lease)
+    }
+
     /// The one resume gate
     /// (SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md §4.2):
     /// before this spawn passes `--resume`, only the head of the agent's
@@ -47,20 +89,16 @@ impl PersistentSubprocessController {
     /// redirected to the head when this config dir reaches it, and cleared
     /// otherwise, so the spawn goes fresh and carries AgentMux's record.
     /// Runs after every path that sets the id (hydrate from config, first
-    /// spawn onto rendered history), before the held-elsewhere check and the
-    /// lease, which then apply to whatever id survives. Never fails the spawn:
-    /// anything unknown leaves the id as it was.
+    /// spawn onto rendered history) and under the agent's lease
+    /// ([`lease_then_gate`](Self::lease_then_gate)), before the held-elsewhere
+    /// check, which then applies to whatever id survives. Never fails the
+    /// spawn: anything unknown leaves the id as it was.
     ///
     /// `history_session`: on a first spawn holding no id, the session of the
     /// history the pane renders when `--resume` can't reach it here. It is a
     /// candidate for relocation only (a rebuild onto a new login of the same
     /// identity); any other decision leaves the spawn holding no id, as
     /// before.
-    pub(super) fn apply_resume_gate(&self, config: &PersistentSpawnConfig, history_session: Option<String>) {
-        let gfs = crate::backend::agent_session::global_transcript_store();
-        self.apply_resume_gate_with(config, gfs.map(|g| &**g), history_session);
-    }
-
     pub(super) fn apply_resume_gate_with(
         &self,
         config: &PersistentSpawnConfig,
