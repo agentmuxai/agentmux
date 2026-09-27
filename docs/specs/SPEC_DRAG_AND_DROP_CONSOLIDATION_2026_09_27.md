@@ -1,7 +1,7 @@
 # SPEC: Drag and drop: audit, one facility, one drop indicator
 
 **Date:** 2026-09-27
-**Status:** proposed; nothing in this spec is implemented. It supersedes `SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md`: its window-level controller and `fileDrop` manifest hook carry over as §5.3, and its thick-border look is replaced by §4. It revives the unlanded `SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md` as phase 4. Written against `main` @ `135251326`; spot-verify file:line citations before trusting them.
+**Status:** proposed; nothing in this spec is implemented. It supersedes `SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md`: its window-level controller and per-pane `accept`/`drop` hook carry over as §5.3 (now registered per block, not on the manifest), and its thick-border look is replaced by §4. It revives the unlanded `SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md` as phase 4. Written against `main` @ `135251326`; spot-verify file:line citations before trusting them.
 **Author:** Korp@narko
 **Related:** `SPEC_PANE_FILE_DROP_2026_05_30.md` (OS file drop: the CEF drag handler and the path stash), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (what an agent pane does with files), `SPEC_TAB_WINDOW_DRAG_CONSOLIDATION_2026_07_13.md` (landed-vs-open map of window drags), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (pane tabs, and `pane-tab-tearoff.ts`, the pattern §5.6 generalises), `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md` (shelved), `docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md`.
 
@@ -38,7 +38,7 @@
   - one set of window listeners;
   - hit-testing;
   - one drop-indicator component and one set of tokens.
-- **Panes opt in to file drops** with a manifest hook: agent and terminal in phase 1; media and editor later.
+- **Panes opt in to file drops** by registering a live hook for their block: agent and terminal in phase 1; media and editor later.
 - **The indicator follows the established pattern** (§4): valid drop zones are outlined as soon as files enter the window; the zone under the cursor gets a translucent accent tint, an accent border and a prompt saying what will happen; invalid zones say why before you let go.
 - **Five independently shippable phases** (§7). Phase 1 is the user-visible file-drop work. The rest is consolidation that each phase proves with tests before deleting old code.
 
@@ -294,17 +294,19 @@ begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "bu
 
 It carries over from the superseded spec, with the §4 look.
 
-**How a pane opts in:**
+**How a pane opts in:** the pane instance registers its **live** hook by block id when it is created, and disposes it with the instance.
+
+- **Why not the manifest:** the manifest registry holds type-level manifests only. `resolvePaneTabView` canonicalises a view name (`pane-tab-registry.ts:189-195`), and `adaptPaneTabInstance` doesn't expose per-instance objects (`pane-tab-host.tsx:36-77`). After a hit-test resolves `data-blockid`, nothing could reach that block's `accept`/`drop` closures without creating a second instance.
+- **Where the call goes:** in the view model's constructor, or the view's mount, with `onCleanup(dispose)`. The registry is the source of truth for which panes accept files; no manifest flag is needed.
 
 ```ts
-// PaneTabManifest.capabilities
-fileDrop?: true;
-
-// returned from manifest.create(ctx)
-fileDrop?: {
+interface FileDropHook {
     accept(drag: DragFiles): { ok: true; message: string; icon?: string } | { ok: false; reason: string };
     drop(paths: string[], files: FileList): void | Promise<void>;
-};
+}
+
+// file-drop.ts: a per-window registry of live hooks, keyed by block id
+registerFileDropTarget(blockId: string, hook: FileDropHook): () => void;   // returns the disposer
 ```
 
 ```ts
@@ -324,12 +326,12 @@ interface DragFiles {
 
 **How a drag is handled:**
 - **Verdicts for every visible pane, up front.** When a `"files"` session begins (the first file `dragenter`), the controller:
-  - enumerates the visible panes with a `fileDrop` hook (the active layout's `[data-role="pane"]` elements);
+  - enumerates the visible panes (the active layout's `[data-role="pane"]` elements) whose block id has a registered hook;
   - calls each `accept` once with the metadata known so far;
   - caches the verdicts for the drag.
 
   That is what lets every valid pane show **Armed** immediately (§4), not only after it has been hovered. When `peek_drag_paths` returns names, every visible pane's `accept` is re-run once and the Armed/Blocked states refresh. Blocked panes are never drawn Armed.
-- **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → view (`resolvePaneTabView`) → the cached verdict. A pane that appears mid-drag, e.g. from a tab switch, is evaluated when first hit. The per-event decision reads the cache, so `accept` never runs per `dragover`.
+- **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → the registered hook's cached verdict. A pane that appears mid-drag, e.g. from a tab switch, is evaluated when first hit. The per-event decision reads the cache, so `accept` never runs per `dragover`.
 - **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, or the files-only idle watchdog, 350 ms without a `dragover`). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
 - **On `drop`:**
   1. **Re-validate synchronously:**
@@ -359,7 +361,7 @@ interface DragFiles {
 
 | Pane | `accept` | `drop` |
 |---|---|---|
-| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: no cwd / `dnd:enabled` off | `attachmentDraft.ingestPaths` or `copyIntoWorkdir` |
+| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: no cwd / `dnd:enabled` off | tray: `attachmentDraft.ingestPaths(paths)`, then `copyIntoWorkdir` on the paths it hands back (`non_images`; always empty today, but an older images-only backend returns them, `useAgentDropAttach.ts:159-189`) · copy mode: `copyIntoWorkdir` |
 | Terminal (`view: "term"`) | "Copy N files to <cwd>" · blocked: no cwd / setting off | `copyIntoWorkdir` (no mention) |
 
 **Later panes:**
@@ -383,7 +385,11 @@ interface DragFiles {
 - **The stash lives as long as the drag.** Today's 5 s TTL (`drag_stash.rs:12-22`, `:35-38`) expires under a user who hovers longer before dropping, so the drop then reports "couldn't read the paths" mid-drag. The entry is kept until one of:
   - it is consumed;
   - a new drag entering that window replaces it (`on_drag_enter`);
-  - the renderer's file session ends without a drop (leave, Esc, idle), which sends `clear_drag_paths {windowLabel}`.
+  - the 10 min backstop below.
+
+  **The renderer never clears it**, not on leave, Esc or the files-idle watchdog:
+  - the watchdog fires on a pause in drag events, which also happens over a native child surface or during a renderer stall while the OS drag is still live, so clearing then would lose the only copy of the paths;
+  - a stale entry is harmless, because the next drag that enters the window replaces it before any drop can consume it.
 
   A long backstop TTL (10 min) only guards against a leak. `peek_drag_paths` never shortens it. The single process-wide slot (`drag_stash.rs:24`) otherwise goes away.
 
@@ -458,6 +464,7 @@ interface DragFiles {
   - `register()` compares identity and re-registers only on change.
 - **This keeps the poll's two jobs:** first mount (one `register()` in `onMount`), and re-registration when a `Show` gate replaces the header. It does both when the DOM actually changes, instead of every 100 ms forever. A characterisation test mounts a tile with a detached fallback header and asserts the live header is the registered handle, before and after the change.
 - **The "never tear down mid-drag" rule** (`:438`) moves into the registrar, keyed on `session()`.
+- **Retry after the drag.** A mutation that arrives mid-drag is skipped by that rule, and when the drag ends there may be no further mutation. So the registrar sets `pendingRegister`, and a session-end subscriber runs `register()` once if it is set. Otherwise a header replaced by a `Show` gate mid-drag would never become draggable.
 
 ### 5.8 Behaviours phases 4–5 must preserve
 
@@ -468,7 +475,7 @@ Today's drag code encodes many deliberate edge cases, and a prose spec can't lis
 | A lone-tab drag carries no cross-window payload; only the native strip merge handles it | `droppable-tab.tsx:141-149` | releasing a lone tab outside any strip does nothing and strands no window |
 | A last tab dropped on another strip: secondary → `RestoreTornOffTab` + close the source; `main` → declined | `tab-tearoff-events.ts:266-296` | both cases |
 | A source `onDrop` for an outside release keeps the payload for the monitor | `TileLayout.core.tsx:504-514`, `droppable-tab.tsx:175-200`, `PaneTabStrip.tsx:624-625` | tear-off still receives the payload |
-| No pragmatic registration teardown mid-drag | `TileLayout.core.tsx:438` | `activeDrag` resets after a drop while the header is replaced mid-drag |
+| No pragmatic registration teardown mid-drag, and the skipped registration is retried when the drag ends | `TileLayout.core.tsx:438` (the poll retried implicitly) | `activeDrag` resets after a drop while the header is replaced mid-drag, and the replacement header is draggable after the drop |
 | The live header is registered, never the detached `ErrorBoundary` fallback | `TileLayout.core.tsx:420-424` | a tile with a detached fallback header |
 | A swallowed `dragend` on Windows is caught by the button poll | win32 monitor | the session ends and `activeDrag` resets |
 | The source renderer disposes the moved tab's `LayoutModel` | `DragOverlay.tsx:126-131` | the model map shrinks after a move-out |
@@ -499,7 +506,7 @@ Each phase is one PR, or a short stack, and is independently shippable.
 1. **Phase 1: file drops**
    - **Build:**
      - `drag-session` for `"files"` only;
-     - `file-drop.ts` and its manifest hook;
+     - `file-drop.ts` and its per-block hook registry;
      - `DropIndicator` + `drop-indicators.scss`;
      - `file-drop-actions.ts`, whose `copyIntoWorkdir` paths transport is the **existing CEF `copy_file_to_dir`** in this phase (the same host-only IPC every phase uses);
      - the agent and terminal hooks;
