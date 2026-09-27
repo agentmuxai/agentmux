@@ -37,6 +37,7 @@ import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { partitionHeaderElems } from "./header-elems";
+import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
 import { resolveContextMenuRegion } from "./context-menu-region";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
 import {
@@ -402,6 +403,11 @@ function EndIcons(props: {
                         disabled={magnifyDisabled()}
                     />
                 }>
+                    {/* "Always on top" tack, with the window controls
+                        (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4). */}
+                    <Show when={canTackFloatingPane(floatingLabel())}>
+                        <FloatingAlwaysOnTopButton label={floatingLabel()!} blockId={props.blockId()} />
+                    </Show>
                     <FloatingMaximizeButton label={floatingLabel()!} blockId={props.blockId()} />
                 </Show>
             }>

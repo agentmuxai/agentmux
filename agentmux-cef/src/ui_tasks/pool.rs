@@ -544,3 +544,40 @@ wrap_task! {
         }
     }
 }
+
+/// Register an approval window as "keep above tacked floaters" if its
+/// top-level window already exists (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27
+/// §3.1). Posted by `open_subwindow` right after it records the label in
+/// `approval_windows`: window creation is posted asynchronously, so either
+/// `on_after_created` runs first (and sees no approval label yet) — then this
+/// task finds the window — or this runs first and finds nothing, and
+/// `on_after_created` registers it. Registration is idempotent (Codex P1 on
+/// #3970).
+#[cfg(target_os = "windows")]
+pub fn post_register_keep_above_floaters(state: &Arc<AppState>, label: &str) {
+    let mut task = RegisterKeepAboveFloatersTask::new(state.clone(), label.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+#[cfg(target_os = "windows")]
+wrap_task! {
+    pub struct RegisterKeepAboveFloatersTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Still an approval window (not already closed)?
+            if !self.state.is_approval_window(&self.label) {
+                return;
+            }
+            // SAFETY: strict resolution — validated cache or the registered
+            // browser's own top-level; never an arbitrary window of ours.
+            let hwnd = unsafe { crate::commands::window::resolve_window_hwnd_strict(&self.state, &self.label) };
+            if let Some(hwnd) = hwnd {
+                crate::floating_pane::register_keep_above_floaters(self.label.clone(), hwnd as isize);
+            }
+        }
+    }
+}

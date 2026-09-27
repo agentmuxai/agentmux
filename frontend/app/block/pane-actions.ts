@@ -7,6 +7,7 @@
  */
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
+import { FLOATING_ONTOP_META_KEY } from "./floating-ontop-meta";
 import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
@@ -58,6 +59,9 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
     for (const key of paneTabCapability(blockData.meta?.view, "splitDropsMeta") ?? []) {
         delete meta[key];
     }
+    // Any view: the "Always on top" tack belongs to the source pane's floating
+    // window; the new split is docked (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §6.3).
+    delete meta[FLOATING_ONTOP_META_KEY];
     const blockDef: BlockDef = { meta };
 
     try {

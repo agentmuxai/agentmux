@@ -415,6 +415,15 @@ impl AgentMuxHandler {
                     if pending_kind == WindowKind::Subwindow {
                         unsafe { skip_taskbar(hwnd); }
                     }
+                    // Approval pages (credential / memory-adoption) must never
+                    // sit behind an "Always on top" floater — they are
+                    // security prompts. Registered here, they are kept above
+                    // tacked floaters (topmost only while those are, re-raised
+                    // on every re-stack) and are ordinary windows otherwise.
+                    // SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.1.
+                    if self.state.is_approval_window(&label) {
+                        crate::floating_pane::register_keep_above_floaters(label.clone(), hwnd as isize);
+                    }
                 }
             }
         }
@@ -1208,6 +1217,8 @@ impl AgentMuxHandler {
         if let Some(lbl) = label.as_deref() {
             self.state.window_meta.lock().remove(lbl);
             self.state.approval_windows.lock().remove(lbl);
+            #[cfg(target_os = "windows")]
+            crate::floating_pane::unregister_keep_above_floaters(lbl);
         }
         if let Some(meta) = &closing_meta {
             if meta.kind == WindowKind::FullInstance {

@@ -560,6 +560,12 @@ pub enum HostCommand {
     /// co-eviction in the `browser_panes` arms — floaters aren't in
     /// `browser_panes`.
     EvictFloatingPaneWindowState { label: String },
+    /// Set a floater's "Always on top" (header tack) flag
+    /// (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27). Pure: records it in
+    /// `pane_window_states[label].always_on_top` and emits
+    /// `FloatingAlwaysOnTopChanged`; the IPC handler applies the Win32
+    /// z-order afterwards.
+    SetFloatingAlwaysOnTop { label: String, on: bool },
 }
 
 impl std::fmt::Debug for HostCommand {
@@ -702,6 +708,11 @@ impl std::fmt::Debug for HostCommand {
             HostCommand::EvictFloatingPaneWindowState { label } => f
                 .debug_struct("EvictFloatingPaneWindowState")
                 .field("label", label)
+                .finish(),
+            HostCommand::SetFloatingAlwaysOnTop { label, on } => f
+                .debug_struct("SetFloatingAlwaysOnTop")
+                .field("label", label)
+                .field("on", on)
                 .finish(),
         }
     }
@@ -890,6 +901,13 @@ pub enum HostEvent {
         /// `None` for Normal→Maximized (the handler computes the work area)
         /// or when no normal rect was ever recorded.
         restore_rect: Option<crate::state::PaneRect>,
+        version: u64,
+    },
+    /// A floater's "Always on top" flag was set (`SetFloatingAlwaysOnTop`).
+    /// The IPC handler applies the z-order change after dispatch.
+    FloatingAlwaysOnTopChanged {
+        label: String,
+        on: bool,
         version: u64,
     },
 
@@ -1136,6 +1154,7 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
             | HostCommand::EndDrag { .. }
             | HostCommand::ToggleFloatingMaximize { .. }
             | HostCommand::EvictFloatingPaneWindowState { .. }
+            | HostCommand::SetFloatingAlwaysOnTop { .. }
             | HostCommand::EnqueueBrowserPaneCreate { .. }
             | HostCommand::TryRegisterBrowserPaneLive { .. }
             | HostCommand::CompleteBrowserPaneCreate { .. }
@@ -1240,6 +1259,9 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         }
         HostCommand::EvictFloatingPaneWindowState { label } => {
             pane_window::handle_evict_floating_pane_window_state(state, label)
+        }
+        HostCommand::SetFloatingAlwaysOnTop { label, on } => {
+            pane_window::handle_set_floating_always_on_top(state, label, on)
         }
     };
     // Pillar 2 — level-triggered quit reconciliation. After any transition that
