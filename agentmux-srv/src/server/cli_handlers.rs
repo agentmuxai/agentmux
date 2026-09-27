@@ -180,7 +180,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 source: "local_install".to_string(),
                             });
                         }
-                        crate::backend::cli_install::clear_incomplete(dir)
+                        crate::backend::cli_install::clear_unless_valid(dir, &cmd.cli_command)
                             .map_err(|e| format!("cannot clear an incomplete CLI install at {}: {e}", dir.display()))?;
                     }
 

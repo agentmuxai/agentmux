@@ -623,7 +623,7 @@ fn spawn_install_task(
                 registry.release_provider(&provider_id);
                 return;
             }
-            if let Err(e) = crate::backend::cli_install::clear_incomplete(dir) {
+            if let Err(e) = crate::backend::cli_install::clear_unless_valid(dir, &cli_command) {
                 emit_done(&broker, false, Some(format!("cannot clear an incomplete install at {}: {e}", dir.display())));
                 registry.drop_session(&session_id);
                 registry.release_provider(&provider_id);

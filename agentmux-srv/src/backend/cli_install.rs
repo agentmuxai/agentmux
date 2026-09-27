@@ -25,8 +25,9 @@
 //! install after acquiring it, so a second instance waits and then reuses
 //! the first one's result instead of running npm into the same directory.
 //! A shared dir only counts as installed once [`COMPLETE_MARKER`] is written,
-//! after npm succeeded and the shim was verified; an unmarked dir is a failed
-//! or in-progress install and is cleared before the next attempt.
+//! after npm succeeded and the shim was verified; an unmarked dir (a failed or
+//! in-progress install), or a marked one whose shim is gone, is cleared —
+//! marker and all — before the next attempt.
 //! `install.start` waits for the lock with [`try_lock_install`] so the wait
 //! stays cancellable.
 
@@ -125,12 +126,22 @@ pub fn mark_complete(dir: &Path, version: &str) -> std::io::Result<()> {
     std::fs::rename(&tmp, dir.join(COMPLETE_MARKER))
 }
 
-/// Under the install lock, before installing into `dir`: a shared dir that
-/// exists without the completion marker is a failed or interrupted install —
-/// clear it so npm starts clean instead of building on its leftovers. No-op
-/// for a missing or complete dir.
-pub fn clear_incomplete(dir: &Path) -> std::io::Result<()> {
-    if dir.exists() && !is_complete(dir) {
+/// Whether `dir` holds a usable install: marked complete AND its shim is
+/// still there. A marker alone isn't enough — a finished install can lose its
+/// shim later (corruption, antivirus cleanup).
+pub fn is_valid_install(dir: &Path, cli_command: &str) -> bool {
+    is_complete(dir) && npm_bin(dir, cli_command).is_file()
+}
+
+/// Under the install lock, before (re)installing into `dir`: unless it holds
+/// a valid install, remove it entirely — leftovers of a failed or interrupted
+/// install, and a stale completion marker whose shim is gone. Removing the
+/// marker is the point: a repair must not run with the old marker visible, or
+/// readers would accept the half-repaired install as soon as npm recreates the
+/// shim, and a failed repair would leave marker + shim accepted indefinitely
+/// (Codex P2 on #3927, second pass). No-op for a missing or valid dir.
+pub fn clear_unless_valid(dir: &Path, cli_command: &str) -> std::io::Result<()> {
+    if dir.exists() && !is_valid_install(dir, cli_command) {
         std::fs::remove_dir_all(dir)?;
     }
     Ok(())
@@ -397,19 +408,43 @@ mod tests {
     }
 
     #[test]
-    fn clear_incomplete_removes_leftovers_but_keeps_a_finished_install() {
+    fn clear_unless_valid_removes_leftovers_but_keeps_a_finished_install() {
         let tmp = tempfile::tempdir().unwrap();
         let p = paths_in(tmp.path());
         let dir = shared_cli_dir(&p, "claude", "2.1.280").unwrap();
         touch_bin(&dir, "claude");
-        clear_incomplete(&dir).unwrap();
+        clear_unless_valid(&dir, "claude").unwrap();
         assert!(!dir.exists(), "a partial install is cleared");
 
         touch_bin(&dir, "claude");
         mark_complete(&dir, "2.1.280").unwrap();
-        clear_incomplete(&dir).unwrap();
-        assert!(is_complete(&dir), "a finished install is kept");
-        clear_incomplete(&tmp.path().join("missing")).unwrap();
+        clear_unless_valid(&dir, "claude").unwrap();
+        assert!(
+            is_valid_install(&dir, "claude"),
+            "a finished install is kept"
+        );
+        clear_unless_valid(&tmp.path().join("missing"), "claude").unwrap();
+    }
+
+    /// Codex P2 on #3927 (second pass): a completed install that lost its
+    /// shim must have its marker removed before the repair, so neither a
+    /// repair in progress nor a failed one is ever accepted.
+    #[test]
+    fn a_completed_install_that_lost_its_shim_is_cleared_marker_and_all() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = paths_in(tmp.path());
+        let dir = shared_cli_dir(&p, "claude", "2.1.280").unwrap();
+        let shim = touch_bin(&dir, "claude");
+        mark_complete(&dir, "2.1.280").unwrap();
+        std::fs::remove_file(&shim).unwrap();
+        assert!(is_complete(&dir) && !is_valid_install(&dir, "claude"));
+
+        clear_unless_valid(&dir, "claude").unwrap();
+        assert!(!dir.exists(), "stale marker and leftovers are gone");
+
+        // A repair that recreates only the shim (npm mid-install) is not accepted.
+        touch_bin(&dir, "claude");
+        assert!(find_installed(&p, "claude", "2.1.280", "claude").is_none());
     }
 
     #[test]
