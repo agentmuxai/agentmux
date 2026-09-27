@@ -137,7 +137,7 @@
         overflow-wrap: anywhere;
 
         code {
-            font-family: var(--fixed-font, monospace);
+            font-family: var(--font-mono);
             font-size: 11px;
             color: var(--accent-color);
             background: color-mix(in srgb, var(--accent-color) 8%, transparent);
@@ -155,7 +155,7 @@
     border-radius: 0;
     max-height: 160px;
     overflow-y: auto;
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: 11px;
     line-height: 1.4;
 

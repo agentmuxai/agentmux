@@ -42,7 +42,7 @@
     }
 
     .token-usage-indicator-counts {
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
         font-size: 10px;
     }
 
@@ -172,7 +172,7 @@
     }
 
     .token-usage-breakdown-row-counts {
-        font-family: var(--fixed-font, monospace);
+        font-family: var(--font-mono);
         color: var(--secondary-text-color);
 
         .token-usage-indicator-arrow {

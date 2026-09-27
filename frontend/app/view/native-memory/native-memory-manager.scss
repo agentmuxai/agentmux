@@ -624,7 +624,7 @@
 .memory-adoption-panel-files {
     overflow: hidden;
     color: var(--secondary-text-color);
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -691,7 +691,7 @@
 
 .memory-claims-panel-dir {
     overflow: hidden;
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     text-overflow: ellipsis;
     white-space: nowrap;

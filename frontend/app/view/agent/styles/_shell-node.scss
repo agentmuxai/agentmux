@@ -136,7 +136,7 @@
 }
 
 .agent-shell-header-cmd {
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--secondary-text-color);
     overflow: hidden;
@@ -308,7 +308,7 @@
     min-width: 0;
     font-size: 11px;
     color: var(--main-text-color);
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -370,7 +370,7 @@
 // becomes identifiable. Wraps instead of scrolling: the whole point is
 // reading it in full.
 .agent-activity-command {
-    font-family: var(--fixed-font, monospace);
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--secondary-text-color);
     white-space: pre-wrap;
