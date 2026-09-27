@@ -282,11 +282,20 @@ Proposed; not started. Each phase is one PR.
       pending node before `sendRpc`, and clears them only on a rejected RPC or
       the hidden turn's `session_end`, so a silent drop would leave the pane
       busy and suppressing output.
+    - a delivery counts only once the hook **acknowledges** it: after writing
+      and flushing valid `additionalContext`, the hook calls srv back. A fetch
+      with no acknowledgement (the hook timed out, crashed or wrote bad output)
+      is not a delivery, so the fallback still runs.
     Without this gate, every compaction injects the memory twice.
   - **The notice ships with the hook (D6).**
     - srv emits one event per delivery (reason, entry names, token counts);
     - the pane renders the existing `MemoryReinjectionNode` from that event, not
       from the frontend's hidden turn.
+    - the event is **persisted** to the block's durable history with a stable
+      id (the delivery record's), so a pane that mounts later, or a history
+      replay, shows the notice once. Background agents have no pane at delivery
+      time, and after P3 no hidden turn remains in the transcript for
+      `parseHistoryLines.ts` to rebuild it from.
     Otherwise every hook delivery would be silent, because today the label is
     produced only when the frontend's own hidden turn ends.
   - Verify first: size limits on `additionalContext`, and whether `compact`
