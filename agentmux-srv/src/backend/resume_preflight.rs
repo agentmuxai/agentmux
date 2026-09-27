@@ -144,7 +144,7 @@ pub struct PreflightInput {
     pub identity_key: Option<String>,
 }
 
-/// The spawn's resume gate (`PersistentSubprocessController::apply_resume_gate`),
+/// The spawn's resume gate (`PersistentSubprocessController::apply_resume_gate_with`),
 /// mirrored: a candidate that isn't the chain head is redirected to the head
 /// when reachable here, else refused. `None` when the candidate stands.
 fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mut Vec<Step>) -> Option<(Verdict, Option<String>)> {

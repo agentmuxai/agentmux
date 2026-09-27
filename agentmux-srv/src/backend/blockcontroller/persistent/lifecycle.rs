@@ -45,6 +45,21 @@ impl PersistentSubprocessController {
             .map(|block_id| (block_id, true))
     }
 
+    /// Another pane of this process holding agent `uid`'s single-live-instance
+    /// lease: its block id. Whatever session either pane holds — a pane with
+    /// a stale id refused because the agent's live pane holds the lease is
+    /// still "open in another pane", not "another instance" (Camper on #3935).
+    pub(super) fn agent_held_by_other_pane(&self, uid: &str) -> Option<String> {
+        super::super::get_all_controllers().into_iter().find_map(|(block_id, ctrl)| {
+            if block_id == self.block_id {
+                return None;
+            }
+            let other = ctrl.as_any().downcast_ref::<PersistentSubprocessController>()?;
+            let holds = other.inner.lock().unwrap().agent_lease.as_ref().is_some_and(|l| l.agent_uid() == uid);
+            holds.then_some(block_id)
+        })
+    }
+
     pub(super) fn request_stop(&self, request: KillRequest) -> Result<(), String> {
         Self::request_stop_on(&self.inner, request)
     }
