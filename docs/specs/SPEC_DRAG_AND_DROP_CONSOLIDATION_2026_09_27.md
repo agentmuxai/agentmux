@@ -75,7 +75,7 @@
 - right-click Paste: CEF, a separate copy (`AgentFooter.tsx:540-550`);
 - Ctrl+V: HTTP upload then srv `attachments.copy-to-workdir` (`attachment-draft.ts:244-253`).
 
-Right-click Paste ignores `dnd:enabled`, `dnd:concurrency` and `dnd:agentinserttoken`.
+Right-click Paste doesn't consult `dnd:enabled`, `dnd:concurrency` or `dnd:agentinserttoken`. That is correct, not a gap: the settings schema defines those settings for drops, and paste is a separate clipboard workflow. The duplication is in the copy, results and notices, not in the gating.
 
 **Copying into a folder is written twice in Rust:**
 - **CEF, `providers.rs:161-263`:**
@@ -300,13 +300,18 @@ interface DragFiles {
 **What a hook can know before the drop:**
 - **MIME types** come from `dataTransfer.items[i].type`, which Chromium exposes during `dragover` (names don't). They can be `""` for unregistered extensions.
 - **Names:** CEF already has the full paths at drag-enter (`on_drag_enter` stashes them). A non-consuming `peek_drag_paths {windowLabel}` IPC, called once per drag on the first file `dragenter`, returns the names. The verdicts are re-asked once when the names arrive, a few milliseconds later.
-- **Where neither is available**, e.g. a host without `nativeFileDrop`, a hook decides on what it has. Media and editor hooks answer `ok` with a softer prompt ("Open here") only when the type is unknown, and their `drop` reports a clear notice for a file they can't open. Target/Blocked is exact whenever names or types are known, which on CEF is always.
+- **Where neither is available**, e.g. a host without `nativeFileDrop`, a hook decides on what it has. Media and editor hooks answer `ok` with a softer prompt ("Open here") only when the type is unknown, and their `drop` reports a clear notice for a file they can't open. While hovering, Target/Blocked is exact once names or types are known. A release can still beat the asynchronous peek, so hover is best-effort and **the drop re-classifies** from the drop event itself (below). On CEF the drop is always classified exactly.
 
 **How a drag is handled:**
 - **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → view (`resolvePaneTabView`) → the instance hook. `accept`'s verdict is cached per pane for the drag, so it runs once per pane entered, not per `dragover`, and the per-event decision reads the cache.
 - **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, watchdog). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
 - **On `drop`:**
-  1. **Re-validate synchronously:** hit-test the `drop` event's own target and read that pane's verdict. Nothing is taken from the last Target state.
+  1. **Re-validate synchronously:**
+     - hit-test the `drop` event's own target;
+     - rebuild `DragFiles` from the drop event's `dataTransfer.files`, whose names and types are available at drop;
+     - re-run that pane's `accept` on it.
+
+     Nothing is taken from the last Target state or the cached hover verdict. A file that looked unknown while hovering but turns out unsupported is refused here, before the stash is consumed.
   2. If the pane doesn't accept, or its verdict is Blocked: `preventDefault` (the window guard) and nothing else. The stash isn't consumed; it expires on its TTL.
   3. Otherwise `consumeDragPaths()`. If that's empty, show one "couldn't read the dropped files' paths" notice; if not, call that pane's `drop`.
 - **A drop anywhere in the pane counts**, including its header and tab strip; today only the content does.
@@ -314,15 +319,22 @@ interface DragFiles {
 
 **Shared helpers, so pane hooks stay a few lines** (`file-drop-actions.ts`):
 - `paneWorkdir(blockId)`: the one `cmd:cwd` lookup.
-- `copyDroppedToWorkdir(blockId, paths, { mention })`: copy (§5.5) + results + `@name` mentions + notices. The terminal pane, the agent pane's copy mode and **both** container paste routes all use it. That collapses the three routes in §2.1 to one, and right-click Paste now respects the `dnd:*` settings.
+- `copyIntoWorkdir(blockId, source, { mention, concurrency })`: the copy, the results, the `@name` mentions and the notices.
+  - **Two transports, because the inputs differ:**
+    - `source` of `{ paths }` (a drop, right-click Paste) → `files.copy-to-dir` (§5.5);
+    - `source` of `{ files: File[] }` (Ctrl+V, where the browser supplies bytes, not paths) → the existing upload + `attachments.copy-to-workdir`, kept (`AgentFooter.tsx:555-563`, `attachment-draft.ts:244-253`).
+  - The three routes in §2.1 become **one helper with two transports**, so results, mentions and notices are written once.
+  - **The helper doesn't read any setting.** Callers pass `mention` and `concurrency`:
+    - the file-drop hooks apply `dnd:enabled`, `dnd:agentinserttoken` and `dnd:concurrency` (drop settings, per the schema);
+    - both paste routes keep today's behaviour: always mention, default concurrency, independent of `dnd:*`.
 - `notifyDrop.{noCwd, noPaths, copied, copyFailed, attachFailed}`: one builder per message, replacing the 13 literals, with consistent expirations.
 
 **Pane hooks in phase 1:**
 
 | Pane | `accept` | `drop` |
 |---|---|---|
-| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: no cwd / `dnd:enabled` off | `attachmentDraft.ingestPaths` or `copyDroppedToWorkdir` |
-| Terminal (`view: "term"`) | "Copy N files to <cwd>" · blocked: no cwd / setting off | `copyDroppedToWorkdir` (no mention) |
+| Agent (`view: "agent"`) | "Drop N files to attach" (tray) · "Copy N files to <cwd>" (container agent or attachments off) · blocked: no cwd / `dnd:enabled` off | `attachmentDraft.ingestPaths` or `copyIntoWorkdir` |
+| Terminal (`view: "term"`) | "Copy N files to <cwd>" · blocked: no cwd / setting off | `copyIntoWorkdir` (no mention) |
 
 **Later panes:**
 
@@ -415,7 +427,7 @@ interface DragFiles {
 | Cross-window monitor code | 3 files, ~140–175 shared lines per pair | 1 module + 3 small adapters |
 | Window hit-tests (Rust + frontend) | 5 (one Z-ordered on Windows only) | 2, both Z-aware (general + the mouse-hook exception) |
 | Rust "copy into folder" | 2 | 1 |
-| Routes into a container working folder | 3 | 1 |
+| Routes into a container working folder | 3 separate implementations | 1 helper, 2 transports (paths, bytes) |
 | Drop/copy notice literals | 13 | 5 builders |
 | Drop colour sources | 3 (+2 hard-coded greens) | 1 token set |
 
@@ -437,7 +449,7 @@ Each phase is one PR, or a short stack, and is independently shippable.
    - The hub (§5.2) can start as just the file subscriber, keeping `installGlobalDropGuard` until phase 4.
 2. **Phase 2: copy and paste**
    - one Rust copy + the `files.copy-to-dir` RPC (§5.5);
-   - both container paste routes on `copyDroppedToWorkdir`;
+   - both container paste routes on `copyIntoWorkdir` (paths and bytes transports; paste keeps ignoring `dnd:*`);
    - CEF `copy_file_to_dir` deleted;
    - the `dnd:maxfilesizemb` decision.
 3. **Phase 3: one look**
@@ -468,7 +480,7 @@ Phases 2–5 have no user-visible features. They're worth doing because every fu
   - **Controller unit tests** (jsdom, synthetic `DragEvent`s): Armed / Target / Blocked / none by pane; `accept` called once per pane entered; clear on each end reason including the watchdog; drop dispatch with stashed paths; empty stash → one notice; internal drags ignored; **a drop released over a blocked pane or chrome within the same frame as leaving a Target dispatches nothing and leaves the stash unconsumed**; `accept` receives MIME types, and names after `peek_drag_paths` resolves.
   - **Per-pane `accept` tables** for agent and terminal.
   - **`DropIndicator`** renders each state; the reactivity bug in §2.1 gets a regression test.
-  - **`copyDroppedToWorkdir`:** mentions, partial failure, notices.
+  - **`copyIntoWorkdir`:** mentions, partial failure, notices.
   - **CEF:** the stash keyed by window label (a put from window A isn't taken by window B; the unlabelled fallback), and floater clients getting a drag handler.
 - **Phase 2:** Rust `copy_into_dir`: de-conflicting under a race (two threads), `.env`, directories, cancel.
 - **Phase 4, before each system moves:** characterisation tests of today's behaviour — tile move, window-tab reorder and tear-off, pane-tab reorder and tear-off, Escape abort, swallowed `dragend`. After it moves, the same tests pass unchanged.
