@@ -259,7 +259,10 @@ begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "wa
   onWindowDrag({ kinds: ["tile"], over(e), leave(e), drop(e) })
   ```
 
-- **`dragover` is coalesced to one dispatch per animation frame.** A subscriber gets the latest event; `preventDefault` / `dropEffect` are applied synchronously by the hub from the subscriber's last answer.
+- **Decisions are synchronous; only visuals are coalesced.**
+  - Every `dragover` and the `drop` event hit-test synchronously and decide `preventDefault` / `dropEffect` from the pane actually under the pointer. The test is a `closest()` plus a cached verdict for that pane, so it's cheap enough per event.
+  - Only the visual state updates (Armed/Target/Blocked, the prompt) are batched to one per animation frame.
+  - A decision is never taken from an earlier frame's answer. Otherwise a release that lands before the next frame would act on the pane the pointer just left.
 - **It replaces:**
   - `installGlobalDropGuard` (`app-init.ts:1029`), whose guard becomes the hub's "files and nobody accepted → prevent default";
   - the per-TileLayout window `dragover` (×N);
@@ -279,18 +282,33 @@ fileDrop?: true;
 
 // returned from manifest.create(ctx)
 fileDrop?: {
-    accept(drag: { count: number }): { ok: true; message: string; icon?: string } | { ok: false; reason: string };
+    accept(drag: DragFiles): { ok: true; message: string; icon?: string } | { ok: false; reason: string };
     drop(paths: string[], files: FileList): void | Promise<void>;
 };
 ```
 
+```ts
+interface DragFiles {
+    count: number;
+    /** MIME per item, from DataTransferItem.type during dragover; "" when the OS gave none. */
+    types: string[];
+    /** File names, when known before the drop (see below); undefined until then. */
+    names?: string[];
+}
+```
+
+**What a hook can know before the drop:**
+- **MIME types** come from `dataTransfer.items[i].type`, which Chromium exposes during `dragover` (names don't). They can be `""` for unregistered extensions.
+- **Names:** CEF already has the full paths at drag-enter (`on_drag_enter` stashes them). A non-consuming `peek_drag_paths {windowLabel}` IPC, called once per drag on the first file `dragenter`, returns the names. The verdicts are re-asked once when the names arrive, a few milliseconds later.
+- **Where neither is available**, e.g. a host without `nativeFileDrop`, a hook decides on what it has. Media and editor hooks answer `ok` with a softer prompt ("Open here") only when the type is unknown, and their `drop` reports a clear notice for a file they can't open. Target/Blocked is exact whenever names or types are known, which on CEF is always.
+
 **How a drag is handled:**
-- **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → view (`resolvePaneTabView`) → the instance hook. Signals change only when the pane under the cursor changes, so `accept` runs once per pane entered, not per `dragover`.
+- **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → view (`resolvePaneTabView`) → the instance hook. `accept`'s verdict is cached per pane for the drag, so it runs once per pane entered, not per `dragover`, and the per-event decision reads the cache.
 - **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, watchdog). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
-- **On drop over a Target:**
-  1. `consumeDragPaths()`;
-  2. if it's empty, one "couldn't read the dropped files' paths" notice;
-  3. otherwise call the hook's `drop`.
+- **On `drop`:**
+  1. **Re-validate synchronously:** hit-test the `drop` event's own target and read that pane's verdict. Nothing is taken from the last Target state.
+  2. If the pane doesn't accept, or its verdict is Blocked: `preventDefault` (the window guard) and nothing else. The stash isn't consumed; it expires on its TTL.
+  3. Otherwise `consumeDragPaths()`. If that's empty, show one "couldn't read the dropped files' paths" notice; if not, call that pane's `drop`.
 - **A drop anywhere in the pane counts**, including its header and tab strip; today only the content does.
 - **The indicator** is rendered by `PaneChrome` as `<DropIndicator state message />`, from a per-window `Map<blockId, state>` signal. It replaces `element/dragoverlay.tsx`, which is deleted along with its name clash.
 
@@ -310,8 +328,8 @@ fileDrop?: {
 
 | Pane | `accept` | `drop` |
 |---|---|---|
-| Media (`view: "media"`) | ok for one image, video or audio file ("Open here"); blocked otherwise | point the pane at the file |
-| Editor (`view: "editor"`) | ok for text files ("Open N files"); blocked for binaries | open as editor tabs |
+| Media (`view: "media"`) | ok when `count === 1` and the type (MIME, else the name's extension) is image, video or audio ("Open here"); blocked otherwise, e.g. "Media panes open one image, video or audio file" | point the pane at the file |
+| Editor (`view: "editor"`) | ok when every name has a text extension, or the MIME is `text/*` or a known text type ("Open N files"); blocked when any is a known binary; unknown types answer ok, and `drop` sniffs the content | open as editor tabs |
 
 **The drone canvas** checks its own MIME type before accepting (`drone-view.tsx:288`). It then stops advertising "copy" for OS files; the hub's guard handles them.
 
@@ -377,8 +395,12 @@ fileDrop?: {
 
 ### 5.7 Tile draggable registration without polling
 
-- **Replace the 100 ms poll** (`TileLayout.core.tsx:522`) with registration from the header element's own lifecycle. The pane header component calls `registerTileDragHandle(nodeId, el)` in its `ref` and unregisters in `onCleanup`.
-- **This keeps the poll's two jobs:** first mount, and re-registration when a `Show` gate replaces the header. It does both at the moment they happen instead of within 100 ms.
+- **Replace the 100 ms poll** (`TileLayout.core.tsx:522`) with a `MutationObserver` on the tile node (`childList`, `subtree`). It calls the **existing** `register()` unchanged.
+- **Why not header `ref` callbacks:** `BlockFrame_Header` exists twice, the live one and an `ErrorBoundary` fallback that is never inserted into the DOM, and the fallback's ref writes last (`TileLayout.core.tsx:419-422`). A ref-driven registrar would bind pragmatic-dnd to a detached element, or let the fallback's cleanup remove the live registration, which would break whole-pane dragging.
+- **The observer keeps today's selection logic:**
+  - `tileNodeRef.querySelector('[data-role="block-header"]')` picks the connected header this tile owns;
+  - `register()` compares identity and re-registers only on change.
+- **This keeps the poll's two jobs:** first mount (one `register()` in `onMount`), and re-registration when a `Show` gate replaces the header. It does both when the DOM actually changes, instead of every 100 ms forever. A characterisation test mounts a tile with a detached fallback header and asserts the live header is the registered handle, before and after the change.
 - **The "never tear down mid-drag" rule** (`:438`) moves into the registrar, keyed on `session()`.
 
 ## 6. Efficiency, before and after
@@ -443,7 +465,7 @@ Phases 2–5 have no user-visible features. They're worth doing because every fu
 ## 8. Tests
 
 - **Phase 1:**
-  - **Controller unit tests** (jsdom, synthetic `DragEvent`s): Armed / Target / Blocked / none by pane; `accept` called once per pane entered; clear on each end reason including the watchdog; drop dispatch with stashed paths; empty stash → one notice; internal drags ignored.
+  - **Controller unit tests** (jsdom, synthetic `DragEvent`s): Armed / Target / Blocked / none by pane; `accept` called once per pane entered; clear on each end reason including the watchdog; drop dispatch with stashed paths; empty stash → one notice; internal drags ignored; **a drop released over a blocked pane or chrome within the same frame as leaving a Target dispatches nothing and leaves the stash unconsumed**; `accept` receives MIME types, and names after `peek_drag_paths` resolves.
   - **Per-pane `accept` tables** for agent and terminal.
   - **`DropIndicator`** renders each state; the reactivity bug in §2.1 gets a regression test.
   - **`copyDroppedToWorkdir`:** mentions, partial failure, notices.
@@ -459,7 +481,7 @@ Phases 2–5 have no user-visible features. They're worth doing because every fu
   - characterisation tests first;
   - one drag system per commit;
   - the per-platform adapters stay where the platforms genuinely differ (win32 OLE `dragleave`, DIP vs physical pixels).
-- **rAF-coalesced `dragover`:** a subscriber sees at most one event per frame. The hub still answers `preventDefault` / `dropEffect` synchronously on every event, from the last decision, so the browser never falls back to its default action between frames.
+- **Coalescing:** only visuals are batched per animation frame. `preventDefault` / `dropEffect` and the `drop` authorisation are computed synchronously from the pane actually under the pointer on every event (§5.2, §5.3). A test covers releasing over a blocked pane within the same frame as leaving a Target: nothing is dispatched.
 - **Moving the copy to srv:**
   - srv is local, so latency is small;
   - progress for big copies improves, because srv streams with progress;
