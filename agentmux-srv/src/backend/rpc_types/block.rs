@@ -390,6 +390,14 @@ pub struct CommandAgentInputData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hidden: Option<bool>,
+    /// Images from the composer's attachment tray, in tray order (ids from
+    /// `attachments.ingest` / the upload route). The backend appends a
+    /// numbered `<attached_images>` list of their send-copies to the
+    /// message, and gives Claude the first ones inline.
+    /// SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub attachments: Option<Vec<super::AttachmentRef>>,
 }
 
 /// Data for AskSideQuestionCommand — the `/btw` slash command's one-shot,
