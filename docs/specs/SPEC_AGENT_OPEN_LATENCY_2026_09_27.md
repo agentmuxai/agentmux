@@ -1,7 +1,7 @@
 # SPEC: opening an agent from My Agents should be near-instant — where the time goes, and what to change
 
 **Date:** 2026-09-27
-**Status:** proposed
+**Status:** implemented — #3927, #3930, #3939, #3940, #3962, #3964, #3965 (§4.7: #3929); §4.2 deferred. See §7.
 **Author:** Manoz
 **Repos touched:** `agentmux` (`agentmux-srv/src/server/cli_handlers.rs`, `agentmux-srv/src/backend/history/`, `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`, `frontend/app/view/agent/hooks/useHistoryPagination.ts`, `frontend/app/notification/sound/`, `docs/MUXLOG.md`)
 **Related:** `SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md` (live feed, K turns), `SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md` (the muxlog recipe pattern reused in §4.6)
@@ -126,3 +126,29 @@ Measured with the §2 profiling method in `task dev`, and with `muxlog opens` on
 
 - Admission and take-over latency. Warm admission measured 70–80 ms (AgentA, 0.58.0); see the muxlog admission spec for its failure modes.
 - The CLI's own startup time after spawn. It happens after the pane is interactive.
+
+## 7. Implementation (2026-09-27)
+
+| § | Change | PR |
+|---|---|---|
+| 4.1 | CLI installs shared per provider + pinned version (`<shared>/cli/<provider>/<pin>/`), completion marker, cross-instance install lock | #3927 |
+| 4.1 | Startup warm-up: installs the pinned CLI of every provider the user's own agents use, 5 s after srv start, npm below normal priority; ResolveCli and the warm-up share one install routine | #3962 |
+| 4.3 | First history-index build waits 60 s, runs at background priority, never repeats or queues behind another build; a search in that minute starts it early | #3930 |
+| 4.4 | Drag ghost rasterised on a 250 ms resting hover or a header press, not on every pointer crossing | #3940 |
+| 4.4 | A tool row builds its result body (shiki-highlighted diffs, previews, Bash output) on first open, not for every collapsed row at mount | #3965 |
+| 4.5 | Restore asks for the live feed's turns (`tail_turns` = K + 1); the backend returns only those, with their start | #3964 |
+| 4.6 | One `[agent-open]` line per open; `muxlog opens` with p50/p95 | #3939 |
+| 4.7 | `.tile-node` / `.tile-leaf` / `.magnify-container` use `overflow: clip` | #3929 |
+
+**Not done, deliberately:**
+
+- **4.2** (mount-time layout reads, ≈ 52 ms): the section requires a before/after profile with a *visible* dev window, and it was occluded throughout. Deferred rather than changed blind.
+- **Markdown near the viewport** (4.4, first bullet): markdown is parsed only for rows the virtualizer mounts (viewport + overscan 5, plus the restored last turn in the tail); deferring those would change row heights after mount. Left as is.
+- **Sound priming** (F4): deliberate (autoplay needs a user gesture); dropped from the plan.
+
+**Measured after the changes** (`task dev` of `f1cfceb`, debug build, same agents and data dir as §2):
+
+- **F1:** srv started 21:28:14; the warm-up installed `claude-code@2.1.280` in 3.0 s and `copilot@1.0.85` in 6.4 s before any pane mounted (≈ 21:28:30). Every restored pane then resolved `cli_source=local_install`: no npm on the open path.
+- **Opens** (warm page reload, visible window, `muxlog opens`): first row 929 / 1,329 / 1,452 ms and quiet 1,441 / 1,323 / 1,460 ms after mount (Lzop / Maksi / Lazo), all while the page itself was bootstrapping 8 panes.
+- **§4.5:** restored lines 5,000 → **65** (Lzop) and → **4,077** (Lazo); Maksi's last 5,000 lines hold fewer than 7 turns, so its window came back whole, as designed. Where it trims a lot, the first row lands sooner (Lzop 929 ms vs Maksi 1,329 ms). **Correction to #3964's premise:** the `history_read` phase did *not* shrink with the line count (≈ 400 ms for 65 lines and for 5,000). During a page reload that phase is dominated by the restore's RPC chain waiting behind page startup, not by transfer size.
+- **§4.3:** the deferred build ran at +60 s. Its duration on this machine varied 86–157 s across runs at the time of measurement, with no measurable difference between lowered and normal priority (88.0 s vs 85.8 s back to back, warm cache), against 28 s earlier the same day: machine state, not the change. It no longer overlaps the first minute either way.
