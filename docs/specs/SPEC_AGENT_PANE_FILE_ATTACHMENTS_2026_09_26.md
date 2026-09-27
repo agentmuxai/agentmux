@@ -46,7 +46,7 @@ Sources: https://platform.claude.com/docs/en/build-with-claude/pdf-support · ht
 1. Drop, Ctrl+V or right-click Paste **any file** into the composer; it gets a tile in the tray and is sent with the message. Same limits as images: 128 attachments and 1 GB per message.
 2. **Tiles:** a real thumbnail when the preview is cheap and safe; a colored type icon for everything else (§5).
 3. Every agent can reach every file; Office documents also come with an extracted text version; Claude gets PDFs inline.
-4. Nothing is written into the working folder — except for **container agents**, which can't see host paths: their panes keep today's copy-into-the-working-folder behavior for every dropped or pasted file (the working folder is bind-mounted at `/workspace`), until attachments are uploaded into containers (image spec phase 3).
+4. Nothing is written into the working folder — except for **container agents**, which can't see host paths: their panes keep today's copy-into-the-working-folder behavior for every dropped or pasted file (the working folder is bind-mounted at `/workspace`): a drop copies the OS paths as today, and a Ctrl+V or right-click Paste goes through `attachments.copy-to-workdir` (§7). This lasts until attachments are uploaded into containers (image spec phase 3).
 
 ## 4. Non-goals
 
@@ -120,6 +120,7 @@ The user attached 5 files. The numbers match how the user refers to them. …
 - `attachments.ingest` stops returning non-images; the drop hook sends everything to the tray. `dnd:agentinserttoken` and the copy-to-cwd path stay only for `attachments:enabled = false`.
 - Folder drops attach every file, skipping dot-folders and `node_modules`, `target`, `dist`, `build`, `.git`, `__pycache__`, `.venv`, within the 128 limit and the existing 10,000-entry walk cap.
 - Ctrl+V and right-click Paste accept any file.
+- **Container panes** (`agentMode: container`): the tray is off. A drop copies into the working folder as today; a pasted file is uploaded, then `attachments.copy-to-workdir` copies it into the working folder and the composer inserts `@name` (§7).
 - Tiles (`AttachmentTile`) get a `kind`; icon tiles use FontAwesome classes from §5. `AttachmentInfo` gains `kind`, `ext`, `page_count`, `text_bytes`, `macros`.
 
 ## 9. Security
