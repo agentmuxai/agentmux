@@ -191,7 +191,15 @@ export function AttachmentTray(props: Props) {
     });
 
     const lightboxItems = (): LightboxItem[] =>
-        d.items().map((i, n) => ({ key: i.key, number: n + 1, name: i.name, id: i.info?.id, info: i.info, error: i.error }));
+        d.items().map((i, n) => ({
+            key: i.key,
+            number: n + 1,
+            name: i.name,
+            id: i.info?.id,
+            info: i.info,
+            error: i.error,
+            pending: i.status === "processing",
+        }));
 
     return (
         <>

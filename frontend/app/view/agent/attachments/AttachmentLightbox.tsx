@@ -28,6 +28,8 @@ export interface LightboxItem {
     id?: string;
     info?: AttachmentInfo;
     error?: string;
+    /** Still copying or processing (composer only): no id yet, but not gone. */
+    pending?: boolean;
 }
 
 interface Props {
@@ -110,7 +112,13 @@ export function AttachmentLightbox(props: Props) {
                                 />
                             }
                         >
-                            <Match when={item()?.error || !item()?.id}>
+                            <Match when={item()?.error}>
+                                <span class="agent-attachment-lightbox__missing">{missing()}</span>
+                            </Match>
+                            <Match when={item()?.pending}>
+                                <span class="agent-attachment-lightbox__missing">Processing…</span>
+                            </Match>
+                            <Match when={!item()?.id}>
                                 <span class="agent-attachment-lightbox__missing">{missing()}</span>
                             </Match>
                             <Match when={isPicture(kind())}>

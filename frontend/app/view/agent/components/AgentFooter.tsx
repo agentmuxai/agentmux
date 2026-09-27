@@ -529,7 +529,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         });
     };
     const mentionPasted = (paths: string[]) => {
-        const root = textareaRef?.closest<HTMLElement>(".agent-view");
+        // Any ancestor holding the composer's textarea will do.
+        const root = textareaRef?.parentElement;
         if (paths.length > 0 && root) spliceComposerTokens(root, paths.map((p) => `@${baseName(p)}`));
     };
     const inContainer = () => !!draftBlockId && isContainerPane(draftBlockId);
@@ -556,9 +557,17 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         const files = Array.from(e.clipboardData?.files ?? []);
         if (files.length === 0) return;
         if (inContainer()) {
-            void Promise.all(files.map((f) => attachmentDraft.uploadToWorkdir(f)))
-                .then(mentionPasted)
-                .catch(pasteFailed);
+            // Each file on its own, like copyFilesToDir: one failure must not
+            // lose the others' @mentions.
+            void Promise.allSettled(files.map((f) => attachmentDraft.uploadToWorkdir(f))).then((results) => {
+                mentionPasted(results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])));
+                const failed = results.flatMap((r, i) =>
+                    r.status === "rejected"
+                        ? [`${files[i].name || "Pasted file"}: ${String((r.reason as Error)?.message ?? r.reason)}`]
+                        : [],
+                );
+                if (failed.length > 0) pasteFailed(failed.join("\n"));
+            });
             return;
         }
         attachmentDraft.uploadFiles(files);
