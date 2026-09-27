@@ -232,11 +232,11 @@ interface DragSession {
     startedAt: number;
 }
 session(): DragSession | null        // reactive
-begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "watchdog"
+begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "button-up" | "files-idle" (files only)
 ```
 
 - **Writers:**
-  - the pragmatic `onDragStart` / `onDrop` sites (tile, window tab, pane tab);
+  - the pragmatic `onDragStart` sites (tile, window tab, pane tab) begin a session;
   - the drone chip;
   - the list reorder;
   - the file-drop controller (§5.3), on the first `dragenter` whose types include `"Files"`.
@@ -248,7 +248,16 @@ begin(kind, source) / end(reason)    // end: "drop" | "cancel" | "dragend" | "wa
   - `dragEscaped`;
   - the ad-hoc `isDragging` locals, which become `session()?.source.nodeId === mine`.
 - **`layoutModel.activeDrag` stays a per-tab atom** that other code reads. It is now written from one place: a session subscriber.
-- **One safety net** replaces the four: a `dragend` listener plus a 2 s watchdog with no drag events, which ends any session left open.
+- **Who may end a session.** This has to follow today's ordering, not simplify it.
+  - An **accepting target-side drop** in this window ends it immediately.
+  - A **source-side `onDrop`** (pragmatic calls it even when the release lands outside every in-window target) must **not** end it. Today's handlers deliberately keep the payload there for the cross-window monitor (`TileLayout.core.tsx:504-514`, `droppable-tab.tsx:175-200`, `PaneTabStrip.tsx:624-625`). They only mark the session `released`.
+  - The **cross-window monitor** ends a `released` session after it has handled the document `dragend` (tear-off or cross-window drop).
+  - The final **safety net** ends whatever is left.
+- **One safety net** replaces the four. It is based on the real drag state, never on inactivity:
+  - the document `dragend` (after the monitor);
+  - on Windows, today's button-state poll (`getMouseButtonState`, win32 monitor), which catches a swallowed `dragend`.
+
+  **Internal sessions have no inactivity timeout.** A drag held over another window for any length of time sends the source renderer no events, and that is normal. The only inactivity watchdog is the file-drop one (§5.3), and it applies only to `"files"` sessions. There it clears visuals only: the path stash is untouched, and re-entering the window begins a new session.
 - **The drag tags** (`tileItemType`, `tabItemType`, `paneTabItemType`) move to one `drag-types.ts`, with `isTileSource(source)` style helpers.
 
 ### 5.2 `window-drag-events.ts`: one set of window listeners
@@ -303,8 +312,14 @@ interface DragFiles {
 - **Where neither is available**, e.g. a host without `nativeFileDrop`, a hook decides on what it has. Media and editor hooks answer `ok` with a softer prompt ("Open here") only when the type is unknown, and their `drop` reports a clear notice for a file they can't open. While hovering, Target/Blocked is exact once names or types are known. A release can still beat the asynchronous peek, so hover is best-effort and **the drop re-classifies** from the drop event itself (below). On CEF the drop is always classified exactly.
 
 **How a drag is handled:**
-- **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → view (`resolvePaneTabView`) → the instance hook. `accept`'s verdict is cached per pane for the drag, so it runs once per pane entered, not per `dragover`, and the per-event decision reads the cache.
-- **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, watchdog). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
+- **Verdicts for every visible pane, up front.** When a `"files"` session begins (the first file `dragenter`), the controller:
+  - enumerates the visible panes with a `fileDrop` hook (the active layout's `[data-role="pane"]` elements);
+  - calls each `accept` once with the metadata known so far;
+  - caches the verdicts for the drag.
+
+  That is what lets every valid pane show **Armed** immediately (§4), not only after it has been hovered. When `peek_drag_paths` returns names, every visible pane's `accept` is re-run once and the Armed/Blocked states refresh. Blocked panes are never drawn Armed.
+- **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → view (`resolvePaneTabView`) → the cached verdict. A pane that appears mid-drag, e.g. from a tab switch, is evaluated when first hit. The per-event decision reads the cache, so `accept` never runs per `dragover`.
+- **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, or the files-only idle watchdog, 350 ms without a `dragover`). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
 - **On `drop`:**
   1. **Re-validate synchronously:**
      - hit-test the `drop` event's own target;
@@ -321,7 +336,7 @@ interface DragFiles {
 - `paneWorkdir(blockId)`: the one `cmd:cwd` lookup.
 - `copyIntoWorkdir(blockId, source, { mention, concurrency })`: the copy, the results, the `@name` mentions and the notices.
   - **Two transports, because the inputs differ:**
-    - `source` of `{ paths }` (a drop, right-click Paste) → `files.copy-to-dir` (§5.5);
+    - `source` of `{ paths }` (a drop, right-click Paste) → in **phase 1** the existing CEF `copy_file_to_dir` (via `util/dnd.ts` `copyFilesToDir`), so phase 1 ships on its own; in **phase 2** swapped for `files.copy-to-dir` (§5.5) inside the helper, with no caller changes;
     - `source` of `{ files: File[] }` (Ctrl+V, where the browser supplies bytes, not paths) → the existing upload + `attachments.copy-to-workdir`, kept (`AgentFooter.tsx:555-563`, `attachment-draft.ts:244-253`).
   - The three routes in §2.1 become **one helper with two transports**, so results, mentions and notices are written once.
   - **The helper doesn't read any setting.** Callers pass `mention` and `concurrency`:
@@ -449,6 +464,7 @@ Each phase is one PR, or a short stack, and is independently shippable.
    - The hub (§5.2) can start as just the file subscriber, keeping `installGlobalDropGuard` until phase 4.
 2. **Phase 2: copy and paste**
    - one Rust copy + the `files.copy-to-dir` RPC (§5.5);
+   - `copyIntoWorkdir`'s paths transport switched from CEF `copy_file_to_dir` to the RPC; phase 1 used the CEF IPC, so it depends on nothing new;
    - both container paste routes on `copyIntoWorkdir` (paths and bytes transports; paste keeps ignoring `dnd:*`);
    - CEF `copy_file_to_dir` deleted;
    - the `dnd:maxfilesizemb` decision.
@@ -477,7 +493,7 @@ Phases 2–5 have no user-visible features. They're worth doing because every fu
 ## 8. Tests
 
 - **Phase 1:**
-  - **Controller unit tests** (jsdom, synthetic `DragEvent`s): Armed / Target / Blocked / none by pane; `accept` called once per pane entered; clear on each end reason including the watchdog; drop dispatch with stashed paths; empty stash → one notice; internal drags ignored; **a drop released over a blocked pane or chrome within the same frame as leaving a Target dispatches nothing and leaves the stash unconsumed**; `accept` receives MIME types, and names after `peek_drag_paths` resolves.
+  - **Controller unit tests** (jsdom, synthetic `DragEvent`s): Armed / Target / Blocked / none by pane; `accept` called once per visible pane at session start (so every valid pane is Armed before being hovered) and once more when names arrive; clear on each end reason including the watchdog; drop dispatch with stashed paths; empty stash → one notice; internal drags ignored; **a source-side `onDrop` for a release outside the window leaves the session `released` for the cross-window monitor, and an internal session held idle for 10 s is not ended**; **a drop released over a blocked pane or chrome within the same frame as leaving a Target dispatches nothing and leaves the stash unconsumed**; `accept` receives MIME types, and names after `peek_drag_paths` resolves.
   - **Per-pane `accept` tables** for agent and terminal.
   - **`DropIndicator`** renders each state; the reactivity bug in §2.1 gets a regression test.
   - **`copyIntoWorkdir`:** mentions, partial failure, notices.
