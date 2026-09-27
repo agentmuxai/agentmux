@@ -268,6 +268,35 @@ describe("toolActivities — backgrounded calls", () => {
         expect(acts[0].status).toBe("running");
     });
 
+    it("recognizes a top-level launch by its structured backgroundTaskId, even though stdout is empty", () => {
+        // Real shape from a Claude CLI stream (2026-09-26): a top-level
+        // launch's tool_use_result has empty stdout plus backgroundTaskId, and
+        // buildToolResults applies it as the node's result. The text check
+        // alone reads "" and missed every one of these.
+        const nodes: DocumentNode[] = [
+            mkBgBash({
+                result: {
+                    stdout: "",
+                    stderr: "",
+                    interrupted: false,
+                    isImage: false,
+                    noOutputExpected: false,
+                    backgroundTaskId: "bhmpp32i4",
+                } as any,
+            }),
+        ];
+        const acts = toolActivities(nodes, 2000);
+        expect(acts).toHaveLength(1);
+        expect(acts[0].status).toBe("running");
+    });
+
+    it("an empty backgroundTaskId is not an acceptance", () => {
+        const nodes: DocumentNode[] = [
+            mkBgBash({ result: { stdout: "<exited 0 in 0.20s>\nok", stderr: "", backgroundTaskId: "" } as any }),
+        ];
+        expect(toolActivities(nodes, 1000 + 60_000)).toEqual([]);
+    });
+
     it("a foreground call is untouched by an unrelated notification in the document", () => {
         const nodes: DocumentNode[] = [
             mkBash({ id: "fg", timestamp: 1000 }),

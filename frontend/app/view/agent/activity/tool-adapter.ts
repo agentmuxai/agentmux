@@ -111,6 +111,15 @@ function resultText(result: ToolNode["result"]): string | undefined {
  */
 export function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
     if ((n.params as BashParams | undefined)?.run_in_background !== true || n.status !== "success") return false;
+    // Current Claude CLIs attach a structured `tool_use_result` to a top-level
+    // launch: empty `stdout` plus `backgroundTaskId`. `resultText` then returns
+    // that empty stdout, so the text check below alone misses every
+    // top-level background launch (only a subagent's, which carries no
+    // structured result, still matched). The id is the harness's own
+    // "this was detached" answer, so it counts on its own.
+    // SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md §2.2.
+    const taskId = (n.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId;
+    if (typeof taskId === "string" && taskId !== "") return true;
     const text = resultText(n.result);
     return typeof text === "string" && text.startsWith(BACKGROUND_LAUNCH_ACCEPTED_PREFIX);
 }

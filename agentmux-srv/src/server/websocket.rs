@@ -15,6 +15,7 @@ use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::backend::background_task_feed::publish_background_task_updated;
 use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
@@ -754,26 +755,6 @@ async fn handle_incoming_text(
     }
 
     Ok(None)
-}
-
-/// Notify subscribers that `block_id`'s `db_background_tasks` state
-/// changed (observed, pid recorded, or completed), so the frontend can
-/// re-query `COMMAND_LIST_BACKGROUND_TASKS` instead of polling. Live-only
-/// (`persist: 0`, mirroring `process_tracker::registry`'s `emit()` for
-/// `agent:process-added`/`-exited`) — a late subscriber gets the current
-/// state via the mount-time list query, not event replay. Deliberately
-/// carries no task data itself (just an invalidation signal): the list
-/// query is the single source of truth for the actual rows, so there's
-/// nothing to keep in sync between two payload shapes. See
-/// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
-fn publish_background_task_updated(broker: &crate::backend::mps::Broker, block_id: &str) {
-    broker.publish(crate::backend::mps::MuxEvent {
-        event: "background-task-updated".to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({ "block_id": block_id })),
-    });
 }
 
 fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: String) {
