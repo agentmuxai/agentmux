@@ -132,6 +132,37 @@ impl WpsClient {
         .await
     }
 
+    /// POST `body` as JSON to `path` on the sidecar and return its JSON
+    /// reply. `agent_token` goes out as `X-Agent-Token`, so the sidecar
+    /// knows which agent is asking (an agent's own env carries it as
+    /// `AGENTMUX_AGENT_TOKEN`). `timeout` replaces the client-wide default:
+    /// callers on a synchronous hook must not wait long.
+    pub async fn post_json(
+        &self,
+        path: &str,
+        agent_token: Option<&str>,
+        body: &impl Serialize,
+        timeout: std::time::Duration,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}{}", self.endpoint, path);
+        let mut req = self
+            .inner
+            .post(&url)
+            .header("X-AuthKey", &self.auth_key)
+            .header("Content-Type", "application/json")
+            .timeout(timeout)
+            .json(body);
+        if let Some(token) = agent_token.filter(|t| !t.is_empty()) {
+            req = req.header("X-Agent-Token", token);
+        }
+        let resp = req.send().await?;
+        let status = resp.status();
+        if !status.is_success() {
+            anyhow::bail!("{path}: HTTP {status}");
+        }
+        Ok(resp.json().await?)
+    }
+
     /// Shared publish path for every MPS event this crate emits.
     /// `event`/`persist` vary per call site; the scoping (`block:<id>`)
     /// and auth/error-handling are identical across all of them.

@@ -107,6 +107,17 @@ export interface MemoryReinjectionControllerOpts {
     dispatchTurnStart: (content: string, hidden: boolean) => void;
     /** Reverts turn-state bookkeeping on a send failure — expected to be the actual `TurnReset` dispatch. */
     dispatchTurnReset: () => void;
+    /**
+     * Asks the sidecar whether this fallback should deliver (`true`) or stand
+     * down because Claude Code's `SessionStart` hook already delivered the
+     * same memory for this event (`false`) —
+     * docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2. Called
+     * right before anything is hidden or dispatched, so standing down leaves
+     * the pane untouched. The sidecar decides atomically: whichever of the hook
+     * and this fallback claims the event first delivers. Absent, or a
+     * rejection, means deliver: a duplicate beats no memory.
+     */
+    claimFallback?: (reason: ReinjectionReason) => Promise<boolean>;
 }
 
 export interface MemoryReinjectionController {
@@ -190,6 +201,21 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         if (opts.isPaneWorking()) {
             deferred = { frameTimestamp, reason };
             return;
+        }
+
+        // Only now — about to fire, pane idle — ask whether the SessionStart
+        // hook already delivered this event. Standing down here touches
+        // nothing: no hiding, no pending node, no TurnStart (Codex on #3926:
+        // a skip must never strand the pane busy). A claim is only made when
+        // the fallback is really about to fire, never while deferred.
+        if (opts.claimFallback) {
+            const proceed = await opts.claimFallback(reason).catch(() => true);
+            if (!proceed) return;
+            // The claim was a round trip too: a real turn may have started.
+            if (opts.isPaneWorking()) {
+                deferred = { frameTimestamp, reason };
+                return;
+            }
         }
 
         const node = buildMemoryReinjectionNode(entries, {

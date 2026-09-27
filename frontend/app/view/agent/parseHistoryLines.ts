@@ -12,6 +12,7 @@
 import { contextCompactedNodeId, parseCompactBoundaryFrame } from "./compact-boundary";
 import { createTranslator } from "./providers/translator-factory";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcome";
+import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode, SessionStats } from "./types";
 
@@ -279,6 +280,16 @@ export class HistoryParser {
                     };
                     put(node, indexById.get(node.id));
                 }
+                continue;
+            }
+
+            // The notice for memory the `SessionStart` hook delivered — same
+            // shared parsing as useAgentStream.ts's live path
+            // (memory-injected.ts). SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
+            if (isMemoryInjectedFrame(rawEvent)) {
+                parser.flushPending();
+                const node = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
+                if (node) put(node, indexById.get(node.id));
                 continue;
             }
 
