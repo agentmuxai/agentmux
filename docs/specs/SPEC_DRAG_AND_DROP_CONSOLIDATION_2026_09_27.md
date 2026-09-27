@@ -396,7 +396,7 @@ interface DragFiles {
 ### 5.7 Tile draggable registration without polling
 
 - **Replace the 100 ms poll** (`TileLayout.core.tsx:522`) with a `MutationObserver` on the tile node (`childList`, `subtree`). It calls the **existing** `register()` unchanged.
-- **Why not header `ref` callbacks:** `BlockFrame_Header` exists twice, the live one and an `ErrorBoundary` fallback that is never inserted into the DOM, and the fallback's ref writes last (`TileLayout.core.tsx:419-422`). A ref-driven registrar would bind pragmatic-dnd to a detached element, or let the fallback's cleanup remove the live registration, which would break whole-pane dragging.
+- **Why not header `ref` callbacks:** `BlockFrame_Header` exists twice, the live one and an `ErrorBoundary` fallback that is never inserted into the DOM, and the fallback's ref writes last (`TileLayout.core.tsx:420-424`). A ref-driven registrar would bind pragmatic-dnd to a detached element, or let the fallback's cleanup remove the live registration, which would break whole-pane dragging.
 - **The observer keeps today's selection logic:**
   - `tileNodeRef.querySelector('[data-role="block-header"]')` picks the connected header this tile owns;
   - `register()` compares identity and re-registers only on change.
