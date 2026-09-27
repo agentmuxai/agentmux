@@ -206,6 +206,16 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // mid-read.
     const [userHolding, setUserHolding] = createSignal(false);
     const expanded = () => disclosure().open || userHolding();
+    // The panel's body (full tool output: diffs, file previews, Bash output,
+    // all highlighted with shiki) mounts the first time the panel opens and
+    // then stays — never unmounted on collapse, so the collapse transition
+    // and the virtualizer's measurements keep the stable subtree the
+    // `--hidden` styles rely on. A row that is never opened never builds it:
+    // restoring history used to highlight every collapsed Edit/Read/Bash
+    // row on mount (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4: shiki + its
+    // wasm ≈ 94 ms of one open).
+    let bodyEverShown = false;
+    const bodyMounted = createMemo(() => bodyEverShown || (bodyEverShown = expanded()));
     // The header click flips whichever set the rule says this row uses:
     // collapsedNodes for an open-by-default (content-first) tool, else the pin.
     const onHeaderClick = () =>
@@ -496,7 +506,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     aria-hidden={!expanded()}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} />
+                    <Show when={bodyMounted()}>
+                        <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} />
+                    </Show>
                 </div>
             </div>
         </Show>

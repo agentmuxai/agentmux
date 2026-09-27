@@ -70,7 +70,10 @@ describe("DocumentRow — finished tool results survive dispatchMatches identity
 
     const renderToolRow = (node: ToolNode) => {
         const [n] = createSignal<DocumentNode>(node);
-        const [state] = createSignal<DocumentState>(emptyState());
+        // Pinned open: a tool row builds its result body only once it has
+        // been opened (ToolBlock's `bodyMounted`), and these tests are
+        // about that body.
+        const [state] = createSignal<DocumentState>({ ...emptyState(), pinnedNodes: new Set([node.id]) });
         const [matches, setMatches] = createSignal<Map<string, AgentDispatch>>(new Map());
         const r = render(() => (
             <DocumentRow
