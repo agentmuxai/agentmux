@@ -2,7 +2,7 @@
 
 **Author:** lark
 **Date:** 2026-09-27
-**Status:** active. §1–§6 implemented (this PR); §7 is a separate follow-up, not started.
+**Status:** active — §1–§6 (incl. §4.2a) shipped in PR #3922; §7 (the same font bug in 46 other rules) not started.
 **Related:** `SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md` (the peek on every node kind),
 `SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md` (the panel pinned right that follows the mouse's vertical
 position), `SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md` §1 (the command line in the peek).
