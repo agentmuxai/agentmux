@@ -45,8 +45,23 @@ pub struct CliArgs {
     #[arg(long = "allowed-origin")]
     pub allowed_origins: Vec<String>,
 
+    /// Headless: where srv keeps secrets (API keys, OAuth accounts, cloud
+    /// credentials). Default `file`: owner-only files under the shared dir,
+    /// for machines with no OS keychain.
+    #[arg(long = "secret-store", value_enum)]
+    pub secret_store: Option<SecretStoreKind>,
+
     #[command(subcommand)]
     pub command: Option<SrvCommand>,
+}
+
+/// `--secret-store`: see `identity::secret_store`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecretStoreKind {
+    /// The OS keychain, as the desktop app uses.
+    Keychain,
+    /// Owner-only files, one per secret.
+    File,
 }
 
 #[derive(Subcommand, Debug)]

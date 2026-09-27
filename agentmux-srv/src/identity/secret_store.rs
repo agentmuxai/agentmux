@@ -1,20 +1,29 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! OS-native secret storage for Armory API keys.
+//! srv's secret storage: Armory API keys, OAuth accounts, MuxBus
+//! credentials, browser-pane logins.
 //!
-//! Backs `SecretRef::Keychain { service, account }`. The plaintext key
-//! lives only in the OS keychain (macOS Keychain / Windows Credential
-//! Manager / Linux Secret Service via the `keyring` crate); the DB holds
-//! just the pointer plus non-secret metadata + a masked tail. Reads return
-//! a `Zeroizing<String>` so the plaintext is wiped from memory on drop.
+//! Backs `SecretRef::Keychain { service, account }`, which names an entry in
+//! *this store*, wherever it keeps secrets; the DB holds just the pointer plus
+//! non-secret metadata + a masked tail. Reads return a `Zeroizing<String>` so
+//! the plaintext is wiped from memory on drop.
 //!
-//! See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7 (best practices) and §12.2.
+//! **Two backends**, chosen once at startup:
+//! - **The OS keychain** (macOS Keychain / Windows Credential Manager / Linux
+//!   Secret Service via the `keyring` crate). The default, and what the
+//!   desktop app always uses.
+//! - **A file store** ([`use_file_store`]): one `0600` file per entry in a
+//!   `0700` directory, for machines with no keychain — a container, a
+//!   server, CI. Headless srv uses it unless told otherwise
+//!   (docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md §3.6). Secrets are
+//!   protected by file permissions (and the volume's own encryption), not
+//!   encrypted by srv: a key kept beside them would add nothing.
 //!
-//! NOTE: an encrypted-file fallback for headless Linux without a Secret
-//! Service agent is a documented follow-up (spec §12.2); the desktop app
-//! ships with a keychain on all three platforms, so keyring is the path
-//! here. Failures surface as a typed error rather than a silent downgrade.
+//! There is no silent downgrade from one to the other: failures surface as
+//! errors. See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7 and §12.2.
+//!
+//! The rest of this comment is about the keychain backend.
 //!
 //! **Reads are bounded by [`TIMEOUT`]; writes are not — see below.** Every
 //! operation here can require interactive OS consent ("App wants to access
@@ -46,7 +55,8 @@
 //! prompt on a write still blocks its caller indefinitely; only reads are
 //! protected today.
 
-use std::sync::mpsc;
+use std::path::{Path, PathBuf};
+use std::sync::{mpsc, OnceLock};
 use std::time::Duration;
 
 use keyring::Entry;
@@ -109,6 +119,28 @@ pub fn account_key(account_id: &str) -> String {
     format!("acct:{account_id}")
 }
 
+/// Set when [`use_file_store`] chose the file store; unset means the keychain.
+static FILE_STORE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Keep every secret in files under `dir` instead of the OS keychain, for
+/// the rest of this process. Called once at startup, before anything reads
+/// or writes a secret. Creates `dir` (mode `0700`) if needed.
+pub fn use_file_store(dir: PathBuf) -> Result<(), String> {
+    file::prepare_dir(&dir)?;
+    FILE_STORE
+        .set(dir)
+        .map_err(|_| "the secret store was already chosen".to_string())
+}
+
+/// Which backend this process uses, for logs: `"keychain"` or `"file"`.
+pub fn backend_name() -> &'static str {
+    if FILE_STORE.get().is_some() {
+        "file"
+    } else {
+        "keychain"
+    }
+}
+
 /// Store (or overwrite) the secret for `account_id` in the OS keychain.
 ///
 /// Deliberately unbounded — see this module's doc comment for why a
@@ -116,6 +148,9 @@ pub fn account_key(account_id: &str) -> String {
 /// completing write can land after the caller has already acted on the
 /// assumption it failed).
 pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
+    if let Some(dir) = FILE_STORE.get() {
+        return file::put(dir, &account_key(account_id), secret);
+    }
     entry(account_id)?
         .set_password(secret)
         .map_err(|e| format!("keychain write failed: {e}"))
@@ -124,6 +159,10 @@ pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
 /// Read the secret for `account_id`. Returned wrapped in `Zeroizing` so it
 /// is wiped on drop. Resolved at agent spawn time when injecting env vars.
 pub fn get(account_id: &str) -> Result<Zeroizing<String>, String> {
+    if let Some(dir) = FILE_STORE.get() {
+        return file::get_optional(dir, &account_key(account_id))?
+            .ok_or_else(|| "secret store read failed: no entry for this account".to_string());
+    }
     let account_id = account_id.to_string();
     match run_with_timeout(TIMEOUT, move || get_now(&account_id)) {
         Ok(result) => result,
@@ -148,6 +187,9 @@ fn get_now(account_id: &str) -> Result<Zeroizing<String>, String> {
 /// failure as "no credential" can silently present as a full logout. Use
 /// this variant when that distinction matters.
 pub fn get_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
+    if let Some(dir) = FILE_STORE.get() {
+        return file::get_optional(dir, &account_key(account_id));
+    }
     let account_id = account_id.to_string();
     match run_with_timeout(TIMEOUT, move || get_optional_now(&account_id)) {
         Ok(result) => result,
@@ -169,6 +211,9 @@ fn get_optional_now(account_id: &str) -> Result<Option<Zeroizing<String>>, Strin
 /// Deliberately unbounded — see this module's doc comment for why a
 /// timeout is unsafe for a mutation specifically.
 pub fn delete(account_id: &str) -> Result<(), String> {
+    if let Some(dir) = FILE_STORE.get() {
+        return file::delete(dir, &account_key(account_id));
+    }
     match entry(account_id)?.delete_password() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
@@ -188,9 +233,142 @@ fn run_outcome_message(op: &str, outcome: RunOutcome) -> String {
     }
 }
 
+/// The file store. Each entry is one file named by the SHA-256 of its
+/// account key, so no key text (ids, hostnames) reaches a file name and no
+/// key can escape the directory. No timeouts: file operations don't wait
+/// on a user.
+mod file {
+    use super::*;
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+
+    pub(super) fn path_for(dir: &Path, key: &str) -> PathBuf {
+        let digest = Sha256::digest(key.as_bytes());
+        dir.join(digest.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    }
+
+    /// Create `dir` if needed and make it owner-only (`0700`), also when it
+    /// already existed with wider permissions.
+    pub(super) fn prepare_dir(dir: &Path) -> Result<(), String> {
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder
+            .create(dir)
+            .map_err(|e| format!("secret store: cannot create {}: {e}", dir.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("secret store: cannot restrict {}: {e}", dir.display()))?;
+        }
+        Ok(())
+    }
+
+    /// Write via a fresh `0600` temp file and a rename, so a reader never
+    /// sees a partial secret and a crash never leaves one behind.
+    pub(super) fn put(dir: &Path, key: &str, secret: &str) -> Result<(), String> {
+        let path = path_for(dir, key);
+        let tmp = dir.join(format!(".tmp-{}", uuid::Uuid::new_v4().simple()));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let written = opts
+            .open(&tmp)
+            .and_then(|mut f| f.write_all(secret.as_bytes()).and_then(|()| f.sync_all()))
+            .and_then(|()| std::fs::rename(&tmp, &path));
+        written.map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            format!("secret store write failed: {e}")
+        })
+    }
+
+    pub(super) fn get_optional(dir: &Path, key: &str) -> Result<Option<Zeroizing<String>>, String> {
+        match std::fs::read(path_for(dir, key)) {
+            Ok(bytes) => String::from_utf8(bytes)
+                .map(|s| Some(Zeroizing::new(s)))
+                .map_err(|_| "secret store read failed: the entry is not valid UTF-8".to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("secret store read failed: {e}")),
+        }
+    }
+
+    pub(super) fn delete(dir: &Path, key: &str) -> Result<(), String> {
+        match std::fs::remove_file(path_for(dir, key)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("secret store delete failed: {e}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_store_round_trips_overwrites_and_deletes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("secrets");
+        file::prepare_dir(&dir).unwrap();
+        let key = account_key("abc");
+        assert!(file::get_optional(&dir, &key).unwrap().is_none());
+        file::put(&dir, &key, "first").unwrap();
+        assert_eq!(file::get_optional(&dir, &key).unwrap().as_deref().map(String::as_str), Some("first"));
+        file::put(&dir, &key, "second").unwrap();
+        assert_eq!(file::get_optional(&dir, &key).unwrap().as_deref().map(String::as_str), Some("second"));
+        file::delete(&dir, &key).unwrap();
+        assert!(file::get_optional(&dir, &key).unwrap().is_none());
+        // Deleting what isn't there is fine, as with the keychain.
+        file::delete(&dir, &key).unwrap();
+        // Only the entries themselves are left: no temp files.
+        file::put(&dir, &key, "x").unwrap();
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+    }
+
+    #[test]
+    fn file_store_entries_are_separate_and_named_by_hash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        // Keys with separators and traversal text stay inside the directory.
+        let (a, b) = ("muxbus:global", "browser-auth:id:../../etc/passwd");
+        file::put(&dir, a, "A").unwrap();
+        file::put(&dir, b, "B").unwrap();
+        assert_eq!(file::get_optional(&dir, a).unwrap().as_deref().map(String::as_str), Some("A"));
+        assert_eq!(file::get_optional(&dir, b).unwrap().as_deref().map(String::as_str), Some("B"));
+        for key in [a, b] {
+            let p = file::path_for(&dir, key);
+            assert_eq!(p.parent(), Some(dir.as_path()));
+            let name = p.file_name().unwrap().to_str().unwrap().to_string();
+            assert_eq!(name.len(), 64);
+            assert!(name.bytes().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_store_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("secrets");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // An existing, wider directory is tightened.
+        file::prepare_dir(&dir).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        file::put(&dir, "k", "v").unwrap();
+        assert_eq!(mode(&file::path_for(&dir, "k")), 0o600);
+    }
 
     #[test]
     fn account_key_is_namespaced() {
