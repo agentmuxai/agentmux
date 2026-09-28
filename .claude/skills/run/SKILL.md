@@ -1,0 +1,174 @@
+---
+name: run
+description: Launch and verify AgentMux's own `task dev` build on Windows — the MAX_PATH subst workaround, a real free-port check instead of trusting the hash, how to confirm the window is actually ready (poll state, not logs), and a safe cleanup pattern for a host running several agents' dev sessions at once.
+---
+
+# Running AgentMux itself (`task dev`, Windows)
+
+This is the verified path for launching AgentMux's own dev build to check a
+change, superseding a generic Electron-app procedure. It exists because an
+agent spent about an hour rediscovering all of this from scratch — see
+`docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md`
+for the full incident and root-causing. Follow this verbatim; don't
+re-diagnose the same four problems.
+
+**Scope note:** this is dev-workflow friction, not an isolation bug. Nothing
+below is needed because AgentMux's multi-instance guarantees (I1–I6 in
+`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`) are
+broken — they hold. This is about an *agent* reliably launching and
+*observing* its own instance on a host where several peers are doing the
+same, which those invariants don't cover.
+
+## 1. Check your workspace path length first
+
+Windows' 260-character `MAX_PATH` breaks the vendored CEF C++ build
+(`libcef_dll_wrapper`) with a misleading error:
+
+```
+fatal error C1083: Cannot open compiler generated file: '': Invalid argument
+```
+
+Agent workspace paths (`~/.agentmux/agents/<agent-id>/work/.../agentmuxai__agentmux`)
+are routinely long enough to hit this. Check before building, not after a
+confusing failure:
+
+```bash
+pwd -P | wc -c   # if this is over ~100, assume trouble; CEF's own nested
+                  # test/ tree + generated filenames eat the rest of the budget
+```
+
+If it's long, map a short drive letter **before** building — this is a
+verified fix (`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`),
+not a fallback to try after failing:
+
+```bash
+cmd //c "subst K: <repo-path-with-backslashes>"   # one whole double-quoted
+# string, no nested quotes, no bare unquoted backslashes — see "Gotchas" below
+cd /k
+```
+
+Undo when done: `cmd //c "subst K: /D"` (run from a different directory —
+you can't remove a mapping you're currently inside).
+
+## 2. Pick a port yourself; don't trust the auto-hash blindly
+
+`Taskfile.yml`'s `dev` task derives `AGENTMUX_VITE_PORT` from a 200-slot hash
+of your workspace path. With several agents' clones on one host this collides
+in practice, and the task's own collision-recovery has two gaps that won't
+save you:
+
+- Its "is this port busy" pre-check is an HTTP `curl`, which can't see a
+  process that has the socket bound but is hung/not answering HTTP.
+- Its "is this my own orphaned Vite" ownership check compares raw path
+  strings — it stops working for the same clone the moment you apply the
+  `subst` workaround above, because the path string changes.
+
+Do a real check yourself and pass the result explicitly, rather than relying
+on the hash or the task's own reaping:
+
+```bash
+# A real TCP probe, not curl — this catches a hung listener a curl GET won't.
+port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+port=5999
+while ! port_free "$port"; do port=$((port + 1)); done
+echo "using port $port"
+```
+
+Launch with it pinned:
+
+```bash
+AGENTMUX_VITE_PORT=$port task dev TITLE="<your-agent-name>"
+```
+
+If you still see `Error: Port <n> is already in use` / repeated
+`vite.config.ts changed, restarting server...`, that port is genuinely stuck
+(usually your own earlier orphan) — go to §4, don't just retry the same port.
+
+## 3. How to know it's actually ready — poll state, don't tail logs
+
+**Don't tail the log file to see if it's working.** Redirected `task dev`
+output showed essentially nothing until the process exited, for reasons not
+conclusively isolated (see the retro — this wasn't simple, fully-explained
+CRT buffering; something in the Go/shell/Rust/Node chain suppresses almost
+all incremental output, mechanism unresolved). For a long-running successful
+session that never exits on its own, a log file may show **nothing, ever**,
+even though everything is fine.
+
+Poll OS-visible state instead:
+
+```bash
+powershell -NoProfile -Command "Get-Process | Where-Object {\$_.MainWindowTitle -like '*<your-agent-name>*'} | Select-Object Id,ProcessName,MainWindowTitle"
+```
+
+**Match by substring, not exact equality.** `TITLE=` becomes the window's
+*display name*, not the whole OS title — the real title is built by
+`frontend/util/window-title.ts`'s `formatWindowTitle()` as
+`"<displayName> - <tabName> - AgentMux"` (or `"<displayName> - AgentMux"` with
+no tab). You'll see things like `"Lark - Tab 1 - AgentMux"` from other
+agents' own sessions on a shared host — that's normal, not a collision.
+
+**Expect a real delay between "window exists" and "title is set."** The
+title is applied by `frontend/app-init.ts` only after `initMuxWrap()`
+finishes — i.e., after the frontend has actually loaded and connected. A
+window that's `Responding: True` with a bare `"AgentMux"` title for a while
+is not stuck; it just hasn't finished init yet. If it *never* progresses past
+plain `"AgentMux"` after a minute or two, the frontend is probably stuck
+behind a Vite problem (§2), not slow — check
+`Get-NetTCPConnection -LocalPort $port` to confirm something is actually
+listening.
+
+## 4. Cleanup: scope every kill to a confirmed-yours PID
+
+On a host running several agents, a loose filter like `*cef-dev*` or `*K:*`
+can match other agents' live processes, not just your own strays. **Always
+confirm ownership before killing anything:**
+
+```bash
+powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=<pid>').CommandLine"
+# only proceed if the printed CommandLine actually references YOUR workspace path
+```
+
+Only then:
+
+```bash
+powershell -NoProfile -Command "Stop-Process -Id <pid> -Force -ErrorAction SilentlyContinue"
+```
+
+A CEF app's process tree needs two passes sometimes (parent exits, orphaned
+children take a moment to follow) — re-check and re-run once if any of your
+own PIDs remain.
+
+## 5. Backgrounding: use `run_in_background`, don't try to fully detach
+
+A `run_in_background: true` Bash tool call survives many subsequent,
+unrelated tool calls in the same session without incident — that's the
+working pattern. **Don't try to fully detach the process** (e.g. via
+PowerShell's `Start-Process` into its own console) to make it "more
+independent" — that was tried and the child silently never executed the
+intended command, for a reason not yet diagnosed. If you kill a background
+`task dev` job yourself later (e.g. via `taskkill`), that's you, not the
+environment — don't mistake it for an external interrupt.
+
+## Gotchas
+
+- **`cmd //c` argument quoting on Windows paths.** Pass the *entire* command
+  as one double-quoted string (`cmd //c "subst K: C:\Users\..."`), not
+  separate unquoted words — unquoted backslashes get consumed as Bash escape
+  characters and silently strip out of the path. Don't mix single- and
+  double-quotes for the same call; that produced a spurious leading backslash
+  in testing (`subst` then reports `Path not found`).
+- **`task dev`'s window starts titled plain `"AgentMux"`** even for a
+  perfectly healthy launch, before init finishes (§3) — don't read that as a
+  problem on its own.
+- **Other agents' sessions on the same host are normal, not a bug.** Seeing
+  other `Lark`/`Korp`/etc.-titled windows, or other `node.exe`/`cargo.exe`
+  processes with high memory, is expected on a shared host — don't clean
+  those up.
+
+## References
+
+- `docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md` — full incident, evidence, and the plan this skill implements (P1).
+- `docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md` — the `MAX_PATH` root cause.
+- `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — the `AGENTMUX_VITE_PORT` mechanism this skill works around.
+- `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` — the I1–I6 invariants this skill's guidance is careful not to violate.
+- `frontend/util/window-title.ts`, `frontend/app-init.ts` — the title-formatting and application logic §3 relies on.
