@@ -95,6 +95,13 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
 3. Run the §5 carry-set gate: **21/21 `OK`**. Record the commit SHA — every platform builds it.
 4. `agentmuxai/cef-rs`: branch `agentmux/154-begin-window-drag` from `cef-v154.2.0+154.0.28`,
    cherry-pick bfeae80 and 9b0abfe; record its SHA.
+0. **Prerequisite, merged before anything is published — pin nightly.** `ci-nightly-artifacts.yml`
+   passes `cef-runtime-tag: ""` for all three platforms, and each `build-*.yml` resolves an empty
+   tag to the most recently *published* `cef-<platform>-*` release (`gh release list`, sorted by
+   `publishedAt`; prereleases included). The moment a 154 release is published, nightly would pair
+   the 154 runtime with `main`'s 152 binding. Make nightly take its three tags from the same
+   `cef-runtime-pins` values `release.yml` uses (the fix #3086 made for releases), so publishing a
+   runtime changes nothing until the consumer PR moves the pins.
 5. `agentmux` (local only, not merged): `cef = "154"` + the new `[patch.crates-io]` rev;
    `cargo check --workspace` must be clean (§2 predicts no API fallout). **Also, on Linux:**
    `cargo check -p agentmux-cef --features patched-libcef` against the new binding rev. The
@@ -130,9 +137,11 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    by the §7.1 patcher log (each registered patch reported applied) plus their §7.3 behavior —
    transparency for `rwhv_background_opaque_check`, title-bar right-click on Linux — as for 152.
    Giving those two platforms a real differential mechanism stays open (tracked in the 152 spec).
-2. **Publish** three releases on `agentmuxai/cef` (operator account, trap 9):
-   `cef-windows-x86_64-154.0.8037.58`, `cef-macos-arm64-154.0.8037.58-codecs`,
-   `cef-linux-x86_64-154.0.8037.58-codecs` — one tag scheme (`cef-<os>-<arch>-<chromium>[-codecs][-rN]`).
+2. **Stage, don't publish yet.** Upload the three runtimes as **draft** releases on
+   `agentmuxai/cef` (operator account, trap 9): `cef-windows-x86_64-154.0.8037.58`,
+   `cef-macos-arm64-154.0.8037.58-codecs`, `cef-linux-x86_64-154.0.8037.58-codecs` — one tag scheme
+   (`cef-<os>-<arch>-<chromium>[-codecs][-rN]`). A draft has no `publishedAt`, isn't public, and a
+   problem found in step 4 can still be fixed without an immutable bad tag.
 3. **One consumer PR in `agentmux`** (trap 8): `agentmux-cef/Cargo.toml` `cef = "154"`; root
    `[patch.crates-io]` → the new `agentmuxai/cef-rs` rev; **`Cargo.lock`** regenerated and committed so
    it records `cef`/`cef-dll-sys` 154.2.0+154.0.28 at that rev (today it pins 152.1.0 and `9b0abfe`;
@@ -146,7 +155,10 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    public ones: `README.md` (the architecture image's alt text and the "Desktop: CEF 152" line) and
    the version text inside `assets/architecture.svg` (edited in place — it has no generator; #3270
    did the same for 148 → 152).
-4. A packaged build on each platform runs the §7.3 checks end to end; then release.
+4. **On the consumer branch**, a packaged build on each platform — using the locally built runtime
+   (or the draft asset) — runs the §7.3 checks end to end. Only when all three pass: **publish the
+   three drafts, then merge the consumer PR right away**, back to back. With step 0 in place, nightly
+   keeps building 152 until that merge moves the pins.
 5. After: switch `agentmuxai/cef`'s default branch to `8037` (needs repo admin — flag it, §6.8).
 
 ### Rollback
