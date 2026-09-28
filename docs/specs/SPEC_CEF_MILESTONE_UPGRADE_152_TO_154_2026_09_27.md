@@ -94,7 +94,11 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
 4. `agentmuxai/cef-rs`: branch `agentmux/154-begin-window-drag` from `cef-v154.2.0+154.0.28`,
    cherry-pick bfeae80 and 9b0abfe; record its SHA.
 5. `agentmux` (local only, not merged): `cef = "154"` + the new `[patch.crates-io]` rev;
-   `cargo check --workspace` must be clean (§2 predicts no API fallout).
+   `cargo check --workspace` must be clean (§2 predicts no API fallout). **Also, on Linux:**
+   `cargo check -p agentmux-cef --features patched-libcef` against the new binding rev. The
+   `begin_window_drag` field access in `ui_tasks/drag.rs` compiles only under that feature, which is
+   default-off, on Linux — without this, a missing or mis-generated 154 slot passes the workspace
+   check and surfaces only after the expensive builds.
 
 ### Day 1 — afternoon → Day 2 morning: three builds in parallel (3 owners, 3–6 h each)
 
@@ -110,9 +114,12 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
 ### Day 2: verify, publish, switch (all, then one owner)
 
 1. **Per platform, §7** of the maintenance doc: `patcher.py` sanity (§7.1), symbol probes with full
-   `nm` (§7.2), and functional checks (§7.3): boot + `chrome://gpu` GPU on; native drag (Linux) or
-   its documented no-op; title-bar right-click; window transparency; H.264/HEVC playback; no -67030
-   on macOS 26; no DCHECK on drag/close.
+   `nm` (§7.2), and functional checks (§7.3): boot + `chrome://gpu` GPU on; title-bar right-click;
+   window transparency; H.264/HEVC playback; no -67030 on macOS 26; no DCHECK on drag/close.
+   **Linux native drag must visibly move the window** (title bar and a floating window) in the
+   packaged build, which enables `patched-libcef`. The size-mismatch fallback in
+   `ui_tasks/drag.rs` (warning, no-op) is a **failure** here, not a pass: it's what an ABI mismatch,
+   a null slot or a missing feature looks like, and it leaves users unable to drag.
    **The §7.2b differential compile (two `OK` lines) is a macOS-only gate.** Under
    `use_thin_lto=true` (Windows, Linux) an isolated single-TU recompile yields LLVM bitcode, not the
    machine code the ThinLTO backend links, so `cef-verify-patches.sh` cannot pass there regardless of
