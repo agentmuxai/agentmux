@@ -104,6 +104,10 @@ simpler) — instead of "latest published". That's the fix #3086 made for releas
 every entry point. After it, publishing a runtime changes nothing until the consumer PR moves the
 pins, and a deliberate non-pinned build has to name its tag.
 
+**This is what makes Day 2 step 4's publish → merge gap safe:** with blank = pinned, no nightly,
+dispatched or scheduled build can pick up a 154 runtime between publishing and the consumer merge,
+however long that gap is. Do not publish anything until this prerequisite is merged.
+
 ### Day 1 — morning: source (one owner, ~3 h)
 
 1. `agentmuxai/cef`: create integration branch **`8037`** from upstream 8037 (564dd6c4).
