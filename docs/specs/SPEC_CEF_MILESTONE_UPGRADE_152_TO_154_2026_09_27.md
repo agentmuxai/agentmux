@@ -104,16 +104,13 @@ simpler) — instead of "latest published". That's the fix #3086 made for releas
 every entry point. After it, publishing a runtime changes nothing until the consumer PR moves the
 pins, and a deliberate non-pinned build has to name its tag.
 
-**This is what makes Day 2 step 4's publish → merge gap safe — for builds that run a workflow
-containing it.** Nightly runs `main`'s workflow, so it is covered once the prerequisite is merged.
-A `workflow_dispatch` runs the workflow *of the ref it is dispatched from*, not `main`'s
-(`release.yml` documents the same behavior), so a dispatch from a tag or branch cut before the
-prerequisite still resolves blank to "latest published". Two rules close that:
-
-- Do not publish anything until this prerequisite is merged.
-- During the publish → merge window (step 4, meant to be minutes), do not dispatch `build-*.yml`
-  from any ref older than the prerequisite, and pass an explicit `cef-runtime-tag` to any manual
-  build. Publishing and merging back to back keeps the window short enough to hold to this.
+**Known limitation — refs cut before this prerequisite.** A `workflow_dispatch` runs the workflow
+*of the ref it is dispatched from*, not `main`'s (`release.yml` documents the same behavior), so a
+blank-tag dispatch from a tag or branch older than this prerequisite still resolves to "latest
+published". That is true of every runtime release, not just 154, and can't be fixed retroactively
+in old refs. Day 2 step 4's order (merge, *then* publish) keeps it from mattering during this
+upgrade: until the drafts are published, "latest published" is still 152, matching old refs' 152
+code. Afterwards, rebuild an old ref only with an explicit `cef-runtime-tag`.
 
 ### Day 1 — morning: source (one owner, ~3 h)
 
@@ -182,11 +179,13 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    the version text inside `assets/architecture.svg` (edited in place — it has no generator; #3270
    did the same for 148 → 152).
 4. **On the consumer branch**, a packaged build on each platform — using the locally built runtime
-   (or the draft asset) — runs the §7.3 checks end to end. **Gate before publishing: confirm the blank = pinned prerequisite is merged on `main`** — each
-   `build-*.yml` resolves an empty `cef-runtime-tag` to the committed pin, not latest published. If it
-   isn't merged, stop: do not publish. Only when all three platforms pass and that gate holds: **publish the
-   three drafts, then merge the consumer PR right away**, back to back. With the prerequisite above in place
-   (blank = pinned), every build keeps using 152 until that merge moves the pins.
+   (or the draft asset) — runs the §7.3 checks end to end. **Gate: the blank = pinned prerequisite
+   is merged on `main`**; if not, stop. Only when all three platforms pass and that gate holds:
+   **merge the consumer PR, then publish the three drafts immediately** — in that order. Between the
+   two, `main` names 154 tags that aren't published yet, so any build of `main` **fails loudly**
+   (it can't download the runtime) instead of producing a 154-runtime/152-binding mismatch, and
+   "latest published" is still 152 for any old-ref dispatch (see the known limitation above). A
+   failed nightly for a few minutes is the intended cost; a mismatched artifact is not possible.
 5. After: switch `agentmuxai/cef`'s default branch to `8037` (needs repo admin — flag it, §6.8).
 
 ### Rollback
@@ -201,7 +200,7 @@ Release tags are immutable: revert the consumer PR to restore the 152.0.7977.83 
 | A build fails late (disk, flag, new Chromium compile break like `installer_tests`) | medium | disk check first; start all three early on Day 1; warm-cache fixes are minutes |
 | A silent runtime regression (the ANGLE class) | medium | §7.2 probes on both library candidates + live `chrome://gpu`, not compile success |
 | Chromium 154 behavior changes in the frontend | low–medium | two milestones, not four; the §7.3 matrix plus a normal release smoke test |
-| A human isn't available to publish | medium | schedule the operator's three publishes for Day 2 midday |
+| A human isn't available to publish | medium | schedule the operator's three publishes for Day 2 midday; merge step 4 only with the publisher on hand — if publishing stalls, revert the merge (`main` builds fail until one of the two happens) |
 | Only two owners available | — | Windows and Linux on narko/charlie in parallel; macOS on Day 2 (adds ~half a day) |
 
 ## 6. After 154: make the next one routine
