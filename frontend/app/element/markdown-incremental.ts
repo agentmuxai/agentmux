@@ -196,3 +196,27 @@ export function findSafeSplitPoint(text: string): number {
 
     return lastSafe;
 }
+
+/**
+ * A `<span …` or `</span…` still being typed at the very end of the text: a
+ * bare `<`, any prefix of the tag name, or the name plus a short run of
+ * attributes. Bounded (no newline, at most 120 attribute characters) so it can
+ * only ever match a tag in progress, never swallow ordinary prose that happens
+ * to contain `<`.
+ */
+const PARTIAL_SPAN_TAG = /<\/?(?:s(?:p(?:a(?:n(?:[ \t][^<>\n]{0,120})?)?)?)?)?$/;
+
+/**
+ * Drops a half-typed `<span …>` / `</span>` from the end of a STREAMING tail
+ * (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4). Markdown renders an
+ * incomplete tag as literal text, so without this a colour span flashes as raw
+ * `<span class="am-o` for a commit or two before its `>` arrives. An unclosed
+ * but complete open tag needs no help: the HTML parser auto-closes it.
+ *
+ * Only for the open tail while streaming. Settled text is never trimmed, so a
+ * message that really ends in `<span` still shows it once streaming stops.
+ */
+export function trimPartialInlineTag(text: string): string {
+    const m = PARTIAL_SPAN_TAG.exec(text);
+    return m ? text.slice(0, m.index) : text;
+}

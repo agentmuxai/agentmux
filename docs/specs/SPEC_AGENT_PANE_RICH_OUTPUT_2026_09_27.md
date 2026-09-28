@@ -1,7 +1,7 @@
 # Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video)
 
 **Date:** 2026-09-27
-**Status:** proposed
+**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2–P4 not started
 **Author:** agent1
 **Scope:**
 - `frontend/app/element/markdown*.ts(x)` (the shared renderer)

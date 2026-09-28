@@ -485,6 +485,7 @@ partial list.
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
 | [`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md) | SPEC: Paste and drop images into the agent pane input |
 | [`SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26`](SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md) | Spec: Agent-pane preview cleanups (message shell, scroll hand-off, cap estimates, file preview) |
+| [`SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27`](SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md) | Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video) |
 | [`SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26`](SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md) | Spec: One open/closed model for agent-pane rows |
 | [`SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24`](SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md) | Agent pane scroll-follow: one owner, one intent-based state machine |
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
@@ -589,7 +590,6 @@ partial list.
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |
-| [`SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27`](SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md) | Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video) |
 | [`SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12`](SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md) | Spec: Agent pane session-replay framework |
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
