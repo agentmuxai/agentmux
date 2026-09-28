@@ -160,7 +160,13 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
 ### Day 2: verify, publish, switch (all, then one owner)
 
 1. **Per platform, §7** of the maintenance doc: `patcher.py` sanity (§7.1), symbol probes with full
-   `nm` (§7.2), and functional checks (§7.3): boot + `chrome://gpu` GPU on; title-bar right-click;
+   `nm` (§7.2) on macOS and Linux, and functional checks (§7.3). **On Windows the release
+   `libcef.dll` carries no local symbols** — `dumpbin /symbols` on it finds nothing, healthy or
+   not (`build-patched-cef-windows.md`, "Verifying `BeginWindowDrag` landed"). Probe the matching
+   `libcef.dll.pdb` from the same `out/` directory instead (a PDB-aware dumper such as
+   `llvm-pdbutil`), first confirming it finds a known-present symbol like `IsUniqueForCEF` so an
+   empty result can't pass; for `BeginWindowDrag`, also check the generated `window_cpptoc.cc`
+   slot as that doc describes. §7.3: boot + `chrome://gpu` GPU on; title-bar right-click;
    window transparency; H.264/HEVC playback; no -67030 on macOS 26; no DCHECK on drag/close.
    **Linux native drag must visibly move the window** (title bar and a floating window) in the
    packaged build, which enables `patched-libcef`. The size-mismatch fallback in
