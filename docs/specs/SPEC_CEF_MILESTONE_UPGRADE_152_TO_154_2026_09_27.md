@@ -123,17 +123,22 @@ code. Afterwards, rebuild an old ref only with an explicit `cef-runtime-tag`.
 
 ### Day 1 — morning: source (one owner, ~3 h)
 
+Both forks' changes land as **reviewed PRs**, not direct pushes. The `cef` fork's PRs into `7977`
+were reviewed by ReAgent and Codex; `cef-rs` has never had a PR, so the operator confirms both apps'
+repository access covers it (org settings → GitHub Apps) before Day 1 — its change decides the ABI.
+
 1. `agentmuxai/cef`: create integration branch **`8037`** from upstream 8037 (564dd6c4).
-2. Port the carry-set onto it, one commit per item (`agentmux: port <item> to 8037 (Chromium 154)`):
-   the 18-file Layer B delta by per-file 3-way merge; the 3 Layer A patches registered in
-   `patch.cfg`; `added=15400` + `version_manager.py -u` (trap 1).
-3. Run the §5 carry-set gate: **21/21 `OK`**. Record the commit SHA — every platform builds it.
-4. `agentmuxai/cef-rs`: branch `agentmux/154-begin-window-drag` from `cef-v154.2.0+154.0.28`,
-   cherry-pick bfeae80 and 9b0abfe; record its SHA. Land it as a **PR** onto a base branch cut from
-   that tag, not a direct push: the fork has never had a PR, so it's unconfirmed whether ReAgent and
-   Codex are installed there, and this is the ABI-deciding change. The operator confirms both apps'
-   repository access covers `cef-rs` (org settings → GitHub Apps) before Day 1. The `cef` fork's
-   port goes the same way, as a PR into `8037` (its PRs into `7977` were reviewed by both).
+2. On a work branch off it, port the carry-set, one commit per item (`agentmux: port <item> to
+   8037 (Chromium 154)`): the 18-file Layer B delta by per-file 3-way merge; the 3 Layer A patches
+   registered in `patch.cfg`; `added=15400` + `version_manager.py -u` (trap 1). Open it as a PR
+   into `8037`.
+3. `agentmuxai/cef-rs`: base branch `agentmux/154` cut from `cef-v154.2.0+154.0.28`; a work branch
+   off it cherry-picks bfeae80 and 9b0abfe; open it as a PR into `agentmux/154`.
+4. Run the §5 carry-set gate (**21/21 `OK`**) and step 5's Cargo checks on the PR heads while
+   review runs. **Merge both PRs, then record the SHAs from the merged `8037` and `agentmux/154`
+   heads and re-run the gate and Cargo checks on exactly those** — an amended or squash-merged PR
+   changes the SHA, and the pre-review one would bypass the review fixes. Those two final SHAs are
+   what every platform builds and what the consumer PR pins.
 5. `agentmux` (local only, not merged): `cef = "154"` + the new `[patch.crates-io]` rev;
    `cargo check --workspace` must be clean (§2 predicts no API fallout). **Also, on Linux:**
    `cargo check -p agentmux-cef --features patched-libcef` against the new binding rev. The
