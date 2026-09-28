@@ -100,7 +100,7 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
 
 | Platform | Owner (did 152) | Machine | GN args | Watch for |
 |---|---|---|---|---|
-| Windows x86_64 | Korp | narko | `args-windows.gn` | `use_static_angle=false`, tracer off, exclude `installer_tests`. **narko has 82 GB free** — the 152 checkout at `C:\Users\asafe\cef-build` can be synced forward instead of recloned, but free space to **≥120 GB** first or confirm the delta fits |
+| Windows x86_64 | Korp | narko | `args-windows.gn` | `use_static_angle=false`, tracer off, exclude `installer_tests`. **Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs** (open question 2). The 152 checkout at `C:\Users\asafe\cef-build` can be synced forward instead of recloned, which may need less — confirm before starting |
 | macOS arm64 | Clare | Clare's Mac | `args-darwin.gn` | keep ANGLE static (no override), `dcheck_always_on=false`, hermetic Xcode pin |
 | Linux x86_64 | Opaz | charlie | `args.gn` | `use_static_angle=false`, strip `libcef.so`, `-codecs` |
 
