@@ -132,7 +132,9 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    `cef-windows-x86_64-154.0.8037.58`, `cef-macos-arm64-154.0.8037.58-codecs`,
    `cef-linux-x86_64-154.0.8037.58-codecs` — one tag scheme (`cef-<os>-<arch>-<chromium>[-codecs][-rN]`).
 3. **One consumer PR in `agentmux`** (trap 8): `agentmux-cef/Cargo.toml` `cef = "154"`; root
-   `[patch.crates-io]` → the new `agentmuxai/cef-rs` rev; `release.yml` `cef-runtime-pins` — all
+   `[patch.crates-io]` → the new `agentmuxai/cef-rs` rev; **`Cargo.lock`** regenerated and committed so
+   it records `cef`/`cef-dll-sys` 154.2.0+154.0.28 at that rev (today it pins 152.1.0 and `9b0abfe`;
+   left stale, the next Cargo run may resolve an unverified 154 crate); `release.yml` `cef-runtime-pins` — all
    three tags together; **`scripts/cef-build/windows-runtime-pin.sh` — all three of its values**
    (`CEF_WINDOWS_RELEASE_TAG`, `CEF_WINDOWS_ASSET`, `CEF_WINDOWS_LIBCEF_SHA256` of the new
    `libcef.dll`). That file, not `fetch-patched-cef-windows.sh` (which only sources it), is the
@@ -160,7 +162,7 @@ Release tags are immutable: revert the consumer PR to restore the 152.0.7977.83 
 ## 6. After 154: make the next one routine
 
 Chromium ships a milestone about every four weeks, and only the newest CEF branch gets fixes, so
-156 lands in late October. This upgrade should leave behind: a script for the Layer B 3-way port
+**155 lands in late October** (and 156 around late November). This upgrade should leave behind: a script for the Layer B 3-way port
 and patch registration (steps 1–3 above), the §2 header comparison as a script, and the
 version drift report's CEF rows as the trigger. Tracked separately.
 
