@@ -172,7 +172,9 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    the version text inside `assets/architecture.svg` (edited in place — it has no generator; #3270
    did the same for 148 → 152).
 4. **On the consumer branch**, a packaged build on each platform — using the locally built runtime
-   (or the draft asset) — runs the §7.3 checks end to end. Only when all three pass: **publish the
+   (or the draft asset) — runs the §7.3 checks end to end. **Gate before publishing: confirm the blank = pinned prerequisite is merged on `main`** — each
+   `build-*.yml` resolves an empty `cef-runtime-tag` to the committed pin, not latest published. If it
+   isn't merged, stop: do not publish. Only when all three platforms pass and that gate holds: **publish the
    three drafts, then merge the consumer PR right away**, back to back. With the prerequisite above in place
    (blank = pinned), every build keeps using 152 until that merge moves the pins.
 5. After: switch `agentmuxai/cef`'s default branch to `8037` (needs repo admin — flag it, §6.8).
