@@ -222,7 +222,7 @@ Release tags are immutable: revert the consumer PR to restore the 152.0.7977.83 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | A build fails late (disk, flag, new Chromium compile break like `installer_tests`) | medium | disk check first; start all three early on Day 1; warm-cache fixes are minutes |
-| A silent runtime regression (the ANGLE class) | medium | §7.2 probes on both library candidates + live `chrome://gpu`, not compile success |
+| A silent runtime regression (the ANGLE class) | medium | the trap 6 ANGLE gates — `verify-angle-libs.sh` on Windows/Linux, the framework `nm` probe on macOS — plus live `chrome://gpu`, not compile success (§7.2 checks carry-set symbols, not ANGLE) |
 | Chromium 154 behavior changes in the frontend | low–medium | two milestones, not four; the §7.3 matrix plus a normal release smoke test |
 | A human isn't available to publish | medium | schedule the operator's three publishes for Day 2 midday; merge step 4 only with the publisher on hand — if publishing stalls, revert the merge (`main` builds fail until one of the two happens) |
 | Only two owners available | — | Windows and Linux on narko/charlie in parallel; macOS on Day 2 (adds ~half a day) |
