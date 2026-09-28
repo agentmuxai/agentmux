@@ -3908,9 +3908,9 @@ fn quit_self_outcome(state: &str, body: &Value) -> anyhow::Result<String> {
 /// it at once, mid-turn included, and is reported as delivered.
 fn deferred_delivery_text(to: &str) -> String {
     format!(
-        "QUEUED for {to} — their agent is starting up or restarting, so it has \
-         not reached them yet. Their AgentMux delivers it as soon as they are \
-         up. Don't resend it."
+        "QUEUED for {to} — their agent is starting up, restarting or stopping, \
+         so it has not reached them yet. Their AgentMux delivers it as soon as \
+         their agent is up. Don't resend it."
     )
 }
 
@@ -4001,7 +4001,7 @@ mod tests {
     #[test]
     fn deferred_delivery_text_is_clean_and_names_the_target() {
         let t = deferred_delivery_text("Camper");
-        assert!(t.starts_with("QUEUED for Camper — their agent is starting up"), "{t}");
+        assert!(t.starts_with("QUEUED for Camper — their agent is starting up, restarting or stopping"), "{t}");
         assert!(!t.contains("mid-turn") && !t.contains("turn ends"), "nothing waits for a turn: {t}");
         assert!(!t.contains("  "), "no runs of spaces: {t:?}");
         assert!(t.ends_with("Don't resend it."), "{t}");

@@ -145,7 +145,7 @@ impl PersistentSubprocessController {
                 // this like any other transient delivery failure and retries.
                 return Err(format!(
                     "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
-                     waiting for this agent's process to start up or restart) — retry shortly"
+                     waiting for this agent's process to start up, restart or stop) — retry shortly"
                 ));
             }
             // Always enqueue first, then write the whole backlog in order.
