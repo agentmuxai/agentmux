@@ -275,7 +275,13 @@ export class ClaudeCodeStreamParser {
         try {
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    // End of stream: a jekt still held for an unfinished block
+                    // must not be lost.
+                    this.releaseHeldJekts();
+                    yield* this.drainReleased();
+                    break;
+                }
 
                 this.buffer += decoder.decode(value, { stream: true });
                 const lines = this.buffer.split("\n");
@@ -287,6 +293,8 @@ export class ClaudeCodeStreamParser {
                     try {
                         const event = JSON.parse(line) as StreamEvent;
                         const node = this.eventToNode(event);
+                        // Released jekts first: they arrived before this event.
+                        yield* this.drainReleased();
                         if (node) yield node;
                     } catch (err) {
                         console.error("Failed to parse NDJSON line:", line, err);
@@ -299,7 +307,12 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
-     * Parse a single line of NDJSON
+     * Parse a single line of NDJSON.
+     *
+     * A jekt arriving while a text/thinking block is open returns `null` and is
+     * held; callers must take released jekts with `drainReleased()` after every
+     * call (and `releaseHeld()` at the end of a turn or input) and place them
+     * before the returned node. `parse()` and `parseEvent()` do this themselves.
      */
     parseLine(line: string): DocumentNode | null {
         if (!line.trim()) return null;
@@ -319,7 +332,9 @@ export class ClaudeCodeStreamParser {
      */
     async parseEvent(event: any): Promise<DocumentNode[]> {
         const node = this.eventToNode(event as StreamEvent);
-        return node ? [node] : [];
+        // Released jekts first: they arrived before this event.
+        const released = this.drainReleased();
+        return node ? [...released, node] : released;
     }
 
     /**
@@ -356,6 +371,11 @@ export class ClaudeCodeStreamParser {
         const out = this.releasedJekts;
         this.releasedJekts = [];
         return out;
+    }
+
+    /** Whether a jekt is being held for a block that is still open. */
+    isHolding(): boolean {
+        return this.heldJekts.length > 0;
     }
 
     /** End of turn: release every held jekt (then drainReleased()). */

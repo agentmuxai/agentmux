@@ -757,6 +757,13 @@ describe("jekt arriving mid-block", () => {
         expect(t1!.id).not.toBe(t2!.id);
     });
 
+    test("parseEvent returns released jekts before the event's own node", async () => {
+        await parser.parseEvent({ type: "text", content: "writing" });
+        expect(await parser.parseEvent({ type: "user_message", message: jekt() })).toEqual([]);
+        const out = await parser.parseEvent({ type: "tool_call", tool: "Bash", id: "tc9", params: { command: "ls" } });
+        expect(out.map((n) => n.type)).toEqual(["jekt_message", "tool"]);
+    });
+
     test("reset drops anything held", () => {
         parser.parseStreamEvent({ type: "text", content: "writing" });
         parser.parseStreamEvent({ type: "user_message", message: jekt() });
