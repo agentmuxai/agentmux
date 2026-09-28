@@ -3,11 +3,12 @@
 
 //! MuxBus cloud connectivity RPC handlers.
 //!
-//! Four commands:
+//! Five commands:
 //!   * `muxbus.login`        — PKCE browser flow (blocks until complete or timeout)
 //!   * `muxbus.login.cancel` — abort an in-flight `muxbus.login` (e.g. user closed the browser)
 //!   * `muxbus.status`       — current credential status
 //!   * `muxbus.disconnect`   — clear stored credentials
+//!   * `muxbus.cloudconfig`  — the cloud settings srv resolved, and where they came from
 
 use std::sync::Arc;
 
@@ -21,6 +22,7 @@ pub const COMMAND_MUXBUS_LOGIN: &str = "muxbus.login";
 pub const COMMAND_MUXBUS_LOGIN_CANCEL: &str = "muxbus.login.cancel";
 pub const COMMAND_MUXBUS_STATUS: &str = "muxbus.status";
 pub const COMMAND_MUXBUS_DISCONNECT: &str = "muxbus.disconnect";
+pub const COMMAND_MUXBUS_CLOUDCONFIG: &str = "muxbus.cloudconfig";
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
@@ -94,6 +96,74 @@ pub struct MuxBusDisconnectReq {}
 #[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct MuxBusDisconnectResp {}
+
+/// Empty request for `muxbus.cloudconfig`: a struct rather than `()` so the
+/// stub's `{}` deserializes, like the request shapes above.
+#[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct MuxBusCloudConfigReq {}
+
+/// Where `muxbus.cloudconfig`'s settings came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[serde(rename_all = "lowercase")]
+pub enum MuxBusCloudConfigSource {
+    /// The relay's `/.well-known/agentmux-cloud.json` (the last good copy
+    /// when a later fetch failed).
+    Discovered,
+    /// No document: srv's compiled relay URLs, and no sign-in settings.
+    Default,
+}
+
+/// Result of `muxbus.cloudconfig`: the AgentMux Cloud settings srv resolved
+/// (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.2). A build compiled
+/// without a Cognito client id asks this whether sign-in is possible anyway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct MuxBusCloudConfigResp {
+    pub source: MuxBusCloudConfigSource,
+    /// The relay REST base srv uses. Always `relay::rest_base_url()`, the
+    /// root of trust the document is fetched from, whatever the document says.
+    pub api: String,
+    /// The relay WebSocket URL the cloud subscriber connects to.
+    pub ws: String,
+    /// The Cloud Console URL; empty when none is published.
+    pub console: String,
+    /// The Cognito hosted-UI domain and desktop client id `muxbus.login`
+    /// prefers over the ones in its request. Empty with `source: "default"`:
+    /// srv has no compiled sign-in settings, only the frontend build does.
+    pub cognito_domain: String,
+    pub client_id: String,
+    pub region: String,
+    pub user_pool_id: String,
+}
+
+/// What `muxbus.cloudconfig` reports for a discovery result.
+fn cloud_config(discovered: Option<crate::muxbus::discovery::CloudSettings>, rest_base: String) -> MuxBusCloudConfigResp {
+    match discovered {
+        Some(s) => MuxBusCloudConfigResp {
+            source: MuxBusCloudConfigSource::Discovered,
+            api: rest_base,
+            ws: s.ws,
+            console: s.console,
+            cognito_domain: s.cognito.domain,
+            client_id: s.cognito.client_id,
+            region: s.cognito.region,
+            user_pool_id: s.cognito.user_pool_id,
+        },
+        None => MuxBusCloudConfigResp {
+            source: MuxBusCloudConfigSource::Default,
+            api: rest_base,
+            ws: crate::muxbus::cloud_subscriber::MUXBUS_WS_URL.to_string(),
+            console: String::new(),
+            cognito_domain: String::new(),
+            client_id: String::new(),
+            region: String::new(),
+            user_pool_id: String::new(),
+        },
+    }
+}
 
 pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // muxbus.login — PKCE browser flow, returns when browser login completes
@@ -309,6 +379,20 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+
+    // muxbus.cloudconfig — the resolved cloud settings. No credential or
+    // keychain access; discovery itself is cached (`discovery::cloud_settings`).
+    let http_client_cloudconfig = state.http_client.clone();
+    engine.register_typed(
+        COMMAND_MUXBUS_CLOUDCONFIG,
+        move |_req: MuxBusCloudConfigReq, _ctx| {
+            let http = http_client_cloudconfig.clone();
+            async move {
+                let discovered = crate::muxbus::discovery::cloud_settings(&http).await;
+                Ok(cloud_config(discovered, crate::muxbus::relay::rest_base_url()))
+            }
+        },
+    );
 }
 
 /// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.3): cached peer
@@ -323,7 +407,7 @@ fn clear_wan_peer_cache() {
     }
 }
 
-// Request-shape tests for the four `muxbus.*` commands.
+// Request-shape tests for the `muxbus.*` commands.
 //
 // These types were private to this file until now, so the frontend's inline
 // copies were hand-maintained against nothing.
@@ -357,6 +441,7 @@ mod req_shape_tests {
         serde_json::from_value::<MuxBusLoginCancelReq>(json!({})).expect("login.cancel");
         serde_json::from_value::<MuxBusStatusReq>(json!({})).expect("status");
         serde_json::from_value::<MuxBusDisconnectReq>(json!({})).expect("disconnect");
+        serde_json::from_value::<MuxBusCloudConfigReq>(json!({})).expect("cloudconfig");
         assert!(serde_json::from_value::<()>(json!({})).is_err());
     }
 
@@ -378,5 +463,53 @@ mod req_shape_tests {
     #[test]
     fn disconnect_response_is_an_empty_object() {
         assert_eq!(serde_json::to_value(MuxBusDisconnectResp {}).unwrap(), json!({}));
+    }
+
+    fn published() -> crate::muxbus::discovery::CloudSettings {
+        crate::muxbus::discovery::parse(
+            r#"{"version":1,"api":"https://api.example.test","ws":"wss://ws.example.test","console":"https://console.example.test",
+                "cognito":{"domain":"https://auth.example.test","clientId":"abc123","region":"us-east-1","userPoolId":"us-east-1_X"}}"#,
+            "https://relay.example.test",
+        )
+        .unwrap()
+    }
+
+    // SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.2: a published document
+    // supplies the sign-in settings and the WebSocket URL; REST stays srv's.
+    #[test]
+    fn cloudconfig_reports_a_published_document_as_discovered() {
+        let r = cloud_config(Some(published()), "https://relay.example.test".to_string());
+        assert_eq!(r.source, MuxBusCloudConfigSource::Discovered);
+        assert_eq!(r.api, "https://relay.example.test", "REST is never taken from the document");
+        assert_eq!(r.ws, "wss://ws.example.test");
+        assert_eq!(r.console, "https://console.example.test");
+        assert_eq!(r.cognito_domain, "https://auth.example.test");
+        assert_eq!(r.client_id, "abc123");
+        assert_eq!(r.region, "us-east-1");
+        assert_eq!(r.user_pool_id, "us-east-1_X");
+    }
+
+    // No document (an older relay, or discovery failed with no earlier copy):
+    // srv's compiled relay URLs, and no client id, so a build without its
+    // own can't offer sign-in.
+    #[test]
+    fn cloudconfig_without_a_document_reports_the_defaults() {
+        let r = cloud_config(None, "https://relay.example.test".to_string());
+        assert_eq!(r.source, MuxBusCloudConfigSource::Default);
+        assert_eq!(r.api, "https://relay.example.test");
+        assert_eq!(r.ws, crate::muxbus::cloud_subscriber::MUXBUS_WS_URL);
+        assert!(r.client_id.is_empty() && r.cognito_domain.is_empty() && r.console.is_empty());
+    }
+
+    // The wire shape the frontend reads: camelCase keys, lowercase source.
+    #[test]
+    fn cloudconfig_serializes_camel_case_with_a_lowercase_source() {
+        let v = serde_json::to_value(cloud_config(Some(published()), "https://relay.example.test".to_string())).unwrap();
+        assert_eq!(v["source"], "discovered");
+        assert_eq!(v["clientId"], "abc123");
+        assert_eq!(v["cognitoDomain"], "https://auth.example.test");
+        assert_eq!(v["userPoolId"], "us-east-1_X");
+        let v = serde_json::to_value(cloud_config(None, String::new())).unwrap();
+        assert_eq!(v["source"], "default");
     }
 }

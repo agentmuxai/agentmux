@@ -91,12 +91,14 @@ pub async fn cloud_settings(http: &reqwest::Client) -> Option<CloudSettings> {
     let base = super::relay::rest_base_url();
     let fetched = fetch(http, &base).await;
     let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    let last_good = match fetched {
-        Some(settings) => Some(settings),
-        None => guard.as_ref().and_then(|c| c.last_good.clone()),
-    };
+    let last_good = keep_last_good(guard.as_ref().and_then(|c| c.last_good.as_ref()), fetched);
     *guard = Some(Cache { fetched_at: Instant::now(), last_good: last_good.clone() });
     last_good
+}
+
+/// A fresh document replaces the cached one; a failed fetch keeps it.
+fn keep_last_good(previous: Option<&CloudSettings>, fetched: Option<CloudSettings>) -> Option<CloudSettings> {
+    fetched.or_else(|| previous.cloned())
 }
 
 async fn fetch(http: &reqwest::Client, base: &str) -> Option<CloudSettings> {
@@ -218,5 +220,54 @@ mod tests {
         assert!(!client_id_superseded(Some(&s), "abc123"));
         assert!(!client_id_superseded(None, "old-client"), "no document: can't tell");
         assert!(!client_id_superseded(Some(&s), ""), "no recorded client id: can't tell");
+    }
+
+    /// A relay that answers every request with `status` and `body`.
+    async fn fake_relay(status: &'static str, body: String) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let _ = stream.read(&mut buf).await;
+                    let resp = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn a_relay_serving_the_document_is_discovered() {
+        let base = fake_relay("200 OK", DOC.to_string()).await;
+        let s = fetch(&reqwest::Client::new(), &base).await.expect("document served");
+        assert_eq!(s.cognito.client_id, "abc123");
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_relay_or_one_without_the_document_is_not_discovered() {
+        let http = reqwest::Client::new();
+        // Nothing listens on port 1.
+        assert!(fetch(&http, "http://127.0.0.1:1").await.is_none());
+        let base = fake_relay("404 Not Found", "{}".to_string()).await;
+        assert!(fetch(&http, &base).await.is_none());
+        let base = fake_relay("200 OK", DOC.replace("\"version\": 1", "\"version\": 2")).await;
+        assert!(fetch(&http, &base).await.is_none());
+    }
+
+    #[test]
+    fn a_failed_fetch_keeps_the_last_good_document() {
+        let old = parse(DOC, "https://muxbus.example.test").unwrap();
+        let new = parse(&DOC.replace("abc123", "def456"), "https://muxbus.example.test").unwrap();
+        assert_eq!(keep_last_good(Some(&old), None), Some(old.clone()));
+        assert_eq!(keep_last_good(Some(&old), Some(new.clone())), Some(new));
+        assert_eq!(keep_last_good(None, None), None);
     }
 }
