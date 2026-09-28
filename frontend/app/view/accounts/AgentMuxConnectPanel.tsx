@@ -26,6 +26,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
+import { muxbusNeedsSignInAgain } from "./muxbus-session";
 
 // Production Cognito config — set after deployment.
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
@@ -41,6 +42,8 @@ interface MuxBusStatus {
     cognitoDomain: string;
     expiresAt: number;
     valid: boolean;
+    /** Only a new sign-in helps — see `muxbusNeedsSignInAgain`. */
+    needsReauth: boolean;
 }
 
 const DISCONNECTED: MuxBusStatus = {
@@ -49,6 +52,7 @@ const DISCONNECTED: MuxBusStatus = {
     cognitoDomain: "",
     expiresAt: 0,
     valid: false,
+    needsReauth: false,
 };
 
 /**
@@ -188,13 +192,30 @@ export const MuxBusConnectSection = (): JSX.Element => {
                 <div class="agent-identity-muxbus-row">
                     <div class="agent-identity-muxbus-info">
                         <span class="agent-identity-account-name">{status()!.email}</span>
-                        <Show when={!status()!.valid}>
-                            <span class="agent-identity-muxbus-expired"> (token expired)</span>
-                        </Show>
-                        <Show when={expiryLabel(status())}>
-                            <span class="agent-identity-muxbus-expiry"> · expires {expiryLabel(status())}</span>
+                        <Show
+                            when={muxbusNeedsSignInAgain(status())}
+                            fallback={
+                                <>
+                                    <Show when={!status()!.valid}>
+                                        <span class="agent-identity-muxbus-expired"> (token expired)</span>
+                                    </Show>
+                                    <Show when={expiryLabel(status())}>
+                                        <span class="agent-identity-muxbus-expiry"> · expires {expiryLabel(status())}</span>
+                                    </Show>
+                                </>
+                            }
+                        >
+                            <span class="agent-identity-muxbus-expired"> (sign-in no longer works)</span>
                         </Show>
                     </div>
+                    <Show when={muxbusNeedsSignInAgain(status())}>
+                        <button
+                            class="agent-identity-new-btn"
+                            onClick={() => void (loading() ? muxbus.cancel() : muxbus.connect())}
+                        >
+                            {loading() ? "Connecting… (Cancel)" : "Sign in again"}
+                        </button>
+                    </Show>
                     <button
                         class="agent-identity-unassign-btn"
                         disabled={loading()}
@@ -280,11 +301,30 @@ export function AgentMuxConnectPanel(props: {
                             }
                         >
                             <div class="oauth-byo-note">
-                                Connected as{" "}
-                                <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong>
-                                <Show when={!muxbus.status()!.valid}> (token expired)</Show>
+                                <Show
+                                    when={muxbusNeedsSignInAgain(muxbus.status())}
+                                    fallback={
+                                        <>
+                                            Connected as{" "}
+                                            <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong>
+                                            <Show when={!muxbus.status()!.valid}> (token expired)</Show>
+                                        </>
+                                    }
+                                >
+                                    ⓘ The sign-in for{" "}
+                                    <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong> no longer
+                                    works. Sign in again to reconnect.
+                                </Show>
                             </div>
                             <div class="identity-key-actions">
+                                <Show when={muxbusNeedsSignInAgain(muxbus.status())}>
+                                    <button
+                                        class="identity-btn identity-btn-primary"
+                                        onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
+                                    >
+                                        {muxbus.loading() ? "Connecting… (Cancel)" : "Sign in again"}
+                                    </button>
+                                </Show>
                                 <button
                                     class="identity-btn identity-btn-secondary"
                                     disabled={muxbus.loading()}

@@ -49,6 +49,10 @@ pub(crate) const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 pub(crate) const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
+// How often a loop parked on a stale sign-in re-reads the stored credential
+// (no network beyond the cached discovery document) in case another channel
+// sharing the store signed in.
+const STALE_RECHECK_SECS: u64 = 60;
 // AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
 // server-initiated keepalive of their own — the connection is dropped on
 // silence in both directions. Ping well under that so a quiet connection
@@ -344,6 +348,15 @@ async fn run_loop(
                                 "no refresh_token stored".to_string(),
                             ));
                         }
+                        // Issued by a client the cloud no longer publishes:
+                        // its pool is gone, so don't refresh against it
+                        // (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.3).
+                        let discovered = crate::muxbus::discovery::cloud_settings(&http).await;
+                        if crate::muxbus::discovery::client_id_superseded(discovered.as_ref(), &current.client_id) {
+                            return Err(RefreshErrorKind::PermanentAuthFailure(
+                                "signed in to a user pool AgentMux Cloud no longer uses".to_string(),
+                            ));
+                        }
                         // Preserve-on-failure: `refresh_token` returning Err
                         // here means `muxbus_save` is simply never called —
                         // the last-known-good credential in the store is
@@ -362,6 +375,9 @@ async fn run_loop(
             )
             .await;
     }
+
+    // The stale sign-in reason last logged, so a parked loop logs it once.
+    let mut stale_logged: Option<String> = None;
 
     loop {
         // Load token — refresh if expired.
@@ -387,18 +403,36 @@ async fn run_loop(
             let mstore = mstore.clone();
             tokio::task::spawn_blocking(move || mstore.muxbus_load()).await
         };
-        let has_stored_creds = match has_stored_creds_load {
-            Ok(Ok(Some(c))) => !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
-            Ok(Ok(None)) => false,
+        let (has_stored_creds, stale) = match has_stored_creds_load {
+            Ok(Ok(Some(c))) => (
+                !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
+                crate::muxbus::stale_sign_in(&c, &http).await,
+            ),
+            Ok(Ok(None)) => (false, None),
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "cloud_subscriber: muxbus_load failed — assuming credentials exist and retrying with backoff");
-                true
+                (true, None)
             }
             Err(e) => {
                 tracing::warn!(error = %e, "cloud_subscriber: muxbus_load task panicked — assuming credentials exist and retrying with backoff");
-                true
+                (true, None)
             }
         };
+        // A sign-in that can't work anymore: stop reconnecting and wait for a
+        // new one (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.3).
+        // `muxbus.status` reports it to the UI as "Sign in again". Rechecked
+        // now and then from local state only, for a sign-in made by another
+        // channel sharing the store (which sends no ReloadToken here).
+        if let Some(reason) = stale {
+            if stale_logged.as_deref() != Some(reason.as_str()) {
+                tracing::warn!(reason = %reason, "cloud_subscriber: AgentMux Cloud sign-in needs renewing — not reconnecting until the user signs in again");
+                stale_logged = Some(reason);
+            }
+            wait_for_sign_in(&mut ctrl_rx, Duration::from_secs(STALE_RECHECK_SECS)).await;
+            delay_secs = RECONNECT_DELAY_SECS;
+            continue;
+        }
+        stale_logged = None;
         let token = match load_valid_token(&mstore, &scheduler).await {
             Some(t) => t,
             None if !has_stored_creds => {
@@ -479,6 +513,28 @@ async fn run_loop(
             }
         }
         delay_secs = (delay_secs * 2).min(MAX_RECONNECT_DELAY_SECS);
+    }
+}
+
+/// Park until a sign-in (`ReloadToken`) or `recheck` elapses, whichever comes
+/// first. AddAgent/RemoveAgent drain without waking it: they already updated
+/// the `agents` set the next connection subscribes from.
+async fn wait_for_sign_in(ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>, recheck: Duration) {
+    let sleep = tokio::time::sleep(recheck);
+    tokio::pin!(sleep);
+    loop {
+        tokio::select! {
+            _ = &mut sleep => return,
+            msg = ctrl_rx.recv() => match msg {
+                Some(CtrlMsg::ReloadToken) => return,
+                Some(CtrlMsg::AddAgent(_) | CtrlMsg::RemoveAgent(_)) => {}
+                // Closed: nothing can wake us early; wait out the recheck.
+                None => {
+                    (&mut sleep).await;
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -1486,6 +1542,33 @@ mod tests {
         assert!(super::drop_cloud_subscription_on_exit(false, false), "no registration and no live holder");
         assert!(super::drop_cloud_subscription_on_exit(true, false));
         assert!(!super::drop_cloud_subscription_on_exit(false, true), "a newer spawn holds it: keep");
+    }
+
+    // A stale sign-in parks the loop instead of reconnecting with backoff
+    // (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.3): agents coming and
+    // going must not wake it, only a sign-in or the slow local recheck.
+    #[tokio::test]
+    async fn a_parked_loop_ignores_agent_traffic_and_waits_for_the_recheck() {
+        use std::time::{Duration, Instant};
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        for i in 0..20 {
+            tx.send(super::CtrlMsg::AddAgent(format!("a{i}"))).unwrap();
+            tx.send(super::CtrlMsg::RemoveAgent(format!("a{i}"))).unwrap();
+        }
+        let started = Instant::now();
+        super::wait_for_sign_in(&mut rx, Duration::from_millis(300)).await;
+        assert!(started.elapsed() >= Duration::from_millis(300), "woke before the recheck");
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_wakes_a_parked_loop_at_once() {
+        use std::time::Duration;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(super::CtrlMsg::AddAgent("a".into())).unwrap();
+        tx.send(super::CtrlMsg::ReloadToken).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), super::wait_for_sign_in(&mut rx, Duration::from_secs(3600)))
+            .await
+            .expect("ReloadToken must end the wait");
     }
 
     fn test_subscriber(
