@@ -86,15 +86,23 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
 
 ## 4. Plan
 
-### Before Day 1: pin nightly (prerequisite, merged before anything is published)
+### Before Day 1: make "blank" mean "pinned" (prerequisite, merged before anything is published)
 
-`ci-nightly-artifacts.yml`
-passes `cef-runtime-tag: ""` for all three platforms, and each `build-*.yml` resolves an empty
-tag to the most recently *published* `cef-<platform>-*` release (`gh release list`, sorted by
-`publishedAt`; prereleases included). The moment a 154 release is published, nightly would pair
-the 154 runtime with `main`'s 152 binding. Make nightly take its three tags from the same
-`cef-runtime-pins` values `release.yml` uses (the fix #3086 made for releases), so publishing a
-runtime changes nothing until the consumer PR moves the pins.
+Every `build-*.yml` (Windows, Linux, macOS) resolves an empty `cef-runtime-tag` to the most
+recently *published* `cef-<platform>-*` release (`gh release list`, sorted by `publishedAt`;
+prereleases included). Two kinds of caller hit that path:
+
+- `ci-nightly-artifacts.yml`, which passes `cef-runtime-tag: ""` for all three platforms;
+- a direct `workflow_dispatch` / `repository_dispatch` of any `build-*.yml` with a blank tag.
+
+Once a 154 release is published, any of them would pair the 154 runtime with `main`'s 152
+binding. Windows then fails its version guard; Linux and macOS have no equivalent major-version
+guard and can emit mismatched artifacts. Fix it at the one place they share: **change the
+blank-tag resolution in each `build-*.yml` to the committed pin** — the same per-platform values
+`release.yml`'s `cef-runtime-pins` job uses (move them to a single file both read, if that's
+simpler) — instead of "latest published". That's the fix #3086 made for releases, extended to
+every entry point. After it, publishing a runtime changes nothing until the consumer PR moves the
+pins, and a deliberate non-pinned build has to name its tag.
 
 ### Day 1 — morning: source (one owner, ~3 h)
 
@@ -161,8 +169,8 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    did the same for 148 → 152).
 4. **On the consumer branch**, a packaged build on each platform — using the locally built runtime
    (or the draft asset) — runs the §7.3 checks end to end. Only when all three pass: **publish the
-   three drafts, then merge the consumer PR right away**, back to back. With the nightly pin
-   (the prerequisite above) in place, nightly keeps building 152 until that merge moves the pins.
+   three drafts, then merge the consumer PR right away**, back to back. With the prerequisite above in place
+   (blank = pinned), every build keeps using 152 until that merge moves the pins.
 5. After: switch `agentmuxai/cef`'s default branch to `8037` (needs repo admin — flag it, §6.8).
 
 ### Rollback
