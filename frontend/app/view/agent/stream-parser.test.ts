@@ -764,6 +764,13 @@ describe("jekt arriving mid-block", () => {
         expect(out.map((n) => n.type)).toEqual(["jekt_message", "tool"]);
     });
 
+    test("session_end releases held jekts for event-at-a-time callers", async () => {
+        await parser.parseEvent({ type: "text", content: "last words" });
+        await parser.parseEvent({ type: "user_message", message: jekt() });
+        const out = await parser.parseEvent({ type: "session_end" });
+        expect(out.map((n) => n.type)).toEqual(["jekt_message"]);
+    });
+
     test("reset drops anything held", () => {
         parser.parseStreamEvent({ type: "text", content: "writing" });
         parser.parseStreamEvent({ type: "user_message", message: jekt() });

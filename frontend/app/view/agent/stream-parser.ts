@@ -465,6 +465,11 @@ export class ClaudeCodeStreamParser {
             // but history replay re-parses every persisted line through here —
             // returning null silently avoids a warn-spam flood (one per turn).
             case "session_end":
+                // The turn ended, so its last block did: release held jekts
+                // for whoever drains next (Codex P2 on #3977 — parseEvent /
+                // parseLine callers see session_end here, not in their own code).
+                this.releaseHeldJekts();
+                return null;
             case "provider_waiting":
                 return null;
 
