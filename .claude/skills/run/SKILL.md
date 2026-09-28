@@ -142,12 +142,38 @@ own PIDs remain.
 
 A `run_in_background: true` Bash tool call survives many subsequent,
 unrelated tool calls in the same session without incident — that's the
-working pattern. **Don't try to fully detach the process** (e.g. via
-PowerShell's `Start-Process` into its own console) to make it "more
-independent" — that was tried and the child silently never executed the
-intended command, for a reason not yet diagnosed. If you kill a background
-`task dev` job yourself later (e.g. via `taskkill`), that's you, not the
-environment — don't mistake it for an external interrupt.
+working pattern. Prefer it over trying to detach the process yourself.
+
+If you do reach for PowerShell's `Start-Process` (e.g. to launch outside
+this session's own process tree entirely), **root cause found**: on Windows
+PowerShell 5.1, `-ArgumentList` given as a string **array** — e.g.
+`-ArgumentList @('-lc', 'echo hi; pwd')` — gets flattened into the child's
+command line *without quoting each element*. `bash` then receives
+`-lc echo hi; pwd` as three separate argv entries instead of `-lc` plus one
+command string; `bash -c`'s multi-word script collapses to just its first
+word (`echo`), and everything after becomes an ignored positional parameter
+(`$0`, `$1`, ...). The process still starts and exits 0 — it silently did
+nothing useful, which is exactly the symptom that made this hard to spot
+(no error, no crash, just no effect).
+
+**Fix: pass `-ArgumentList` as a single pre-quoted string, not an array:**
+
+```powershell
+$cmd = 'cd /some/path && echo hi && pwd'
+Start-Process -FilePath 'C:\Program Files\Git\bin\bash.exe' `
+  -ArgumentList "-lc `"$cmd`"" -RedirectStandardOutput $log -WindowStyle Hidden
+```
+
+Verified: the array form above produces an empty log and exit code 0 with
+nothing executed; the single-string form runs the full multi-word command
+and captures its real output. (`cmd.exe` targets were not affected by this
+particular bug — its own `/c` argument doesn't get split the same way — so
+if your only prior test was a plain `cmd.exe` command, that isn't evidence
+against this fix mattering for `bash.exe`.)
+
+If you kill a background `task dev` job yourself later (e.g. via
+`taskkill`), that's you, not the environment — don't mistake it for an
+external interrupt.
 
 ## Gotchas
 
