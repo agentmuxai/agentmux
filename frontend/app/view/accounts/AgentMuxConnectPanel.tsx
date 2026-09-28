@@ -26,6 +26,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
+import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
 
 // Production Cognito config — set after deployment.
@@ -35,6 +36,13 @@ const MUXBUS_COGNITO_DOMAIN =
     "https://muxbus-auth.auth.us-east-1.amazoncognito.com";
 const MUXBUS_CLIENT_ID =
     (import.meta.env.VITE_MUXBUS_CLIENT_ID as string | undefined) ?? "";
+
+// One per app: the build's pair, else the one srv discovered (asked only by a
+// build without a compiled client id). Shared by every controller below.
+const cloudConfig = createMuxBusCloudConfig(
+    { cognitoDomain: MUXBUS_COGNITO_DOMAIN, clientId: MUXBUS_CLIENT_ID },
+    () => RpcApi.MuxBusCloudConfigCommand(TabRpcClient),
+);
 
 interface MuxBusStatus {
     connected: boolean;
@@ -79,7 +87,11 @@ export interface MuxBusController {
     cancel: () => Promise<void>;
     /** Clear stored credentials, then refresh. */
     disconnect: () => Promise<void>;
-    /** False when no built-in client id is baked into this build. */
+    /**
+     * True when this build has a compiled client id, or srv discovered one
+     * from the cloud (`muxbus.cloudconfig`). Reactive: a build without one
+     * turns true once `refresh()` has learned it.
+     */
     isConfigured: () => boolean;
 }
 
@@ -89,6 +101,9 @@ export function useMuxBusStatus(): MuxBusController {
     const [error, setError] = createSignal<string | null>(null);
 
     const refresh = async () => {
+        // Not awaited: the status never waits on the cloud settings. A no-op
+        // once a client id is known, which a production build always has.
+        void cloudConfig.load();
         try {
             setStatus(await RpcApi.MuxBusStatusCommand(TabRpcClient));
         } catch {
@@ -98,17 +113,16 @@ export function useMuxBusStatus(): MuxBusController {
     };
 
     const connect = async () => {
-        if (!MUXBUS_CLIENT_ID) {
+        await cloudConfig.load();
+        const signIn = cloudConfig.signIn();
+        if (!signIn) {
             setError("AgentMux client ID not configured (contact AgentMux team).");
             return;
         }
         setError(null);
         setLoading(true);
         try {
-            const result = await RpcApi.MuxBusLoginCommand(TabRpcClient, {
-                cognitoDomain: MUXBUS_COGNITO_DOMAIN,
-                clientId: MUXBUS_CLIENT_ID,
-            });
+            const result = await RpcApi.MuxBusLoginCommand(TabRpcClient, signIn);
             if (result.success) {
                 await refresh();
             } else if (result.error !== "sign-in cancelled") {
@@ -148,7 +162,7 @@ export function useMuxBusStatus(): MuxBusController {
         }
     };
 
-    const isConfigured = () => MUXBUS_CLIENT_ID !== "";
+    const isConfigured = () => cloudConfig.signIn() !== null;
 
     return { status, loading, error, refresh, connect, cancel, disconnect, isConfigured };
 }

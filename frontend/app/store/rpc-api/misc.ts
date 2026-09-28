@@ -44,6 +44,7 @@ export type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 export type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
 export type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
 export type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
+export type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
 export type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
 export type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
 export type { CatalogModel } from "@/types/rpc/CatalogModel";
@@ -56,6 +57,8 @@ import type { MuxBusStatusReq } from "@/types/rpc/MuxBusStatusReq";
 import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
 import type { MuxBusDisconnectReq } from "@/types/rpc/MuxBusDisconnectReq";
 import type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
+import type { MuxBusCloudConfigReq } from "@/types/rpc/MuxBusCloudConfigReq";
+import type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
 import type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
 import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
 
@@ -157,5 +160,12 @@ export const MiscApi = {
     MuxBusDisconnectCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusDisconnectResp> {
         const data: MuxBusDisconnectReq = {};
         return client.rpcCall("muxbus.disconnect", data, opts);
+    },
+
+    // command "muxbus.cloudconfig" — the cloud settings srv resolved (the
+    // relay's discovery document, else its defaults) and their source
+    MuxBusCloudConfigCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusCloudConfigResp> {
+        const data: MuxBusCloudConfigReq = {};
+        return client.rpcCall("muxbus.cloudconfig", data, opts);
     },
 };
