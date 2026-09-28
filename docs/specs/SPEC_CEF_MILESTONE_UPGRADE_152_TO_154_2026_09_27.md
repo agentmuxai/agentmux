@@ -67,8 +67,10 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
 6. **Build flags matter as much as patches** (`scripts/cef-build/args*.gn`):
    - `use_static_angle` is **per platform** — `false` on Windows and Linux (152 shipped stub ANGLE
      otherwise, #3172, #3229); macOS links ANGLE statically and must **not** override it.
-     A clean compile does not prove GPU works: run the §7.2 symbol probes on *both*
-     `libEGL`/`libGLESv2` and the main library, and a live GPU check.
+     A clean compile does not prove GPU works: run **`scripts/verify-angle-libs.sh`** (the ANGLE
+     export check — `eglGetProcAddress`/`glGetString`) on each built runtime and on the packaged
+     app, as `Taskfile.yml` already does at package time, plus a live `chrome://gpu` check. The §7.2
+     probes check our carry-set symbols (`BeginWindowDrag`, …) in the main CEF library, not ANGLE.
    - `enable_backup_ref_ptr_instance_tracer=false` (the renderer deadlock that forced Windows `-r2`,
      #3561) — on all three, from the first build.
    - `dcheck_always_on=false` (macOS DCHECK crash on drag/close).
