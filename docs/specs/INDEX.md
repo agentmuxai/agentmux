@@ -539,7 +539,6 @@ partial list.
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
-| [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
@@ -637,6 +636,7 @@ partial list.
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
+| [`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28`](SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md) | SPEC: jekts reach the agent immediately; only the pane waits for the block to end |
 | [`SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15`](SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md) | SPEC: Narrow TIER=sensitive to real red flags only |
 | [`SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md) | SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender |
 | [`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17`](SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md) | SPEC: general agent-to-agent WAN-tier jekt signing |
@@ -1079,6 +1079,7 @@ partial list.
 | [`SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22`](SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md) | Spec: Hidden memory reinjection after compaction |
 | [`SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10`](SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10.md) | SPEC: Defer jekt / inter-agent message delivery until a safe turn boundary — never truncate an in-progress explanation |
 | [`SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05`](SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md) | Memory carry-over: loading and management across the three agent-awareness cases |
+| [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
 | [`SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27`](SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md) | SPEC: Highlight the pane a dragged file will land in |
 
 ### no status line

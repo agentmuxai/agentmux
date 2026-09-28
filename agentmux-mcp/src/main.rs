@@ -1461,8 +1461,9 @@ async fn call_tool(
                 // (server/reactive.rs, `try_cloud_relay` — "Queued is not
                 // delivered"). Report which one happened.
                 if result.get("block_id").and_then(|v| v.as_str()).is_some() {
-                    // srv holds automated messages while the target is
-                    // mid-turn (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) and
+                    // srv queues a message while the target's process is
+                    // starting up, restarting or stopping
+                    // (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.1) and
                     // says so with `deferred`; "injected" would be untrue.
                     if result.get("deferred").and_then(|v| v.as_bool()) == Some(true) {
                         Ok(deferred_delivery_text(&to))
@@ -3901,13 +3902,15 @@ fn quit_self_outcome(state: &str, body: &Value) -> anyhow::Result<String> {
     }
 }
 
-/// `SendMessage`'s answer when srv accepted the message but holds it until the
-/// target's next tool call or turn boundary (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
+/// `SendMessage`'s answer when srv accepted the message but queued it because
+/// the target's process is starting up, restarting or stopping
+/// (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.1). A target that is up gets
+/// it at once, mid-turn included, and is reported as delivered.
 fn deferred_delivery_text(to: &str) -> String {
     format!(
-        "QUEUED for {to} — they're mid-turn, so it has not reached them yet. \
-         Their AgentMux holds it while they are writing and delivers it at \
-         their next tool call, or when their turn ends. Don't resend it."
+        "QUEUED for {to} — their agent is starting up or restarting, so it has \
+         not reached them yet. Their AgentMux delivers it as soon as they are \
+         up. Don't resend it."
     )
 }
 
@@ -3998,7 +4001,8 @@ mod tests {
     #[test]
     fn deferred_delivery_text_is_clean_and_names_the_target() {
         let t = deferred_delivery_text("Camper");
-        assert!(t.starts_with("QUEUED for Camper — they're mid-turn"), "{t}");
+        assert!(t.starts_with("QUEUED for Camper — their agent is starting up"), "{t}");
+        assert!(!t.contains("mid-turn") && !t.contains("turn ends"), "nothing waits for a turn: {t}");
         assert!(!t.contains("  "), "no runs of spaces: {t:?}");
         assert!(t.ends_with("Don't resend it."), "{t}");
     }

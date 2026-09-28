@@ -1897,9 +1897,9 @@ fn test_handler_inject_structured_delivery_skips_pty() {
     assert_eq!(resp.deferred, Some(false), "written now, and the response says so");
 }
 
-/// A mid-turn target: the sender reports `Deferred`, and the response carries
-/// it so `SendMessage` can say "queued until their turn ends" instead of
-/// "injected into their conversation".
+/// A target whose process is still starting up: the sender reports
+/// `Deferred`, and the response carries it so `SendMessage` can say "queued
+/// until they're up" instead of "injected into their conversation".
 #[test]
 fn test_handler_inject_reports_deferred_delivery() {
     let mut handler = Handler::new();

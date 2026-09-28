@@ -619,37 +619,18 @@ pub fn send_input(block_id: &str, input: BlockInputUnion, seq: Option<u64>) -> R
     }
 }
 
-/// When a message may be written to a running agent's live input.
+/// What an automated send to a persistent agent did with one message.
 ///
-/// The distinction exists because "deliver this to the agent" means two
-/// different things depending on who is asking. A human typing into their own
-/// agent's pane is deliberately interrupting it, and that is correct. An
-/// automated sender — a GitHub/ReAgent notification, a CI result, another
-/// agent's coordination ping — is not asking to interrupt anything, and
-/// writing it mid-turn makes the agent abandon whatever it was explaining.
-///
-/// Spec: `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.1. This
-/// replaces `InjectionRequest::wait_for_idle`, which named this distinction
-/// but was never read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DeliverPolicy {
-    /// Write to live stdin now, even mid-turn. Reserved for the human
-    /// operator's own deliberate action.
-    Immediate,
-    /// Queue while the agent is writing; deliver when it next waits on a tool
-    /// call or its turn ends, one message per wait or boundary. The default
-    /// for every automated sender.
-    #[default]
-    NextIdle,
-}
-
-/// What a [`DeliverPolicy`] send actually did with one message.
+/// A live process gets it at once, mid-turn or not; it is queued only while
+/// the process cannot take a write (starting up, restarting, stopping).
+/// Spec: `docs/specs/SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` §2.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendOutcome {
     /// Written to the agent's input now.
     Sent,
-    /// Queued behind the agent's writing (or older queued messages); released
-    /// at its next tool call or turn boundary.
+    /// Queued because the agent's process is starting up, restarting or
+    /// stopping (or behind older messages queued for that reason); written as
+    /// soon as the process can take it.
     Deferred,
 }
 
@@ -657,19 +638,13 @@ pub enum SendOutcome {
 #[derive(Debug)]
 pub enum AgentDelivery {
     /// Accepted on the controller's structured input channel — a persistent
-    /// stream-json stdin line or an ACP `session/prompt`. No PTY keystrokes are
-    /// needed.
-    ///
-    /// "Accepted", not necessarily "already written": under
-    /// [`DeliverPolicy::NextIdle`] a message arriving while the agent is writing
-    /// is held and released at its next tool call or turn boundary. This
-    /// variant means the controller has taken responsibility for it, not that
-    /// the agent has seen it yet — [`AgentDelivery::StructuredDeferred`] says
-    /// when it is still waiting.
+    /// stream-json stdin line or an ACP `session/prompt` — and written now. No
+    /// PTY keystrokes are needed.
     Structured,
-    /// Accepted like [`AgentDelivery::Structured`], but held because the agent
-    /// is writing (`DeliverPolicy::NextIdle`); released at its next tool call
-    /// or turn boundary.
+    /// Accepted like [`AgentDelivery::Structured`], but queued because the
+    /// agent's process is starting up, restarting or stopping; written as soon
+    /// as it can take it. The controller has taken responsibility for it; the
+    /// agent has not seen it yet.
     StructuredDeferred,
     /// The controller is PTY/terminal-based (shell/term) or otherwise has no
     /// structured input channel. The caller should fall back to keystroke
@@ -681,15 +656,15 @@ pub enum AgentDelivery {
 /// expects.
 ///
 /// Callers of this function are automated senders by definition — muxbus, the
-/// reactive/jekt handler, MCP `SendMessage`, the messaging bridges. Delivery is
-/// therefore [`DeliverPolicy::NextIdle`]: if the agent is writing, the message
-/// waits for its next tool call or turn boundary instead of cutting its
-/// explanation in half. Spec: `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.7. The human
-/// operator's own input does not come through here — it goes via the
-/// `agentinput` RPC — so it is unaffected.
+/// reactive/jekt handler, MCP `SendMessage`, the messaging bridges. The message
+/// reaches the agent at once, whatever it is doing: the agent gets it as soon
+/// as it can act on it (`docs/specs/SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`
+/// §2.1). The human operator's own input does not come through here — it goes
+/// via the `agentinput` RPC.
 ///
 /// - **Persistent** (stream-json) agents have no PTY: the message is written as a
-///   `{type:"user",…}` line on the live stdin, queued behind any in-flight turn.
+///   `{type:"user",…}` line on the live stdin, mid-turn included. It is queued
+///   only while the process is starting up, restarting or stopping.
 /// - **ACP** agents receive the message as a `session/prompt` (the ACP controller's
 ///   `send_input` already wraps raw input that way).
 /// - **App Server** (Codex) agents have no PTY either: the message is queued/dispatched
