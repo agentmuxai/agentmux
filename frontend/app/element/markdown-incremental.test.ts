@@ -18,7 +18,7 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
-import { findSafeSplitPoint } from "./markdown-incremental";
+import { findSafeSplitPoint, trimPartialInlineTag } from "./markdown-incremental";
 
 const PAD = "Filler paragraph that exists only to clear the minimum prefix length.\n\n".repeat(12);
 
@@ -210,4 +210,33 @@ describe("split equivalence — prefix+tail renders identically to the whole", (
             expect(combined).toEqual(render(text));
         });
     }
+});
+
+// SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4: while a reply streams, a
+// colour span's tag can arrive half-typed. Markdown renders an unclosed `<span`
+// as literal text, so the streaming tail drops it until the `>` arrives.
+describe("trimPartialInlineTag", () => {
+    it.each([
+        ["done <", "done "],
+        ["done </", "done "],
+        ["done <s", "done "],
+        ["done <spa", "done "],
+        ["done <span", "done "],
+        ['done <span class="am-o', "done "],
+        ['done <span class="am-ok">pass</sp', 'done <span class="am-ok">pass'],
+        ['done <span class="am-ok">pass</span', 'done <span class="am-ok">pass'],
+    ])("drops the partial tag at the end of %j", (input, expected) => {
+        expect(trimPartialInlineTag(input)).toBe(expected);
+    });
+
+    it.each([
+        ['done <span class="am-ok">pass</span>', "a complete tag"],
+        ["a < b", "a less-than followed by a space"],
+        ["x <div", "a different tag name"],
+        ["see <span\nnext line", "a line break after the tag start"],
+        ["done <span " + "x".repeat(200), "an overlong tail (not a tag an agent is typing)"],
+        ["done <span> and more", "text after a complete tag"],
+    ])("leaves %j alone (%s)", (input) => {
+        expect(trimPartialInlineTag(input)).toBe(input);
+    });
 });
