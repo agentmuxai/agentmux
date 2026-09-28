@@ -1,7 +1,7 @@
 # SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in
 
 **Date:** 2026-09-27
-**Status:** active — slice 1 (§3.1–3.2, discovery used for login and the WebSocket URL) merged in PR #3954; slice 2 (§3.3, §3.5, "Sign in again") in PR #3981; slice 3 (§3.4, per-agent credentials re-provisioned) in PR #3982; slice 4 (`muxbus.cloudconfig`, `isConfigured()` from it) in this PR.
+**Status:** active — slice 1 (§3.1–3.2, discovery used for login and the WebSocket URL) merged in PR #3954; slice 2 (§3.3, §3.5, "Sign in again") in PR #3981; slice 3 (§3.4, per-agent credentials re-provisioned) in PR #3982; slice 4 (`muxbus.cloudconfig`, `isConfigured()` from it) in PR #3985.
 **Author:** Maricon
 
 ---
