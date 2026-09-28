@@ -687,3 +687,81 @@ describe("tool summary text", () => {
         expect(call.summary).toBe("🛠️ mcp__agentmux__WhoAmI");
     });
 });
+
+// ── A jekt never splits a streaming block ───────────────────────────────────
+// SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2: srv delivers a jekt to the
+// agent at once; the pane holds its bubble until the text/thinking block that
+// is streaming ends, then places it right after that block.
+describe("jekt arriving mid-block", () => {
+    const jekt = (msgid = "m1") =>
+        `[JEKT:FROM=reagent TO=lark TIER=coord DELIVERY=wan TRUST=network-claimed MSGID=${msgid} PRIORITY=normal TS=1783386012]\n` +
+        `From: reagent | To: lark | ts=1783386012\nPR reviewed\n[/JEKT]`;
+
+    test("text → jekt → text stays ONE text node; the jekt is released at the next tool call, before it", () => {
+        const t1 = parser.parseStreamEvent({ type: "text", content: "first half " });
+        const held = parser.parseStreamEvent({ type: "user_message", message: jekt() });
+        expect(held).toBeNull();
+        expect(parser.drainReleased()).toEqual([]);
+        const t2 = parser.parseStreamEvent({ type: "text", content: "second half" });
+        expect(t2!.id).toBe(t1!.id);
+        expect((t2 as MarkdownNode).content).toBe("first half second half");
+
+        const tool = parser.parseStreamEvent({ type: "tool_call", tool: "Bash", id: "tc1", params: { command: "ls" } } as StreamEvent);
+        const released = parser.drainReleased();
+        expect(released.map((n) => n.type)).toEqual(["jekt_message"]);
+        expect(tool!.type).toBe("tool");
+    });
+
+    test("the same for a thinking block", () => {
+        const k1 = parser.parseStreamEvent({ type: "thinking", content: "hmm " } as StreamEvent);
+        expect(parser.parseStreamEvent({ type: "user_message", message: jekt() })).toBeNull();
+        const k2 = parser.parseStreamEvent({ type: "thinking", content: "still thinking" } as StreamEvent);
+        expect(k2!.id).toBe(k1!.id);
+    });
+
+    test("switching from thinking to text ends the thinking block and releases the jekt", () => {
+        parser.parseStreamEvent({ type: "thinking", content: "hmm" } as StreamEvent);
+        parser.parseStreamEvent({ type: "user_message", message: jekt() });
+        parser.parseStreamEvent({ type: "text", content: "answer" });
+        expect(parser.drainReleased().map((n) => n.type)).toEqual(["jekt_message"]);
+    });
+
+    test("a jekt with no block open is emitted at once", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: jekt() });
+        expect(node!.type).toBe("jekt_message");
+        expect(parser.drainReleased()).toEqual([]);
+    });
+
+    test("held jekts are released in arrival order at the end of the turn", () => {
+        parser.parseStreamEvent({ type: "text", content: "writing" });
+        parser.parseStreamEvent({ type: "user_message", message: jekt("a") });
+        parser.parseStreamEvent({ type: "user_message", message: jekt("b") });
+        expect(parser.drainReleased()).toEqual([]);
+        parser.releaseHeld();
+        const out = parser.drainReleased() as import("./types").JektMessageNode[];
+        expect(out.map((n) => n.msgId)).toEqual(["a", "b"]);
+    });
+
+    test("flushPending releases held jekts too", () => {
+        parser.parseStreamEvent({ type: "text", content: "writing" });
+        parser.parseStreamEvent({ type: "user_message", message: jekt() });
+        parser.flushPending();
+        expect(parser.drainReleased().map((n) => n.type)).toEqual(["jekt_message"]);
+    });
+
+    test("a plain user message (the human typing) still ends the block, as before", () => {
+        const t1 = parser.parseStreamEvent({ type: "text", content: "Response 1" });
+        const u = parser.parseStreamEvent({ type: "user_message", message: "stop, do X" });
+        expect(u!.type).toBe("user_message");
+        const t2 = parser.parseStreamEvent({ type: "text", content: "Response 2" });
+        expect(t1!.id).not.toBe(t2!.id);
+    });
+
+    test("reset drops anything held", () => {
+        parser.parseStreamEvent({ type: "text", content: "writing" });
+        parser.parseStreamEvent({ type: "user_message", message: jekt() });
+        parser.reset();
+        parser.releaseHeld();
+        expect(parser.drainReleased()).toEqual([]);
+    });
+});
