@@ -17,6 +17,7 @@
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { isMuxBusSessionOk } from "@/app/view/accounts/muxbus-session";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
@@ -93,10 +94,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // motivated surfacing it here).
     const muxbus = useMuxBusStatus();
     void muxbus.refresh();
-    const muxbusOk = () => {
-        const s = muxbus.status();
-        return !!s && s.connected && s.valid;
-    };
+    const muxbusOk = () => isMuxBusSessionOk(muxbus.status());
 
     // Refresh window-instance state ONLY when the launcher is silent
     // (`task dev` mode — no launcher process, no typed events). In

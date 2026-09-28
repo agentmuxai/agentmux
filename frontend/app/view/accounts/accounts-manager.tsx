@@ -29,6 +29,7 @@ import { AccountForm } from "@/app/view/identity/identity-account-form";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { AccountsGallery } from "./AccountsGallery";
 import { AgentMuxConnectPanel, useMuxBusStatus } from "./AgentMuxConnectPanel";
+import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "./muxbus-session";
 import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
 import "@/app/view/identity/identity-view.scss";
 
@@ -52,7 +53,7 @@ export function AccountsManager(): JSX.Element {
 
     const muxStatusDot = (): string => {
         const s = muxbus.status();
-        if (s?.connected && s.valid) return "status-dot status-valid";
+        if (isMuxBusSessionOk(s)) return "status-dot status-valid";
         if (s?.connected) return "status-dot status-expired";
         return "status-dot status-unknown";
     };
@@ -110,12 +111,21 @@ export function AccountsManager(): JSX.Element {
                                         <div class="identity-row-meta">
                                             <span class="identity-display-name">
                                                 AgentMux Cloud
-                                                <Show when={!muxbus.status()?.valid}> · token expired</Show>
+                                                <Show
+                                                    when={muxbusNeedsSignInAgain(muxbus.status())}
+                                                    fallback={<Show when={!muxbus.status()?.valid}> · token expired</Show>}
+                                                > · sign in again</Show>
                                             </span>
                                         </div>
                                         <span
                                             class={muxStatusDot()}
-                                            title={muxbus.status()?.valid ? "valid" : "expired"}
+                                            title={
+                                                muxbusNeedsSignInAgain(muxbus.status())
+                                                    ? "sign in again"
+                                                    : muxbus.status()?.valid
+                                                      ? "valid"
+                                                      : "expired"
+                                            }
                                         />
                                     </div>
                                 </div>

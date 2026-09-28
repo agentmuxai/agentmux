@@ -1,7 +1,7 @@
 # SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in
 
 **Date:** 2026-09-27
-**Status:** active — slice 1 (§3.1–3.2, discovery used for login and the WebSocket URL) in PR #3954; slices 2–4 not started.
+**Status:** active — slice 1 (§3.1–3.2, discovery used for login and the WebSocket URL) merged in PR #3954; slice 2 (§3.3, §3.5, "Sign in again") in progress; slices 3–4 not started.
 **Author:** Maricon
 
 ---
@@ -74,12 +74,12 @@ After sign-in, srv stores the domain and client id with the tokens (`MuxBusCrede
 ### 3.3 srv: a sign-in that can't work anymore
 
 A stored credential is **stale** when:
-- the broker has it in `NeedsReauth` (a permanent refresh failure: 4xx other than 408/429); or
+- the broker has it in `NeedsReauth` because a refresh was refused (a permanent refresh failure: 4xx other than 408/429), and no fresh token has been stored since. `NeedsReauth` reached by piling up transient failures (e.g. offline) is not stale; or
 - the discovered `cognito.clientId` differs from the stored `client_id`. It was issued by a user pool this cloud no longer uses.
 
 When stale:
 - `muxbus.status` reports `needs_reauth: true` along with the stored email;
-- the subscriber stops reconnecting, logs the reason once, and waits for a new sign-in;
+- the subscriber stops reconnecting, logs the reason once, and waits for a new sign-in. A sign-in here wakes it at once; one made by another channel sharing the store is noticed by a once-a-minute local recheck;
 - no refresh is attempted against a pool the cloud has left.
 
 The stored credential is **not deleted automatically**. The user's next sign-in replaces it, as `muxbus_save` already does, and an explicit disconnect clears it.
