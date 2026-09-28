@@ -150,10 +150,10 @@ impl RefreshScheduler {
         self.wake(credential_id);
     }
 
-    /// The credential's current coordination state, if registered —
-    /// diagnostics/future-UI hook (e.g. surfacing `NeedsReauth` distinctly
-    /// from a routine in-progress refresh). Not used by `ensure_fresh`
-    /// itself, which always dispatches through the reducer regardless.
+    /// The credential's current coordination state, if registered. Read by
+    /// `muxbus::stale_sign_in` to surface `NeedsReauth` distinctly from a
+    /// routine in-progress refresh. Not used by `ensure_fresh` itself, which
+    /// always dispatches through the reducer regardless.
     pub fn state(&self, credential_id: &str) -> Option<CredentialState> {
         self.tables.lock().unwrap().states.get(credential_id).cloned()
     }

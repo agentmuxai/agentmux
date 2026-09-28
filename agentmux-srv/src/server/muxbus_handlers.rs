@@ -63,6 +63,11 @@ pub struct MuxBusStatusResp {
     #[ts(type = "number")]
     pub expires_at: i64,
     pub valid: bool,
+    /// The stored sign-in can't work anymore and only a new sign-in helps:
+    /// the refresh was refused, or it was issued by a client the cloud no
+    /// longer publishes (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.3).
+    /// The UI shows "Sign in again" with `email`.
+    pub needs_reauth: bool,
 }
 
 /// Empty request shapes for `muxbus.login.cancel`, `muxbus.status` and
@@ -217,10 +222,12 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // muxbus.status — return current credential state
     let mstore_status = state.id_store.clone();
+    let http_client_status = state.http_client.clone();
     engine.register_typed(
         COMMAND_MUXBUS_STATUS,
         move |_req: MuxBusStatusReq, _ctx| {
             let mstore = mstore_status.clone();
+            let http = http_client_status.clone();
             async move {
                 // reagentx P0 on PR #3248, round 2: `frontend/app/statusbar/
                 // HostPopover.tsx` mounts globally and polls this handler on
@@ -242,6 +249,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         cognito_domain: String::new(),
                         expires_at: 0,
                         valid: false,
+                        needs_reauth: false,
                     };
                     return Ok(resp);
                 }
@@ -254,12 +262,14 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 match load_result {
                     Ok(Some(creds)) => {
                         let valid = creds.is_valid();
+                        let needs_reauth = crate::muxbus::stale_sign_in(&creds, &http).await.is_some();
                         let resp = MuxBusStatusResp {
                             connected: !creds.access_token.is_empty(),
                             email: creds.user_email,
                             cognito_domain: creds.cognito_domain,
                             expires_at: creds.expires_at,
                             valid,
+                            needs_reauth,
                         };
                         Ok(resp)
                     }
@@ -270,6 +280,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             cognito_domain: String::new(),
                             expires_at: 0,
                             valid: false,
+                            needs_reauth: false,
                         };
                         Ok(resp)
                     }

@@ -11,6 +11,7 @@ import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
 import { useMuxBusStatus, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
 import { isLinux, isMacOS } from "@/util/platformutil";
 import QRCode from "qrcode";
 
@@ -139,10 +140,8 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     };
 
     const muxbus = props.muxbus;
-    const muxbusOk = () => {
-        const s = muxbus.status();
-        return !!s && s.connected && s.valid;
-    };
+    const muxbusOk = () => isMuxBusSessionOk(muxbus.status());
+    const signInAgain = () => muxbusNeedsSignInAgain(muxbus.status());
 
     // Positioning routes through the shared primitive (mirrors
     // TokenBreakdownPopover): anchored to the hostname chip's rect,
@@ -340,27 +339,45 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     <div class="status-bar-popover-row">
                         <span class="status-bar-popover-label">MuxBus Cloud</span>
                         <Show
-                            when={muxbus.status()?.connected && muxbus.status()?.valid}
+                            when={muxbusOk()}
                             fallback={
-                                <button
-                                    type="button"
-                                    class="muxbus-login-chip muxbus-login-chip-signin"
-                                    style={{ "margin-left": "auto", height: "auto", padding: "1px 8px" }}
-                                    title={muxbus.loading() ? "Cancel sign-in" : undefined}
-                                    onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
-                                >
-                                    {muxbus.loading()
-                                        ? "Cancel"
-                                        : muxbus.status()?.connected
-                                          ? "Expired — re-login"
-                                          : "Sign in"}
-                                </button>
+                                <>
+                                    {/* A dead sign-in names the account it was for
+                                        (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.5). */}
+                                    <Show when={signInAgain()}>
+                                        <span
+                                            class="status-bar-popover-mono"
+                                            style={{ "font-size": "0.85em", "margin-left": "auto" }}
+                                        >
+                                            {muxbus.status()?.email}
+                                        </span>
+                                    </Show>
+                                    <button
+                                        type="button"
+                                        class="muxbus-login-chip muxbus-login-chip-signin"
+                                        style={{
+                                            "margin-left": signInAgain() ? "6px" : "auto",
+                                            height: "auto",
+                                            padding: "1px 8px",
+                                        }}
+                                        title={muxbus.loading() ? "Cancel sign-in" : undefined}
+                                        onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
+                                    >
+                                        {muxbus.loading()
+                                            ? "Cancel"
+                                            : signInAgain()
+                                              ? "Sign in again"
+                                              : muxbus.status()?.connected
+                                                ? "Expired — re-login"
+                                                : "Sign in"}
+                                    </button>
+                                </>
                             }
                         >
                             <span class="status-bar-popover-mono" style={{ "font-size": "0.85em" }}>{muxbus.status()?.email}</span>
                         </Show>
                     </div>
-                    <Show when={isMacOS() && !(muxbus.status()?.connected && muxbus.status()?.valid)}>
+                    <Show when={isMacOS() && !muxbusOk()}>
                         <div class="status-bar-popover-info-notice" role="status">
                             <span class="status-bar-popover-info-notice-icon" aria-hidden="true">
                                 {"🔒"}
@@ -371,7 +388,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                             </span>
                         </div>
                     </Show>
-                    <Show when={isLinux() && !(muxbus.status()?.connected && muxbus.status()?.valid)}>
+                    <Show when={isLinux() && !muxbusOk()}>
                         <div class="status-bar-popover-info-notice" role="status">
                             <span class="status-bar-popover-info-notice-icon" aria-hidden="true">
                                 {"🔒"}
@@ -382,7 +399,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                             </span>
                         </div>
                     </Show>
-                    <Show when={muxbus.status()?.connected && muxbus.status()?.valid}>
+                    <Show when={muxbusOk()}>
                         <div class="status-bar-popover-row" style={{ "justify-content": "flex-end" }}>
                             <button
                                 type="button"
@@ -445,10 +462,13 @@ const HostPopover = (): JSX.Element => {
         const timer = window.setInterval(() => void muxbus.refresh(), 60_000);
         onCleanup(() => window.clearInterval(timer));
     });
-    const muxbusOk = () => {
-        const s = muxbus.status();
-        return !!s && s.connected && s.valid;
-    };
+    const muxbusOk = () => isMuxBusSessionOk(muxbus.status());
+    const muxbusTip = () =>
+        muxbusOk()
+            ? "MuxBus connected"
+            : muxbusNeedsSignInAgain(muxbus.status())
+              ? "MuxBus sign-in no longer works — click to sign in again"
+              : "MuxBus not connected — click for details and sign in";
 
     const lanInstances = lanInstancesAtom;
     const lanCount = () => lanInstances().length;
@@ -546,7 +566,7 @@ const HostPopover = (): JSX.Element => {
                     <span
                         class="status-muxbus-dot"
                         classList={{ "status-muxbus-dot--ok": muxbusOk() }}
-                        data-tip={muxbusOk() ? "MuxBus connected" : "MuxBus not connected — click for details and sign in"}
+                        data-tip={muxbusTip()}
                         aria-label={muxbusOk() ? "MuxBus connected" : "MuxBus not connected"}
                     />
                 </Show>
