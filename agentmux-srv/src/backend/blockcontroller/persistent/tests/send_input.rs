@@ -1658,8 +1658,8 @@ fn decide_retry_batch_action_marks_every_entry_as_already_persisted() {
 ///
 /// This used to be enforced by returning a retryable error, because there
 /// was no safe place to hold the message. `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
-/// §3.2.1 gave it one: it is deferred to the turn-boundary queue and released
-/// after the drain, so the no-reordering invariant now holds *without* the
+/// §3.2.1 gave it one: it is queued and written by the watchdog once the
+/// drain is done, so the no-reordering invariant now holds *without* the
 /// caller having to retry — and without the jekt being dropped outright,
 /// which is what the old error actually caused in production (the reactive
 /// handler has no retry).
@@ -1684,7 +1684,7 @@ async fn send_user_message_defers_instead_of_reordering_while_a_drain_is_still_a
     assert_eq!(
         inner.deferred_deliveries.len(),
         1,
-        "the message must be held for the next turn boundary, not dropped"
+        "the message must be queued until the process is up, not dropped"
     );
 }
 
@@ -2911,17 +2911,20 @@ fn decide_retry_batch_action_prepends_ahead_of_an_unrelated_later_message() {
     );
 }
 
-// ── No mid-turn delivery (SPEC_NO_MIDTURN_DELIVERY_2026_09_23) ───────
+// ── Immediate delivery (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28 §2.1) ──
 //
-// The guarantee: a message from an automated sender is never written to
-// live stdin while a turn is in flight. These tests pin the four ways
-// that guarantee can break — writing anyway, draining too eagerly,
-// stranding a message, and silently dropping one.
+// A live process gets an automated message at once, mid-turn or not. The
+// queue holds a message only while the process cannot take a write — a spawn
+// in flight, a committed restart, a requested stop, another writer on stdin —
+// and the watchdog writes it once it can. These pin both halves: nothing
+// waits on the agent's turn, and nothing is dropped or reordered around a
+// process that isn't ready (the startup race of
+// `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §3.2.1).
 
 /// A live controller with a turn already running.
 fn busy_controller() -> (PersistentSubprocessController, mpsc::Receiver<String>) {
     let c = controller();
-    let (tx, rx) = mpsc::channel::<String>(16);
+    let (tx, rx) = mpsc::channel::<String>(64);
     {
         let mut inner = c.inner.lock().unwrap();
         inner.stdin_tx = Some(tx);
@@ -2930,55 +2933,141 @@ fn busy_controller() -> (PersistentSubprocessController, mpsc::Receiver<String>)
     (c, rx)
 }
 
-/// The core guarantee: mid-turn arrivals do not reach the agent.
-#[tokio::test]
-async fn a_message_arriving_mid_turn_is_queued_not_written() {
-    let (c, mut rx) = busy_controller();
-
-    c.send_user_message("from github".to_string()).unwrap();
-
-    assert!(
-        rx.try_recv().is_err(),
-        "a mid-turn message must not reach live stdin — that is the interrupt this prevents"
-    );
-    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
+/// A live process whose spawn is still in flight: `stdin_tx` is set, but the
+/// spawn's own seed message and drain have not finished.
+fn starting_controller() -> (PersistentSubprocessController, mpsc::Receiver<String>) {
+    let (c, rx) = busy_controller();
+    c.inner.lock().unwrap().spawning_in_progress = true;
+    (c, rx)
 }
 
-/// The idle fast-path still delivers immediately — deferral must not
-/// become "everything waits for a turn that never starts".
-#[tokio::test]
-async fn a_message_arriving_while_idle_is_delivered_immediately() {
-    let c = controller();
-    let (tx, mut rx) = mpsc::channel::<String>(16);
-    c.inner.lock().unwrap().stdin_tx = Some(tx);
+fn drain(rx: &mut mpsc::Receiver<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    while let Ok(line) = rx.try_recv() {
+        out.push(line);
+    }
+    out
+}
 
-    c.send_user_message("hello".to_string()).unwrap();
+/// The core of the change: a message for a live, busy agent is written now,
+/// and the caller is told it was delivered, not queued.
+#[tokio::test]
+async fn a_message_arriving_mid_turn_is_written_at_once() {
+    let (c, mut rx) = busy_controller();
+
+    let outcome = c.send_user_message_outcome("from github".to_string()).unwrap();
+
+    assert_eq!(outcome, SendOutcome::Sent, "reported delivered, not deferred");
+    let line = rx.try_recv().expect("a mid-turn message reaches live stdin at once");
+    assert!(line.contains("from github"));
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty(), "nothing is held for the turn");
+    assert!(c.health_monitor.is_active_turn(), "the running turn carries on");
+}
+
+/// An idle agent gets it at once too, and the write starts its turn.
+#[tokio::test]
+async fn a_message_arriving_while_idle_is_written_at_once_and_starts_a_turn() {
+    let (c, mut rx) = idle_controller();
+
+    assert_eq!(c.send_user_message_outcome("hello".to_string()).unwrap(), SendOutcome::Sent);
 
     let line = rx.try_recv().expect("an idle agent receives the message now");
     assert!(line.contains("hello"));
     assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+    assert!(c.health_monitor.is_active_turn());
 }
 
-/// `Immediate` is the human operator's own deliberate interruption and
-/// must bypass the queue entirely.
+/// Several messages mid-turn: every one is written, in the order sent — none
+/// waits for the next turn, and none overtakes an earlier one.
 #[tokio::test]
-async fn immediate_policy_still_steers_mid_turn() {
+async fn successive_messages_mid_turn_are_all_written_in_send_order() {
     let (c, mut rx) = busy_controller();
 
-    c.send_user_message_with_policy("stop what you are doing".to_string(), DeliverPolicy::Immediate)
-        .unwrap();
+    for text in ["first", "second", "third"] {
+        assert_eq!(c.send_user_message_outcome(text.to_string()).unwrap(), SendOutcome::Sent);
+    }
 
-    let line = rx.try_recv().expect("Immediate writes through a live turn");
-    assert!(line.contains("stop what you are doing"));
+    let lines = drain(&mut rx);
+    assert_eq!(lines.len(), 3, "all three written now: {lines:?}");
+    for (line, text) in lines.iter().zip(["first", "second", "third"]) {
+        assert!(line.contains(text), "send order kept: {lines:?}");
+    }
     assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
 }
 
-/// §4.5: a full queue returns an error rather than accepting a message
-/// it will then drop. Reporting success and losing the message is the
-/// failure mode this guards.
+/// Concurrent senders with real threads, against a busy turn and against an
+/// idle one: every message is written, none is queued or lost, and each
+/// sender's own messages arrive in the order it sent them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_senders_are_all_written_in_each_senders_order() {
+    use std::sync::Arc as StdArc;
+
+    for busy in [true, false] {
+        // A sender that starts a turn re-arms the status heartbeat, which
+        // needs a reactor; plain threads have none, so hand each one this
+        // runtime's handle.
+        let rt = tokio::runtime::Handle::current();
+        let (c, mut rx) = busy_controller();
+        c.health_monitor.set_active_turn(busy);
+        let c = StdArc::new(c);
+
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let c = StdArc::clone(&c);
+                let rt = rt.clone();
+                std::thread::spawn(move || {
+                    let _guard = rt.enter();
+                    c.send_user_message(format!("a-{i}")).is_ok()
+                        && c.send_user_message(format!("b-{i}")).is_ok()
+                })
+            })
+            .collect();
+        for h in handles {
+            assert!(h.join().expect("sender thread panicked"), "every send accepted (busy={busy})");
+        }
+
+        let lines = drain(&mut rx);
+        assert_eq!(lines.len(), 32, "every message written, none held (busy={busy})");
+        assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+        for i in 0..16 {
+            let pos = |m: String| lines.iter().position(|l| l.contains(&format!("\"{m}\""))).unwrap();
+            assert!(pos(format!("a-{i}")) < pos(format!("b-{i}")), "sender {i}'s order (busy={busy})");
+        }
+        assert!(c.health_monitor.is_active_turn());
+    }
+}
+
+/// The startup race stays fixed: a message sent while the spawn is in flight
+/// is queued (not refused, not written ahead of the spawn's own drain), and
+/// the watchdog writes it once the process is up — while the spawn's first
+/// turn is still running, not at its end.
+#[tokio::test]
+async fn a_message_during_a_spawn_is_queued_and_delivered_once_the_process_is_up() {
+    let (c, mut rx) = starting_controller();
+
+    let outcome = c.send_user_message_outcome("arrived during startup".to_string()).unwrap();
+
+    assert_eq!(outcome, SendOutcome::Deferred);
+    assert!(rx.try_recv().is_err(), "nothing ahead of the spawn's own drain");
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "queued, not dropped");
+
+    // The spawn's drain finishes; its seed message's turn is running.
+    c.inner.lock().unwrap().spawning_in_progress = false;
+    assert!(c.health_monitor.is_active_turn());
+    let mut orphaned = 0;
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+
+    assert!(rx.try_recv().unwrap().contains("arrived during startup"));
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Exit, "nothing left to watch");
+}
+
+/// A full queue returns an error rather than accepting a message it will then
+/// drop. Reporting success and losing the message is the failure mode this
+/// guards.
 #[tokio::test]
 async fn a_full_queue_reports_an_error_rather_than_accepting_and_dropping() {
-    let (c, _rx) = busy_controller();
+    let (c, _rx) = starting_controller();
     for i in 0..MAX_DEFERRED_DELIVERIES {
         c.send_user_message(format!("msg-{i}")).unwrap();
     }
@@ -2993,37 +3082,26 @@ async fn a_full_queue_reports_an_error_rather_than_accepting_and_dropping() {
     );
 }
 
-/// FIFO: a message accepted while idle-but-backlogged must not jump the
-/// queue. Ordering is what makes one-per-boundary release coherent.
+/// FIFO: a message sent while an older one is still queued (the process just
+/// became able to take writes, before the watchdog's next tick) must not jump
+/// the queue. Both go out now, oldest first.
 #[tokio::test]
-async fn delivery_order_is_preserved_when_a_backlog_exists() {
-    let c = controller();
-    let (tx, mut rx) = mpsc::channel::<String>(16);
-    {
-        let mut inner = c.inner.lock().unwrap();
-        inner.stdin_tx = Some(tx);
-        inner.deferred_deliveries.push_back(
-            PersistentSubprocessController::encode_user_message("earlier"),
-        );
-    }
+async fn a_backlog_is_written_first_and_in_order() {
+    let (c, mut rx) = idle_controller();
+    enqueue_deferred(&c, "earlier");
 
-    // Idle, but something older is already waiting.
-    c.send_user_message("later".to_string()).unwrap();
+    assert_eq!(c.send_user_message_outcome("later".to_string()).unwrap(), SendOutcome::Sent);
 
-    let line = rx.try_recv().expect("the head of the queue goes out");
-    assert!(
-        line.contains("earlier"),
-        "the older message must go first, got {line}"
-    );
-    let inner = c.inner.lock().unwrap();
-    assert_eq!(inner.deferred_deliveries.len(), 1, "the newer one waits its turn");
-    assert!(inner.deferred_deliveries[0].contains("later"));
+    let lines = drain(&mut rx);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("earlier") && lines[1].contains("later"), "{lines:?}");
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
 }
 
-/// §4.5: teardown must not silently discard accepted messages.
+/// Teardown must not silently discard accepted messages.
 #[tokio::test]
 async fn teardown_drains_the_queue_rather_than_discarding_it_silently() {
-    let (c, _rx) = busy_controller();
+    let (c, _rx) = starting_controller();
     c.send_user_message("will not make it".to_string()).unwrap();
     assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
 
@@ -3035,53 +3113,58 @@ async fn teardown_drains_the_queue_rather_than_discarding_it_silently() {
     );
 }
 
-/// Codex P2 on #3562: `stop` used to request the kill, release `inner`, then
-/// drain in a second acquisition. The stdout reader could handle the turn's
-/// `result` in between and flush a deferred message into the process being
-/// killed, leaving the report an empty queue. The interleaving itself cannot
-/// be forced from a single-threaded test; this pins what the one-acquisition
-/// fix guarantees: by the time the kill is observable the queue is already
-/// drained, and a `result` that lands afterwards writes nothing.
+/// Codex P2 on #3562: `stop` drains the queue in the same acquisition as the
+/// kill, so by the time the kill is observable the queue is already drained,
+/// and neither the dying process's final `result` nor a watchdog tick writes
+/// anything into it.
 #[tokio::test]
-async fn stop_drains_the_queue_with_the_kill_so_a_late_result_writes_nothing() {
-    let (c, mut rx) = busy_controller();
+async fn stop_drains_the_queue_with_the_kill_so_nothing_is_written_afterwards() {
+    let (c, mut rx) = starting_controller();
     let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel();
     c.inner.lock().unwrap().kill_tx = Some(kill_tx);
-    c.send_user_message("deferred".to_string()).unwrap();
+    c.send_user_message("queued".to_string()).unwrap();
     let generation = c.inner.lock().unwrap().spawn_generation;
 
     crate::backend::blockcontroller::Controller::stop(&c, true, "done").unwrap();
 
     assert!(matches!(kill_rx.try_recv(), Ok(KillRequest::Force)), "the kill was requested");
     assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
-    // The dying process's final `result` arrives now.
-    let late = boundary(&c, generation).expect("same generation");
-    assert_eq!(late.flushed, DeferredFlush::Empty);
+    // The spawn's claim goes away and the dying process's `result` arrives.
+    c.inner.lock().unwrap().spawning_in_progress = false;
+    assert_eq!(boundary(&c, generation), Some(false));
+    let mut orphaned = 0;
+    c.sweep_deferred_once(&mut orphaned);
     assert!(rx.try_recv().is_err(), "nothing written into the process being killed");
 }
 
-/// The same race on the Stop button (SIGINT → `stop_process`), which keeps
-/// the queue for the next process rather than draining it: a `result` already
-/// in the pipe when the kill is requested must not flush a deferred message
-/// into the process being killed. It stays queued, and neither the boundary
-/// nor the watchdog writes it while that process is still going down.
+/// A stop still queues: once the Stop button (SIGINT → `stop_process`) has
+/// requested the kill, a message for the dying process is queued, not written
+/// into it and lost, even mid-turn. It is kept for the next process and
+/// delivered to it.
 #[tokio::test]
-async fn a_stop_request_gates_deferred_writes_into_the_dying_process() {
+async fn a_stop_request_queues_messages_for_the_next_process() {
     let (c, mut rx) = busy_controller();
     let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel();
     c.inner.lock().unwrap().kill_tx = Some(kill_tx);
-    c.send_user_message("deferred".to_string()).unwrap();
-    let generation = c.inner.lock().unwrap().spawn_generation;
 
     c.stop_process(true).unwrap();
     assert!(kill_rx.try_recv().is_ok(), "the kill was requested");
 
-    let late = boundary(&c, generation).expect("same generation");
-    assert_eq!(late.flushed, DeferredFlush::Failed, "refused, and the watchdog is armed for it");
+    assert_eq!(c.send_user_message_outcome("while stopping".to_string()).unwrap(), SendOutcome::Deferred);
     let mut orphaned = 0;
-    c.sweep_deferred_once(&mut orphaned);
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
     assert!(rx.try_recv().is_err(), "nothing written into the process being killed");
     assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept for the next process");
+
+    // The replacement spawns (which clears `stop_pending`).
+    let (tx, mut rx2) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stop_pending = false;
+        inner.stdin_tx = Some(tx);
+    }
+    c.sweep_deferred_once(&mut orphaned);
+    assert!(rx2.try_recv().unwrap().contains("while stopping"));
 }
 
 /// Reagent P1 on #3562: an IDLE agent whose kill was requested must defer an
@@ -3140,29 +3223,9 @@ async fn dropping_the_controller_reports_a_message_enqueued_after_stop() {
     );
 }
 
-/// Codex P1 on #3562: a human send that chose `DeliverDirect` used to mark the
-/// turn active only after releasing `inner`. An automated send landing in
-/// that gap saw an idle agent and wrote first, so both prompts entered one
-/// turn with the automated one ahead. The decision now reserves the turn in
-/// the same acquisition, so the automated send defers behind it.
-#[tokio::test]
-async fn a_human_direct_send_reserves_the_turn_before_an_automated_send_can_take_it() {
-    let (c, mut rx) = idle_controller();
-    let human = PersistentSubprocessController::encode_user_message("human");
-
-    let action = c.decide_send_action(&human, None);
-    assert!(matches!(action, SendAction::DeliverDirect { was_active: false }));
-
-    // The automated sender, in the gap before the human write.
-    c.send_user_message("automated".to_string()).unwrap();
-
-    assert!(rx.try_recv().is_err(), "the automated message must not overtake the human one");
-    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "deferred to the next boundary");
-}
-
-/// The reservation above happens before the write, so a failed write must
-/// hand the turn back. Otherwise the agent stays "busy" with nothing running,
-/// and every deferred message waits for a `result` that never comes.
+/// A human direct send reserves the turn before its write. If that write
+/// fails, the turn must be handed back, or the agent stays "busy" with
+/// nothing running.
 #[tokio::test]
 async fn a_failed_human_direct_send_releases_the_turn_it_reserved() {
     let c = controller();
@@ -3185,187 +3248,31 @@ async fn a_failed_human_direct_send_releases_the_turn_it_reserved() {
     assert!(!c.health_monitor.is_active_turn(), "nothing was written, so no turn is running");
 }
 
-/// The §4.2 race, with real threads: concurrent senders hitting a busy
-/// controller must all be accounted for — none written through, none lost
-/// between the turn-state check and the enqueue.
-#[test]
-fn concurrent_senders_against_a_busy_turn_strand_nothing() {
-    use std::sync::Arc as StdArc;
-
-    let c = controller();
-    let (tx, _rx) = mpsc::channel::<String>(64);
-    c.inner.lock().unwrap().stdin_tx = Some(tx);
-    c.health_monitor.set_active_turn(true);
-    let c = StdArc::new(c);
-
-    let handles: Vec<_> = (0..16)
-        .map(|i| {
-            let c = StdArc::clone(&c);
-            std::thread::spawn(move || c.send_user_message(format!("msg-{i}")).is_ok())
-        })
-        .collect();
-    let accepted = handles
-        .into_iter()
-        .map(|h| h.join().expect("sender thread panicked"))
-        .filter(|accepted| *accepted)
-        .count();
-
-    assert_eq!(accepted, 16, "every sender should be accepted");
-    assert_eq!(
-        c.inner.lock().unwrap().deferred_deliveries.len(),
-        16,
-        "every accepted message must be in the queue — none written through, none lost"
-    );
-}
-
-/// §4.4, the rule that makes the whole thing sound: a turn boundary
-/// releases exactly ONE message. Releasing two would write the second
-/// into the turn the first just started — the mid-turn write this
-/// mechanism exists to prevent.
+/// A process that went away must not silently eat the queue: a failed flush
+/// leaves every entry in place, reported as an error, so teardown or the
+/// watchdog's grace window can report them.
 #[tokio::test]
-async fn a_turn_boundary_releases_exactly_one_message() {
-    let (c, mut rx) = busy_controller();
-    c.send_user_message("first".to_string()).unwrap();
-    c.send_user_message("second".to_string()).unwrap();
-    c.send_user_message("third".to_string()).unwrap();
+async fn a_failed_flush_leaves_the_queue_intact() {
+    let c = controller();
+    enqueue_deferred(&c, "stranded");
 
-    let flushed = {
+    let (written, err) = {
         let mut inner = c.inner.lock().unwrap();
-        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
+        PersistentSubprocessController::flush_deferred_locked(&mut inner, "block")
     };
 
-    let DeferredFlush::Released(flushed) = flushed else { panic!("one message released, got {flushed:?}") };
-    assert!(flushed.contains("first"));
-    let line = rx.try_recv().expect("it reached stdin");
-    assert!(line.contains("first"));
-    assert!(
-        rx.try_recv().is_err(),
-        "only ONE message may go out per boundary — a burst drain writes mid-turn"
-    );
-    assert_eq!(
-        c.inner.lock().unwrap().deferred_deliveries.len(),
-        2,
-        "the rest wait for their own boundaries"
-    );
+    assert!(written.is_empty());
+    assert!(err.is_some_and(|e| e.contains("not running")), "a failed write is not an empty queue");
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "a failed write must not drop the message");
 }
 
-/// Draining across successive boundaries preserves send order.
+/// Codex + reagent P1 on #3523: every stdin write is tracked into the current
+/// generation's resume retry batch. The case that matters is eager resume: an
+/// unconfirmed `--resume` with NO seed message, so the batch starts empty. A
+/// message written there and not tracked would be gone if the resume then
+/// turned out to be stale, despite having been accepted and rendered.
 #[tokio::test]
-async fn successive_boundaries_drain_in_order() {
-    let (c, mut rx) = busy_controller();
-    c.send_user_message("one".to_string()).unwrap();
-    c.send_user_message("two".to_string()).unwrap();
-
-    for _ in 0..2 {
-        let mut inner = c.inner.lock().unwrap();
-        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block");
-    }
-
-    assert!(rx.try_recv().unwrap().contains("one"));
-    assert!(rx.try_recv().unwrap().contains("two"));
-    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
-}
-
-/// An empty queue at a boundary releases nothing — this is the case where
-/// the caller lets the turn actually go idle.
-#[tokio::test]
-async fn an_empty_queue_releases_nothing_at_a_boundary() {
-    let (c, _rx) = busy_controller();
-
-    let mut inner = c.inner.lock().unwrap();
-    assert_eq!(
-        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block"),
-        DeferredFlush::Empty
-    );
-}
-
-/// A dead process must not silently eat the queue: the entries stay put so
-/// teardown can report them (§4.5).
-#[tokio::test]
-async fn a_failed_flush_leaves_the_queue_intact_for_teardown() {
-    let (c, _rx) = busy_controller();
-    c.send_user_message("stranded".to_string()).unwrap();
-    // The process goes away before the boundary is reached.
-    c.inner.lock().unwrap().stdin_tx = None;
-
-    let flushed = {
-        let mut inner = c.inner.lock().unwrap();
-        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
-    };
-
-    assert_eq!(flushed, DeferredFlush::Failed, "a failed write is not an empty queue");
-    assert_eq!(
-        c.inner.lock().unwrap().deferred_deliveries.len(),
-        1,
-        "a failed write must not drop the message"
-    );
-}
-
-/// The idle→active transition race (ReAgent P1 on #3562). Senders racing an
-/// *idle* controller must produce exactly one live write: whoever wins flips
-/// `turn_active` inside the same critical section that wrote, so everyone
-/// else observes a busy turn and queues.
-///
-/// The earlier concurrency test only raced against an already-busy turn, so
-/// it could not catch this: the bug was that the flip happened after the
-/// lock was released, leaving a window in which a second caller saw "idle,
-/// empty queue" and wrote a second message with no turn boundary between them.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn concurrent_senders_against_an_idle_turn_produce_exactly_one_write() {
-    use std::sync::Arc as StdArc;
-
-    // The winning sender re-arms the status heartbeat, which needs a reactor;
-    // plain threads have none, so hand each one this runtime's handle.
-    let rt = tokio::runtime::Handle::current();
-    let c = controller();
-    let (tx, mut rx) = mpsc::channel::<String>(64);
-    c.inner.lock().unwrap().stdin_tx = Some(tx);
-    // Deliberately idle — this is the transition under test.
-    assert!(!c.health_monitor.is_active_turn());
-    let c = StdArc::new(c);
-
-    let handles: Vec<_> = (0..16)
-        .map(|i| {
-            let c = StdArc::clone(&c);
-            let rt = rt.clone();
-            std::thread::spawn(move || {
-                let _guard = rt.enter();
-                c.send_user_message(format!("msg-{i}")).is_ok()
-            })
-        })
-        .collect();
-    let accepted = handles
-        .into_iter()
-        .map(|h| h.join().expect("sender thread panicked"))
-        .filter(|accepted| *accepted)
-        .count();
-    assert_eq!(accepted, 16);
-
-    let mut written = 0;
-    while rx.try_recv().is_ok() {
-        written += 1;
-    }
-    assert_eq!(
-        written, 1,
-        "exactly one message may reach stdin; the other 15 must wait for a turn boundary"
-    );
-    assert_eq!(
-        c.inner.lock().unwrap().deferred_deliveries.len(),
-        15,
-        "every message that did not win the race must be queued, not dropped"
-    );
-}
-
-/// Rebase of #3562 onto #3551: `main` taught the injection path to track
-/// every stdin write into the current generation's resume retry batch
-/// (codex + reagent P1 on #3523). Deferral adds a second write site — the
-/// turn-boundary flush — which must track too. The case that matters is
-/// eager resume: an unconfirmed `--resume` with NO seed message, so the
-/// batch starts empty. A deferred message flushed there and not tracked
-/// would be gone if the resume then turned out to be stale, despite having
-/// been accepted and rendered.
-#[tokio::test]
-async fn a_flushed_deferred_message_is_tracked_into_an_unconfirmed_resume_retry_batch() {
+async fn a_delivered_message_is_tracked_into_an_unconfirmed_resume_retry_batch() {
     let (c, mut rx) = busy_controller();
     {
         let mut inner = c.inner.lock().unwrap();
@@ -3388,20 +3295,14 @@ async fn a_flushed_deferred_message_is_tracked_into_an_unconfirmed_resume_retry_
             },
         });
     }
-    c.send_user_message("deferred".to_string()).unwrap();
+    c.send_user_message("mid-turn".to_string()).unwrap();
 
-    let flushed = {
-        let mut inner = c.inner.lock().unwrap();
-        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
-    };
-    let DeferredFlush::Released(flushed) = flushed else { panic!("the boundary releases it, got {flushed:?}") };
-    assert_eq!(rx.try_recv().unwrap(), flushed);
-
+    let written = rx.try_recv().unwrap();
     let inner = c.inner.lock().unwrap();
     match &inner.resume {
         persistent_resume::ResumeState::AwaitingOutcome { retry, .. } => {
-            assert_eq!(retry.messages.len(), 1, "the flushed message must be in the retry batch");
-            assert_eq!(retry.messages[0].json, flushed);
+            assert_eq!(retry.messages.len(), 1, "the written message must be in the retry batch");
+            assert_eq!(retry.messages[0].json, written);
         }
         other => panic!("expected AwaitingOutcome, got {other:?}"),
     }
@@ -3409,9 +3310,8 @@ async fn a_flushed_deferred_message_is_tracked_into_an_unconfirmed_resume_retry_
 
 // ── Deferred-delivery watchdog (codex P1s on #3562) ─────────────────
 //
-// The `result`-frame flush only fires when a turn ends. These cover the
-// cases with no turn boundary coming, where an accepted message would
-// otherwise sit in the queue indefinitely.
+// The watchdog is what writes a queued message once the process can take it,
+// and what reports one that never can.
 
 fn idle_controller() -> (PersistentSubprocessController, mpsc::Receiver<String>) {
     let (c, rx) = busy_controller();
@@ -3427,21 +3327,21 @@ fn enqueue_deferred(c: &PersistentSubprocessController, text: &str) {
         .push_back(PersistentSubprocessController::encode_user_message(text));
 }
 
-/// Codex P1: a failed boundary write used to be indistinguishable from an
-/// empty queue, so the turn went idle with no retry scheduled.
+/// Codex P1: a failed write is not an empty queue. The entry stays queued,
+/// and the watchdog's next tick delivers it once the channel has room.
 #[tokio::test]
-async fn a_full_stdin_channel_is_a_failed_flush_not_an_empty_queue() {
+async fn a_full_stdin_channel_is_a_failed_flush_retried_by_the_watchdog() {
     let c = controller();
     let (tx, mut rx) = mpsc::channel::<String>(1);
     tx.try_send("occupying the only slot".to_string()).unwrap();
     c.inner.lock().unwrap().stdin_tx = Some(tx);
     enqueue_deferred(&c, "waiting");
 
-    let flushed = {
+    let (written, err) = {
         let mut inner = c.inner.lock().unwrap();
-        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
+        PersistentSubprocessController::flush_deferred_locked(&mut inner, "block")
     };
-    assert_eq!(flushed, DeferredFlush::Failed);
+    assert!(written.is_empty() && err.is_some());
     assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "the entry stays queued");
 
     // Once the channel has room, the watchdog's next tick delivers it.
@@ -3452,35 +3352,36 @@ async fn a_full_stdin_channel_is_a_failed_flush_not_an_empty_queue() {
     assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
 }
 
-/// An idle agent with a live process and a queued message: release ONE and
-/// mark the turn active inside the same critical section, exactly like the
-/// idle fast path. This is the eager-resume case — a spawn that succeeded
-/// with nothing to say, so no `result` frame is ever coming.
+/// Once the process can take writes, one tick writes the whole backlog in
+/// order — busy or idle, nothing waits for a turn — and marks the turn active
+/// inside the same critical section, like the send path. This is also the
+/// eager-resume case: a spawn that succeeded with nothing to say, so no turn
+/// was running.
 #[tokio::test]
-async fn the_watchdog_releases_one_message_to_an_idle_agent_and_marks_the_turn_active() {
-    let (c, mut rx) = idle_controller();
-    enqueue_deferred(&c, "one");
-    enqueue_deferred(&c, "two");
+async fn the_watchdog_writes_the_whole_backlog_in_order_and_marks_the_turn_active() {
+    for busy in [false, true] {
+        let (c, mut rx) = idle_controller();
+        c.health_monitor.set_active_turn(busy);
+        enqueue_deferred(&c, "one");
+        enqueue_deferred(&c, "two");
 
-    let mut orphaned = 0;
-    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+        let mut orphaned = 0;
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
 
-    assert!(rx.try_recv().unwrap().contains("one"));
-    assert!(rx.try_recv().is_err(), "one per boundary applies to the watchdog too");
-    assert!(c.health_monitor.is_active_turn(), "the released message started a turn");
-
-    // The turn is running now, so the next tick must hold "two" back.
-    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
-    assert!(rx.try_recv().is_err(), "the watchdog must never write mid-turn");
+        let lines = drain(&mut rx);
+        assert_eq!(lines.len(), 2, "busy={busy}: {lines:?}");
+        assert!(lines[0].contains("one") && lines[1].contains("two"), "busy={busy}: {lines:?}");
+        assert!(c.health_monitor.is_active_turn(), "busy={busy}");
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Exit, "busy={busy}");
+    }
 }
 
-/// Reagent (#3562) asked what a failed fast-path write does when an older
-/// entry is already stuck at the head (a failed boundary flush left it, turn
-/// now idle). The older entry was accepted and must stay, first in line. The
-/// new one was never accepted: it is removed and reported as an error, so its
-/// caller retries. Neither is lost, and FIFO holds.
+/// Reagent (#3562) asked what a failed write does when an older entry is
+/// already stuck at the head. The older entry was accepted and must stay,
+/// first in line. The new one was never accepted: it is removed and reported
+/// as an error, so its caller retries. Neither is lost, and FIFO holds.
 #[tokio::test]
-async fn a_failed_fast_path_write_behind_a_stuck_head_keeps_the_head_and_refuses_the_newcomer() {
+async fn a_failed_write_behind_a_stuck_head_keeps_the_head_and_refuses_the_newcomer() {
     let c = controller();
     let (tx, mut rx) = mpsc::channel::<String>(1);
     tx.try_send("occupying the only slot".to_string()).unwrap();
@@ -3501,14 +3402,14 @@ async fn a_failed_fast_path_write_behind_a_stuck_head_keeps_the_head_and_refuses
     assert!(rx.try_recv().unwrap().contains("older"));
 }
 
-/// Every reason to wait is honoured, not just `turn_active`.
+/// Every reason the process cannot take a write is honoured.
 #[tokio::test]
 async fn the_watchdog_waits_while_anything_is_in_flight() {
     let (c, mut rx) = idle_controller();
     enqueue_deferred(&c, "waiting");
     let mut orphaned = 0;
 
-    let cases: [(&str, fn(&mut PersistentInner, bool)); 3] = [
+    let cases: [(&str, fn(&mut PersistentInner, bool)); 5] = [
         ("spawn in flight", |i, on| i.spawning_in_progress = on),
         ("retry batch being replayed", |i, on| i.drain_claim = on),
         ("human messages queued", |i, on| {
@@ -3518,6 +3419,8 @@ async fn the_watchdog_waits_while_anything_is_in_flight() {
                 i.pending_send_messages.clear();
             }
         }),
+        ("restart committed", |i, on| i.restart_pending = on),
+        ("stop requested", |i, on| i.stop_pending = on),
     ];
     for (why, set) in cases {
         set(&mut c.inner.lock().unwrap(), true);
@@ -3525,25 +3428,47 @@ async fn the_watchdog_waits_while_anything_is_in_flight() {
         assert!(rx.try_recv().is_err(), "must wait: {why}");
         set(&mut c.inner.lock().unwrap(), false);
     }
+    c.sweep_deferred_once(&mut orphaned);
+    assert!(rx.try_recv().unwrap().contains("waiting"), "delivered once nothing is in flight");
 }
 
-/// The idle fast path shares the watchdog's definition of "must wait": a
-/// stale-resume retry batch being replayed must not be overtaken.
+/// Reagent P1 on #3562: the send path shares the watchdog's definition of
+/// "must wait". Another writer owning stdin — a stale-resume retry batch being
+/// replayed, a spawn in flight, human messages queued behind a spawn — was
+/// accepted earlier and must not be overtaken, mid-turn or not. Once it is
+/// done, the watchdog delivers, even though the turn it started is running.
 #[tokio::test]
-async fn the_idle_fast_path_does_not_overtake_a_retry_batch_replay() {
-    let (c, mut rx) = idle_controller();
-    c.inner.lock().unwrap().drain_claim = true;
+async fn the_send_path_does_not_overtake_another_writer() {
+    let cases: [(&str, fn(&mut PersistentInner, bool)); 3] = [
+        ("retry batch being replayed", |i, on| i.drain_claim = on),
+        ("spawn in flight", |i, on| i.spawning_in_progress = on),
+        ("human messages queued", |i, on| {
+            if on {
+                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string()));
+            } else {
+                i.pending_send_messages.clear();
+            }
+        }),
+    ];
+    for (why, set) in cases {
+        let (c, mut rx) = busy_controller();
+        set(&mut c.inner.lock().unwrap(), true);
 
-    c.send_user_message("automated".to_string()).unwrap();
+        assert_eq!(c.send_user_message_outcome("automated".to_string()).unwrap(), SendOutcome::Deferred, "{why}");
+        assert!(rx.try_recv().is_err(), "must not write: {why}");
+        assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept: {why}");
 
-    assert!(rx.try_recv().is_err());
-    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
+        set(&mut c.inner.lock().unwrap(), false);
+        let mut orphaned = 0;
+        c.sweep_deferred_once(&mut orphaned);
+        assert!(rx.try_recv().unwrap().contains("automated"), "delivered afterwards, mid-turn: {why}");
+    }
 }
 
-/// Codex P1: a message deferred behind a spawn that then FAILS has no turn
+/// Codex P1: a message deferred behind a spawn that then FAILS has no process
 /// and no teardown coming. After the grace window with no process and no
-/// respawn, it is reported stranded (spec §4.5) and the watchdog exits —
-/// not before, so a respawn that is about to start still gets it.
+/// respawn, it is reported stranded and the watchdog exits — not before, so a
+/// respawn that is about to start still gets it.
 #[tokio::test]
 async fn a_message_deferred_behind_a_failed_spawn_is_reported_after_the_grace_window() {
     let c = controller();
@@ -3648,61 +3573,18 @@ async fn the_watchdog_task_delivers_after_a_spawn_that_never_starts_a_turn() {
 
     let line = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
         .await
-        .expect("the watchdog must deliver without any turn boundary")
+        .expect("the watchdog must deliver without any turn")
         .unwrap();
     assert!(line.contains("arrived during startup"));
 
     // Next tick finds the queue empty and disarms.
-    c.health_monitor.set_active_turn(false);
     tokio::time::sleep(DEFERRED_WATCHDOG_TICK * 3).await;
     assert!(!c.inner.lock().unwrap().deferred_watchdog_armed);
 }
 
-/// Reagent P1 on #3562: the turn-boundary flush must honour the same
-/// "another writer owns stdin" rule as the fast path and the watchdog. A
-/// `result` on the live process can land while a stale-resume retry batch
-/// is being replayed into that same channel (`drain_claim`), or while human
-/// messages are queued behind a spawn; writing the deferred message then
-/// would overtake messages accepted before it.
-#[tokio::test]
-async fn a_turn_boundary_holds_the_queue_while_another_writer_owns_stdin() {
-    let cases: [(&str, fn(&mut PersistentInner, bool)); 3] = [
-        ("retry batch being replayed", |i, on| i.drain_claim = on),
-        ("spawn in flight", |i, on| i.spawning_in_progress = on),
-        ("human messages queued", |i, on| {
-            if on {
-                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string()));
-            } else {
-                i.pending_send_messages.clear();
-            }
-        }),
-    ];
-    for (why, set) in cases {
-        let (c, mut rx) = busy_controller();
-        c.send_user_message("automated".to_string()).unwrap();
-        set(&mut c.inner.lock().unwrap(), true);
-
-        let flushed = {
-            let mut inner = c.inner.lock().unwrap();
-            PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
-        };
-        assert_eq!(flushed, DeferredFlush::Held, "{why}");
-        assert!(rx.try_recv().is_err(), "must not write: {why}");
-        assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept: {why}");
-
-        // The other writer finishes and the turn it started ends; the
-        // watchdog then releases the held entry.
-        set(&mut c.inner.lock().unwrap(), false);
-        c.health_monitor.set_active_turn(false);
-        let mut orphaned = 0;
-        c.sweep_deferred_once(&mut orphaned);
-        assert!(rx.try_recv().unwrap().contains("automated"), "delivered afterwards: {why}");
-    }
-}
-
 // ── Turn-boundary decision (`turn_boundary_locked`) ──────────────────
 
-fn boundary(c: &PersistentSubprocessController, generation: u64) -> Option<TurnBoundary> {
+fn boundary(c: &PersistentSubprocessController, generation: u64) -> Option<bool> {
     PersistentSubprocessController::turn_boundary_locked(
         &mut c.inner.lock().unwrap(),
         &c.health_monitor,
@@ -3712,13 +3594,11 @@ fn boundary(c: &PersistentSubprocessController, generation: u64) -> Option<TurnB
 }
 
 /// Codex P1 on #3562: a `result` buffered from a REPLACED process must not
-/// act on the current one. The flush writes to the current `stdin_tx`, so it
-/// would inject into the replacement's running turn, and the idle flip and
-/// deferred restart would hit that process too.
+/// act on the current one: the idle flip and the deferred restart would hit
+/// the replacement's running turn.
 #[tokio::test]
 async fn a_result_from_a_replaced_process_touches_nothing() {
-    let (c, mut rx) = busy_controller();
-    c.send_user_message("queued".to_string()).unwrap();
+    let (c, _rx) = busy_controller();
     let current = {
         let mut inner = c.inner.lock().unwrap();
         inner.spawn_generation = 2;
@@ -3728,74 +3608,36 @@ async fn a_result_from_a_replaced_process_touches_nothing() {
 
     assert_eq!(boundary(&c, current - 1), None);
 
-    assert!(rx.try_recv().is_err(), "nothing injected into the replacement");
     assert!(c.health_monitor.is_active_turn(), "the replacement's turn is still running");
     let inner = c.inner.lock().unwrap();
-    assert_eq!(inner.deferred_deliveries.len(), 1, "the queue waits for the real boundary");
     assert!(inner.restart_when_idle, "the deferred restart is not consumed");
     assert!(!inner.restart_pending);
 }
 
-/// Codex P1 on #3562: `Held` keeps the turn active. The earlier writer's
-/// prompt is still running or about to, and the drain does not re-mark the
-/// turn active, so going idle would let the watchdog write mid-turn the
-/// moment that writer released its claim.
+/// A boundary ends the turn and writes nothing. The deferred restart applies
+/// only with nothing queued — killing the process then would strand the entry
+/// — and stays pending for the next boundary otherwise.
 #[tokio::test]
-async fn a_held_boundary_keeps_the_turn_active_until_the_earlier_writers_own_result() {
+async fn a_boundary_ends_the_turn_and_applies_the_restart_only_with_nothing_queued() {
+    // Nothing queued: idle, restart applies.
     let (c, mut rx) = busy_controller();
-    c.send_user_message("automated".to_string()).unwrap();
-    c.inner.lock().unwrap().drain_claim = true;
-    let generation = c.inner.lock().unwrap().spawn_generation;
-
-    let b = boundary(&c, generation).unwrap();
-    assert_eq!(b.flushed, DeferredFlush::Held);
-    assert!(c.health_monitor.is_active_turn(), "must stay active on Held");
-
-    // The replay releases its claim while its prompt is still running: the
-    // watchdog must not write.
-    c.inner.lock().unwrap().drain_claim = false;
-    let mut orphaned = 0;
-    c.sweep_deferred_once(&mut orphaned);
-    assert!(rx.try_recv().is_err(), "no write while the replayed prompt runs");
-
-    // That prompt's own `result` is the boundary that releases it.
-    let b = boundary(&c, generation).unwrap();
-    assert!(matches!(b.flushed, DeferredFlush::Released(_)));
-    assert!(rx.try_recv().unwrap().contains("automated"));
-}
-
-/// The remaining outcomes: `Empty` and `Failed` end the turn; only `Empty`
-/// lets a deferred restart apply; `Released` keeps the turn and defers the
-/// restart.
-#[tokio::test]
-async fn which_boundary_outcomes_end_the_turn_and_apply_the_restart() {
-    // Empty: idle, restart applies.
-    let (c, _rx) = busy_controller();
     c.inner.lock().unwrap().restart_when_idle = true;
-    let b = boundary(&c, 0).unwrap();
-    assert_eq!(b, TurnBoundary { flushed: DeferredFlush::Empty, apply_deferred_restart: true });
+    assert_eq!(boundary(&c, 0), Some(true));
     assert!(!c.health_monitor.is_active_turn());
     assert!(c.inner.lock().unwrap().restart_pending);
+    assert!(rx.try_recv().is_err());
 
-    // Released: still active, restart waits.
-    let (c, _rx) = busy_controller();
-    c.send_user_message("next".to_string()).unwrap();
+    // Something queued (behind a retry-batch replay): idle, restart waits.
+    let (c, mut rx) = busy_controller();
+    c.inner.lock().unwrap().drain_claim = true;
+    c.send_user_message("queued".to_string()).unwrap();
     c.inner.lock().unwrap().restart_when_idle = true;
-    let b = boundary(&c, 0).unwrap();
-    assert!(matches!(b.flushed, DeferredFlush::Released(_)));
-    assert!(!b.apply_deferred_restart);
-    assert!(c.health_monitor.is_active_turn());
-    assert!(c.inner.lock().unwrap().restart_when_idle, "still pending");
-
-    // Failed: idle (nothing started), restart waits (an entry is queued).
-    let (c, _rx) = busy_controller();
-    c.send_user_message("stuck".to_string()).unwrap();
-    c.inner.lock().unwrap().stdin_tx = None;
-    c.inner.lock().unwrap().restart_when_idle = true;
-    let b = boundary(&c, 0).unwrap();
-    assert_eq!(b.flushed, DeferredFlush::Failed);
-    assert!(!b.apply_deferred_restart);
+    assert_eq!(boundary(&c, 0), Some(false));
     assert!(!c.health_monitor.is_active_turn());
+    assert!(rx.try_recv().is_err(), "a boundary writes nothing");
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.restart_when_idle, "still pending");
+    assert!(!inner.restart_pending);
 }
 
 // ── Committed deferred restart (codex P1 on #3562) ──────────────────
@@ -3804,17 +3646,15 @@ async fn which_boundary_outcomes_end_the_turn_and_apply_the_restart() {
 // before `spawn.rs` calls `stop_process`. The process's stdin is still live
 // in that window, the turn is idle, and the process is about to die.
 
-/// Codex's scenario: an automated message arriving in that window must not
-/// be written into the doomed process and reported delivered.
+/// A restart still queues: an automated message arriving in that window must
+/// not be written into the doomed process and reported delivered.
 #[tokio::test]
 async fn a_message_arriving_after_a_restart_is_committed_is_kept_for_the_replacement() {
     let (c, mut rx) = busy_controller();
     c.inner.lock().unwrap().restart_when_idle = true;
-    let b = boundary(&c, 0).unwrap();
-    assert!(b.apply_deferred_restart, "precondition: the restart is committed");
-    assert!(!c.health_monitor.is_active_turn());
+    assert_eq!(boundary(&c, 0), Some(true), "precondition: the restart is committed");
 
-    c.send_user_message("mid-restart".to_string()).unwrap();
+    assert_eq!(c.send_user_message_outcome("mid-restart".to_string()).unwrap(), SendOutcome::Deferred);
 
     assert!(rx.try_recv().is_err(), "nothing written into a process about to be killed");
     assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept, not lost");
@@ -3844,21 +3684,6 @@ async fn the_watchdog_waits_out_a_restart_and_delivers_to_the_replacement() {
     }
     c.sweep_deferred_once(&mut orphaned);
     assert!(rx.try_recv().unwrap().contains("for the replacement"));
-}
-
-/// Every write through `try_write_stdin_locked` honours it, `Immediate`
-/// included: an explicit error, not a write into a doomed process.
-#[tokio::test]
-async fn an_immediate_send_is_refused_while_a_restart_is_committed() {
-    let (c, mut rx) = idle_controller();
-    c.inner.lock().unwrap().restart_pending = true;
-
-    let err = c
-        .send_user_message_with_policy("now".to_string(), DeliverPolicy::Immediate)
-        .unwrap_err();
-
-    assert!(err.contains("restarting"), "{err}");
-    assert!(rx.try_recv().is_err());
 }
 
 // ── Dead-air re-deliveries reach the transcript (spec §6.9; #3703) ──────────
@@ -3974,26 +3799,27 @@ async fn a_dead_air_answer_during_a_committed_restart_is_not_recorded() {
 }
 
 /// `SendMessage` tells its caller what happened instead of "injected" for
-/// both: mid-turn is `Deferred`, idle is `Sent`, idle behind an older queued
-/// message is still `Deferred` (FIFO sends the older one), and the operator's
-/// own `Immediate` input is always `Sent`.
+/// both: a live agent, busy or idle, is `Sent` (a backlog ahead of it goes out
+/// with it); only a process that cannot take a write yet — starting up,
+/// restarting, stopping — is `Deferred`.
 #[tokio::test]
-async fn send_outcome_reports_deferred_or_sent() {
+async fn send_outcome_reports_deferred_only_while_the_process_cannot_take_it() {
     let (c, _rx) = busy_controller();
-    assert_eq!(c.send_user_message_outcome("mid-turn".to_string()).unwrap(), SendOutcome::Deferred);
+    assert_eq!(c.send_user_message_outcome("mid-turn".to_string()).unwrap(), SendOutcome::Sent);
 
     let (c, _rx) = idle_controller();
     assert_eq!(c.send_user_message_outcome("idle".to_string()).unwrap(), SendOutcome::Sent);
 
     let (c, _rx) = idle_controller();
     enqueue_deferred(&c, "older");
-    assert_eq!(c.send_user_message_outcome("newer".to_string()).unwrap(), SendOutcome::Deferred);
+    assert_eq!(c.send_user_message_outcome("newer".to_string()).unwrap(), SendOutcome::Sent);
+
+    let (c, _rx) = starting_controller();
+    assert_eq!(c.send_user_message_outcome("starting".to_string()).unwrap(), SendOutcome::Deferred);
 
     let (c, _rx) = busy_controller();
-    assert_eq!(
-        c.send_user_message_outcome_with_policy("stop".to_string(), DeliverPolicy::Immediate).unwrap(),
-        SendOutcome::Sent
-    );
+    c.inner.lock().unwrap().restart_pending = true;
+    assert_eq!(c.send_user_message_outcome("restarting".to_string()).unwrap(), SendOutcome::Deferred);
 }
 
 /// SPEC_AGENT_SELF_QUIT §6.3: a delivery that says who it's from labels the
@@ -4002,15 +3828,17 @@ async fn send_outcome_reports_deferred_or_sent() {
 async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
     use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
     use crate::backend::blockcontroller::Controller;
-    let (c, _rx) = idle_controller();
+    let (c, mut rx) = idle_controller();
     let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into() };
     assert!(matches!(c.decide_send_action_from("m", None, Some(input)), SendAction::DeliverDirect { was_active: false }));
     let p = c.turn_provenance().expect("a turn is in flight");
     assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
-    // A jekt arriving now is deferred to the turn boundary, not delivered
-    // into this turn, so it doesn't taint it (it starts its own turn later).
+    // A jekt arriving now is delivered into this turn at once
+    // (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28 §2.1), so it taints it.
     c.send_user_message("jekt".to_string()).unwrap();
-    assert!(!c.turn_provenance().unwrap().tainted, "deferred, not delivered into the user's turn");
+    assert!(rx.try_recv().unwrap().contains("jekt"));
+    let p = c.turn_provenance().unwrap();
+    assert_eq!((p.origin, p.tainted), (TurnOrigin::User, true), "automated input got into the user's turn");
 }
 
 /// ReAgent P1 on #3789: the spawn path labels the turn from the queued

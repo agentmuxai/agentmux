@@ -74,11 +74,10 @@ impl PersistentSubprocessController {
     /// A kill for teardown: drains the deferred queue in the SAME `inner`
     /// acquisition that issues the kill, and returns what it drained for the
     /// caller to report. Draining in a second acquisition left a window
-    /// after the kill request where the stdout reader could handle the
-    /// turn's `result`, flush a deferred message into the process being
-    /// killed, and leave the report an empty queue: lost, with no stranded
-    /// warning (codex P2 on #3562). Once this lock is released, a boundary
-    /// flush finds the queue empty.
+    /// after the kill request where a flush could write a deferred message
+    /// into the process being killed, and leave the report an empty queue:
+    /// lost, with no stranded warning (codex P2 on #3562). Once this lock is
+    /// released, `stop_pending` holds anything queued later.
     pub(super) fn request_stop_draining_deferred(&self, request: KillRequest) -> Vec<String> {
         Self::request_stop_inner(&self.inner, request, true)
     }
