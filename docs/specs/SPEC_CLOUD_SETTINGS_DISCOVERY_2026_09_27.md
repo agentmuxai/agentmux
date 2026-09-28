@@ -1,7 +1,7 @@
 # SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in
 
 **Date:** 2026-09-27
-**Status:** active — slice 1 (§3.1–3.2, discovery used for login and the WebSocket URL) merged in PR #3954; slice 2 (§3.3, §3.5, "Sign in again") in PR #3981; slice 3 (§3.4, per-agent credentials re-provisioned) in PR #3982; slice 4 not started.
+**Status:** active — slice 1 (§3.1–3.2, discovery used for login and the WebSocket URL) merged in PR #3954; slice 2 (§3.3, §3.5, "Sign in again") in PR #3981; slice 3 (§3.4, per-agent credentials re-provisioned) in PR #3982; slice 4 (`muxbus.cloudconfig`, `isConfigured()` from it) in PR #3985.
 **Author:** Maricon
 
 ---
@@ -66,10 +66,16 @@ After sign-in, srv stores the domain and client id with the tokens (`MuxBusCrede
   - a 5 s timeout;
   - the result is cached in memory for 5 minutes, and the last good copy is kept;
   - on any failure, the compiled defaults are used, with no error surfaced for that alone.
+  - a failed fetch keeps the last good copy, and also waits the 5 minutes before asking again.
 - **Login:** `muxbus.login` uses the discovered `cognito.domain` and `cognito.clientId` when present. It falls back to the values in `MuxBusLoginReq` (the compiled ones), then to nothing (a "cloud not configured" error). The frontend keeps sending its compiled values as the fallback.
 - **WebSocket:** the cloud subscriber connects to the discovered `ws`, falling back to `MUXBUS_WS_URL`.
 - **REST:** unchanged. `rest_base_url()` stays the root of trust, because the document is fetched from it.
 - **`muxbus.cloudconfig`** (new RPC, slice 4): returns the resolved settings and their source (`discovered` or `default`). Only needed for a build with **no** compiled client id. Production builds always have one (`vite.config.ts` refuses to build without it), so slice 1 doesn't need it.
+  - Shape (`MuxBusCloudConfigResp`, camelCase): `source`, `api`, `ws`, `console`, `cognitoDomain`, `clientId`, `region`, `userPoolId`.
+  - `discovered`: everything but `api` from the document; the last good copy counts, even while later fetches fail.
+  - `default` (no document, or discovery failed with no earlier copy): `ws` is `MUXBUS_WS_URL`, and the console and all Cognito fields are empty. srv has no compiled sign-in settings; only the frontend build does.
+  - `api` is always `rest_base_url()`, the REST base srv actually uses, whatever the document says.
+  - It reads no credential and touches no keychain.
 
 ### 3.3 srv: a sign-in that can't work anymore
 
@@ -93,7 +99,10 @@ The stored credential is **not deleted automatically**. The user's next sign-in 
 ### 3.5 Frontend
 
 - `useMuxBusStatus` reads `needs_reauth`. The cloud row in the host popover and the AgentMux Cloud panel show **"Sign in again"**, with the stored email, and the same connect action as today.
-- `isConfigured()` is true when the build has a client id **or** `muxbus.cloudconfig` returns one (slice 4).
+- `isConfigured()` is true when the build has a client id **or** `muxbus.cloudconfig` returns one (slice 4). Details (`muxbus-cloud-config.ts`):
+  - a build with a compiled client id never calls the RPC, and signs in with its compiled pair as before;
+  - a build without one asks from `refresh()`, without awaiting it, so the status never waits on it. One request is shared by every controller, and a client id is kept for the session once known. Until then each `refresh()` asks again; srv answers from its 5-minute cache;
+  - `connect()` signs in with the discovered pair in that case. srv still prefers its own copy (§3.2).
 
 ## 4. Slices
 
@@ -102,7 +111,7 @@ The stored credential is **not deleted automatically**. The user's next sign-in 
 | **1** | §3.1–3.2: discovery in srv, used for login and the WebSocket URL |
 | **2** | §3.3 and §3.5: `needs_reauth`, the subscriber stops spinning, "Sign in again" in the UI |
 | **3** | §3.4: per-agent credentials are dropped and re-provisioned |
-| 4 | `muxbus.cloudconfig`, and `isConfigured()` from it (§3.5), for builds without a compiled client id |
+| **4** | `muxbus.cloudconfig`, and `isConfigured()` from it (§3.5), for builds without a compiled client id |
 
 ## 5. Testing
 
