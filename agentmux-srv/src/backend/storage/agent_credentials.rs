@@ -121,6 +121,18 @@ impl Store {
         Ok(())
     }
 
+    /// Delete one agent's credential row outright — for a client the cloud
+    /// no longer recognizes (`invalid_client`), where keeping the
+    /// client_id/secret would only fail again. The next
+    /// `ensure_agent_credential` re-provisions it. No-op if there is no row.
+    /// docs/specs/SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.4.
+    pub fn agent_credential_delete(&self, agent_id: &str) -> Result<(), StoreError> {
+        let key = agent_id.to_lowercase();
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM db_agent_credentials WHERE agent_id = ?1", params![key])?;
+        Ok(())
+    }
+
     /// Wipe every cached per-agent M2M credential. `db_agent_credentials`
     /// carries no account/user_sub column of its own — each row is only
     /// ever meaningful under the muxbus account that provisioned it — so a
@@ -230,6 +242,20 @@ mod tests {
         let store = shared_store();
         store.agent_credential_invalidate_token("agentx").unwrap();
         assert!(store.agent_credential_load("agentx").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_removes_only_that_agents_row() {
+        let store = shared_store();
+        store.agent_credential_save("agentx", "client-1", "secret-1", "endpoint-1").unwrap();
+        store.agent_credential_save("agenty", "client-2", "secret-2", "endpoint-2").unwrap();
+
+        store.agent_credential_delete("AgentX").unwrap();
+
+        assert!(store.agent_credential_load("agentx").unwrap().is_none());
+        assert!(store.agent_credential_load("agenty").unwrap().is_some());
+        // Deleting a missing row is fine.
+        store.agent_credential_delete("agentx").unwrap();
     }
 
     #[test]
