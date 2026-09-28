@@ -129,7 +129,11 @@ code. Afterwards, rebuild an old ref only with an explicit `cef-runtime-tag`.
    `patch.cfg`; `added=15400` + `version_manager.py -u` (trap 1).
 3. Run the §5 carry-set gate: **21/21 `OK`**. Record the commit SHA — every platform builds it.
 4. `agentmuxai/cef-rs`: branch `agentmux/154-begin-window-drag` from `cef-v154.2.0+154.0.28`,
-   cherry-pick bfeae80 and 9b0abfe; record its SHA.
+   cherry-pick bfeae80 and 9b0abfe; record its SHA. Land it as a **PR** onto a base branch cut from
+   that tag, not a direct push: the fork has never had a PR, so it's unconfirmed whether ReAgent and
+   Codex are installed there, and this is the ABI-deciding change. The operator confirms both apps'
+   repository access covers `cef-rs` (org settings → GitHub Apps) before Day 1. The `cef` fork's
+   port goes the same way, as a PR into `8037` (its PRs into `7977` were reviewed by both).
 5. `agentmux` (local only, not merged): `cef = "154"` + the new `[patch.crates-io]` rev;
    `cargo check --workspace` must be clean (§2 predicts no API fallout). **Also, on Linux:**
    `cargo check -p agentmux-cef --features patched-libcef` against the new binding rev. The
@@ -173,7 +177,11 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    `cef-macos-arm64-154.0.8037.58-codecs`, `cef-linux-x86_64-154.0.8037.58-codecs` — one tag scheme
    (`cef-<os>-<arch>-<chromium>[-codecs][-rN]`). A draft has no `publishedAt`, so even an unpinned
    nightly wouldn't pick it; it isn't public; and a problem found in step 4 can still be fixed without
-   an immutable bad tag.
+   an immutable bad tag. **A corrected runtime gets a new `-rN` tag, never new bytes under the same
+   tag:** all three `build-*.yml` cache the runtime by tag alone and skip the download on a hit, and
+   Linux and macOS have no asset-hash check, so a replaced asset under an old tag can pass the gate
+   on cached, stale bytes while different, untested ones get published. Delete the superseded draft
+   and point the consumer PR's pins at the new tag.
 3. **One consumer PR in `agentmux`** (trap 8): `agentmux-cef/Cargo.toml` `cef = "154"`; root
    `[patch.crates-io]` → the new `agentmuxai/cef-rs` rev; **`Cargo.lock`** regenerated and committed so
    it records `cef`/`cef-dll-sys` 154.2.0+154.0.28 at that rev (today it pins 152.1.0 and `9b0abfe`;
