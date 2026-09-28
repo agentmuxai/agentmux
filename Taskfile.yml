@@ -1141,6 +1141,34 @@ tasks:
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
 
+                # Resolve a possibly-`subst`'d drive to its real underlying path
+                # (Windows only; subst is how docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md's
+                # MAX_PATH workaround is applied). Without this, a clone whose
+                # cwd is exactly the root of a substituted drive gets a
+                # degenerate CLONE_ROOT ("/k", nothing else — git-bash's own
+                # `pwd -P` doesn't expand a subst mount into its target), which
+                # made this SAME clone's own earlier orphan look foreign to the
+                # ownership check below and refuse to be reaped. Handles both
+                # git-bash's `/k`/`/k/sub` notation and Windows' `k:`/`k:/sub`.
+                # Not a general symlink/junction resolver — only subst, the one
+                # workaround this file documents. See
+                # docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md
+                # for the failure this fixes, verified against a live `subst` mapping.
+                windows_canonicalize() {
+                  _wc_p="$1"
+                  case "$_wc_p" in
+                    [a-zA-Z]:/*|[a-zA-Z]:) _wc_drive="$(printf '%s' "${_wc_p%%:*}" | tr '[:lower:]' '[:upper:]')"; _wc_rest="${_wc_p#*:}" ;;
+                    /[a-zA-Z]/*|/[a-zA-Z]) _wc_drive="$(printf '%s' "${_wc_p#/}" | cut -c1 | tr '[:lower:]' '[:upper:]')"; _wc_rest="${_wc_p#/?}" ;;
+                    *) printf '%s\n' "$_wc_p"; return ;;
+                  esac
+                  _wc_target="$(subst 2>/dev/null | tr -d '\r' | awk -F' => ' -v want="$_wc_drive" '{n=split($1,a,":"); if (toupper(a[1])==want) print $2}' | head -1)"
+                  if [ -z "$_wc_target" ]; then
+                    printf '%s\n' "$_wc_p"
+                    return
+                  fi
+                  printf '%s%s\n' "$(printf '%s' "$_wc_target" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')" "$_wc_rest"
+                }
+
                 # Refuse to attach the host to a foreign Vite. If our chosen
                 # port is already held by another process, our spawn would
                 # silently die and the curl readiness probe would still pass
@@ -1149,11 +1177,23 @@ tasks:
                 # Pre-check the port before spawning so a collision fails
                 # fast with a clear message.
                 #
+                # A real listening-socket check (netstat/lsof), not an HTTP
+                # curl GET: a hung/stuck Vite can have the port bound while
+                # never answering HTTP within the timeout, which let a curl
+                # probe report "free" and send this task straight past the
+                # reaping logic below into Vite's own raw --strictPort
+                # EADDRINUSE. See docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md.
+                #
                 # Note: we can't use `$!` here for liveness/cleanup because
                 # go-task's embedded shell (mvdan/sh) tracks background jobs
                 # as goroutine IDs ("g1"), not real OS PIDs — so $! is never
                 # a kill-able pid in this context.
-                if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
+                if [ "{{OS}}" = "windows" ]; then
+                  EXISTING_PID="$(netstat -ano 2>/dev/null | grep -i LISTENING | grep ":$AGENTMUX_VITE_PORT " | awk '{print $NF}' | head -1)"
+                else
+                  EXISTING_PID="$(lsof -ti ":$AGENTMUX_VITE_PORT" 2>/dev/null | head -1)"
+                fi
+                if [ -n "$EXISTING_PID" ]; then
                   # The per-clone port is held. The overwhelmingly common cause is
                   # OUR OWN Vite, orphaned by a prior dev session: the host window
                   # closed but the backgrounded Vite (unkillable here — $! is a
@@ -1162,9 +1202,9 @@ tasks:
                   # relaunch. Reap it best-effort; if the port is STILL held we treat
                   # it as a genuinely foreign process and fail as before. See
                   # retro-dev-instance-vite-orphan-port-2026-06-16 (never committed to this repo).
-                  echo "[dev] Port $AGENTMUX_VITE_PORT busy — reaping a stale Vite if present…"
+                  echo "[dev] Port $AGENTMUX_VITE_PORT busy (pid $EXISTING_PID) — reaping a stale Vite if present…"
                   if [ "{{OS}}" = "windows" ]; then
-                    pid="$(netstat -ano 2>/dev/null | grep -i LISTENING | grep ":$AGENTMUX_VITE_PORT " | awk '{print $NF}' | head -1)"
+                    pid="$EXISTING_PID"
                     if [ -n "$pid" ]; then
                       proc="$(tasklist /FI "PID eq $pid" /FO CSV /NH 2>/dev/null | head -1 | cut -d',' -f1 | tr -d '"')"
                       if echo "$proc" | grep -qi "node"; then
@@ -1181,7 +1221,10 @@ tasks:
                           exit 1
                         fi
                         proc_cmd="$("$_ps" -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine" 2>/dev/null | tr -d '\r\n' | tr '[:upper:]' '[:lower:]' | tr '\\' '/')"
-                        our_root="$(echo "$CLONE_ROOT" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||')"
+                        # Canonicalize our own root through any active `subst`
+                        # mapping before stripping its drive letter — see
+                        # windows_canonicalize's comment above for why.
+                        our_root="$(windows_canonicalize "$CLONE_ROOT" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||')"
                         if [ -z "$proc_cmd" ] || ! echo "$proc_cmd" | grep -qF "${our_root}/"; then
                           echo "❌ Port $AGENTMUX_VITE_PORT is held by a node process whose command line does not reference this clone (${our_root}) — likely another dev instance."
                           echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
@@ -1195,7 +1238,7 @@ tasks:
                       fi
                     fi
                   else
-                    pid="$(lsof -ti ":$AGENTMUX_VITE_PORT" 2>/dev/null | head -1)"
+                    pid="$EXISTING_PID"
                     if [ -n "$pid" ]; then
                       proc="$(ps -p "$pid" -o comm= 2>/dev/null)"
                       if echo "$proc" | grep -qi "node"; then
@@ -1222,7 +1265,12 @@ tasks:
                     fi
                   fi
                   sleep 1
-                  if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
+                  if [ "{{OS}}" = "windows" ]; then
+                    STILL_HELD="$(netstat -ano 2>/dev/null | grep -i LISTENING | grep ":$AGENTMUX_VITE_PORT " | awk '{print $NF}' | head -1)"
+                  else
+                    STILL_HELD="$(lsof -ti ":$AGENTMUX_VITE_PORT" 2>/dev/null | head -1)"
+                  fi
+                  if [ -n "$STILL_HELD" ]; then
                     echo "❌ Port $AGENTMUX_VITE_PORT is still in use after reaping (foreign process)."
                     echo "   The per-clone derivation collided, or a non-dev process holds it. Override with:"
                     echo "   AGENTMUX_VITE_PORT=<free-port> task dev"
