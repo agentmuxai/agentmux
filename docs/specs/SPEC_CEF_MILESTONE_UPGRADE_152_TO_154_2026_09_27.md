@@ -67,9 +67,14 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
 6. **Build flags matter as much as patches** (`scripts/cef-build/args*.gn`):
    - `use_static_angle` is **per platform** — `false` on Windows and Linux (152 shipped stub ANGLE
      otherwise, #3172, #3229); macOS links ANGLE statically and must **not** override it.
-     A clean compile does not prove GPU works: run **`scripts/verify-angle-libs.sh`** (the ANGLE
-     export check — `eglGetProcAddress`/`glGetString`) on each built runtime and on the packaged
-     app, as `Taskfile.yml` already does at package time, plus a live `chrome://gpu` check. The §7.2
+     A clean compile does not prove GPU works. On **Windows and Linux** run
+     **`scripts/verify-angle-libs.sh`** (the ANGLE export check — `eglGetProcAddress`/`glGetString`
+     in the separate `libEGL`/`libGLESv2`) on each built runtime and on the packaged app, as
+     `Taskfile.yml` already does at package time. On **macOS** that script proves nothing: there are
+     no separate ANGLE libraries, and it skips absent ones and still prints success. Instead `nm` the
+     framework binary for the `angle::`/`rx::`/`DisplayMtl` symbols (148 → 152 spec, the macOS ANGLE
+     finding — 152 had thousands of each); zero means no usable ANGLE. All three: plus a live
+     `chrome://gpu` check. The §7.2
      probes check our carry-set symbols (`BeginWindowDrag`, …) in the main CEF library, not ANGLE.
    - `enable_backup_ref_ptr_instance_tracer=false` (the renderer deadlock that forced Windows `-r2`,
      #3561) — on all three, from the first build.
@@ -101,7 +106,10 @@ guard and can emit mismatched artifacts. Fix it at the one place they share: **c
 blank-tag resolution in each `build-*.yml` to the committed pin** instead of "latest published".
 Move the per-platform values out of `release.yml`'s `cef-runtime-pins` job into **one shared pin
 file** that `release.yml` and all three `build-*.yml` read — not per-workflow literals, which would
-be four more places for the consumer PR to miss (Day 2 step 3 moves that file). That's the fix #3086 made for releases, extended to
+be four more places for the consumer PR to miss (Day 2 step 3 moves that file). The same PR
+updates the docs that name `release.yml` as the pins' home — `CEF_FORK_MAINTENANCE.md` §8 (its
+text and its `sed` command for reading the live values) and `README.md`'s pin note — so the next
+upgrade doesn't edit the wrong file. That's the fix #3086 made for releases, extended to
 every entry point. After it, publishing a runtime changes nothing until the consumer PR moves the
 pins, and a deliberate non-pinned build has to name its tag.
 
