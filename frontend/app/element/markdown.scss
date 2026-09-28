@@ -250,4 +250,55 @@
             }
         }
     }
+
+    // Semantic colour an agent can put on a span
+    // (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2). The class list lives in
+    // markdown-semantic.ts, and the sanitizer strips any other class. Colours
+    // come from the theme, so light and dark both work. Tints mix the text
+    // colour with transparent rather than adding a variable per class.
+
+    // A pill label. Alone it's neutral; combined with a colour class below
+    // (declared later, so its `color` wins), the pill takes that colour.
+    .am-badge {
+        display: inline-block;
+        padding: 0 0.45em;
+        border-radius: 0.6em;
+        font-size: 0.85em;
+        font-weight: 600;
+        line-height: 1.5;
+        white-space: nowrap;
+        color: var(--secondary-text-color);
+        background: color-mix(in srgb, currentColor 16%, transparent);
+    }
+
+    .am-ok {
+        color: var(--success-text-color);
+    }
+
+    .am-warn {
+        color: var(--warning-text-color);
+    }
+
+    .am-error {
+        color: var(--error-text-color);
+    }
+
+    .am-info {
+        color: var(--info-color);
+    }
+
+    .am-muted {
+        color: var(--secondary-text-color);
+    }
+
+    .am-added {
+        color: var(--success-text-color);
+        background: color-mix(in srgb, var(--success-text-color) 14%, transparent);
+    }
+
+    .am-removed {
+        color: var(--error-text-color);
+        background: color-mix(in srgb, var(--error-text-color) 14%, transparent);
+        text-decoration: line-through;
+    }
 }

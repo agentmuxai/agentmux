@@ -18,7 +18,8 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
-import { findSafeSplitPoint } from "./markdown-incremental";
+import rehypeRaw from "rehype-raw";
+import { findSafeSplitPoint, trimPartialInlineTag } from "./markdown-incremental";
 
 const PAD = "Filler paragraph that exists only to clear the minimum prefix length.\n\n".repeat(12);
 
@@ -210,4 +211,56 @@ describe("split equivalence — prefix+tail renders identically to the whole", (
             expect(combined).toEqual(render(text));
         });
     }
+
+    // Codex P2 on #3978: a colour span left open across a blank line. The
+    // pipeline above stops before rehype-raw, where raw HTML becomes elements,
+    // so this runs the renderer's raw step too. Whole or split, the span can't
+    // outlive its paragraph: the HTML parser closes a <span> at the </p>, and
+    // span isn't a formatting element, so the next <p> doesn't reopen it. So
+    // there is nothing for a split to break.
+    it("an am-* span left open across a blank line renders the same split or whole", () => {
+        const raw = unified()
+            .use(remarkParse)
+            .use(remarkGfm)
+            .use(remarkRehype, { allowDangerousHtml: true })
+            .use(rehypeRaw);
+        const renderRaw = (src: string) =>
+            strip((raw.runSync(raw.parse(src)) as any).children).filter(
+                (n: any) => !(n.type === "text" && typeof n.value === "string" && n.value.trim() === ""),
+            );
+        const text = `${PAD}<span class="am-ok">first paragraph\n\nsecond paragraph</span> tail\n\nAfter.\n`;
+        const at = findSafeSplitPoint(text);
+        expect(at).toBeGreaterThan(0); // the case Codex describes: a split inside the open span
+        expect(text.slice(0, at)).toContain('<span class="am-ok">');
+        expect([...renderRaw(text.slice(0, at)), ...renderRaw(text.slice(at))]).toEqual(renderRaw(text));
+    });
+});
+
+// SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4: while a reply streams, a
+// colour span's tag can arrive half-typed. Markdown renders an unclosed `<span`
+// as literal text, so the streaming tail drops it until the `>` arrives.
+describe("trimPartialInlineTag", () => {
+    it.each([
+        ["done <", "done "],
+        ["done </", "done "],
+        ["done <s", "done "],
+        ["done <spa", "done "],
+        ["done <span", "done "],
+        ['done <span class="am-o', "done "],
+        ['done <span class="am-ok">pass</sp', 'done <span class="am-ok">pass'],
+        ['done <span class="am-ok">pass</span', 'done <span class="am-ok">pass'],
+    ])("drops the partial tag at the end of %j", (input, expected) => {
+        expect(trimPartialInlineTag(input)).toBe(expected);
+    });
+
+    it.each([
+        ['done <span class="am-ok">pass</span>', "a complete tag"],
+        ["a < b", "a less-than followed by a space"],
+        ["x <div", "a different tag name"],
+        ["see <span\nnext line", "a line break after the tag start"],
+        ["done <span " + "x".repeat(200), "an overlong tail (not a tag an agent is typing)"],
+        ["done <span> and more", "text after a complete tag"],
+    ])("leaves %j alone (%s)", (input) => {
+        expect(trimPartialInlineTag(input)).toBe(input);
+    });
 });

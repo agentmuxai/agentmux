@@ -252,8 +252,6 @@ impl PersistentSubprocessController {
             // Clearing per-spawn scopes the flag to the generation that
             // requested it, which is the only one it ever meant anything for.
             inner.restart_when_idle = false;
-            // A new process starts out writing, not waiting on a tool.
-            inner.tool_wait = ToolWait::Writing;
             inner.spawn_generation += 1;
             // Any spawn consumes or invalidates an adopted leftover
             // candidate — it only ever meant "for the very next spawn".
@@ -783,15 +781,6 @@ impl PersistentSubprocessController {
                 // `PersistentInner::pending_error_result_line`. `false` for
                 // every other line, matching today's behavior exactly.
                 let mut hold_back_for_resume_retry = false;
-                // A deferred message released at this line's turn boundary.
-                // Its stdin write happens at the boundary (atomically with the
-                // idle decision), but its blockfile append waits until THIS
-                // line — the `result` that ended the previous turn — has been
-                // appended, so the transcript and live consumers see
-                // `result(N)` before `user(N+1)`, never the reverse (codex P1
-                // on #3562).
-                let mut released_deferred_line: Option<String> = None;
-
                 // Parse JSON for control-frame handling, turn-active tracking,
                 // and session ID capture
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
@@ -831,38 +820,6 @@ impl PersistentSubprocessController {
                     }
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");
-                    // A tool call just started running: the model has stopped
-                    // writing, so a deferred message can go out now without
-                    // cutting anything (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
-                    // §4.7). The `result` frame below is the other release point.
-                    if !is_result_frame {
-                        if let Some(signal) = tool_wait_signal(&parsed) {
-                            let flushed = PersistentSubprocessController::tool_wait_locked(
-                                &mut inner_read.lock().unwrap(),
-                                my_generation_read,
-                                signal,
-                                &block_id_read,
-                            );
-                            match flushed {
-                                DeferredFlush::Released(released) => {
-                                    tracing::info!(
-                                        block_id = %block_id_read,
-                                        "agent is waiting on a tool — released one deferred message"
-                                    );
-                                    // Appended after THIS line, like the boundary release.
-                                    released_deferred_line = Some(released);
-                                    // Automated input inside the running turn.
-                                    health_read.note_input(crate::backend::blockcontroller::health::TurnOrigin::Automated);
-                                }
-                                DeferredFlush::Held | DeferredFlush::Failed => {
-                                    if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
-                                        ctrl.ensure_deferred_watchdog();
-                                    }
-                                }
-                                DeferredFlush::Empty => {}
-                            }
-                        }
-                    }
                     // Claude's turn-ending marker. Persistent mode never exits
                     // between turns, so this is the only place `turn_active`
                     // can go back to false without waiting for process exit —
@@ -884,19 +841,8 @@ impl PersistentSubprocessController {
                         // closes. `restart_pending` is committed in the SAME
                         // acquisition so no send can slip into `DeliverDirect`
                         // between the decision and the kill.
-                        // The turn boundary is also the flush point for
-                        // messages deferred by
-                        // `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.4.
-                        //
-                        // Exactly ONE message is released per boundary, never
-                        // the whole queue: writing to stdin starts a new turn,
-                        // so a burst drain would write message #2 while #1's
-                        // turn was already running — the precise mid-turn write
-                        // this exists to prevent. The next queued message goes
-                        // out on *that* new turn's own `result` frame.
-                        //
-                        // Which outcomes end the turn, and when the deferred
-                        // restart may apply: see `turn_boundary_locked`.
+                        // Whether the deferred restart may apply: see
+                        // `turn_boundary_locked`.
                         let boundary = PersistentSubprocessController::turn_boundary_locked(
                             &mut inner_read.lock().unwrap(),
                             &health_read,
@@ -905,29 +851,10 @@ impl PersistentSubprocessController {
                         );
                         // `None`: this reader's process has been replaced. Its
                         // `result` ends nothing the current process is doing,
-                        // so it must not flush into, idle, or restart that
-                        // process (codex P1 on #3562).
+                        // so it must not idle or restart that process (codex
+                        // P1 on #3562).
                         let boundary_is_current = boundary.is_some();
-                        let turn_still_active = boundary.as_ref().is_some_and(|b| b.turn_still_active());
-                        let (flushed, deferred_restart) = match boundary {
-                            Some(b) => (b.flushed, b.apply_deferred_restart),
-                            None => (DeferredFlush::Empty, false),
-                        };
-                        match flushed {
-                            DeferredFlush::Released(line) => {
-                                tracing::info!(
-                                    block_id = %block_id_read,
-                                    "turn ended — released one deferred message"
-                                );
-                                released_deferred_line = Some(line);
-                            }
-                            DeferredFlush::Held | DeferredFlush::Failed => {
-                                if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
-                                    ctrl.ensure_deferred_watchdog();
-                                }
-                            }
-                            DeferredFlush::Empty => {}
-                        }
+                        let deferred_restart = boundary.unwrap_or(false);
                         if deferred_restart {
                             tracing::info!(
                                 block_id = %block_id_read,
@@ -966,14 +893,7 @@ impl PersistentSubprocessController {
                                     shellprocname: String::new(),
                                     spawn_ts_ms: None,
                                     is_agent_pane: true,
-                                    // NOT unconditionally false: if a deferred
-                                    // message was just released, or an earlier
-                                    // writer's prompt is still running (`Held`),
-                                    // the turn is live and publishing "idle" here
-                                    // would hand subscribers (the Swarm badge,
-                                    // `trackTurnJustEnded`) a bogus end-of-turn
-                                    // for a turn that is actively in flight.
-                                    turn_active: turn_still_active,
+                                    turn_active: false,
                                 }
                             };
                             super::super::publish_controller_status(broker, &status);
@@ -1361,13 +1281,6 @@ impl PersistentSubprocessController {
                 }
 
                 if hold_back_for_resume_retry {
-                    // This `result` is held back, not persisted — but the
-                    // message already went to stdin, so it must still render.
-                    if let Some(released) = released_deferred_line.take() {
-                        if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
-                            ctrl.append_delivered_message(&released);
-                        }
-                    }
                     continue;
                 }
 
@@ -1397,11 +1310,6 @@ impl PersistentSubprocessController {
                     );
                 } else {
                     tracing::warn!(block_id = %block_id_read, "persistent stdout: no broker available");
-                }
-                if let Some(released) = released_deferred_line.take() {
-                    if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
-                        ctrl.append_delivered_message(&released);
-                    }
                 }
             }
 

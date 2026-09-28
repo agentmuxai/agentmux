@@ -140,6 +140,10 @@ export function replayInstant(
         }
     }
 
+    // End of the fixture: a jekt still held for an unfinished block is shown.
+    parser.releaseHeld();
+    applyReleased(parser, nodeIds, applyDoc, stats);
+
     return { docState, paneState, warnings, stats };
 }
 
@@ -153,7 +157,13 @@ function handleStreamLine(
 ): void {
     stats.streamLinesParsed += 1;
     const node = parser.parseLine(ev.line);
+    // Jekts released by this line go first — they arrived before it
+    // (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2, same as the live pane).
+    applyReleased(parser, seenIds, applyDoc, stats);
     if (!node) {
+        // A jekt held for a still-open block isn't "no node": it appears
+        // when the block ends.
+        if (parser.isHolding()) return;
         // Parser returned null. Expected for line types the parser
         // intentionally ignores (e.g. `tool_chunk` lines handled
         // out-of-band, message_start/_stop). Surface it as a
@@ -170,6 +180,19 @@ function handleStreamLine(
         applyDoc({ type: "StreamFlush", newNodes: [], updatedNodes: [node] });
     } else {
         applyDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
+        stats.nodesAppended += 1;
+    }
+}
+
+function applyReleased(
+    parser: ClaudeCodeStreamParser,
+    seenIds: Set<string>,
+    applyDoc: (cmd: AgentDocumentCommand) => void,
+    stats: ReplayResult["stats"],
+): void {
+    for (const released of parser.drainReleased()) {
+        if (seenIds.has(released.id)) continue;
+        applyDoc({ type: "StreamFlush", newNodes: [released], updatedNodes: [] });
         stats.nodesAppended += 1;
     }
 }

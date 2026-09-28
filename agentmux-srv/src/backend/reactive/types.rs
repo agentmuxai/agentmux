@@ -402,9 +402,10 @@ pub struct InjectionResponse {
     /// channel tier or when nothing could be checked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_verified: Option<bool>,
-    /// `Some(true)`: the target was mid-turn, so the message is queued and
-    /// reaches it when that turn ends — accepted, not yet seen. `Some(false)`:
-    /// written to the agent now. `None` where nothing structured was attempted
+    /// `Some(true)`: the target's process is starting up, restarting or
+    /// stopping, so the message is queued and reaches it once the process is
+    /// up — accepted, not yet seen. `Some(false)`: written to the agent now
+    /// (mid-turn included). `None` where nothing structured was attempted
     /// (errors, PTY keystrokes, relay paths). Lets `SendMessage` tell its
     /// caller which happened instead of claiming "injected" for both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -690,10 +691,10 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 /// - `Ok(SenderDelivery::Delivered)` — delivered on the controller's structured
 ///   channel (persistent stream-json stdin / ACP `session/prompt`); no PTY
 ///   keystrokes needed.
-/// - `Ok(SenderDelivery::Deferred)` — accepted on that channel but held while
-///   the agent is writing; released at its next tool call or turn boundary
-///   (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
-///   The message is safe; the agent just hasn't seen it yet.
+/// - `Ok(SenderDelivery::Deferred)` — accepted on that channel but queued
+///   because the agent's process is starting up, restarting or stopping;
+///   written once it can take it (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md
+///   §2.1). The message is safe; the agent just hasn't seen it yet.
 /// - `Ok(SenderDelivery::Pty)` — the controller is PTY-based; the caller should
 ///   fall back to keystroke injection.
 /// - `Err(_)` — a structured controller failed to accept the message (e.g. the

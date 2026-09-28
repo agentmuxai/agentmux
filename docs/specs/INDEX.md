@@ -321,6 +321,7 @@ partial list.
 | [`SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27`](SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md) | Spec: Opt-in isolated auth for `task dev` testing |
 | [`SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31`](SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md) | Spec: Stop the isolated Claude Code config dir from falling back to the host's `~/.claude/CLAUDE.md` |
 | [`SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14`](SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md) | SPEC: 24h TTL / rotation for the host-tier jekt signing key |
+| [`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28`](SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md) | SPEC: jekts reach the agent immediately; only the pane waits for the block to end |
 | [`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15`](SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md) | SPEC: LAN-tier Ed25519 jekt signing |
 | [`SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14`](SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md) | SPEC — Relax TIER=sensitive for cryptographically-verified WAN jekts |
 | [`SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16`](SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16.md) | SPEC: LAN discovery peer metadata gets clobbered blank by TXT-less mDNS re-resolutions |
@@ -485,6 +486,7 @@ partial list.
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
 | [`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md) | SPEC: Paste and drop images into the agent pane input |
 | [`SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26`](SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md) | Spec: Agent-pane preview cleanups (message shell, scroll hand-off, cap estimates, file preview) |
+| [`SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27`](SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md) | Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video) |
 | [`SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26`](SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md) | Spec: One open/closed model for agent-pane rows |
 | [`SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24`](SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md) | Agent pane scroll-follow: one owner, one intent-based state machine |
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
@@ -539,7 +541,6 @@ partial list.
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
-| [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
@@ -589,7 +590,6 @@ partial list.
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |
-| [`SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27`](SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md) | Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video) |
 | [`SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12`](SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md) | Spec: Agent pane session-replay framework |
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
@@ -1079,6 +1079,7 @@ partial list.
 | [`SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22`](SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md) | Spec: Hidden memory reinjection after compaction |
 | [`SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10`](SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10.md) | SPEC: Defer jekt / inter-agent message delivery until a safe turn boundary — never truncate an in-progress explanation |
 | [`SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05`](SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md) | Memory carry-over: loading and management across the three agent-awareness cases |
+| [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
 | [`SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27`](SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md) | SPEC: Highlight the pane a dragged file will land in |
 
 ### no status line

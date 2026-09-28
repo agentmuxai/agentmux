@@ -354,6 +354,19 @@ export function useAgentStream({
         nodeIdSet = new Set();
         queue.resetNodeQueues();
 
+        // Jekts the parser held while a text/thinking block streamed, released
+        // now that it ended: pushed as new nodes, BEFORE whatever node the
+        // releasing event produced. SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2.
+        const pushReleasedJekts = () => {
+            for (const released of parser.drainReleased()) {
+                if ((released as { timestamp?: number }).timestamp == null) {
+                    (released as { timestamp?: number }).timestamp = Date.now();
+                }
+                if (hasNodeId(released.id)) continue;
+                addNodeId(released.id);
+                queue.pushNewNode(released);
+            }
+        };
         // Turn-lifecycle finalization (session_end / Esc-fallback / crash
         // grace timer) and the stuck-stream watchdog. `finalizeTurn` is
         // called below on the real `session_end` StreamEvent.
@@ -363,7 +376,11 @@ export function useAgentStream({
             turnPhase,
             provider,
             queue,
-            flushParserPending: () => parser.flushPending(),
+            // Turn end without session_end (Esc / crash): release held jekts too.
+            flushParserPending: () => {
+                parser.flushPending();
+                pushReleasedJekts();
+            },
             hasNodeId,
             addNodeId,
         });
@@ -525,6 +542,7 @@ export function useAgentStream({
                     // to parse — it's still a real boundary in the
                     // underlying conversation.
                     parser.flushPending();
+                    pushReleasedJekts();
                     const compactBoundary = parseCompactBoundaryFrame(rawEvent);
                     if (compactBoundary) {
                         const paneEvents = model.dispatchPane({
@@ -559,6 +577,7 @@ export function useAgentStream({
                 // directly.
                 if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
                     parser.flushPending();
+                    pushReleasedJekts();
                     const sessionOutcome = parseSessionOutcomeFrame(rawEvent);
                     // `resumed` is demoted out of the working transcript —
                     // same rule and rationale as parseHistoryLines.ts
@@ -613,6 +632,7 @@ export function useAgentStream({
                 // SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
                 if (isMemoryInjectedFrame(rawEvent)) {
                     parser.flushPending();
+                    pushReleasedJekts();
                     const node = buildMemoryInjectedNode(rawEvent, {
                         contextWindow: contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
                         now: Date.now(),
@@ -722,6 +742,9 @@ export function useAgentStream({
                         // Done → Streaming at t+6ms, then nothing). Genuine
                         // multi-round continuations still re-promote — their
                         // flushes arrive after this point.
+                        // The turn ended: a jekt still held for its last block goes out now.
+                        parser.releaseHeld();
+                        pushReleasedJekts();
                         queue.flushNow();
                         finalizeTurn(event.stats ?? null);
                         // AFTER finalizeTurn — turnPhase is now genuinely
@@ -778,6 +801,7 @@ export function useAgentStream({
                         continue;
                     }
                     const node = parser.parseLine(JSON.stringify(event));
+                    pushReleasedJekts(); // before `node`: they arrived before the event that released them
                     if (!node) continue;
 
                     // Stamp a receive time on nodes that don't carry their own

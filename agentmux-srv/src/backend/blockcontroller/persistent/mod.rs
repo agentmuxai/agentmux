@@ -40,7 +40,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use super::{
-    BlockControllerRuntimeStatus, BlockInputUnion, Controller, DeliverPolicy, SendOutcome, STATUS_DONE,
+    BlockControllerRuntimeStatus, BlockInputUnion, Controller, SendOutcome, STATUS_DONE,
     STATUS_INIT, STATUS_RUNNING,
 };
 use super::core;
@@ -347,8 +347,7 @@ struct PersistentInner {
     /// the replacement process spawns.
     restart_pending: bool,
     /// A kill has been requested for the current process (`request_stop_on`).
-    /// `stdin_tx` stays live until it actually exits, and a `result` already
-    /// in the pipe still reaches the turn-boundary flush. Writing a deferred
+    /// `stdin_tx` stays live until it actually exits. Writing an automated
     /// message then would put it into the dying process and lose it (codex
     /// P2 on #3562 for `stop`, and the same window on the Stop button).
     /// `try_write_stdin_locked` refuses while this is set, so the message
@@ -405,21 +404,18 @@ struct PersistentInner {
     /// Drained by `release_spawn_claim_and_drain_queue`.
     pending_send_messages: VecDeque<QueuedMessage>,
     /// Non-human messages (jekt, muxbus, bridges, MCP `SendMessage`) that
-    /// arrived while a turn was in flight and were deferred to the next turn
-    /// boundary rather than steering the agent mid-explanation.
-    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.
+    /// arrived while the process could not take a write — a spawn in flight,
+    /// a committed restart, a requested stop, or another writer owning stdin
+    /// (`deferred_must_wait_locked`). Written, in order, by the watchdog once
+    /// it can. A live process that can take a write gets the message at once,
+    /// mid-turn or not (`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` §2.1),
+    /// so nothing waits here for a turn to end.
     ///
-    /// Distinct from `pending_send_messages`, which orders messages around a
-    /// *spawn*; this one orders them around a *turn*. Entries are the fully
-    /// encoded stream-json stdin lines, ready to write.
-    ///
-    /// This field and the `turn_active` flag it coordinates with MUST be read
-    /// and written under this one mutex — §4.2. `PersistentInner`'s lock is
-    /// what serializes them, because the turn-end handler in `spawn.rs`
-    /// already calls `health_monitor.set_active_turn(false)` while holding it.
-    /// Splitting them across two locks reintroduces the stranding race in
-    /// which a message enqueued just as a flush observes the queue empty has
-    /// no future trigger.
+    /// Distinct from `pending_send_messages`, the human path's queue around a
+    /// spawn. Entries are the fully encoded stream-json stdin lines, ready to
+    /// write. Read and written only under this mutex, together with the
+    /// must-wait state it depends on, so a message is never enqueued just as
+    /// a drain observes the queue empty and exits.
     deferred_deliveries: VecDeque<String>,
     /// Whether a deferred-delivery watchdog task is running for this
     /// controller — see `ensure_deferred_watchdog`. Set and cleared only
@@ -427,11 +423,6 @@ struct PersistentInner {
     /// finds the queue empty, so an enqueue can never observe "armed" from a
     /// watchdog that has already decided to exit.
     deferred_watchdog_armed: bool,
-    /// Whether the model is writing or waiting on its tool calls — see
-    /// [`ToolWait`]. Changed only under this lock: by the stdout reader
-    /// (`tool_wait_signal`), by each release, by a `result`, and by every
-    /// spawn. Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.7.
-    tool_wait: ToolWait,
     /// Exclusive claim held by a stale-resume retry batch flush (issue
     /// #2367; spec §4 option 2 of
     /// SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09).
@@ -954,15 +945,15 @@ const ANSWER_RESUME_FALLBACK_MS: u64 = 4000;
 /// all have to cope with an unreachable target instance — so surfacing a full
 /// queue as one more retryable failure needs no new machinery on their side.
 ///
-/// 64 is chosen to be far above any plausible legitimate backlog for a single
-/// turn while still bounding memory: these are whole messages, and the queue
-/// is per-block.
+/// 64 is chosen to be far above any plausible legitimate backlog for one
+/// startup or restart while still bounding memory: these are whole messages,
+/// and the queue is per-block.
 pub(super) const MAX_DEFERRED_DELIVERIES: usize = 64;
 
 /// How often the deferred-delivery watchdog re-checks a non-empty queue.
-/// It is the safety net, not the primary path: the `result`-frame flush in
-/// `spawn.rs` releases a message the instant a turn ends, so this only sets
-/// the latency of the cases that have no turn boundary to wait for.
+/// Messages are queued only while the process cannot take a write (starting
+/// up, restarting, stopping), and the watchdog is what writes them once it
+/// can, so this bounds how long after the process comes up they arrive.
 pub(super) const DEFERRED_WATCHDOG_TICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Consecutive watchdog ticks with no process and no spawn in flight before
@@ -971,130 +962,6 @@ pub(super) const DEFERRED_WATCHDOG_TICK: std::time::Duration = std::time::Durati
 /// (a stale-`--resume` retry, a fallback respawn); short enough that a dead
 /// agent's backlog is surfaced rather than held forever.
 pub(super) const DEFERRED_ORPHAN_GRACE_TICKS: u32 = 20;
-
-/// Outcome of [`PersistentSubprocessController::flush_one_deferred_locked`].
-/// `Empty`, `Held` and `Failed` all write nothing, but they are not the same:
-/// `Empty` lets the turn go idle, while `Held` (another writer owns stdin) and
-/// `Failed` (the write itself failed) still have an accepted message waiting
-/// and need the watchdog to finish it (codex + reagent P1s on #3562).
-#[derive(Debug, PartialEq)]
-pub(super) enum DeferredFlush {
-    Empty,
-    Released(String),
-    Held,
-    Failed,
-}
-
-/// Where the current turn is, as far as an automated message is concerned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum ToolWait {
-    /// The model is (or may be) producing text or thinking. Messages wait.
-    #[default]
-    Writing,
-    /// The model has finished writing and its tool calls are running. One
-    /// message may be written now: the tool is not something to cut into, and
-    /// the model reads it when the tool returns.
-    Open,
-    /// This tool wait already released its one message. The rest wait for the
-    /// next one, or for the turn to end.
-    Spent,
-    /// The model called a tool that parks for the operator's answer
-    /// ([`tool_parks_for_operator`]). Nothing is released: the agent is blocked
-    /// on a person, and a message would land between the question and its
-    /// answer. Set from the tool call's own `assistant` line, which precedes
-    /// both the `message_delta` that would open the wait and the
-    /// `control_request` that fills `pending_questions`, so the gate never
-    /// depends on the park having happened yet.
-    Blocked,
-}
-
-/// Whether a stdout line says the model is waiting on tools or is writing again.
-#[derive(Debug, PartialEq)]
-pub(super) enum ToolWaitSignal {
-    /// A tool call is complete and running: the model is not producing text.
-    Enter,
-    /// The model is producing output again (or the turn moved on).
-    Leave,
-    /// The model called a tool that waits on the operator, not on a program.
-    Blocked,
-}
-
-/// Whether a tool call parks for the operator's answer rather than running.
-/// Must agree with `handle_control_frame`, which is what actually parks: an
-/// AskUserQuestion always, and any tool `should_route_to_decision_panel` routes.
-fn tool_parks_for_operator(tool_name: &str) -> bool {
-    tool_name == "AskUserQuestion" || should_route_to_decision_panel(tool_name)
-}
-
-/// Classify one stdout line. Only the agent's own top-level output counts: a
-/// subagent's lines (`parent_tool_use_id` set) say nothing about whether the
-/// parent is mid-sentence.
-///
-/// `Enter` only on a `message_delta` whose `stop_reason` is `tool_use`: the
-/// whole message, every tool call in it, has been written. `Blocked` on an
-/// `assistant` line calling a tool that parks for the operator (it precedes the
-/// `message_delta`, so `Blocked` is always seen first). `Leave` on
-/// `message_start` or an `assistant` line with text or thinking. Anything
-/// unrecognised is `None`, which keeps the previous state, and the default
-/// state is "writing", so an unknown stream shape holds messages and never
-/// releases them early.
-pub(super) fn tool_wait_signal(parsed: &serde_json::Value) -> Option<ToolWaitSignal> {
-    if parsed.get("parent_tool_use_id").is_some_and(|v| !v.is_null()) {
-        return None;
-    }
-    match parsed.get("type")?.as_str()? {
-        "stream_event" => {
-            let event = parsed.get("event")?;
-            match event.get("type")?.as_str()? {
-                "message_start" => Some(ToolWaitSignal::Leave),
-                "message_delta"
-                    if event.pointer("/delta/stop_reason").and_then(|v| v.as_str())
-                        == Some("tool_use") =>
-                {
-                    Some(ToolWaitSignal::Enter)
-                }
-                _ => None,
-            }
-        }
-        "assistant" => {
-            let blocks = parsed.pointer("/message/content")?.as_array()?;
-            fn kind(b: &serde_json::Value) -> Option<&str> {
-                b.get("type").and_then(|t| t.as_str())
-            }
-            let parks = blocks.iter().any(|b| {
-                kind(b) == Some("tool_use")
-                    && b.get("name").and_then(|n| n.as_str()).is_some_and(tool_parks_for_operator)
-            });
-            if parks {
-                Some(ToolWaitSignal::Blocked)
-            } else if blocks
-                .iter()
-                .any(|b| matches!(kind(b), Some("text" | "thinking" | "redacted_thinking")))
-            {
-                Some(ToolWaitSignal::Leave)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-/// What a current-generation `result` frame decided — see
-/// [`PersistentSubprocessController::turn_boundary_locked`].
-#[derive(Debug, PartialEq)]
-pub(super) struct TurnBoundary {
-    pub(super) flushed: DeferredFlush,
-    pub(super) apply_deferred_restart: bool,
-}
-
-impl TurnBoundary {
-    /// `Released` started a turn; `Held` means an earlier writer's prompt is
-    /// still running or about to. Either way the turn is not over.
-    pub(super) fn turn_still_active(&self) -> bool {
-        matches!(self.flushed, DeferredFlush::Released(_) | DeferredFlush::Held)
-    }
-}
 
 /// Whether the deferred-delivery watchdog keeps running after a tick.
 #[derive(Debug, PartialEq)]
@@ -1284,7 +1151,6 @@ impl PersistentSubprocessController {
                 pending_send_messages: VecDeque::new(),
                 deferred_deliveries: VecDeque::new(),
                 deferred_watchdog_armed: false,
-                tool_wait: ToolWait::Writing,
                 drain_claim: false,
                 next_message_seq: 0,
                 drain_send_in_flight: false,
