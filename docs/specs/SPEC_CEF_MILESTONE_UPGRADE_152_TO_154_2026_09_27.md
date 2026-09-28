@@ -142,7 +142,10 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    `libcef.dll`). That file, not `fetch-patched-cef-windows.sh` (which only sources it), is the
    Windows pin local and package builds use: leave it on 152 and they fetch the 152 runtime and fail
    the version guard, while a 154 runtime fails `verify-cef-runtime-windows.sh`'s SHA check. Also
-   the Taskfile CEF tiers if they name a version, and `docs/cef-build/*` version references.
+   the Taskfile CEF tiers if they name a version, `docs/cef-build/*` version references, and the
+   public ones: `README.md` (the architecture image's alt text and the "Desktop: CEF 152" line) and
+   the version text inside `assets/architecture.svg` (edited in place — it has no generator; #3270
+   did the same for 148 → 152).
 4. A packaged build on each platform runs the §7.3 checks end to end; then release.
 5. After: switch `agentmuxai/cef`'s default branch to `8037` (needs repo admin — flag it, §6.8).
 
