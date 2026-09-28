@@ -75,7 +75,7 @@ const muxbus = {
     isConfigured: () => false,
 } as any;
 
-function renderPanel() {
+function renderPanel(mux = muxbus) {
     return render(() => (
         <HostPopoverPanel
             anchorRect={null}
@@ -87,7 +87,7 @@ function renderPanel() {
             lanDiscoveryEnabled={() => false}
             lanDiscoveryError={() => null}
             onLanToggle={() => {}}
-            muxbus={muxbus}
+            muxbus={mux}
         />
     ));
 }
@@ -160,5 +160,43 @@ describe("HostPopoverPanel — Instance row and Data-path link", () => {
         platform = os;
         renderPanel();
         expect(screen.getByRole("button", { name: DATA_DIR })).toHaveAttribute("data-tip", label);
+    });
+});
+
+describe("HostPopoverPanel — MuxBus Cloud row", () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    const cloud = (status: Record<string, unknown>, connect = vi.fn(async () => {})) =>
+        ({
+            ...muxbus,
+            isConfigured: () => true,
+            status: () => ({ cognitoDomain: "", expiresAt: 0, ...status }),
+            connect,
+        }) as any;
+
+    // SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.5: a sign-in srv reports
+    // as dead reads "Sign in again" with its email, even while its token
+    // lasts, and runs the same connect action as a first sign-in.
+    it("a dead sign-in offers Sign in again with the stored email", async () => {
+        const connect = vi.fn(async () => {});
+        renderPanel(cloud({ connected: true, valid: true, needsReauth: true, email: "me@example.com" }, connect));
+        expect(screen.getByText("me@example.com")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Sign in again" }));
+        await waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
+    });
+
+    it("an expired but live sign-in still reads Expired — re-login", () => {
+        renderPanel(cloud({ connected: true, valid: false, needsReauth: false, email: "me@example.com" }));
+        expect(screen.getByRole("button", { name: "Expired — re-login" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Sign in again" })).not.toBeInTheDocument();
+    });
+
+    it("a working sign-in shows the email and Disconnect", () => {
+        renderPanel(cloud({ connected: true, valid: true, needsReauth: false, email: "me@example.com" }));
+        expect(screen.getByText("me@example.com")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
     });
 });

@@ -56,7 +56,14 @@ pub enum CredentialState {
     /// `RefreshErrorKind::PermanentAuthFailure` (no need to accumulate
     /// failures for an error already known permanent). Retrying
     /// automatically is pointless; a human needs to log in again.
-    NeedsReauth { since_unix: u64, reason: String },
+    /// `rejected` tells the two apart: true when the credential itself was
+    /// refused, false when transient failures merely piled up (which a
+    /// returning network can still cure through an on-demand check).
+    NeedsReauth {
+        since_unix: u64,
+        reason: String,
+        rejected: bool,
+    },
 }
 
 /// What a registered refresh closure's failure means for scheduling.
@@ -261,6 +268,7 @@ pub fn update(
                     CredentialState::NeedsReauth {
                         since_unix: now_unix(),
                         reason: reason.clone(),
+                        rejected: permanent,
                     },
                 );
                 vec![Event::BecameNeedsReauth { id, reason }]
@@ -485,7 +493,7 @@ mod tests {
         ));
         assert!(matches!(
             m.get("cred"),
-            Some(CredentialState::NeedsReauth { .. })
+            Some(CredentialState::NeedsReauth { rejected: true, .. })
         ));
     }
 
@@ -515,9 +523,11 @@ mod tests {
             events.as_slice(),
             [Event::BecameNeedsReauth { .. }]
         ));
+        // Nothing refused the credential itself: an offline stretch must not
+        // read as a dead sign-in.
         assert!(matches!(
             m.get("cred"),
-            Some(CredentialState::NeedsReauth { .. })
+            Some(CredentialState::NeedsReauth { rejected: false, .. })
         ));
     }
 

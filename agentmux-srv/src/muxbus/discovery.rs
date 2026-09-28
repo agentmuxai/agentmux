@@ -146,6 +146,17 @@ pub fn resolve_login(
     Err("AgentMux Cloud sign-in isn't configured: the cloud publishes no settings and this build has none".to_string())
 }
 
+/// Was a stored sign-in issued to a Cognito client the cloud no longer
+/// publishes? Then it belongs to a user pool the cloud has left, and neither
+/// its tokens nor a refresh will work. `false` when that can't be told: no
+/// document, or a credential saved without its client id.
+pub fn client_id_superseded(discovered: Option<&CloudSettings>, stored_client_id: &str) -> bool {
+    match discovered {
+        Some(s) => !stored_client_id.is_empty() && s.cognito.client_id != stored_client_id,
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +209,14 @@ mod tests {
         );
         assert!(resolve_login(None, "https://compiled", "").is_err());
         assert!(resolve_login(None, "", "").is_err());
+    }
+
+    #[test]
+    fn a_sign_in_from_another_client_is_superseded_only_when_the_cloud_says_so() {
+        let s = parse(DOC, "https://muxbus.example.test").unwrap();
+        assert!(client_id_superseded(Some(&s), "old-client"));
+        assert!(!client_id_superseded(Some(&s), "abc123"));
+        assert!(!client_id_superseded(None, "old-client"), "no document: can't tell");
+        assert!(!client_id_superseded(Some(&s), ""), "no recorded client id: can't tell");
     }
 }
