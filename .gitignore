@@ -70,8 +70,18 @@ docs/manual/screenshots/
 # AppImage build artifacts (assembled in build/AgentMux.AppDir/ before being bundled by appimagetool)
 /build/AgentMux.AppDir/
 
-# Claude Code agent session state — worktrees, logs, todos, etc.
-.claude/
+# Claude Code agent session state — worktrees, logs, todos, etc. — except
+# .claude/skills/, which is how Claude Code's own `run` skill (and others)
+# auto-discovers a COMMITTED project skill by walking up for
+# .claude/skills/*/SKILL.md (see its own instructions). Without this carve-out
+# a project skill placed there can never actually be shared with other agents —
+# see docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md.
+# `.claude/*` (not `.claude/`) is required for the `!` negations below to take
+# effect at all — a directory-matching ignore stops git from descending into
+# it even to check further patterns.
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 
 # macOS packaging build artifact (signed .app — never commit)
 build/AgentMux.app/
