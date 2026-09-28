@@ -104,9 +104,16 @@ simpler) — instead of "latest published". That's the fix #3086 made for releas
 every entry point. After it, publishing a runtime changes nothing until the consumer PR moves the
 pins, and a deliberate non-pinned build has to name its tag.
 
-**This is what makes Day 2 step 4's publish → merge gap safe:** with blank = pinned, no nightly,
-dispatched or scheduled build can pick up a 154 runtime between publishing and the consumer merge,
-however long that gap is. Do not publish anything until this prerequisite is merged.
+**This is what makes Day 2 step 4's publish → merge gap safe — for builds that run a workflow
+containing it.** Nightly runs `main`'s workflow, so it is covered once the prerequisite is merged.
+A `workflow_dispatch` runs the workflow *of the ref it is dispatched from*, not `main`'s
+(`release.yml` documents the same behavior), so a dispatch from a tag or branch cut before the
+prerequisite still resolves blank to "latest published". Two rules close that:
+
+- Do not publish anything until this prerequisite is merged.
+- During the publish → merge window (step 4, meant to be minutes), do not dispatch `build-*.yml`
+  from any ref older than the prerequisite, and pass an explicit `cef-runtime-tag` to any manual
+  build. Publishing and merging back to back keeps the window short enough to hold to this.
 
 ### Day 1 — morning: source (one owner, ~3 h)
 
