@@ -98,9 +98,10 @@ prereleases included). Two kinds of caller hit that path:
 Once a 154 release is published, any of them would pair the 154 runtime with `main`'s 152
 binding. Windows then fails its version guard; Linux and macOS have no equivalent major-version
 guard and can emit mismatched artifacts. Fix it at the one place they share: **change the
-blank-tag resolution in each `build-*.yml` to the committed pin** — the same per-platform values
-`release.yml`'s `cef-runtime-pins` job uses (move them to a single file both read, if that's
-simpler) — instead of "latest published". That's the fix #3086 made for releases, extended to
+blank-tag resolution in each `build-*.yml` to the committed pin** instead of "latest published".
+Move the per-platform values out of `release.yml`'s `cef-runtime-pins` job into **one shared pin
+file** that `release.yml` and all three `build-*.yml` read — not per-workflow literals, which would
+be four more places for the consumer PR to miss (Day 2 step 3 moves that file). That's the fix #3086 made for releases, extended to
 every entry point. After it, publishing a runtime changes nothing until the consumer PR moves the
 pins, and a deliberate non-pinned build has to name its tag.
 
@@ -168,8 +169,10 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
 3. **One consumer PR in `agentmux`** (trap 8): `agentmux-cef/Cargo.toml` `cef = "154"`; root
    `[patch.crates-io]` → the new `agentmuxai/cef-rs` rev; **`Cargo.lock`** regenerated and committed so
    it records `cef`/`cef-dll-sys` 154.2.0+154.0.28 at that rev (today it pins 152.1.0 and `9b0abfe`;
-   left stale, the next Cargo run may resolve an unverified 154 crate); `release.yml` `cef-runtime-pins` — all
-   three tags together; **`scripts/cef-build/windows-runtime-pin.sh` — all three of its values**
+   left stale, the next Cargo run may resolve an unverified 154 crate); **the shared pin file from
+   the prerequisite** (read by `release.yml` and every `build-*.yml`'s blank-tag path) — all three
+   tags together; left on 152, nightly and blank-tag builds keep fetching 152 runtimes against the
+   154 binding; **`scripts/cef-build/windows-runtime-pin.sh` — all three of its values**
    (`CEF_WINDOWS_RELEASE_TAG`, `CEF_WINDOWS_ASSET`, `CEF_WINDOWS_LIBCEF_SHA256` of the new
    `libcef.dll`). That file, not `fetch-patched-cef-windows.sh` (which only sources it), is the
    Windows pin local and package builds use: leave it on 152 and they fetch the 152 runtime and fail
