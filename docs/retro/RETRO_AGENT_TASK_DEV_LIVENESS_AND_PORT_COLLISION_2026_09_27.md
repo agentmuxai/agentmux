@@ -142,9 +142,21 @@ background-task capture, or an explicit `> file.log 2>&1` this session
 controlled directly — showed **nothing** while `task dev` was actually
 building or serving successfully, and (for the two runs that failed) dumped
 its *entire* multi-thousand-line output only at the moment the process
-exited. This is standard Windows CRT behavior: a process whose stdout is a
-pipe/file rather than a real console switches from line-buffered to fully
-block-buffered. It isn't a bug in this repo's tooling, but it means:
+exited. **Correction (Codex review on the PR for this retro): the original
+draft attributed this to "standard Windows CRT full-buffering," stated as a
+blanket rule.** That doesn't hold up: a fully-buffered stream still flushes
+whenever its buffer fills, not only at exit, so many minutes of continuous
+`cargo`/`ninja` compiler output — easily well past any typical few-KB buffer
+— should have produced *some* incremental lines long before exit, and
+`task dev`'s output is a mix of Go (`task` itself), shell, Rust, and Node
+processes, not one CRT stream to begin with. Something in this pipeline did
+suppress nearly all incremental output — plausibly full buffering somewhere
+in that chain, or an aggregation layer in the harness's own capture (the
+`task`/`agentmux-bashwrap` wrapping this session's tool calls go through) —
+but which one, and why literally nothing flushed across 15+ minutes of real
+build output in one run, was **not conclusively isolated here**. Treat the
+mechanism as unresolved; the *practical* conclusion below (poll OS state, not
+log content) held regardless of which mechanism turns out to be responsible:
 
 - A **failed** run's diagnostics are only visible after the fact (fine — you
   get them all at once).
@@ -243,7 +255,13 @@ roughly an hour. Write one, covering:
   curl-based check) and pass an explicit, confirmed-free
   `AGENTMUX_VITE_PORT=<n>` up front.
 - **How to confirm success without reading process output**: poll
-  `Get-Process | Where MainWindowTitle -eq $expectedTitle`, not log tailing.
+  `Get-Process | Where MainWindowTitle -like "$expectedTitle*"`, not log
+  tailing. **Correction (Codex): don't match by exact equality.** The `TITLE`
+  value becomes the window *display name*, not the whole title; the actual
+  OS title is built by `frontend/util/window-title.ts`'s `formatWindowTitle()`
+  as `"<displayName> - <tabName> - AgentMux"` (or `"<displayName> - AgentMux"`
+  with no tab — see `window-title.test.ts`, and the real examples this
+  session observed, `"Lark - Tab 1 - AgentMux"` / `"Korp - Tab 1 - AgentMux"`).
   Expect a delay between "window exists" and "title is set" — that gap means
   the frontend hasn't finished `initMuxWrap` yet, not that anything is wrong.
 - A precise, PID-scoped cleanup snippet: always resolve and print the exact
