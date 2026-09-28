@@ -18,6 +18,7 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
+import rehypeRaw from "rehype-raw";
 import { findSafeSplitPoint, trimPartialInlineTag } from "./markdown-incremental";
 
 const PAD = "Filler paragraph that exists only to clear the minimum prefix length.\n\n".repeat(12);
@@ -210,6 +211,29 @@ describe("split equivalence — prefix+tail renders identically to the whole", (
             expect(combined).toEqual(render(text));
         });
     }
+
+    // Codex P2 on #3978: a colour span left open across a blank line. The
+    // pipeline above stops before rehype-raw, where raw HTML becomes elements,
+    // so this runs the renderer's raw step too. Whole or split, the span can't
+    // outlive its paragraph: the HTML parser closes a <span> at the </p>, and
+    // span isn't a formatting element, so the next <p> doesn't reopen it. So
+    // there is nothing for a split to break.
+    it("an am-* span left open across a blank line renders the same split or whole", () => {
+        const raw = unified()
+            .use(remarkParse)
+            .use(remarkGfm)
+            .use(remarkRehype, { allowDangerousHtml: true })
+            .use(rehypeRaw);
+        const renderRaw = (src: string) =>
+            strip((raw.runSync(raw.parse(src)) as any).children).filter(
+                (n: any) => !(n.type === "text" && typeof n.value === "string" && n.value.trim() === ""),
+            );
+        const text = `${PAD}<span class="am-ok">first paragraph\n\nsecond paragraph</span> tail\n\nAfter.\n`;
+        const at = findSafeSplitPoint(text);
+        expect(at).toBeGreaterThan(0); // the case Codex describes: a split inside the open span
+        expect(text.slice(0, at)).toContain('<span class="am-ok">');
+        expect([...renderRaw(text.slice(0, at)), ...renderRaw(text.slice(at))]).toEqual(renderRaw(text));
+    });
 });
 
 // SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4: while a reply streams, a
