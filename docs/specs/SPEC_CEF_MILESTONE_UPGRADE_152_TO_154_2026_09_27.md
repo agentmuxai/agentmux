@@ -148,5 +148,5 @@ version drift report's CEF rows as the trigger. Tracked separately.
 ## 7. Open questions for the operator
 
 1. Owners: Korp (Windows), Clare (macOS), Opaz (Linux) again, or others?
-2. Disk on narko: it has 82 GB free against the ≥120 GB a cold build needs — free about 40 GB more, or build Windows elsewhere?
+2. Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs. Free the space, rely on syncing the existing checkout forward, or build Windows elsewhere?
 3. Who publishes the three releases (operator account), and when on Day 2?
