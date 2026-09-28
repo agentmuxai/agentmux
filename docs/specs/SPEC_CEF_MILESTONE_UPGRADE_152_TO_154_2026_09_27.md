@@ -110,16 +110,28 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
 ### Day 2: verify, publish, switch (all, then one owner)
 
 1. **Per platform, §7** of the maintenance doc: `patcher.py` sanity (§7.1), symbol probes with full
-   `nm` (§7.2), the differential compile (**two** `OK` lines, §7.2b), functional checks (§7.3):
-   boot + `chrome://gpu` GPU on; native drag (Linux) or its documented no-op; title-bar right-click;
-   window transparency; H.264/HEVC playback; no -67030 on macOS 26; no DCHECK on drag/close.
+   `nm` (§7.2), and functional checks (§7.3): boot + `chrome://gpu` GPU on; native drag (Linux) or
+   its documented no-op; title-bar right-click; window transparency; H.264/HEVC playback; no -67030
+   on macOS 26; no DCHECK on drag/close.
+   **The §7.2b differential compile (two `OK` lines) is a macOS-only gate.** Under
+   `use_thin_lto=true` (Windows, Linux) an isolated single-TU recompile yields LLVM bitcode, not the
+   machine code the ThinLTO backend links, so `cef-verify-patches.sh` cannot pass there regardless of
+   the patches (148 → 152 spec, the 2026-09-15 status note; its default pairs also include the
+   macOS-only `mach_port_rendezvous_mac.o`). On Windows and Linux the no-symbol patches are verified
+   by the §7.1 patcher log (each registered patch reported applied) plus their §7.3 behavior —
+   transparency for `rwhv_background_opaque_check`, title-bar right-click on Linux — as for 152.
+   Giving those two platforms a real differential mechanism stays open (tracked in the 152 spec).
 2. **Publish** three releases on `agentmuxai/cef` (operator account, trap 9):
    `cef-windows-x86_64-154.0.8037.58`, `cef-macos-arm64-154.0.8037.58-codecs`,
    `cef-linux-x86_64-154.0.8037.58-codecs` — one tag scheme (`cef-<os>-<arch>-<chromium>[-codecs][-rN]`).
 3. **One consumer PR in `agentmux`** (trap 8): `agentmux-cef/Cargo.toml` `cef = "154"`; root
    `[patch.crates-io]` → the new `agentmuxai/cef-rs` rev; `release.yml` `cef-runtime-pins` — all
-   three tags together; `scripts/cef-build/fetch-patched-cef-windows.sh` and the Taskfile CEF tiers;
-   `docs/cef-build/*` version references.
+   three tags together; **`scripts/cef-build/windows-runtime-pin.sh` — all three of its values**
+   (`CEF_WINDOWS_RELEASE_TAG`, `CEF_WINDOWS_ASSET`, `CEF_WINDOWS_LIBCEF_SHA256` of the new
+   `libcef.dll`). That file, not `fetch-patched-cef-windows.sh` (which only sources it), is the
+   Windows pin local and package builds use: leave it on 152 and they fetch the 152 runtime and fail
+   the version guard, while a 154 runtime fails `verify-cef-runtime-windows.sh`'s SHA check. Also
+   the Taskfile CEF tiers if they name a version, and `docs/cef-build/*` version references.
 4. A packaged build on each platform runs the §7.3 checks end to end; then release.
 5. After: switch `agentmuxai/cef`'s default branch to `8037` (needs repo admin — flag it, §6.8).
 
