@@ -152,7 +152,10 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    by the §7.1 patcher log (each registered patch reported applied) plus their §7.3 behavior —
    transparency for `rwhv_background_opaque_check`, title-bar right-click on Linux — as for 152.
    Giving those two platforms a real differential mechanism stays open (tracked in the 152 spec).
-2. **Stage, don't publish yet.** Upload the three runtimes as **draft** releases on
+2. **Stage, don't publish yet.** A GitHub *draft* release is not published: it has no
+   `publishedAt`, isn't public, and `gh release list` resolution can't select it — publishing happens
+   only in step 4, behind that step's gate (the blank = pinned prerequisite confirmed merged). Upload
+   the three runtimes as **draft** releases on
    `agentmuxai/cef` (operator account, trap 9): `cef-windows-x86_64-154.0.8037.58`,
    `cef-macos-arm64-154.0.8037.58-codecs`, `cef-linux-x86_64-154.0.8037.58-codecs` — one tag scheme
    (`cef-<os>-<arch>-<chromium>[-codecs][-rN]`). A draft has no `publishedAt`, so even an unpinned
