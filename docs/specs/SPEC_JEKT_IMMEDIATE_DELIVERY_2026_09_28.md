@@ -2,7 +2,7 @@
 
 **Author:** lark
 **Date:** 2026-09-28
-**Status:** active — §2.1 (immediate delivery) in PR #3979; §2.2 (the pane holds a jekt until the streaming block ends) in PR #3977.
+**Status:** implemented — §2.1 (immediate delivery) in PR #3979; §2.2 (the pane holds a jekt until the streaming block ends) in PR #3977.
 **Supersedes:** the delivery policy of `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` (§1's guarantee, §4.1–4.5
 and §4.7 — the `NextIdle` default, the per-boundary release, the tool-wait gate). That spec's startup-race
 fix (§3.2.1: a message sent while the agent's process is still spawning is queued, not dropped) is kept.
