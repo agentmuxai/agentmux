@@ -4,7 +4,8 @@
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { createContentBlockPlugin } from "@/app/element/markdown-contentblock-plugin";
 import { transformBlocks, type MarkdownContentBlockType } from "@/app/element/markdown-util";
-import { findSafeSplitPoint } from "@/app/element/markdown-incremental";
+import { findSafeSplitPoint, trimPartialInlineTag } from "@/app/element/markdown-incremental";
+import { AM_SPAN_CLASSES } from "@/app/element/markdown-semantic";
 
 /**
  * Deterministic work counters for the streaming-render invariants. Not a
@@ -426,7 +427,9 @@ const Markdown = (props: MarkdownProps) => {
                               ...defaultSchema.attributes,
                               span: [
                                   ...(defaultSchema.attributes?.span || []),
-                                  ["className", /^hljs-./],
+                                  // The syntax highlighter's own classes, plus the
+                                  // semantic colour set agents may use.
+                                  ["className", /^hljs-./, ...AM_SPAN_CLASSES],
                                   ["srcset"],
                                   ["media"],
                                   ["type"],
@@ -508,6 +511,13 @@ const Markdown = (props: MarkdownProps) => {
         const highlight = highlightOn();
         const tailProc = tailProcessor();
         const blocks = blocksSignature(contentBlocksMap());
+        // While streaming, a colour span's tag can arrive half-typed, and
+        // markdown shows an unclosed `<span` as literal text. Hold that
+        // fragment back until its `>` arrives
+        // (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4). Only the open tail
+        // is ever affected, and never once streaming ends.
+        const streamingNow = streamingOn();
+        const openTail = (s: string) => (streamingNow ? trimPartialInlineTag(s) : s);
 
         /**
          * Parse ONE independent segment. `tocRef` is cleared per call, not per
@@ -537,7 +547,7 @@ const Markdown = (props: MarkdownProps) => {
             if (splitAt <= 0) {
                 disposeFrozen();
                 // Nothing is provably closed, so all of it is the open tail.
-                const whole = runSegment(txt, tailProc);
+                const whole = runSegment(openTail(txt), tailProc);
                 // Owned by this memo run, like the tail below: disposed and
                 // replaced wholesale on the next commit.
                 element = hastToElement(whole.children);
@@ -575,7 +585,7 @@ const Markdown = (props: MarkdownProps) => {
                 // commit. Its element is owned by this memo run, so the next
                 // commit disposes it and Solid's array reconcile swaps just
                 // these trailing nodes, leaving `frozen.elements` untouched.
-                const tail = runSegment(txt.slice(splitAt), tailProc);
+                const tail = runSegment(openTail(txt.slice(splitAt)), tailProc);
                 element = frozen.elements.concat(flatNodes(hastToElement(tail.children)));
                 toc = frozen.toc.concat(tail.toc);
             }
