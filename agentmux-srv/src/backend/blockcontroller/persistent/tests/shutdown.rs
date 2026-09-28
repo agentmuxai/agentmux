@@ -138,10 +138,12 @@ async fn shutdown_with_no_process_still_reports_deferred_messages() {
 
 /// Codex P2 on #3562: `shutdown` drained the queue up front but only gated
 /// writes (`stop_pending`) after the interrupt's turn had ended. A sender that
-/// already held the controller could enqueue in between, and the interrupt's
-/// own `result` then flushed that message into the process being shut down,
-/// leaving the drop report an empty queue. The gate now goes up in the same
-/// locked section as the drain, before the interrupt is sent.
+/// already held the controller could get its message written into the process
+/// being shut down in between, lost with no stranded report. The gate goes up
+/// in the same locked section as the drain, before the interrupt is sent, so
+/// such a message is queued (not written, though delivery is otherwise
+/// immediate) and neither the interrupted turn's `result` nor the watchdog
+/// writes it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_deferred_during_the_shutdown_interrupt_is_not_written_into_the_dying_process() {
     let c = PersistentSubprocessController::new("tab".into(), "blk-late".into(), None, None, None, None);
@@ -163,20 +165,17 @@ async fn a_message_deferred_during_the_shutdown_interrupt_is_not_written_into_th
     assert!(interrupt.contains("interrupt"), "{interrupt}");
 
     // A sender that already held the controller arrives now…
-    c.send_user_message("late".to_string()).unwrap();
-    // …and then the interrupted turn's `result` lands.
-    let boundary = PersistentSubprocessController::turn_boundary_locked(
+    assert_eq!(c.send_user_message_outcome("late".to_string()).unwrap(), SendOutcome::Deferred);
+    // …and then the interrupted turn's `result` lands, and the watchdog ticks.
+    PersistentSubprocessController::turn_boundary_locked(
         &mut c.inner.lock().unwrap(),
         &c.health_monitor,
         "blk-late",
         generation,
     )
     .expect("same generation");
-    assert!(
-        !matches!(boundary.flushed, DeferredFlush::Released(_)),
-        "must not flush into the process being shut down: {:?}",
-        boundary.flushed
-    );
+    let mut orphaned = 0;
+    c.sweep_deferred_once(&mut orphaned);
     assert!(rx.try_recv().is_err(), "nothing written after the interrupt");
     assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept for the drop report");
 

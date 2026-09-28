@@ -16,7 +16,6 @@ mod agent_id;
 mod shutdown;
 mod reopen_guard;
 mod eager_resume;
-mod turn_boundary;
+mod immediate_delivery;
 mod single_live_instance;
-mod tool_wait;
 mod resume_gate;

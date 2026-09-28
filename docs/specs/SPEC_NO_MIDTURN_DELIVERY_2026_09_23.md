@@ -1,10 +1,11 @@
 # SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought
 
 **Date:** 2026-09-23
-**Status:** active — Phase 1 (this doc, supersessions, dead-field removal) in #3557; Phase 2 (the
-`DeliverPolicy` queue, the actual behavior change) in #3562; Phase 3 (ACP, sender-addressed failure
-reporting, frontend interleaving tests) not started; Phase 4 (release while the agent waits on a tool
-call, §4.7) amends the guarantee below. See §5.
+**Status:** superseded — its delivery policy (§1's guarantee, §4.1–4.5, §4.7: holding automated
+messages while the agent writes) was a misreading of the request and is replaced; its startup-race fix
+(§3.2.1: a message sent while the agent's process is still spawning is queued, not dropped) is kept.
+Before that: Phase 1 in #3557, Phase 2 (the `DeliverPolicy` queue) in #3562, Phase 4 (§4.7) later.
+**Superseded-by:** `docs/specs/SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`
 **Author:** Maricon
 **Scope:** all non-human-initiated delivery into a running agent's live input —
 `agentmux-srv/src/backend/reactive/**`, `backend/blockcontroller/mod.rs::deliver_agent_message`,

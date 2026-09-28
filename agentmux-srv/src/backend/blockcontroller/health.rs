@@ -214,22 +214,6 @@ impl TurnActivityTracker {
         was_active
     }
 
-    /// The turn goes on but a new one logically begins — a deferred message
-    /// released at a `result` boundary, where `turn_active` never dropped.
-    pub fn begin_turn_from(&self, input: TurnInput) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.provenance = Some(TurnProvenance::from_input(input));
-    }
-
-    /// Input delivered into the running turn without a turn flip (a deferred
-    /// message released while the agent waits on a tool).
-    pub fn note_input(&self, origin: TurnOrigin) {
-        let mut inner = self.inner.lock().unwrap();
-        if let Some(p) = inner.provenance.as_mut() {
-            p.absorb(origin);
-        }
-    }
-
     /// What started the turn in flight, if one is and it was reported.
     pub fn provenance(&self) -> Option<TurnProvenance> {
         let inner = self.inner.lock().unwrap();
@@ -372,15 +356,5 @@ mod tests {
         t.hint_next_turn_unlabelled();
         t.set_active_turn(true);
         assert!(t.provenance().unwrap().tainted);
-    }
-
-    #[test]
-    fn a_boundary_release_or_tool_wait_release_is_automated() {
-        let t = TurnActivityTracker::new("b".into());
-        t.mark_turn_active_from(Some(user("go")));
-        t.note_input(TurnOrigin::Automated);
-        assert!(t.provenance().unwrap().tainted, "released while waiting on a tool");
-        t.begin_turn_from(automated());
-        assert_eq!(t.provenance().unwrap().origin, TurnOrigin::Automated, "released at the result boundary");
     }
 }

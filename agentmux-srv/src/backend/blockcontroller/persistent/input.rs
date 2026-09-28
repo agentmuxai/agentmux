@@ -32,13 +32,13 @@ impl PersistentSubprocessController {
 
     /// Write an already-encoded stdin line, given a held `inner` guard.
     ///
-    /// Callers must hold the lock across the turn-state check and this write —
-    /// that is the whole point of `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
-    /// §4.2's single-mutex requirement.
+    /// Callers must hold the lock across the must-wait check, the queue
+    /// update and this write, so no concurrent sender or watchdog tick can
+    /// slip between them.
     ///
     /// On success the line is also tracked into the current generation's
-    /// resume retry batch, so every write site (immediate, idle fast path and
-    /// turn-boundary flush) gets it without having to remember to.
+    /// resume retry batch, so every write site (the send path and the
+    /// watchdog) gets it without having to remember to.
     pub(super) fn try_write_stdin_locked(
         inner: &mut PersistentInner,
         line: &str,
@@ -109,253 +109,144 @@ impl PersistentSubprocessController {
     /// delivery (`deliver_agent_message`), where the agent is live (busy or idle)
     /// and we have no `PersistentSpawnConfig` to hand.
     ///
-    /// Defaults to [`DeliverPolicy::NextIdle`]: while the agent is writing the
-    /// message is queued, and it is delivered when the agent next waits on a
-    /// tool call or its turn ends, so an automated sender never cuts the
-    /// agent's explanation in half.
-    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.7.
+    /// A live process gets the message at once, whatever the agent is doing —
+    /// mid-turn included; the CLI reads it at its next inference step. It is
+    /// queued only while the process cannot take a write yet: a spawn in
+    /// flight, a committed restart, a requested stop, or another writer owning
+    /// stdin (see [`Self::deferred_must_wait_locked`]). Refusing it then used
+    /// to drop the message outright (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
+    /// §3.2.1). Spec: `SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` §2.1.
     pub fn send_user_message(&self, message: String) -> Result<(), String> {
-        self.send_user_message_with_policy(message, DeliverPolicy::NextIdle)
+        self.send_user_message_outcome(message).map(|_| ())
     }
 
     /// [`send_user_message`], reporting whether the message went to the agent
-    /// now or is waiting for the current turn to end — so an automated sender
-    /// can tell its caller the truth (MCP `SendMessage`).
+    /// now or is queued until the process can take it (it is starting up,
+    /// restarting or stopping) — so an automated sender can tell its caller
+    /// the truth (MCP `SendMessage`).
     pub fn send_user_message_outcome(&self, message: String) -> Result<SendOutcome, String> {
-        self.send_user_message_outcome_with_policy(message, DeliverPolicy::NextIdle)
-    }
-
-    /// [`send_user_message`] with an explicit delivery policy.
-    ///
-    /// `Immediate` preserves the pre-2026-09-23 behavior (write to live stdin
-    /// regardless of turn state, steering the agent). It exists for the human
-    /// operator's own deliberate interruption and should not be used for
-    /// automated traffic — see [`DeliverPolicy`].
-    pub fn send_user_message_with_policy(
-        &self,
-        message: String,
-        policy: DeliverPolicy,
-    ) -> Result<(), String> {
-        self.send_user_message_outcome_with_policy(message, policy).map(|_| ())
-    }
-
-    /// [`send_user_message_with_policy`], reporting [`SendOutcome`].
-    pub fn send_user_message_outcome_with_policy(
-        &self,
-        message: String,
-        policy: DeliverPolicy,
-    ) -> Result<SendOutcome, String> {
         // Pre-turn fence — see `send_message`.
         self.fence_check()?;
         let json_str = Self::encode_user_message(&message);
 
-        // ONE lock acquisition covers the turn-state read, the enqueue and the
-        // idle fast-path send (§4.2/§4.3). Because the turn-end flush in
-        // `spawn.rs` takes this same lock, there is no window in which a
-        // message is enqueued against a queue a concurrent flush has already
-        // finished draining.
+        // ONE lock acquisition covers the must-wait check, the enqueue and the
+        // write. Because the watchdog takes this same lock, there is no window
+        // in which a message is enqueued against a queue a concurrent drain
+        // has already finished with.
         //
         // `publish_status`/`spawn_status_heartbeat` must NOT be called while
         // this guard is held — `publish_status` takes `inner` itself and would
         // deadlock. They run after the guard drops, below.
-        let (delivered, still_queued) = {
+        let (written, was_active, still_queued, failure) = {
             let mut inner = self.inner.lock().unwrap();
 
-            let delivered = if policy == DeliverPolicy::Immediate {
-                Self::try_write_stdin_locked(&mut inner, &json_str)?;
-                Some((json_str.clone(), self.mark_turn_active_locked()))
-            } else {
-                if inner.deferred_deliveries.len() >= MAX_DEFERRED_DELIVERIES {
-                    // §4.5: an explicit error, never a false success. The
-                    // caller treats this like any other transient delivery
-                    // failure and retries.
-                    return Err(format!(
-                        "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
-                         waiting on this agent's current turn) — retry shortly"
-                    ));
-                }
-                // Always enqueue first, then decide whether to drain the head
-                // immediately. Sending directly while a backlog exists would
-                // reorder this message ahead of older ones — FIFO is what
-                // makes "one message per turn boundary" produce the order the
-                // senders actually sent in.
-                inner.deferred_deliveries.push_back(json_str);
+            if inner.deferred_deliveries.len() >= MAX_DEFERRED_DELIVERIES {
+                // An explicit error, never a false success. The caller treats
+                // this like any other transient delivery failure and retries.
+                return Err(format!(
+                    "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
+                     waiting for this agent's process to start up, restart or stop) — retry shortly"
+                ));
+            }
+            // Always enqueue first, then write the whole backlog in order.
+            // Writing this message directly while older ones are queued would
+            // reorder it ahead of them.
+            inner.deferred_deliveries.push_back(json_str);
 
-                // A spawn in flight counts as busy rather than as an error.
-                // This is the startup race that used to drop jekts outright
-                // (spec §3.2.1). Not every spawn ends in a turn boundary — it
-                // can fail, or (eager resume) succeed with nothing to say — so
-                // anything left queued here is the watchdog's to finish, below.
-                if self.deferred_must_wait_locked(&inner) {
-                    None
-                } else {
-                    let head = inner
-                        .deferred_deliveries
-                        .front()
-                        .expect("just pushed")
-                        .clone();
-                    match Self::try_write_stdin_locked(&mut inner, &head) {
-                        Ok(()) => {
-                            inner.deferred_deliveries.pop_front();
-                            Self::note_release_locked(&mut inner);
-                            // The flip MUST happen before this guard drops.
-                            // Deferred to after the lock, a second caller
-                            // arriving in the gap would still read "idle" and
-                            // an empty queue, take this same fast path, and
-                            // write a second message with no turn boundary
-                            // between them — the exact thing this PR forbids.
-                            Some((head, self.mark_turn_active_locked()))
-                        }
-                        Err(e) => {
-                            // Drop the entry we just added — this call is
-                            // reporting failure, so the caller owns the retry.
-                            // Anything already queued stays put. `pop_back`
-                            // is this call's own push even when the head that
-                            // failed is an older entry: same lock, nothing
-                            // else ran in between. That older head was already
-                            // accepted, and whoever queued it armed the
-                            // watchdog, so it keeps its retry.
-                            inner.deferred_deliveries.pop_back();
-                            return Err(e);
-                        }
-                    }
+            // A spawn in flight counts as "wait" rather than as an error. This
+            // is the startup race that used to drop jekts outright
+            // (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §3.2.1). Not every spawn
+            // ends in a turn — it can fail, or (eager resume) succeed with
+            // nothing to say — so anything left queued here is the watchdog's
+            // to finish, below.
+            let mut failure = None;
+            let mut written = Vec::new();
+            if !self.deferred_must_wait_locked(&inner) {
+                let (w, err) = Self::flush_deferred_locked(&mut inner, &self.block_id);
+                written = w;
+                if let Some(e) = err {
+                    // This call's own message is the newest entry, so it was
+                    // not written. Take it back: this call reports failure,
+                    // so the caller owns the retry. Anything older stays
+                    // queued — it was already accepted, and whoever queued it
+                    // armed the watchdog, so it keeps its retry.
+                    inner.deferred_deliveries.pop_back();
+                    failure = Some(e);
                 }
-            };
-            (delivered, !inner.deferred_deliveries.is_empty())
+            }
+            // Marked under this same guard, so the turn state a concurrent
+            // caller or the turn-end handler reads is never behind the write.
+            let was_active = (!written.is_empty()).then(|| self.mark_turn_active_locked());
+            (written, was_active, !inner.deferred_deliveries.is_empty(), failure)
         };
 
-        // Anything still queued needs a guaranteed way out even if no turn
-        // boundary ever comes. Called after EVERY enqueue that leaves the queue
-        // non-empty, so it cannot miss a watchdog that exited just before.
+        // Anything still queued needs a guaranteed way out. Called after EVERY
+        // enqueue that leaves the queue non-empty, so it cannot miss a watchdog
+        // that exited just before.
         if still_queued {
             self.ensure_deferred_watchdog();
         }
 
-        // FIFO: when a backlog existed, what was just written is the OLDEST
-        // queued message, and this one is still waiting behind it. So this
-        // message went out now only if nothing is left queued.
-        let outcome = if policy == DeliverPolicy::Immediate || (delivered.is_some() && !still_queued) { SendOutcome::Sent } else { SendOutcome::Deferred };
-        let Some((sent_line, was_active)) = delivered else {
+        if let Some(was_active) = was_active {
+            // Everything below needs the `inner` lock released:
+            // `publish_status` takes it, and `spawn_status_heartbeat`'s task
+            // does too. The heartbeat is re-armed only when resuming from idle
+            // — a mid-turn send already has one running, and re-spawning per
+            // call would leak duplicate heartbeat tasks.
+            if !was_active {
+                self.spawn_status_heartbeat();
+            }
+            self.publish_status();
+            for line in &written {
+                self.append_delivered_message(line);
+            }
+        }
+        if let Some(e) = failure {
+            return Err(e);
+        }
+        if still_queued {
             tracing::info!(
                 block_id = %self.block_id,
-                "delivery deferred — the agent is writing; will release at its next tool call or turn boundary"
+                "delivery queued — the agent's process is starting up, restarting or stopping; \
+                 it will be written once the process can take it"
             );
-            return Ok(outcome);
-        };
-
-        // Everything below needs the `inner` lock released: `publish_status`
-        // takes it, and `spawn_status_heartbeat`'s task does too. The turn was
-        // already marked active inside the critical section above; these are
-        // only the observable side effects of that.
-        //
-        // The heartbeat is re-armed only when resuming from idle — a mid-turn
-        // steering send already has one running, and re-spawning per call would
-        // leak duplicate heartbeat tasks.
-        if !was_active {
-            self.spawn_status_heartbeat();
+            return Ok(SendOutcome::Deferred);
         }
-        self.publish_status();
-        self.append_delivered_message(&sent_line);
-        Ok(outcome)
+        Ok(SendOutcome::Sent)
     }
 
-    /// Mark the turn active while the caller already holds `inner`.
-    ///
-    /// Exists to make the lock discipline explicit at the call sites: the flip
-    /// belongs *inside* the critical section that decided to send, so no
-    /// concurrent caller can observe "idle with an empty queue" between the
-    /// write and the flip and take the idle fast path a second time. Lock
-    /// order is `inner` → `health_monitor`, matching the turn-end handler in
-    /// `spawn.rs`; `health_monitor` never takes `inner`, so this cannot
-    /// deadlock. Returns the pre-call value.
+    /// Mark the turn active while the caller already holds `inner`, so the
+    /// flip is never behind the write that caused it. Lock order is `inner` →
+    /// `health_monitor`, matching the turn-end handler in `spawn.rs`;
+    /// `health_monitor` never takes `inner`, so this cannot deadlock. Returns
+    /// the pre-call value.
     fn mark_turn_active_locked(&self) -> bool {
         self.health_monitor.mark_turn_active_returning_was_active()
     }
 
-    /// Whether a deferred message must keep waiting rather than be written
-    /// now: a turn is running (writing now is the interrupt this exists to
-    /// stop), or another writer owns stdin — see
-    /// [`Self::stdin_owned_by_another_writer`]. Shared by the idle fast path
-    /// and the watchdog, so the two can never disagree about what "idle" means.
+    /// Whether a queued message must keep waiting rather than be written now.
+    /// Only states in which the process cannot take a write: what the agent is
+    /// doing (mid-turn or idle) is not one of them
+    /// (`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` §2.1). Shared by the send
+    /// path and the watchdog, so the two can never disagree.
     ///
-    /// A committed config restart (`restart_pending`) also means wait. The
-    /// process is about to be killed, and it stays down until the next message
-    /// respawns it. The queue is kept for that replacement, and the watchdog
-    /// must not count this window toward reporting it stranded.
-    ///
-    /// A requested kill (`stop_pending`) means wait too, but only while the
-    /// dying process still holds `stdin_tx`: writes are refused then, and a
-    /// refusal must not reach an automated caller as an error (reagent P1 on
-    /// #3562). Once it exits, the ordinary no-process rules apply. A send
-    /// fails into the caller's respawn fallback, and the watchdog's grace
-    /// window runs, so nothing parks unreported behind a stop.
+    /// - Another writer owns stdin — see
+    ///   [`Self::stdin_owned_by_another_writer`]; this includes a spawn in
+    ///   flight, whose write `try_write_stdin_locked` would refuse.
+    /// - A committed config restart (`restart_pending`). The process is about
+    ///   to be killed, and it stays down until the next message respawns it.
+    ///   The queue is kept for that replacement, and the watchdog must not
+    ///   count this window toward reporting it stranded.
+    /// - A requested kill (`stop_pending`), but only while the dying process
+    ///   still holds `stdin_tx`: writes are refused then, and a refusal must
+    ///   not reach an automated caller as an error (reagent P1 on #3562). Once
+    ///   it exits, the ordinary no-process rules apply. A send fails into the
+    ///   caller's respawn fallback, and the watchdog's grace window runs, so
+    ///   nothing parks unreported behind a stop.
     pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
-        (self.health_monitor.is_active_turn() && !Self::tool_wait_open_locked(inner))
-            || inner.restart_pending
+        inner.restart_pending
             || (inner.stop_pending && inner.stdin_tx.is_some())
             || Self::stdin_owned_by_another_writer(inner)
-    }
-
-    /// The agent is waiting on a tool call, so a message written now cuts
-    /// nothing: the model has stopped writing and reads it when the tool
-    /// returns. Not while the agent is blocked on the operator (a question or a
-    /// permission prompt): a message there would land between the prompt and
-    /// its answer.
-    fn tool_wait_open_locked(inner: &PersistentInner) -> bool {
-        inner.tool_wait == ToolWait::Open
-            && inner.pending_questions.is_empty()
-            && inner.pending_permissions.is_empty()
-    }
-
-    /// Apply one stdout line's [`ToolWaitSignal`] under `inner`, releasing at
-    /// most one deferred message when a tool wait opens.
-    ///
-    /// Ignored when `generation` is no longer the current one: a replaced
-    /// process's leftover lines say nothing about the new one, and the release
-    /// writes to the CURRENT stdin (same reason as `turn_boundary_locked`).
-    ///
-    /// `Enter` acts only from `Writing`, so it does nothing once the wait is
-    /// `Spent` (a second `message_delta` would otherwise release a second message
-    /// inside the same wait, the burst the one-per-boundary rule forbids) or
-    /// `Blocked` on the operator.
-    pub(super) fn tool_wait_locked(
-        inner: &mut PersistentInner,
-        generation: u64,
-        signal: ToolWaitSignal,
-        block_id: &str,
-    ) -> DeferredFlush {
-        if inner.spawn_generation != generation {
-            return DeferredFlush::Empty;
-        }
-        match signal {
-            ToolWaitSignal::Leave => {
-                inner.tool_wait = ToolWait::Writing;
-                DeferredFlush::Empty
-            }
-            ToolWaitSignal::Blocked => {
-                inner.tool_wait = ToolWait::Blocked;
-                DeferredFlush::Empty
-            }
-            ToolWaitSignal::Enter if inner.tool_wait != ToolWait::Writing => DeferredFlush::Empty,
-            ToolWaitSignal::Enter => {
-                inner.tool_wait = ToolWait::Open;
-                if !Self::tool_wait_open_locked(inner) {
-                    return DeferredFlush::Empty;
-                }
-                Self::flush_one_deferred_locked(inner, block_id)
-            }
-        }
-    }
-
-    /// A deferred message was just written. Inside a tool wait that spends the
-    /// wait's one message; anywhere else it starts a new turn, whose first tool
-    /// wait is still to come.
-    fn note_release_locked(inner: &mut PersistentInner) {
-        inner.tool_wait = if inner.tool_wait == ToolWait::Open {
-            ToolWait::Spent
-        } else {
-            ToolWait::Writing
-        };
     }
 
     /// Another writer is feeding stdin, and messages it carries were accepted
@@ -375,91 +266,66 @@ impl PersistentSubprocessController {
     /// the no-process fallback, and kept the watchdog resetting its orphan
     /// timer forever (codex P1 on #3562).
     ///
-    /// Checked inside [`Self::flush_one_deferred_locked`] itself, so EVERY
-    /// release path honours it, the turn-boundary flush included (reagent P1
-    /// on #3562: the boundary flush used to skip it).
+    /// Also part of [`Self::deferred_must_wait_locked`], which every caller of
+    /// [`Self::flush_deferred_locked`] checks first under the same lock.
     fn stdin_owned_by_another_writer(inner: &PersistentInner) -> bool {
         inner.spawning_in_progress
             || inner.drain_claim
             || (!inner.pending_send_messages.is_empty() && inner.stdin_tx.is_some())
     }
 
-    /// Release at most ONE deferred message.
+    /// Write the queued messages to stdin, oldest first, as far as stdin takes
+    /// them. Returns the lines written, in order, and the error that stopped
+    /// it early, if any: the entry that failed stays at the head of the queue
+    /// with everything behind it, so a failed write never drops a message.
     ///
-    /// Exactly one, never the whole queue: writing to stdin starts a new turn,
-    /// so a burst drain would write message #2 while #1's turn was already
-    /// running — the mid-turn write this whole mechanism exists to prevent
-    /// (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.4). The next queued message
-    /// goes out on that new turn's own boundary.
+    /// The whole backlog at once, not one at a time: nothing is held for what
+    /// the agent is doing any more (`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`
+    /// §2.1), only for whether the process can take a write.
     ///
-    /// The caller holds `inner` across this, and must leave `turn_active` set
-    /// on [`DeferredFlush::Released`] — the released message just started a
-    /// turn. A failed write leaves the queue intact; it is reported as
-    /// [`DeferredFlush::Failed`], distinct from an empty queue, because the
-    /// caller must arrange a retry for it rather than treat it as idle. The
-    /// same holds for [`DeferredFlush::Held`], returned without writing when
-    /// another writer owns stdin.
-    pub(super) fn flush_one_deferred_locked(
+    /// The caller holds `inner` across this, has checked
+    /// [`Self::deferred_must_wait_locked`] under that same guard, and marks the
+    /// turn active before dropping it if anything was written.
+    pub(super) fn flush_deferred_locked(
         inner: &mut PersistentInner,
         block_id: &str,
-    ) -> DeferredFlush {
-        let Some(head) = inner.deferred_deliveries.front().cloned() else {
-            return DeferredFlush::Empty;
-        };
-        if Self::stdin_owned_by_another_writer(inner) {
-            return DeferredFlush::Held;
-        }
-        match Self::try_write_stdin_locked(inner, &head) {
-            Ok(()) => {
-                inner.deferred_deliveries.pop_front();
-                Self::note_release_locked(inner);
-                DeferredFlush::Released(head)
-            }
-            Err(e) => {
+    ) -> (Vec<String>, Option<String>) {
+        let mut written = Vec::new();
+        while let Some(head) = inner.deferred_deliveries.front().cloned() {
+            if let Err(e) = Self::try_write_stdin_locked(inner, &head) {
                 tracing::warn!(
                     block_id = %block_id,
                     error = %e,
                     queued = inner.deferred_deliveries.len(),
                     "deferred flush failed; leaving the queue for the watchdog to retry"
                 );
-                DeferredFlush::Failed
+                return (written, Some(e));
             }
+            inner.deferred_deliveries.pop_front();
+            written.push(head);
         }
+        (written, None)
     }
 
-    /// The turn-boundary decision for a `result` frame, under `inner`: release
-    /// at most one deferred message, decide whether the turn is over, and
-    /// whether a deferred runtime-config restart may now apply.
+    /// The turn-boundary decision for a `result` frame, under `inner`: the turn
+    /// is over, and a deferred runtime-config restart may now apply. Returns
+    /// whether it does.
     ///
     /// Returns `None`, touching nothing, when `generation` is no longer the
     /// current one. A fallback respawn can install a new process before the
     /// old reader drains a buffered `result`. That `result` ends nothing the
-    /// new process is doing, and `flush_one_deferred_locked` writes to the
-    /// CURRENT `stdin_tx`, so acting on it would inject into the replacement's
-    /// running turn, mark it idle, or restart it (codex P1 on #3562).
+    /// new process is doing, so acting on it would mark the replacement's
+    /// running turn idle, or restart it (codex P1 on #3562).
     ///
-    /// The turn stays active on `Released` (the message just started a turn)
-    /// and on `Held`: an earlier writer's prompt (a retry-batch replay or a
-    /// queued human message) is running or about to, and the drain that wrote
-    /// it does not re-mark the turn active. Going idle here would let the
-    /// watchdog write the moment that writer released its claim, mid-turn
-    /// (codex P1 on #3562). The turn only goes idle on `Empty` or `Failed`.
-    ///
-    /// **Residual:** a `Held` boundary whose writer then writes nothing
-    /// further leaves the turn marked active until the next `result`, i.e.
-    /// until the next input. It needs a `result` to land in the instant
-    /// between a drain's last write and its claim release. Staying active too
-    /// long is the safe failure: a deferred message waits, and none is ever
-    /// written mid-turn.
-    ///
-    /// The deferred restart applies only on `Empty`. Killing the process with
-    /// an entry still queued, or just written, would strand it.
+    /// The deferred restart applies only when nothing is queued. Killing the
+    /// process with an entry still queued would strand it; the flag stays set,
+    /// and the next `result` (the watchdog's write starts a turn) applies it.
     pub(super) fn turn_boundary_locked(
         inner: &mut PersistentInner,
         health: &TurnActivityTracker,
         block_id: &str,
         generation: u64,
-    ) -> Option<TurnBoundary> {
+    ) -> Option<bool> {
         if inner.spawn_generation != generation {
             tracing::debug!(
                 block_id = %block_id,
@@ -469,43 +335,31 @@ impl PersistentSubprocessController {
             );
             return None;
         }
-        // The turn is over, so whatever tool wait it was in is too; a released
-        // message starts a new turn that is writing until its own tool call.
-        inner.tool_wait = ToolWait::Writing;
-        let flushed = Self::flush_one_deferred_locked(inner, block_id);
-        let boundary = TurnBoundary {
-            apply_deferred_restart: flushed == DeferredFlush::Empty
-                && std::mem::replace(&mut inner.restart_when_idle, false),
-            flushed,
-        };
-        if !boundary.turn_still_active() {
-            health.set_active_turn(false);
-        } else if matches!(boundary.flushed, DeferredFlush::Released(_)) {
-            // The released message starts the next turn while `turn_active`
-            // stays up: an automated turn (deferred deliveries always are).
-            health.begin_turn_from(crate::backend::blockcontroller::health::TurnInput {
-                origin: crate::backend::blockcontroller::health::TurnOrigin::Automated,
-                text: String::new(),
-            });
-        }
-        if boundary.apply_deferred_restart {
+        let apply_deferred_restart = inner.deferred_deliveries.is_empty()
+            && std::mem::replace(&mut inner.restart_when_idle, false);
+        health.set_active_turn(false);
+        if apply_deferred_restart {
             inner.restart_pending = true;
         }
-        Some(boundary)
+        Some(apply_deferred_restart)
     }
 
     /// Make sure a watchdog task is looking after a non-empty deferred queue.
     ///
-    /// The `result`-frame flush is the primary path, but it only fires when a
-    /// turn ends. Three cases have no such boundary coming (codex P1s on
-    /// #3562, plus one found alongside them):
+    /// Messages are queued only while the process cannot take a write (see
+    /// [`Self::deferred_must_wait_locked`]), and nothing else writes them once
+    /// it can, so this is how every queued message gets out:
     ///
-    /// - a boundary flush whose write failed (e.g. the bounded stdin channel
-    ///   was momentarily full) — the turn went idle with the entry still queued;
-    /// - a message deferred behind a spawn that then FAILED — no process, so
-    ///   no turn and no `result`;
-    /// - a message deferred behind a spawn that succeeded with nothing to say
-    ///   (eager resume spawns with no seed message) — idle, no turn.
+    /// - a message queued behind a spawn — delivered once the process is up,
+    ///   whether or not that spawn starts a turn (eager resume spawns with no
+    ///   seed message);
+    /// - a message queued behind a committed restart or a requested stop —
+    ///   delivered to the replacement process;
+    /// - a write that failed (e.g. the bounded stdin channel was momentarily
+    ///   full) — retried;
+    /// - a message queued behind a spawn that then FAILED, or behind a process
+    ///   that exited and was never replaced — reported stranded after the
+    ///   grace window.
     ///
     /// Idempotent: at most one watchdog per controller. A no-op for an
     /// instance without `set_self_ref` (only tests construct those) or outside
@@ -553,15 +407,15 @@ impl PersistentSubprocessController {
                 return WatchdogStep::Exit;
             }
             if self.deferred_must_wait_locked(&inner) {
-                // Something in flight will reach a boundary (or fail into a
-                // state this watchdog sees on a later tick).
+                // Something in flight will bring the process up (or fail into
+                // a state this watchdog sees on a later tick).
                 *orphaned_ticks = 0;
                 return WatchdogStep::Continue;
             }
             if inner.stdin_tx.is_none() {
                 // No process and nothing starting one. Give a respawn the
                 // grace window to begin, then stop pretending these will be
-                // delivered (spec §4.5).
+                // delivered.
                 *orphaned_ticks += 1;
                 if *orphaned_ticks < DEFERRED_ORPHAN_GRACE_TICKS {
                     return WatchdogStep::Continue;
@@ -570,15 +424,14 @@ impl PersistentSubprocessController {
                 (None, inner.deferred_deliveries.drain(..).collect::<Vec<_>>())
             } else {
                 *orphaned_ticks = 0;
-                match Self::flush_one_deferred_locked(&mut inner, &self.block_id) {
-                    // Flip inside the lock, exactly as the idle fast path does.
-                    DeferredFlush::Released(line) => (Some((line, self.mark_turn_active_locked())), Vec::new()),
-                    // Transient; the next tick tries again. (`Held` can't
-                    // happen here — `deferred_must_wait_locked` above already
-                    // returned — but it means the same thing if it did.)
-                    DeferredFlush::Failed | DeferredFlush::Held => return WatchdogStep::Continue,
-                    DeferredFlush::Empty => unreachable!("checked non-empty under this same lock"),
+                // A failed write is transient; whatever is left is retried on
+                // the next tick.
+                let (written, _failed) = Self::flush_deferred_locked(&mut inner, &self.block_id);
+                if written.is_empty() {
+                    return WatchdogStep::Continue;
                 }
+                // Flip inside the lock, exactly as the send path does.
+                (Some((written, self.mark_turn_active_locked())), Vec::new())
             }
         };
 
@@ -590,16 +443,19 @@ impl PersistentSubprocessController {
             );
             return WatchdogStep::Exit;
         }
-        if let Some((line, was_active)) = released {
+        if let Some((written, was_active)) = released {
             tracing::info!(
                 block_id = %self.block_id,
-                "agent idle with no turn boundary pending — watchdog released one deferred message"
+                count = written.len(),
+                "the agent's process can take input again — watchdog delivered the queued messages"
             );
             if !was_active {
                 self.spawn_status_heartbeat();
             }
             self.publish_status();
-            self.append_delivered_message(&line);
+            for line in &written {
+                self.append_delivered_message(line);
+            }
         }
         WatchdogStep::Continue
     }
