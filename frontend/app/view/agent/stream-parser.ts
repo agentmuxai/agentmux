@@ -170,6 +170,16 @@ export class ClaudeCodeStreamParser {
     // Mutable node objects for accumulated text/thinking — content is appended in-place
     private currentTextNode: { type: "markdown"; id: string; content: string } | null = null;
     private currentThinkingNode: { type: "markdown"; id: string; content: string; timestamp?: number; metadata: { thinking: true } } | null = null;
+    // A jekt that arrives while a text or thinking block is still streaming
+    // is held here instead of being emitted, so the block isn't split in two
+    // around its bubble: the agent already has the message (srv delivers at
+    // once); only its place in the pane waits for the block to end.
+    // SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2.
+    private heldJekts: DocumentNode[] = [];
+    // Held jekts whose block has ended, waiting for the caller to take them
+    // with drainReleased() and place them BEFORE the node of the event that
+    // ended the block.
+    private releasedJekts: DocumentNode[] = [];
     // True for the dedicated parser instance parseHistoryLines.ts creates to
     // batch-replay persisted NDJSON at pane-reopen time — false (default) for
     // the live useAgentStream.ts parser. thinking/tool_call events carry no
@@ -265,7 +275,13 @@ export class ClaudeCodeStreamParser {
         try {
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    // End of stream: a jekt still held for an unfinished block
+                    // must not be lost.
+                    this.releaseHeldJekts();
+                    yield* this.drainReleased();
+                    break;
+                }
 
                 this.buffer += decoder.decode(value, { stream: true });
                 const lines = this.buffer.split("\n");
@@ -277,6 +293,8 @@ export class ClaudeCodeStreamParser {
                     try {
                         const event = JSON.parse(line) as StreamEvent;
                         const node = this.eventToNode(event);
+                        // Released jekts first: they arrived before this event.
+                        yield* this.drainReleased();
                         if (node) yield node;
                     } catch (err) {
                         console.error("Failed to parse NDJSON line:", line, err);
@@ -289,7 +307,12 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
-     * Parse a single line of NDJSON
+     * Parse a single line of NDJSON.
+     *
+     * A jekt arriving while a text/thinking block is open returns `null` and is
+     * held; callers must take released jekts with `drainReleased()` after every
+     * call (and `releaseHeld()` at the end of a turn or input) and place them
+     * before the returned node. `parse()` and `parseEvent()` do this themselves.
      */
     parseLine(line: string): DocumentNode | null {
         if (!line.trim()) return null;
@@ -309,7 +332,9 @@ export class ClaudeCodeStreamParser {
      */
     async parseEvent(event: any): Promise<DocumentNode[]> {
         const node = this.eventToNode(event as StreamEvent);
-        return node ? [node] : [];
+        // Released jekts first: they arrived before this event.
+        const released = this.drainReleased();
+        return node ? [...released, node] : released;
     }
 
     /**
@@ -326,12 +351,42 @@ export class ClaudeCodeStreamParser {
      * close them so the next text/thinking event starts fresh.
      */
     flushPending(): DocumentNode[] {
+        // The block ends here, so anything held for it is released (drain with
+        // drainReleased(); the returned nodes below are the block itself).
+        this.releaseHeldJekts();
         const nodes: DocumentNode[] = [];
         if (this.currentTextNode) nodes.push(this.currentTextNode);
         if (this.currentThinkingNode) nodes.push(this.currentThinkingNode);
         this.currentTextNode = null;
         this.currentThinkingNode = null;
         return nodes;
+    }
+
+    /**
+     * Jekts released since the last call — held while a block streamed, now
+     * free because it ended. Place them before the node the same parse call
+     * returned (they arrived before the event that ended the block).
+     */
+    drainReleased(): DocumentNode[] {
+        const out = this.releasedJekts;
+        this.releasedJekts = [];
+        return out;
+    }
+
+    /** Whether a jekt is being held for a block that is still open. */
+    isHolding(): boolean {
+        return this.heldJekts.length > 0;
+    }
+
+    /** End of turn: release every held jekt (then drainReleased()). */
+    releaseHeld(): void {
+        this.releaseHeldJekts();
+    }
+
+    private releaseHeldJekts(): void {
+        if (this.heldJekts.length === 0) return;
+        this.releasedJekts.push(...this.heldJekts);
+        this.heldJekts = [];
     }
 
     /**
@@ -356,6 +411,7 @@ export class ClaudeCodeStreamParser {
                 return this.thinkingToNode(event as ThinkingEvent);
 
             case "tool_call":
+                this.releaseHeldJekts();
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
                 return this.toolCallToNode(event as ToolCallEvent);
@@ -372,21 +428,33 @@ export class ClaudeCodeStreamParser {
                 return null;
 
             case "tool_result":
+                this.releaseHeldJekts();
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
                 return this.toolResultToNode(event as ToolResultEvent);
 
             case "agent_message":
+                this.releaseHeldJekts();
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
                 return this.agentMessageToNode(event as AgentMessageEvent);
 
-            case "user_message":
+            case "user_message": {
+                const node = this.userMessageToNode(event as UserMessageEvent);
+                // A jekt mid-block waits for the block to end (see heldJekts).
+                // Anything else — the human typing — ends the block as before.
+                if (node.type === "jekt_message" && (this.currentTextNode || this.currentThinkingNode)) {
+                    this.heldJekts.push(node);
+                    return null;
+                }
+                this.releaseHeldJekts();
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
-                return this.userMessageToNode(event as UserMessageEvent);
+                return node;
+            }
 
             case "error_result":
+                this.releaseHeldJekts();
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
                 return this.errorResultToNode(event as ErrorResultEvent);
@@ -397,6 +465,11 @@ export class ClaudeCodeStreamParser {
             // but history replay re-parses every persisted line through here —
             // returning null silently avoids a warn-spam flood (one per turn).
             case "session_end":
+                // The turn ended, so its last block did: release held jekts
+                // for whoever drains next (Codex P2 on #3977 — parseEvent /
+                // parseLine callers see session_end here, not in their own code).
+                this.releaseHeldJekts();
+                return null;
             case "provider_waiting":
                 return null;
 
@@ -412,6 +485,7 @@ export class ClaudeCodeStreamParser {
      * content appended). Switches away from thinking accumulation.
      */
     private textToNode(event: TextEvent): DocumentNode {
+        if (this.currentThinkingNode) this.releaseHeldJekts(); // thinking block ended
         this.currentThinkingNode = null;
         if (!this.currentTextNode) {
             this.currentTextNode = { type: "markdown", id: this.nextIdOf("node"), content: event.content };
@@ -427,6 +501,7 @@ export class ClaudeCodeStreamParser {
      * Switches away from text accumulation.
      */
     private thinkingToNode(event: ThinkingEvent): DocumentNode {
+        if (this.currentTextNode) this.releaseHeldJekts(); // text block ended
         this.currentTextNode = null;
         if (!this.currentThinkingNode) {
             // Stamped only on first creation of the clump — this is when the
@@ -805,6 +880,8 @@ export class ClaudeCodeStreamParser {
         this.pendingToolTimestamps.clear();
         this.currentTextNode = null;
         this.currentThinkingNode = null;
+        this.heldJekts = [];
+        this.releasedJekts = [];
         // skipIds intentionally NOT cleared — a `reset()` typically
         // follows a `StreamTruncate` (the snapshot's nodes are gone
         // from the doc) but we keep the original skip-set out of

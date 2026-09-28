@@ -599,3 +599,32 @@ describe("user messages persisted for CLIs that don't echo them (spec §6.9)", (
         }
     );
 });
+
+// SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2 — replay places a jekt that
+// arrived mid-block the same way the live pane does.
+describe("parseHistoryLines — jekt arriving mid-block", () => {
+    const jekt =
+        "[JEKT:FROM=reagent TO=lark TIER=coord DELIVERY=wan TRUST=network-claimed MSGID=m1 PRIORITY=normal TS=1783386012]\n" +
+        "From: reagent | To: lark | ts=1783386012\nPR reviewed\n[/JEKT]";
+
+    it("keeps the text block whole and puts the jekt after it, before the tool that ended it", () => {
+        const lines = [
+            line({ type: "text", content: "first half " }),
+            line({ type: "user_message", message: jekt }),
+            line({ type: "text", content: "second half" }),
+            line({ type: "tool_call", tool: "Bash", id: "tool-1", params: { command: "ls" } }),
+        ];
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+        expect(nodes.map((n) => n.type)).toEqual(["markdown", "jekt_message", "tool"]);
+        expect((nodes[0] as { content: string }).content).toBe("first half second half");
+    });
+
+    it("a batch that ends mid-block still shows the held jekt", () => {
+        const lines = [
+            line({ type: "text", content: "still writing" }),
+            line({ type: "user_message", message: jekt }),
+        ];
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+        expect(nodes.map((n) => n.type)).toEqual(["markdown", "jekt_message"]);
+    });
+});

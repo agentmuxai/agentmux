@@ -149,6 +149,12 @@ export class HistoryParser {
             if (ts != null && ts !== 0) return node;
             return { ...node, timestamp: stampMs } as DocumentNode;
         };
+        // Jekts the parser held while a text/thinking block streamed, released
+        // once it ended — placed before the releasing event's node, as live
+        // (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2).
+        const putReleased = (): void => {
+            for (const released of parser.drainReleased()) put(released, indexById.get(released.id));
+        };
         // An in-place same-id replacement (tool_call → tool_result, accumulated
         // text deltas) must not wipe the stamp the node got when it was first
         // created — the replacement event is typically timestamp-less too.
@@ -198,6 +204,7 @@ export class HistoryParser {
                 // already correctly represented in `nodes` from when the
                 // per-line loop processed them.
                 parser.flushPending();
+                putReleased();
                 const data = parseCompactBoundaryFrame(rawEvent);
                 if (data) {
                     const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
@@ -233,6 +240,7 @@ export class HistoryParser {
             // docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.
             if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
                 parser.flushPending();
+                putReleased();
                 // reagentx P1, PR #3502, second review round: a hidden
                 // memory-reinjection turn (tryParseMemoryReinjection) landing
                 // as the LAST turn of a session before this boundary would
@@ -288,6 +296,7 @@ export class HistoryParser {
             // (memory-injected.ts). SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
             if (isMemoryInjectedFrame(rawEvent)) {
                 parser.flushPending();
+                putReleased();
                 const node = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
                 if (node) put(node, indexById.get(node.id));
                 continue;
@@ -298,6 +307,9 @@ export class HistoryParser {
 
             for (const event of streamEvents) {
                 if (event.type === "session_end") {
+                    // The turn ended: a jekt held for its last block goes out now.
+                    parser.releaseHeld();
+                    putReleased();
                     // Only overwrite when this session_end actually carries usage —
                     // skip the empty-stats per-turn boundary marker so it can't
                     // clobber a real result's stats seen earlier in the window.
@@ -310,6 +322,7 @@ export class HistoryParser {
                     continue;
                 }
                 const node = parser.parseLine(JSON.stringify(event));
+                putReleased(); // before `node`, as live
                 if (!node) continue;
                 const existing = indexById.get(node.id);
                 // Replace at the original position so insertion order
@@ -322,6 +335,11 @@ export class HistoryParser {
             }
         }
 
+        // A batch can end mid-block (the turn was still running). Live streaming
+        // then continues on a different parser, so a jekt still held here would
+        // never be shown: release it at the end of every batch.
+        parser.releaseHeld();
+        putReleased();
         return changed;
     }
 }
