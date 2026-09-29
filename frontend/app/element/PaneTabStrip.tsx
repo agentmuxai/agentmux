@@ -32,18 +32,15 @@ import { atoms } from "@/store/global";
 import { isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
+// The Pane Tab pill's drag tag (drag-types.ts): distinct from the tile and
+// window-tab tags, so no existing target mistakes a pill for either.
+// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1.
+import { paneTabItemType } from "@/app/drag/drag-types";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
 const WIDTH_TRANSITION_MS = 160;
 
-/** Drag payload tag for a Pane Tab pill, mirroring the existing
- *  `tileItemType`/`tabItemType` module-level constants
- *  (tilelayout-shared.tsx / tabbar-dnd.ts) — a distinct tag so a dragged
- *  pill is never mistaken for a whole-Pane or Window-Tab drag by any
- *  existing drop target.
- *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1. */
-export const paneTabItemType = "PANE_TAB_ITEM";
 
 /** How long a just-landed pill keeps `.pane-tab--landing` — the Window Tab
  *  bar's own clear-timeout for its bounce (tab-reorder.ts), so the two match. */

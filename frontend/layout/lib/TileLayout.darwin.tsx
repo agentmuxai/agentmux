@@ -15,7 +15,6 @@ import type { JSX } from "solid-js";
 import { debounce, throttle } from "throttle-debounce";
 import { createTileLayout, type ResizeHandleComponentProps, type TileLayoutPlatform } from "./TileLayout.core";
 
-export { tileItemType } from "./TileLayout.core";
 export type { TileLayoutProps } from "./TileLayout.core";
 
 const ResizeHandle = (props: ResizeHandleComponentProps) => {
