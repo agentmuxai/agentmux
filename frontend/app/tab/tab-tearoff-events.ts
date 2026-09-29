@@ -246,7 +246,7 @@ export function useTabTearOffEvents(
                             // Strip-area hit test, same as tearoff:merge:
                             // releasing over this window's CONTENT area is
                             // not a header drop. The legacy cross-drag
-                            // pipeline (DragOverlay) still handles that
+                            // pipeline (CrossWindowDropOverlay) still handles that
                             // case as an append-merge, unchanged.
                             const stripRect = tabBarScrollRef()?.getBoundingClientRect();
                             const clientX = physicalToClientX(payload.cursorX);
@@ -274,7 +274,7 @@ export function useTabTearOffEvents(
                                 );
                                 return;
                             }
-                            // Mark BEFORE the awaits — DragOverlay's
+                            // Mark BEFORE the awaits — CrossWindowDropOverlay's
                             // cross-drag-end for the same gesture arrives
                             // while these RPCs are in flight, and the mark
                             // is what makes it a no-op.

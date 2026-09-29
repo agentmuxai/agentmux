@@ -238,8 +238,8 @@
         // the two (`rgb(65, 159, 224 / 0.2)`) is invalid CSS and the
         // declaration is ignored — fill/border would render transparent.
         // Codex P2 on PR #829.
-        background-color: rgba(var(--accent-color-rgb), 0.2);
-        border: 1px solid rgba(var(--accent-color-rgb), 0.5);
+        background-color: var(--drop-target-bg);
+        border: 1px solid var(--drop-zone-armed-border);
         border-radius: 0;
         box-sizing: border-box;
         opacity: 1;

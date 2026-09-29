@@ -354,11 +354,11 @@
     }
 
     &--drop-before {
-        box-shadow: inset 2px 0 0 0 var(--accent-color);
+        box-shadow: inset 2px 0 0 0 var(--drop-target-border);
     }
 
     &--drop-after {
-        box-shadow: inset -2px 0 0 0 var(--accent-color);
+        box-shadow: inset -2px 0 0 0 var(--drop-target-border);
     }
 
     // A tab that was just dropped into place — from another pane, or
