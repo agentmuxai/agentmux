@@ -523,17 +523,23 @@ eyeballing assembly is not.
 
 ## 8. Release pinning across three platforms
 
-All three pins live in one place — `release.yml`'s `cef-runtime-pins` job — which
-is correct and was a deliberate fix (PR #3086 and its follow-up). Keep it that
-way; do not reintroduce per-job literals.
+All three pins live in one place — `scripts/cef-build/cef-runtime-pins.sh` —
+which `release.yml`'s `cef-runtime-pins` job reads for releases and every
+`build-*.yml` reads when its `cef-runtime-tag` is blank (nightlies, direct
+dispatches). So publishing a runtime changes no build until a PR moves the
+pins. This was a deliberate fix (PR #3086, its follow-up, and the 154 upgrade
+spec's prerequisite). Keep it that way; do not reintroduce per-job literals or a
+"latest published" lookup. The Windows tag must also match
+`windows-runtime-pin.sh` (local and package builds; carries the `libcef.dll`
+hash), which the release job checks.
 
-**The live values are in `release.yml`, and are deliberately not repeated here.**
+**The live values are in `cef-runtime-pins.sh`, and are deliberately not repeated here.**
 This section previously pinned them inline and went stale the first time one was
 bumped — the same duplicated-value rot §5 and §7 keep running into. To read the
 current pins:
 
 ```bash
-sed -n '/cef-runtime-pins/,/MISMATCH/p' .github/workflows/release.yml | grep '_TAG='
+grep '_TAG=' scripts/cef-build/cef-runtime-pins.sh
 ```
 
 **Known sharp edge: the three tags use two different version schemes.** Windows
