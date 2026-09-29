@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createEditorDropHook, editorDropVerdict, openEmptyScratch } from "./editor-drop";
+import { createEditorDropHook, editorDropVerdict, MAX_DROPPED_TEXT_BYTES, openEmptyScratch } from "./editor-drop";
 
 const drag = (names?: string[], types: string[] = []) => ({ count: names?.length ?? types.length, types, names });
 
@@ -54,6 +54,20 @@ describe("editor pane file drop", () => {
         expect(target.cantOpen).toHaveBeenCalledWith("data");
         expect(target.openText).toHaveBeenCalledTimes(1);
         expect(target.openText).toHaveBeenCalledWith("readme", "ok");
+    });
+});
+
+describe("a pathless drop's size", () => {
+    it("refuses a file over the editor's read limit without reading it", async () => {
+        const target = { openFile: vi.fn(), openText: vi.fn(), cantOpen: vi.fn() };
+        const big = new File(["a".repeat(MAX_DROPPED_TEXT_BYTES + 1)], "huge.log");
+        const read = vi.spyOn(big, "text");
+        const slice = vi.spyOn(big, "slice");
+        await createEditorDropHook(target).drop({ paths: [], files: [big] });
+        expect(target.cantOpen).toHaveBeenCalledWith("huge.log");
+        expect(read).not.toHaveBeenCalled();
+        expect(slice).not.toHaveBeenCalled();
+        expect(target.openText).not.toHaveBeenCalled();
     });
 });
 
