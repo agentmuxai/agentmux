@@ -106,3 +106,15 @@ chrome_pgo_phase=0
 # scripts/cef-build/args-windows.gn and
 # docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md.
 enable_backup_ref_ptr_instance_tracer=false
+
+# Linux only: Chromium 154 (CEF 8037) builds fontconfig's internal header through
+# `rust_bindgen("fcint_h_bindgen")`, whose standard bitfield accessors use
+# i32<->u32 `transmute`s. rustc's `unnecessary_transmutes` lint fires on them,
+# and `config("treat_warnings_as_errors")` (build/config/compiler/BUILD.gn)
+# passes `-Dwarnings`. Its third-party suppression doesn't cover a
+# bindgen-generated crate, so the build failed deterministically on
+# `libfcint_bindings.rlib` (charlie, 2026-09-29; SPEC_CEF_MILESTONE_UPGRADE_152_TO_154).
+# The flag only makes warnings non-fatal; codegen is unchanged. Our carry-set is
+# verified by the §5 gate and §7, not by -Werror. Revisit when a newer milestone
+# fixes the bindings upstream.
+treat_warnings_as_errors=false
