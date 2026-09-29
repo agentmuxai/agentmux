@@ -343,6 +343,9 @@ impl PersistentSubprocessController {
         health.set_active_turn(false);
         if apply_deferred_restart {
             inner.restart_pending = true;
+            // The restart token, set in the acquisition that commits the
+            // restart: nothing later may re-arm it after a Stop cleared it.
+            inner.config_restart_generation = Some(generation);
         }
         Some(apply_deferred_restart)
     }

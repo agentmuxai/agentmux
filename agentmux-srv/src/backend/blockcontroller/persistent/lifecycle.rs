@@ -72,10 +72,11 @@ impl PersistentSubprocessController {
     }
 
     /// Apply a deferred runtime-config restart: stop the current process (as
-    /// `stop_process(false)` does) and mark this generation, so the kill arm
-    /// brings the replacement up itself once it's gone
-    /// (`PersistentInner::config_restart_generation`). Called only at the turn
-    /// boundary that consumed `restart_when_idle`.
+    /// `stop_process(false)` does) WITHOUT clearing the restart token the turn
+    /// boundary set (`PersistentInner::config_restart_generation`), so the exit
+    /// handler brings the replacement up. It never sets the token either: a
+    /// Stop that landed between the boundary and this call already cleared it
+    /// and took the kill channel, and must stay in force (codex P1 on #3990).
     pub(super) fn stop_for_config_restart(&self) {
         let request = KillRequest::Graceful(std::time::Instant::now() + super::super::SHUTDOWN_GRACE);
         Self::request_stop_inner(&self.inner, request, false, true);
@@ -92,10 +93,11 @@ impl PersistentSubprocessController {
         Self::request_stop_inner(&self.inner, request, true, false)
     }
 
-    /// `config_restart`: this stop is a deferred runtime-config restart
-    /// ([`Self::stop_for_config_restart`]). Every other stop clears the mark
-    /// in this same acquisition, so a Stop or pane close landing after the
-    /// restart was committed wins, and nothing respawns behind it.
+    /// `config_restart`: this stop is a deferred runtime-config restart's own
+    /// ([`Self::stop_for_config_restart`]), which leaves the restart token as
+    /// the boundary left it. Every other stop clears it in this same
+    /// acquisition, so a Stop or pane close landing after the restart was
+    /// committed wins, and nothing respawns behind it.
     pub(super) fn request_stop_inner(
         inner_arc: &Arc<Mutex<PersistentInner>>,
         request: KillRequest,
@@ -121,7 +123,9 @@ impl PersistentSubprocessController {
             let generation = inner.spawn_generation;
             inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested { generation });
             inner.stop_pending = true;
-            inner.config_restart_generation = config_restart.then_some(generation);
+            if !config_restart {
+                inner.config_restart_generation = None;
+            }
             let drained = if drain_deferred {
                 inner.deferred_deliveries.drain(..).collect()
             } else {

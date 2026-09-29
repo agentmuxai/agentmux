@@ -207,6 +207,10 @@ impl PersistentSubprocessController {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
+        // Last point a Stop can still cancel a config restart's replacement
+        // (see `take_restart_spawn_permission_locked`).
+        Self::take_restart_spawn_permission_locked(&mut self.inner.lock().unwrap())?;
+
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
             format!("failed to spawn persistent process: {e}")
@@ -241,6 +245,7 @@ impl PersistentSubprocessController {
             // …and for a config restart's pending replacement: this spawn is
             // it (or supersedes it), so no exit handler may start another.
             inner.config_restart_generation = None;
+            inner.restart_spawn_for = None;
             // …and any deferred restart is moot now, for the same reason: this
             // spawn read `cmd:args` fresh from block meta, so the new config is
             // already applied and there is nothing left to restart FOR.
