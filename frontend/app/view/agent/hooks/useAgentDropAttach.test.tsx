@@ -34,7 +34,6 @@ vi.mock("@/app/drag/file-drop-actions", () => ({
     fileCount: (n: number) => `${n} ${n === 1 ? "file" : "files"}`,
     notifyDrop: { attachFailed: (e: unknown) => hub.attachFailed(e) },
     paneWorkdir: () => hub.meta["cmd:cwd"],
-    UPLOAD_CONCURRENCY: 4,
 }));
 vi.mock("../attachments/attachment-draft", () => ({
     getAttachmentDraft: () => ({ ingestPaths: hub.ingest, uploadFiles: hub.upload }),
@@ -84,7 +83,7 @@ describe("agent pane file drop", () => {
         const hook = mount();
         const files = [file("virtual.txt")];
         await hook.drop({ paths: [], files });
-        expect(hub.upload).toHaveBeenCalledWith(files, 4);
+        expect(hub.upload).toHaveBeenCalledWith(files, undefined);
         expect(hub.ingest).not.toHaveBeenCalled();
     });
 

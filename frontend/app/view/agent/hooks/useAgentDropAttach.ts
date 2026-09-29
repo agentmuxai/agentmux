@@ -18,14 +18,7 @@
  */
 
 import { onCleanup, onMount } from "solid-js";
-import {
-    copyIntoWorkdir,
-    fileCount,
-    notifyDrop,
-    paneWorkdir,
-    UPLOAD_CONCURRENCY,
-    type CopySource,
-} from "@/app/drag/file-drop-actions";
+import { copyIntoWorkdir, fileCount, notifyDrop, paneWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import { registerFileDropTarget, type FileDropHook } from "@/app/drag/file-drop";
 import { getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
@@ -115,7 +108,7 @@ export function useAgentDropAttach(opts: Opts): void {
             }
             const draft = getAttachmentDraft(opts.blockId);
             if (paths.length === 0) {
-                draft.uploadFiles(files, concurrency() ?? UPLOAD_CONCURRENCY);
+                draft.uploadFiles(files, concurrency());
                 return;
             }
             try {

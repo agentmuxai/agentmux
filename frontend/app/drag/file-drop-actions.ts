@@ -62,9 +62,6 @@ export const notifyDrop = {
 
 export type CopySource = { paths: string[] } | { files: File[] };
 
-/** Uploads in flight at once for the bytes transport when `dnd:concurrency` isn't set. */
-export const UPLOAD_CONCURRENCY = 4;
-
 /** `Promise.allSettled` over `items`, with at most `limit` running at a time. */
 export async function settleWithLimit<T, R>(
     items: T[],
@@ -95,6 +92,7 @@ export interface CopyOptions {
      */
     mentionIn?: HTMLElement | null;
     splice?: (root: HTMLElement, tokens: string[]) => boolean;
+    /** `dnd:concurrency`; absent means unlimited, as for copyFilesToDir. */
     concurrency?: number;
     /** What to call the pane in notices ("agent pane", "terminal pane"). */
     paneKind: string;
@@ -120,7 +118,7 @@ export async function copyIntoWorkdir(blockId: string, source: CopySource, opts:
             else if (r.error) failures.push(`${baseName(r.source)}: ${r.error}`);
         }
     } else {
-        const results = await settleWithLimit(source.files, opts.concurrency ?? UPLOAD_CONCURRENCY, (f) =>
+        const results = await settleWithLimit(source.files, opts.concurrency ?? source.files.length, (f) =>
             uploadFileToWorkdir(blockId, f)
         );
         results.forEach((r, i) => {
