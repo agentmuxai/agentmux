@@ -189,6 +189,12 @@ pub struct KnownInstance {
 
 pub struct WanIdentityStore {
     conn: Mutex<Connection>,
+    /// Bumped by `agent_keys_forget_published`, under `conn`'s lock. A
+    /// publication records the generation it started under and only marks
+    /// if it's still current, so a PUT to the previous directory that is
+    /// still in flight at a sign-in can't restore a cleared mark. In memory:
+    /// the sign-in and the publisher run in the same process.
+    publish_gen: std::sync::atomic::AtomicU64,
 }
 
 static GLOBAL: std::sync::OnceLock<std::sync::Arc<WanIdentityStore>> = std::sync::OnceLock::new();
@@ -314,7 +320,7 @@ impl WanIdentityStore {
         if let Some(dir) = path.parent() {
             restrict_permissions(dir, path);
         }
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self { conn: Mutex::new(conn), publish_gen: std::sync::atomic::AtomicU64::new(0) })
     }
 
     /// The newest schema version any binary has written to this file.
@@ -431,9 +437,26 @@ impl WanIdentityStore {
     /// recreated while the PUT was in flight must not have its new key marked
     /// published on the strength of the old one's.
     pub fn agent_key_mark_published(&self, agent_id: &str, public_key: &str) -> Result<bool, StoreError> {
+        self.agent_key_mark_published_at(agent_id, public_key, self.publish_generation())
+    }
+
+    /// The generation a publication should record before its PUT; see
+    /// `publish_gen`.
+    pub fn publish_generation(&self) -> u64 {
+        self.publish_gen.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// `agent_key_mark_published`, but only if the marks haven't been
+    /// forgotten since `generation` was read — the publisher's form, so a
+    /// PUT that started before a sign-in can't mark against the new
+    /// directory. `Ok(false)` when stale; the next pass publishes the key.
+    pub fn agent_key_mark_published_at(&self, agent_id: &str, public_key: &str, generation: u64) -> Result<bool, StoreError> {
         let Some(public) = decode_32(public_key) else { return Ok(false) };
         let fp = agentmux_common::jekt_sign::wan_key_fingerprint(&public);
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        if self.publish_generation() != generation {
+            return Ok(false);
+        }
         let updated = conn.execute(
             "UPDATE wan_agent_keys SET published_fp = ?1, published_at = ?2 WHERE agent_id = ?3 AND public_key = ?4",
             params![fp, agentmux_common::time::now_secs(), agent_id.to_lowercase(), public_key],
@@ -448,6 +471,9 @@ impl WanIdentityStore {
     /// many marks were cleared.
     pub fn agent_keys_forget_published(&self) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        // Under the lock, so a mark can't slip in between the bump and the
+        // clear (`agent_key_mark_published_at` checks under the same lock).
+        self.publish_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(conn.execute(
             "UPDATE wan_agent_keys SET published_fp = NULL, published_at = NULL WHERE published_fp IS NOT NULL",
             [],
@@ -820,6 +846,24 @@ mod tests {
             "only the marks go: the keys themselves are kept"
         );
         assert_eq!(store.agent_keys_forget_published().unwrap(), 0, "nothing left to forget");
+    }
+
+    #[test]
+    fn a_publication_started_before_forgetting_cannot_restore_its_mark() {
+        // Codex P2 on #3994: a PUT to the OLD directory is in flight when the
+        // sign-in forgets the marks. When it returns, its mark must not land,
+        // or the new directory never gets the key.
+        let (_dir, store) = temp_store();
+        let camper = store.agent_key_ensure("camper", None).unwrap();
+        let before = store.publish_generation(); // the old pass starts its PUT
+        store.agent_keys_forget_published().unwrap(); // the sign-in lands mid-PUT
+
+        assert!(!store.agent_key_mark_published_at("camper", &camper.public_key, before).unwrap());
+        assert_eq!(store.agent_keys_unpublished().unwrap().len(), 1, "the next pass still publishes it");
+
+        let now = store.publish_generation();
+        assert!(store.agent_key_mark_published_at("camper", &camper.public_key, now).unwrap());
+        assert!(store.agent_keys_unpublished().unwrap().is_empty());
     }
 
     #[test]

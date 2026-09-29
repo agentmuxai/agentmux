@@ -128,6 +128,10 @@ pub(crate) async fn publish_pending(
     http: &reqwest::Client,
     token: &str,
 ) -> PassResult {
+    // Before reading what's pending: if a sign-in forgets the marks while this
+    // pass's PUTs (to the directory and token it started with) are in flight,
+    // they must not mark anything. The next pass publishes to the new one.
+    let generation = wan.publish_generation();
     let pending = match wan.agent_keys_unpublished() {
         Ok(p) => p,
         Err(e) => {
@@ -143,10 +147,11 @@ pub(crate) async fn publish_pending(
             continue;
         };
         match publish_record(base_url, http, token, &record).await {
-            PublishOutcome::Published => match wan.agent_key_mark_published(agent_id, &key.public_key) {
+            PublishOutcome::Published => match wan.agent_key_mark_published_at(agent_id, &key.public_key, generation) {
                 Ok(true) => result.published += 1,
                 // The key changed under us (agent deleted and recreated
-                // mid-PUT); the new key is picked up next pass.
+                // mid-PUT), or a sign-in forgot the marks mid-PUT; either
+                // way the next pass publishes the current key.
                 Ok(false) => {}
                 Err(e) => {
                     tracing::warn!(agent = %agent_id, error = %e, "wan publish: could not record publication");
