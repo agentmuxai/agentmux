@@ -5,6 +5,7 @@
 
 pub mod api_types;
 mod cli;
+pub mod copy_into_dir;
 pub mod data_paths;
 pub mod errors;
 pub mod event_log;

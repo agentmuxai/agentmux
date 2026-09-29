@@ -251,10 +251,10 @@ impl Store {
         Some((path, kind))
     }
 
-    /// Copy the original of `id` into `dir` as `name`, de-conflicted the way a
-    /// drop is (`report_1.pdf`, `report_2.pdf`, …); each candidate is created
-    /// exclusively, so two copies can't race for one name. For container
-    /// panes, whose agents can't see the store
+    /// Copy the original of `id` into `dir` as `name`, with the same copy a
+    /// drop makes (`agentmux_common::copy_into_dir`): the name kept valid,
+    /// dotfiles included, and de-conflicted exclusively. For container panes,
+    /// whose agents can't see the store
     /// (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7).
     pub fn copy_original_to(&self, id: &str, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
         if !is_valid_id(id) {
@@ -272,39 +272,8 @@ impl Store {
                 "working folder not found",
             ));
         }
-        let safe = safe_file_name(name);
-        let (stem, ext) = match safe.rfind('.') {
-            Some(dot) if dot > 0 => (&safe[..dot], &safe[dot..]),
-            _ => (safe.as_str(), ""),
-        };
-        for n in 0..100 {
-            let candidate = if n == 0 {
-                dir.join(&safe)
-            } else {
-                dir.join(format!("{stem}_{n}{ext}"))
-            };
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&candidate)
-            {
-                Ok(mut out) => {
-                    let mut input = std::fs::File::open(&blob)?;
-                    if let Err(e) = std::io::copy(&mut input, &mut out) {
-                        drop(out);
-                        let _ = std::fs::remove_file(&candidate);
-                        return Err(e);
-                    }
-                    return Ok(candidate);
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e),
-            }
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "too many files with that name",
-        ))
+        use agentmux_common::copy_into_dir::{copy_into_dir, CopyControl};
+        copy_into_dir(&blob, dir, name, &CopyControl::default())
     }
 
     /// The stored original and its MIME type, whatever kind it is.
@@ -1005,6 +974,22 @@ mod tests {
     fn ingest(s: &Store, src: &Path) -> Result<(String, StoredMeta), process::ProcessError> {
         let (tmp, id, _) = s.copy_in(src, |_| true).unwrap();
         s.commit(&tmp, &id, 2000).map(|m| (id, m))
+    }
+
+    #[test]
+    fn copy_to_workdir_keeps_a_dotfile_name_and_deconflicts() {
+        let (dir, s) = store();
+        let src = png(dir.path(), "a.png", 10);
+        let (id, _) = ingest(&s, &src).unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let first = s.copy_original_to(&id, &work, ".env").unwrap();
+        let second = s.copy_original_to(&id, &work, ".env").unwrap();
+        assert_eq!(first.file_name().unwrap(), ".env");
+        assert_eq!(second.file_name().unwrap(), ".env_1");
+        assert_eq!(std::fs::read(&second).unwrap(), std::fs::read(&src).unwrap());
+        assert!(s.copy_original_to(&id, &work.join("missing"), "x.png").is_err());
+        assert!(s.copy_original_to("../escape", &work, "x.png").is_err());
     }
 
     #[test]
