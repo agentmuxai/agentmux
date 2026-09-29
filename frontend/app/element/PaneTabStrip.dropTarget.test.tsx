@@ -46,7 +46,8 @@ vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
     setCurrentDragPayload: (p: unknown) => payloadCalls.push(p),
 }));
 
-import { LANDING_BOUNCE_MS, paneTabItemType, PaneTabStrip } from "./PaneTabStrip";
+import { LANDING_BOUNCE_MS, PaneTabStrip } from "./PaneTabStrip";
+import { paneTabItemType } from "@/app/drag/drag-types";
 
 afterEach(() => cleanup());
 beforeEach(() => {

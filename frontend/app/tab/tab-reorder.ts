@@ -12,12 +12,12 @@ import { onCleanup, onMount } from "solid-js";
 import { fireAndForget } from "@/util/util";
 import { isWindows } from "@/util/platformutil";
 import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { clearCrossTabDrop, getLayoutModelForTabById, tileItemType } from "@/layout/index";
+import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
+import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import { setTileDragInFlight } from "@/layout/lib/dragInFlight";
 import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
 import { WorkspaceService } from "../store/services";
 import {
-    tabItemType,
     insertionPoint,
     setInsertionPoint,
     setBouncingTabId,

@@ -9,8 +9,8 @@ import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import clsx from "clsx";
 import { Tab } from "./tab";
+import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import {
-    tabItemType,
     GAP_PX,
     globalDragTabId,
     setGlobalDragTabId,
@@ -25,7 +25,7 @@ import {
     setDragEscaped,
 } from "./tabbar-dnd";
 import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { getLayoutModelForTabById, redockDraggedPane, tileItemType } from "@/layout/index";
+import { getLayoutModelForTabById, redockDraggedPane } from "@/layout/index";
 import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { setTabGrabOffset } from "./tab-grab-offset";

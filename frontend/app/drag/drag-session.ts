@@ -1,0 +1,107 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * What is being dragged in this renderer: one session, from the drag's start
+ * to its end. docs/specs/SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §5.1.
+ *
+ * Who may end a session follows today's ordering:
+ * - an accepting drop target in this window ends it;
+ * - the SOURCE's onDrop only marks it `released` (pragmatic calls it even for
+ *   a release outside every target), so the cross-window monitor still sees it;
+ * - the cross-window monitor ends a released session once it has handled the
+ *   document dragend;
+ * - the safety net ends whatever is left.
+ * Internal sessions have no inactivity timeout: a drag held over another
+ * window sends this renderer no events, and that is normal.
+ */
+
+import { createSignal } from "solid-js";
+
+export type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "drone-kind" | "list-item";
+export type DragEndReason = "drop" | "cancel" | "dragend" | "button-up" | "files-idle";
+
+export interface DragSource {
+    nodeId?: string;
+    tabId?: string;
+    blockId?: string;
+    wsId?: string;
+}
+
+/** Kind-specific data captured at drag start that can't be re-derived later. */
+export interface DragPayload {
+    /** pane-tab: the visible pane's size at start; a background pill has no element to measure at tear-off. */
+    paneSize?: { width: number; height: number };
+    /** window-tab: false for a lone-tab drag, which only the native strip merge may handle. */
+    crossWindow?: boolean;
+}
+
+export interface DragSession {
+    kind: DragKind;
+    /** Minted at start, so host events for one drag can be de-duplicated. */
+    dragId: string;
+    source?: DragSource;
+    payload?: DragPayload;
+    escaped: boolean;
+    released: boolean;
+    startedAt: number;
+}
+
+export interface SessionEnd {
+    session: DragSession;
+    reason: DragEndReason;
+}
+
+const [current, setCurrent] = createSignal<DragSession | null>(null);
+const listeners = new Set<(end: SessionEnd) => void>();
+
+/** The session in progress, or null. Reactive. */
+export const session = current;
+
+function mintId(): string {
+    const c = globalThis.crypto as Crypto | undefined;
+    if (c?.randomUUID) return c.randomUUID();
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function beginDrag(kind: DragKind, source?: DragSource, payload?: DragPayload): DragSession {
+    // A new drag means any session still here was stranded (its end was lost).
+    endDrag("cancel");
+    const s: DragSession = {
+        kind,
+        dragId: mintId(),
+        source,
+        payload,
+        escaped: false,
+        released: false,
+        startedAt: Date.now(),
+    };
+    setCurrent(s);
+    return s;
+}
+
+function update(patch: Partial<DragSession>): void {
+    const s = current();
+    if (s) setCurrent({ ...s, ...patch });
+}
+
+/** The source's onDrop: the drag is over in this window, not necessarily handled. */
+export const markReleased = () => update({ released: true });
+
+export const markEscaped = () => update({ escaped: true });
+
+/**
+ * End the current session. With `dragId`, only if it is still that drag, so a
+ * late end from an old drag can't cut short the next one.
+ */
+export function endDrag(reason: DragEndReason, dragId?: string): void {
+    const s = current();
+    if (!s || (dragId !== undefined && s.dragId !== dragId)) return;
+    setCurrent(null);
+    for (const listener of listeners) listener({ session: s, reason });
+}
+
+export function onSessionEnded(listener: (end: SessionEnd) => void): () => void {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+}

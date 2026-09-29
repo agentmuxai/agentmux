@@ -38,8 +38,8 @@ import {
     takeCrossTabDropFor,
 } from "./crossTabDrag";
 import { dragState, isCrossTabDrag } from "./tilelayout-drag-state";
+import { tileItemType } from "@/app/drag/drag-types";
 
-export const tileItemType = "TILE_ITEM";
 
 export function NodeBackdrops(props: { layoutModel: LayoutModel }) {
     const blockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblursecondarypx");
