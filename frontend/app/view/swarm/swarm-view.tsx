@@ -270,16 +270,12 @@ export function AgentRow({
     // Ticks in the view rather than the model because promotion is time-based:
     // the list changes with the clock, not only with backend events.
     const tick = useTick(1000);
-    // A background call the registry tracks is shown by the Background
-    // bucket (or under its subagent) with its real status, so the
-    // transcript-derived "Running" bucket skips it rather than showing it
-    // twice — and, for a subagent's call, running forever.
-    const registryTaskIds = new Set(
-        [...node.backgroundTasks.own, ...[...node.backgroundTasks.bySubagent.values()].flat()].map((t) => t.id)
-    );
+    // Background launches never reach this bucket (`longRunningToolRows`
+    // excludes them); the Background bucket and the subagent rows show them
+    // from the registry, with their real status.
     const longRunningRows = createMemo(() => {
         tick();
-        return longRunningToolRows(node.blockId, Date.now()).filter((r) => !registryTaskIds.has(r.id));
+        return longRunningToolRows(node.blockId, Date.now());
     });
     const ownBackgroundRows = createMemo(() => {
         tick();
