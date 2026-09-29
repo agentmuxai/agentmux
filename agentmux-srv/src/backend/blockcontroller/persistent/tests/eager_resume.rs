@@ -978,3 +978,72 @@ async fn a_generic_spawn_failure_with_queued_work_still_falls_back_to_a_fresh_re
     assert!(!inner.spawning_in_progress, "a failed fallback releases the claim too");
     assert_eq!(inner.pending_send_messages.len(), 1, "an undeliverable prompt is still not dropped");
 }
+
+/// codex P1 on #3990: a config restart's replacement cancelled by a Stop must
+/// not fall back to a fresh respawn for prompts queued behind it; that would
+/// start the agent the user just stopped. It releases the claim and reports
+/// the discarded prompts instead, like an ownership refusal.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_cancelled_by_stop_does_not_respawn_for_queued_prompts() {
+    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let c = PersistentSubprocessController {
+        broker: Some(broker.clone()),
+        filestore: Some(filestore.clone()),
+        ..controller("blk-restart-cancelled")
+    };
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawning_in_progress = true; // the restart replacement's claim
+        inner.session_id = Some("sid-kept".to_string());
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"prompt\"}".to_string()));
+    }
+
+    c.settle_eager_spawn_failure(super::super::eager_resume::RESTART_OVERRIDDEN, bogus_config("sid-kept"));
+
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.current_pid.is_none(), "the Stop wins: nothing is started");
+    assert!(!inner.spawning_in_progress, "the claim is released");
+    assert!(inner.pending_send_messages.is_empty(), "no leftover for a later fallback to deliver");
+    assert_eq!(inner.session_id.as_deref(), Some("sid-kept"), "the session is not reset to fresh");
+    drop(inner);
+    let output = filestore
+        .read_file("blk-restart-cancelled", PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .unwrap_or_default();
+    assert!(
+        output.contains("1 queued prompt(s) were not delivered") && output.contains("stopped before its config restart"),
+        "the operator is told what was discarded and why; got: {output}"
+    );
+}
+
+/// codex P1 on #3990: closing the pane while a restart's replacement is still
+/// spawning (no pid yet) must cancel that replacement: shutdown's no-process
+/// branch clears the token, so the install-time commit refuses.
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_the_pane_mid_restart_spawn_cancels_the_replacement() {
+    let c = controller("blk-close-mid-restart");
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawn_generation = 2;
+        inner.config_restart_generation = Some(2);
+        inner.restart_spawn_for = Some(2); // claimed, credential gate in flight
+        inner.current_pid = None;
+    }
+    let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(3)).await;
+    let mut inner = c.inner.lock().unwrap();
+    assert_eq!(inner.config_restart_generation, None);
+    assert!(
+        PersistentSubprocessController::commit_restart_spawn_locked(&mut inner).is_ok(),
+        "restart_spawn_for was cleared too, so the late spawn is an ordinary one to its commit"
+    );
+    assert!(
+        PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut inner).is_ok()
+            && inner.config_restart_generation.is_none(),
+        "and no restart token remains for it to consume"
+    );
+}
