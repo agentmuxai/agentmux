@@ -199,7 +199,7 @@ The kind is a **closed enum**. A Source cannot invent a new visual treatment. Ne
    - Better long term: stop reading env inside `tray::` and pass a resolved `LauncherOptions { tray, background_service }` built once in `main`. Both env and settings (next item) feed it.
 2. **Add a real setting.**
    - The launcher reads `<config_dir>/settings.json` directly at startup. It starts before srv, and it already knows the data dir (see `data_paths.rs`).
-   - New key: `app:runinbackground` (bool, default `false`; **changed to `true` on 2026-09-25** by the repo owner, see the tray spec §6). "Keep AgentMux running in the system tray when all windows are closed."
+   - New key: `app:runinbackground` (bool, default `false`; changed to `true` on 2026-09-25 by #3785, **reverted to `false` on 2026-09-28** by the repo owner, see `docs/reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md`). The tray icon became its own key, `app:showtray` (bool, default `true`); background mode forces the icon on. "Keep AgentMux running in the system tray when all windows are closed."
    - It implies both flags, preserving the tray spec's deliberate pairing (§1.1 rationale at `tray/mod.rs:240-246`: a tray without background mode would lie).
    - The env vars stay as developer overrides.
    - Changing it requires a restart in v1. Surface that in the settings UI. Live toggling can follow once the launcher is subscribed to srv's `config` event (§3.3).
@@ -360,7 +360,8 @@ Also hold back (queue, don't drop) while the OS reports a presentation or full-s
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `app:runinbackground` | bool | `false` | Tray + background-service mode (Phase 0). Restart required in v1 |
+| `app:runinbackground` | bool | `false` | Background-service mode; forces the tray icon (Phase 0). Restart required in v1 |
+| `app:showtray` | bool | `true` | Tray icon while AgentMux runs (2026-09-28). Restart required |
 | `notify:os:enabled` | bool | `true` once Phase 1 ships (the OS still asks for permission on macOS) | Master switch for OS toasts |
 | `notify:os:when` | `"unfocused" \| "always" \| "never"` | `"unfocused"` | §6.0 |
 | `notify:os:inputwaiting` / `turncompleted` / `turnerrored` / `agentcrashed` / `messageneedsreview` / `reviewarrived` / `crondeliveryfailed` | bool | `true, true, true, true, true, true, false` | Per-kind (§5.1 step 1) |

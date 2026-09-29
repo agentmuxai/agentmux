@@ -50,10 +50,14 @@
 
     // -- App --
     // Keep running with a system-tray icon when all windows are closed
-    // (background-service mode). On by default; set false to quit when the
-    // last window closes. Applies at the NEXT launch: the launcher reads this
+    // (background-service mode). Off by default (opt-in): closing the last
+    // window quits. Applies at the NEXT launch: the launcher reads this
     // before the app itself is running.
-    // "app:runinbackground":      true,
+    // "app:runinbackground":      false,
+    // Show an icon in the system tray / menu bar while AgentMux is running.
+    // On by default. Always shown while app:runinbackground is on. Applies at
+    // the NEXT launch.
+    // "app:showtray":             true,
     // Start at login (off by default). Same switch as the tray menu's
     // "Start at login".
     // "app:startatlogin":         false,

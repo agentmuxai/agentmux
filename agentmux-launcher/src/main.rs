@@ -148,17 +148,17 @@ fn main() {
     #[cfg(target_os = "macos")]
     {
         if splash_config::splash_disabled() {
-            if tray::background_service_from_env() {
-                // Splash disabled BUT background-service mode on: the main
-                // thread must still pump AppKit, or there is no reopen
-                // delegate and no menu-bar item once every window is closed
-                // (design doc §7.5.1). Same thread layout as the splash path,
-                // minus the window.
+            if tray::should_enable(tray::tray_opt_in_from_env(), tray::background_service_from_env()) {
+                // Splash disabled BUT the menu-bar item is on (the default, and
+                // always in background-service mode): the main thread must
+                // still pump AppKit, or there is no menu-bar item and no reopen
+                // delegate once every window is closed (design doc §7.5.1).
+                // Same thread layout as the splash path, minus the window.
                 splash_mac::prepare_headless_app();
                 spawn_supervisor_thread(None);
                 splash_mac::pump_forever();
             }
-            // Splash disabled, ordinary mode → no AppKit at all; run the
+            // Splash disabled and no menu-bar item → no AppKit at all; run the
             // supervisor directly on the main thread (there's no runloop to
             // pump without a window or a tray).
             tokio::runtime::Runtime::new()

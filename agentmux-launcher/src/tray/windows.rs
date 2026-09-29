@@ -144,8 +144,8 @@ fn build_menu(
     Ok((menu, ids))
 }
 
-fn full_tooltip(running: bool, nstate: &super::notify_menu::NotifyTrayState) -> String {
-    let base = super::tooltip(running);
+fn full_tooltip(nstate: &super::notify_menu::NotifyTrayState) -> String {
+    let base = super::tooltip();
     match super::notify_menu::tooltip_suffix(nstate, now_ms()) {
         Some(extra) => format!("{base}\n{extra}"),
         None => base,
@@ -187,7 +187,7 @@ fn run(
 
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip(full_tooltip(running, &nstate))
+        .with_tooltip(full_tooltip(&nstate))
         .with_icon(pick_icon(&nstate))
         .build()
         .map_err(|e| format!("build tray icon: {}", e))?;
@@ -275,7 +275,7 @@ fn run(
                     }
                     Err(e) => crate::log(&format!("tray: menu rebuild failed: {e}")),
                 }
-                let _ = tray.set_tooltip(Some(full_tooltip(running, &nstate)));
+                let _ = tray.set_tooltip(Some(full_tooltip(&nstate)));
                 let _ = tray.set_icon(Some(pick_icon(&nstate)));
                 continue;
             }
