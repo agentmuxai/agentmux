@@ -233,13 +233,17 @@ impl PersistentSubprocessController {
     /// - Another writer owns stdin — see
     ///   [`Self::stdin_owned_by_another_writer`]; this includes a spawn in
     ///   flight, whose write `try_write_stdin_locked` would refuse.
-    /// - A committed config restart (`restart_pending`). The process is about
-    ///   to be killed, and its kill arm brings the replacement up
-    ///   (`respawn_after_config_restart`), which clears this. The queue is kept
-    ///   for that replacement, and the watchdog must not count this window
-    ///   toward reporting it stranded. If the replacement can't be started, the
-    ///   window is closed anyway, so the queue falls to the no-process rules
-    ///   instead of waiting forever.
+    /// - A committed config restart (`restart_pending`), but only while the
+    ///   process being restarted still holds `stdin_tx`: it is about to be
+    ///   killed, so writes must wait for the replacement. Once it has exited,
+    ///   the ordinary rules apply. The exit handler's respawn
+    ///   (`respawn_after_config_restart`) holds the spawn claim, so the queue
+    ///   keeps waiting for it (a spawn in flight, below), and if no spawn is in
+    ///   flight, whoever was to start one declined or failed. Waiting on
+    ///   `restart_pending` alone then held jekts forever, since only a
+    ///   successful spawn clears it (Korp, 2026-09-29; ReAgent P1 on #3990: a
+    ///   competing spawn claim that fails leaves it set). The watchdog's grace
+    ///   window covers the moment between the exit and the respawn's claim.
     /// - A requested kill (`stop_pending`), but only while the dying process
     ///   still holds `stdin_tx`: writes are refused then, and a refusal must
     ///   not reach an automated caller as an error (reagent P1 on #3562). Once
@@ -247,7 +251,7 @@ impl PersistentSubprocessController {
     ///   caller's respawn fallback, and the watchdog's grace window runs, so
     ///   nothing parks unreported behind a stop.
     pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
-        inner.restart_pending
+        (inner.restart_pending && inner.stdin_tx.is_some())
             || (inner.stop_pending && inner.stdin_tx.is_some())
             || Self::stdin_owned_by_another_writer(inner)
     }
