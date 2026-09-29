@@ -3,7 +3,6 @@
 
 import { createSignal } from "solid-js";
 
-export const tabItemType = "TAB_ITEM";
 
 /** Half the gap opened on each side of an insertion point (px). Total visual gap = 2 × GAP_PX. */
 export const GAP_PX = 12;

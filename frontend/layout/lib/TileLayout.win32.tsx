@@ -19,7 +19,6 @@ import { dragState } from "./tilelayout-drag-state";
 import { FlexDirection } from "./types";
 import { createTileLayout, type ResizeHandleComponentProps, type TileLayoutPlatform } from "./TileLayout.core";
 
-export { tileItemType } from "./TileLayout.core";
 export type { TileLayoutProps } from "./TileLayout.core";
 
 const ResizeHandle = (props: ResizeHandleComponentProps) => {

@@ -55,10 +55,8 @@ import {
     NodeBackdrops,
     OverlayNodeWrapper,
     Placeholder,
-    tileItemType,
 } from "./tilelayout-shared";
-
-export { tileItemType };
+import { tileItemType } from "@/app/drag/drag-types";
 
 export interface TileLayoutProps {
     /**
