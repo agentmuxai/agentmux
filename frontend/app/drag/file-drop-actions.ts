@@ -56,6 +56,9 @@ export const notifyDrop = {
             failures.length > 0 ? 8 : 5
         );
     },
+    /** A media or editor pane was handed a file it can't open. */
+    cantOpen: (name: string, paneKind: string) =>
+        notice("warning", "Couldn't open the file", `${name} can't be opened in this ${paneKind}.`),
     copyFailed: (failures: string[]) =>
         notice("error", `Copy failed (${fileCount(failures.length)})`, failures.join("\n"), 12),
 };

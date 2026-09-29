@@ -20,6 +20,8 @@ import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { registerFileDropTarget, type DragFiles, type DropVerdict, type FileDropHook } from "@/app/drag/file-drop";
+import { notifyDrop } from "@/app/drag/file-drop-actions";
 
 const META_PATH = "media:path" as const;
 
@@ -102,6 +104,64 @@ async function fetchMediaBlob(path: string): Promise<Blob> {
     return await resp.blob();
 }
 
+const MEDIA_MIME_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "video/webm",
+    "video/mp4",
+    "video/quicktime",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/vnd.wave",
+]);
+
+const isMediaName = (name: string) => ALL_MEDIA_EXTENSIONS.includes(extOf(name));
+
+/**
+ * Whether a file drag can open in a media pane: exactly one file of a type it
+ * plays. Names decide when known, else the MIME type; an unknown type is let
+ * through and the drop reports it if it can't be shown.
+ * SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §5.3.
+ */
+export function mediaDropVerdict(drag: DragFiles): DropVerdict {
+    const refuse: DropVerdict = { ok: false, reason: "Media panes open one image, video or audio file" };
+    const open: DropVerdict = { ok: true, message: "Open here", icon: "fa-photo-film" };
+    if (drag.count !== 1) return refuse;
+    const name = drag.names?.[0];
+    if (name !== undefined) return isMediaName(name) ? open : refuse;
+    const type = drag.types[0] ?? "";
+    if (type === "") return open;
+    return MEDIA_MIME_TYPES.has(type) ? open : refuse;
+}
+
+export interface MediaDropActions {
+    showPath(path: string): void;
+    /** A file with no host path: shown from its bytes, without live updates. */
+    showFile(file: File): void;
+    cantOpen(name: string): void;
+}
+
+export function createMediaDropHook(actions: MediaDropActions): FileDropHook {
+    return {
+        accept: mediaDropVerdict,
+        drop({ paths, files }) {
+            const path = paths[0];
+            if (path !== undefined) {
+                if (isMediaName(path)) actions.showPath(path);
+                else actions.cantOpen(basenameOf(path));
+                return;
+            }
+            const file = files[0];
+            if (!file) return;
+            if (isMediaName(file.name)) actions.showFile(file);
+            else actions.cantOpen(file.name || "file");
+        },
+    };
+}
+
 /** The pane's title: the file's basename, or "Media" before one is picked. */
 export function mediaTitle(meta: MetaType | undefined): string {
     const path = meta?.[META_PATH];
@@ -135,6 +195,8 @@ function MediaView(props: { ctx: PaneTabHostContext }): JSX.Element {
     const [objectUrl, setObjectUrl] = createSignal<string | null>(null);
     const [errorMsg, setErrorMsg] = createSignal("");
     const [mediaReady, setMediaReady] = createSignal(false);
+    // A dropped file with no host path, shown from its bytes (no live updates).
+    const [localName, setLocalName] = createSignal("");
 
     let watchedDir: string | null = null;
     let unsubFileChanged: () => void = () => {};
@@ -185,6 +247,7 @@ function MediaView(props: { ctx: PaneTabHostContext }): JSX.Element {
     // pipeline), the pane live-swaps to it via the MPS handler above.
     const showPath = (path: string) => {
         setErrorMsg("");
+        setLocalName("");
         setDisplayPath(path);
         const dir = dirnameOf(path);
         if (dir) startWatching(dir);
@@ -193,14 +256,42 @@ function MediaView(props: { ctx: PaneTabHostContext }): JSX.Element {
     // Native "open file" dialog — the only way to point this pane at
     // something (no path text entry, per design). Persists the pick so it
     // survives a pane reload.
-    const pickFile = async () => {
-        const path = await getApi()?.showOpenFileDialog?.();
-        if (!path) return; // user cancelled
+    const openPath = (path: string) => {
         fireAndForget(() => ctx.setMeta({ [META_PATH]: path }));
         showPath(path);
     };
 
+    const pickFile = async () => {
+        const path = await getApi()?.showOpenFileDialog?.();
+        if (!path) return; // user cancelled
+        openPath(path);
+    };
+
+    const showFile = (file: File) => {
+        stopWatching();
+        fetchToken++; // drop any fetch still in flight for the previous path
+        fireAndForget(() => ctx.setMeta({ [META_PATH]: "" }));
+        setDisplayPath("");
+        setErrorMsg("");
+        const url = URL.createObjectURL(file);
+        const prev = currentObjectUrl;
+        currentObjectUrl = url;
+        setLocalName(file.name);
+        setMediaReady(false);
+        setObjectUrl(url);
+        if (prev) URL.revokeObjectURL(prev);
+    };
+
     onMount(() => {
+        const dispose = registerFileDropTarget(
+            ctx.blockId,
+            createMediaDropHook({
+                showPath: openPath,
+                showFile,
+                cantOpen: (name) => notifyDrop.cantOpen(name, "media pane"),
+            }),
+        );
+        onCleanup(dispose);
         const saved = ctx.meta()?.[META_PATH];
         if (typeof saved === "string" && saved.length > 0) {
             showPath(saved);
@@ -254,7 +345,7 @@ function MediaView(props: { ctx: PaneTabHostContext }): JSX.Element {
     });
 
     const kind = () => {
-        const ext = extOf(displayPath());
+        const ext = extOf(displayPath() || localName());
         if (IMAGE_EXTENSIONS.includes(ext)) return "image";
         if (VIDEO_EXTENSIONS.includes(ext)) return "video";
         if (AUDIO_EXTENSIONS.includes(ext)) return "audio";

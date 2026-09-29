@@ -1,8 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import { basenameOf, dirnameOf, extOf, mediaPaneTab, mediaTitle } from "./media";
+import { describe, expect, it, vi } from "vitest";
+import { basenameOf, createMediaDropHook, dirnameOf, extOf, mediaDropVerdict, mediaPaneTab, mediaTitle } from "./media";
 
 describe("extOf", () => {
     it("returns the lowercase extension without a dot", () => {
@@ -60,5 +60,49 @@ describe("mediaPaneTab", () => {
         expect(mediaTitle({ "media:path": "/home/me/cat.png" } as any)).toBe("cat.png");
         expect(mediaTitle({} as any)).toBe("Media");
         expect(mediaTitle(undefined)).toBe("Media");
+    });
+});
+
+describe("media pane file drop", () => {
+    const drag = (names?: string[], types: string[] = []) => ({ count: names?.length ?? types.length, types, names });
+
+    it("accepts one supported image, video or audio file", () => {
+        expect(mediaDropVerdict(drag(["C:/pics/cat.PNG"]))).toMatchObject({ ok: true, message: "Open here" });
+        expect(mediaDropVerdict(drag(["clip.mp4"]))).toMatchObject({ ok: true });
+        expect(mediaDropVerdict(drag(["tone.wav"]))).toMatchObject({ ok: true });
+    });
+
+    it("blocks several files, and types the pane can't show", () => {
+        expect(mediaDropVerdict(drag(["a.png", "b.png"]))).toEqual({
+            ok: false,
+            reason: "Media panes open one image, video or audio file",
+        });
+        expect(mediaDropVerdict(drag(["notes.txt"]))).toMatchObject({ ok: false });
+        expect(mediaDropVerdict(drag(["movie.mkv"]))).toMatchObject({ ok: false });
+    });
+
+    it("uses the MIME type before names are known, and lets an unknown type through", () => {
+        expect(mediaDropVerdict(drag(undefined, ["image/png"]))).toMatchObject({ ok: true });
+        expect(mediaDropVerdict(drag(undefined, ["image/bmp"]))).toMatchObject({ ok: false });
+        expect(mediaDropVerdict(drag(undefined, ["application/pdf"]))).toMatchObject({ ok: false });
+        expect(mediaDropVerdict(drag(undefined, [""]))).toMatchObject({ ok: true, message: "Open here" });
+    });
+
+    it("a drop with a path shows that path; without one, the file itself", async () => {
+        const actions = { showPath: vi.fn(), showFile: vi.fn(), cantOpen: vi.fn() };
+        const hook = createMediaDropHook(actions);
+        await hook.drop({ paths: ["C:/pics/cat.png"], files: [] });
+        expect(actions.showPath).toHaveBeenCalledWith("C:/pics/cat.png");
+        const file = new File(["x"], "clip.webm", { type: "video/webm" });
+        await hook.drop({ paths: [], files: [file] });
+        expect(actions.showFile).toHaveBeenCalledWith(file);
+        expect(actions.cantOpen).not.toHaveBeenCalled();
+    });
+
+    it("a dropped file it can't show is reported, not shown", async () => {
+        const actions = { showPath: vi.fn(), showFile: vi.fn(), cantOpen: vi.fn() };
+        await createMediaDropHook(actions).drop({ paths: ["C:/docs/report.pdf"], files: [] });
+        expect(actions.showPath).not.toHaveBeenCalled();
+        expect(actions.cantOpen).toHaveBeenCalledWith("report.pdf");
     });
 });
