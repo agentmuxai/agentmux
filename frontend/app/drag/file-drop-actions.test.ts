@@ -115,4 +115,19 @@ describe("settleWithLimit", () => {
         expect(peak).toBe(3);
         expect(dests).toHaveLength(6);
     });
+
+    it("the bytes transport is unlimited when dnd:concurrency is blank", async () => {
+        let running = 0;
+        let peak = 0;
+        hub.upload.mockImplementation(async (_b: string, f: File) => {
+            running++;
+            peak = Math.max(peak, running);
+            await new Promise((r) => setTimeout(r, 5));
+            running--;
+            return `/work/${f.name}`;
+        });
+        const files = Array.from({ length: 9 }, (_, i) => new File(["x"], `f${i}.txt`));
+        await copyIntoWorkdir("b1", { files }, { paneKind: "terminal pane" });
+        expect(peak).toBe(9);
+    });
 });
