@@ -441,6 +441,19 @@ impl WanIdentityStore {
         Ok(updated > 0)
     }
 
+    /// Forget which keys the directory holds, so the publisher sends them all
+    /// again. For a sign-in: the marks record what the directory at the time
+    /// accepted, and a sign-in can land on a different one (another relay, or
+    /// another account) that has never seen them. Keys are kept. Returns how
+    /// many marks were cleared.
+    pub fn agent_keys_forget_published(&self) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn.execute(
+            "UPDATE wan_agent_keys SET published_fp = NULL, published_at = NULL WHERE published_fp IS NOT NULL",
+            [],
+        )?)
+    }
+
     /// An agent's WAN key, created on first call: `import` (the agent's key
     /// from this version's `db_agent_wan_keys`, read by the caller) is
     /// carried over if given, otherwise a fresh key is minted. Only the first
@@ -782,6 +795,31 @@ mod tests {
         assert!(store.agent_key_load("camper").unwrap().is_none());
         assert!(store.agent_key_load("lark").unwrap().is_some(), "other agents are untouched");
         assert_ne!(store.agent_key_ensure("camper", None).unwrap().public_key, old.public_key);
+    }
+
+    #[test]
+    fn forgetting_publications_makes_every_key_pending_again() {
+        // A sign-in can land on a different directory (another cloud, or
+        // another account) that has never seen these keys. The marks record
+        // what the OLD directory accepted, so they must not survive it, or
+        // the publisher idles and every jekt from here arrives unverified.
+        let (_dir, store) = temp_store();
+        let camper = store.agent_key_ensure("camper", None).unwrap();
+        let lark = store.agent_key_ensure("lark", None).unwrap();
+        assert!(store.agent_key_mark_published("camper", &camper.public_key).unwrap());
+        assert!(store.agent_key_mark_published("lark", &lark.public_key).unwrap());
+        assert!(store.agent_keys_unpublished().unwrap().is_empty());
+
+        assert_eq!(store.agent_keys_forget_published().unwrap(), 2);
+
+        let pending: Vec<String> = store.agent_keys_unpublished().unwrap().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(pending, vec!["camper".to_string(), "lark".to_string()]);
+        assert_eq!(
+            store.agent_key_load("camper").unwrap().unwrap().public_key,
+            camper.public_key,
+            "only the marks go: the keys themselves are kept"
+        );
+        assert_eq!(store.agent_keys_forget_published().unwrap(), 0, "nothing left to forget");
     }
 
     #[test]
