@@ -3924,7 +3924,7 @@ fn a_restart_that_cannot_resume_stops_holding_jekts_back() {
     assert_eq!(c.send_user_message_outcome("jekt".to_string()).unwrap(), SendOutcome::Deferred);
     assert!(c.deferred_must_wait_locked(&c.inner.lock().unwrap()), "precondition: the jekt is held back");
 
-    c.respawn_after_config_restart();
+    c.respawn_after_config_restart(0);
 
     let inner = c.inner.lock().unwrap();
     assert!(!inner.restart_pending && !inner.stop_pending, "the window must close when no replacement is coming");
@@ -3941,7 +3941,7 @@ fn a_restart_that_cannot_resume_stops_holding_jekts_back() {
 fn no_respawn_for_a_controller_that_no_longer_serves_its_block() {
     let c = controller(); // never registered: a closed or replaced pane
     c.inner.lock().unwrap().restart_pending = true;
-    c.respawn_after_config_restart();
+    c.respawn_after_config_restart(0);
     assert!(c.inner.lock().unwrap().restart_pending, "a stale controller must leave its state alone");
 }
 
@@ -3956,9 +3956,68 @@ fn no_respawn_once_something_else_replaced_the_process() {
         inner.stdin_tx = Some(tx);
         inner.stop_pending = true;
     }
-    c.respawn_after_config_restart();
+    c.respawn_after_config_restart(0);
     let inner = c.inner.lock().unwrap();
     assert!(inner.stdin_tx.is_some() && inner.stop_pending, "a live replacement is left untouched");
+    drop(inner);
+    crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
+}
+
+// codex P1s on #3990: the token is consumed only by the spawn claim, and
+// both exit arms finish a restart.
+
+/// The exit handler decided to respawn, then a Stop landed before the
+/// spawn claim: the claim must refuse, so the Stop wins.
+#[test]
+fn a_stop_after_the_respawn_decision_still_wins_at_the_claim() {
+    let c = controller();
+    c.inner.lock().unwrap().spawn_generation = 4;
+    c.stop_for_config_restart();
+    assert!(PersistentSubprocessController::config_restart_due_locked(&c.inner.lock().unwrap(), 4));
+    let _ = c.stop_process(false); // the user's Stop, in the window
+    assert!(!c.try_claim_eager_resume_spawn_for(Some(4)), "the Stop must win");
+    assert!(!c.inner.lock().unwrap().spawning_in_progress, "no claim may be left behind");
+}
+
+#[test]
+fn the_spawn_claim_consumes_the_restart_token() {
+    let c = controller();
+    c.inner.lock().unwrap().spawn_generation = 4;
+    c.stop_for_config_restart();
+    assert!(c.try_claim_eager_resume_spawn_for(Some(4)));
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.spawning_in_progress);
+    assert_eq!(inner.config_restart_generation, None, "one restart, one replacement");
+}
+
+/// What both exit arms consult, so the arm that wins the `select!` doesn't
+/// matter: due only for the restarted generation, and not after a Stop.
+#[test]
+fn a_restart_is_due_only_for_its_own_generation() {
+    let c = controller();
+    c.inner.lock().unwrap().spawn_generation = 7;
+    c.stop_for_config_restart();
+    {
+        let inner = c.inner.lock().unwrap();
+        assert!(PersistentSubprocessController::config_restart_due_locked(&inner, 7));
+        assert!(!PersistentSubprocessController::config_restart_due_locked(&inner, 6), "a superseded generation");
+    }
+    c.inner.lock().unwrap().spawn_generation = 8; // something else spawned
+    assert!(!PersistentSubprocessController::config_restart_due_locked(&c.inner.lock().unwrap(), 7));
+}
+
+/// A Stop that overrides the restart must still not leave jekts waiting on
+/// `restart_pending` forever.
+#[test]
+fn a_stop_overriding_the_restart_still_closes_the_window() {
+    let (block_id, c) = registered_controller();
+    c.stop_for_config_restart();
+    let _ = c.stop_process(false);
+    c.inner.lock().unwrap().restart_pending = true;
+    c.respawn_after_config_restart(0);
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.restart_pending && !c.deferred_must_wait_locked(&inner));
+    assert!(!inner.spawning_in_progress, "the Stop won: nothing was started");
     drop(inner);
     crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
 }
