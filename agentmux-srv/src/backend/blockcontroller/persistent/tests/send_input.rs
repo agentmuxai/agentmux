@@ -3666,7 +3666,13 @@ async fn a_message_arriving_after_a_restart_is_committed_is_kept_for_the_replace
 #[tokio::test]
 async fn the_watchdog_waits_out_a_restart_and_delivers_to_the_replacement() {
     let c = controller();
-    c.inner.lock().unwrap().restart_pending = true;
+    // The process being restarted is still dying: it holds stdin.
+    let (old_tx, _old_rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stdin_tx = Some(old_tx);
+    }
     c.send_user_message("for the replacement".to_string()).unwrap();
 
     let mut orphaned = 0;
@@ -3855,4 +3861,321 @@ async fn the_mark_after_a_spawn_does_not_taint_the_user_s_turn() {
     c.mark_turn_active_and_publish();
     let p = c.turn_provenance().expect("a turn is in flight");
     assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
+}
+
+// ── A deferred restart brings its replacement up (Korp, 2026-09-29) ──────
+//
+// The restart used to stop the process and wait for "the next message" to
+// respawn it. Automated delivery never spawns and waits while
+// `restart_pending` is set, so every jekt to the agent queued until a human
+// typed into its pane (docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md).
+
+fn registered_controller() -> (String, Arc<PersistentSubprocessController>) {
+    let block_id = format!("block-restart-{}", uuid::Uuid::new_v4());
+    let c = Arc::new(PersistentSubprocessController::new(
+        "tab".to_string(),
+        block_id.clone(),
+        None,
+        None,
+        None,
+        None,
+    ));
+    crate::backend::blockcontroller::register_controller(&block_id, c.clone());
+    (block_id, c)
+}
+
+/// Commit a deferred restart the way production does: `restart_when_idle`
+/// consumed at the turn boundary, then the restart's own stop.
+fn commit_restart(c: &PersistentSubprocessController, generation: u64) {
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawn_generation = generation;
+        inner.restart_when_idle = true;
+    }
+    assert_eq!(
+        PersistentSubprocessController::turn_boundary_locked(
+            &mut c.inner.lock().unwrap(),
+            &c.health_monitor,
+            "block",
+            generation,
+        ),
+        Some(true),
+    );
+    c.stop_for_config_restart();
+}
+
+#[test]
+fn the_boundary_that_commits_a_restart_arms_its_token() {
+    let c = controller();
+    commit_restart(&c, 3);
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.config_restart_generation, Some(3));
+    assert!(inner.restart_pending);
+    assert!(inner.stop_pending, "a restart is still a stop for the dying process");
+}
+
+/// codex P1 on #3990: a Stop between the boundary and the restart's own stop
+/// clears the token; the restart's stop must not re-arm it.
+#[test]
+fn the_restarts_own_stop_never_rearms_a_token_a_stop_cleared() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawn_generation = 3;
+        inner.restart_when_idle = true;
+    }
+    PersistentSubprocessController::turn_boundary_locked(&mut c.inner.lock().unwrap(), &c.health_monitor, "block", 3);
+    let _ = c.stop_process(false); // the user's Stop, in the gap
+    c.stop_for_config_restart();
+    assert_eq!(c.inner.lock().unwrap().config_restart_generation, None, "the Stop must stay in force");
+}
+
+/// A Stop, or a teardown's stop, landing after the restart was committed
+/// must win: nothing may respawn an agent the user just stopped.
+#[test]
+fn any_later_stop_overrides_a_committed_config_restart() {
+    for later_stop in [
+        (|c: &PersistentSubprocessController| {
+            let _ = c.stop_process(false);
+        }) as fn(&PersistentSubprocessController),
+        |c| {
+            let _ = c.request_stop_draining_deferred(KillRequest::Force);
+        },
+    ] {
+        let c = controller();
+        commit_restart(&c, 1);
+        later_stop(&c);
+        assert_eq!(c.inner.lock().unwrap().config_restart_generation, None);
+    }
+}
+
+/// The incident itself: the restart's process is gone and the replacement
+/// can't be resumed (here: no store to read the session from). Before the
+/// fix a jekt then waited on `restart_pending` forever, with the watchdog
+/// resetting its orphan timer on every tick.
+#[test]
+fn a_restart_that_cannot_resume_stops_holding_jekts_back() {
+    let (block_id, c) = registered_controller();
+    // Queued while the restarted process was still dying: held for the
+    // replacement, as before the incident.
+    let (old_tx, _old_rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stop_pending = true;
+        inner.stdin_tx = Some(old_tx);
+    }
+    assert_eq!(c.send_user_message_outcome("jekt".to_string()).unwrap(), SendOutcome::Deferred);
+    // The kill arm has run: no process, and no respawn claim yet.
+    c.inner.lock().unwrap().stdin_tx = None;
+
+    c.respawn_after_config_restart(0);
+
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.restart_pending && !inner.stop_pending, "the window must close when no replacement is coming");
+    assert!(
+        !c.deferred_must_wait_locked(&inner),
+        "queued jekts must fall to the no-process rules, not wait forever",
+    );
+    assert_eq!(inner.deferred_deliveries.len(), 1, "the jekt itself is kept for the watchdog to report");
+    drop(inner);
+    crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
+}
+
+#[test]
+fn no_respawn_for_a_controller_that_no_longer_serves_its_block() {
+    let c = controller(); // never registered: a closed or replaced pane
+    c.inner.lock().unwrap().restart_pending = true;
+    c.respawn_after_config_restart(0);
+    assert!(c.inner.lock().unwrap().restart_pending, "a stale controller must leave its state alone");
+}
+
+#[test]
+fn no_respawn_once_something_else_replaced_the_process() {
+    let (block_id, c) = registered_controller();
+    let (tx, _rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        // A human message's spawn got there first: it cleared the window.
+        inner.restart_pending = false;
+        inner.stdin_tx = Some(tx);
+        inner.stop_pending = true;
+    }
+    c.respawn_after_config_restart(0);
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.stdin_tx.is_some() && inner.stop_pending, "a live replacement is left untouched");
+    drop(inner);
+    crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
+}
+
+// codex P1s on #3990: the token is consumed only by the spawn claim, and
+// both exit arms finish a restart.
+
+/// The exit handler decided to respawn, then a Stop landed before the
+/// spawn claim: the claim must refuse, so the Stop wins.
+#[test]
+fn a_stop_after_the_respawn_decision_still_wins_at_the_claim() {
+    let c = controller();
+    commit_restart(&c, 4);
+    assert!(PersistentSubprocessController::config_restart_due_locked(&c.inner.lock().unwrap(), 4));
+    let _ = c.stop_process(false); // the user's Stop, in the window
+    assert!(!c.try_claim_eager_resume_spawn_for(Some(4)), "the Stop must win");
+    assert!(!c.inner.lock().unwrap().spawning_in_progress, "no claim may be left behind");
+}
+
+/// The claim only reserves: the token stays live until the child starts.
+#[test]
+fn the_spawn_claim_keeps_the_token_until_the_child_starts() {
+    let c = controller();
+    commit_restart(&c, 4);
+    assert!(c.try_claim_eager_resume_spawn_for(Some(4)));
+    let mut inner = c.inner.lock().unwrap();
+    assert!(inner.spawning_in_progress);
+    assert_eq!(inner.restart_spawn_for, Some(4));
+    assert_eq!(inner.config_restart_generation, Some(4), "still cancellable by a Stop");
+    // …and `spawn_process` consumes it right before starting the child.
+    PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut inner).unwrap();
+    assert_eq!(inner.config_restart_generation, Some(4), "the pre-spawn check does not consume it");
+    PersistentSubprocessController::commit_restart_spawn_locked(&mut inner).unwrap();
+    assert_eq!(inner.config_restart_generation, None, "one restart, one replacement");
+    assert_eq!(inner.restart_spawn_for, None);
+}
+
+/// codex P1 on #3990: a Stop after the claim (during the credential gate)
+/// must still cancel the replacement before its child starts.
+#[test]
+fn a_stop_during_the_credential_gate_cancels_the_replacement() {
+    let c = controller();
+    commit_restart(&c, 4);
+    assert!(c.try_claim_eager_resume_spawn_for(Some(4)));
+    let _ = c.stop_process(false); // the user's Stop, mid-gate
+    let mut inner = c.inner.lock().unwrap();
+    assert!(
+        PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut inner).is_err(),
+        "spawn_process must refuse to start the child",
+    );
+    assert_eq!(inner.restart_spawn_for, None, "the refusal leaves no restart claim behind");
+}
+
+/// Ordinary spawns (a human's message) never consult the restart token.
+#[test]
+fn an_ordinary_spawn_is_not_gated_by_the_restart_token() {
+    let c = controller();
+    let mut inner = c.inner.lock().unwrap();
+    assert!(PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut inner).is_ok());
+    assert!(PersistentSubprocessController::commit_restart_spawn_locked(&mut inner).is_ok());
+}
+
+/// What both exit arms consult, so the arm that wins the `select!` doesn't
+/// matter: due only for the restarted generation, and not after a Stop.
+#[test]
+fn a_restart_is_due_only_for_its_own_generation() {
+    let c = controller();
+    commit_restart(&c, 7);
+    {
+        let inner = c.inner.lock().unwrap();
+        assert!(PersistentSubprocessController::config_restart_due_locked(&inner, 7));
+        assert!(!PersistentSubprocessController::config_restart_due_locked(&inner, 6), "a superseded generation");
+    }
+    c.inner.lock().unwrap().spawn_generation = 8; // something else spawned
+    assert!(!PersistentSubprocessController::config_restart_due_locked(&c.inner.lock().unwrap(), 7));
+}
+
+/// A Stop that overrides the restart must still not leave jekts waiting on
+/// `restart_pending` forever.
+#[test]
+fn a_stop_overriding_the_restart_still_closes_the_window() {
+    let (block_id, c) = registered_controller();
+    commit_restart(&c, 1);
+    let _ = c.stop_process(false);
+    assert!(c.inner.lock().unwrap().restart_pending, "precondition: a Stop leaves the window open");
+    c.respawn_after_config_restart(1);
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.restart_pending && !c.deferred_must_wait_locked(&inner));
+    assert!(!inner.spawning_in_progress, "the Stop won: nothing was started");
+    drop(inner);
+    crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
+}
+
+/// ReAgent P1 on #3990: a competing spawn claim (a human's message) wins the
+/// race with the restart's respawn and then fails. Nothing clears
+/// `restart_pending` then, so the restart must stop holding jekts once its
+/// process is gone and no spawn is in flight; they fall to the grace window
+/// and are reported stranded rather than waiting forever.
+#[tokio::test]
+async fn a_restart_whose_process_is_gone_stops_holding_jekts_even_if_nothing_closes_it() {
+    let c = controller();
+    let (old_tx, _old_rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stop_pending = true;
+        inner.config_restart_generation = Some(1);
+        inner.stdin_tx = Some(old_tx); // still dying
+    }
+    c.send_user_message("jekt".to_string()).unwrap(); // queued for the replacement
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = None; // exited
+        inner.spawning_in_progress = false; // the competing spawn failed and released its claim
+    }
+    assert!(!c.deferred_must_wait_locked(&c.inner.lock().unwrap()));
+
+    let mut orphaned = 0;
+    let mut steps = 0;
+    while c.sweep_deferred_once(&mut orphaned) == WatchdogStep::Continue {
+        steps += 1;
+        assert!(steps <= DEFERRED_ORPHAN_GRACE_TICKS, "must be reported within the grace window");
+    }
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty(), "reported stranded, not held");
+}
+
+/// …while a respawn holding the claim keeps the queue waiting for it.
+#[tokio::test]
+async fn a_restart_respawn_in_flight_keeps_jekts_queued_for_it() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stdin_tx = None;
+        inner.spawning_in_progress = true;
+    }
+    c.send_user_message("jekt".to_string()).unwrap();
+    let mut orphaned = 0;
+    for _ in 0..DEFERRED_ORPHAN_GRACE_TICKS * 2 {
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    }
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
+}
+
+/// With the restarted process gone and nothing spawning, a new jekt is
+/// refused with a truthful error the sender sees, not silently parked.
+#[test]
+fn a_jekt_with_no_process_and_no_spawn_is_refused_not_parked() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stdin_tx = None;
+    }
+    let err = c.send_user_message_outcome("jekt".to_string()).unwrap_err();
+    assert!(err.contains("restarting"), "got: {err}");
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+}
+
+/// codex P1 on #3990 (round 3): a Stop landing after the pre-spawn check, while
+/// the child is being started, must still win at installation.
+#[test]
+fn a_stop_while_the_child_starts_is_honored_at_installation() {
+    let c = controller();
+    commit_restart(&c, 5);
+    assert!(c.try_claim_eager_resume_spawn_for(Some(5)));
+    PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut c.inner.lock().unwrap()).unwrap();
+    let _ = c.stop_process(false); // lands during cmd.spawn()
+    let mut inner = c.inner.lock().unwrap();
+    assert!(
+        PersistentSubprocessController::commit_restart_spawn_locked(&mut inner).is_err(),
+        "the install must refuse, so spawn_process kills the child",
+    );
+    assert_eq!(inner.restart_spawn_for, None);
 }

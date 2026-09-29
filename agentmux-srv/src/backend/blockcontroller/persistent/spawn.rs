@@ -207,6 +207,11 @@ impl PersistentSubprocessController {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
+        // Don't even start a config restart's replacement a Stop has already
+        // cancelled (see `restart_spawn_still_permitted_locked`); the decision
+        // itself is made where the child is installed, below.
+        Self::restart_spawn_still_permitted_locked(&mut self.inner.lock().unwrap())?;
+
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
             format!("failed to spawn persistent process: {e}")
@@ -230,6 +235,21 @@ impl PersistentSubprocessController {
         // own doc comment for what this identifies and why.
         let (my_generation, superseded_effects) = {
             let mut inner = self.inner.lock().unwrap();
+            // A config restart's replacement is installed only if no Stop has
+            // cancelled it, decided in this acquisition: before it, a Stop has
+            // no `kill_tx` to reach the child through (codex P1 on #3990).
+            if let Err(e) = Self::commit_restart_spawn_locked(&mut inner) {
+                drop(inner);
+                let _ = child.start_kill();
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
+                tracing::info!(
+                    block_id = %self.block_id,
+                    "config restart: a stop landed while the replacement was starting — killed it"
+                );
+                return Err(e);
+            }
             // The replacement process is here, so the quiesce window is over —
             // messages may take `DeliverDirect` against this new `stdin_tx`
             // again. Cleared unconditionally rather than only when set: any
@@ -238,6 +258,10 @@ impl PersistentSubprocessController {
             // Same for a stop request: it targeted the process this spawn
             // replaces.
             inner.stop_pending = false;
+            // …and for a config restart's pending replacement: this spawn is
+            // it (or supersedes it), so no exit handler may start another.
+            inner.config_restart_generation = None;
+            inner.restart_spawn_for = None;
             // …and any deferred restart is moot now, for the same reason: this
             // spawn read `cmd:args` fresh from block meta, so the new config is
             // already applied and there is nothing left to restart FOR.
@@ -829,9 +853,11 @@ impl PersistentSubprocessController {
                         // arrived mid-turn and was deferred rather than
                         // killing this turn — see
                         // `request_restart_when_idle`. The turn is over now,
-                        // so stop the process: the next message respawns it,
-                        // and `input.rs` rebuilds `cli_args` from block meta
-                        // at that point, so the new flags take effect then.
+                        // so stop the process. Its kill arm eager-resumes the
+                        // replacement at once (`respawn_after_config_restart`),
+                        // which rebuilds `cli_args` from block meta, so the
+                        // new flags take effect then. It used to wait for "the
+                        // next message", which a jekt never is.
                         // Not `poison_resume` and not a user Stop — the
                         // session id is retained, so the respawn `--resume`s
                         // the same conversation.
@@ -860,8 +886,12 @@ impl PersistentSubprocessController {
                                 block_id = %block_id_read,
                                 "turn ended — applying the deferred runtime-config restart"
                             );
+                            // Marked as a restart, not a plain stop, so the
+                            // kill arm brings the replacement up itself: the
+                            // next message is often a jekt, and automated
+                            // delivery never spawns.
                             if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
-                                let _ = ctrl.stop_process(false);
+                                ctrl.stop_for_config_restart();
                             }
                         }
                         // Publish the flip so the Swarm view's live
@@ -1534,6 +1564,12 @@ impl PersistentSubprocessController {
                     if is_current_generation {
                         Self::set_status(&mut inner, STATUS_DONE);
                     }
+                    // A committed config restart whose process exited on its
+                    // own before the kill was consumed: this arm won the
+                    // `select!`, so it must finish the restart too (codex P1 on
+                    // #3990). Acted on at the end of this arm, like the kill
+                    // arm; a stale-resume retry spawning first supersedes it.
+                    let respawn_after_restart = Self::config_restart_due_locked(&inner, my_generation_wait);
                     drop(inner);
 
                     if is_current_generation {
@@ -1774,6 +1810,12 @@ impl PersistentSubprocessController {
                             }
                         }
                     }
+
+                    if respawn_after_restart {
+                        if let Some(ctrl) = self_ref_wait.upgrade() {
+                            ctrl.respawn_after_config_restart(my_generation_wait);
+                        }
+                    }
                 }
                 Ok(request) = kill_rx => {
                     let graceful_deadline = match request {
@@ -1956,6 +1998,13 @@ impl PersistentSubprocessController {
                         inner.spawning_in_progress = false;
                         Self::set_status(&mut inner, STATUS_DONE);
                     }
+                    // This kill was a deferred config restart of THIS
+                    // generation (`config_restart_due_locked`). Acted on at the
+                    // end of this arm, after the deregistration below, because
+                    // the replacement registers itself afresh. Only read here:
+                    // the spawn claim consumes the token, so a Stop landing
+                    // before then still wins.
+                    let respawn_after_restart = Self::config_restart_due_locked(&inner, my_generation_wait);
                     drop(inner);
 
                     // reagentx P1 on PR #2776: a user-initiated Stop can
@@ -2077,6 +2126,12 @@ impl PersistentSubprocessController {
                         // read and this call.
                         if let Some(ref mstore) = mstore_wait {
                             super::super::session_recovery::clear_active_pid_if_pid(mstore, &block_id_wait, pid_wait);
+                        }
+                    }
+
+                    if respawn_after_restart {
+                        if let Some(ctrl) = self_ref_wait.upgrade() {
+                            ctrl.respawn_after_config_restart(my_generation_wait);
                         }
                     }
                 }

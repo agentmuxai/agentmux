@@ -24,10 +24,27 @@ impl PersistentSubprocessController {
     /// entirely still passed all 6 eager-resume tests, since none of them
     /// exercised `try_eager_resume`'s OWN claim step in isolation).
     pub(super) fn try_claim_eager_resume_spawn(&self) -> bool {
+        self.try_claim_eager_resume_spawn_for(None)
+    }
+
+    /// [`Self::try_claim_eager_resume_spawn`], and for a config restart's
+    /// replacement (`Some(generation)`) also require that restart's token
+    /// (`config_restart_generation`) in the SAME acquisition that takes the
+    /// claim, and record the claim as that replacement (`restart_spawn_for`).
+    /// The token is not consumed here: `spawn_process` consumes it right
+    /// before starting the child, so a Stop during the credential gate in
+    /// between still cancels the replacement (codex P1s on #3990).
+    pub(super) fn try_claim_eager_resume_spawn_for(&self, restart_generation: Option<u64>) -> bool {
         let mut inner = self.inner.lock().unwrap();
         if inner.stdin_tx.is_some() || inner.spawning_in_progress || inner.drain_claim {
             return false;
         }
+        if let Some(generation) = restart_generation {
+            if inner.config_restart_generation != Some(generation) {
+                return false;
+            }
+        }
+        inner.restart_spawn_for = restart_generation;
         inner.spawning_in_progress = true;
         true
     }
@@ -37,6 +54,17 @@ impl PersistentSubprocessController {
     /// is "fall back to lazy", not "fail the resync"; see `start()`'s own
     /// doc comment for why.
     pub(super) fn try_eager_resume(&self, block_meta: &super::super::super::obj::MetaMapType, session_id: &str) -> EagerResumeOutcome {
+        self.try_eager_resume_as(block_meta, session_id, None)
+    }
+
+    /// [`Self::try_eager_resume`], optionally as a config restart's
+    /// replacement: see [`Self::try_claim_eager_resume_spawn_for`].
+    pub(super) fn try_eager_resume_as(
+        &self,
+        block_meta: &super::super::super::obj::MetaMapType,
+        session_id: &str,
+        restart_generation: Option<u64>,
+    ) -> EagerResumeOutcome {
         let (Some(id_store), Some(identity_store)) = (self.id_store.clone(), self.identity_store.clone()) else {
             return EagerResumeOutcome::DeclinedTo("identity stores not configured for this controller");
         };
@@ -124,9 +152,10 @@ impl PersistentSubprocessController {
         // branch claims for a live message — this is the same lock a
         // concurrent `send_message` acquires, so the check-and-set below is
         // atomic with respect to it.
-        if !self.try_claim_eager_resume_spawn() {
+        if !self.try_claim_eager_resume_spawn_for(restart_generation) {
             return EagerResumeOutcome::DeclinedTo(
-                "already running or another spawn already in flight — nothing to eagerly resume",
+                "already running, another spawn already in flight, or a stop overrode the restart \
+                 — nothing to eagerly resume",
             );
         }
 
@@ -382,14 +411,19 @@ impl PersistentSubprocessController {
     /// unable to misread them is for them not to be there.
     pub(super) fn settle_eager_spawn_failure(&self, err: &str, retry_config: PersistentSpawnConfig) {
         let ownership_refusal = is_held_elsewhere_error(err);
+        // A Stop that cancelled a config restart's replacement must win over
+        // prompts queued behind it too: the fallback respawn below would start
+        // the agent the user just stopped (codex P1 on #3990).
+        let restart_cancelled = err == RESTART_OVERRIDDEN;
+        let no_fallback = ownership_refusal || restart_cancelled;
         let (stranded, discarded) = {
             let mut inner = self.inner.lock().unwrap();
             let n = inner.pending_send_messages.len();
             let mut discarded = 0;
-            if n == 0 || ownership_refusal {
+            if n == 0 || no_fallback {
                 inner.spawning_in_progress = false;
             }
-            if ownership_refusal {
+            if no_fallback {
                 discarded = inner.pending_send_messages.len();
                 inner.pending_send_messages.clear();
             }
@@ -398,23 +432,167 @@ impl PersistentSubprocessController {
         if stranded == 0 {
             return;
         }
-        if !ownership_refusal {
+        if !no_fallback {
             // Claim still held: `respawn_once_for_leftover_queue` owns its
             // release on either outcome.
             self.respawn_once_for_leftover_queue(retry_config);
             return;
         }
+        let why = if restart_cancelled {
+            "this agent was stopped before its config restart finished, so it was not restarted".to_string()
+        } else {
+            format!("this agent was not resumed. {err}")
+        };
         let frame = serde_json::json!({
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
             "error": {
                 "message": format!(
-                    "[AgentMux] {discarded} queued prompt(s) were not delivered and have been discarded: \
-                     this agent was not resumed. {err}"
+                    "[AgentMux] {discarded} queued prompt(s) were not delivered and have been discarded: {why}"
                 )
             }
         });
         self.flush_error_line_now(format!("{frame}\n"));
     }
 }
+
+impl PersistentSubprocessController {
+    /// Called under `inner` just before `spawn_process` starts the OS child:
+    /// if this spawn is a config restart's replacement and a Stop cleared its
+    /// token since the claim (the claim precedes the credential gate, which
+    /// can be slow), refuse, so no process is started at all. A cheap early
+    /// out only: the token stays live, because a Stop can still land while the
+    /// child is being started, and only [`Self::commit_restart_spawn_locked`],
+    /// in the acquisition that installs the child, decides (codex P1s on
+    /// #3990). Refusing returns an error, so the caller takes its ordinary
+    /// spawn-failure path: the claim is released, and a message a human typed
+    /// meanwhile still gets its own spawn.
+    pub(super) fn restart_spawn_still_permitted_locked(inner: &mut PersistentInner) -> Result<(), String> {
+        let Some(generation) = inner.restart_spawn_for else {
+            return Ok(());
+        };
+        if inner.config_restart_generation != Some(generation) {
+            inner.restart_spawn_for = None;
+            return Err(RESTART_OVERRIDDEN.to_string());
+        }
+        Ok(())
+    }
+
+    /// Called in the SAME `inner` acquisition that installs a freshly started
+    /// child as the live process: consume a config restart's token, or refuse
+    /// if a Stop cleared it while the child was starting. Until this point a
+    /// Stop has no `kill_tx` to reach the new process through, so this is
+    /// where it must win: on refusal the caller kills the child it just
+    /// started and fails the spawn.
+    pub(super) fn commit_restart_spawn_locked(inner: &mut PersistentInner) -> Result<(), String> {
+        let Some(generation) = inner.restart_spawn_for.take() else {
+            return Ok(());
+        };
+        if inner.config_restart_generation != Some(generation) {
+            return Err(RESTART_OVERRIDDEN.to_string());
+        }
+        inner.config_restart_generation = None;
+        Ok(())
+    }
+
+    /// Whether the process of `generation` just ended as a committed config
+    /// restart that nothing has overridden, so its exit handler must bring the
+    /// replacement up. Checked by BOTH exit arms: the process can exit on its
+    /// own right after its last `result` and win the `select!` before the kill
+    /// is consumed (codex P1 on #3990). A read, not a take: the token is
+    /// consumed only right before the replacement's child starts, so a Stop
+    /// until then still wins.
+    pub(super) fn config_restart_due_locked(inner: &PersistentInner, generation: u64) -> bool {
+        inner.spawn_generation == generation && inner.config_restart_generation == Some(generation)
+    }
+
+    /// The second half of a deferred runtime-config restart, run by the old
+    /// process's exit handler once it is gone: resume the same session with the
+    /// config now in block meta, exactly as a restart that found the pane idle
+    /// does (`resync_controller` replaces the controller and `start()`
+    /// eager-resumes). Before this the pane stayed empty "until the next
+    /// message", and a jekt is never that message: automated delivery doesn't
+    /// spawn, and it waits while `restart_pending` is set, so every message to
+    /// the agent queued until a human typed into it
+    /// (`docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md`).
+    ///
+    /// Nothing is started for a controller that's no longer this block's (a
+    /// pane closed or replaced in the window), when something already replaced
+    /// the process (any spawn clears the token), or when a Stop overrode the
+    /// restart: the token is consumed only inside the spawn claim, under the
+    /// lock a Stop clears it with. Whenever no replacement comes, the restart
+    /// window is closed anyway, so queued deliveries fall to the no-process
+    /// rules (reported stranded after the watchdog's grace) instead of waiting
+    /// for a spawn that isn't coming.
+    pub(super) fn respawn_after_config_restart(&self, generation: u64) {
+        let is_this_blocks_controller = super::super::get_controller(&self.block_id).is_some_and(|c| {
+            c.as_any()
+                .downcast_ref::<PersistentSubprocessController>()
+                .is_some_and(|c| std::ptr::eq(c, self))
+        });
+        if !is_this_blocks_controller {
+            tracing::info!(
+                block_id = %self.block_id,
+                "config restart: controller no longer serves this block — not respawning"
+            );
+            return;
+        }
+        {
+            let inner = self.inner.lock().unwrap();
+            if inner.stdin_tx.is_some() || inner.spawning_in_progress {
+                return;
+            }
+        }
+        let block_meta = self
+            .mstore
+            .as_ref()
+            .and_then(|s| s.get::<crate::backend::obj::Block>(&self.block_id).ok().flatten())
+            .map(|b| b.meta);
+        let session_id = block_meta
+            .as_ref()
+            .map(|m| crate::backend::obj::meta_get_string(m, core::META_SESSION_ID, ""))
+            .unwrap_or_default();
+        let outcome = match block_meta {
+            Some(ref meta) if !session_id.is_empty() => self.try_eager_resume_as(meta, &session_id, Some(generation)),
+            Some(_) => EagerResumeOutcome::DeclinedTo("no session id on file"),
+            None => EagerResumeOutcome::DeclinedTo("block not found"),
+        };
+        match outcome {
+            EagerResumeOutcome::Spawned => {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    session_id = %session_id,
+                    "config restart: replacement process resumed the session"
+                );
+            }
+            EagerResumeOutcome::DeclinedTo(reason) => {
+                self.close_restart_window_without_process();
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    reason = %reason,
+                    "config restart: could not resume a replacement — the agent waits for its next \
+                     message, and queued deliveries follow the no-process rules"
+                );
+            }
+        }
+    }
+
+    /// End a config restart's quiesce window when no replacement is coming:
+    /// with `restart_pending` (and the restart's own `stop_pending`) left set,
+    /// `deferred_must_wait_locked` holds every queued delivery forever and the
+    /// watchdog never reports it. Leaves them alone if a spawn has meanwhile
+    /// begun, since that spawn clears both itself.
+    pub(super) fn close_restart_window_without_process(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.stdin_tx.is_none() && !inner.spawning_in_progress {
+            inner.config_restart_generation = None;
+            inner.restart_spawn_for = None;
+            inner.restart_pending = false;
+            inner.stop_pending = false;
+        }
+    }
+}
+
+/// Why a config restart's replacement was abandoned: a Stop landed first.
+pub(super) const RESTART_OVERRIDDEN: &str = "a stop overrode the config restart before its replacement started";

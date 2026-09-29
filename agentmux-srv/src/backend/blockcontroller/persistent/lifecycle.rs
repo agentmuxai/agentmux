@@ -67,8 +67,19 @@ impl PersistentSubprocessController {
     /// [`request_stop`] over just the shared state, for the `'static`
     /// future [`Controller::shutdown`] returns.
     pub(super) fn request_stop_on(inner_arc: &Arc<Mutex<PersistentInner>>, request: KillRequest) -> Result<(), String> {
-        Self::request_stop_inner(inner_arc, request, false);
+        Self::request_stop_inner(inner_arc, request, false, false);
         Ok(())
+    }
+
+    /// Apply a deferred runtime-config restart: stop the current process (as
+    /// `stop_process(false)` does) WITHOUT clearing the restart token the turn
+    /// boundary set (`PersistentInner::config_restart_generation`), so the exit
+    /// handler brings the replacement up. It never sets the token either: a
+    /// Stop that landed between the boundary and this call already cleared it
+    /// and took the kill channel, and must stay in force (codex P1 on #3990).
+    pub(super) fn stop_for_config_restart(&self) {
+        let request = KillRequest::Graceful(std::time::Instant::now() + super::super::SHUTDOWN_GRACE);
+        Self::request_stop_inner(&self.inner, request, false, true);
     }
 
     /// A kill for teardown: drains the deferred queue in the SAME `inner`
@@ -79,13 +90,19 @@ impl PersistentSubprocessController {
     /// lost, with no stranded warning (codex P2 on #3562). Once this lock is
     /// released, `stop_pending` holds anything queued later.
     pub(super) fn request_stop_draining_deferred(&self, request: KillRequest) -> Vec<String> {
-        Self::request_stop_inner(&self.inner, request, true)
+        Self::request_stop_inner(&self.inner, request, true, false)
     }
 
-    fn request_stop_inner(
+    /// `config_restart`: this stop is a deferred runtime-config restart's own
+    /// ([`Self::stop_for_config_restart`]), which leaves the restart token as
+    /// the boundary left it. Every other stop clears it in this same
+    /// acquisition, so a Stop or pane close landing after the restart was
+    /// committed wins, and nothing respawns behind it.
+    pub(super) fn request_stop_inner(
         inner_arc: &Arc<Mutex<PersistentInner>>,
         request: KillRequest,
         drain_deferred: bool,
+        config_restart: bool,
     ) -> Vec<String> {
         let (kill_tx, drained) = {
             let mut inner = inner_arc.lock().unwrap();
@@ -106,6 +123,9 @@ impl PersistentSubprocessController {
             let generation = inner.spawn_generation;
             inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested { generation });
             inner.stop_pending = true;
+            if !config_restart {
+                inner.config_restart_generation = None;
+            }
             let drained = if drain_deferred {
                 inner.deferred_deliveries.drain(..).collect()
             } else {
