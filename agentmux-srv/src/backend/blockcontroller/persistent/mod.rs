@@ -1475,6 +1475,13 @@ impl Controller for PersistentSubprocessController {
                 // controller. Returning first discarded the message unreported
                 // (codex P2 on #3562).
                 let stranded: Vec<String> = g.deferred_deliveries.drain(..).collect();
+                // A pane close outranks a committed config restart in EVERY
+                // branch, including this no-process one: the restart's
+                // replacement may still be mid-spawn with no pid yet, and
+                // would otherwise pass `commit_restart_spawn_locked` and
+                // install a child for a closed pane (codex P1 on #3990).
+                g.config_restart_generation = None;
+                g.restart_spawn_for = None;
                 let running = if g.current_pid.is_none() {
                     // Never spawned (lazy), or already gone. A spawn still in
                     // flight is killed by the caller's tracker drop.
@@ -1487,8 +1494,6 @@ impl Controller for PersistentSubprocessController {
                     // shut down (codex P2 on #3562). The interrupt itself
                     // goes out on `stdin_tx` directly, not through the gate.
                     g.stop_pending = true;
-                    // A pane close outranks a committed config restart.
-                    g.config_restart_generation = None;
                     // Nothing queued may start a new turn after the interrupt.
                     g.pending_send_messages.clear();
                     // Before the interrupt: its `is_error` result is our stop,
