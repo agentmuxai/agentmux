@@ -498,6 +498,53 @@ fn process_jsonl_change_reads_the_spawning_tool_use_id_from_the_sidecar() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+fn drain_event_names(rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>) -> Vec<String> {
+    let mut names = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        if let Some(name) = msg.pointer("/data/data/event").and_then(|v| v.as_str()) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// codex P2 on #3963: a sidecar written after the transcript's LAST line
+/// brings no new transcript events, so the id it fills in must still be
+/// announced — otherwise Swarm keeps the subagent's background tasks at agent
+/// level until some unrelated event reloads the list. Announced once, and not
+/// as a re-sent `subagent:spawned` (the dock's sources add rows on that).
+#[test]
+fn a_late_sidecar_with_no_new_transcript_lines_announces_the_id_once() {
+    let dir = std::env::temp_dir().join(format!("amx-subagent-test-late-sidecar-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-l.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let mut rx = watcher.event_bus.register_ws("test-conn", "test-tab").priority;
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    let first = drain_event_names(&mut rx);
+    assert!(!first.contains(&"subagent:updated".to_string()), "no id yet: {first:?}");
+
+    std::fs::write(
+        dir.join("agent-sub-l.meta.json"),
+        r#"{"agentType":"general-purpose","toolUseId":"toolu_late","spawnDepth":1}"#,
+    )
+    .unwrap();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert_eq!(drain_event_names(&mut rx), vec!["subagent:updated".to_string()]);
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert!(drain_event_names(&mut rx).is_empty(), "id already known — nothing to announce");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn process_jsonl_change_stays_active_without_result_event() {
     let dir = std::env::temp_dir().join(format!("amx-subagent-test-active-{}", now_millis()));

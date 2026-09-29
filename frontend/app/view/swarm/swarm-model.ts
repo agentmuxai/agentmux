@@ -1129,6 +1129,15 @@ export class SwarmViewModel {
         });
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
 
+        // A known subagent's `tool_use_id` arrived after its spawn (the CLI
+        // writes the sidecar separately) — reload so its background tasks
+        // move from the agent-level bucket to under its row.
+        const unsubUpdated = muxEventSubscribe({
+            eventType: "subagent:updated",
+            handler: () => this.scheduleLoadSubagents(),
+        });
+        if (unsubUpdated) this.unsubs.push(unsubUpdated);
+
         // One or more subagents just reconciled active -> abandoned, either
         // live (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
         // Phase A, #2234 — the instant their parent's turn ends) or at
