@@ -219,6 +219,34 @@ describe("AttachmentDraft.uploadFiles", () => {
         d.uploadFiles(files(3));
         expect(sent()).toEqual(["f0.png", "f1.png", "f2.png"]);
     });
+
+    it("a paste during a capped drop starts at once and never lifts the drop's cap", () => {
+        const d = new AttachmentDraft("u5");
+        d.uploadFiles(files(4), 2);
+        d.uploadFiles([new File(["x"], "p0.png"), new File(["x"], "p1.png")]);
+        expect(sent()).toEqual(["f0.png", "f1.png", "p0.png", "p1.png"]);
+        FakeXhr.made[2].succeed("d".repeat(64));
+        FakeXhr.made[3].succeed("e".repeat(64));
+        expect(sent()).toHaveLength(4);
+        FakeXhr.made[0].succeed("f".repeat(64));
+        expect(sent()).toEqual(["f0.png", "f1.png", "p0.png", "p1.png", "f2.png"]);
+    });
+
+    it("pastes already in flight don't hold back a capped drop", () => {
+        const d = new AttachmentDraft("u7");
+        d.uploadFiles([new File(["x"], "p0.png"), new File(["x"], "p1.png"), new File(["x"], "p2.png")]);
+        d.uploadFiles(files(3), 2);
+        expect(sent()).toEqual(["p0.png", "p1.png", "p2.png", "f0.png", "f1.png"]);
+    });
+
+    it("back-to-back capped drops share one cap", () => {
+        const d = new AttachmentDraft("u6");
+        d.uploadFiles(files(2), 2);
+        d.uploadFiles([new File(["x"], "g0.png"), new File(["x"], "g1.png")], 2);
+        expect(sent()).toEqual(["f0.png", "f1.png"]);
+        FakeXhr.made[1].onerror?.();
+        expect(sent()).toEqual(["f0.png", "f1.png", "g0.png"]);
+    });
 });
 
 describe("pastedFileName", () => {
