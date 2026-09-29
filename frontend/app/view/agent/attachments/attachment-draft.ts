@@ -94,6 +94,18 @@ export async function uploadFile(file: File, name: string): Promise<AttachmentIn
     return body as AttachmentInfo;
 }
 
+/**
+ * Put a file's bytes into a pane's working folder (`cmd:cwd`): stored like an
+ * attachment, then copied there by srv. For files that arrive as bytes with
+ * no host path (Ctrl+V, virtual or pathless drops). Resolves with the path.
+ */
+export async function uploadFileToWorkdir(blockId: string, file: File): Promise<string> {
+    const name = pastedFileName(file);
+    const info = await uploadFile(file, name);
+    const res = await RpcApi.AttachmentsCopyToWorkdirCommand(TabRpcClient, { block_id: blockId, id: info.id, name });
+    return res.path;
+}
+
 export class AttachmentDraft {
     readonly blockId: string;
     readonly items: Accessor<DraftAttachment[]>;
@@ -115,6 +127,8 @@ export class AttachmentDraft {
      */
     private readonly early = new Map<string, Array<() => void>>();
     private readonly uploads = new Map<string, XMLHttpRequest>();
+    private pendingUploads: { key: string; file: File; name: string; limit: number }[] = [];
+    private readonly cappedInFlight = new Set<string>();
 
     constructor(blockId: string) {
         this.blockId = blockId;
@@ -214,8 +228,13 @@ export class AttachmentDraft {
         return true;
     }
 
-    /** Stream pasted Files to the upload route, one request each. */
-    uploadFiles(files: File[]): void {
+    /**
+     * Stream Files to the upload route, one request each. With `concurrency`,
+     * they queue behind every other capped upload and share one cap; without
+     * it (paste) they start at once and don't count against that cap.
+     */
+    uploadFiles(files: File[], concurrency?: number): void {
+        const limit = concurrency && concurrency > 0 ? concurrency : undefined;
         const rejected: AttachmentRejected[] = [];
         let count = this.count();
         let bytes = this.totalBytes();
@@ -231,9 +250,12 @@ export class AttachmentDraft {
             }
             count += 1;
             bytes += file.size;
-            this.startUpload(file, name);
+            const key = this.addUploadTile(file, name);
+            if (limit === undefined) this.startUpload(key, file, name);
+            else this.pendingUploads.push({ key, file, name, limit });
         }
         this.reportRejected(rejected);
+        this.pumpUploads();
     }
 
     /**
@@ -242,23 +264,32 @@ export class AttachmentDraft {
      * Resolves with the path it landed at. Spec §7.
      */
     async uploadToWorkdir(file: File): Promise<string> {
-        const name = pastedFileName(file);
-        const info = await uploadFile(file, name);
-        const res = await RpcApi.AttachmentsCopyToWorkdirCommand(TabRpcClient, {
-            block_id: this.blockId,
-            id: info.id,
-            name,
-        });
-        return res.path;
+        return uploadFileToWorkdir(this.blockId, file);
     }
 
-    private startUpload(file: File, name: string): void {
+    private addUploadTile(file: File, name: string): string {
         const key = nextKey();
         this.setItems((prev) => [
             ...prev,
             { key, name, bytes: file.size, status: "processing", stage: "uploading", doneBytes: 0 },
         ]);
+        return key;
+    }
+
+    private pumpUploads(): void {
+        while (this.pendingUploads.length > 0 && this.cappedInFlight.size < this.pendingUploads[0].limit) {
+            const next = this.pendingUploads.shift()!;
+            this.cappedInFlight.add(next.key);
+            this.startUpload(next.key, next.file, next.name);
+        }
+    }
+
+    private startUpload(key: string, file: File, name: string): void {
         const xhr = new XMLHttpRequest();
+        const settle = () => {
+            this.uploads.delete(key);
+            this.cappedInFlight.delete(key);
+        };
         this.uploads.set(key, xhr);
         xhr.open("POST", `${getWebServerEndpoint()}/api/v1/attachments/upload?name=${encodeURIComponent(name)}`);
         xhr.setRequestHeader("X-AuthKey", getApi()?.getAuthKey?.() ?? "");
@@ -267,7 +298,7 @@ export class AttachmentDraft {
             this.patch(key, { doneBytes: e.loaded, stage: e.loaded >= e.total ? "processing" : "uploading" });
         };
         xhr.onload = () => {
-            this.uploads.delete(key);
+            settle();
             let body: any = null;
             try {
                 body = JSON.parse(xhr.responseText);
@@ -279,13 +310,16 @@ export class AttachmentDraft {
             } else {
                 this.patch(key, { status: "error", error: body?.error ?? `Upload failed (${xhr.status}).` });
             }
+            this.pumpUploads();
         };
         xhr.onerror = () => {
-            this.uploads.delete(key);
+            settle();
             this.patch(key, { status: "error", error: "Upload failed: the connection to AgentMux dropped." });
+            this.pumpUploads();
         };
         xhr.onabort = () => {
-            this.uploads.delete(key);
+            settle();
+            this.pumpUploads();
         };
         xhr.send(file);
     }
@@ -297,6 +331,7 @@ export class AttachmentDraft {
         const position = list.findIndex((i) => i.key === key);
         if (position < 0) return null;
         const item = list[position];
+        this.pendingUploads = this.pendingUploads.filter((p) => p.key !== key);
         this.uploads.get(key)?.abort();
         this.setItems((prev) => prev.filter((i) => i.key !== key));
         return { item, position };
@@ -338,8 +373,10 @@ export class AttachmentDraft {
         for (const batchId of this.openBatches) {
             void RpcApi.AttachmentsCancelCommand(TabRpcClient, { batch_id: batchId }).catch(() => {});
         }
+        this.pendingUploads = [];
         for (const xhr of this.uploads.values()) xhr.abort();
         this.uploads.clear();
+        this.cappedInFlight.clear();
         this.setItems((prev) => prev.filter((i) => i.status !== "processing"));
     }
 

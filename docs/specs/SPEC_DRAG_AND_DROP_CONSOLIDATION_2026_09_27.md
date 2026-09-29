@@ -336,7 +336,7 @@ interface DragFiles {
 
   That is what lets every valid pane show **Armed** immediately (§4), not only after it has been hovered. When `peek_drag_paths` returns names, every visible pane's `accept` is re-run once and the Armed/Blocked states refresh. Blocked panes are never drawn Armed.
 - **Hit-test:** `e.target.closest('[data-role="pane"]')` → `data-blockid` → the registered hook's cached verdict. A pane that appears mid-drag, e.g. from a tab switch, is evaluated when first hit. The per-event decision reads the cache, so `accept` never runs per `dragover`.
-- **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, or the files-only idle watchdog, 350 ms without a `dragover`). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
+- **Clearing:** state clears on the session's end (drop, dragend, `dragleave` with `relatedTarget: null`, or the files-only idle watchdog, 1.2 s without a `dragover`: well above the HTML spec's dragover cadence of 350 ms ± 200 ms while the cursor is still, so holding a file still never clears the indicator). The watchdog also covers the cursor crossing a native browser pane, where the renderer gets no events.
 - **On `drop`:**
   1. **Re-validate synchronously:**
      - hit-test the `drop` event's own target;

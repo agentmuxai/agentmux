@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Search, useSearch } from "@/app/element/search";
-import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, useBlockAtom, MOS } from "@/store/global";
+import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, useBlockAtom, MOS } from "@/store/global";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import { ISearchOptions } from "@xterm/addon-search";
 import clsx from "clsx";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { resolveTermFontFamily } from "./termfontfamily";
 import { resolveTermScrollback } from "./termscrollback";
@@ -20,12 +20,11 @@ import { termPaneTab } from "./term-pane-tab";
 import { TermWrap } from "./termwrap";
 import { termModels } from "./term-models";
 import "./xterm.css";
-import { DragOverlay } from "@/app/element/dragoverlay";
-import { hostHas } from "@/app/host/host-caps";
+import { registerFileDropTarget } from "@/app/drag/file-drop";
+import { copyIntoWorkdir, fileCount, paneWorkdir } from "@/app/drag/file-drop-actions";
 import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 import type { NodeModel } from "@/layout/index";
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -329,118 +328,29 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
         return typeof v === "number" && v > 0 ? v : undefined;
     };
 
-    const handleFilesDropped = async (paths: string[]) => {
-        const cwd = meta()?.["cmd:cwd"];
-        if (!cwd) {
-            console.warn("[term-drop] No working directory detected, ignoring drop");
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "Drop failed",
-                message: "No working directory detected for this terminal pane.",
-                timestamp: new Date().toISOString(),
-                type: "warning",
-                expiration: Date.now() + 8000,
-            });
-            return;
-        }
-        const outcome = await copyFilesToDir(paths, cwd, { concurrency: dndConcurrency() });
-        const successes = outcome.results.filter((r) => r.dest);
-        const failures = outcome.results.filter((r) => r.error);
-        if (successes.length > 0) {
-            const summary =
-                successes.length === 1
-                    ? `Copied ${baseName(successes[0].dest!)} to ${cwd}`
-                    : `Copied ${successes.length} files to ${cwd}`;
-            pushNotification({
-                icon: "fa-check",
-                title: failures.length > 0 ? `${summary} (${failures.length} failed)` : summary,
-                message: failures.length > 0 ? failures.map((f) => `${baseName(f.source)}: ${f.error}`).join("\n") : "",
-                timestamp: new Date().toISOString(),
-                type: failures.length > 0 ? "warning" : "info",
-                expiration: Date.now() + 6000,
-            });
-        } else if (failures.length > 0) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: `Copy failed (${failures.length} file${failures.length === 1 ? "" : "s"})`,
-                message: failures.map((f) => `${baseName(f.source)}: ${f.error}`).join("\n"),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 12000,
-            });
-        }
-    };
-
-    const [isDragOver, setIsDragOver] = createSignal(false);
-
+    // File drops: this pane's hook for the window-level file-drop controller
+    // (app/drag/file-drop.ts), which hit-tests, draws the indicator and
+    // dispatches. A drop copies the files into the terminal's working folder
+    // (SPEC_PANE_FILE_DROP_2026_05_30.md, SPEC_DRAG_AND_DROP_CONSOLIDATION §5.3).
+    // Without host paths the files' bytes are copied instead.
     onMount(() => {
-        if (hostHas("nativeFileDrop")) {
-            // CEF: HTML5 drag events work natively (unlike WebView2)
-            if (!viewRef) return;
-            const onDragOver = (e: DragEvent) => {
-                if (!dndEnabled()) return;
-                // Only treat file drags as drop targets — text/URL drags keep
-                // their browser default behavior so a selection or link dragged
-                // over a terminal doesn't trigger a misleading "Copy to <cwd>"
-                // overlay. Matches the guard in useAgentDropAttach.
-                const types = e.dataTransfer?.types;
-                if (!types || !Array.from(types).includes("Files")) return;
-                e.preventDefault();
-                setIsDragOver(true);
-            };
-            const onDragLeave = (e: DragEvent) => {
-                // Only clear when the drag actually leaves the pane — see the
-                // matching comment in useAgentDropAttach. xterm fills the pane
-                // with composited child layers; treating every dragleave as
-                // "drag is gone" caused the overlay to flicker the moment the
-                // cursor crossed into the xterm viewport.
-                const next = e.relatedTarget as Node | null;
-                if (!next || !viewRef.contains(next)) setIsDragOver(false);
-            };
-            const onDrop = (e: DragEvent) => {
-                if (!dndEnabled()) return;
-                e.preventDefault();
-                setIsDragOver(false);
-                const files = e.dataTransfer?.files;
-                if (!files || files.length === 0) return;
-                // HTML5 File API only exposes bare filenames; the OS paths
-                // were captured by CefDragHandler::on_drag_enter and stashed
-                // in the host. Consume the stash now — it's keyed by drag
-                // session, not by pane, so it returns the same N paths the
-                // browser sees as `files`.
-                void consumeDragPaths().then((paths) => {
-                    if (paths.length > 0) {
-                        handleFilesDropped(paths);
-                        return;
-                    }
-                    // Stash empty: TTL expired, or the OnDragEnter callback
-                    // didn't fire (e.g. browser pane child window that
-                    // doesn't carry our DragHandler). Surface a clear
-                    // message rather than silently dropping.
-                    pushNotification({
-                        icon: "fa-triangle-exclamation",
-                        title: "Drop failed",
-                        message: `Couldn't read the OS paths for ${files.length} dropped file(s). Try again.`,
-                        timestamp: new Date().toISOString(),
-                        type: "warning",
-                        expiration: Date.now() + 6000,
-                    });
+        const dispose = registerFileDropTarget(blockId, {
+            accept(drag) {
+                if (!dndEnabled()) return { ok: false, reason: "File drop is turned off (dnd:enabled)" };
+                const cwd = paneWorkdir(blockId);
+                const what = drag.count > 0 ? fileCount(drag.count) : "files";
+                return cwd
+                    ? { ok: true, message: `Copy ${what} to ${cwd}`, icon: "fa-copy" }
+                    : { ok: false, reason: "No working directory for this terminal" };
+            },
+            async drop({ paths, files }) {
+                await copyIntoWorkdir(blockId, paths.length > 0 ? { paths } : { files }, {
+                    paneKind: "terminal pane",
+                    concurrency: dndConcurrency(),
                 });
-            };
-            viewRef.addEventListener("dragover", onDragOver);
-            viewRef.addEventListener("dragleave", onDragLeave);
-            viewRef.addEventListener("drop", onDrop);
-            onCleanup(() => {
-                viewRef.removeEventListener("dragover", onDragOver);
-                viewRef.removeEventListener("dragleave", onDragLeave);
-                viewRef.removeEventListener("drop", onDrop);
-            });
-        }
-    });
-
-    const dropMessage = createMemo(() => {
-        const cwd = meta()?.["cmd:cwd"];
-        return cwd ? `Copy to ${cwd}` : "No working directory detected";
+            },
+        });
+        onCleanup(dispose);
     });
 
     return (
@@ -449,7 +359,6 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
             class={clsx("view-term", "term-mode-" + termMode())}
             style={{ position: "relative" }}
         >
-            <DragOverlay message={dropMessage()} visible={isDragOver()} />
             <TermResyncHandler blockId={blockId} model={model} />
             <TermThemeUpdater blockId={blockId} model={model} termRef={model.termRef} />
             <TermStickers config={stickerConfig()} />
