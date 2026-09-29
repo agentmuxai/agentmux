@@ -86,11 +86,18 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
    `agentmux-cef` cannot link 152 on one platform and 154 on another. The consumer switch is **one PR
    after all three runtimes exist**; the `cef-runtime-pins` job fails a release whose three tags
    disagree on milestone (by design).
-9. **Agents publish through their GitHub App — no operator step.** *(Corrected 2026-09-29: this
-   trap used to say publishing needs the operator's account. That predates the App migration;
-   `cef-windows-x86_64-152.0.7977.83-r2` was published by `agent3-workflow[bot]` on 2026-09-23.)*
-   Each builder uploads its runtime as a **draft** from its own machine with `gh-agent release
-   create --draft`, and the upgrade's manager publishes the three drafts (Day 2 step 4).
+9. **Agents publish through their GitHub App — no operator step.** *(Corrected 2026-09-29, after
+   the operator asked whether publishing goes through CI. This trap used to say "agent identities
+   have no write access to `agentmuxai/cef` releases (r2 notes)". That was written before agents moved
+   to GitHub Apps (`shared-infrastructure` `AGENT_GITHUB_AUTH.md`). The r2 release it cites was
+   itself published by an agent App. Check it with
+   `gh-agent api repos/agentmuxai/cef/releases --jq '.[0:2][] | [.tag_name, .author.login]'`:
+   `cef-windows-x86_64-152.0.7977.83-r2` → `agent3-workflow[bot]`, 2026-09-23. GHSA-6726-q276-g6f6
+   is not a reason for this trap: it concerns same-OS-user agent impersonation on a host, see
+   `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.1.)* Each builder uploads its
+   runtime as a **draft** from its own machine with `gh-agent release create --draft`, and the
+   upgrade's manager publishes the three drafts (Day 2 step 4). A draft is not public and no build
+   resolves it (step 2).
 
 ## 4. Plan
 
@@ -264,8 +271,16 @@ version drift report's CEF rows as the trigger. Tracked separately.
 
 1. Owners: Korp (Windows), Clare (macOS), Opaz (Linux) again, or others? **Yes, those three;
    AgentY is manager lead.**
-2. Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs. **Resolved:
-   narko cleanup freed ~880 GB. charlie had 23 GB free; Opaz frees the 152 `out/` (95 GB) after
-   archiving its debug info.**
+2. Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs. **Resolved
+   per host, by the operator:**
+   - **narko:** a 2026-09-28 cleanup of idle agents' Rust `target/` dirs left ~880 GB free. The
+     Windows build needs no other change.
+   - **charlie:** 23 GB free. The operator approved archive-then-delete of the 152
+     `out/Release_GN_x64`, for this build only. Opaz archived the 152 debug info
+     (`~/cef-152-symbols-linux.tar.zst`, 4.0 GB, 46,373 entries, checked with `tar -tf`), deleted
+     `out/` (95 GB), and left charlie with 119 GB free.
+   - **Deleting a previous milestone's `out/` stays an operator decision on each host.** Archive its
+     unstripped `libcef` and debug info first: they are the only symbols matching the shipped
+     runtime.
 3. Who publishes the three releases, and when on Day 2? **The builders upload drafts; AgentY
    publishes them right after the consumer PR merges (trap 9).**
