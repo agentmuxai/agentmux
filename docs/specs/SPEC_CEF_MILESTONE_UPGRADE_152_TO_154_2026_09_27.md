@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-27
-**Status:** proposed
+**Status:** active — Day 1 shipped: prerequisite PR #3987, agentmuxai/cef#10, agentmuxai/cef-rs#1. Remaining: the three runtime builds (running), the consumer PR, publishing. Verified 2026-09-29.
 **Executes:** `docs/cef-build/CEF_FORK_MAINTENANCE.md` §6 (upgrade runbook), §5 (carry-set gate),
 §7 (artifact verification), §8 (release pinning), §9 (checklists). This spec does not restate them;
 it adds what is specific to 154, the schedule, and the traps 148 → 152 already hit.
@@ -86,8 +86,18 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
    `agentmux-cef` cannot link 152 on one platform and 154 on another. The consumer switch is **one PR
    after all three runtimes exist**; the `cef-runtime-pins` job fails a release whose three tags
    disagree on milestone (by design).
-9. **Publishing needs the operator's account** — agent identities have no write access to
-   `agentmuxai/cef` releases (r2 notes). Plan for a human step per platform.
+9. **Agents publish through their GitHub App — no operator step.** *(Corrected 2026-09-29, after
+   the operator asked whether publishing goes through CI. This trap used to say "agent identities
+   have no write access to `agentmuxai/cef` releases (r2 notes)". That was written before agents moved
+   to GitHub Apps (`shared-infrastructure` `AGENT_GITHUB_AUTH.md`). The r2 release it cites was
+   itself published by an agent App. Check it with
+   `gh-agent api repos/agentmuxai/cef/releases --jq '.[0:2][] | [.tag_name, .author.login]'`:
+   `cef-windows-x86_64-152.0.7977.83-r2` → `agent3-workflow[bot]`, 2026-09-23. GHSA-6726-q276-g6f6
+   is not a reason for this trap: it concerns same-OS-user agent impersonation on a host, see
+   `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.1.)* Each builder uploads its
+   runtime as a **draft** from its own machine with `gh-agent release create --draft`, and the
+   upgrade's manager publishes the three drafts (Day 2 step 4). A draft is not public and no build
+   resolves it (step 2).
 
 ## 4. Plan
 
@@ -146,6 +156,23 @@ repository access covers it (org settings → GitHub Apps) before Day 1 — its 
    default-off, on Linux — without this, a missing or mis-generated 154 slot passes the workspace
    check and surfaces only after the expensive builds.
 
+#### Day 1 results (2026-09-29)
+
+- **Prerequisite** merged: agentmuxai/agentmux#3987 (pins in `scripts/cef-build/cef-runtime-pins.sh`);
+  the drift reporter reads that file (a5af/shared-infrastructure#541, deployed).
+- **`agentmuxai/cef` `8037`** cut from upstream **682c378d7**, not 564dd6c4: four later upstream
+  fixes, same `refs/tags/154.0.8037.58`. Port PR #10, one commit per item, all 18 Layer B files
+  3-way merged with no conflicts. **Build SHA: `660112374b790582d63a356da633fb2cb14b7538`**; gate
+  21 OK / 0 MISS on it.
+- **`agentmuxai/cef-rs` `agentmux/154`**: PR #1 (the two cherry-picks, plus an `offset_of!`
+  assertion pinning `begin_window_drag` at 888). **Binding SHA:
+  `9568a644ce2fd471d1f8812d953228bfec28c4fc`**; `cargo check --workspace` clean with `cef = "154"`.
+  The Linux `--features patched-libcef` check runs on charlie.
+- **API hashes:** after `version_manager.py -u` (run after patching, **before** ninja), expect
+  "27/28 versioned match" plus "Hashes for version 15400 do not match". That single mismatch is
+  expected: 15400 is frozen upstream and `BeginWindowDrag` is added to it. 152 shipped the same
+  way on 15200 (55edc030's "26/27").
+
 ### Day 1 — afternoon → Day 2 morning: three builds in parallel (3 owners, 3–6 h each)
 
 | Platform | Owner (did 152) | Machine | GN args | Watch for |
@@ -184,7 +211,7 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    `publishedAt`, isn't public, and `gh release list` resolution can't select it — publishing happens
    only in step 4, behind that step's gate (the blank = pinned prerequisite confirmed merged). Upload
    the three runtimes as **draft** releases on
-   `agentmuxai/cef` (operator account, trap 9): `cef-windows-x86_64-154.0.8037.58`,
+   `agentmuxai/cef` (each builder, via `gh-agent`, trap 9): `cef-windows-x86_64-154.0.8037.58`,
    `cef-macos-arm64-154.0.8037.58-codecs`, `cef-linux-x86_64-154.0.8037.58-codecs` — one tag scheme
    (`cef-<os>-<arch>-<chromium>[-codecs][-rN]`). A draft has no `publishedAt`, so even an unpinned
    nightly wouldn't pick it; it isn't public; and a problem found in step 4 can still be fixed without
@@ -230,7 +257,7 @@ Release tags are immutable: revert the consumer PR to restore the 152.0.7977.83 
 | A build fails late (disk, flag, new Chromium compile break like `installer_tests`) | medium | disk check first; start all three early on Day 1; warm-cache fixes are minutes |
 | A silent runtime regression (the ANGLE class) | medium | the trap 6 ANGLE gates — `verify-angle-libs.sh` on Windows/Linux, the framework `nm` probe on macOS — plus live `chrome://gpu`, not compile success (§7.2 checks carry-set symbols, not ANGLE) |
 | Chromium 154 behavior changes in the frontend | low–medium | two milestones, not four; the §7.3 matrix plus a normal release smoke test |
-| A human isn't available to publish | medium | schedule the operator's three publishes for Day 2 midday; merge step 4 only with the publisher on hand — if publishing stalls, revert the merge (`main` builds fail until one of the two happens) |
+| Publishing stalls after the consumer merge | low | the manager publishes all three drafts right after merging (agent App, no human step, trap 9); if a publish fails, revert the merge (`main` builds fail until one of the two happens) |
 | Only two owners available | — | Windows and Linux on narko/charlie in parallel; macOS on Day 2 (adds ~half a day) |
 
 ## 6. After 154: make the next one routine
@@ -240,8 +267,20 @@ Chromium ships a milestone about every four weeks, and only the newest CEF branc
 and patch registration (steps 1–3 above), the §2 header comparison as a script, and the
 version drift report's CEF rows as the trigger. Tracked separately.
 
-## 7. Open questions for the operator
+## 7. Open questions for the operator (answered 2026-09-29)
 
-1. Owners: Korp (Windows), Clare (macOS), Opaz (Linux) again, or others?
-2. Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs. Free the space, rely on syncing the existing checkout forward, or build Windows elsewhere?
-3. Who publishes the three releases (operator account), and when on Day 2?
+1. Owners: Korp (Windows), Clare (macOS), Opaz (Linux) again, or others? **Yes, those three;
+   AgentY is manager lead.**
+2. Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs. **Resolved
+   per host, by the operator:**
+   - **narko:** a 2026-09-28 cleanup of idle agents' Rust `target/` dirs left ~880 GB free. The
+     Windows build needs no other change.
+   - **charlie:** 23 GB free. The operator approved archive-then-delete of the 152
+     `out/Release_GN_x64`, for this build only. Opaz archived the 152 debug info
+     (`~/cef-152-symbols-linux.tar.zst`, 4.0 GB, 46,373 entries, checked with `tar -tf`), deleted
+     `out/` (95 GB), and left charlie with 119 GB free.
+   - **Deleting a previous milestone's `out/` stays an operator decision on each host.** Archive its
+     unstripped `libcef` and debug info first: they are the only symbols matching the shipped
+     runtime.
+3. Who publishes the three releases, and when on Day 2? **The builders upload drafts; AgentY
+   publishes them right after the consumer PR merges (trap 9).**

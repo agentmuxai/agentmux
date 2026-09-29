@@ -506,6 +506,7 @@ partial list.
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
+| [`SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27`](SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md) | CEF milestone upgrade: 152 (7977) → 154 (8037), all three platforms — in two days |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
@@ -604,7 +605,6 @@ partial list.
 | [`SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15`](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Browser Pane: Live Favicon + Page Title in Pane Header |
 | [`SPEC_BROWSER_PANE_IDENTITIES_2026_09_22`](SPEC_BROWSER_PANE_IDENTITIES_2026_09_22.md) | Spec: Browser pane identities — shared by default, private (unique incognito) per pane tab, named profiles later |
 | [`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04`](SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md) | CEF 148 — Linux Drag/Right-Click/Transparency Forward-Port |
-| [`SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27`](SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md) | CEF milestone upgrade: 152 (7977) → 154 (8037), all three platforms — in two days |
 | [`SPEC_CEF_SANDBOX_2026_06_20`](SPEC_CEF_SANDBOX_2026_06_20.md) | SPEC: Enable CEF Renderer Sandbox |
 | [`SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20`](SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20.md) | SPEC: CEF Windows Renderer Sandbox — Phase 3 |
 | [`SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12`](SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md) | SPEC — Balanced PR and nightly test lanes |
