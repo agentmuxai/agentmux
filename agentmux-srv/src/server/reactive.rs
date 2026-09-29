@@ -1502,9 +1502,17 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     // The gate's refusal reason rides on the "queued" line below: a
     // signature that silently fails to ride is otherwise invisible, and the
     // receiver can't tell it from a sender that never signed.
+    // The directory this relay sends into: this relay plus the signed-in
+    // account. The publisher binds each publication to the same id.
+    let directory = state
+        .id_store
+        .muxbus_user_sub()
+        .filter(|sub| !sub.is_empty())
+        .map(|sub| crate::muxbus::wan_publish::directory_id(&crate::muxbus::relay::rest_base_url(), &sub));
     let (carried, unsigned_reason) = match crate::muxbus::relay::wan_carry_gate(
         req,
         state.mstore.wan_identity().as_deref(),
+        directory.as_deref(),
         &crate::backend::reactive::registry::local_channel_id(),
     ) {
         Ok(carried) => (Some(carried), ""),

@@ -85,12 +85,16 @@ const MAX_CARRIED_ID_CHARS: usize = 256;
 /// 2. The signed instance and channel are this install's own.
 /// 3. The signature verifies locally under the agent's key in `wan.db`
 ///    (a key purged by an agent delete fails here).
-/// 4. The directory is confirmed to hold that key (`published_fp`), so a
-///    receiver can find it.
+/// 4. The directory this relay sends into — this relay plus the signed-in
+///    account (`wan_publish::directory_id`) — is confirmed to hold that key,
+///    so a receiver can find it. A key published under another account or
+///    relay doesn't count: after a sign-in there, the signature would name a
+///    key the receiver can't fetch.
 /// 5. Both ids are well-formed and every field is within the cloud's caps.
 pub(crate) fn wan_carry_gate(
     req: &crate::backend::reactive::types::InjectionRequest,
     wan: Option<&crate::backend::storage::wan_identity::WanIdentityStore>,
+    directory: Option<&str>,
     local_channel: &str,
 ) -> Result<WanCarried, &'static str> {
     use crate::backend::reactive::sanitize::validate_agent_id;
@@ -133,8 +137,9 @@ pub(crate) fn wan_carry_gate(
         return Err("signature does not verify locally");
     }
     // 4
-    if !key.is_published() {
-        return Err("key not yet published");
+    let directory = directory.ok_or("no account to publish under")?;
+    if !wan.agent_key_is_published_to(source, &key, directory).unwrap_or(false) {
+        return Err("key not published to this directory");
     }
     // 5
     if !validate_agent_id(source) || !validate_agent_id(&req.target_agent) {
@@ -523,13 +528,15 @@ mod tests {
 
     /// A wan.db with a published key for `camper`, and a request exactly as
     /// the MCP would send it: signed, host-verified, this instance.
+    const TEST_DIR: &str = "https://relay.test#acct";
+
     fn signed_request() -> (tempfile::TempDir, WanIdentityStore, InjectionRequest) {
         use base64::Engine as _;
         let dir = tempfile::tempdir().unwrap();
         let wan = WanIdentityStore::open(&dir.path().join("wan.db")).unwrap();
         let instance = wan.instance_ensure("narko").unwrap();
         let key = wan.agent_key_ensure("camper", None).unwrap();
-        wan.agent_key_mark_published("camper", &key.public_key).unwrap();
+        wan.agent_key_mark_published("camper", &key.public_key, TEST_DIR).unwrap();
         let private = base64::engine::general_purpose::STANDARD.decode(&key.private_key).unwrap();
         let sig = agentmux_common::jekt_sign::sign_wan_jekt(
             &private, "msg-1", "camper", &instance.instance_id, "stable", "agent2", 1_790_000_000, "hello",
@@ -553,7 +560,7 @@ mod tests {
     #[test]
     fn a_signed_host_verified_published_message_is_carried_as_signed() {
         let (_dir, wan, req) = signed_request();
-        let carried = wan_carry_gate(&req, Some(&wan), "stable").expect("every condition holds");
+        let carried = wan_carry_gate(&req, Some(&wan), Some(TEST_DIR), "stable").expect("every condition holds");
         let key = wan.agent_key_load("camper").unwrap().unwrap();
         assert_eq!(carried.wan_sig, req.wan_sig.clone().unwrap());
         assert_eq!(carried.wan_msg_id, "msg-1");
@@ -615,18 +622,26 @@ mod tests {
         for (name, mutate) in cases {
             let (_dir, wan, mut req) = signed_request();
             mutate(&mut req, &wan);
-            assert!(wan_carry_gate(&req, Some(&wan), "stable").is_err(), "{name} was carried");
+            assert!(wan_carry_gate(&req, Some(&wan), Some(TEST_DIR), "stable").is_err(), "{name} was carried");
         }
         // And with no wan.db at all.
         let (_dir, _wan, req) = signed_request();
-        assert_eq!(wan_carry_gate(&req, None, "stable"), Err("no wan.db"));
+        assert_eq!(wan_carry_gate(&req, None, Some(TEST_DIR), "stable"), Err("no wan.db"));
+        // 4, after a sign-in to another account or relay: published there
+        // under the old one only, or no account at all.
+        let (_dir, wan, req) = signed_request();
+        assert_eq!(
+            wan_carry_gate(&req, Some(&wan), Some("https://relay.test#another-account"), "stable"),
+            Err("key not published to this directory")
+        );
+        assert_eq!(wan_carry_gate(&req, Some(&wan), None, "stable"), Err("no account to publish under"));
     }
 
     #[tokio::test]
     async fn the_carried_tuple_rides_the_body_and_its_absence_keeps_the_old_shape() {
         let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
         let (_dir, wan, req) = signed_request();
-        let carried = wan_carry_gate(&req, Some(&wan), "stable").unwrap();
+        let carried = wan_carry_gate(&req, Some(&wan), Some(TEST_DIR), "stable").unwrap();
         let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried))
             .await;
         {

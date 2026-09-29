@@ -428,6 +428,13 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
+/// The `sub` claim of a Cognito token (unverified decode: this names the
+/// account a token we already hold belongs to, it doesn't authenticate it).
+/// Empty if the token isn't a JWT or has no `sub`.
+pub(crate) fn token_sub(token: &str) -> String {
+    extract_jwt_claims(token).1
+}
+
 fn extract_jwt_claims(token: &str) -> (String, String) {
     let payload = token.splitn(3, '.').nth(1).unwrap_or("");
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD

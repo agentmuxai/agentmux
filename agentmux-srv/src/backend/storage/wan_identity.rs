@@ -45,7 +45,8 @@ use super::error::StoreError;
 /// Bumped only by additive changes (new tables, new nullable columns).
 /// v2 (D2): the receiver tables — peer-record cache, known instances, and
 /// seen signatures.
-const SCHEMA_VERSION: i64 = 2;
+/// v3: `wan_agent_key_publications` — publication recorded per directory.
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS wan_meta (
@@ -71,9 +72,22 @@ const SCHEMA: &str = "
         -- db_agent_wan_keys rather than minted here.
         imported     INTEGER NOT NULL DEFAULT 0,
         -- D1b: the fingerprint of the certificate confirmed published to the
-        -- cloud directory, and when. NULL until then.
+        -- cloud directory, and when. Superseded by wan_agent_key_publications
+        -- (v3), which records WHICH directory; no longer read or written here.
         published_fp TEXT,
         published_at INTEGER
+    );
+    -- v3: which key fingerprint each directory is confirmed to hold. A
+    -- directory is a relay plus the account it was published under
+    -- (`wan_publish::directory_id`). A sign-in to another relay or account
+    -- simply has no row yet, so the key is pending there — no reset needed,
+    -- whichever process or channel of this file did the publishing.
+    CREATE TABLE IF NOT EXISTS wan_agent_key_publications (
+        agent_id     TEXT    NOT NULL,
+        directory    TEXT    NOT NULL,
+        key_fp       TEXT    NOT NULL,
+        published_at INTEGER NOT NULL,
+        PRIMARY KEY (agent_id, directory)
     );
     -- v2 (D2, receiver side) --
     -- Directory records fetched for verification. Self-certifying and
@@ -147,10 +161,6 @@ pub struct WanAgentKey {
     /// `issued_at`, so re-certifying a key produces the identical record and
     /// a re-publish is a no-op at the directory.
     pub created_at: i64,
-    /// The fingerprint of this key's certificate once the cloud directory
-    /// accepted it; `None` until then. The relay carry gate (§2.1 condition
-    /// 4) requires it to equal the key's own fingerprint.
-    pub published_fp: Option<String>,
 }
 
 impl std::fmt::Debug for WanAgentKey {
@@ -159,7 +169,6 @@ impl std::fmt::Debug for WanAgentKey {
             .field("public_key", &self.public_key)
             .field("imported", &self.imported)
             .field("created_at", &self.created_at)
-            .field("published_fp", &self.published_fp)
             .finish_non_exhaustive()
     }
 }
@@ -170,13 +179,6 @@ impl WanAgentKey {
         decode_32(&self.public_key)
     }
 
-    /// Whether the directory is confirmed to hold this exact key.
-    pub fn is_published(&self) -> bool {
-        match (self.public_key_bytes(), &self.published_fp) {
-            (Some(public), Some(fp)) => agentmux_common::jekt_sign::wan_key_fingerprint(&public) == *fp,
-            _ => false,
-        }
-    }
 }
 
 /// What this install knows about another instance (§2.6).
@@ -189,12 +191,6 @@ pub struct KnownInstance {
 
 pub struct WanIdentityStore {
     conn: Mutex<Connection>,
-    /// Bumped by `agent_keys_forget_published`, under `conn`'s lock. A
-    /// publication records the generation it started under and only marks
-    /// if it's still current, so a PUT to the previous directory that is
-    /// still in flight at a sign-in can't restore a cleared mark. In memory:
-    /// the sign-in and the publisher run in the same process.
-    publish_gen: std::sync::atomic::AtomicU64,
 }
 
 static GLOBAL: std::sync::OnceLock<std::sync::Arc<WanIdentityStore>> = std::sync::OnceLock::new();
@@ -320,7 +316,7 @@ impl WanIdentityStore {
         if let Some(dir) = path.parent() {
             restrict_permissions(dir, path);
         }
-        Ok(Self { conn: Mutex::new(conn), publish_gen: std::sync::atomic::AtomicU64::new(0) })
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
     /// The newest schema version any binary has written to this file.
@@ -391,7 +387,7 @@ impl WanIdentityStore {
         Self::agent_key_load_locked(&conn, &agent_id.to_lowercase())
     }
 
-    const AGENT_KEY_COLUMNS: &'static str = "public_key, private_key, imported, created_at, published_fp";
+    const AGENT_KEY_COLUMNS: &'static str = "public_key, private_key, imported, created_at";
 
     fn agent_key_from_row(r: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<WanAgentKey> {
         Ok(WanAgentKey {
@@ -399,7 +395,6 @@ impl WanIdentityStore {
             private_key: r.get(offset + 1)?,
             imported: r.get::<_, i64>(offset + 2)? != 0,
             created_at: r.get(offset + 3)?,
-            published_fp: r.get(offset + 4)?,
         })
     }
 
@@ -413,71 +408,69 @@ impl WanIdentityStore {
             .optional()?)
     }
 
-    /// Every agent key the directory is not confirmed to hold, by agent id —
+    /// Every agent key `directory` is not confirmed to hold, by agent id —
     /// what the publisher (`muxbus/wan_publish.rs`) works through.
-    pub fn agent_keys_unpublished(&self) -> Result<Vec<(String, WanAgentKey)>, StoreError> {
+    pub fn agent_keys_unpublished(&self, directory: &str) -> Result<Vec<(String, WanAgentKey)>, StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = conn.prepare(&format!(
-            "SELECT agent_id, {} FROM wan_agent_keys ORDER BY agent_id",
-            Self::AGENT_KEY_COLUMNS
+            "SELECT k.agent_id, {}, p.key_fp FROM wan_agent_keys k \
+             LEFT JOIN wan_agent_key_publications p ON p.agent_id = k.agent_id AND p.directory = ?1 \
+             ORDER BY k.agent_id",
+            Self::AGENT_KEY_COLUMNS.split(", ").map(|c| format!("k.{c}")).collect::<Vec<_>>().join(", ")
         ))?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, Self::agent_key_from_row(r, 1)?)))?;
+        let rows = stmt.query_map(params![directory], |r| {
+            Ok((r.get::<_, String>(0)?, Self::agent_key_from_row(r, 1)?, r.get::<_, Option<String>>(5)?))
+        })?;
         let mut out = Vec::new();
         for row in rows {
-            let (agent_id, key) = row?;
-            if !key.is_published() {
+            let (agent_id, key, published_fp) = row?;
+            if !Self::fp_matches(&key, published_fp.as_deref()) {
                 out.push((agent_id, key));
             }
         }
         Ok(out)
     }
 
-    /// Record that the directory accepted `public_key`'s certificate. Only
-    /// marks the row if it still holds that key — an agent deleted and
+    /// Whether `directory` is confirmed to hold `key`, `agent_id`'s current
+    /// key — the relay carry gate's condition 4 (`relay::wan_carry_gate`).
+    pub fn agent_key_is_published_to(&self, agent_id: &str, key: &WanAgentKey, directory: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let fp: Option<String> = conn
+            .query_row(
+                "SELECT key_fp FROM wan_agent_key_publications WHERE agent_id = ?1 AND directory = ?2",
+                params![agent_id.to_lowercase(), directory],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(Self::fp_matches(key, fp.as_deref()))
+    }
+
+    fn fp_matches(key: &WanAgentKey, published_fp: Option<&str>) -> bool {
+        match (key.public_key_bytes(), published_fp) {
+            (Some(public), Some(fp)) => agentmux_common::jekt_sign::wan_key_fingerprint(&public) == fp,
+            _ => false,
+        }
+    }
+
+    /// Record that `directory` accepted `public_key`'s certificate. Only
+    /// marks if the row still holds that key — an agent deleted and
     /// recreated while the PUT was in flight must not have its new key marked
-    /// published on the strength of the old one's.
-    pub fn agent_key_mark_published(&self, agent_id: &str, public_key: &str) -> Result<bool, StoreError> {
-        self.agent_key_mark_published_at(agent_id, public_key, self.publish_generation())
-    }
-
-    /// The generation a publication should record before its PUT; see
-    /// `publish_gen`.
-    pub fn publish_generation(&self) -> u64 {
-        self.publish_gen.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// `agent_key_mark_published`, but only if the marks haven't been
-    /// forgotten since `generation` was read — the publisher's form, so a
-    /// PUT that started before a sign-in can't mark against the new
-    /// directory. `Ok(false)` when stale; the next pass publishes the key.
-    pub fn agent_key_mark_published_at(&self, agent_id: &str, public_key: &str, generation: u64) -> Result<bool, StoreError> {
+    /// published on the strength of the old one's. `directory` must be the
+    /// one the PUT went to, so a PUT that returns after a sign-in to another
+    /// account marks the old directory, not the new one.
+    pub fn agent_key_mark_published(&self, agent_id: &str, public_key: &str, directory: &str) -> Result<bool, StoreError> {
         let Some(public) = decode_32(public_key) else { return Ok(false) };
         let fp = agentmux_common::jekt_sign::wan_key_fingerprint(&public);
+        let agent_id = agent_id.to_lowercase();
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        if self.publish_generation() != generation {
-            return Ok(false);
-        }
         let updated = conn.execute(
-            "UPDATE wan_agent_keys SET published_fp = ?1, published_at = ?2 WHERE agent_id = ?3 AND public_key = ?4",
-            params![fp, agentmux_common::time::now_secs(), agent_id.to_lowercase(), public_key],
+            "INSERT INTO wan_agent_key_publications (agent_id, directory, key_fp, published_at) \
+             SELECT ?1, ?2, ?3, ?4 WHERE EXISTS \
+               (SELECT 1 FROM wan_agent_keys WHERE agent_id = ?1 AND public_key = ?5) \
+             ON CONFLICT (agent_id, directory) DO UPDATE SET key_fp = excluded.key_fp, published_at = excluded.published_at",
+            params![agent_id, directory, fp, agentmux_common::time::now_secs(), public_key],
         )?;
         Ok(updated > 0)
-    }
-
-    /// Forget which keys the directory holds, so the publisher sends them all
-    /// again. For a sign-in: the marks record what the directory at the time
-    /// accepted, and a sign-in can land on a different one (another relay, or
-    /// another account) that has never seen them. Keys are kept. Returns how
-    /// many marks were cleared.
-    pub fn agent_keys_forget_published(&self) -> Result<usize, StoreError> {
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        // Under the lock, so a mark can't slip in between the bump and the
-        // clear (`agent_key_mark_published_at` checks under the same lock).
-        self.publish_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(conn.execute(
-            "UPDATE wan_agent_keys SET published_fp = NULL, published_at = NULL WHERE published_fp IS NOT NULL",
-            [],
-        )?)
     }
 
     /// An agent's WAN key, created on first call: `import` (the agent's key
@@ -824,46 +817,54 @@ mod tests {
     }
 
     #[test]
-    fn forgetting_publications_makes_every_key_pending_again() {
-        // A sign-in can land on a different directory (another cloud, or
-        // another account) that has never seen these keys. The marks record
-        // what the OLD directory accepted, so they must not survive it, or
-        // the publisher idles and every jekt from here arrives unverified.
+    fn a_key_published_to_one_directory_is_pending_in_another() {
+        // A sign-in to another relay or account lands on a directory that has
+        // never seen these keys. Marks for the old one must not count there,
+        // or the publisher idles and every jekt from here arrives unverified.
         let (_dir, store) = temp_store();
         let camper = store.agent_key_ensure("camper", None).unwrap();
-        let lark = store.agent_key_ensure("lark", None).unwrap();
-        assert!(store.agent_key_mark_published("camper", &camper.public_key).unwrap());
-        assert!(store.agent_key_mark_published("lark", &lark.public_key).unwrap());
-        assert!(store.agent_keys_unpublished().unwrap().is_empty());
+        let (old, new) = ("https://relay#old-account", "https://relay#new-account");
+        assert!(store.agent_key_mark_published("camper", &camper.public_key, old).unwrap());
 
-        assert_eq!(store.agent_keys_forget_published().unwrap(), 2);
+        assert!(store.agent_keys_unpublished(old).unwrap().is_empty());
+        assert!(store.agent_key_is_published_to("camper", &camper, old).unwrap());
+        let pending: Vec<String> = store.agent_keys_unpublished(new).unwrap().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(pending, vec!["camper".to_string()]);
+        assert!(!store.agent_key_is_published_to("camper", &camper, new).unwrap());
 
-        let pending: Vec<String> = store.agent_keys_unpublished().unwrap().into_iter().map(|(id, _)| id).collect();
-        assert_eq!(pending, vec!["camper".to_string(), "lark".to_string()]);
-        assert_eq!(
-            store.agent_key_load("camper").unwrap().unwrap().public_key,
-            camper.public_key,
-            "only the marks go: the keys themselves are kept"
-        );
-        assert_eq!(store.agent_keys_forget_published().unwrap(), 0, "nothing left to forget");
+        assert!(store.agent_key_mark_published("camper", &camper.public_key, new).unwrap());
+        assert!(store.agent_keys_unpublished(new).unwrap().is_empty());
+        assert!(store.agent_key_is_published_to("Camper", &camper, old).unwrap(), "the old mark stays: case-insensitive, both directories hold it");
     }
 
     #[test]
-    fn a_publication_started_before_forgetting_cannot_restore_its_mark() {
-        // Codex P2 on #3994: a PUT to the OLD directory is in flight when the
-        // sign-in forgets the marks. When it returns, its mark must not land,
-        // or the new directory never gets the key.
+    fn a_publication_that_returns_after_a_sign_in_marks_the_directory_it_went_to() {
+        // Codex P2s on #3994: a PUT to the OLD account can complete after the
+        // sign-in, in this process or another one sharing this file. It
+        // records the directory it was sent to, so the new one still sees
+        // the key as pending.
         let (_dir, store) = temp_store();
         let camper = store.agent_key_ensure("camper", None).unwrap();
-        let before = store.publish_generation(); // the old pass starts its PUT
-        store.agent_keys_forget_published().unwrap(); // the sign-in lands mid-PUT
+        let (old, new) = ("https://relay#old-account", "https://relay#new-account");
+        // Another process opening the same file, as a second version would.
+        let other = WanIdentityStore::open(&_dir.path().join("wan-identity").join("wan.db")).unwrap();
+        assert!(other.agent_key_mark_published("camper", &camper.public_key, old).unwrap());
+        assert_eq!(store.agent_keys_unpublished(new).unwrap().len(), 1);
+    }
 
-        assert!(!store.agent_key_mark_published_at("camper", &camper.public_key, before).unwrap());
-        assert_eq!(store.agent_keys_unpublished().unwrap().len(), 1, "the next pass still publishes it");
-
-        let now = store.publish_generation();
-        assert!(store.agent_key_mark_published_at("camper", &camper.public_key, now).unwrap());
-        assert!(store.agent_keys_unpublished().unwrap().is_empty());
+    #[test]
+    fn marks_written_before_v3_count_for_no_directory() {
+        // Upgrade: a key an older binary marked in `published_fp` doesn't say
+        // where it went, so it's published again once, to the current one.
+        let (_dir, store) = temp_store();
+        let camper = store.agent_key_ensure("camper", None).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE wan_agent_keys SET published_fp = 'x', published_at = 1 WHERE agent_id = 'camper'", []).unwrap();
+        }
+        assert_eq!(store.agent_keys_unpublished("https://relay#acct").unwrap().len(), 1);
+        assert!(!store.agent_key_is_published_to("camper", &camper, "https://relay#acct").unwrap());
+        assert_eq!(store.schema_version().unwrap(), 3);
     }
 
     #[test]

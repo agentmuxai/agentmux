@@ -40,6 +40,15 @@ const NOT_SUPPORTED_RETRY_SECS: u64 = 60 * 60;
 
 const PUBLISH_TIMEOUT_SECS: u64 = 10;
 
+/// Which directory a publication is for: the relay's REST base plus the
+/// account (the token's `sub`). The directory is keyed by account, and a
+/// relay move or a sign-in to another account is a directory that has never
+/// seen this install's keys — so `wan.db` records publications per this id,
+/// and a key counts as published only to the directory it went to.
+pub(crate) fn directory_id(base_url: &str, account_sub: &str) -> String {
+    format!("{}#{}", base_url.trim_end_matches('/'), account_sub)
+}
+
 static NUDGE: OnceLock<Arc<tokio::sync::Notify>> = OnceLock::new();
 
 fn nudge_handle() -> Arc<tokio::sync::Notify> {
@@ -127,12 +136,9 @@ pub(crate) async fn publish_pending(
     base_url: &str,
     http: &reqwest::Client,
     token: &str,
+    directory: &str,
 ) -> PassResult {
-    // Before reading what's pending: if a sign-in forgets the marks while this
-    // pass's PUTs (to the directory and token it started with) are in flight,
-    // they must not mark anything. The next pass publishes to the new one.
-    let generation = wan.publish_generation();
-    let pending = match wan.agent_keys_unpublished() {
+    let pending = match wan.agent_keys_unpublished(directory) {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(error = %e, "wan publish: could not read wan.db");
@@ -147,11 +153,13 @@ pub(crate) async fn publish_pending(
             continue;
         };
         match publish_record(base_url, http, token, &record).await {
-            PublishOutcome::Published => match wan.agent_key_mark_published_at(agent_id, &key.public_key, generation) {
+            // Marked for `directory`, the one this PUT went to, even if a
+            // sign-in to another account has landed since: the new directory
+            // still sees the key as pending.
+            PublishOutcome::Published => match wan.agent_key_mark_published(agent_id, &key.public_key, directory) {
                 Ok(true) => result.published += 1,
                 // The key changed under us (agent deleted and recreated
-                // mid-PUT), or a sign-in forgot the marks mid-PUT; either
-                // way the next pass publishes the current key.
+                // mid-PUT); the new key is picked up next pass.
                 Ok(false) => {}
                 Err(e) => {
                     tracing::warn!(agent = %agent_id, error = %e, "wan publish: could not record publication");
@@ -168,7 +176,7 @@ pub(crate) async fn publish_pending(
             }
         }
     }
-    result.remaining = wan.agent_keys_unpublished().map(|p| p.len()).unwrap_or(pending.len());
+    result.remaining = wan.agent_keys_unpublished(directory).map(|p| p.len()).unwrap_or(pending.len());
     result
 }
 
@@ -212,21 +220,29 @@ async fn run_pass(wan: &Arc<WanIdentityStore>, id_store: &Arc<Store>, http: &req
             return Wait::Retry;
         }
     };
-    if wan.agent_keys_unpublished().map(|p| p.is_empty()).unwrap_or(false) {
-        return Wait::Idle;
-    }
     let Some(scheduler) = crate::broker::get_global() else { return Wait::Retry };
     let Some(token) = crate::muxbus::cloud_subscriber::load_valid_token(id_store, &scheduler).await else {
         tracing::debug!("wan publish: not logged in to muxbus — keys stay unpublished");
         return Wait::Retry;
     };
+    let account = crate::muxbus::pkce::token_sub(&token);
+    if account.is_empty() {
+        tracing::warn!("wan publish: the account token names no account — keys stay unpublished");
+        return Wait::Retry;
+    }
+    let base_url = crate::muxbus::relay::rest_base_url();
+    let directory = directory_id(&base_url, &account);
+    if wan.agent_keys_unpublished(&directory).map(|p| p.is_empty()).unwrap_or(false) {
+        return Wait::Idle;
+    }
     let result = publish_pending(
         wan,
         &instance,
         &crate::backend::reactive::registry::local_channel_id(),
-        &crate::muxbus::relay::rest_base_url(),
+        &base_url,
         http,
         &token,
+        &directory,
     )
     .await;
     if result.published > 0 {
@@ -284,6 +300,13 @@ mod tests {
         Stub { seen, _guard: token.drop_guard(), url: format!("http://{addr}") }
     }
 
+    const DIR: &str = "https://relay.test#acct";
+
+    fn published(wan: &WanIdentityStore, agent_id: &str, directory: &str) -> bool {
+        let key = wan.agent_key_load(agent_id).unwrap().unwrap();
+        wan.agent_key_is_published_to(agent_id, &key, directory).unwrap()
+    }
+
     fn temp_wan() -> (tempfile::TempDir, WanIdentityStore, WanInstance) {
         let dir = tempfile::tempdir().unwrap();
         let wan = WanIdentityStore::open(&dir.path().join("wan.db")).unwrap();
@@ -310,9 +333,9 @@ mod tests {
         wan.agent_key_ensure("camper", None).unwrap();
         wan.agent_key_ensure("lark", None).unwrap();
 
-        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok").await;
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
         assert_eq!(result, PassResult { published: 2, remaining: 0, ..Default::default() });
-        assert!(wan.agent_key_load("camper").unwrap().unwrap().is_published());
+        assert!(published(&wan, "camper", DIR));
 
         let seen = stub.seen.lock().unwrap().clone();
         assert_eq!(seen.len(), 2);
@@ -325,7 +348,7 @@ mod tests {
         }
 
         // Nothing left: a second pass sends nothing.
-        let again = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok").await;
+        let again = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
         assert_eq!(again, PassResult::default());
         assert_eq!(stub.seen.lock().unwrap().len(), 2);
     }
@@ -336,7 +359,7 @@ mod tests {
         let (_dir, wan, instance) = temp_wan();
         wan.agent_key_ensure("camper", None).unwrap();
         wan.agent_key_ensure("lark", None).unwrap();
-        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok").await;
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
         assert!(result.not_supported);
         assert_eq!(result.remaining, 2);
         assert_eq!(stub.seen.lock().unwrap().len(), 1, "one 404 is enough to know");
@@ -347,9 +370,9 @@ mod tests {
         let stub = stub_directory(axum::http::StatusCode::BAD_REQUEST).await;
         let (_dir, wan, instance) = temp_wan();
         wan.agent_key_ensure("camper", None).unwrap();
-        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok").await;
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
         assert_eq!(result, PassResult { failed: 1, remaining: 1, ..Default::default() });
-        assert!(!wan.agent_key_load("camper").unwrap().unwrap().is_published());
+        assert!(!published(&wan, "camper", DIR));
     }
 
     #[tokio::test]
@@ -360,7 +383,7 @@ mod tests {
         };
         let (_dir, wan, instance) = temp_wan();
         wan.agent_key_ensure("camper", None).unwrap();
-        let result = publish_pending(&wan, &instance, "stable", &url, &reqwest::Client::new(), "tok").await;
+        let result = publish_pending(&wan, &instance, "stable", &url, &reqwest::Client::new(), "tok", DIR).await;
         assert_eq!(result.failed, 1);
         assert_eq!(result.remaining, 1);
     }
@@ -372,9 +395,37 @@ mod tests {
         // Agent deleted and recreated while the PUT was in flight.
         wan.agent_keys_delete(&["camper".to_string()]).unwrap();
         let new = wan.agent_key_ensure("camper", None).unwrap();
-        assert!(!wan.agent_key_mark_published("camper", &old.public_key).unwrap());
-        assert!(!wan.agent_key_load("camper").unwrap().unwrap().is_published());
-        assert!(wan.agent_key_mark_published("camper", &new.public_key).unwrap());
-        assert!(wan.agent_key_load("camper").unwrap().unwrap().is_published());
+        assert!(!wan.agent_key_mark_published("camper", &old.public_key, DIR).unwrap());
+        assert!(!published(&wan, "camper", DIR));
+        assert!(wan.agent_key_mark_published("camper", &new.public_key, DIR).unwrap());
+        assert!(published(&wan, "camper", DIR));
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_to_another_account_publishes_every_key_again() {
+        // The relay moved (or the user signed in to another account): the
+        // new directory has never seen these keys. Before directory-bound
+        // marks, the old marks made this pass a no-op and every jekt from
+        // here arrived unverified.
+        let stub = stub_directory(axum::http::StatusCode::OK).await;
+        let (_dir, wan, instance) = temp_wan();
+        wan.agent_key_ensure("camper", None).unwrap();
+        let old = directory_id(&stub.url, "old-account");
+        let new = directory_id(&stub.url, "new-account");
+        let first = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", &old).await;
+        assert_eq!(first.published, 1);
+
+        let second = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok2", &new).await;
+        assert_eq!(second, PassResult { published: 1, remaining: 0, ..Default::default() });
+        assert!(published(&wan, "camper", &new));
+        assert!(published(&wan, "camper", &old), "the old directory's record stays true");
+        assert_eq!(stub.seen.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_directory_is_the_relay_plus_the_account() {
+        assert_eq!(directory_id("https://relay.example/", "sub-1"), "https://relay.example#sub-1");
+        assert_ne!(directory_id("https://relay.example", "sub-1"), directory_id("https://relay.example", "sub-2"));
+        assert_ne!(directory_id("https://a.example", "sub-1"), directory_id("https://b.example", "sub-1"));
     }
 }

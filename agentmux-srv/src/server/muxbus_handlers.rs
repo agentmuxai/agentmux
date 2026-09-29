@@ -251,14 +251,11 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // W3-S: a login may be an account switch — forget
                         // peer records fetched under the old account (§2.3),
                         // and publish any keys that were waiting on a login.
-                        // It may also land on a different directory (another
-                        // relay or account) that has never seen this
-                        // instance's keys: forget which ones the old one held,
-                        // or the publisher finds nothing to do and every jekt
-                        // from here arrives unverified. Republishing to the
-                        // same directory is an idempotent PUT.
+                        // A login to another relay or account is a directory
+                        // that has never seen this install's keys; publications
+                        // are recorded per directory, so the pass this nudge
+                        // starts finds them all pending there.
                         clear_wan_peer_cache();
-                        forget_wan_publications();
                         crate::muxbus::wan_publish::nudge();
                         let resp = MuxBusLoginResp {
                             success: true,
@@ -410,19 +407,6 @@ fn clear_wan_peer_cache() {
     if let Some(wan) = crate::backend::storage::wan_identity::global() {
         if let Err(e) = wan.peer_cache_clear() {
             tracing::warn!(error = %e, "wan identity: could not clear the peer-record cache");
-        }
-    }
-}
-
-/// After a login, send every agent key to the directory again
-/// (`WanIdentityStore::agent_keys_forget_published`). Best-effort like
-/// `clear_wan_peer_cache`: on failure the old marks stand, which is today's
-/// behavior.
-fn forget_wan_publications() {
-    if let Some(wan) = crate::backend::storage::wan_identity::global() {
-        match wan.agent_keys_forget_published() {
-            Ok(n) => tracing::info!(keys = n, "wan identity: keys will be published to the directory again"),
-            Err(e) => tracing::warn!(error = %e, "wan identity: could not reset the published marks"),
         }
     }
 }
