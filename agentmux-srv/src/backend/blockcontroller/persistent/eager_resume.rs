@@ -411,14 +411,19 @@ impl PersistentSubprocessController {
     /// unable to misread them is for them not to be there.
     pub(super) fn settle_eager_spawn_failure(&self, err: &str, retry_config: PersistentSpawnConfig) {
         let ownership_refusal = is_held_elsewhere_error(err);
+        // A Stop that cancelled a config restart's replacement must win over
+        // prompts queued behind it too: the fallback respawn below would start
+        // the agent the user just stopped (codex P1 on #3990).
+        let restart_cancelled = err == RESTART_OVERRIDDEN;
+        let no_fallback = ownership_refusal || restart_cancelled;
         let (stranded, discarded) = {
             let mut inner = self.inner.lock().unwrap();
             let n = inner.pending_send_messages.len();
             let mut discarded = 0;
-            if n == 0 || ownership_refusal {
+            if n == 0 || no_fallback {
                 inner.spawning_in_progress = false;
             }
-            if ownership_refusal {
+            if no_fallback {
                 discarded = inner.pending_send_messages.len();
                 inner.pending_send_messages.clear();
             }
@@ -427,20 +432,24 @@ impl PersistentSubprocessController {
         if stranded == 0 {
             return;
         }
-        if !ownership_refusal {
+        if !no_fallback {
             // Claim still held: `respawn_once_for_leftover_queue` owns its
             // release on either outcome.
             self.respawn_once_for_leftover_queue(retry_config);
             return;
         }
+        let why = if restart_cancelled {
+            "this agent was stopped before its config restart finished, so it was not restarted".to_string()
+        } else {
+            format!("this agent was not resumed. {err}")
+        };
         let frame = serde_json::json!({
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
             "error": {
                 "message": format!(
-                    "[AgentMux] {discarded} queued prompt(s) were not delivered and have been discarded: \
-                     this agent was not resumed. {err}"
+                    "[AgentMux] {discarded} queued prompt(s) were not delivered and have been discarded: {why}"
                 )
             }
         });
