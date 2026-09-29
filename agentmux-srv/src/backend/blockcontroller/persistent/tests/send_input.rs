@@ -3666,7 +3666,13 @@ async fn a_message_arriving_after_a_restart_is_committed_is_kept_for_the_replace
 #[tokio::test]
 async fn the_watchdog_waits_out_a_restart_and_delivers_to_the_replacement() {
     let c = controller();
-    c.inner.lock().unwrap().restart_pending = true;
+    // The process being restarted is still dying: it holds stdin.
+    let (old_tx, _old_rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stdin_tx = Some(old_tx);
+    }
     c.send_user_message("for the replacement".to_string()).unwrap();
 
     let mut orphaned = 0;
@@ -3950,15 +3956,18 @@ fn any_later_stop_overrides_a_committed_config_restart() {
 #[test]
 fn a_restart_that_cannot_resume_stops_holding_jekts_back() {
     let (block_id, c) = registered_controller();
+    // Queued while the restarted process was still dying: held for the
+    // replacement, as before the incident.
+    let (old_tx, _old_rx) = mpsc::channel::<String>(4);
     {
         let mut inner = c.inner.lock().unwrap();
-        // The kill arm has run: no process, restart window still open.
         inner.restart_pending = true;
         inner.stop_pending = true;
-        inner.stdin_tx = None;
+        inner.stdin_tx = Some(old_tx);
     }
     assert_eq!(c.send_user_message_outcome("jekt".to_string()).unwrap(), SendOutcome::Deferred);
-    assert!(c.deferred_must_wait_locked(&c.inner.lock().unwrap()), "precondition: the jekt is held back");
+    // The kill arm has run: no process, and no respawn claim yet.
+    c.inner.lock().unwrap().stdin_tx = None;
 
     c.respawn_after_config_restart(0);
 
@@ -4083,4 +4092,70 @@ fn a_stop_overriding_the_restart_still_closes_the_window() {
     assert!(!inner.spawning_in_progress, "the Stop won: nothing was started");
     drop(inner);
     crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
+}
+
+/// ReAgent P1 on #3990: a competing spawn claim (a human's message) wins the
+/// race with the restart's respawn and then fails. Nothing clears
+/// `restart_pending` then, so the restart must stop holding jekts once its
+/// process is gone and no spawn is in flight; they fall to the grace window
+/// and are reported stranded rather than waiting forever.
+#[tokio::test]
+async fn a_restart_whose_process_is_gone_stops_holding_jekts_even_if_nothing_closes_it() {
+    let c = controller();
+    let (old_tx, _old_rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stop_pending = true;
+        inner.config_restart_generation = Some(1);
+        inner.stdin_tx = Some(old_tx); // still dying
+    }
+    c.send_user_message("jekt".to_string()).unwrap(); // queued for the replacement
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = None; // exited
+        inner.spawning_in_progress = false; // the competing spawn failed and released its claim
+    }
+    assert!(!c.deferred_must_wait_locked(&c.inner.lock().unwrap()));
+
+    let mut orphaned = 0;
+    let mut steps = 0;
+    while c.sweep_deferred_once(&mut orphaned) == WatchdogStep::Continue {
+        steps += 1;
+        assert!(steps <= DEFERRED_ORPHAN_GRACE_TICKS, "must be reported within the grace window");
+    }
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty(), "reported stranded, not held");
+}
+
+/// …while a respawn holding the claim keeps the queue waiting for it.
+#[tokio::test]
+async fn a_restart_respawn_in_flight_keeps_jekts_queued_for_it() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stdin_tx = None;
+        inner.spawning_in_progress = true;
+    }
+    c.send_user_message("jekt".to_string()).unwrap();
+    let mut orphaned = 0;
+    for _ in 0..DEFERRED_ORPHAN_GRACE_TICKS * 2 {
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    }
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
+}
+
+/// With the restarted process gone and nothing spawning, a new jekt is
+/// refused with a truthful error the sender sees, not silently parked.
+#[test]
+fn a_jekt_with_no_process_and_no_spawn_is_refused_not_parked() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = true;
+        inner.stdin_tx = None;
+    }
+    let err = c.send_user_message_outcome("jekt".to_string()).unwrap_err();
+    assert!(err.contains("restarting"), "got: {err}");
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
 }
