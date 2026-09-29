@@ -418,3 +418,87 @@ impl PersistentSubprocessController {
         self.flush_error_line_now(format!("{frame}\n"));
     }
 }
+
+impl PersistentSubprocessController {
+    /// The second half of a deferred runtime-config restart, run by the kill
+    /// arm once the old process is gone: resume the same session with the
+    /// config now in block meta, exactly as a restart that found the pane idle
+    /// does (`resync_controller` replaces the controller and `start()`
+    /// eager-resumes). Before this the pane stayed empty "until the next
+    /// message", and a jekt is never that message: automated delivery doesn't
+    /// spawn, and it waits while `restart_pending` is set, so every message to
+    /// the agent queued until a human typed into it
+    /// (`docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md`).
+    ///
+    /// Nothing is started for a controller that's no longer this block's (a
+    /// pane closed or replaced in the window), or when something already
+    /// replaced the process (a human message's spawn clears `restart_pending`).
+    /// If the resume is declined, the restart window is closed anyway, so
+    /// queued deliveries fall to the no-process rules (reported stranded after
+    /// the watchdog's grace) instead of waiting for a spawn that isn't coming.
+    pub(super) fn respawn_after_config_restart(&self) {
+        let is_this_blocks_controller = super::super::get_controller(&self.block_id).is_some_and(|c| {
+            c.as_any()
+                .downcast_ref::<PersistentSubprocessController>()
+                .is_some_and(|c| std::ptr::eq(c, self))
+        });
+        if !is_this_blocks_controller {
+            tracing::info!(
+                block_id = %self.block_id,
+                "config restart: controller no longer serves this block — not respawning"
+            );
+            return;
+        }
+        {
+            let inner = self.inner.lock().unwrap();
+            if !inner.restart_pending || inner.stdin_tx.is_some() || inner.spawning_in_progress {
+                return;
+            }
+        }
+        let block_meta = self
+            .mstore
+            .as_ref()
+            .and_then(|s| s.get::<crate::backend::obj::Block>(&self.block_id).ok().flatten())
+            .map(|b| b.meta);
+        let session_id = block_meta
+            .as_ref()
+            .map(|m| crate::backend::obj::meta_get_string(m, core::META_SESSION_ID, ""))
+            .unwrap_or_default();
+        let outcome = match block_meta {
+            Some(ref meta) if !session_id.is_empty() => self.try_eager_resume(meta, &session_id),
+            Some(_) => EagerResumeOutcome::DeclinedTo("no session id on file"),
+            None => EagerResumeOutcome::DeclinedTo("block not found"),
+        };
+        match outcome {
+            EagerResumeOutcome::Spawned => {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    session_id = %session_id,
+                    "config restart: replacement process resumed the session"
+                );
+            }
+            EagerResumeOutcome::DeclinedTo(reason) => {
+                self.close_restart_window_without_process();
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    reason = %reason,
+                    "config restart: could not resume a replacement — the agent waits for its next \
+                     message, and queued deliveries follow the no-process rules"
+                );
+            }
+        }
+    }
+
+    /// End a config restart's quiesce window when no replacement is coming:
+    /// with `restart_pending` (and the restart's own `stop_pending`) left set,
+    /// `deferred_must_wait_locked` holds every queued delivery forever and the
+    /// watchdog never reports it. Leaves them alone if a spawn has meanwhile
+    /// begun, since that spawn clears both itself.
+    pub(super) fn close_restart_window_without_process(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.stdin_tx.is_none() && !inner.spawning_in_progress {
+            inner.restart_pending = false;
+            inner.stop_pending = false;
+        }
+    }
+}

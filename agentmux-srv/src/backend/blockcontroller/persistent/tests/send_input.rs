@@ -3856,3 +3856,109 @@ async fn the_mark_after_a_spawn_does_not_taint_the_user_s_turn() {
     let p = c.turn_provenance().expect("a turn is in flight");
     assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
 }
+
+// ── A deferred restart brings its replacement up (Korp, 2026-09-29) ──────
+//
+// The restart used to stop the process and wait for "the next message" to
+// respawn it. Automated delivery never spawns and waits while
+// `restart_pending` is set, so every jekt to the agent queued until a human
+// typed into its pane (docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md).
+
+fn registered_controller() -> (String, Arc<PersistentSubprocessController>) {
+    let block_id = format!("block-restart-{}", uuid::Uuid::new_v4());
+    let c = Arc::new(PersistentSubprocessController::new(
+        "tab".to_string(),
+        block_id.clone(),
+        None,
+        None,
+        None,
+        None,
+    ));
+    crate::backend::blockcontroller::register_controller(&block_id, c.clone());
+    (block_id, c)
+}
+
+#[test]
+fn a_config_restart_stop_marks_the_generation_it_restarts() {
+    let c = controller();
+    c.inner.lock().unwrap().spawn_generation = 3;
+    c.stop_for_config_restart();
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.config_restart_generation, Some(3));
+    assert!(inner.stop_pending, "a restart is still a stop for the dying process");
+}
+
+/// A Stop, or a teardown's stop, landing after the restart was committed
+/// must win: nothing may respawn an agent the user just stopped.
+#[test]
+fn any_later_stop_overrides_a_committed_config_restart() {
+    for later_stop in [
+        (|c: &PersistentSubprocessController| {
+            let _ = c.stop_process(false);
+        }) as fn(&PersistentSubprocessController),
+        |c| {
+            let _ = c.request_stop_draining_deferred(KillRequest::Force);
+        },
+    ] {
+        let c = controller();
+        c.stop_for_config_restart();
+        later_stop(&c);
+        assert_eq!(c.inner.lock().unwrap().config_restart_generation, None);
+    }
+}
+
+/// The incident itself: the restart's process is gone and the replacement
+/// can't be resumed (here: no store to read the session from). Before the
+/// fix a jekt then waited on `restart_pending` forever, with the watchdog
+/// resetting its orphan timer on every tick.
+#[test]
+fn a_restart_that_cannot_resume_stops_holding_jekts_back() {
+    let (block_id, c) = registered_controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        // The kill arm has run: no process, restart window still open.
+        inner.restart_pending = true;
+        inner.stop_pending = true;
+        inner.stdin_tx = None;
+    }
+    assert_eq!(c.send_user_message_outcome("jekt".to_string()).unwrap(), SendOutcome::Deferred);
+    assert!(c.deferred_must_wait_locked(&c.inner.lock().unwrap()), "precondition: the jekt is held back");
+
+    c.respawn_after_config_restart();
+
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.restart_pending && !inner.stop_pending, "the window must close when no replacement is coming");
+    assert!(
+        !c.deferred_must_wait_locked(&inner),
+        "queued jekts must fall to the no-process rules, not wait forever",
+    );
+    assert_eq!(inner.deferred_deliveries.len(), 1, "the jekt itself is kept for the watchdog to report");
+    drop(inner);
+    crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
+}
+
+#[test]
+fn no_respawn_for_a_controller_that_no_longer_serves_its_block() {
+    let c = controller(); // never registered: a closed or replaced pane
+    c.inner.lock().unwrap().restart_pending = true;
+    c.respawn_after_config_restart();
+    assert!(c.inner.lock().unwrap().restart_pending, "a stale controller must leave its state alone");
+}
+
+#[test]
+fn no_respawn_once_something_else_replaced_the_process() {
+    let (block_id, c) = registered_controller();
+    let (tx, _rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        // A human message's spawn got there first: it cleared the window.
+        inner.restart_pending = false;
+        inner.stdin_tx = Some(tx);
+        inner.stop_pending = true;
+    }
+    c.respawn_after_config_restart();
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.stdin_tx.is_some() && inner.stop_pending, "a live replacement is left untouched");
+    drop(inner);
+    crate::backend::blockcontroller::remove_controller_entry_only(&block_id);
+}

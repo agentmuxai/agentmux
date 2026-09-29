@@ -356,6 +356,19 @@ struct PersistentInner {
     /// Set under the same lock as the kill request, cleared when the
     /// replacement process spawns, exactly like `restart_pending`.
     stop_pending: bool,
+    /// The spawn generation a deferred runtime-config restart is stopping
+    /// ([`Self::stop_for_config_restart`]), so its kill arm knows to bring the
+    /// replacement up itself once the process is gone.
+    ///
+    /// Without it the pane was left with no process until a human typed into
+    /// it: automated delivery (`send_user_message`) never spawns, and it waits
+    /// while `restart_pending` is set, so jekts queued forever (Korp on narko,
+    /// 2026-09-29; `docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md`).
+    /// A restart is also a stop (`stop_pending`, `StopRequested`), so neither
+    /// of those can tell it apart from a user's Stop; this can. Any other stop
+    /// request clears it, so an explicit Stop or a pane close that lands in
+    /// the window is never undone by a respawn.
+    config_restart_generation: Option<u64>,
     /// This spawn generation's stale-`--resume` retry decision, plus any
     /// held-back terminal error-result line — see
     /// `persistent_resume::ResumeState`'s own doc comment for the full
@@ -1146,6 +1159,7 @@ impl PersistentSubprocessController {
                 restart_when_idle: false,
                 restart_pending: false,
                 stop_pending: false,
+                config_restart_generation: None,
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
@@ -1463,6 +1477,8 @@ impl Controller for PersistentSubprocessController {
                     // shut down (codex P2 on #3562). The interrupt itself
                     // goes out on `stdin_tx` directly, not through the gate.
                     g.stop_pending = true;
+                    // A pane close outranks a committed config restart.
+                    g.config_restart_generation = None;
                     // Nothing queued may start a new turn after the interrupt.
                     g.pending_send_messages.clear();
                     // Before the interrupt: its `is_error` result is our stop,

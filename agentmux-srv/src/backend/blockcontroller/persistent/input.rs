@@ -234,9 +234,12 @@ impl PersistentSubprocessController {
     ///   [`Self::stdin_owned_by_another_writer`]; this includes a spawn in
     ///   flight, whose write `try_write_stdin_locked` would refuse.
     /// - A committed config restart (`restart_pending`). The process is about
-    ///   to be killed, and it stays down until the next message respawns it.
-    ///   The queue is kept for that replacement, and the watchdog must not
-    ///   count this window toward reporting it stranded.
+    ///   to be killed, and its kill arm brings the replacement up
+    ///   (`respawn_after_config_restart`), which clears this. The queue is kept
+    ///   for that replacement, and the watchdog must not count this window
+    ///   toward reporting it stranded. If the replacement can't be started, the
+    ///   window is closed anyway, so the queue falls to the no-process rules
+    ///   instead of waiting forever.
     /// - A requested kill (`stop_pending`), but only while the dying process
     ///   still holds `stdin_tx`: writes are refused then, and a refusal must
     ///   not reach an automated caller as an error (reagent P1 on #3562). Once
