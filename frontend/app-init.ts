@@ -64,6 +64,7 @@ import {
     startLauncherEventReducer,
 } from "@/app/store/launcher-event-reducer";
 import { startSingletonCrashRelease } from "@/app/store/singleton-modal";
+import { installFileDropController } from "@/app/drag/file-drop";
 import { MuxInitFatalError, requireLoaded } from "@/app/init/require-loaded";
 
 // Deferred — assigned inside initApp() after window.api is ready.
@@ -640,6 +641,8 @@ async function initAppInner() {
     // comment). No dependency on window.api / host state, so there's no
     // reason to delay it.
     installGlobalDropGuard();
+    // Pane file-drop targets and their indicator (SPEC_DRAG_AND_DROP_CONSOLIDATION §5.3).
+    installFileDropController();
 
     // Phase 3 voice input — surface permission errors via the existing
     // notification system. `useVoiceInput.ts` dispatches `voice-input-error`
@@ -1005,11 +1008,14 @@ function installWindowTitleEffect(windowId: string): void {
 
 /**
  * Global safety net against an unhandled OS file drop navigating the whole
- * window away. Terminal and Agent panes handle file drops themselves
- * (term.tsx, useAgentDropAttach.ts) and call preventDefault() on their own
- * dragover/drop listeners. But a drop landing outside any pane's content
- * area — the tab strip, title bar, splitters/gaps between panes, or any
- * pane type that never registered a handler — reaches no listener at all.
+ * window away. Pane file drops are handled by the window-level controller
+ * (app/drag/file-drop.ts, installed next to this), which already calls
+ * preventDefault() for every file drag it sees. This guard stays as a
+ * backstop for anything that controller doesn't claim, such as a drop on
+ * the tab strip or title bar, or on a pane type that never registered a
+ * hook, until the drag-session consolidation folds it into one
+ * window-event hub (SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §5.2,
+ * phase 4).
  * Chromium's default action for an unhandled file drop is to navigate the
  * top-level frame to the dropped file, which destroys this entire app
  * (the window's own controls are part of this same page, not native OS
@@ -1021,10 +1027,9 @@ function installWindowTitleEffect(windowId: string): void {
  * on the browser's own default text-insertion behavior
  * (SPEC_PANE_FILE_DROP_2026_05_30.md §7), which this must not suppress.
  *
- * Registered on `window` without `capture`, so it only runs in the bubble
- * phase, after any nearer pane-level handler already had first chance to
- * handle the event — this is a backstop, not a replacement for the
- * pane-scoped handlers.
+ * Registered on `window` without `capture`, so it runs in the bubble phase,
+ * after the capture-phase file-drop controller and any element's own
+ * handler (e.g. the drone canvas's node drops) had first chance.
  */
 function installGlobalDropGuard(): void {
     window.addEventListener("dragover", (e) => {

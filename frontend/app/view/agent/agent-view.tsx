@@ -3,7 +3,6 @@
 
 import { revealBlockLocally } from "@/app/util/reveal-block";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
-import { DragOverlay } from "@/app/element/dragoverlay";
 import {
     snapshot as layoutSnapshot,
     registerPane as registerLayoutPane,
@@ -2352,11 +2351,9 @@ const AgentPresentationView = ({
     // Persistence is owned by the universal zoom framework — see the
     // note below where the inline handlers were removed.
 
-    // File-drop attach. Drop a file onto the agent pane → copy it into the
-    // agent's CWD AND splice `@filename` into the composer at the caret, so
-    // the agent sees it on its next turn. Spec:
-    // docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md.
-    const dropAttach = useAgentDropAttach({
+    // File drops: this pane's hook for the window-level file-drop controller
+    // (tray, or copy + `@filename`). SPEC_DRAG_AND_DROP_CONSOLIDATION §5.3.
+    useAgentDropAttach({
         blockId: model.blockId,
         rootRef: () => rootRef,
     });
@@ -2557,7 +2554,6 @@ const AgentPresentationView = ({
                     />
                 </Portal>
             </Show>
-            <DragOverlay message={dropAttach.dropMessage()} visible={dropAttach.isDragOver()} />
             {/* /btw side-question overlay — ephemeral, floats over the whole
                 pane (position: absolute against .agent-view, styles/_btw.scss),
                 NOT part of the persisted layout tree and NOT gated on the

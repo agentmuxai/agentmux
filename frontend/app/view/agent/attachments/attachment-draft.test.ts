@@ -146,6 +146,109 @@ describe("AttachmentDraft", () => {
     });
 });
 
+class FakeXhr {
+    static made: FakeXhr[] = [];
+    upload: { onprogress: ((e: ProgressEvent) => void) | null } = { onprogress: null };
+    status = 0;
+    responseText = "";
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    name = "";
+    aborted = false;
+    constructor() {
+        FakeXhr.made.push(this);
+    }
+    open(_method: string, url: string) {
+        this.name = decodeURIComponent(url.split("name=")[1]);
+    }
+    setRequestHeader() {}
+    send() {}
+    abort() {
+        this.aborted = true;
+        this.onabort?.();
+    }
+    succeed(id: string) {
+        this.status = 200;
+        this.responseText = JSON.stringify(info(id));
+        this.onload?.();
+    }
+}
+
+describe("AttachmentDraft.uploadFiles", () => {
+    const files = (n: number) => Array.from({ length: n }, (_, i) => new File(["x"], `f${i}.png`));
+    const sent = () => FakeXhr.made.map((x) => x.name);
+
+    beforeEach(() => {
+        FakeXhr.made = [];
+        vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    });
+
+    it("shows every tile at once but keeps at most `concurrency` uploads in flight", () => {
+        const d = new AttachmentDraft("u1");
+        d.uploadFiles(files(5), 2);
+        expect(d.items()).toHaveLength(5);
+        expect(sent()).toEqual(["f0.png", "f1.png"]);
+        FakeXhr.made[0].succeed("a".repeat(64));
+        expect(sent()).toEqual(["f0.png", "f1.png", "f2.png"]);
+        FakeXhr.made[1].onerror?.();
+        expect(sent()).toEqual(["f0.png", "f1.png", "f2.png", "f3.png"]);
+    });
+
+    it("never sends a queued file that was removed", () => {
+        const d = new AttachmentDraft("u2");
+        d.uploadFiles(files(3), 1);
+        d.remove(d.items()[2].key);
+        FakeXhr.made[0].succeed("b".repeat(64));
+        FakeXhr.made[1].succeed("c".repeat(64));
+        expect(sent()).toEqual(["f0.png", "f1.png"]);
+        expect(d.items().map((i) => i.status)).toEqual(["ready", "ready"]);
+    });
+
+    it("cancel drops the queue along with what's in flight", () => {
+        const d = new AttachmentDraft("u3");
+        d.uploadFiles(files(3), 1);
+        d.cancel();
+        expect(FakeXhr.made[0].aborted).toBe(true);
+        expect(sent()).toEqual(["f0.png"]);
+        expect(d.items()).toEqual([]);
+    });
+
+    it("sends everything at once when no limit is given", () => {
+        const d = new AttachmentDraft("u4");
+        d.uploadFiles(files(3));
+        expect(sent()).toEqual(["f0.png", "f1.png", "f2.png"]);
+    });
+
+    it("a paste during a capped drop starts at once and never lifts the drop's cap", () => {
+        const d = new AttachmentDraft("u5");
+        d.uploadFiles(files(4), 2);
+        d.uploadFiles([new File(["x"], "p0.png"), new File(["x"], "p1.png")]);
+        expect(sent()).toEqual(["f0.png", "f1.png", "p0.png", "p1.png"]);
+        FakeXhr.made[2].succeed("d".repeat(64));
+        FakeXhr.made[3].succeed("e".repeat(64));
+        expect(sent()).toHaveLength(4);
+        FakeXhr.made[0].succeed("f".repeat(64));
+        expect(sent()).toEqual(["f0.png", "f1.png", "p0.png", "p1.png", "f2.png"]);
+    });
+
+    it("pastes already in flight don't hold back a capped drop", () => {
+        const d = new AttachmentDraft("u7");
+        d.uploadFiles([new File(["x"], "p0.png"), new File(["x"], "p1.png"), new File(["x"], "p2.png")]);
+        d.uploadFiles(files(3), 2);
+        expect(sent()).toEqual(["p0.png", "p1.png", "p2.png", "f0.png", "f1.png"]);
+    });
+
+    it("back-to-back capped drops share one cap", () => {
+        const d = new AttachmentDraft("u6");
+        d.uploadFiles(files(2), 2);
+        d.uploadFiles([new File(["x"], "g0.png"), new File(["x"], "g1.png")], 2);
+        expect(sent()).toEqual(["f0.png", "f1.png"]);
+        FakeXhr.made[1].onerror?.();
+        expect(sent()).toEqual(["f0.png", "f1.png", "g0.png"]);
+    });
+});
+
 describe("pastedFileName", () => {
     it("names clipboard bitmaps by time and keeps real file names", () => {
         const at = new Date(2026, 8, 26, 14, 3, 12);
