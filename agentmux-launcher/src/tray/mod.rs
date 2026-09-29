@@ -37,15 +37,16 @@
 //!
 //! ## When it runs
 //!
-//! Only when `AGENTMUX_TRAY` is set (presence-based, matching the
-//! `AGENTMUX_DEV` / `AGENTMUX_BACKGROUND_SERVICE` idiom). `background_config`
-//! sets it from the `app:runinbackground` setting, which is **on by default**
-//! (repo owner's decision, 2026-09-25). The icon must be a *reliable* indicator
-//! that the background service is running, so the tray is only meaningful
-//! alongside `AGENTMUX_BACKGROUND_SERVICE` (`should_enable` encodes that
-//! pairing), and the converse holds too: when the tray was requested but
-//! failed to start, [`unavailable`] tells the host spawn to drop background
-//! mode, so there is never a resident process without an icon.
+//! When `AGENTMUX_TRAY` or `AGENTMUX_BACKGROUND_SERVICE` is set
+//! (presence-based, matching the `AGENTMUX_DEV` idiom). `background_config`
+//! sets them from two separate settings: `app:showtray` (the icon, **on by
+//! default**) and `app:runinbackground` (keep running after the last window
+//! closes, **opt-in**). Background mode forces the icon (`should_enable`), and
+//! the converse holds too: when the tray was requested but failed to start,
+//! [`unavailable`] tells the host spawn to drop background mode, so there is
+//! never a resident process without an icon. See
+//! `docs/reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md` for why the
+//! two are kept apart.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -299,32 +300,26 @@ pub fn menu_model(running: bool, start_at_login: Option<bool>) -> Vec<MenuItem> 
     ]
 }
 
-/// Tooltip shown on hover. Same honesty requirement as the menu label: it must
-/// say whether the background service is actually up, not just that an icon
-/// exists.
-pub fn tooltip(running: bool) -> String {
-    if running {
-        "AgentMux — running in the background".to_string()
-    } else {
-        "AgentMux — not running".to_string()
-    }
+/// Tooltip shown on hover: just the name and version. The running state is
+/// reported by the menu's first item ("New Window" / "Start AgentMux").
+pub fn tooltip() -> String {
+    format!("AgentMux v{}", env!("CARGO_PKG_VERSION"))
 }
 
 /// Should the tray be started at all?
 ///
-/// Requires BOTH the tray opt-in and background-service mode. A tray icon
-/// without background-service mode would be actively misleading: closing the
-/// last window would still quit the whole app, leaving an icon that either
-/// vanishes instantly or (worse) lingers pointing at a dead instance —
-/// precisely the "unreliable indicator" Workstream 4 calls out as the
-/// cautionary case. Pairing them is enforced here rather than documented and
-/// hoped for.
-pub fn should_enable(tray_opt_in: bool, background_service: bool) -> bool {
-    tray_opt_in && background_service
+/// When the tray is on (`app:showtray`, on by default), or whenever
+/// background-service mode is on: a resident process must always show an
+/// icon, so background mode forces it. Without background mode the icon
+/// simply lives as long as the app does: closing the last window quits, and
+/// the icon goes with the process.
+pub fn should_enable(tray: bool, background_service: bool) -> bool {
+    tray || background_service
 }
 
-/// Read the opt-in from the environment. Presence-based, matching
-/// `AGENTMUX_DEV` and `AGENTMUX_BACKGROUND_SERVICE`.
+/// Read the tray switch from the environment (`background_config` sets it
+/// from `app:showtray`). Presence-based, matching `AGENTMUX_DEV` and
+/// `AGENTMUX_BACKGROUND_SERVICE`.
 pub fn tray_opt_in_from_env() -> bool {
     std::env::var("AGENTMUX_TRAY").is_ok()
 }
@@ -381,14 +376,13 @@ mod tray_model_tests {
     use super::*;
 
     #[test]
-    fn tray_requires_both_opt_in_and_background_service() {
+    fn tray_shows_when_on_and_always_in_background_mode() {
         assert!(should_enable(true, true));
-        // Tray without background-service mode would be a lying indicator:
-        // the app still quits on last-window-close.
-        assert!(!should_enable(true, false));
-        // Background-service mode without the tray opt-in is a supported
-        // configuration (that is what shipped in #2983) — just no icon.
-        assert!(!should_enable(false, true));
+        // The default: an icon while the app runs, quit on last-window-close.
+        assert!(should_enable(true, false));
+        // A resident process must never be without an icon.
+        assert!(should_enable(false, true));
+        // `app:showtray: false` without background mode: no icon.
         assert!(!should_enable(false, false));
     }
 
@@ -416,13 +410,16 @@ mod tray_model_tests {
     }
 
     #[test]
-    fn menu_and_tooltip_report_running_state_honestly() {
+    fn menu_reports_running_state_honestly() {
         // WS4: the icon must be a reliable "is it actually running"
-        // indicator, so both surfaces have to change with the state.
+        // indicator, so the first menu item changes with the state.
         assert_eq!(menu_model(true, Some(false))[0].label, "New Window");
         assert_eq!(menu_model(false, Some(false))[0].label, "Start AgentMux");
-        assert!(tooltip(true).contains("running in the background"));
-        assert!(tooltip(false).contains("not running"));
+    }
+
+    #[test]
+    fn tooltip_is_just_the_name_and_version() {
+        assert_eq!(tooltip(), format!("AgentMux v{}", env!("CARGO_PKG_VERSION")));
     }
 
     #[test]

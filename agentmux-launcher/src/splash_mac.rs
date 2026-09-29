@@ -757,13 +757,14 @@ unsafe fn tray_tick() {
 }
 
 // -----------------------------------------------------------------------------
-// Headless AppKit pump — background-service mode with the splash disabled.
+// Headless AppKit pump — the menu-bar item (or background-service mode) with
+// the splash disabled.
 //
 // Design doc §7.5.1 recorded the gap: `install_reopen_handler` only ran from
 // `Splash::show`, so with the splash off there was no `NSApplication`, no
 // pump, and no reopen delegate — a user who closed every window had no way
 // back except a second launch, and the menu-bar item could not exist at all.
-// `main` now routes background-service mode through this pair instead of
+// `main` now routes any start with a menu-bar item through this pair instead of
 // running the supervisor on the main thread.
 // -----------------------------------------------------------------------------
 
@@ -782,7 +783,7 @@ pub fn prepare_headless_app() {
         send_void(pool, sel(b"drain\0"));
     }
     crate::tray::macos::mark_main_pump_available();
-    crate::log("headless AppKit pump prepared (background-service mode, splash disabled)");
+    crate::log("headless AppKit pump prepared (menu-bar item on, splash disabled)");
 }
 
 /// Pump `NSApplication` on the main thread until the supervisor thread exits

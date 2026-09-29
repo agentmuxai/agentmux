@@ -25,7 +25,7 @@
 //! main thread with no `NSApplication` at all (design doc §7.5.1's macOS
 //! gap). A queued request would then never be serviced, and the log would
 //! claim "tray: started" for an icon that never appears. `main.rs` therefore
-//! chooses the pump layout whenever background-service mode is on, and the
+//! chooses the pump layout whenever the menu-bar item is on, and the
 //! pump owner calls `mark_main_pump_available` *before* the supervisor thread
 //! is spawned, so `spawn` can refuse honestly if that did not happen.
 //!
@@ -76,8 +76,8 @@ pub fn spawn(
 ) -> Result<mpsc::Receiver<TrayAction>, String> {
     if !MAIN_PUMP_AVAILABLE.load(Ordering::SeqCst) {
         return Err(
-            "main thread is not pumping AppKit (no splash and not in background-service \
-             mode), so a menu-bar item could never be created or clicked"
+            "main thread is not pumping AppKit (no splash and no headless pump), \
+             so a menu-bar item could never be created or clicked"
                 .to_string(),
         );
     }
@@ -212,7 +212,7 @@ fn create(req: Request) -> Result<Live, String> {
 
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu.clone()))
-        .with_tooltip(super::tooltip(running))
+        .with_tooltip(super::tooltip())
         .with_icon(icon())
         // Template: macOS renders the alpha mask in the menu bar's own tint,
         // so the mark is correct in light and dark menu bars and when the
@@ -294,7 +294,6 @@ impl Live {
                 continue;
             }
             self.running = now;
-            let _ = self.tray.set_tooltip(Some(super::tooltip(now)));
             // Reuse the shared model so the label wording stays in one place
             // (and stays covered by `tray_model_tests`).
             if let Some(entry) = super::menu_model(now, None)
