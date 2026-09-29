@@ -20,7 +20,6 @@
 
     // -- Drag and drop (file drop onto Terminal / Agent panes) --
     // "dnd:enabled":              true,
-    // "dnd:maxfilesizemb":        256,
     // "dnd:concurrency":          4,
     // "dnd:agentinserttoken":     true,
 

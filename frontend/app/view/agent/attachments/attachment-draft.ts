@@ -258,15 +258,6 @@ export class AttachmentDraft {
         this.pumpUploads();
     }
 
-    /**
-     * Container panes: their agents can't see the attachment store, so a
-     * pasted file is stored and then copied into the pane's working folder.
-     * Resolves with the path it landed at. Spec §7.
-     */
-    async uploadToWorkdir(file: File): Promise<string> {
-        return uploadFileToWorkdir(this.blockId, file);
-    }
-
     private addUploadTile(file: File, name: string): string {
         const key = nextKey();
         this.setItems((prev) => [

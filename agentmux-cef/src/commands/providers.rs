@@ -178,19 +178,14 @@ pub fn copy_file_to_dir(args: &serde_json::Value) -> Result<serde_json::Value, S
     if !source.exists() {
         return Err(format!("Source not found: {}", source.display()));
     }
-    if !target_dir.exists() {
-        return Err(format!("Target directory not found: {}", target_dir.display()));
-    }
-    if !target_dir.is_dir() {
-        return Err(format!("Target path is not a directory: {}", target_dir.display()));
-    }
-
     let name = source
         .file_name()
-        .ok_or_else(|| "Invalid source path".to_string())?;
-
-    let target = deconflict_path(target_dir, name)?;
-    copy_recursive(source, &target)?;
+        .ok_or_else(|| "Invalid source path".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let copy = agentmux_common::copy_into_dir::CopyControl::default();
+    let target = agentmux_common::copy_into_dir::copy_into_dir(source, target_dir, &name, &copy)
+        .map_err(|e| format!("Copy failed: {e}"))?;
 
     Ok(serde_json::json!(target.display().to_string()))
 }
@@ -216,48 +211,4 @@ fn normalize_path_for_platform(path: &str) -> String {
     }
     #[cfg(not(windows))]
     path.to_string()
-}
-
-fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-    if src.is_file() {
-        std::fs::copy(src, dst).map_err(|e| format!("Copy failed: {}", e))?;
-    } else if src.is_dir() {
-        std::fs::create_dir_all(dst).map_err(|e| format!("Create dir failed: {}", e))?;
-        for entry in std::fs::read_dir(src).map_err(|e| format!("Read dir failed: {}", e))? {
-            let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
-            let name = entry.file_name();
-            copy_recursive(&entry.path(), &dst.join(&name))?;
-        }
-    }
-    Ok(())
-}
-
-fn deconflict_path(
-    dir: &std::path::Path,
-    name: &std::ffi::OsStr,
-) -> Result<std::path::PathBuf, String> {
-    let candidate = dir.join(name);
-    if !candidate.exists() {
-        return Ok(candidate);
-    }
-
-    let name_str = name.to_string_lossy();
-    let (stem, ext) = match name_str.rfind('.') {
-        Some(dot) => (&name_str[..dot], &name_str[dot..]),
-        None => (name_str.as_ref(), ""),
-    };
-
-    for n in 1..=99 {
-        let new_name = format!("{stem}_{n}{ext}");
-        let candidate = dir.join(&new_name);
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(format!(
-        "Could not find a free filename for '{}' in '{}'",
-        name_str,
-        dir.display()
-    ))
 }

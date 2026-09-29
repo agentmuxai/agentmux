@@ -28,7 +28,7 @@ import { AttachmentTray } from "../attachments/AttachmentTray";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
 import { attachmentNoun, fileKind } from "../attachments/file-kind";
 import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAttach";
-import { baseName, copyFilesToDir } from "@/util/dnd";
+import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 
 function pickThinkingPhrase(_exclude?: string): string {
@@ -528,25 +528,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             expiration: Date.now() + 8000,
         });
     };
-    const mentionPasted = (paths: string[]) => {
-        // Any ancestor holding the composer's textarea will do.
-        const root = textareaRef?.parentElement;
-        if (paths.length > 0 && root) spliceComposerTokens(root, paths.map((p) => `@${baseName(p)}`));
-    };
     const inContainer = () => !!draftBlockId && isContainerPane(draftBlockId);
+    // The same copy a drop makes, notices and @mentions included. Paste
+    // ignores `dnd:*`.
+    const pasteIntoWorkdir = (source: CopySource) =>
+        copyIntoWorkdir(draftBlockId!, source, {
+            paneKind: "agent pane",
+            // Any ancestor holding the composer's textarea will do.
+            mentionIn: textareaRef?.parentElement ?? null,
+            splice: spliceComposerTokens,
+        });
 
     const pasteAttachmentsFromMenu = (paths: string[]) => {
         if (!attachmentDraft) return;
         if (inContainer()) {
-            const cwd = MOS.getObjectValue<Block>(MOS.makeORef("block", draftBlockId!))?.meta?.["cmd:cwd"];
-            if (!cwd) return pasteFailed("No working directory detected for this agent pane.");
-            void copyFilesToDir(paths, cwd)
-                .then((outcome) => {
-                    mentionPasted(outcome.results.filter((r) => r.dest).map((r) => r.dest!));
-                    const failed = outcome.results.filter((r) => r.error);
-                    if (failed.length > 0) pasteFailed(failed.map((f) => `${baseName(f.source)}: ${f.error}`).join("\n"));
-                })
-                .catch(pasteFailed);
+            void pasteIntoWorkdir({ paths });
             return;
         }
         void attachmentDraft.ingestPaths(paths).catch(pasteFailed);
@@ -557,17 +553,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         const files = Array.from(e.clipboardData?.files ?? []);
         if (files.length === 0) return;
         if (inContainer()) {
-            // Each file on its own, like copyFilesToDir: one failure must not
-            // lose the others' @mentions.
-            void Promise.allSettled(files.map((f) => attachmentDraft.uploadToWorkdir(f))).then((results) => {
-                mentionPasted(results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])));
-                const failed = results.flatMap((r, i) =>
-                    r.status === "rejected"
-                        ? [`${files[i].name || "Pasted file"}: ${String((r.reason as Error)?.message ?? r.reason)}`]
-                        : [],
-                );
-                if (failed.length > 0) pasteFailed(failed.join("\n"));
-            });
+            void pasteIntoWorkdir({ files });
             return;
         }
         attachmentDraft.uploadFiles(files);
