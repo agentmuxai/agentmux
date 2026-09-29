@@ -332,8 +332,9 @@ Layer B is where both incidents happened. Nothing checks it.
    patches applied.
 2. Verify patch symbols with **full `nm`**. They are local, not exported —
    `nm -gU` misses every one and reports a false negative.
-3. **All three platform pins live in one place** (`release.yml`'s
-   `cef-runtime-pins`) and must be bumped together, from **one** fork commit.
+3. **All three platform pins live in one place**
+   (`scripts/cef-build/cef-runtime-pins.sh`, read by releases and by any build
+   with a blank `cef-runtime-tag`) and must be bumped together, from **one** fork commit.
    The job only cross-checks the leading milestone, so two tags can agree on
    `152` and still come from different fork commits with different carry-sets.
 

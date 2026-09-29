@@ -31,7 +31,7 @@ on:
         required: false
         default: ""
       cef-runtime-tag:
-        description: "agentmuxai/cef release tag for patched libcef.so (blank = latest)"
+        description: "agentmuxai/cef release tag for patched libcef.so (blank = the pin in scripts/cef-build/cef-runtime-pins.sh)"
         required: false
         default: ""
   repository_dispatch:
@@ -53,7 +53,7 @@ on:
         type: string
         default: ""
       cef-runtime-tag:
-        description: "agentmuxai/cef release tag for patched libcef.so (blank = latest)"
+        description: "agentmuxai/cef release tag for patched libcef.so (blank = the pin in scripts/cef-build/cef-runtime-pins.sh)"
         required: false
         type: string
         default: ""
@@ -163,23 +163,17 @@ jobs:
         run: |
           TAG="${{ steps.in.outputs.cef_tag }}"
           if [ -z "$TAG" ]; then
-            # agentmuxai/cef now holds BOTH platforms' releases — filter to the
-            # Linux x86_64 prefix (a bare --limit 1 would grab whichever platform
-            # released most recently, e.g. a macOS framework).
-            #
-            # gh release list's default order is NOT reliably publish-time-descending
-            # on this fork — a release cut without an explicit --target inherits a
-            # frozen default-branch-HEAD created_at instead of the actual cut time, so
-            # trusting [0] after the filter can silently pick a stale tag (this bit the
-            # macOS codec release — see
-            # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md). Sort by
-            # publishedAt explicitly instead.
-            TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                    --json tagName,publishedAt \
-                    --jq '[.[] | select(.tagName | startswith("cef-linux-x86_64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
+            # Blank = this ref's committed pin, never "latest published":
+            # a nightly or a direct dispatch must not pair a newly published
+            # runtime with this ref's binding
+            # (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md §4). A
+            # deliberate non-pinned build names its cef-runtime-tag explicitly.
+            # shellcheck source=/dev/null
+            source scripts/cef-build/cef-runtime-pins.sh
+            TAG="$CEF_LINUX_RUNTIME_TAG"
           fi
           if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            echo "ERROR: no cef-linux-x86_64-* release found in agentmuxai/cef"; exit 1
+            echo "ERROR: no Linux CEF runtime tag (input blank and no pin in cef-runtime-pins.sh)"; exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Resolved patched libcef.so tag: $TAG"

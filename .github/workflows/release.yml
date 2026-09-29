@@ -126,7 +126,7 @@ jobs:
   # prevent — via a stale manual edit instead of a live "latest" race. Nothing
   # caught that.
   #
-  # This job is now the ONE place the three pins are declared — build-windows/
+  # This job is now the ONE place the release reads the three pins — build-windows/
   # linux/macos below reference its outputs, not a literal string of their
   # own — and it fails the release if they don't agree on Chromium MILESTONE
   # before any build starts. Milestone, not full version equality: the three
@@ -139,14 +139,15 @@ jobs:
   # can mean something for.
   #
   # No GitHub API calls, no secrets: this only parses the three literal
-  # strings declared right here, so it's a fast, offline, always-reproducible
-  # check — not a live "resolve latest" query, which would silently undo
-  # #3086's reproducibility fix.
+  # strings in the committed pin file, so it's a fast, offline,
+  # always-reproducible check — not a live "resolve latest" query, which would
+  # silently undo #3086's reproducibility fix.
   #
-  # To bump a pin: update the matching value below (this is now the only
-  # place to do it) in the same PR as the consumer-side CEF upgrade change,
-  # exactly as #3086's original guidance said — just centralized to one site
-  # instead of three, so there's no longer a second and third place to forget.
+  # The values live in scripts/cef-build/cef-runtime-pins.sh, not here: the
+  # blank-tag path of each build-*.yml (nightlies, direct dispatches) reads the
+  # same file, so publishing a new runtime can't reach a build until a PR moves
+  # the pins (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md §4). To bump
+  # a pin: edit that file, in the same PR as the consumer-side CEF upgrade.
   cef-runtime-pins:
     name: CEF runtime tags (single source of truth + milestone check)
     needs: check-macos
@@ -156,14 +157,32 @@ jobs:
       linux-tag: ${{ steps.pins.outputs.linux-tag }}
       macos-tag: ${{ steps.pins.outputs.macos-tag }}
     steps:
-      - name: Declare pins and check milestone agreement
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          sparse-checkout: scripts/cef-build
+
+      - name: Read pins and check milestone agreement
         id: pins
         env:
           MACOS_AVAILABLE: ${{ needs.check-macos.outputs.available }}
         run: |
-          WIN_TAG="cef-windows-x86_64-152.0.7977.83-r2"
-          LINUX_TAG="cef-linux-x86_64-152.0.7977.83-codecs"
-          MACOS_TAG="cef-macos-arm64-152.0.7977.83-codecs"
+          # shellcheck source=/dev/null
+          source scripts/cef-build/cef-runtime-pins.sh
+          WIN_TAG="$CEF_WINDOWS_RUNTIME_TAG"
+          LINUX_TAG="$CEF_LINUX_RUNTIME_TAG"
+          MACOS_TAG="$CEF_MACOS_RUNTIME_TAG"
+
+          # Local and package Windows builds read their own pin
+          # (windows-runtime-pin.sh, which also carries libcef.dll's SHA-256).
+          # A release whose CI Windows runtime differs from it would ship a
+          # runtime no local build verifies against.
+          # shellcheck source=/dev/null
+          source scripts/cef-build/windows-runtime-pin.sh
+          if [ "$WIN_TAG" != "$CEF_WINDOWS_RELEASE_TAG" ]; then
+            echo "ERROR: cef-runtime-pins.sh has windows=$WIN_TAG but windows-runtime-pin.sh has $CEF_WINDOWS_RELEASE_TAG — bump both in the same PR."
+            exit 1
+          fi
 
           # Chromium milestone = the leading dot-separated numeric segment
           # after the cef-<platform>-<arch>- prefix. Works across both
