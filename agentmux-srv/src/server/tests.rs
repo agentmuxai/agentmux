@@ -6699,3 +6699,69 @@ async fn memory_session_start_serves_parts_then_one_notice_after_every_ack() {
     assert_eq!(v["complete"], false, "one notice per delivery: {v}");
     assert_eq!(output().unwrap().lines().count(), 1);
 }
+
+// ---- Container-agent credential (REPORT_AGENT_FILE_ACCESS_2026_09_29.md) ----
+
+async fn status_with_key(method: &str, uri: &str, key: &str) -> StatusCode {
+    let req = Request::builder()
+        .uri(uri)
+        .method(method)
+        .header("X-AuthKey", key)
+        .header("Content-Type", "application/json")
+        .body(Body::from("{}"))
+        .unwrap();
+    test_router().oneshot(req).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn container_token_reaches_agent_routes() {
+    let token = crate::backend::container_credential::token_for_block("ct-allowed", Some("agent-tok"));
+    assert_eq!(status_with_key("GET", "/agentmux/discovery", &token).await, StatusCode::OK);
+    let names = status_with_key("GET", "/agentmux/reactive/agent-names", &token).await;
+    assert!(names != StatusCode::UNAUTHORIZED && names != StatusCode::FORBIDDEN, "LAN-forward router: {names}");
+}
+
+#[tokio::test]
+async fn container_token_is_refused_host_exec_and_host_file_routes() {
+    let token = crate::backend::container_credential::token_for_block("ct-refused", Some("agent-tok"));
+    for (method, uri) in [
+        ("POST", "/api/v1/shell/create"),
+        ("POST", "/api/v1/ptyshell/create"),
+        ("GET", "/agentmux/stream-local-file?path=C:/Windows/win.ini"),
+        ("POST", "/agentmux/service"),
+        ("GET", "/ws"),
+        ("POST", "/api/v1/pane/open"),
+        ("POST", "/api/v1/agent/open"),
+        ("POST", "/api/v1/agent/globalmemory/write"),
+        ("GET", "/agentmux/reactive/agents"),
+    ] {
+        assert_eq!(status_with_key(method, uri, &token).await, StatusCode::FORBIDDEN, "{method} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn container_token_without_identity_cannot_touch_memory() {
+    let token = crate::backend::container_credential::token_for_block("ct-anon", None);
+    assert_eq!(
+        status_with_key("GET", "/api/v1/agent/memory/list?agent_id=someone-else", &token).await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn revoked_or_unknown_container_tokens_are_unauthorized() {
+    let token = crate::backend::container_credential::token_for_block("ct-revoked", Some("agent-tok"));
+    crate::backend::container_credential::revoke_block("ct-revoked");
+    assert_eq!(status_with_key("GET", "/agentmux/discovery", &token).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status_with_key("GET", "/agentmux/discovery", "amxc_forged").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        status_with_key("GET", "/agentmux/reactive/agent-names", "amxc_forged").await,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn full_key_still_reaches_routes_containers_cannot() {
+    assert_ne!(status_with_key("POST", "/api/v1/pane/open", "test-secret-key").await, StatusCode::FORBIDDEN);
+    assert_ne!(status_with_key("POST", "/api/v1/pane/open", "test-secret-key").await, StatusCode::UNAUTHORIZED);
+}

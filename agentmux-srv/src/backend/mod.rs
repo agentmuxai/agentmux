@@ -95,6 +95,7 @@ pub mod mps;
 pub mod osc_extractor;
 pub mod tool_store;
 pub mod container;
+pub mod container_credential;
 pub mod cron;
 pub mod dev_proxy;
 pub mod shell_node;

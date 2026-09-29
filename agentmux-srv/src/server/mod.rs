@@ -629,8 +629,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
-        // trusted AGENTMUX_AGENT_ID env; an agent's PTY has no auth key to reach
-        // these directly, so the slug cannot be forged. Each handler calls the
+        // AGENTMUX_AGENT_ID env. Host agents do hold the instance key, so the
+        // owner comes from the caller's token where there is one
+        // (`SelfOwner::of`); a container token is always pinned to its own
+        // agent (backend::container_credential). Each handler calls the
         // same `app_api::*_impl` the WebSocket RPC handlers use.
         .route("/api/v1/agent/memory/list", get(handle_agent_memory_list))
         .route("/api/v1/agent/memory/read", get(handle_agent_memory_read))
@@ -3214,12 +3216,44 @@ async fn auth_middleware(
             req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
             next.run(req).await
         }
-        _ => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "unauthorized"})),
-        )
-            .into_response(),
+        Some(key) => match crate::backend::container_credential::grant_for(&key) {
+            Some(grant) => admit_container_agent(grant, req, next).await,
+            None => unauthorized(),
+        },
+        None => unauthorized(),
     }
+}
+
+fn unauthorized() -> Response {
+    (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthorized"}))).into_response()
+}
+
+/// A container agent's token: allowed only on
+/// [`crate::backend::container_credential::container_route_allowed`]. There it
+/// stands in for the instance key it replaced (so jekt tiers and identity
+/// behave as for any agent), with the caller pinned to the grant's agent by
+/// `caller_middleware`.
+async fn admit_container_agent(
+    grant: crate::backend::container_credential::ContainerGrant,
+    mut req: Request<Body>,
+    next: Next,
+) -> Response {
+    use crate::backend::container_credential::{container_route_allowed, route_needs_identity};
+    let path = req.uri().path().to_string();
+    let refused = if !container_route_allowed(&path) {
+        Some("this route is not available to container agents")
+    } else if route_needs_identity(&path) && grant.agent_token.is_none() {
+        Some("this container agent has no identity token")
+    } else {
+        None
+    };
+    if let Some(reason) = refused {
+        tracing::warn!(block_id = %grant.block_id, %path, reason, "container agent request refused");
+        return (StatusCode::FORBIDDEN, Json(json!({"error": reason}))).into_response();
+    }
+    req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
+    req.extensions_mut().insert(grant);
+    next.run(req).await
 }
 
 /// Auth middleware for the two LAN-forwarding-relevant reactive routes
@@ -3284,10 +3318,10 @@ async fn lan_or_full_auth_middleware(
             req.extensions_mut().insert(ReactiveAuthVia::LanKey);
             next.run(req).await
         }
-        _ => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "unauthorized"})),
-        )
-            .into_response(),
+        Some(key) => match crate::backend::container_credential::grant_for(key) {
+            Some(grant) => admit_container_agent(grant, req, next).await,
+            None => unauthorized(),
+        },
+        None => unauthorized(),
     }
 }

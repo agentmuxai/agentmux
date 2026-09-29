@@ -331,6 +331,7 @@ async fn shutdown_one(state: &AppState, block_id: &str, deadline: std::time::Ins
         );
     }
     blockcontroller::mark_closing_stopped(block_id);
+    crate::backend::container_credential::revoke_block(block_id);
     // 6. Save final state.
     save_final_state(state, block_id);
     publish_shutdown(state, block_id, "saved", "conversation saved".into(), serde_json::json!({}));

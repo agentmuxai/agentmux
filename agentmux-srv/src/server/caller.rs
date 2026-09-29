@@ -112,12 +112,21 @@ pub(crate) async fn caller_middleware(
     let full_key = req.extensions().get::<ReactiveAuthVia>() == Some(&ReactiveAuthVia::FullAuthKey);
     // A CORS preflight skips auth, so it is never marked; it is not a
     // token on a LAN key and must not be counted as one.
-    let token = if req.uri().path() == "/ws" || req.method() == axum::http::Method::OPTIONS {
+    // A container token names its agent itself; a header can't re-point it.
+    let pinned = req
+        .extensions()
+        .get::<crate::backend::container_credential::ContainerGrant>()
+        .map(|g| g.agent_token.clone());
+    let header = if req.uri().path() == "/ws" || req.method() == axum::http::Method::OPTIONS {
         None
     } else {
         req.headers()
             .get(AGENT_TOKEN_HEADER)
             .and_then(|v| v.to_str().ok())
+    };
+    let token = match &pinned {
+        Some(agent_token) => agent_token.as_deref(),
+        None => header,
     };
     let caller = derive_caller(token, full_key, |t| match state.mstore.token_index() {
         Some(index) => Lookup::Index(index.uid_for(t)),
