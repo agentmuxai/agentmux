@@ -9,7 +9,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type 
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { MOS, atoms, pushNotification } from "@/app/store/global";
+import { atoms, pushNotification } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
