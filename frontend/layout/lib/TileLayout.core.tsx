@@ -39,6 +39,7 @@ import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { setTileDragInFlight } from "./dragInFlight";
 import { clearCrossTabDrop } from "./crossTabDrag";
 import { dragState } from "./tilelayout-drag-state";
+import { createTileDragRegistrar } from "./tile-drag-registrar";
 import {
     computeDragPreviewSize,
     createDragPreviewIntent,
@@ -406,17 +407,11 @@ export function createTileLayout(platform: TileLayoutPlatform) {
         // not the tile root (WebView2 / WebKitGTK / WKWebView all break on
         // pragmatic-dnd's dragHandle option).
         //
-        // The header ref may not be available at mount time (block content loads
-        // async behind a Show gate). Poll briefly until the ref is set.
-        // SolidJS's <Show> gate destroys/recreates the header element during block
-        // data loading. We must re-register whenever dragHandleRef.current changes
-        // or the element leaves the DOM. A persistent poll (cleared on unmount)
-        // handles all cases without needing to observe SolidJS internals.
+        // The header may mount after the tile (block content loads behind a Show
+        // gate), and a Show gate replaces it later on. The registrar rebinds when
+        // the tile's DOM actually changes (tile-drag-registrar.ts, spec §5.7).
         onMount(() => {
             if (!tileNodeRef) return;
-            let cleanupFn: (() => void) | null = null;
-            let registeredHandle: HTMLElement | null = null;
-
             // Query the actual live header from the DOM rather than relying on dragHandleRef.
             // dragHandleRef is written by two BlockFrame_Header instances (primary + ErrorBoundary
             // fallback), and the fallback (never inserted into the DOM) always overwrites the
@@ -425,28 +420,8 @@ export function createTileLayout(platform: TileLayoutPlatform) {
             const findHandle = (): HTMLElement | null =>
                 tileNodeRef?.querySelector<HTMLElement>('[data-role="block-header"]') ?? null;
 
-            const register = () => {
-                const handle = findHandle();
-
-                // Nothing changed
-                if (handle === registeredHandle) return;
-
-                // NEVER tear down while a drag is in progress. If we call cleanupFn()
-                // mid-drag, pragmatic-dnd removes its onDrop listener and activeDrag
-                // never resets to false — leaving pointer-events:none permanently on
-                // all pane bodies ("widgets broken").
-                if (props.layoutModel.activeDrag()) return;
-
-                // Handle changed or left DOM — tear down old registration
-                cleanupFn?.();
-                cleanupFn = null;
-                registeredHandle = null;
-
-                if (!handle) return;
-
-                // New live handle — register draggable on it
-                registeredHandle = handle;
-                cleanupFn = draggable({
+            const bind = (handle: HTMLElement) =>
+                draggable({
                     element: handle,
                     canDrag: ({ input }) => {
                         if (isEphemeral() || isMagnified()) return false;
@@ -514,16 +489,21 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                         // out-of-window. Cleared in dropTargetForElements.onDrop instead.
                     },
                 });
-            };
 
-            // Poll every 100ms for the lifetime of this tile. Handles initial load
-            // and any SolidJS Show-gate replacements during the tile's lifetime.
-            register();
-            const interval = setInterval(register, 100);
-            onCleanup(() => {
-                clearInterval(interval);
-                cleanupFn?.();
+            const registrar = createTileDragRegistrar({
+                root: tileNodeRef,
+                find: findHandle,
+                bind,
+                // NEVER tear down while a drag is in progress: pragmatic-dnd would
+                // drop its onDrop listener and activeDrag would never reset,
+                // leaving pointer-events:none on every pane body.
+                dragging: () => props.layoutModel.activeDrag(),
             });
+            registrar.register();
+            createEffect(() => {
+                if (!props.layoutModel.activeDrag()) registrar.dragEnded();
+            });
+            onCleanup(() => registrar.dispose());
         });
 
         const leafContent = () => (
