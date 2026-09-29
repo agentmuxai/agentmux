@@ -63,7 +63,7 @@ export const notifyDrop = {
 export type CopySource = { paths: string[] } | { files: File[] };
 
 /** Uploads in flight at once for the bytes transport when `dnd:concurrency` isn't set. */
-const UPLOAD_CONCURRENCY = 4;
+export const UPLOAD_CONCURRENCY = 4;
 
 /** `Promise.allSettled` over `items`, with at most `limit` running at a time. */
 export async function settleWithLimit<T, R>(

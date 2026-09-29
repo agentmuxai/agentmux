@@ -127,6 +127,7 @@ export class AttachmentDraft {
      */
     private readonly early = new Map<string, Array<() => void>>();
     private readonly uploads = new Map<string, XMLHttpRequest>();
+    private pendingUploads: { key: string; file: File; name: string; limit: number }[] = [];
 
     constructor(blockId: string) {
         this.blockId = blockId;
@@ -226,8 +227,9 @@ export class AttachmentDraft {
         return true;
     }
 
-    /** Stream pasted Files to the upload route, one request each. */
-    uploadFiles(files: File[]): void {
+    /** Stream Files to the upload route, one request each, at most `concurrency` at a time. */
+    uploadFiles(files: File[], concurrency?: number): void {
+        const limit = concurrency && concurrency > 0 ? concurrency : Infinity;
         const rejected: AttachmentRejected[] = [];
         let count = this.count();
         let bytes = this.totalBytes();
@@ -243,9 +245,10 @@ export class AttachmentDraft {
             }
             count += 1;
             bytes += file.size;
-            this.startUpload(file, name);
+            this.pendingUploads.push({ key: this.addUploadTile(file, name), file, name, limit });
         }
         this.reportRejected(rejected);
+        this.pumpUploads();
     }
 
     /**
@@ -257,12 +260,23 @@ export class AttachmentDraft {
         return uploadFileToWorkdir(this.blockId, file);
     }
 
-    private startUpload(file: File, name: string): void {
+    private addUploadTile(file: File, name: string): string {
         const key = nextKey();
         this.setItems((prev) => [
             ...prev,
             { key, name, bytes: file.size, status: "processing", stage: "uploading", doneBytes: 0 },
         ]);
+        return key;
+    }
+
+    private pumpUploads(): void {
+        while (this.pendingUploads.length > 0 && this.uploads.size < this.pendingUploads[0].limit) {
+            const next = this.pendingUploads.shift()!;
+            this.startUpload(next.key, next.file, next.name);
+        }
+    }
+
+    private startUpload(key: string, file: File, name: string): void {
         const xhr = new XMLHttpRequest();
         this.uploads.set(key, xhr);
         xhr.open("POST", `${getWebServerEndpoint()}/api/v1/attachments/upload?name=${encodeURIComponent(name)}`);
@@ -284,13 +298,16 @@ export class AttachmentDraft {
             } else {
                 this.patch(key, { status: "error", error: body?.error ?? `Upload failed (${xhr.status}).` });
             }
+            this.pumpUploads();
         };
         xhr.onerror = () => {
             this.uploads.delete(key);
             this.patch(key, { status: "error", error: "Upload failed: the connection to AgentMux dropped." });
+            this.pumpUploads();
         };
         xhr.onabort = () => {
             this.uploads.delete(key);
+            this.pumpUploads();
         };
         xhr.send(file);
     }
@@ -302,6 +319,7 @@ export class AttachmentDraft {
         const position = list.findIndex((i) => i.key === key);
         if (position < 0) return null;
         const item = list[position];
+        this.pendingUploads = this.pendingUploads.filter((p) => p.key !== key);
         this.uploads.get(key)?.abort();
         this.setItems((prev) => prev.filter((i) => i.key !== key));
         return { item, position };
@@ -343,6 +361,7 @@ export class AttachmentDraft {
         for (const batchId of this.openBatches) {
             void RpcApi.AttachmentsCancelCommand(TabRpcClient, { batch_id: batchId }).catch(() => {});
         }
+        this.pendingUploads = [];
         for (const xhr of this.uploads.values()) xhr.abort();
         this.uploads.clear();
         this.setItems((prev) => prev.filter((i) => i.status !== "processing"));

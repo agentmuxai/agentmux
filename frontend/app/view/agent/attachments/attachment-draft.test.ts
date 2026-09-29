@@ -146,6 +146,81 @@ describe("AttachmentDraft", () => {
     });
 });
 
+class FakeXhr {
+    static made: FakeXhr[] = [];
+    upload: { onprogress: ((e: ProgressEvent) => void) | null } = { onprogress: null };
+    status = 0;
+    responseText = "";
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    name = "";
+    aborted = false;
+    constructor() {
+        FakeXhr.made.push(this);
+    }
+    open(_method: string, url: string) {
+        this.name = decodeURIComponent(url.split("name=")[1]);
+    }
+    setRequestHeader() {}
+    send() {}
+    abort() {
+        this.aborted = true;
+        this.onabort?.();
+    }
+    succeed(id: string) {
+        this.status = 200;
+        this.responseText = JSON.stringify(info(id));
+        this.onload?.();
+    }
+}
+
+describe("AttachmentDraft.uploadFiles", () => {
+    const files = (n: number) => Array.from({ length: n }, (_, i) => new File(["x"], `f${i}.png`));
+    const sent = () => FakeXhr.made.map((x) => x.name);
+
+    beforeEach(() => {
+        FakeXhr.made = [];
+        vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    });
+
+    it("shows every tile at once but keeps at most `concurrency` uploads in flight", () => {
+        const d = new AttachmentDraft("u1");
+        d.uploadFiles(files(5), 2);
+        expect(d.items()).toHaveLength(5);
+        expect(sent()).toEqual(["f0.png", "f1.png"]);
+        FakeXhr.made[0].succeed("a".repeat(64));
+        expect(sent()).toEqual(["f0.png", "f1.png", "f2.png"]);
+        FakeXhr.made[1].onerror?.();
+        expect(sent()).toEqual(["f0.png", "f1.png", "f2.png", "f3.png"]);
+    });
+
+    it("never sends a queued file that was removed", () => {
+        const d = new AttachmentDraft("u2");
+        d.uploadFiles(files(3), 1);
+        d.remove(d.items()[2].key);
+        FakeXhr.made[0].succeed("b".repeat(64));
+        FakeXhr.made[1].succeed("c".repeat(64));
+        expect(sent()).toEqual(["f0.png", "f1.png"]);
+        expect(d.items().map((i) => i.status)).toEqual(["ready", "ready"]);
+    });
+
+    it("cancel drops the queue along with what's in flight", () => {
+        const d = new AttachmentDraft("u3");
+        d.uploadFiles(files(3), 1);
+        d.cancel();
+        expect(FakeXhr.made[0].aborted).toBe(true);
+        expect(sent()).toEqual(["f0.png"]);
+        expect(d.items()).toEqual([]);
+    });
+
+    it("sends everything at once when no limit is given", () => {
+        const d = new AttachmentDraft("u4");
+        d.uploadFiles(files(3));
+        expect(sent()).toEqual(["f0.png", "f1.png", "f2.png"]);
+    });
+});
+
 describe("pastedFileName", () => {
     it("names clipboard bitmaps by time and keeps real file names", () => {
         const at = new Date(2026, 8, 26, 14, 3, 12);
