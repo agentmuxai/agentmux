@@ -34,6 +34,7 @@ vi.mock("@/app/drag/file-drop-actions", () => ({
     fileCount: (n: number) => `${n} ${n === 1 ? "file" : "files"}`,
     notifyDrop: { attachFailed: (e: unknown) => hub.attachFailed(e) },
     paneWorkdir: () => hub.meta["cmd:cwd"],
+    UPLOAD_CONCURRENCY: 4,
 }));
 vi.mock("../attachments/attachment-draft", () => ({
     getAttachmentDraft: () => ({ ingestPaths: hub.ingest, uploadFiles: hub.upload }),
@@ -83,8 +84,16 @@ describe("agent pane file drop", () => {
         const hook = mount();
         const files = [file("virtual.txt")];
         await hook.drop({ paths: [], files });
-        expect(hub.upload).toHaveBeenCalledWith(files);
+        expect(hub.upload).toHaveBeenCalledWith(files, 4);
         expect(hub.ingest).not.toHaveBeenCalled();
+    });
+
+    it("limits those uploads to dnd:concurrency", async () => {
+        hub.settings["dnd:concurrency"] = 2;
+        const hook = mount();
+        const files = [file("a.txt"), file("b.txt"), file("c.txt")];
+        await hook.drop({ paths: [], files });
+        expect(hub.upload).toHaveBeenCalledWith(files, 2);
     });
 
     it("copies what an older backend's ingest hands back", async () => {
