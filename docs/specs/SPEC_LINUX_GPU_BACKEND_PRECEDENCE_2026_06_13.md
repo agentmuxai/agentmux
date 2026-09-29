@@ -1,7 +1,7 @@
 # SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection)
 
 **Date:** 2026-06-13
-**Status:** Implemented in PR #1394 — replaces the initial VMware DMI gate
+**Status:** implemented in PR #1394; §7 `GL_RENDERER` check added 2026-09-29 — replaces the initial VMware DMI gate
 **Author:** AgentU
 **Related:** `agentmux-cef/src/app.rs` (`on_before_command_line_processing`, `is_vmware_guest`), `agentmux-cef/Cargo.toml`, `frontend/app/view/term/termwrap.ts`, `frontend/util/gpuutil.ts`, `frontend/app/statusbar/GpuStatus.tsx`
 
@@ -142,15 +142,21 @@ spec must reproduce **identical** behavior on the same box via the general path
 (probe ⇒ HW-GL rung), plus: HW-Vulkan box ⇒ no flags (stays Vulkan); headless ⇒ no
 flags (stays software).
 
-**Upgrade path** (future): replace the `has_hw_gl` render-node heuristic with a
-real `GL_RENDERER` check (throwaway EGL context, reject software-marker strings —
-the `SOFTWARE_MARKERS` list already exists in `gpuutil.ts`) to tighten the
-blocklist-override decision on exotic GL-only GPUs.
+**Upgrade path — built 2026-09-29** (`agentmux-cef/src/app/gl_probe.rs`): the HW-GL
+rung now also requires a real `GL_RENDERER` check. A re-exec of the binary makes a
+surfaceless throwaway EGL context and prints the renderer; software markers
+(llvmpipe, softpipe, swrast, SwiftShader, lavapipe), a failed probe, or a 3 s
+timeout mean the Software rung. The render node alone had over-trusted a VMware
+guest with 3D off (vmwgfx keeps `renderD128`, Mesa falls back to llvmpipe): the
+forced `use-angle=gl --ignore-gpu-blocklist` crashed the GPU process and the app
+launched invisible (`docs/retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md`).
+Measured on that guest: the probe reports `llvmpipe (LLVM 21.1.8, 256 bits)`, takes
+~92 ms, and runs only when there is no hardware Vulkan but a render node exists.
 
 ## 8. Risks
 
 - `--ignore-gpu-blocklist` force-enables features Chromium flagged risky; scoped to
   the HW-GL rung (not global), but a render-node heuristic can over-trust an
-  exotic GL stack — §7 upgrade addresses this.
+  exotic GL stack. Addressed by §7's `GL_RENDERER` check (built 2026-09-29).
 - Adds a `VkInstance` create+enumerate at startup (~tens of ms, once, browser
   process only); fully guarded so any failure degrades to "no HW Vulkan".
