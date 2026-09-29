@@ -293,19 +293,33 @@ pub(crate) async fn relay_inject(
 /// provisioning round trip (`POST /agents/provision`) on a logged-out instance
 /// — once per failed local inject, i.e. on the hot path of every message to an
 /// unknown agent.
+///
+/// Returns the account too, read from the same shared token: the carry gate
+/// needs the directory this send goes into, and reading the account
+/// separately would let a sign-in in between pair one account's token with
+/// another's directory (Codex P2 on #3994).
 pub(crate) async fn relay_token(
     source_agent: &str,
     store: &Arc<Store>,
     http: &reqwest::Client,
-) -> Option<String> {
+) -> Option<RelayCredential> {
     let scheduler = crate::broker::get_global()?;
     let shared = crate::muxbus::cloud_subscriber::load_valid_token(store, &scheduler).await?;
+    let account_sub = crate::muxbus::pkce::token_sub(&shared);
 
-    match crate::muxbus::agent_credentials::ensure_agent_credential(source_agent, store, http).await
-    {
-        Some(per_agent) => Some(per_agent),
-        None => Some(shared),
-    }
+    let token = match crate::muxbus::agent_credentials::ensure_agent_credential(source_agent, store, http).await {
+        Some(per_agent) => per_agent,
+        None => shared,
+    };
+    Some(RelayCredential { token, account_sub })
+}
+
+/// What [`relay_token`] resolved: the bearer to send with, and the account
+/// (`sub`) of the shared token it was resolved under — empty if that token
+/// names none, which leaves the carry gate without a directory (unsigned).
+pub(crate) struct RelayCredential {
+    pub token: String,
+    pub account_sub: String,
 }
 
 #[cfg(test)]

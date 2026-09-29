@@ -12,7 +12,9 @@
 //!
 //! **When.** The spawn path nudges the publisher after it provisions a key
 //! ([`nudge`]); a background loop also re-runs every [`RETRY_SECS`] so a key
-//! that failed to publish (logged out, cloud down) is retried. A cloud that
+//! that failed to publish (logged out, cloud down) is retried, and every
+//! [`IDLE_RECHECK_SECS`] when idle, because a sign-in in another channel can
+//! change the directory without nudging this process. A cloud that
 //! answers 404 predates the directory (C1 not deployed): retried at most
 //! hourly, never hot.
 //!
@@ -37,6 +39,12 @@ const RETRY_SECS: u64 = 5 * 60;
 
 /// Retry interval after the cloud said it has no directory (HTTP 404).
 const NOT_SUPPORTED_RETRY_SECS: u64 = 60 * 60;
+
+/// How often an idle publisher looks again. A sign-in in another channel
+/// (the MuxBus login is shared) changes the directory this one should
+/// publish to, but only nudges its own process (Codex P2 on #3994), so an
+/// idle publisher can't wait on nudges alone.
+const IDLE_RECHECK_SECS: u64 = 5 * 60;
 
 const PUBLISH_TIMEOUT_SECS: u64 = 10;
 
@@ -181,7 +189,8 @@ pub(crate) async fn publish_pending(
 }
 
 /// Start the background publisher. No-op without a `wan.db`. Runs a pass on
-/// start, on every [`nudge`], and every [`RETRY_SECS`] while keys remain;
+/// start, on every [`nudge`], every [`RETRY_SECS`] while keys remain, and every
+/// [`IDLE_RECHECK_SECS`] when none do;
 /// after a 404 it waits [`NOT_SUPPORTED_RETRY_SECS`] (nudges included, so a
 /// burst of spawns can't turn an old cloud into a hot loop).
 pub(crate) fn spawn(mstore: Arc<Store>, id_store: Arc<Store>) {
@@ -199,14 +208,20 @@ pub(crate) fn spawn(mstore: Arc<Store>, id_store: Arc<Store>) {
                         _ = tokio::time::sleep(Duration::from_secs(RETRY_SECS)) => {}
                     }
                 }
-                Wait::Idle => notify.notified().await,
+                Wait::Idle => {
+                    tokio::select! {
+                        _ = notify.notified() => {}
+                        _ = tokio::time::sleep(Duration::from_secs(IDLE_RECHECK_SECS)) => {}
+                    }
+                }
             }
         }
     });
 }
 
 enum Wait {
-    /// Everything is published: sleep until a spawn nudges.
+    /// Everything is published to the current directory: sleep until a
+    /// nudge, or [`IDLE_RECHECK_SECS`] in case the account changed elsewhere.
     Idle,
     Retry,
     NotSupported,

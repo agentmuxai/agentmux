@@ -1486,8 +1486,8 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     // so a caller with no source agent (cron, external bridge) has no tier 4.
     let source = req.source_agent.as_deref().filter(|s| !s.is_empty())?;
 
-    let token = crate::muxbus::relay::relay_token(source, &state.id_store, &state.http_client).await;
-    let Some(token) = token else {
+    let credential = crate::muxbus::relay::relay_token(source, &state.id_store, &state.http_client).await;
+    let Some(credential) = credential else {
         tracing::debug!(
             target = %req.target_agent,
             "cloud relay skipped: not logged in to muxbus"
@@ -1502,13 +1502,12 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     // The gate's refusal reason rides on the "queued" line below: a
     // signature that silently fails to ride is otherwise invisible, and the
     // receiver can't tell it from a sender that never signed.
-    // The directory this relay sends into: this relay plus the signed-in
-    // account. The publisher binds each publication to the same id.
-    let directory = state
-        .id_store
-        .muxbus_user_sub()
+    // The directory this send goes into: this relay plus the account of the
+    // credential it's sent with. The publisher binds each publication to the
+    // same id.
+    let directory = Some(credential.account_sub.as_str())
         .filter(|sub| !sub.is_empty())
-        .map(|sub| crate::muxbus::wan_publish::directory_id(&crate::muxbus::relay::rest_base_url(), &sub));
+        .map(|sub| crate::muxbus::wan_publish::directory_id(&crate::muxbus::relay::rest_base_url(), sub));
     let (carried, unsigned_reason) = match crate::muxbus::relay::wan_carry_gate(
         req,
         state.mstore.wan_identity().as_deref(),
@@ -1521,7 +1520,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     let outcome = crate::muxbus::relay::relay_inject(
         &crate::muxbus::relay::rest_base_url(),
         &state.http_client,
-        &token,
+        &credential.token,
         source,
         &req.target_agent,
         &req.message,

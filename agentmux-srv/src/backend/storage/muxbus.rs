@@ -1026,15 +1026,6 @@ impl Store {
         Ok(())
     }
 
-    /// The signed-in account's Cognito `sub`, from SQLite only (no keychain
-    /// read) — cheap enough for every WAN send's carry gate. `None` when
-    /// logged out.
-    pub fn muxbus_user_sub(&self) -> Option<String> {
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        conn.query_row("SELECT user_sub FROM db_muxbus_credentials WHERE id = 'global'", [], |row| row.get(0))
-            .ok()
-    }
-
     pub fn muxbus_clear(&self) -> Result<(), StoreError> {
         // reagent P1 on #2260: without this lock, a concurrent muxbus_save
         // (broker refresh or muxbus.login) can commit its keychain + SQL
