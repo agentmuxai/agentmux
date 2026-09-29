@@ -311,7 +311,25 @@ pub(crate) async fn relay_token(
         Some(per_agent) => per_agent,
         None => shared,
     };
-    Some(RelayCredential { token, account_sub })
+    // `ensure_agent_credential` loads the account token itself when it
+    // provisions, so a sign-in to another account in between could hand back
+    // the new account's per-agent token while `account_sub` is the old one's
+    // (Codex P2 on #3994). Look again; if the account moved, bind no account
+    // and the send goes unsigned rather than into the wrong directory.
+    let after = crate::muxbus::cloud_subscriber::load_valid_token(store, &scheduler)
+        .await
+        .map(|t| crate::muxbus::pkce::token_sub(&t));
+    Some(RelayCredential { token, account_sub: settled_account(account_sub, after) })
+}
+
+/// The account to bind a send to: the one its credential was resolved
+/// under, if it's still the signed-in one afterwards; empty otherwise.
+fn settled_account(before: String, after: Option<String>) -> String {
+    if after.as_deref() == Some(before.as_str()) {
+        before
+    } else {
+        String::new()
+    }
 }
 
 /// What [`relay_token`] resolved: the bearer to send with, and the account
@@ -543,6 +561,16 @@ mod tests {
     /// A wan.db with a published key for `camper`, and a request exactly as
     /// the MCP would send it: signed, host-verified, this instance.
     const TEST_DIR: &str = "https://relay.test#acct";
+
+    #[test]
+    fn a_send_is_bound_to_an_account_only_if_it_held_through_resolution() {
+        // Codex P2 on #3994: a sign-in to another account while the per-agent
+        // credential resolves can pair one account's token with the other's
+        // directory. Then the send gets no account, so it goes unsigned.
+        assert_eq!(settled_account("acct-a".into(), Some("acct-a".into())), "acct-a");
+        assert_eq!(settled_account("acct-a".into(), Some("acct-b".into())), "");
+        assert_eq!(settled_account("acct-a".into(), None), "", "logged out mid-way");
+    }
 
     fn signed_request() -> (tempfile::TempDir, WanIdentityStore, InjectionRequest) {
         use base64::Engine as _;
