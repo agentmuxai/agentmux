@@ -251,6 +251,10 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // W3-S: a login may be an account switch — forget
                         // peer records fetched under the old account (§2.3),
                         // and publish any keys that were waiting on a login.
+                        // A login to another relay or account is a directory
+                        // that has never seen this install's keys; publications
+                        // are recorded per directory, so the pass this nudge
+                        // starts finds them all pending there.
                         clear_wan_peer_cache();
                         crate::muxbus::wan_publish::nudge();
                         let resp = MuxBusLoginResp {
