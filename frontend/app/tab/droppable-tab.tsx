@@ -140,7 +140,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 setIsDragging(true);
                 // Lone-tab drags carry NO cross-window payload: the HTML5
                 // pipeline's outcomes for a tab (tear-off to a new window,
-                // append-merge via DragOverlay) are all wrong for a
+                // append-merge via CrossWindowDropOverlay) are all wrong for a
                 // single-tab window — tear-off would strand an empty
                 // window. The host mouse hook below is the only consumer;
                 // release anywhere but another window's strip is a no-op.

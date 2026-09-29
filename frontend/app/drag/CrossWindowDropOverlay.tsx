@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * DragOverlay
+ * CrossWindowDropOverlay
  *
  * Renders a full-window overlay when a cross-window drag is hovering
  * over this window. Shows a visual indicator that a drop will be accepted.
@@ -18,7 +18,7 @@ import { wasTabRecentlyMerged } from "@/app/tab/tabbar-dnd";
 import { Logger } from "@/util/logger";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
-import "./drag-overlay.scss";
+import "./cross-window-drop-overlay.scss";
 
 interface CrossDragUpdateEvent {
     dragId: string;
@@ -41,7 +41,7 @@ interface CrossDragEndEvent {
     sourceTabId: string;
 }
 
-function DragOverlay(): JSX.Element {
+function CrossWindowDropOverlay(): JSX.Element {
     const [isTarget, setIsTarget] = createSignal(false);
     const [dragType, setDragType] = createSignal<"pane" | "tab" | null>(null);
     const [windowLabel, setWindowLabel] = createSignal<string | null>(null);
@@ -57,7 +57,7 @@ function DragOverlay(): JSX.Element {
         if (!wl) return;
 
         const api = getApi();
-        Logger.debug("dnd:overlay", "DragOverlay listening for events", { windowLabel: wl });
+        Logger.debug("dnd:overlay", "CrossWindowDropOverlay listening for events", { windowLabel: wl });
 
         let unlistenUpdate: (() => void) | null = null;
         let unlistenEnd: (() => void) | null = null;
@@ -168,4 +168,4 @@ function DragOverlay(): JSX.Element {
     );
 }
 
-export { DragOverlay };
+export { CrossWindowDropOverlay };

@@ -55,8 +55,8 @@ body {
     position: fixed;
     pointer-events: none;
     z-index: 9999;
-    background-color: rgba(from var(--accent-color) r g b / 0.18);
-    border: 2px solid var(--accent-color);
+    background-color: var(--drop-target-bg);
+    border: 2px solid var(--drop-target-border);
     border-radius: var(--block-border-radius);
     transition: top 120ms ease-out, left 120ms ease-out, width 120ms ease-out, height 120ms ease-out;
 }
