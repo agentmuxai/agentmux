@@ -207,9 +207,10 @@ impl PersistentSubprocessController {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
-        // Last point a Stop can still cancel a config restart's replacement
-        // (see `take_restart_spawn_permission_locked`).
-        Self::take_restart_spawn_permission_locked(&mut self.inner.lock().unwrap())?;
+        // Don't even start a config restart's replacement a Stop has already
+        // cancelled (see `restart_spawn_still_permitted_locked`); the decision
+        // itself is made where the child is installed, below.
+        Self::restart_spawn_still_permitted_locked(&mut self.inner.lock().unwrap())?;
 
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
@@ -234,6 +235,21 @@ impl PersistentSubprocessController {
         // own doc comment for what this identifies and why.
         let (my_generation, superseded_effects) = {
             let mut inner = self.inner.lock().unwrap();
+            // A config restart's replacement is installed only if no Stop has
+            // cancelled it, decided in this acquisition: before it, a Stop has
+            // no `kill_tx` to reach the child through (codex P1 on #3990).
+            if let Err(e) = Self::commit_restart_spawn_locked(&mut inner) {
+                drop(inner);
+                let _ = child.start_kill();
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
+                tracing::info!(
+                    block_id = %self.block_id,
+                    "config restart: a stop landed while the replacement was starting — killed it"
+                );
+                return Err(e);
+            }
             // The replacement process is here, so the quiesce window is over —
             // messages may take `DeliverDirect` against this new `stdin_tx`
             // again. Cleared unconditionally rather than only when set: any

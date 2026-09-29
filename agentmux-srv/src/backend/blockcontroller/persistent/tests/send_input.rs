@@ -4034,7 +4034,9 @@ fn the_spawn_claim_keeps_the_token_until_the_child_starts() {
     assert_eq!(inner.restart_spawn_for, Some(4));
     assert_eq!(inner.config_restart_generation, Some(4), "still cancellable by a Stop");
     // …and `spawn_process` consumes it right before starting the child.
-    PersistentSubprocessController::take_restart_spawn_permission_locked(&mut inner).unwrap();
+    PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut inner).unwrap();
+    assert_eq!(inner.config_restart_generation, Some(4), "the pre-spawn check does not consume it");
+    PersistentSubprocessController::commit_restart_spawn_locked(&mut inner).unwrap();
     assert_eq!(inner.config_restart_generation, None, "one restart, one replacement");
     assert_eq!(inner.restart_spawn_for, None);
 }
@@ -4049,7 +4051,7 @@ fn a_stop_during_the_credential_gate_cancels_the_replacement() {
     let _ = c.stop_process(false); // the user's Stop, mid-gate
     let mut inner = c.inner.lock().unwrap();
     assert!(
-        PersistentSubprocessController::take_restart_spawn_permission_locked(&mut inner).is_err(),
+        PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut inner).is_err(),
         "spawn_process must refuse to start the child",
     );
     assert_eq!(inner.restart_spawn_for, None, "the refusal leaves no restart claim behind");
@@ -4060,7 +4062,8 @@ fn a_stop_during_the_credential_gate_cancels_the_replacement() {
 fn an_ordinary_spawn_is_not_gated_by_the_restart_token() {
     let c = controller();
     let mut inner = c.inner.lock().unwrap();
-    assert!(PersistentSubprocessController::take_restart_spawn_permission_locked(&mut inner).is_ok());
+    assert!(PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut inner).is_ok());
+    assert!(PersistentSubprocessController::commit_restart_spawn_locked(&mut inner).is_ok());
 }
 
 /// What both exit arms consult, so the arm that wins the `select!` doesn't
@@ -4158,4 +4161,21 @@ fn a_jekt_with_no_process_and_no_spawn_is_refused_not_parked() {
     let err = c.send_user_message_outcome("jekt".to_string()).unwrap_err();
     assert!(err.contains("restarting"), "got: {err}");
     assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+}
+
+/// codex P1 on #3990 (round 3): a Stop landing after the pre-spawn check, while
+/// the child is being started, must still win at installation.
+#[test]
+fn a_stop_while_the_child_starts_is_honored_at_installation() {
+    let c = controller();
+    commit_restart(&c, 5);
+    assert!(c.try_claim_eager_resume_spawn_for(Some(5)));
+    PersistentSubprocessController::restart_spawn_still_permitted_locked(&mut c.inner.lock().unwrap()).unwrap();
+    let _ = c.stop_process(false); // lands during cmd.spawn()
+    let mut inner = c.inner.lock().unwrap();
+    assert!(
+        PersistentSubprocessController::commit_restart_spawn_locked(&mut inner).is_err(),
+        "the install must refuse, so spawn_process kills the child",
+    );
+    assert_eq!(inner.restart_spawn_for, None);
 }

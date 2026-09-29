@@ -449,19 +449,39 @@ impl PersistentSubprocessController {
 }
 
 impl PersistentSubprocessController {
-    /// Called under `inner` immediately before `spawn_process` starts the OS
-    /// child: if this spawn is a config restart's replacement, consume its
-    /// token, or refuse if a Stop cleared it since the claim (codex P1 on
-    /// #3990: the claim precedes the credential gate, which can be slow).
-    /// Refusing returns an error, so the caller takes its ordinary spawn-failure
-    /// path: the claim is released, and a message a human typed meanwhile still
-    /// gets its own spawn.
-    pub(super) fn take_restart_spawn_permission_locked(inner: &mut PersistentInner) -> Result<(), String> {
+    /// Called under `inner` just before `spawn_process` starts the OS child:
+    /// if this spawn is a config restart's replacement and a Stop cleared its
+    /// token since the claim (the claim precedes the credential gate, which
+    /// can be slow), refuse, so no process is started at all. A cheap early
+    /// out only: the token stays live, because a Stop can still land while the
+    /// child is being started, and only [`Self::commit_restart_spawn_locked`],
+    /// in the acquisition that installs the child, decides (codex P1s on
+    /// #3990). Refusing returns an error, so the caller takes its ordinary
+    /// spawn-failure path: the claim is released, and a message a human typed
+    /// meanwhile still gets its own spawn.
+    pub(super) fn restart_spawn_still_permitted_locked(inner: &mut PersistentInner) -> Result<(), String> {
+        let Some(generation) = inner.restart_spawn_for else {
+            return Ok(());
+        };
+        if inner.config_restart_generation != Some(generation) {
+            inner.restart_spawn_for = None;
+            return Err(RESTART_OVERRIDDEN.to_string());
+        }
+        Ok(())
+    }
+
+    /// Called in the SAME `inner` acquisition that installs a freshly started
+    /// child as the live process: consume a config restart's token, or refuse
+    /// if a Stop cleared it while the child was starting. Until this point a
+    /// Stop has no `kill_tx` to reach the new process through, so this is
+    /// where it must win: on refusal the caller kills the child it just
+    /// started and fails the spawn.
+    pub(super) fn commit_restart_spawn_locked(inner: &mut PersistentInner) -> Result<(), String> {
         let Some(generation) = inner.restart_spawn_for.take() else {
             return Ok(());
         };
         if inner.config_restart_generation != Some(generation) {
-            return Err("a stop overrode the config restart before its replacement started".to_string());
+            return Err(RESTART_OVERRIDDEN.to_string());
         }
         inner.config_restart_generation = None;
         Ok(())
@@ -564,3 +584,6 @@ impl PersistentSubprocessController {
         }
     }
 }
+
+/// Why a config restart's replacement was abandoned: a Stop landed first.
+pub(super) const RESTART_OVERRIDDEN: &str = "a stop overrode the config restart before its replacement started";
