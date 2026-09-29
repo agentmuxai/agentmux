@@ -67,8 +67,18 @@ impl PersistentSubprocessController {
     /// [`request_stop`] over just the shared state, for the `'static`
     /// future [`Controller::shutdown`] returns.
     pub(super) fn request_stop_on(inner_arc: &Arc<Mutex<PersistentInner>>, request: KillRequest) -> Result<(), String> {
-        Self::request_stop_inner(inner_arc, request, false);
+        Self::request_stop_inner(inner_arc, request, false, false);
         Ok(())
+    }
+
+    /// Apply a deferred runtime-config restart: stop the current process (as
+    /// `stop_process(false)` does) and mark this generation, so the kill arm
+    /// brings the replacement up itself once it's gone
+    /// (`PersistentInner::config_restart_generation`). Called only at the turn
+    /// boundary that consumed `restart_when_idle`.
+    pub(super) fn stop_for_config_restart(&self) {
+        let request = KillRequest::Graceful(std::time::Instant::now() + super::super::SHUTDOWN_GRACE);
+        Self::request_stop_inner(&self.inner, request, false, true);
     }
 
     /// A kill for teardown: drains the deferred queue in the SAME `inner`
@@ -79,13 +89,18 @@ impl PersistentSubprocessController {
     /// lost, with no stranded warning (codex P2 on #3562). Once this lock is
     /// released, `stop_pending` holds anything queued later.
     pub(super) fn request_stop_draining_deferred(&self, request: KillRequest) -> Vec<String> {
-        Self::request_stop_inner(&self.inner, request, true)
+        Self::request_stop_inner(&self.inner, request, true, false)
     }
 
-    fn request_stop_inner(
+    /// `config_restart`: this stop is a deferred runtime-config restart
+    /// ([`Self::stop_for_config_restart`]). Every other stop clears the mark
+    /// in this same acquisition, so a Stop or pane close landing after the
+    /// restart was committed wins, and nothing respawns behind it.
+    pub(super) fn request_stop_inner(
         inner_arc: &Arc<Mutex<PersistentInner>>,
         request: KillRequest,
         drain_deferred: bool,
+        config_restart: bool,
     ) -> Vec<String> {
         let (kill_tx, drained) = {
             let mut inner = inner_arc.lock().unwrap();
@@ -106,6 +121,7 @@ impl PersistentSubprocessController {
             let generation = inner.spawn_generation;
             inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested { generation });
             inner.stop_pending = true;
+            inner.config_restart_generation = config_restart.then_some(generation);
             let drained = if drain_deferred {
                 inner.deferred_deliveries.drain(..).collect()
             } else {
