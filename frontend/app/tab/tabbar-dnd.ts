@@ -178,7 +178,7 @@ export function insertionPointToIndex(ip: InsertionPoint | null, tabs: string[])
 // ── Cross-window merge dedup ────────────────────────────────────────────────
 // A direct cross-window tab remount (tabdrag:merge-direct, emitted by the
 // host's mouse hook) and the legacy HTML5 cross-drag pipeline
-// (DragOverlay's cross-drag-end → MoveTabToWorkspace) can BOTH fire for
+// (CrossWindowDropOverlay's cross-drag-end → MoveTabToWorkspace) can BOTH fire for
 // one gesture — the hook resolves on WM_LBUTTONUP while the source
 // window's dragend independently drives the cross-drag pipeline. Both
 // handlers run in the TARGET window, so a same-context recency mark is
