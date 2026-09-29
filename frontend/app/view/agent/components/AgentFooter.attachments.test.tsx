@@ -10,7 +10,10 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const hub = vi.hoisted(() => ({ ingest: vi.fn(), info: vi.fn(), container: false, splice: vi.fn() }));
+const hub = vi.hoisted(() => ({ ingest: vi.fn(), info: vi.fn(), container: false, splice: vi.fn(), copy: vi.fn() }));
+vi.mock("@/app/drag/file-drop-actions", () => ({
+    copyIntoWorkdir: (...a: unknown[]) => hub.copy(...a),
+}));
 vi.mock("../hooks/useAgentDropAttach", () => ({
     isContainerPane: () => hub.container,
     spliceComposerTokens: (...a: unknown[]) => hub.splice(...a),
@@ -124,24 +127,25 @@ describe("AgentFooter with attachments", () => {
         expect(ev.defaultPrevented).toBe(false);
     });
 
-    it("container panes: a pasted file that fails doesn't lose the others' @mentions", async () => {
+    it("container panes: a paste is copied into the working folder, like a drop", () => {
         const { ta, draft } = setup();
         hub.container = true;
-        hub.splice.mockReset().mockReturnValue(true);
-        const toWorkdir = vi
-            .spyOn(draft, "uploadToWorkdir")
-            .mockResolvedValueOnce("/work/a.txt")
-            .mockRejectedValueOnce(new Error("disk full"))
-            .mockResolvedValueOnce("/work/c.pdf");
+        hub.copy.mockReset().mockResolvedValue([]);
         const tray = vi.spyOn(draft, "uploadFiles");
-        const files = ["a.txt", "b.bin", "c.pdf"].map((n) => new File([new Uint8Array([1])], n));
+        const files = ["a.txt", "b.bin"].map((n) => new File([new Uint8Array([1])], n));
         const ev = new Event("paste", { bubbles: true, cancelable: true });
         Object.defineProperty(ev, "clipboardData", { value: { files } });
         try {
             ta.dispatchEvent(ev);
-            await vi.waitFor(() => expect(hub.splice).toHaveBeenCalled());
-            expect(hub.splice.mock.calls[0][1]).toEqual(["@a.txt", "@c.pdf"]);
-            expect(toWorkdir).toHaveBeenCalledTimes(3);
+            expect(hub.copy).toHaveBeenCalledTimes(1);
+            const [blockId, source, opts] = hub.copy.mock.calls[0];
+            expect(blockId).toBe(draft.blockId);
+            expect(source).toEqual({ files });
+            expect(opts.paneKind).toBe("agent pane");
+            expect(opts.mentionIn).toBe(ta.parentElement);
+            expect(opts.concurrency).toBeUndefined();
+            opts.splice(ta.parentElement, ["@a.txt"]);
+            expect(hub.splice).toHaveBeenCalledWith(ta.parentElement, ["@a.txt"]);
             expect(tray).not.toHaveBeenCalled();
         } finally {
             hub.container = false;

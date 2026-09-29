@@ -421,7 +421,7 @@ interface DragFiles {
 - **The channel stays host-only.** An arbitrary source-path + destination copy must **not** become a srv RPC. srv's full-auth surface is also reachable by agent processes, which are given `AGENTMUX_AUTH_KEY` (`agent_handlers/input.rs:548-564`), and the container exec denylist (`container.rs:231-245`) doesn't remove it. A caller-supplied `{paths, dir}` RPC would let an agent copy host files into its own working folder.
   - The copy therefore stays behind CEF's renderer-only IPC (`copy_file_to_dir`, `ipc.rs:434`), and only its implementation changes: it calls `agentmux_common::copy_into_dir` inside `spawn_blocking`, instead of the racy, synchronous `providers.rs:161-263`.
   - The one implementation is shared by crate, not by moving the call to srv.
-- **Settings:** `dnd:maxfilesizemb` is either enforced in the CEF copy or removed from the settings template. Decide in phase 2 (open question 4).
+- **Settings:** `dnd:maxfilesizemb` was removed from the settings template in phase 2 (open question 4); it was never read.
 
 ### 5.6 Cross-window drags
 
@@ -597,4 +597,4 @@ Phases 2–5 have no user-visible features. They're worth doing because every fu
 1. **Armed outline on panes in other window tabs?** They aren't visible, so no. Only the visible layout is armed.
 2. **Blocked panes:** show the prompt with the reason (recommended), or nothing?
 3. **SC_MOVE / `HookMode::TearOff`:** is it shelved for good? If yes, phase 5 deletes it; if not, it stays with a comment.
-4. **`dnd:maxfilesizemb`:** enforce a per-file cap in the host-only CEF copy, or drop the setting? Recommendation: drop it. The attachment store already has its own limits, and a copy into a working folder is the user's explicit act.
+4. **`dnd:maxfilesizemb`:** enforce a per-file cap in the host-only CEF copy, or drop the setting? Recommendation: drop it. The attachment store already has its own limits, and a copy into a working folder is the user's explicit act. **Decided in phase 2: dropped.**

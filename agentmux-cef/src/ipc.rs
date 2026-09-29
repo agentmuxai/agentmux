@@ -432,7 +432,13 @@ async fn route_command(
         "ensure_settings_file" => commands::platform::ensure_settings_file(state),
         "open_in_editor" => commands::platform::open_in_editor(args),
         "open_in_file_manager" => commands::platform::open_in_file_manager(state, args),
-        "copy_file_to_dir" => commands::providers::copy_file_to_dir(args),
+        // spawn_blocking: a folder or a large file copies for seconds.
+        "copy_file_to_dir" => {
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || commands::providers::copy_file_to_dir(&args_clone))
+                .await
+                .map_err(|e| format!("copy_file_to_dir join error: {}", e))?
+        }
         // Paths of the OS file drag that entered the caller's window. The
         // renderer passes its own `?windowLabel=`; see drag_stash.rs.
         "consume_drag_paths" => {
