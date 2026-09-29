@@ -27,6 +27,8 @@ use std::sync::Arc;
 use crate::client::*;
 use crate::state::AppState;
 
+#[cfg(target_os = "linux")]
+pub(crate) mod gl_probe;
 mod gpu;
 mod monitor;
 mod window_settings;
