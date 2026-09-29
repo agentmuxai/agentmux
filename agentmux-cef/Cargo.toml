@@ -49,14 +49,13 @@ resources_path = "resources"
 
 [dependencies]
 agentmux-common = { path = "../agentmux-common" }
-# CEF 152, all platforms (SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md
-# Phase E) — collapsed back from the temporary cef_win/cef_unix staged-rollout
-# split (removed here) now that Windows, macOS, and Linux all have a real,
-# verified 152 runtime release. Still goes through [patch.crates-io] below
+# CEF 154, all platforms (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md);
+# one milestone everywhere since 152's Phase E collapsed the temporary
+# cef_win/cef_unix staged-rollout split. Still goes through [patch.crates-io] below
 # (the AgentMux libcef fork) for begin_window_drag, needed by Linux's
 # patched-libcef feature; Windows/macOS carry the same patched binding
 # unused, same as before the split ever existed.
-cef = { version = "152", default-features = false, features = ["build-util"] }
+cef = { version = "154", default-features = false, features = ["build-util"] }
 # Native "pick a file" dialog for the Media pane (SPEC_MEDIA_PANE_2026_07_26.md).
 # Default features pick the right native backend per platform (Win32
 # IFileDialog / macOS NSOpenPanel / Linux GTK3).
