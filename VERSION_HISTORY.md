@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.58.2 — 2026-09-28
+
+- Claude agents now get their Global Memory, Operator Config and Personal Memory at every new session, /clear and compaction through Claude Code's SessionStart hook, with a notice listing each part's size.
+- fix(macos,linux): packaged builds now include agentmux-bashwrap, so agents' Bash commands stream their output into the pane and get the idle-timeout and background-task tracking that Windows builds already had
+- fix(agent): background commands leave the Activity Dock when they finish — including ones a subagent started, which used to stay 'running' forever — and the agent's own background commands show up there again, named by their description
+- Dropping files into a floating pane on Windows works (its paths were never captured), a long hover before dropping no longer loses the dropped files' paths, and each window reads only its own drag's paths.
+- perf(agents): install the pinned CLI of every provider your agents use in the background at startup, so the first open after a CLI pin bump doesn't wait on npm
+- perf(agents): an agent pane restores only the turns its live feed keeps instead of a fixed 5,000-line window (about 41% of the lines in a real transcript)
+- perf(agents): a tool row builds its highlighted result body (diffs, file previews, Bash output) the first time it's opened, not for every collapsed row on restore
+- Floating panes (Windows): a tack button next to Maximize keeps the pane on top of every AgentMux window. It lights up in the theme color when on, two tacked panes behave normally toward each other, and switching to another app lets that app cover it. The tack survives a reload of the pane and is dropped when the pane is redocked.
+- feat(toolchain): Local models section — detect Ollama, llama.cpp, LM Studio, llmfit, OpenCode, Goose, Crush and Aider
+- fix(dev): real port-liveness and subst-safe ownership check in task dev
+- feat(markdown): agents can colour status words in their replies — ok, warn, error, info, muted, added/removed and badge pills, from the theme
+- AgentMux Cloud: a sign-in that can no longer work (its refresh was refused, or the cloud moved to a new sign-in service) now shows "Sign in again" with your email in the host popover and the AgentMux Cloud panel, and the app stops reconnecting with it until you do.
+- AgentMux Cloud: an agent's cloud credential that the cloud no longer recognizes is now dropped and provisioned again on its next use, instead of being retried every minute forever.
+- docs(run skill): root-cause the Start-Process silent-no-op and document the fix
+- AgentMux Cloud: a build without a compiled sign-in client id can sign in with the one the cloud publishes, and srv reports the cloud settings it resolved and their source (`muxbus.cloudconfig`).
+
 ## 0.58.1 — 2026-09-27
 
 - Windows: when the AgentMux window stops responding (its UI thread misses two liveness checks in a row, 1-2 minutes), the launcher now saves a small diagnostic dump of it to %LOCALAPPDATA%\CrashDumps\agentmux-host-hang\<instance> (newest 5 per instance), so a hang that has to be killed leaves evidence of its cause. Nothing is killed automatically.
