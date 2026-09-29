@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-27
-**Status:** active (Day 1 done 2026-09-29; builds running)
+**Status:** active — Day 1 shipped: prerequisite PR #3987, agentmuxai/cef#10, agentmuxai/cef-rs#1. Remaining: the three runtime builds (running), the consumer PR, publishing. Verified 2026-09-29.
 **Executes:** `docs/cef-build/CEF_FORK_MAINTENANCE.md` §6 (upgrade runbook), §5 (carry-set gate),
 §7 (artifact verification), §8 (release pinning), §9 (checklists). This spec does not restate them;
 it adds what is specific to 154, the schedule, and the traps 148 → 152 already hit.
