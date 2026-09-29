@@ -5,8 +5,9 @@
  * Notifications & Tray section — SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1.
  *
  * Pins the two contracts that are easy to break silently:
- * - the tray toggle writes exactly `app:runinbackground` (the key
- *   `agentmux-launcher/src/background_config.rs` reads before the app runs);
+ * - the tray-icon toggle writes exactly `app:showtray` (on by default) and the
+ *   background toggle exactly `app:runinbackground` (off by default) — the
+ *   keys `agentmux-launcher/src/background_config.rs` reads before the app runs;
  * - start at login writes exactly `app:startatlogin` (the one property the
  *   tray's check item also writes, and the launcher applies to the OS login
  *   entry), is off by default, and a host/launcher that can't manage a login
@@ -50,7 +51,7 @@ function toggleFor(label: string): HTMLElement {
     return row!.querySelector('[role="switch"]') as HTMLElement;
 }
 
-describe("Notifications & Tray — run in background", () => {
+describe("Notifications & Tray — tray icon and run in background", () => {
     beforeEach(() => {
         setConfig.mockReset();
         getAutostartStatus.mockReset();
@@ -60,18 +61,27 @@ describe("Notifications & Tray — run in background", () => {
     });
     afterEach(() => cleanup());
 
-    it("is on by default and writes app:runinbackground=false when turned off", () => {
+    it("shows the tray icon by default and writes app:showtray=false when turned off", () => {
         render(() => <NotificationsSection />);
-        const t = toggleFor("Keep running in the system tray");
+        const t = toggleFor("Show icon in the system tray");
         expect(t.getAttribute("aria-checked")).toBe("true");
         fireEvent.click(t);
-        expect(setConfig.mock.calls[0][1]).toEqual({ "app:runinbackground": false });
+        expect(setConfig.mock.calls[0][1]).toEqual({ "app:showtray": false });
     });
 
-    it("reflects a stored true", () => {
-        settings = { "app:runinbackground": true };
+    it("keeps running in the background only when opted in, writing app:runinbackground=true", () => {
         render(() => <NotificationsSection />);
-        expect(toggleFor("Keep running in the system tray").getAttribute("aria-checked")).toBe("true");
+        const t = toggleFor("Keep running after all windows are closed");
+        expect(t.getAttribute("aria-checked")).toBe("false");
+        fireEvent.click(t);
+        expect(setConfig.mock.calls[0][1]).toEqual({ "app:runinbackground": true });
+    });
+
+    it("reflects stored values", () => {
+        settings = { "app:runinbackground": true, "app:showtray": false };
+        render(() => <NotificationsSection />);
+        expect(toggleFor("Keep running after all windows are closed").getAttribute("aria-checked")).toBe("true");
+        expect(toggleFor("Show icon in the system tray").getAttribute("aria-checked")).toBe("false");
     });
 });
 
@@ -198,7 +208,8 @@ describe("Notifications & Tray — a host without a tray or login entries", () =
     it("shows neither row, nor the section header", () => {
         useHost({});
         render(() => <NotificationsSection />);
-        expect(screen.queryByText("Keep running in the system tray")).toBeNull();
+        expect(screen.queryByText("Show icon in the system tray")).toBeNull();
+        expect(screen.queryByText("Keep running after all windows are closed")).toBeNull();
         expect(screen.queryByText("Start at login")).toBeNull();
         expect(screen.queryByText("System tray")).toBeNull();
         // The rest of the section is still there.
@@ -208,7 +219,8 @@ describe("Notifications & Tray — a host without a tray or login entries", () =
     it("shows only what the host has", () => {
         useHost({ tray: true });
         render(() => <NotificationsSection />);
-        expect(screen.getByText("Keep running in the system tray")).toBeTruthy();
+        expect(screen.getByText("Show icon in the system tray")).toBeTruthy();
+        expect(screen.getByText("Keep running after all windows are closed")).toBeTruthy();
         expect(screen.queryByText("Start at login")).toBeNull();
         expect(screen.getByText("System tray")).toBeTruthy();
     });

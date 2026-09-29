@@ -6,7 +6,7 @@
 **Trigger:** Repo owner: *"we also want to design a robust 'start with OS' feature."*
 **Builds on:** `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §4 (mechanism choice per platform, WS2)
 and §6 (consent rules); `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md` §4.1 (the Settings toggle).
-**Related:** PR #3785 (tray on by default; a tray that cannot start drops background mode).
+**Related:** PR #3785 (turned background mode on by default; reverted 2026-09-28 to icon on by default, background mode opt-in, see `docs/reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md`; a tray that cannot start drops background mode).
 **Owner decisions (2026-09-25):** start at login is **off by default**, with no first-run prompt. It is
 controlled from a Settings toggle **and** a check item in the tray's right-click menu, and both control
 the **same reactive property** (§3.9).
@@ -243,7 +243,7 @@ broadcasts it like every other setting.
 ## 4. Consent and defaults
 
 - Start at login is **off by default**, with **no first-run prompt** (owner decision, 2026-09-25). It is
-  separate from the tray, which #3785 turns on by default.
+  separate from background mode, which is also opt-in (`app:runinbackground`; #3785 turned it on by default, reverted 2026-09-28). The tray icon itself is on by default (`app:showtray`).
 - Nothing enables it implicitly: not an installer, not an update, not self-heal. The one exception is
   adopting an entry the user already created with the old toggle (§3.9), which keeps their choice
   rather than making a new one.

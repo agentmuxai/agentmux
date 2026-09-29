@@ -19,13 +19,21 @@ import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-contr
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const NOTIFICATIONS_SETTINGS = {
+    showTray: {
+        id: "notifications.show_tray",
+        label: "Show icon in the system tray",
+        description:
+            "Show an AgentMux icon in the system tray (the menu bar on macOS) while AgentMux is running. Always shown while “Keep running after all windows are closed” is on. Applies at the next launch. On Windows 11 new tray icons start in the overflow (^) area — drag it onto the taskbar to keep it visible.",
+        section: "notifications",
+        keywords: ["system tray", "tray icon", "menu bar", "notification area", "app:showtray"],
+    },
     runInBackground: {
         id: "notifications.run_in_background",
-        label: "Keep running in the system tray",
+        label: "Keep running after all windows are closed",
         description:
-            "When all windows are closed, AgentMux keeps running with an icon in the system tray instead of quitting. Applies at the next launch. On Windows 11 new tray icons start in the overflow (^) area — drag it onto the taskbar to keep it visible.",
+            "When all windows are closed, AgentMux keeps running in the system tray instead of quitting. Quit it from the tray icon's menu. Applies at the next launch.",
         section: "notifications",
-        keywords: ["system tray", "tray icon", "menu bar", "background", "minimize to tray", "close to tray", "app:runinbackground"],
+        keywords: ["background", "minimize to tray", "close to tray", "keep running", "app:runinbackground"],
     },
     autostart: {
         id: "notifications.autostart",
@@ -284,12 +292,23 @@ export function NotificationsSection(): JSX.Element {
             </Show>
             <Show when={hostHas("tray")}>
                 <SettingRow
+                    id={NOTIFICATIONS_SETTINGS.showTray.id}
+                    label={NOTIFICATIONS_SETTINGS.showTray.label}
+                    description={NOTIFICATIONS_SETTINGS.showTray.description}
+                    control={
+                        <ToggleControl
+                            checked={(s()["app:showtray"] as boolean | undefined) ?? true}
+                            onChange={(v) => set("app:showtray", v)}
+                        />
+                    }
+                />
+                <SettingRow
                     id={NOTIFICATIONS_SETTINGS.runInBackground.id}
                     label={NOTIFICATIONS_SETTINGS.runInBackground.label}
                     description={NOTIFICATIONS_SETTINGS.runInBackground.description}
                     control={
                         <ToggleControl
-                            checked={(s()["app:runinbackground"] as boolean | undefined) ?? true}
+                            checked={(s()["app:runinbackground"] as boolean | undefined) ?? false}
                             onChange={(v) => set("app:runinbackground", v)}
                         />
                     }
