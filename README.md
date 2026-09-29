@@ -255,7 +255,7 @@ A fifth crate, `agentmux-common`, provides shared utilities (path resolution, ru
 
 **Stack:**
 - **Frontend:** SolidJS + TypeScript + Vite (state via SolidJS signals + a 4-layer reducer stack)
-- **Desktop:** CEF 152 via cef-rs — bundles its own Chromium (~160 MB ZIP package, ~150 ms startup, 150–350 MB resident)
+- **Desktop:** CEF 154 via cef-rs — bundles its own Chromium (~160 MB ZIP package, ~150 ms startup, 150–350 MB resident)
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
 
