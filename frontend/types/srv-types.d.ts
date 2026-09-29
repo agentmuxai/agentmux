@@ -1076,6 +1076,7 @@ declare global {
         "tab:skipcloseconfirm"?: boolean;
         "splash:disabled"?: boolean;
         "app:runinbackground"?: boolean;
+        "app:showtray"?: boolean;
         "app:startatlogin"?: boolean;
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;

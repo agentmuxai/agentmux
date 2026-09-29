@@ -94,7 +94,7 @@ impl ksni::Tray for AgentMuxTray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: super::tooltip(self.running),
+            title: super::tooltip(),
             description: notify_menu::tooltip_suffix(&self.nstate, now_ms()).unwrap_or_default(),
             ..Default::default()
         }

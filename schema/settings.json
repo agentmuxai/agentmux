@@ -443,10 +443,15 @@
           "default": 30,
           "description": "Days an attachment's files are kept after last use. Images that were never sent are removed after 7 days (or this, if shorter). Default 30."
         },
-        "app:runinbackground": {
+        "app:showtray": {
           "type": "boolean",
           "default": true,
-          "description": "Keep AgentMux running with a system-tray / menu-bar icon when all windows are closed (background-service mode; implies the tray). On by default; if the tray cannot be shown (e.g. Linux without a StatusNotifier host), closing the last window quits instead. Read by agentmux-launcher at startup, so a change applies at the NEXT launch. Env AGENTMUX_BACKGROUND_SERVICE / AGENTMUX_TRAY and the --background flag also enable it. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1."
+          "description": "Show an AgentMux icon in the system tray / menu bar while AgentMux is running. On by default. Always shown while app:runinbackground is on (a process that keeps running must show an icon). Read by agentmux-launcher at startup, so a change applies at the NEXT launch."
+        },
+        "app:runinbackground": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep AgentMux running with a system-tray / menu-bar icon when all windows are closed (background-service mode; implies the tray icon regardless of app:showtray). Off by default (opt-in); if the tray cannot be shown (e.g. Linux without a StatusNotifier host), closing the last window quits even when this is on. Read by agentmux-launcher at startup, so a change applies at the NEXT launch. Env AGENTMUX_BACKGROUND_SERVICE / AGENTMUX_TRAY and the --background flag also enable it. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1."
         },
         "app:startatlogin": {
           "type": "boolean",
