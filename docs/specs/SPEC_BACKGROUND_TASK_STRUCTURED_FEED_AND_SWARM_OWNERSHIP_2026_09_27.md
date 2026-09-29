@@ -5,7 +5,7 @@
 
 **Date:** 2026-09-27
 **Author:** AgentO
-**Status:** active — Phase 1 (§2) is implemented by #3953, the PR that adds this doc. Phases 2-4 (§3-§5) are not started. Phase 4's bashwrap packaging prerequisite is #3952.
+**Status:** active — Phase 1 (§2) implemented by #3953. Phases 2 and 3 (§3, §4) implemented by #3963. Phase 4 (§5) is not started; its bashwrap packaging prerequisite is #3952.
 **Builds on:** `SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md` (registry list RPC + invalidation event), `SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` (pid capture), `STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md` (one registry that the dock, `attachedTask` and Swarm all read)
 
 ## 1. Problem
@@ -62,19 +62,27 @@ The renderer's existing `docknodestatus`/completion pushes are unchanged; every 
 - Non-persistent controllers (one-shot subprocess, containers) keep today's renderer-only path.
 - Tasks the CLI never reports ending (a CLI that dies mid-task, `kill -9`). See Phase 4.
 
-## 3. Phase 2 — ownership
+## 3. Phase 2 — ownership (implemented)
 
 - Store the owner on the row: new nullable `db_background_tasks.owner_tool_use_id`, from the `parent_tool_use_id` of the `assistant` line that issued the Bash call. srv sees that line immediately before `task_started`; keep a small per-stream `tool_use_id → parent_tool_use_id` map in the same reader.
 - `ActiveSubagent` gains `tool_use_id` (from `meta.json`'s `toolUseId`, which `subagent_watcher::completion::tool_use_id_for` already reads).
 - `COMMAND_LIST_BACKGROUND_TASKS` accepts an empty `blockid` meaning "every block" (backed by a variant of `background_task_list_running` that also returns recently ended rows), so Swarm can list the fleet in one call, the way it lists subagents and shells.
 
-## 4. Phase 3 — Swarm shows background work under its owner
+## 4. Phase 3 — Swarm shows background work under its owner (implemented)
 
 - Swarm's model fetches the fleet list and subscribes to `background-task-updated` without a scope, like its other buckets.
 - Per agent row: a background task whose `owner_tool_use_id` matches a subagent's `tool_use_id` renders nested under that subagent; the rest render at the agent level. Nesting follows the subagent tree at every depth.
 - Each row shows the description, elapsed time and real status (`running`, then `done`/`error`/`stopped` for the same retention window the dock uses). A finished subagent keeps its still-running tasks visible under it; they are not closed just because their owner ended.
 - `swarm-longrunning.ts` keeps showing long-running **foreground** calls; background calls come from the registry, deduplicated by id (registry id = tool_use_id).
 - Consistent with `SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md` §3.3 (Swarm reads the same feed, no duplicated "Running in background" text) and `TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md` §3.4 (the four "what's running" subsystems stay separate; this only feeds one of them into Swarm).
+
+### 4.1 As built
+
+- The fleet list is `COMMAND_LIST_BACKGROUND_TASKS` with an empty `blockid`: running rows plus rows that ended in the last 60 s (`FLEET_ENDED_WINDOW_MS`, longer than the longest finished-row retention).
+- `SubAgent.tool_use_id` is read from `meta.json` when the subagent is first seen and retried on later transcript changes, because the CLI can write the sidecar after the transcript.
+- A task is nested only under a **solo** subagent row that is actually shown. A task owned by a workflow member, or by a retired subagent row, renders in the agent's Background bucket instead, so nothing is hidden. Nesting under workflow members is left for later.
+- Nested rows show whether or not the subagent row is expanded.
+- `background_task_describe` also replaces the renderer's generic "Bash" label with the CLI's description when the renderer created the row first.
 
 ## 5. Phase 4 — backstops for tasks the CLI never reports ending
 

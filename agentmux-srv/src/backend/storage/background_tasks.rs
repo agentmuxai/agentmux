@@ -69,7 +69,13 @@ pub struct BackgroundTask {
     pub status: BackgroundTaskStatus,
     pub last_seen_ms: i64,
     pub ended_at_ms: Option<i64>,
+    /// The Agent call (`tool_use_id`) whose subagent launched this task, or
+    /// `None` for the agent's own. Schema v41.
+    pub owner_tool_use_id: Option<String>,
 }
+
+const COLUMNS: &str =
+    "id, block_id, label, pid, started_at_ms, status, last_seen_ms, ended_at_ms, owner_tool_use_id";
 
 impl Store {
     /// Create the row if it doesn't exist yet (status `running`), and
@@ -133,10 +139,7 @@ impl Store {
 
     pub fn background_task_get(&self, id: &str) -> Result<Option<BackgroundTask>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, block_id, label, pid, started_at_ms, status, last_seen_ms, ended_at_ms
-             FROM db_background_tasks WHERE id = ?1",
-        )?;
+        let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM db_background_tasks WHERE id = ?1"))?;
         let mut rows = stmt.query_map(params![id], map_row)?;
         match rows.next() {
             Some(r) => Ok(Some(r?)),
@@ -146,10 +149,9 @@ impl Store {
 
     pub fn background_task_list_for_block(&self, block_id: &str) -> Result<Vec<BackgroundTask>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, block_id, label, pid, started_at_ms, status, last_seen_ms, ended_at_ms
-             FROM db_background_tasks WHERE block_id = ?1 ORDER BY started_at_ms ASC",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM db_background_tasks WHERE block_id = ?1 ORDER BY started_at_ms ASC"
+        ))?;
         let iter = stmt.query_map(params![block_id], map_row)?;
         iter.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -159,12 +161,45 @@ impl Store {
     /// caller doesn't yet know which block(s) to ask about.
     pub fn background_task_list_running(&self) -> Result<Vec<BackgroundTask>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, block_id, label, pid, started_at_ms, status, last_seen_ms, ended_at_ms
-             FROM db_background_tasks WHERE status = 'running' ORDER BY started_at_ms ASC",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM db_background_tasks WHERE status = 'running' ORDER BY started_at_ms ASC"
+        ))?;
         let iter = stmt.query_map([], map_row)?;
         iter.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Every block's `running` rows plus those that ended at or after
+    /// `ended_since_ms` — what a fleet view (Swarm) shows: live work, and
+    /// finished work for as long as it keeps showing a finished row.
+    pub fn background_task_list_fleet(&self, ended_since_ms: i64) -> Result<Vec<BackgroundTask>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM db_background_tasks
+             WHERE status = 'running' OR ended_at_ms >= ?1
+             ORDER BY started_at_ms ASC"
+        ))?;
+        let iter = stmt.query_map(params![ended_since_ms], map_row)?;
+        iter.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Record what the CLI says about a task: its description (replacing a
+    /// generic label such as the renderer's "Bash") and the subagent that
+    /// owns it. The owner is only ever filled in, never cleared or changed.
+    /// No-op (`false`) if the row doesn't exist.
+    pub fn background_task_describe(
+        &self,
+        id: &str,
+        label: &str,
+        owner_tool_use_id: Option<&str>,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_background_tasks
+             SET label = ?1, owner_tool_use_id = COALESCE(owner_tool_use_id, ?2)
+             WHERE id = ?3",
+            params![label, owner_tool_use_id, id],
+        )?;
+        Ok(rows > 0)
     }
 }
 
@@ -179,6 +214,7 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BackgroundTask> {
         status: BackgroundTaskStatus::from_str(&status),
         last_seen_ms: row.get(6)?,
         ended_at_ms: row.get(7)?,
+        owner_tool_use_id: row.get(8)?,
     })
 }
 
@@ -323,5 +359,37 @@ mod tests {
         let task = reopened.background_task_get("t1").unwrap().unwrap();
         assert_eq!(task.label, "task dev");
         assert_eq!(task.status, BackgroundTaskStatus::Running);
+    }
+
+    #[test]
+    fn describe_replaces_the_label_and_fills_the_owner_once() {
+        let store = object_store();
+        store.background_task_observe("t1", "block-a", "Bash", 1000, 1000).unwrap();
+        assert_eq!(store.background_task_get("t1").unwrap().unwrap().owner_tool_use_id, None);
+
+        assert!(store.background_task_describe("t1", "Background wait", Some("toolu_agent")).unwrap());
+        let task = store.background_task_get("t1").unwrap().unwrap();
+        assert_eq!((task.label.as_str(), task.owner_tool_use_id.as_deref()), ("Background wait", Some("toolu_agent")));
+
+        // A later description without an owner, or with a different one,
+        // never clears or moves the owner.
+        store.background_task_describe("t1", "Background wait", None).unwrap();
+        store.background_task_describe("t1", "Background wait", Some("toolu_other")).unwrap();
+        assert_eq!(store.background_task_get("t1").unwrap().unwrap().owner_tool_use_id.as_deref(), Some("toolu_agent"));
+
+        assert!(!store.background_task_describe("missing", "x", None).unwrap());
+    }
+
+    #[test]
+    fn list_fleet_returns_running_rows_and_recently_ended_ones_across_blocks() {
+        let store = object_store();
+        store.background_task_observe("live", "block-a", "live", 100, 100).unwrap();
+        store.background_task_observe("recent", "block-b", "recent", 110, 110).unwrap();
+        store.background_task_observe("old", "block-b", "old", 50, 50).unwrap();
+        store.background_task_complete("recent", BackgroundTaskStatus::Done, 900).unwrap();
+        store.background_task_complete("old", BackgroundTaskStatus::Error, 200).unwrap();
+
+        let ids: Vec<String> = store.background_task_list_fleet(500).unwrap().into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec!["live".to_string(), "recent".to_string()]);
     }
 }

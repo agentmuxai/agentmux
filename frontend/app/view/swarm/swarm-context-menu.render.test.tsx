@@ -42,6 +42,7 @@ import type {
     WorkflowDispatch,
 } from "./swarm-model";
 import { AgentRow } from "./swarm-view";
+import { NO_BACKGROUND_TASKS } from "./swarm-background";
 
 afterEach(() => {
     cleanup();
@@ -67,6 +68,7 @@ function treeNode(over: Partial<AgentTreeNode> = {}): AgentTreeNode {
         todosTruncated: 0,
         todosPartial: false,
         currentTool: null,
+        backgroundTasks: NO_BACKGROUND_TASKS,
         ...over,
     } as AgentTreeNode;
 }

@@ -612,6 +612,11 @@ pub struct BackgroundTaskView {
     pub last_seen_ms: i64,
     #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
+    /// The Agent call (`tool_use_id`) whose subagent launched this task —
+    /// the same id as that subagent's `tool_use_id` in Swarm. Null for the
+    /// agent's own tasks. Always present, like `pid`.
+    #[ts(type = "string | null")]
+    pub owner_tool_use_id: Option<String>,
 }
 
 impl From<crate::backend::storage::background_tasks::BackgroundTask> for BackgroundTaskView {
@@ -625,6 +630,7 @@ impl From<crate::backend::storage::background_tasks::BackgroundTask> for Backgro
             status: t.status.as_str(),
             last_seen_ms: t.last_seen_ms,
             ended_at_ms: t.ended_at_ms,
+            owner_tool_use_id: t.owner_tool_use_id,
         }
     }
 }
@@ -1588,6 +1594,7 @@ mod tests {
             status,
             last_seen_ms: started_at_ms,
             ended_at_ms: None,
+            owner_tool_use_id: None,
         }
     }
 

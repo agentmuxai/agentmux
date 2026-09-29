@@ -536,6 +536,13 @@ impl SubagentWatcher {
                                 let is_journal = name == "journal.jsonl";
                                 if is_subagent || is_journal {
                                     let _ = tx_clone.send(path);
+                                } else if let Some(transcript) =
+                                    completion::transcript_for_sidecar(&path)
+                                {
+                                    // The sidecar can land after the transcript's
+                                    // last line; re-process the transcript so its
+                                    // `tool_use_id` retry runs (jsonl.rs).
+                                    let _ = tx_clone.send(transcript);
                                 }
                             }
                         }

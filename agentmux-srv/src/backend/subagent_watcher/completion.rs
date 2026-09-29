@@ -59,6 +59,16 @@ fn sidecar_path(subagent_jsonl: &Path) -> Option<PathBuf> {
     Some(subagent_jsonl.with_file_name(format!("{stem}.meta.json")))
 }
 
+/// `…/agent-<id>.meta.json` → `…/agent-<id>.jsonl`; `None` for any other file.
+/// The inverse of `sidecar_path`, so the watcher can route a sidecar write to
+/// the transcript whose `tool_use_id` it carries.
+pub(super) fn transcript_for_sidecar(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_str()?;
+    let stem = name.strip_suffix(".meta.json")?;
+    stem.starts_with("agent-")
+        .then(|| path.with_file_name(format!("{stem}.jsonl")))
+}
+
 /// The parent session transcript for a subagent transcript.
 ///
 /// Claude Code lays these out as `…/<session-id>.jsonl` alongside a
@@ -228,6 +238,22 @@ mod tests {
         assert_eq!(
             sidecar_path(Path::new("/x/subagents/agent-a5cb.jsonl")),
             Some(PathBuf::from("/x/subagents/agent-a5cb.meta.json"))
+        );
+    }
+
+    #[test]
+    fn a_sidecar_routes_to_its_transcript_and_nothing_else_does() {
+        assert_eq!(
+            transcript_for_sidecar(Path::new("/x/subagents/agent-a5cb.meta.json")),
+            Some(PathBuf::from("/x/subagents/agent-a5cb.jsonl"))
+        );
+        assert_eq!(
+            transcript_for_sidecar(Path::new("/x/subagents/agent-a5cb.jsonl")),
+            None
+        );
+        assert_eq!(
+            transcript_for_sidecar(Path::new("/x/subagents/other.meta.json")),
+            None
         );
     }
 

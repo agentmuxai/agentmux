@@ -28,6 +28,7 @@ import {
     type DispatchActivityEntry,
     type WorkflowDispatch,
 } from "./swarm-model";
+import { NO_BACKGROUND_TASKS } from "./swarm-background";
 
 function mkShell(overrides: Partial<ActiveShell> & Pick<ActiveShell, "shell_id" | "block_id">): ActiveShell {
     return {
@@ -446,6 +447,7 @@ function mkNode(agentToolRows: ActiveSubagent[], workflowRows: WorkflowDispatch[
         todosTruncated: 0,
         todosPartial: false,
         currentTool: null,
+        backgroundTasks: NO_BACKGROUND_TASKS,
         shellRows: [],
         cronRows: [],
     };

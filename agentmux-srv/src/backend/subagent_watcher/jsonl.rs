@@ -76,7 +76,7 @@ impl SubagentWatcher {
         };
 
         // Now lock and update state
-        let (is_new, info_snapshot, completed) = {
+        let (is_new, info_snapshot, completed, id_learned) = {
             let mut sessions = self.sessions.lock().unwrap();
             let session = sessions
                 .entry(session_id.clone())
@@ -172,11 +172,24 @@ impl SubagentWatcher {
                         dispatch_id: dispatch_id.clone(),
                         display_name: None,
                         spawned_from_agent_id: None,
+                        tool_use_id: super::completion::tool_use_id_for(jsonl_path),
                     },
                     file_offset: 0,
                     events: Vec::new(),
                 }
             });
+            // The CLI can write the `.meta.json` sidecar a moment after the
+            // transcript itself; keep trying until it is readable. The watcher
+            // also routes the sidecar's own write here (`build_watch`), so a
+            // sidecar that lands after the transcript's last line is still
+            // picked up. `id_learned`: an already-known subagent just gained
+            // its id, which the spawn broadcast never carried.
+            let id_learned = if state.info.tool_use_id.is_none() {
+                state.info.tool_use_id = super::completion::tool_use_id_for(jsonl_path);
+                !is_new && state.info.tool_use_id.is_some()
+            } else {
+                false
+            };
 
             // A live observation outranks a replay's inference.
             //
@@ -217,6 +230,11 @@ impl SubagentWatcher {
             }
 
             if new_events.is_empty() && !is_new {
+                if id_learned {
+                    let agent_id = state.info.agent_id.clone();
+                    drop(sessions);
+                    self.broadcast_subagent_updated(&agent_id, parent_block_id);
+                }
                 return;
             }
 
@@ -270,9 +288,13 @@ impl SubagentWatcher {
             }
 
             let info_snapshot = state.info.clone();
-            (is_new, info_snapshot, completed)
+            (is_new, info_snapshot, completed, id_learned)
         };
         // Mutex released here — broadcast outside the lock
+
+        if id_learned {
+            self.broadcast_subagent_updated(&agent_id, parent_block_id);
+        }
 
         if is_new {
             // Eager per-dispatch Haiku naming (issue:
@@ -759,6 +781,28 @@ impl SubagentWatcher {
             return;
         }
         Self::recompute_dispatch_status(state);
+    }
+
+    /// A known subagent's fields changed without a new spawn — today, only its
+    /// `tool_use_id` arriving late from the sidecar. Swarm reloads the list on
+    /// it so the subagent's background tasks move under its row. Deliberately
+    /// NOT a re-sent `subagent:spawned`: the dock's sources add rows on that.
+    pub(super) fn broadcast_subagent_updated(&self, agent_id: &str, parent_block_id: &str) {
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "command": "eventrecv",
+                "data": {
+                    "event": "subagent:updated",
+                    "data": {
+                        "agentId": agent_id,
+                        "parentBlockId": parent_block_id,
+                    }
+                }
+            })),
+        };
+        self.event_bus.broadcast_event(&event);
     }
 
     pub(super) fn broadcast_dispatch_updated(&self, info: &AgentDispatch) {
