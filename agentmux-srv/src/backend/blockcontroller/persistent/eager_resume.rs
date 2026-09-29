@@ -28,12 +28,12 @@ impl PersistentSubprocessController {
     }
 
     /// [`Self::try_claim_eager_resume_spawn`], and for a config restart's
-    /// replacement (`Some(generation)`) also consume that restart's token
+    /// replacement (`Some(generation)`) also require that restart's token
     /// (`config_restart_generation`) in the SAME acquisition that takes the
-    /// claim. A Stop clears the token under this lock too, so it wins: either
-    /// it lands first and there is no claim, or the claim is already taken
-    /// (codex P1 on #3990 — checking the token earlier, then claiming later,
-    /// let a Stop in between be overridden by the respawn).
+    /// claim, and record the claim as that replacement (`restart_spawn_for`).
+    /// The token is not consumed here: `spawn_process` consumes it right
+    /// before starting the child, so a Stop during the credential gate in
+    /// between still cancels the replacement (codex P1s on #3990).
     pub(super) fn try_claim_eager_resume_spawn_for(&self, restart_generation: Option<u64>) -> bool {
         let mut inner = self.inner.lock().unwrap();
         if inner.stdin_tx.is_some() || inner.spawning_in_progress || inner.drain_claim {
@@ -43,8 +43,8 @@ impl PersistentSubprocessController {
             if inner.config_restart_generation != Some(generation) {
                 return false;
             }
-            inner.config_restart_generation = None;
         }
+        inner.restart_spawn_for = restart_generation;
         inner.spawning_in_progress = true;
         true
     }
@@ -449,12 +449,31 @@ impl PersistentSubprocessController {
 }
 
 impl PersistentSubprocessController {
+    /// Called under `inner` immediately before `spawn_process` starts the OS
+    /// child: if this spawn is a config restart's replacement, consume its
+    /// token, or refuse if a Stop cleared it since the claim (codex P1 on
+    /// #3990: the claim precedes the credential gate, which can be slow).
+    /// Refusing returns an error, so the caller takes its ordinary spawn-failure
+    /// path: the claim is released, and a message a human typed meanwhile still
+    /// gets its own spawn.
+    pub(super) fn take_restart_spawn_permission_locked(inner: &mut PersistentInner) -> Result<(), String> {
+        let Some(generation) = inner.restart_spawn_for.take() else {
+            return Ok(());
+        };
+        if inner.config_restart_generation != Some(generation) {
+            return Err("a stop overrode the config restart before its replacement started".to_string());
+        }
+        inner.config_restart_generation = None;
+        Ok(())
+    }
+
     /// Whether the process of `generation` just ended as a committed config
     /// restart that nothing has overridden, so its exit handler must bring the
     /// replacement up. Checked by BOTH exit arms: the process can exit on its
     /// own right after its last `result` and win the `select!` before the kill
     /// is consumed (codex P1 on #3990). A read, not a take: the token is
-    /// consumed only by the spawn claim, so a Stop until then still wins.
+    /// consumed only right before the replacement's child starts, so a Stop
+    /// until then still wins.
     pub(super) fn config_restart_due_locked(inner: &PersistentInner, generation: u64) -> bool {
         inner.spawn_generation == generation && inner.config_restart_generation == Some(generation)
     }
@@ -539,6 +558,7 @@ impl PersistentSubprocessController {
         let mut inner = self.inner.lock().unwrap();
         if inner.stdin_tx.is_none() && !inner.spawning_in_progress {
             inner.config_restart_generation = None;
+            inner.restart_spawn_for = None;
             inner.restart_pending = false;
             inner.stop_pending = false;
         }

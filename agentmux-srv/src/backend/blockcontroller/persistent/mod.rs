@@ -356,8 +356,9 @@ struct PersistentInner {
     /// Set under the same lock as the kill request, cleared when the
     /// replacement process spawns, exactly like `restart_pending`.
     stop_pending: bool,
-    /// The spawn generation a deferred runtime-config restart is stopping
-    /// ([`Self::stop_for_config_restart`]), so its kill arm knows to bring the
+    /// The spawn generation a deferred runtime-config restart is replacing:
+    /// set by `turn_boundary_locked` in the same acquisition that commits the
+    /// restart, so the old process's exit handler knows to bring the
     /// replacement up itself once the process is gone.
     ///
     /// Without it the pane was left with no process until a human typed into
@@ -365,10 +366,18 @@ struct PersistentInner {
     /// while `restart_pending` is set, so jekts queued forever (Korp on narko,
     /// 2026-09-29; `docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md`).
     /// A restart is also a stop (`stop_pending`, `StopRequested`), so neither
-    /// of those can tell it apart from a user's Stop; this can. Any other stop
-    /// request clears it, so an explicit Stop or a pane close that lands in
-    /// the window is never undone by a respawn.
+    /// of those can tell it apart from a user's Stop; this can. Every stop
+    /// request except the restart's own clears it, and nothing but the
+    /// boundary sets it, so an explicit Stop or a pane close landing anywhere
+    /// in the window is never undone by a respawn (codex P1s on #3990). It is
+    /// consumed only immediately before the replacement's OS process starts
+    /// (`take_restart_spawn_permission_locked`).
     config_restart_generation: Option<u64>,
+    /// The spawn claimed for a config restart's replacement, by generation
+    /// (`try_claim_eager_resume_spawn_for`). `spawn_process` re-checks the
+    /// restart token against it right before starting the child, so a Stop
+    /// during the (possibly slow) credential gate still cancels it.
+    restart_spawn_for: Option<u64>,
     /// This spawn generation's stale-`--resume` retry decision, plus any
     /// held-back terminal error-result line — see
     /// `persistent_resume::ResumeState`'s own doc comment for the full
@@ -1160,6 +1169,7 @@ impl PersistentSubprocessController {
                 restart_pending: false,
                 stop_pending: false,
                 config_restart_generation: None,
+                restart_spawn_for: None,
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),

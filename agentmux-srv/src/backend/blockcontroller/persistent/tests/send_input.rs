@@ -3878,14 +3878,50 @@ fn registered_controller() -> (String, Arc<PersistentSubprocessController>) {
     (block_id, c)
 }
 
-#[test]
-fn a_config_restart_stop_marks_the_generation_it_restarts() {
-    let c = controller();
-    c.inner.lock().unwrap().spawn_generation = 3;
+/// Commit a deferred restart the way production does: `restart_when_idle`
+/// consumed at the turn boundary, then the restart's own stop.
+fn commit_restart(c: &PersistentSubprocessController, generation: u64) {
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawn_generation = generation;
+        inner.restart_when_idle = true;
+    }
+    assert_eq!(
+        PersistentSubprocessController::turn_boundary_locked(
+            &mut c.inner.lock().unwrap(),
+            &c.health_monitor,
+            "block",
+            generation,
+        ),
+        Some(true),
+    );
     c.stop_for_config_restart();
+}
+
+#[test]
+fn the_boundary_that_commits_a_restart_arms_its_token() {
+    let c = controller();
+    commit_restart(&c, 3);
     let inner = c.inner.lock().unwrap();
     assert_eq!(inner.config_restart_generation, Some(3));
+    assert!(inner.restart_pending);
     assert!(inner.stop_pending, "a restart is still a stop for the dying process");
+}
+
+/// codex P1 on #3990: a Stop between the boundary and the restart's own stop
+/// clears the token; the restart's stop must not re-arm it.
+#[test]
+fn the_restarts_own_stop_never_rearms_a_token_a_stop_cleared() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawn_generation = 3;
+        inner.restart_when_idle = true;
+    }
+    PersistentSubprocessController::turn_boundary_locked(&mut c.inner.lock().unwrap(), &c.health_monitor, "block", 3);
+    let _ = c.stop_process(false); // the user's Stop, in the gap
+    c.stop_for_config_restart();
+    assert_eq!(c.inner.lock().unwrap().config_restart_generation, None, "the Stop must stay in force");
 }
 
 /// A Stop, or a teardown's stop, landing after the restart was committed
@@ -3901,7 +3937,7 @@ fn any_later_stop_overrides_a_committed_config_restart() {
         },
     ] {
         let c = controller();
-        c.stop_for_config_restart();
+        commit_restart(&c, 1);
         later_stop(&c);
         assert_eq!(c.inner.lock().unwrap().config_restart_generation, None);
     }
@@ -3971,23 +4007,51 @@ fn no_respawn_once_something_else_replaced_the_process() {
 #[test]
 fn a_stop_after_the_respawn_decision_still_wins_at_the_claim() {
     let c = controller();
-    c.inner.lock().unwrap().spawn_generation = 4;
-    c.stop_for_config_restart();
+    commit_restart(&c, 4);
     assert!(PersistentSubprocessController::config_restart_due_locked(&c.inner.lock().unwrap(), 4));
     let _ = c.stop_process(false); // the user's Stop, in the window
     assert!(!c.try_claim_eager_resume_spawn_for(Some(4)), "the Stop must win");
     assert!(!c.inner.lock().unwrap().spawning_in_progress, "no claim may be left behind");
 }
 
+/// The claim only reserves: the token stays live until the child starts.
 #[test]
-fn the_spawn_claim_consumes_the_restart_token() {
+fn the_spawn_claim_keeps_the_token_until_the_child_starts() {
     let c = controller();
-    c.inner.lock().unwrap().spawn_generation = 4;
-    c.stop_for_config_restart();
+    commit_restart(&c, 4);
     assert!(c.try_claim_eager_resume_spawn_for(Some(4)));
-    let inner = c.inner.lock().unwrap();
+    let mut inner = c.inner.lock().unwrap();
     assert!(inner.spawning_in_progress);
+    assert_eq!(inner.restart_spawn_for, Some(4));
+    assert_eq!(inner.config_restart_generation, Some(4), "still cancellable by a Stop");
+    // …and `spawn_process` consumes it right before starting the child.
+    PersistentSubprocessController::take_restart_spawn_permission_locked(&mut inner).unwrap();
     assert_eq!(inner.config_restart_generation, None, "one restart, one replacement");
+    assert_eq!(inner.restart_spawn_for, None);
+}
+
+/// codex P1 on #3990: a Stop after the claim (during the credential gate)
+/// must still cancel the replacement before its child starts.
+#[test]
+fn a_stop_during_the_credential_gate_cancels_the_replacement() {
+    let c = controller();
+    commit_restart(&c, 4);
+    assert!(c.try_claim_eager_resume_spawn_for(Some(4)));
+    let _ = c.stop_process(false); // the user's Stop, mid-gate
+    let mut inner = c.inner.lock().unwrap();
+    assert!(
+        PersistentSubprocessController::take_restart_spawn_permission_locked(&mut inner).is_err(),
+        "spawn_process must refuse to start the child",
+    );
+    assert_eq!(inner.restart_spawn_for, None, "the refusal leaves no restart claim behind");
+}
+
+/// Ordinary spawns (a human's message) never consult the restart token.
+#[test]
+fn an_ordinary_spawn_is_not_gated_by_the_restart_token() {
+    let c = controller();
+    let mut inner = c.inner.lock().unwrap();
+    assert!(PersistentSubprocessController::take_restart_spawn_permission_locked(&mut inner).is_ok());
 }
 
 /// What both exit arms consult, so the arm that wins the `select!` doesn't
@@ -3995,8 +4059,7 @@ fn the_spawn_claim_consumes_the_restart_token() {
 #[test]
 fn a_restart_is_due_only_for_its_own_generation() {
     let c = controller();
-    c.inner.lock().unwrap().spawn_generation = 7;
-    c.stop_for_config_restart();
+    commit_restart(&c, 7);
     {
         let inner = c.inner.lock().unwrap();
         assert!(PersistentSubprocessController::config_restart_due_locked(&inner, 7));
@@ -4011,10 +4074,10 @@ fn a_restart_is_due_only_for_its_own_generation() {
 #[test]
 fn a_stop_overriding_the_restart_still_closes_the_window() {
     let (block_id, c) = registered_controller();
-    c.stop_for_config_restart();
+    commit_restart(&c, 1);
     let _ = c.stop_process(false);
-    c.inner.lock().unwrap().restart_pending = true;
-    c.respawn_after_config_restart(0);
+    assert!(c.inner.lock().unwrap().restart_pending, "precondition: a Stop leaves the window open");
+    c.respawn_after_config_restart(1);
     let inner = c.inner.lock().unwrap();
     assert!(!inner.restart_pending && !c.deferred_must_wait_locked(&inner));
     assert!(!inner.spawning_in_progress, "the Stop won: nothing was started");
