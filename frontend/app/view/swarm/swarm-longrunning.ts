@@ -42,7 +42,7 @@
  */
 
 import { snapshot } from "@/app/store/agent-document-store";
-import { toolActivities } from "@/app/view/agent/activity/tool-adapter";
+import { isAcceptedBackgroundLaunch, toolActivities } from "@/app/view/agent/activity/tool-adapter";
 import type { PinnedActivity } from "@/app/view/agent/activity/types";
 
 /** One long-running tool call, as Swarm needs to render it. */
@@ -72,6 +72,11 @@ export function longRunningToolRows(blockId: string | null, now: number): LongRu
     if (!state) return [];
     return toolActivities(state.nodes, now)
         .filter((a: PinnedActivity) => a.status === "running")
+        // Background launches are the registry-backed buckets' job (srv's own
+        // task feed records every one, owner included). The transcript can't
+        // end a subagent's launch — its <task-notification> never reaches the
+        // parent — so letting one through here shows it running forever.
+        .filter((a) => !(a.tool && isAcceptedBackgroundLaunch(a.tool)))
         .map((a) => ({
             id: a.id,
             title: a.title,

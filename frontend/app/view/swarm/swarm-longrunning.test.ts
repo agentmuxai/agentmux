@@ -88,6 +88,31 @@ describe("longRunningToolRows", () => {
         expect(longRunningToolRows("b1", START + 6_000).map((r) => r.id)).toEqual(["new", "old"]);
     });
 
+    /** A background launch belongs to the registry-backed buckets, never this
+     *  one. A subagent's launch never gets its `<task-notification>` in the
+     *  parent transcript, so `toolActivities` reports it running forever; once
+     *  srv's fleet list drops the ended task (60 s), an id-based skip would let
+     *  it back in as a stuck row. Reagent P1 on #3963. */
+    it("excludes an accepted background launch, even with no completion ever seen", () => {
+        paneWith("b1", [
+            bash({
+                id: "sub-bg",
+                status: "success",
+                duration: 0.1,
+                params: { command: "sleep 30", run_in_background: true },
+                result: { stdout: "Command running in background with ID: bx1. Output is being written to: …", stderr: "", exitCode: 0 },
+            }),
+            bash({
+                id: "own-bg",
+                status: "success",
+                duration: 0.1,
+                params: { command: "npm run watch", run_in_background: true },
+                result: { stdout: "", backgroundTaskId: "bx2" },
+            }),
+        ]);
+        expect(longRunningToolRows("b1", START + 3_600_000)).toEqual([]);
+    });
+
     it("keeps panes independent — one agent's work never shows on another's row", () => {
         paneWith("b1", [bash({ id: "a", params: { command: "sleep 300" } })]);
         paneWith("b2", [bash({ id: "b", params: { command: "sleep 300" } })]);

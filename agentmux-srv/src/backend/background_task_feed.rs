@@ -138,13 +138,23 @@ struct Pending {
     label: String,
     started_at_ms: i64,
     backgrounded: bool,
+    /// The Agent call whose subagent issued this Bash call; `None` for the
+    /// agent's own.
+    owner: Option<String>,
 }
 
+/// Bound on `TaskFeed::owners`. Entries are normally consumed by the
+/// `task_started` that follows within the same message; this only guards
+/// against a stream shape where that never happens.
+const MAX_UNCLAIMED_OWNERS: usize = 4096;
+
 /// Per-stream state: one per stdout reader. Holds only shell tasks that have
-/// started and not yet ended, so it stays small.
+/// started and not yet ended, plus the owners of subagent Bash calls whose
+/// `task_started` hasn't arrived yet, so it stays small.
 #[derive(Debug, Default)]
 pub(crate) struct TaskFeed {
     pending: HashMap<String, Pending>,
+    owners: HashMap<String, String>,
 }
 
 impl TaskFeed {
@@ -158,6 +168,7 @@ impl TaskFeed {
         line: &Value,
         now_ms: i64,
     ) -> bool {
+        self.note_owner(line);
         let Some(event) = parse(line) else {
             return false;
         };
@@ -168,8 +179,17 @@ impl TaskFeed {
                 label,
                 backgrounded,
             } => {
-                let observed =
-                    backgrounded && observe(store, block_id, &tool_use_id, &label, now_ms, now_ms);
+                let owner = self.owners.remove(&tool_use_id);
+                let observed = backgrounded
+                    && observe(
+                        store,
+                        block_id,
+                        &tool_use_id,
+                        &label,
+                        owner.as_deref(),
+                        now_ms,
+                        now_ms,
+                    );
                 self.pending.insert(
                     task_id,
                     Pending {
@@ -177,6 +197,7 @@ impl TaskFeed {
                         label,
                         started_at_ms: now_ms,
                         backgrounded,
+                        owner,
                     },
                 );
                 observed
@@ -190,6 +211,7 @@ impl TaskFeed {
                         block_id,
                         &p.tool_use_id,
                         &p.label,
+                        p.owner.as_deref(),
                         p.started_at_ms,
                         now_ms,
                     )
@@ -234,17 +256,56 @@ impl TaskFeed {
         }
         changed
     }
+
+    /// A subagent's own stream lines carry `parent_tool_use_id` = the Agent
+    /// call that spawned it (also that subagent's `meta.json` `toolUseId`).
+    /// Remember it for each Bash call such a line issues; the call's
+    /// `task_started`, which follows in the same message, claims it.
+    fn note_owner(&mut self, line: &Value) {
+        if str_field(line, "type") != Some("assistant") {
+            return;
+        }
+        let Some(parent) = str_field(line, "parent_tool_use_id") else {
+            return;
+        };
+        let Some(blocks) = line.pointer("/message/content").and_then(Value::as_array) else {
+            return;
+        };
+        for block in blocks {
+            if str_field(block, "type") == Some("tool_use")
+                && str_field(block, "name") == Some("Bash")
+            {
+                if let Some(id) = str_field(block, "id") {
+                    if self.owners.len() >= MAX_UNCLAIMED_OWNERS {
+                        self.owners.clear();
+                    }
+                    self.owners.insert(id.to_string(), parent.to_string());
+                }
+            }
+        }
+    }
 }
 
+/// Create the row if needed, then record the CLI's description as its label
+/// (replacing the renderer's generic "Bash" if it got there first) and its
+/// owner.
 fn observe(
     store: &Store,
     block_id: &str,
     tool_use_id: &str,
     label: &str,
+    owner: Option<&str>,
     started_at_ms: i64,
     seen_at_ms: i64,
 ) -> bool {
-    match store.background_task_observe(tool_use_id, block_id, label, started_at_ms, seen_at_ms) {
+    let result = store
+        .background_task_observe(tool_use_id, block_id, label, started_at_ms, seen_at_ms)
+        .and_then(|()| {
+            store
+                .background_task_describe(tool_use_id, label, owner)
+                .map(|_| ())
+        });
+    match result {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!(target: "background_tasks", block_id, node_id = %tool_use_id, error = %e,
@@ -443,6 +504,123 @@ mod tests {
                 .unwrap()
                 .status,
             BackgroundTaskStatus::Error
+        );
+    }
+
+    /// A subagent's Bash call, as the parent stream carries it (shape from a
+    /// real recording, trimmed).
+    fn subagent_bash_call(tool: &str, parent: &str) -> Value {
+        json!({"type":"assistant","parent_tool_use_id":parent,
+               "message":{"role":"assistant","content":[
+                   {"type":"tool_use","id":tool,"name":"Bash",
+                    "input":{"command":"sleep 180; echo waited","run_in_background":true}}]}})
+    }
+
+    #[test]
+    fn a_subagent_task_records_the_agent_call_that_owns_it() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &subagent_bash_call("toolu_1", "toolu_agent"),
+            1,
+        );
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("b1", "toolu_1", true, true),
+            2,
+        );
+        let row = store.background_task_get("toolu_1").unwrap().unwrap();
+        assert_eq!(row.owner_tool_use_id.as_deref(), Some("toolu_agent"));
+        assert!(
+            feed.owners.is_empty(),
+            "the owner is claimed by its task_started"
+        );
+    }
+
+    #[test]
+    fn the_agents_own_task_has_no_owner() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        let own = json!({"type":"assistant","parent_tool_use_id":null,
+                         "message":{"content":[{"type":"tool_use","id":"toolu_own","name":"Bash","input":{}}]}});
+        feed.apply(&store, None, "blk", &own, 1);
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("b2", "toolu_own", true, false),
+            2,
+        );
+        assert_eq!(
+            store
+                .background_task_get("toolu_own")
+                .unwrap()
+                .unwrap()
+                .owner_tool_use_id,
+            None
+        );
+    }
+
+    #[test]
+    fn the_owner_survives_a_later_move_to_the_background() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &subagent_bash_call("toolu_mv", "toolu_agent"),
+            1,
+        );
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("b3", "toolu_mv", false, true),
+            2,
+        );
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &updated("b3", json!({"is_backgrounded": true})),
+            3,
+        );
+        assert_eq!(
+            store
+                .background_task_get("toolu_mv")
+                .unwrap()
+                .unwrap()
+                .owner_tool_use_id
+                .as_deref(),
+            Some("toolu_agent")
+        );
+    }
+
+    /// The renderer's own push can create the row first, labelled with the
+    /// tool name; the CLI's description replaces it.
+    #[test]
+    fn the_clis_description_replaces_a_generic_label() {
+        let store = store();
+        store
+            .background_task_observe("toolu_1", "blk", "Bash", 1, 1)
+            .unwrap();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("b1", "toolu_1", true, false),
+            2,
+        );
+        assert_eq!(
+            store.background_task_get("toolu_1").unwrap().unwrap().label,
+            "Background wait for agents"
         );
     }
 

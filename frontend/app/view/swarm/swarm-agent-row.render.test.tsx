@@ -25,6 +25,7 @@ import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-docum
 import { AgentRow } from "./swarm-view";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 import type { DocumentNode } from "@/app/view/agent/types";
+import { NO_BACKGROUND_TASKS } from "./swarm-background";
 
 afterEach(() => {
     cleanup();
@@ -67,6 +68,7 @@ function treeNode(): AgentTreeNode {
         todosTruncated: 0,
         todosPartial: false,
         currentTool: null,
+        backgroundTasks: NO_BACKGROUND_TASKS,
     } as AgentTreeNode;
 }
 

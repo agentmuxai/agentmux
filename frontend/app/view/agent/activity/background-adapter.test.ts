@@ -16,6 +16,7 @@ function task(overrides: Partial<BackgroundTaskView> = {}): BackgroundTaskView {
         status: "running",
         last_seen_ms: 1000,
         ended_at_ms: null,
+        owner_tool_use_id: null,
         ...overrides,
     };
 }

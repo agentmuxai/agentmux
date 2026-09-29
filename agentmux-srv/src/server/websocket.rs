@@ -757,6 +757,12 @@ async fn handle_incoming_text(
     Ok(None)
 }
 
+/// How far back the fleet list (`COMMAND_LIST_BACKGROUND_TASKS` with an empty
+/// `blockid`) reaches for tasks that already ended. Comfortably longer than the
+/// longest finished-row retention the renderer applies (15 s for an error), so
+/// a finished row is still in the list for as long as it is shown.
+const FLEET_ENDED_WINDOW_MS: i64 = 60_000;
+
 fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: String) {
     // getfullconfig → return full config as JSON
     let config_watcher = state.config_watcher.clone();
@@ -1572,9 +1578,20 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         move |cmd: CommandListBackgroundTasksData, _ctx| {
             let mstore = mstore_lbt.clone();
             async move {
-                let tasks = mstore
-                    .background_task_list_for_block(&cmd.blockid)
-                    .map_err(|e| format!("listbackgroundtasks: {e}"))?;
+                // An empty blockid asks for the whole fleet (Swarm): every
+                // running task plus those that ended recently enough to still
+                // show a finished row. SPEC_BACKGROUND_TASK_STRUCTURED_FEED_
+                // AND_SWARM_OWNERSHIP_2026_09_27.md §3.
+                let tasks = if cmd.blockid.is_empty() {
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0);
+                    mstore.background_task_list_fleet(now_ms - FLEET_ENDED_WINDOW_MS)
+                } else {
+                    mstore.background_task_list_for_block(&cmd.blockid)
+                }
+                .map_err(|e| format!("listbackgroundtasks: {e}"))?;
                 let views: Vec<super::muxspect_handlers::BackgroundTaskView> =
                     tasks.into_iter().map(Into::into).collect();
                 Ok(views)

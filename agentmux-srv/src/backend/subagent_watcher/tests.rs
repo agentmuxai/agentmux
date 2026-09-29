@@ -56,6 +56,7 @@ fn fixture_state(parent_agent: &str, agent_id: &str, session_id: &str) -> Subage
             dispatch_id: solo_dispatch_id(agent_id),
             display_name: None,
             spawned_from_agent_id: None,
+            tool_use_id: None,
         },
         file_offset: 0,
         events: Vec::new(),
@@ -459,6 +460,87 @@ fn process_jsonl_change_marks_completed_on_result_event() {
             SubagentEventType::Result { .. }
         ));
     }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The subagent's parent-side tool_use_id comes from its `.meta.json`
+/// sidecar, and is picked up on a later change when the sidecar lands after
+/// the transcript (the CLI writes them separately).
+#[test]
+fn process_jsonl_change_reads_the_spawning_tool_use_id_from_the_sidecar() {
+    let dir = std::env::temp_dir().join(format!("amx-subagent-test-owner-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-o.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let tool_use_id = |w: &SubagentWatcher| {
+        let sessions = w.sessions.lock().unwrap();
+        sessions.values().next().unwrap().subagents.get("sub-o").unwrap().info.tool_use_id.clone()
+    };
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert_eq!(tool_use_id(&watcher), None, "no sidecar yet");
+
+    std::fs::write(
+        dir.join("agent-sub-o.meta.json"),
+        r#"{"agentType":"general-purpose","toolUseId":"toolu_spawn","spawnDepth":1}"#,
+    )
+    .unwrap();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert_eq!(tool_use_id(&watcher).as_deref(), Some("toolu_spawn"));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+fn drain_event_names(rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>) -> Vec<String> {
+    let mut names = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        if let Some(name) = msg.pointer("/data/data/event").and_then(|v| v.as_str()) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// codex P2 on #3963: a sidecar written after the transcript's LAST line
+/// brings no new transcript events, so the id it fills in must still be
+/// announced — otherwise Swarm keeps the subagent's background tasks at agent
+/// level until some unrelated event reloads the list. Announced once, and not
+/// as a re-sent `subagent:spawned` (the dock's sources add rows on that).
+#[test]
+fn a_late_sidecar_with_no_new_transcript_lines_announces_the_id_once() {
+    let dir = std::env::temp_dir().join(format!("amx-subagent-test-late-sidecar-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-l.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let mut rx = watcher.event_bus.register_ws("test-conn", "test-tab").priority;
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    let first = drain_event_names(&mut rx);
+    assert!(!first.contains(&"subagent:updated".to_string()), "no id yet: {first:?}");
+
+    std::fs::write(
+        dir.join("agent-sub-l.meta.json"),
+        r#"{"agentType":"general-purpose","toolUseId":"toolu_late","spawnDepth":1}"#,
+    )
+    .unwrap();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert_eq!(drain_event_names(&mut rx), vec!["subagent:updated".to_string()]);
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert!(drain_event_names(&mut rx).is_empty(), "id already known — nothing to announce");
 
     std::fs::remove_dir_all(&dir).ok();
 }

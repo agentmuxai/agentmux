@@ -1,0 +1,71 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Background-task rows (swarm-background-tasks.tsx). Same row geometry as the
+// long-running rows in swarm-view.scss so the two buckets line up.
+
+// Quiet label, like the long-running bucket: the rows themselves carry a
+// status word in its own color, so the bucket needs no hue of its own.
+.swarm-bucket--background .swarm-bucket-label {
+    color: var(--secondary-text-color);
+}
+
+.swarm-background-row {
+    display: flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 6px 0 30px;
+    gap: 8px;
+    user-select: none;
+
+    // Under a subagent row: indented one step further than the subagent's
+    // own label, so it reads as belonging to it.
+    &--nested {
+        height: 24px;
+        padding-left: 46px;
+    }
+
+    &--done,
+    &--stopped {
+        opacity: 0.6;
+    }
+}
+
+.swarm-background-sigil {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--secondary-text-color);
+}
+
+.swarm-background-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--main-text-color);
+}
+
+.swarm-background-status {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+
+    .swarm-background-row--running & {
+        color: var(--accent-color);
+    }
+    .swarm-background-row--done & {
+        color: var(--success-color);
+    }
+    .swarm-background-row--error & {
+        color: var(--error-color);
+    }
+}
+
+.swarm-background-elapsed {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+}

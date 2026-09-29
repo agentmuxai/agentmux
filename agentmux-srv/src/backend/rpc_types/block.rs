@@ -279,6 +279,9 @@ pub struct CommandBackgroundTaskPidData {
 /// this block's current `db_background_tasks` rows (as
 /// `muxspect_handlers::BackgroundTaskView`s). See
 /// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+/// An empty `blockid` returns the whole fleet instead: every running task
+/// plus recently ended ones (Swarm; see
+/// docs/specs/SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md §3).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandListBackgroundTasksData {

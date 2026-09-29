@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { agentChildRowCount } from "./swarm-view";
 import type { AgentTreeNode } from "./swarm-model";
+import { NO_BACKGROUND_TASKS } from "./swarm-background";
 
 function node(over: Partial<AgentTreeNode> = {}): AgentTreeNode {
     return {
@@ -29,6 +30,7 @@ function node(over: Partial<AgentTreeNode> = {}): AgentTreeNode {
         todosTruncated: 0,
         todosPartial: false,
         currentTool: null,
+        backgroundTasks: NO_BACKGROUND_TASKS,
         ...over,
     } as AgentTreeNode;
 }
@@ -57,8 +59,17 @@ describe("agentChildRowCount", () => {
         expect(agentChildRowCount(node(over as Partial<AgentTreeNode>), 0)).toBe(1);
     });
 
+    /** An agent whose only activity is a background command it (or a
+     *  subagent without a row) launched must still report children, for the
+     *  same reason as the long-running case above. */
+    it("counts the agent-level Background bucket even when every other bucket is empty", () => {
+        expect(agentChildRowCount(node(), 0, 1)).toBe(1);
+        expect(agentChildRowCount(node(), 0, 4)).toBe(4);
+    });
+
     it("sums every bucket together", () => {
         const n = node({ agentToolRows: one, workflowRows: one, shellRows: one, cronRows: one });
         expect(agentChildRowCount(n, 2)).toBe(6);
+        expect(agentChildRowCount(n, 2, 3)).toBe(9);
     });
 });
