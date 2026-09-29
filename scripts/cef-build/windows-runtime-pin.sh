@@ -7,8 +7,8 @@
 # with the tracer on, any process that loads libcef.dll can deadlock on its
 # global mutex (INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md).
 #
-# Bumping the runtime: change all three lines here AND release.yml's WIN_TAG in
-# the same PR. CEF_WINDOWS_LIBCEF_SHA256 is the SHA-256 of libcef.dll inside
+# Bumping the runtime: change all three lines here AND the Windows tag in
+# cef-runtime-pins.sh in the same PR (release.yml fails if they differ). CEF_WINDOWS_LIBCEF_SHA256 is the SHA-256 of libcef.dll inside
 # the release zip (not the zip's own checksum). See
 # docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md.
 CEF_WINDOWS_RELEASE_TAG="cef-windows-x86_64-152.0.7977.83-r2"
