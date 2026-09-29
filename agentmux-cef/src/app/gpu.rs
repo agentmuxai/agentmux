@@ -55,7 +55,7 @@ pub(crate) fn detect_gpu_tier() -> GpuTier {
     }
     let tier = if has_hardware_vulkan() {
         GpuTier::HwVulkan
-    } else if has_drm_render_node() {
+    } else if has_drm_render_node() && super::gl_probe::hardware_gl_confirmed() {
         GpuTier::HwGl
     } else {
         GpuTier::Software
@@ -95,10 +95,11 @@ fn has_hardware_vulkan() -> bool {
     has_hw
 }
 
-/// True if a DRM render node (`/dev/dri/renderD*`) exists — a kernel GPU with a
-/// render node, i.e. a real hardware GL path (vmwgfx on VMware, i915/amdgpu/
-/// nvidia on bare metal). Heuristic; the spec's §7 upgrade path tightens this to
-/// a `GL_RENDERER` software-marker check.
+/// True if a DRM render node (`/dev/dri/renderD*`) exists: a kernel GPU driver
+/// is present. Necessary but NOT sufficient for hardware GL. VMware's vmwgfx
+/// exposes a render node even with "Accelerate 3D graphics" off, where no
+/// hardware GL exists (charlie, 2026-09-29). [`hardware_gl_confirmed`] is what
+/// decides.
 #[cfg(target_os = "linux")]
 fn has_drm_render_node() -> bool {
     std::fs::read_dir("/dev/dri")
