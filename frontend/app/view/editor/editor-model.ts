@@ -55,6 +55,9 @@ import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
 import type { CommandReadEditorFileResult } from "@/app/store/rpc-api";
+import { registerFileDropTarget } from "@/app/drag/file-drop";
+import { notifyDrop } from "@/app/drag/file-drop-actions";
+import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -195,6 +198,7 @@ export class EditorViewModel {
     /** Tabs that started loading via openFile — used so concurrent dispatches
      *  for the same path don't double-fetch. */
     private _loadingPaths = new Set<string>();
+    private _disposeFileDrop: () => void = () => {};
 
     /** Slice event subscribers wired from the view (for snapshot/restore of
      *  CodeMirror state, dirty-confirm modal, LSP didOpen/didClose). */
@@ -465,6 +469,16 @@ export class EditorViewModel {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();
         }
+
+        // Files dropped onto the pane (SPEC_DRAG_AND_DROP_CONSOLIDATION §5.3).
+        this._disposeFileDrop = registerFileDropTarget(
+            blockId,
+            createEditorDropHook({
+                openFile: (path) => this.openFile(path),
+                openText: (name, content) => this.openDroppedText(name, content),
+                cantOpen: (name) => notifyDrop.cantOpen(name, "editor"),
+            }),
+        );
 
         // Reuse: pending files are handled by the reactive createEffect
         // above (covers this initial-mount case too — no separate one-shot
@@ -845,13 +859,13 @@ export class EditorViewModel {
      *  always wants a genuinely new tab, same as any other tabbed UI;
      *  silently re-activating the pane's existing scratch tab there reads
      *  as "+ does nothing" when that tab is already the active one). */
-    async openScratch(reuseExisting: boolean = true): Promise<void> {
+    async openScratch(reuseExisting: boolean = true): Promise<string | undefined> {
         if (reuseExisting) {
             // Reuse an existing scratch tab if one is already open in this pane.
             const existing = snapshot(this.blockId)?.tabs.find((t) => t.isScratch);
             if (existing) {
                 dispatch(this.blockId, { type: "SwitchTab", tabId: existing.id, source: "system" });
-                return;
+                return existing.id;
             }
         }
         try {
@@ -876,7 +890,7 @@ export class EditorViewModel {
                 source: "system",
             });
             const opened = events.find((e) => e.type === "TabOpened" || e.type === "TabActivated");
-            if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) return;
+            if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) return undefined;
             const tabId = opened.tabId;
             // Read the actual on-disk content — the backend may have returned a
             // reused scratch file that already has content from a prior session.
@@ -894,10 +908,32 @@ export class EditorViewModel {
                 readOnly: false,
                 source: "system",
             });
+            return tabId;
         } catch {
             // Scratch creation failed — editor opens in empty state, user can
             // open a file manually.
+            return undefined;
         }
+    }
+
+    /** A dropped file with no host path: its text in a new untitled tab,
+     *  unsaved, so Save As chooses where it goes. */
+    async openDroppedText(name: string, content: string): Promise<void> {
+        if (sniffUnopenable(content)) {
+            notifyDrop.cantOpen(name, "editor");
+            return;
+        }
+        const tabId = await openEmptyScratch(
+            () => this.openScratch(false),
+            (id) => this._contentByTab.get(id),
+        );
+        if (!tabId) {
+            notifyDrop.cantOpen(name, "editor");
+            return;
+        }
+        this._contentByTab.set(tabId, content);
+        this._contentVersion[1]((v) => v + 1);
+        dispatch(this.blockId, { type: "MarkDirty", tabId, source: "system" });
     }
 
     /** Promote the active scratch tab to a real path (Save As). */
@@ -1261,6 +1297,7 @@ export class EditorViewModel {
     }
 
     dispose(): void {
+        this._disposeFileDrop();
         this._unsubFileChanged();
         this._disposePendingOpenFilesEffect();
         for (const tabId of [...this._watchedPathByTab.keys()]) this._unwatchTab(tabId);
