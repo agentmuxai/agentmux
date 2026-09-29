@@ -13,6 +13,9 @@ import { fileKind } from "@/app/view/agent/attachments/file-kind";
 const BINARY_KINDS = new Set(["image", "image_file", "pdf", "word", "excel", "powerpoint", "archive", "audio", "video"]);
 const TEXT_MIME = /^(text\/|application\/(json|xml|javascript|x-sh|x-yaml|toml|sql)|image\/svg\+xml$)/;
 const SNIFF_BYTES = 8192;
+/** The same cap srv's readeditorfile enforces on a path (editor_handlers.rs),
+ *  checked before a pathless file's bytes are read into memory. */
+export const MAX_DROPPED_TEXT_BYTES = 10_000_000;
 
 const baseName = (path: string) => path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
@@ -56,7 +59,7 @@ export function createEditorDropHook(target: EditorDropTarget): FileDropHook {
             }
             for (const file of files) {
                 const name = file.name || "file";
-                if (isKnownBinaryName(name) || (await looksBinary(file))) {
+                if (file.size > MAX_DROPPED_TEXT_BYTES || isKnownBinaryName(name) || (await looksBinary(file))) {
                     target.cantOpen(name);
                     continue;
                 }

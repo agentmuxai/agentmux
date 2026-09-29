@@ -310,6 +310,9 @@ function MediaView(props: { ctx: PaneTabHostContext }): JSX.Element {
     createEffect(() => {
         const path = displayPath();
         revision();
+        // A dropped file with no path is showFile's: nothing to fetch, and
+        // clearing here (this can run after showFile) would revoke its URL.
+        if (!path && localName()) return;
         const myToken = ++fetchToken;
         setMediaReady(false);
 
