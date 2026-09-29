@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-28
 **Author:** agent1
-**Status:** Fixed on branch `agent1/tray-opt-in-default` (see §5). The tray icon
-is on by default; background mode is opt-in.
+**Status:** analysis. Fixed in PR #3988 (see §6): the tray icon is on by
+default; background mode is opt-in.
 
 ## 1. What the user saw
 
