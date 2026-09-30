@@ -257,7 +257,11 @@
     font-size: 9px;
     line-height: 1;
     cursor: default;
-    transition: all var(--motion-fast);
+    // Not `all`: that also animates the inherited `visibility` that hides
+    // window and pane tabs, so this would pop in a frame late when shown
+    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
+    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
+    transition-duration: var(--motion-fast);
 
     &:hover {
         color: var(--main-text-color);

@@ -13,6 +13,7 @@ import { atoms } from "@/store/global";
 import {
     WindowTabDisplayedProvider,
     keepInactiveTabsLaidOut,
+    resolveDisplayedTabId,
     tabContainerVisibility,
 } from "./window-tab-visibility";
 import {
@@ -24,6 +25,7 @@ import {
     tabSwitching,
     tabWasShown,
 } from "@/store/tab-reveal";
+import { switchIntentTabId } from "@/store/tab-actions";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -84,16 +86,45 @@ function WorkspaceElem(): JSX.Element {
     // nothing else decided to gate (e.g. backend-driven switches that
     // bypass setActiveTab entirely, per that file's own comment).
     const [displayTabId, setDisplayTabId] = createSignal(tabId());
+    // A warm destination (already shown, kept laid out) is shown from the
+    // switch intent, before the SetActiveTab round trip, so it swaps in the
+    // same frame as the optimistic pill — as a pane tab does
+    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.2).
+    // Anything else waits for the committed `tabId()`, as before.
+    const targetTabId = (): string =>
+        resolveDisplayedTabId({
+            committed: tabId(),
+            intent: switchIntentTabId(),
+            tabIds: [...(ws()?.pinnedtabids ?? []), ...(ws()?.tabids ?? [])],
+            keepLaidOut: keepInactiveTabsLaidOut(),
+            wasShown: tabWasShown,
+        });
+    // The tab displayed until a moment ago, while it skips rendering instead
+    // of restyling everything in it (window-tab-visibility.ts `leaving`).
+    // Cleared two frames on: a single rAF would run before the switch's own
+    // frame is rendered.
+    const [leavingTabId, setLeavingTabId] = createSignal<string | null>(null);
+    let leavingSeq = 0;
     createEffect(() => {
-        const next = tabId();
-        if (next === displayTabId()) return;
-        const apply = () => {
-            setDisplayTabId(next);
-            if (tabSwitching()) scheduleRevealLift();
-        };
+        const next = targetTabId();
+        const prev = displayTabId();
+        if (next === prev) return;
         // A tab already shown and kept laid out swaps in one frame, as a
         // pane tab does: a cross-fade would only delay it (§6.4).
         const instant = keepInactiveTabsLaidOut() && tabWasShown(next);
+        const apply = () => {
+            if (instant) {
+                const seq = ++leavingSeq;
+                setLeavingTabId(prev);
+                requestAnimationFrame(() =>
+                    requestAnimationFrame(() => {
+                        if (seq === leavingSeq) setLeavingTabId(null);
+                    })
+                );
+            }
+            setDisplayTabId(next);
+            if (tabSwitching()) scheduleRevealLift();
+        };
         if (!instant && !prefersReducedMotion() && typeof document.startViewTransition === "function") {
             document.startViewTransition(apply);
         } else {
@@ -197,7 +228,12 @@ function WorkspaceElem(): JSX.Element {
                                     forgetTabShown(tid);
                                 });
                                 const shown = createMemo(() =>
-                                    tabContainerVisibility(tid === displayTabId(), keepLaidOut(), gateHides(tid)),
+                                    tabContainerVisibility(
+                                        tid === displayTabId(),
+                                        keepLaidOut(),
+                                        gateHides(tid),
+                                        tid === leavingTabId()
+                                    ),
                                 );
                                 return (
                                 <div
@@ -283,6 +319,9 @@ function WorkspaceElem(): JSX.Element {
                                         // so nothing inside can paint through visibility:hidden
                                         // (window-tab-visibility.ts).
                                         opacity: shown().opacity ?? undefined,
+                                        // The displayed tab sits above one still leaving
+                                        // (content-visibility: hidden, not yet pointer-events: none).
+                                        "z-index": shown()["z-index"] ?? undefined,
                                         // Reveal gate (issue #774): hide the active tab while
                                         // it's still settling so the piecemeal mount cascade
                                         // doesn't paint stage-by-stage. `visibility: hidden`

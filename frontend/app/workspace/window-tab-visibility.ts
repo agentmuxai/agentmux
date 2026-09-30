@@ -44,6 +44,8 @@ export interface TabContainerVisibility {
     /** `"0"` for a tab kept laid out and not shown — see below. */
     opacity: "0" | null;
     "pointer-events": "auto" | "none";
+    /** `"1"` for the displayed tab, so it is on top of a tab still leaving. */
+    "z-index": "1" | null;
     /** The tab is kept laid out and not shown; its agents pause rendering. */
     hiddenLaidOut: boolean;
 }
@@ -60,9 +62,30 @@ export interface TabContainerVisibility {
 export function tabContainerVisibility(
     displayed: boolean,
     keepLaidOut: boolean,
-    gated: boolean
+    gated: boolean,
+    /**
+     * The tab was displayed until this frame (kept laid out only). For a
+     * couple of frames it hides with `content-visibility: hidden`, under the
+     * displayed tab, and only then takes its inherited `visibility: hidden` /
+     * `pointer-events: none`. Those restyle every element in the tab, which
+     * on a large tab cost as much as showing the new one, all in the
+     * switch's own frame; `content-visibility` isn't inherited and also
+     * skips the tab's paint, which `opacity: 0` alone did not
+     * (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §7).
+     */
+    leaving = false
 ): TabContainerVisibility {
     const hiddenLaidOut = keepLaidOut && !displayed;
+    if (hiddenLaidOut && leaving) {
+        return {
+            "content-visibility": "hidden",
+            visibility: null,
+            opacity: "0",
+            "pointer-events": "auto",
+            "z-index": null,
+            hiddenLaidOut,
+        };
+    }
     return {
         "content-visibility": keepLaidOut || displayed ? "visible" : "hidden",
         visibility: gated || hiddenLaidOut ? "hidden" : null,
@@ -73,6 +96,27 @@ export function tabContainerVisibility(
         // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §1.
         opacity: hiddenLaidOut ? "0" : null,
         "pointer-events": displayed ? "auto" : "none",
+        "z-index": displayed ? "1" : null,
         hiddenLaidOut,
     };
+}
+
+/**
+ * Which window tab to display: the committed `activetabid`, or the tab a
+ * `setActiveTab` is switching to when that one is warm (it exists, and has
+ * already been shown while inactive tabs are kept laid out) — so a warm
+ * switch swaps in the same frame as the optimistic pill instead of after
+ * the round trip (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md
+ * §5.2). A cold destination still waits for the backend and its reveal gate.
+ */
+export function resolveDisplayedTabId(input: {
+    committed: string;
+    intent: string | null;
+    tabIds: readonly string[];
+    keepLaidOut: boolean;
+    wasShown: (tabId: string) => boolean;
+}): string {
+    const { committed, intent, tabIds, keepLaidOut, wasShown } = input;
+    if (intent == null || intent === committed) return committed;
+    return keepLaidOut && tabIds.includes(intent) && wasShown(intent) ? intent : committed;
 }

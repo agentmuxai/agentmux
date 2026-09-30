@@ -279,6 +279,15 @@ tasks:
             docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md.
         cmd: bash scripts/check-scrollbar-cursor.sh
 
+    check:no-transition-all:
+        desc: >-
+            Grep gate — fails on `transition: all` (or the Tailwind
+            `transition-all` class) in the frontend. It animates the
+            inherited `visibility` that hides window and pane tabs, so the
+            element pops in a frame late on every switch. See
+            docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3.
+        cmd: bash scripts/check-no-transition-all.sh
+
     build:frontend:
         desc: Build the frontend (production mode).
         cmd: bash scripts/vite-build.sh --mode production --config vite.config.ts
