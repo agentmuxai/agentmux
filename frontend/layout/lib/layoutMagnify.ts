@@ -21,11 +21,14 @@ import { clearLeafRevealGate } from "@/app/store/tab-reveal";
  * @param model The LayoutModel instance.
  * @param nodeId The id of the node that is being magnified.
  * @param setState Whether to persist the state change.
+ * @param focused Whether to request node focus once committed. false for a
+ * programmatic un-magnify that must leave the user's focus where it is.
  */
-export function magnifyNodeToggle(model: LayoutModel, nodeId: string, setState = true) {
+export function magnifyNodeToggle(model: LayoutModel, nodeId: string, setState = true, focused = true) {
     const action: LayoutTreeMagnifyNodeToggleAction = {
         type: LayoutTreeActionType.MagnifyNodeToggle,
         nodeId: nodeId,
+        ...(focused ? {} : { focused: false }),
     };
 
     // Unset the last ephemeral node id to ensure the magnify animation sits on top of the layout.
