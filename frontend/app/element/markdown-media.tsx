@@ -258,14 +258,22 @@ function RemoteImage(props: { src: string; alt: string }): JSX.Element {
 }
 
 /**
- * Every markdown `<img>`. A `data:image/` URI renders directly, as it always
- * has (it makes no request). Anything else loads only where `media` is on.
+ * Raster data URIs only. An SVG can reference remote resources, so an inline
+ * SVG data URI never renders (ReAgent P0 on #4064); a local `.svg` file goes
+ * through the blob path like any other file.
+ */
+const RASTER_DATA_URI = /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i;
+
+/**
+ * Every markdown `<img>`. Nothing renders unless `media` is on — the agent's
+ * own messages. There, a raster `data:` URI renders directly (no request).
  */
 const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?: MarkdownMediaOpts }) => {
     const src = ((p.props as any)?.src as string | undefined) ?? "";
     const alt = ((p.props as any)?.alt as string | undefined) ?? "";
-    if (src.startsWith("data:image/")) return <img src={src} alt={alt} />;
-    if (!p.media) return <span>[img:{src}]</span>;
+    if (!p.media) return <span>[img:{src.startsWith("data:") ? "data" : src}]</span>;
+    if (RASTER_DATA_URI.test(src)) return <img src={src} alt={alt} />;
+    if (/^data:/i.test(src)) return <span class="am-muted">[image: inline data — unsupported type]</span>;
     if (/^https?:\/\//i.test(src)) return <RemoteImage src={src} alt={alt} />;
     const path = resolveMediaPath(src, p.media.baseDir);
     if (path == null) return <span class="am-muted">[image not found: {src}]</span>;

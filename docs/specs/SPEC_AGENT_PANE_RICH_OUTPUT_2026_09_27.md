@@ -262,7 +262,9 @@ keeps the feature and removes the silent part.
   before any component saw them; `data:` images had never rendered, despite
   §4.3's "as today". `rehype-local-image-src.ts` rewrites a drive path to
   `file:///…`, and `src` now also allows `file` and `data` (only `MarkdownImg`
-  decides what's fetched). `<picture>`/`<source>` came from the default
+  decides what's fetched). A `data:` image renders only where `media` is on,
+  and only as a raster type: an SVG can reference remote resources, so an
+  inline SVG data URI never renders (ReAgent P0 on #4064). `<picture>`/`<source>` came from the default
   allowlist too; they're now filtered out, so a remote `srcset` can't load
   beside a local image.
 - **Row height.** The placeholder is 16:9 until the natural size is known; the
