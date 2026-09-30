@@ -29,7 +29,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
+import { isAuthFailure, workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "../launch-args";
@@ -764,7 +764,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // useAgentFailure.ts's silent self-heal handler ("never
                 // blow away an unrelated concurrent failure"). reagentx P1
                 // on PR #2338 (thirty-fifth re-review).
-                if (paneSnapshot(opts.blockId)?.failure?.data.code === "auth") {
+                if (isAuthFailure(paneSnapshot(opts.blockId)?.failure)) {
                     opts.model.dispatchPane({ type: "FailureCleared" });
                 }
                 // A successful refresh proves the pane's state.failure (the
@@ -857,7 +857,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // an unrelated concurrent failure"). reagentx P1 on PR #2338
         // (thirty-fifth re-review).
         clearAuthFailure: () => {
-            if (paneSnapshot(opts.blockId)?.failure?.data.code === "auth") {
+            if (isAuthFailure(paneSnapshot(opts.blockId)?.failure)) {
                 opts.model.dispatchPane({ type: "FailureCleared" });
             }
         },
@@ -1431,7 +1431,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // updated by a mid-turn 401/403 either, so without this check
             // neither live accessor would catch it. Codex P2 on PR #2338
             // (nineteenth re-review).
-            const liveAuthFailure = paneSnapshot(opts.blockId)?.failure?.data.code === "auth";
+            const liveAuthFailure = isAuthFailure(paneSnapshot(opts.blockId)?.failure);
             if (!(initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve || liveAuthFailure))) {
                 return true;
             }
@@ -1718,7 +1718,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // looking clean on both existing checks and it gets
                 // delivered to the still-bad credential. codex P2 on
                 // PR #2338 (twenty-third re-review).
-                const liveAuthFailure = paneSnapshot(opts.blockId)?.failure?.data.code === "auth";
+                const liveAuthFailure = isAuthFailure(paneSnapshot(opts.blockId)?.failure);
                 if (item.authWasKnownBadAtQueueTime || item.authFailureToPreserve || liveAuthFailure) {
                     opts.log("auth", "held message not sent — not logged in", "warn");
                     // Roll back the OPTIMISTIC TurnStart handleSendMessage
