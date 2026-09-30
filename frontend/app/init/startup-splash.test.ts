@@ -57,4 +57,25 @@ describe("startup splash fade", () => {
         fadeOutStartupSplash();
         expect(onReveal).not.toHaveBeenCalled();
     });
+
+    it("covers the splash with the torn-off pane's picture, which fades out with it", async () => {
+        const { fadeOutStartupSplash, markPoolPromoted, showTearOffSnapshot } = await import("./startup-splash");
+        markPoolPromoted();
+        const el = mountSplash();
+        showTearOffSnapshot("AAAA");
+        const img = el.querySelector("img")!;
+        expect(img.src).toBe("data:image/jpeg;base64,AAAA");
+        expect(img.style.position).toBe("absolute");
+        fadeOutStartupSplash();
+        vi.advanceTimersByTime(90 + 120);
+        expect(document.getElementById("startup-loading")).toBeNull();
+    });
+
+    it("once the splash is fading, a late picture isn't shown", async () => {
+        const { fadeOutStartupSplash, showTearOffSnapshot } = await import("./startup-splash");
+        const el = mountSplash();
+        fadeOutStartupSplash();
+        showTearOffSnapshot("AAAA");
+        expect(el.querySelector("img")).toBeNull();
+    });
 });

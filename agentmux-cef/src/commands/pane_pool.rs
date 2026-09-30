@@ -459,6 +459,7 @@ pub fn promote_pane_pool_window(
     width: i32,
     height: i32,
     parent_hwnd: isize,
+    snapshot: Option<&str>,
 ) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
@@ -587,6 +588,10 @@ pub fn promote_pane_pool_window(
                 "paneId": pane_id,
                 "workspaceId": workspace_id,
                 "windowLabel": new_label,
+                // The source's picture of the pane, shown until the live
+                // content reveals. SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md
+                // phase 3.1.
+                "snapshot": snapshot,
             }),
         );
 
@@ -604,6 +609,7 @@ pub fn promote_pane_pool_window(
         // `windowLabel` should be applied here (via `post_promote_pane_pool_window`)
         // as a follow-up on macOS/Linux.
         let _ = parent_hwnd; // unused on non-Windows
+        let _ = snapshot; // Windows only for now (phase 3.1)
         let dispatch = state.host_dispatch(
             crate::reducer::HostCommand::PopAndPromoteFrontPanePoolWindow,
         );

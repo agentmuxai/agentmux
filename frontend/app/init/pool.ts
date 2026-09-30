@@ -14,7 +14,7 @@
 //
 // Spec: docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.5
 
-import { markPoolPromoted } from "./startup-splash";
+import { markPoolPromoted, showTearOffSnapshot } from "./startup-splash";
 
 /** True when the current renderer was spawned as a tab/new-window pool window. */
 export function isPoolMode(): boolean {
@@ -115,11 +115,13 @@ export async function awaitPanePoolPromote(): Promise<void> {
         let unsub: (() => void) | undefined;
         const cleanup = () => { unsub?.(); };
 
-        unsub = await listenEvent<{ paneId: string; workspaceId: string; windowLabel?: string }>(
+        unsub = await listenEvent<{ paneId: string; workspaceId: string; windowLabel?: string; snapshot?: string | null }>(
             "pool:pane-promote",
             (payload) => {
                 cleanup();
                 markPoolPromoted(() => getApi().setWindowInitStatus("revealed"));
+                // The source's picture of the pane, until its content reveals.
+                if (payload.snapshot) showTearOffSnapshot(payload.snapshot);
                 const url = new URL(window.location.href);
                 url.searchParams.set("floatingPaneId", payload.paneId);
                 // Match cold-path contract: omit workspaceId when empty so

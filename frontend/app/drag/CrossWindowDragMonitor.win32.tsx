@@ -33,6 +33,7 @@ import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
+import { paneDragCandidate, prewarmTearOffSnapshot, takeTearOffSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
@@ -60,8 +61,20 @@ function CrossWindowDragMonitor(): JSX.Element {
     let windowLabelRef: string | null = null;
 
     onMount(async () => {
+        // A pane about to be dragged: picture it now, while it's still drawn
+        // normally, in case the drag tears it off (tearoff-snapshot.ts).
+        // Registered before the first await, while onCleanup still has an owner.
+        const onPointerDown = (e: PointerEvent) => {
+            if (e.button !== 0) return;
+            const blockId = paneDragCandidate(e.target);
+            if (blockId) prewarmTearOffSnapshot(blockId);
+        };
+        document.addEventListener("pointerdown", onPointerDown, true);
+        onCleanup(() => document.removeEventListener("pointerdown", onPointerDown, true));
+
         windowLabelRef = await getApi().getWindowLabel();
         Logger.debug("dnd:cross", "CrossWindowDragMonitor mounted (win32)", { windowLabel: windowLabelRef });
+
 
         let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -323,6 +336,9 @@ async function performTearOff(
             ? undefined
             : measureMotherResize(payload.blockId);
 
+        // The pane's picture for the floater, taken before the drag; any wait
+        // for it overlaps TearOffBlock. SPEC_TEAROFF_PAINT_LATENCY §4 3.1.
+        const snapshotTaken = takeTearOffSnapshot(payload.blockId);
         const newWsId = await WorkspaceService.TearOffBlock(
             payload.blockId,
             sourceTabId,
@@ -335,6 +351,7 @@ async function performTearOff(
             });
             return;
         }
+        const snapshot = await snapshotTaken;
         // Diagnostic snapshot — awaited so it captures state before the IPC
         // starts (a fire-and-forget races the IPC and may read post-start state).
         await getApi().windows.getPaneDebugState().then((snap) => {
@@ -362,6 +379,7 @@ async function performTearOff(
                 height: floaterHeight,
                 source_window_label: sourceWindowLabel,
                 mother_resize_to_width: motherResizeToWidth,
+                snapshot,
             });
             Logger.info("dnd:cross", "floating pane spawned", {
                 blockId: payload.blockId,
@@ -388,6 +406,7 @@ async function performTearOff(
                         height: floaterHeight,
                         source_window_label: sourceWindowLabel,
                         mother_resize_to_width: motherResizeToWidth,
+                        snapshot,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {

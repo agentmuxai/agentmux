@@ -27,6 +27,7 @@ import { atoms, getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { sleep } from "@/util/util";
 import { floaterSizeFromRect, measureMotherResize, measureSourcePaneSize } from "./tear-off-pool-helper";
+import { takeTearOffSnapshot } from "./tearoff-snapshot";
 
 /** The cross-window drag payload a Pane Tab pill sets on drag start
  *  (PaneTabStrip). `paneSize` is its pane's rect (CSS/DIP px) at that moment:
@@ -160,6 +161,9 @@ export async function tearOffPaneTab(
             ? measureMotherResize(blockId)
             : undefined;
 
+    // The pane's picture for the floater (Windows), taken before the drag;
+    // any wait for it overlaps TearOffBlock. SPEC_TEAROFF_PAINT_LATENCY §4 3.1.
+    const snapshot = opts.platform === "win32" ? takeTearOffSnapshot(blockId) : Promise.resolve(undefined);
     const newWsId = await WorkspaceService.TearOffBlock(blockId, sourceTabId, opts.sourceWorkspaceId, true);
     if (!newWsId) {
         Logger.error("dnd:cross", "pane-tab tear-off: TearOffBlock returned no workspace id", { blockId });
@@ -169,6 +173,7 @@ export async function tearOffPaneTab(
     const opened = await openFloatingPaneWindow({
         pane_id: blockId,
         workspace_id: newWsId,
+        snapshot: await snapshot,
         x: opts.screenX,
         y: opts.screenY,
         width,
