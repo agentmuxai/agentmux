@@ -329,8 +329,10 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 /// `TRUST=wan-verified INSTANCE=<host_hint>~<id8> INSTANCE_STATUS=<status>`:
 /// the label's suffix comes from the id the certificate chain proved, never
 /// from the sender, and the status tells the reader whether a human approved
-/// that install (`approved`), nobody has (`new`: verified but no relaxation),
-/// or its owner retired it (`revoked`: forced sensitive by the caller).
+/// that install (`approved`), nobody has yet (`new`), or its owner retired it
+/// (`revoked`: forced sensitive by the caller). Both `approved` and `new` count
+/// as a verified sender (`ESCALATE=none`) since 2026-09-26
+/// (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.6); only `revoked` does not.
 ///
 /// `requires_stop` (SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md)
 /// is the caller's already-computed answer to "does `TIER=sensitive` mean
