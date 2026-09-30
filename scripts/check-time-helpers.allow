@@ -11,7 +11,6 @@ crates/launcher/src/host_hang_dump.rs
 crates/launcher/src/logging.rs
 crates/launcher/src/tray/linux.rs
 crates/launcher/src/tray/windows.rs
-crates/mcp/src/main.rs
 crates/mcp/src/window_capture.rs
 crates/srv/src/agents/translator/claude.rs
 crates/srv/src/backend/agent_seed.rs
