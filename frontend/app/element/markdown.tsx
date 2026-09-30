@@ -54,7 +54,8 @@ import remarkRehype from "remark-rehype";
 import { openLink } from "../store/global";
 import { rehypeLinkify } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
-import { MarkdownImg, MarkdownSource, MuxBlock } from "./markdown-media";
+import { MarkdownImg, type MarkdownMediaOpts, MuxBlock } from "./markdown-media";
+import { rehypeLocalImageSrc } from "./rehype-local-image-src";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
 import "./markdown.scss";
 
@@ -124,7 +125,10 @@ type MarkdownProps = {
     class?: string;
     contentClass?: string;
     onClickExecute?: (cmd: string) => void;
-    resolveOpts?: MarkdownResolveOpts;
+    /** Inline images from local files and click-to-load remote ones. Only the
+     *  agent's own messages pass this (SPEC_AGENT_PANE_RICH_OUTPUT §4.1);
+     *  without it, a markdown image never makes the pane fetch anything. */
+    media?: MarkdownMediaOpts;
     scrollable?: boolean;
     /** When true, skip OverlayScrollbars entirely and let `.content` use its
      *  plain CSS `overflow` — a real native/webkit scrollbar, styled by the
@@ -175,7 +179,6 @@ const Markdown = (props: MarkdownProps) => {
         style,
         class: className,
         contentClass: contentClassName,
-        resolveOpts,
         fontSizeOverride,
         fixedFontSizeOverride,
         scrollable = true,
@@ -236,8 +239,7 @@ const Markdown = (props: MarkdownProps) => {
         h4: (props: any) => <Heading props={props} hnum={4} />,
         h5: (props: any) => <Heading props={props} hnum={5} />,
         h6: (props: any) => <Heading props={props} hnum={6} />,
-        img: (props: any) => <MarkdownImg props={props} resolveOpts={resolveOpts} />,
-        source: (props: any) => <MarkdownSource props={props} resolveOpts={resolveOpts} />,
+        img: (imgProps: any) => <MarkdownImg props={imgProps} media={props.media} />,
         code: Code,
         pre: (props: any) => <CodeBlock children={props.children} onClickExecute={onClickExecute} />,
         table: (props: any) => <TableBlock>{props.children}</TableBlock>,
@@ -418,6 +420,7 @@ const Markdown = (props: MarkdownProps) => {
         const rehypePlugins: any[] = rehype
             ? [
                   rehypeRaw,
+                  rehypeLocalImageSrc,
                   ...(withHighlight ? [rehypeHighlight] : []),
                   rehypeAlignToClass,
                   rehypeLinkify,
@@ -431,9 +434,6 @@ const Markdown = (props: MarkdownProps) => {
                                   // The syntax highlighter's own classes, plus the
                                   // semantic colour set agents may use.
                                   ["className", /^hljs-./, ...AM_SPAN_CLASSES],
-                                  ["srcset"],
-                                  ["media"],
-                                  ["type"],
                               ],
                               th: [
                                   ...(defaultSchema.attributes?.th || []),
@@ -448,13 +448,22 @@ const Markdown = (props: MarkdownProps) => {
                               waveblock: [["blockkey"]],
                           },
                           tagNames: [
-                              ...(defaultSchema.tagNames || []),
+                              // Not <picture>/<source>: a remote `srcset` beside
+                              // a local image would load with no click (§4.3).
+                              ...(defaultSchema.tagNames || []).filter((t) => t !== "picture" && t !== "source"),
                               "span",
                               "waveblock",
-                              "picture",
-                              "source",
                               "mermaidblock",
                           ],
+                          // `file:` carries a Windows drive path through
+                          // (rehype-local-image-src); `data:` lets an inline
+                          // image render (no request). An image src is only
+                          // ever loaded by MarkdownImg, which decides what may
+                          // be fetched; the sanitizer isn't that gate.
+                          protocols: {
+                              ...defaultSchema.protocols,
+                              src: [...(defaultSchema.protocols?.src || []), "file", "data"],
+                          },
                       }),
                   () => rehypeSlug({ prefix: idPrefix() }),
               ]

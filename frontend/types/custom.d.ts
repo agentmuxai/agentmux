@@ -882,11 +882,6 @@ declare global {
 
     type SuggestionsType = SuggestionConnectionItem | SuggestionConnectionScope;
 
-    type MarkdownResolveOpts = {
-        connName: string;
-        baseDir: string;
-    };
-
     type FlashErrorType = {
         id: string;
         icon: string;

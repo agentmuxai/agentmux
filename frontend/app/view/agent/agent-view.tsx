@@ -21,6 +21,7 @@ import {
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
 import { AgentDormancyProvider } from "./agent-dormancy";
+import { AgentMediaProvider } from "./agent-media";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
@@ -2388,6 +2389,11 @@ const AgentPresentationView = ({
         ContextMenuModel.showContextMenu([{ label: "Copy", click: () => clipboardWriteText(sel) }], e);
     };
 
+    // Relative paths in the agent's own image references resolve against its
+    // working directory: the actual launch cwd first, as for the stash modal.
+    const mediaBaseDir = (): string =>
+        (block()?.meta?.["cmd:cwd"] as string) || currentAgent()?.working_directory || "";
+
     return (
         // Dormancy is provided at the SUBTREE root, not threaded as a prop:
         // the expensive consumer (MarkdownBlock) sits four layers down, behind
@@ -2399,6 +2405,7 @@ const AgentPresentationView = ({
         // alike; this provider gates only rendering (the timers read `hidden`
         // directly).
         <AgentDormancyProvider dormant={hidden}>
+        <AgentMediaProvider baseDir={mediaBaseDir}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls
@@ -2985,6 +2992,7 @@ const AgentPresentationView = ({
                     </div>
             </Show>
         </div>
+        </AgentMediaProvider>
         </AgentDormancyProvider>
     );
 };
