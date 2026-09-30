@@ -5,7 +5,7 @@ import { useOnResize } from "@/app/hook/useDimensions";
 import { atoms, MOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { LayoutModel } from "./layoutModel";
 import { LayoutNode, NodeModel, TileLayoutContents } from "./types";
@@ -55,6 +55,30 @@ export function getLayoutModelForTabById(tabId: string) {
 export function getLayoutModelForStaticTab() {
     const tabId = atoms.activeTabId();
     return getLayoutModelForTabById(tabId);
+}
+
+/**
+ * Dispose the layout model of every tab that leaves this window's workspace:
+ * torn off, moved to another window, or closed. Only the window that owns a
+ * tab may process and persist its layout; a model left behind would apply the
+ * same queued backend actions as the tab's new window and write a stale tree
+ * over its layout. A tab that comes back gets a fresh model, built from the
+ * backend state. Install once per window; returns its disposer.
+ */
+export function installLayoutModelEviction(): () => void {
+    return createRoot((dispose) => {
+        let owned = new Set<string>();
+        createEffect(() => {
+            const ws = atoms.workspace();
+            if (!ws) return;
+            const now = new Set([...(ws.tabids ?? []), ...(ws.pinnedtabids ?? [])]);
+            for (const tabId of owned) {
+                if (!now.has(tabId)) deleteLayoutModelForTab(tabId);
+            }
+            owned = now;
+        });
+        return dispose;
+    });
 }
 
 export function deleteLayoutModelForTab(tabId: string) {
