@@ -99,16 +99,31 @@ function WorkspaceElem(): JSX.Element {
             keepLaidOut: keepInactiveTabsLaidOut(),
             wasShown: tabWasShown,
         });
+    // The tab displayed until a moment ago, while it hides by opacity alone
+    // (window-tab-visibility.ts `leaving`). Cleared two frames on: a single
+    // rAF would run before the switch's own frame is rendered.
+    const [leavingTabId, setLeavingTabId] = createSignal<string | null>(null);
+    let leavingSeq = 0;
     createEffect(() => {
         const next = targetTabId();
-        if (next === displayTabId()) return;
-        const apply = () => {
-            setDisplayTabId(next);
-            if (tabSwitching()) scheduleRevealLift();
-        };
+        const prev = displayTabId();
+        if (next === prev) return;
         // A tab already shown and kept laid out swaps in one frame, as a
         // pane tab does: a cross-fade would only delay it (§6.4).
         const instant = keepInactiveTabsLaidOut() && tabWasShown(next);
+        const apply = () => {
+            if (instant) {
+                const seq = ++leavingSeq;
+                setLeavingTabId(prev);
+                requestAnimationFrame(() =>
+                    requestAnimationFrame(() => {
+                        if (seq === leavingSeq) setLeavingTabId(null);
+                    })
+                );
+            }
+            setDisplayTabId(next);
+            if (tabSwitching()) scheduleRevealLift();
+        };
         if (!instant && !prefersReducedMotion() && typeof document.startViewTransition === "function") {
             document.startViewTransition(apply);
         } else {
@@ -212,7 +227,12 @@ function WorkspaceElem(): JSX.Element {
                                     forgetTabShown(tid);
                                 });
                                 const shown = createMemo(() =>
-                                    tabContainerVisibility(tid === displayTabId(), keepLaidOut(), gateHides(tid)),
+                                    tabContainerVisibility(
+                                        tid === displayTabId(),
+                                        keepLaidOut(),
+                                        gateHides(tid),
+                                        tid === leavingTabId()
+                                    ),
                                 );
                                 return (
                                 <div
@@ -298,6 +318,9 @@ function WorkspaceElem(): JSX.Element {
                                         // so nothing inside can paint through visibility:hidden
                                         // (window-tab-visibility.ts).
                                         opacity: shown().opacity ?? undefined,
+                                        // The displayed tab sits above one still leaving
+                                        // (opacity 0, not yet pointer-events: none).
+                                        "z-index": shown()["z-index"] ?? undefined,
                                         // Reveal gate (issue #774): hide the active tab while
                                         // it's still settling so the piecemeal mount cascade
                                         // doesn't paint stage-by-stage. `visibility: hidden`

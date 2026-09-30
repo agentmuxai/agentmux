@@ -11,6 +11,7 @@ describe("tabContainerVisibility", () => {
             visibility: null,
             opacity: null,
             "pointer-events": "none",
+            "z-index": null,
             hiddenLaidOut: false,
         });
     });
@@ -22,6 +23,7 @@ describe("tabContainerVisibility", () => {
             // Nothing inside can paint through (a `visibility` transition would).
             opacity: "0",
             "pointer-events": "none",
+            "z-index": null,
             hiddenLaidOut: true,
         });
     });
@@ -33,9 +35,29 @@ describe("tabContainerVisibility", () => {
                 visibility: null,
                 opacity: null,
                 "pointer-events": "auto",
+                "z-index": "1",
                 hiddenLaidOut: false,
             });
         }
+    });
+
+    // ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §7: the tab just switched
+    // away from hides by opacity alone, under the displayed one, so the switch's
+    // frame doesn't also restyle everything in it.
+    it("hides a tab that is leaving by opacity alone, under the displayed tab", () => {
+        expect(tabContainerVisibility(false, true, false, true)).toEqual({
+            "content-visibility": "visible",
+            visibility: null,
+            opacity: "0",
+            "pointer-events": "auto",
+            "z-index": null,
+            hiddenLaidOut: true,
+        });
+        expect(tabContainerVisibility(true, true, false, false)["z-index"]).toBe("1");
+    });
+
+    it("ignores `leaving` when inactive tabs aren't kept laid out", () => {
+        expect(tabContainerVisibility(false, false, false, true)).toEqual(tabContainerVisibility(false, false, false));
     });
 
     it("lets the reveal gate hide the displayed tab in both modes", () => {
