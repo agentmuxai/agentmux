@@ -26,6 +26,8 @@ export interface DragSource {
     tabId?: string;
     blockId?: string;
     wsId?: string;
+    /** list-item: the dragged entry. */
+    itemId?: string;
 }
 
 /** Kind-specific data captured at drag start that can't be re-derived later. */
@@ -34,6 +36,8 @@ export interface DragPayload {
     paneSize?: { width: number; height: number };
     /** window-tab: false for a lone-tab drag, which only the native strip merge may handle. */
     crossWindow?: boolean;
+    /** drone-kind: the node kind a top-bar chip creates. */
+    droneKind?: string;
 }
 
 export interface DragSession {
