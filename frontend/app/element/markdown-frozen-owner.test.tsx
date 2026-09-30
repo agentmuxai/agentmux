@@ -3,23 +3,21 @@
 
 /**
  * Components inside a frozen segment must stay alive while the message keeps
- * streaming. An image in the frozen prefix resolves its path asynchronously; if
+ * streaming. An image in the frozen prefix loads its file asynchronously; if
  * its component had been created under the insert effect that the next commit
  * re-runs, it would be disposed before the path resolved and never show.
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const pending: Array<() => void> = [];
-vi.mock("@/app/element/markdown-util", async (importOriginal) => {
-    const orig = await importOriginal<typeof import("@/app/element/markdown-util")>();
+vi.mock("@/app/element/local-media", async (importOriginal) => {
+    const orig = await importOriginal<typeof import("@/app/element/local-media")>();
     return {
         ...orig,
-        resolveRemoteFile: (src: string) =>
-            new Promise<string>((resolve) => pending.push(() => resolve(`resolved://${src}`))),
-        resolveSrcSet: async () => "",
+        fetchMediaBlob: () => new Promise<Blob>((resolve) => pending.push(() => resolve(new Blob(["x"])))),
     };
 });
 
@@ -27,9 +25,15 @@ vi.mock("@/util/clipboard", () => ({ writeText: async () => {} }));
 
 import { Markdown } from "./markdown";
 
-afterEach(() => cleanup());
+beforeEach(() => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:frozen-owner", revokeObjectURL: () => {} }));
+});
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 
-const RESOLVE_OPTS: MarkdownResolveOpts = { connName: "", baseDir: "/" };
+const MEDIA = { baseDir: "/" };
 const LONG_FILLER = "Filler prose that pads the document past the split threshold.\n\n".repeat(14);
 
 describe("Markdown frozen segment components", () => {
@@ -37,7 +41,7 @@ describe("Markdown frozen segment components", () => {
         const head = `![pic](pic.png)\n\n${LONG_FILLER}`;
         const [text, setText] = createSignal(`${head}Streaming tail 0`);
         const { container } = render(() => (
-            <Markdown text={text()} streaming={true} scrollable={false} resolveOpts={RESOLVE_OPTS} />
+            <Markdown text={text()} streaming={true} scrollable={false} media={MEDIA} />
         ));
         await Promise.resolve();
         for (let i = 1; i <= 5; i++) setText(`${head}Streaming tail ${"x".repeat(i)}`);
@@ -47,7 +51,7 @@ describe("Markdown frozen segment components", () => {
         await new Promise((r) => setTimeout(r, 0));
 
         const img = container.querySelector("img");
-        expect(img?.getAttribute("src")).toBe("resolved://pic.png");
+        expect(img?.getAttribute("src")).toBe("blob:frozen-owner");
     });
 
     it("a table's copy button still shows its feedback after the message finishes streaming", async () => {

@@ -111,8 +111,23 @@ export function toolExpandedPx(): number {
 // buildRendererRegistry() at view-mount time — registry binding to
 // concrete components is Phase 2's job.
 
+/**
+ * Room reserved per local image in an agent message
+ * (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §4.2): the loading placeholder is
+ * 16:9 at the row's width, capped at `min(60vh, 640px)`. A typical pane width
+ * lands near this; the measured height replaces it on render.
+ */
+export const INLINE_MEDIA_ESTIMATE_PX = 360;
+const INLINE_MEDIA_ESTIMATE_MAX_COUNT = 3;
+/** `![…](…)` whose target isn't remote or a data URI: a local file. */
+const LOCAL_IMAGE_REF = /!\[[^\]]*\]\(\s*<?(?!https?:|data:)[^)\s]/gi;
+
 export function estimateMarkdown(node: MarkdownNode): number {
-    return estimateTextHeight(node.content);
+    const images = node.content.includes("![") ? (node.content.match(LOCAL_IMAGE_REF)?.length ?? 0) : 0;
+    return (
+        estimateTextHeight(node.content) +
+        Math.min(images, INLINE_MEDIA_ESTIMATE_MAX_COUNT) * INLINE_MEDIA_ESTIMATE_PX
+    );
 }
 
 /**
@@ -234,7 +249,7 @@ export function estimateNodeForState(
         case "agent_message":     return estimateTextHeight(node.message);
         case "jekt_message":      return estimateExpandedJekt(node.message);
         case "user_message":      return estimateUnwrappedTextHeight(node.message);
-        case "markdown":          return estimateTextHeight(node.content);
+        case "markdown":          return estimateMarkdown(node);
         case "shell":             return SHELL_EXPANDED_PX;
         case "agent_error":       return 64;
         case "context_compacted": return 48;

@@ -337,4 +337,69 @@
     .markdown-alert-caution {
         --alert-color: var(--error-text-color);
     }
+
+    // Inline media in the agent's own messages (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md
+    // §4, markdown-media.tsx). An image the agent chose to show is the content,
+    // so it gets more room than a tool-output preview.
+    .am-media {
+        margin: 0.4em 0;
+        max-width: 100%;
+    }
+
+    .am-media-img,
+    .am-media-placeholder {
+        display: block;
+        max-width: 100%;
+        max-height: min(60vh, 640px);
+    }
+
+    .am-media-img {
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        cursor: zoom-in;
+    }
+
+    // Reserves the row's height while the file loads, so the image arriving
+    // late doesn't shove the transcript; the real aspect ratio replaces 16:9.
+    .am-media-placeholder {
+        width: 100%;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--secondary-text-color) 10%, transparent);
+    }
+
+    .am-media figcaption {
+        margin-top: 0.25em;
+        font-size: 0.85em;
+        color: var(--secondary-text-color);
+    }
+
+    // Over the size cap: a card that opens the file in a Media pane.
+    .am-media-card,
+    .am-media-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5em;
+        padding: 0.25em 0.7em;
+        border: 1px solid color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--secondary-text-color) 8%, transparent);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+
+        &:hover {
+            background: color-mix(in srgb, var(--secondary-text-color) 16%, transparent);
+        }
+    }
+
+    .am-media-card-action {
+        color: var(--accent-color);
+    }
+
+    // A remote image waiting for a click (§4.3).
+    .am-media-chip {
+        font-size: 0.9em;
+        color: var(--secondary-text-color);
+    }
 }
