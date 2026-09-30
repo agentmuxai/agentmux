@@ -45,7 +45,6 @@ import {
     loadAccounts,
     subscribeAccountChanges,
     type Account,
-    type AgentAccounts,
 } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
@@ -130,7 +129,7 @@ import { useResumePreflight } from "./hooks/useResumePreflight";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
-import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
+import { sendStartupSequence } from "./startup/sendStartupSequence";
 import { createAgentAtoms } from "./state";
 import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
@@ -1769,75 +1768,24 @@ export const AgentPresentationView = ({
         }
     });
 
-    // On first connect (no existing session), assemble a structured startup
-    // payload from agent-definition + Identity data and send it as the opening turn.
-    // See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md
-    onReadyFn = async () => {
-        // Skip if this is a resumed session
-        if (block()?.meta?.["agent:sessionid"]) return;
-
-        try {
-            const agent = currentAgent();
-            if (!agent) return;
-
-            // Gather inputs in parallel where possible
-            const [startupContentResult, startupBundleIdResult, version, identityLinks] = await Promise.all([
-                RpcApi.GetAgentContentCommand(TabRpcClient, {
-                    agent_id: agentId,
-                    content_type: "startup",
-                }).catch(() => null),
-                RpcApi.GetAgentContentCommand(TabRpcClient, {
-                    agent_id: agentId,
-                    content_type: "startup_bundle_id",
-                }).catch(() => null),
-                Promise.resolve(getApi().getAboutModalDetails().version),
-                RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }).catch(() => []),
-            ]);
-
-            // If this agent has a Bundle selected as its startup source
-            // (AgentStartupModal, Armory → Bundles content), its
-            // `instructions` take precedence over the legacy freeform
-            // "startup" blob — which has no live authoring UI anywhere, see
-            // docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §5. Falls back to
-            // the freeform blob when no bundle is selected (or it no longer
-            // resolves, e.g. deleted), preserving any seed-manifest content.
-            const startupBundleId = startupBundleIdResult?.content?.trim() || null;
-            const startupBundle = startupBundleId
-                ? await RpcApi.GetBundleCommand(TabRpcClient, { id: startupBundleId }).catch(() => null)
-                : null;
-            const startupContent = startupBundle?.instructions?.trim()
-                ? startupBundle.instructions
-                : (startupContentResult?.content ?? null);
-
-            // Resolve assigned accounts from the same db_agent_identity_links
-            // rows spawn-time credential resolution and the agent pane's own
-            // Identity tab already use — NOT the legacy AgentDefinition.accounts
-            // JSON blob, which can silently diverge from what the agent
-            // actually launches with (see docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §1).
-            const agentAccounts: AgentAccounts = {};
-            for (const link of identityLinks) {
-                agentAccounts[link.provider as keyof AgentAccounts] = link.account_id;
-            }
-            const accounts = resolveAccounts(agentAccounts, loadAccounts());
-
-            const payload = buildStartupPayload({
-                agent,
-                providerDisplayName: provider()?.displayName ?? providerKey(),
-                workDir: block()?.meta?.["cmd:cwd"] ?? "",
-                version,
-                accounts,
-                peerAgents: agentDefinitions(),
-                startupContent,
-            });
-
-            if (payload) {
-                log("agent", "sending startup sequence");
-                await handleSendMessage(payload);
-            }
-        } catch (err) {
-            log("warn", `startup sequence failed: ${err}`, "warn");
-        }
-    };
+    // On first connect (no existing session), send the startup sequence as the
+    // opening turn (startup/sendStartupSequence.ts).
+    onReadyFn = () =>
+        sendStartupSequence({
+            sessionId: () => block()?.meta?.["agent:sessionid"],
+            agent: currentAgent,
+            providerDisplayName: () => provider()?.displayName ?? providerKey(),
+            workDir: () => block()?.meta?.["cmd:cwd"] ?? "",
+            version: () => getApi().getAboutModalDetails().version,
+            peerAgents: agentDefinitions,
+            getAgentContent: (contentType) =>
+                RpcApi.GetAgentContentCommand(TabRpcClient, { agent_id: agentId, content_type: contentType }),
+            getBundle: (id) => RpcApi.GetBundleCommand(TabRpcClient, { id }),
+            listIdentities: () => RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }),
+            loadAccounts,
+            send: handleSendMessage,
+            log,
+        });
 
     // Signal-based jump command. AgentDocumentView reacts via a
     // createEffect and scrolls inside its own container — no mutable
