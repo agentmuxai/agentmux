@@ -58,7 +58,22 @@ body {
     background-color: var(--drop-target-bg);
     border: 2px solid var(--drop-target-border);
     border-radius: var(--block-border-radius);
-    transition: top 120ms ease-out, left 120ms ease-out, width 120ms ease-out, height 120ms ease-out;
+    transition:
+        top 120ms ease-out,
+        left 120ms ease-out,
+        width 120ms ease-out,
+        height 120ms ease-out,
+        background-color 100ms ease-out,
+        border-color 100ms ease-out;
+
+    // Stage one, before the dwell arms the drop: where the pane would land,
+    // without committing to it (redock-ghost.ts). Releasing here leaves the
+    // pane floating.
+    &--preview {
+        background-color: transparent;
+        border-style: dashed;
+        border-color: var(--drop-zone-armed-border);
+    }
 }
 
 a.plain-link {
