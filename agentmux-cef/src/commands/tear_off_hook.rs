@@ -746,48 +746,80 @@ fn candidate_label_under_cursor_locked(
 /// otherwise a child of the top-level window, so comparing it with the root
 /// never matched and every release reported no target.
 ///
-/// 1. `window_hwnds`, bound at Views window creation (app/mod.rs). A stale
-///    entry holds a dead HWND, which can't equal the live root, so it never
-///    matches wrongly or hides the fallback below.
+/// A cached HWND can be stale, and Windows reuses a destroyed window's HWND
+/// value, so a stale entry can equal a live window. Each step guards that:
+/// 1. `root` must belong to this process; if it doesn't, any cached match
+///    is a reused value.
+/// 2. A browser's own host handle, when CEF gives one, says for certain.
+/// 3. Otherwise `window_hwnds`, bound at Views window creation (app/mod.rs),
+///    trusted only when exactly one label is cached for `root` and that
+///    label's browser doesn't place itself in another window. Two labels on
+///    one HWND means one is stale and nothing says which: no target.
 ///    A promoted pool window serving the primary keeps its `window-pool-*`
 ///    entry, while its renderer registered "main" and has no backend window
 ///    of its own under the pool label; that is "main", the same rule the
 ///    redock resolver uses (commands/window/motion.rs).
-/// 2. Otherwise the browser whose host handle has this root.
 #[cfg(target_os = "windows")]
 fn label_for_top_level(
     ctx: &HookContext,
     browsers: &std::collections::HashMap<String, cef::Browser>,
     root: *mut std::ffi::c_void,
 ) -> Option<String> {
-    use cef::{ImplBrowser, ImplBrowserHost};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
-    let cached = ctx.state.label_for_hwnd(root as _);
-    if let Some(label) = cached {
-        if browsers.contains_key(&label) {
-            return Some(label);
-        }
-        if label.starts_with("window-pool-")
-            && ctx.state.backend_window_id(&label).is_none()
-            && browsers.contains_key("main")
-            && !main_has_live_window(ctx)
-        {
-            return Some("main".to_string());
-        }
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(root as _, &mut pid) };
+    if pid != unsafe { GetCurrentProcessId() } {
+        return None;
     }
+
     for (label, browser) in browsers.iter() {
-        let Some(host) = browser.host() else { continue };
-        let h = host.window_handle().0 as *mut std::ffi::c_void;
-        if h.is_null() {
-            continue;
-        }
-        let top = unsafe { GetAncestor(h as _, GA_ROOT) } as *mut std::ffi::c_void;
-        if (if top.is_null() { h } else { top }) == root {
+        if host_top_level(browser) == Some(root) {
             return Some(label.clone());
         }
     }
+
+    let cached: Vec<String> = ctx
+        .state
+        .window_hwnds
+        .lock()
+        .iter()
+        .filter(|(_, &h)| h == root as isize)
+        .map(|(l, _)| l.clone())
+        .collect();
+    let [label] = cached.as_slice() else {
+        return None;
+    };
+    if let Some(browser) = browsers.get(label) {
+        // Its host handle names a different window: this entry is stale.
+        return match host_top_level(browser) {
+            Some(_) => None,
+            None => Some(label.clone()),
+        };
+    }
+    if label.starts_with("window-pool-")
+        && ctx.state.backend_window_id(label).is_none()
+        && browsers.contains_key("main")
+        && !main_has_live_window(ctx)
+    {
+        return Some("main".to_string());
+    }
     None
+}
+
+/// The top-level window of the browser's host handle, when CEF gives one.
+#[cfg(target_os = "windows")]
+fn host_top_level(browser: &cef::Browser) -> Option<*mut std::ffi::c_void> {
+    use cef::{ImplBrowser, ImplBrowserHost};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+
+    let h = browser.host()?.window_handle().0 as *mut std::ffi::c_void;
+    if h.is_null() {
+        return None;
+    }
+    let top = unsafe { GetAncestor(h as _, GA_ROOT) } as *mut std::ffi::c_void;
+    Some(if top.is_null() { h } else { top })
 }
 
 /// "main" has its own live top-level window in `window_hwnds`, so a pool
