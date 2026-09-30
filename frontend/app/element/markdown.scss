@@ -301,4 +301,40 @@
         background: color-mix(in srgb, var(--error-text-color) 14%, transparent);
         text-decoration: line-through;
     }
+
+    // GitHub-style callouts, `> [!WARNING]` (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md
+    // §3). remark-github-alerts.ts emits the markup and the kind list. Each
+    // kind only sets --alert-color; the shared rules draw a left rule, a faint
+    // tint and a coloured title from it.
+    .markdown-alert {
+        margin: 0.286em 0.714em;
+        padding: 0.3em 0.7em;
+        border-left: 0.25em solid var(--alert-color);
+        background: color-mix(in srgb, var(--alert-color) 8%, transparent);
+    }
+
+    .markdown-alert-title {
+        font-weight: 600;
+        color: var(--alert-color);
+    }
+
+    .markdown-alert-note {
+        --alert-color: var(--info-color);
+    }
+
+    .markdown-alert-tip {
+        --alert-color: var(--success-text-color);
+    }
+
+    .markdown-alert-important {
+        --alert-color: var(--accent-color);
+    }
+
+    .markdown-alert-warning {
+        --alert-color: var(--warning-text-color);
+    }
+
+    .markdown-alert-caution {
+        --alert-color: var(--error-text-color);
+    }
 }
