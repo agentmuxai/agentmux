@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** active — items 1, 2 and 4 shipped (#4029, #4030, #4032); `agent-view.tsx` split steps 0–1 shipped (#4039, #4042), later steps in progress.
+**Status:** active — items 1, 2, 4, 5, 10 and 12 shipped, 11 in part, the `agent-view.tsx` split through step 9, and the inline-test moves of §4 (see §0.1).
 **Baseline:** `main` @ `4b5814f47` (v0.58.3). Every `path:line` below was read on that commit.
 **Related:**
 [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) (the first agent-view split plan; 7 of 12 steps landed, the file grew anyway),
@@ -33,6 +33,22 @@ Ordered by benefit ÷ risk. Size: S ≈ under a day, M ≈ 1–2 days, L ≈ mul
 | 12 | **Delete the dead `@keyframes pulse`** in `_control-bar.scss:37`; it collides globally with `_status-dot.scss:28` | Last-loaded-wins visual bug | Very low | S | none |
 
 **Should `agent-view.tsx` be split?** Yes — but for testability and review load, not for the line count, and only with a regrowth guard. §3.1 explains; the 04-13 attempt took out seven hooks and the file still went from 1,959 lines (2026-07-31) to 3,001.
+
+### 0.1 Progress (2026-09-30)
+
+| Item | Status | PRs |
+|---|---|---|
+| 1. Claude launch args drifted | Shipped; the test now compares every provider's args, found from `providers.rs` | #4029 |
+| 2. `agentmux-mcp`'s root resolver | Shipped; its tests are isolated from the ambient environment | #4030 |
+| 3. Split `agent-view.tsx` | Steps 0–5, 6a and 9 shipped: 3,001 → 2,110 lines, 13 modules, a size ratchet, the A6/A9 guards widened. **Left:** 6b (bottom panels), 7 (live-feed roll-off), 8 (pane reveal), 10 (turn reconciliation) — the steps with cross-hook ordering and the densest review history | #4039, #4042, #4043, #4046, #4047, #4049, #4051, #4053, #4055 |
+| 4. One builder for the busy predicate's input | Shipped | #4032 |
+| 5. Name → slug rules | Rust side shipped (`agentmux_common::slug`, four named rules, table + oracle tests); the TS mirrors are left | #4052 |
+| 10. Time helpers | CI ratchet shipped: 91 grandfathered files (more than §6.1 counted: it covered helper definitions, not inline uses) | #4050 |
+| 11. Small frontend helpers | `isAuthFailure` | #4057 |
+| 12. Duplicate `@keyframes pulse` | Shipped | #4048 |
+| §4 inline tests | Moved to their own files: `app_api/mod.rs` 4,985 → 2,292, `reactive.rs` 3,839 → 2,598, `native_memory_handlers.rs` 3,339 → 1,674 lines; test counts identical before and after | #4054, #4056 |
+
+Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an OSC sequence with a space (or an ST terminator) through into the shell drawer (#4045); the progress ring's flicker and orphaned background-task rows (retro in `docs/retro/`, #4035, #4040).
 
 ---
 
