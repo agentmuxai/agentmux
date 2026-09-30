@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 import { workingFromPhase, type TurnPhase } from "@/app/store/agent-pane-state/types";
-import { paneBusyForInput } from "./working-indicator";
+import type { ToolNode } from "./types";
+import { busyInputFromState, paneBusyForInput, type BusyInputState } from "./working-indicator";
 
 const phase = (kind: TurnPhase["kind"], extra: Record<string, unknown> = {}): TurnPhase =>
     ({ kind, ...extra }) as TurnPhase;
@@ -186,5 +187,74 @@ describe("working indicator — busy without a turn in flight", () => {
         expect(
             paneBusyForInput({ ...idle, compacting: undefined, reconnecting: undefined }),
         ).toBe(false);
+    });
+});
+
+// One builder for paneBusyForInput's input, used by both the indicator
+// (agent-view.tsx) and the send gate (useAgentCommands.ts). The two hand-built
+// copies drifted twice (#3143, ReAgent P1 on #3340); SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md item 4.
+describe("busyInputFromState", () => {
+    const running = (id: string): ToolNode => ({
+        type: "tool",
+        id,
+        tool: "Bash",
+        status: "running",
+        params: { command: "cargo test" },
+        collapsed: false,
+        summary: "",
+        timestamp: 0,
+    });
+    const done = (id: string): ToolNode => ({ ...running(id), status: "success" });
+    // Minimal stand-ins: the builder only passes these values through or
+    // null-checks them, so their inner shape doesn't matter here.
+    const st = (fields: Record<string, unknown>) => fields as unknown as BusyInputState;
+
+    it("reads an absent pane as idle with nothing attached", () => {
+        expect(busyInputFromState(undefined, [], false)).toEqual({
+            showingLaunchActivity: false,
+            turnPhase: { kind: "Idle" },
+            compacting: null,
+            reconnecting: null,
+            hasAttachedBackgroundWork: false,
+            hasBlockingForegroundToolCall: false,
+        });
+    });
+
+    it("passes the pane's phase, compaction and reconnect state through", () => {
+        const state = st({
+            turnPhase: phase("Streaming"),
+            compacting: { startedAt: 1 },
+            reconnecting: { attempt: 2 },
+            attachedTask: null,
+            registryAttachedTaskSince: null,
+        });
+        const input = busyInputFromState(state, [], true);
+        expect(input.showingLaunchActivity).toBe(true);
+        expect(input.turnPhase).toBe(state.turnPhase);
+        expect(input.compacting).toBe(state.compacting);
+        expect(input.reconnecting).toBe(state.reconnecting);
+    });
+
+    it("counts either attached-task axis as background work", () => {
+        const base = { turnPhase: phase("Streaming"), compacting: null, reconnecting: null };
+        expect(
+            busyInputFromState(st({ ...base, attachedTask: { since: 1 }, registryAttachedTaskSince: null }), [], false)
+                .hasAttachedBackgroundWork,
+        ).toBe(true);
+        expect(
+            busyInputFromState(st({ ...base, attachedTask: null, registryAttachedTaskSince: 5 }), [], false)
+                .hasAttachedBackgroundWork,
+        ).toBe(true);
+        expect(
+            busyInputFromState(st({ ...base, attachedTask: null, registryAttachedTaskSince: null }), [], false)
+                .hasAttachedBackgroundWork,
+        ).toBe(false);
+    });
+
+    it("derives the blocking-tool flag from the document", () => {
+        expect(busyInputFromState(undefined, [done("a")], false).hasBlockingForegroundToolCall).toBe(false);
+        expect(busyInputFromState(undefined, [done("a"), running("b")], false).hasBlockingForegroundToolCall).toBe(
+            true,
+        );
     });
 });
