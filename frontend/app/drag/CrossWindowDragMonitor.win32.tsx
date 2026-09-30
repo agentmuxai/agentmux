@@ -415,6 +415,30 @@ async function performTearOff(
                     });
                     return;
                 }
+            } else if (snapshot) {
+                // The picture is best-effort: never let it fail the tear-off.
+                Logger.warn("dnd:cross", "open_floating_pane_window failed with a snapshot — retrying without it", {
+                    error: msg,
+                    blockId: payload.blockId,
+                });
+                try {
+                    await getApi().windows.openFloatingPane({
+                        pane_id: payload.blockId,
+                        workspace_id: newWsId,
+                        x: screenX,
+                        y: screenY,
+                        width: floaterWidth,
+                        height: floaterHeight,
+                        source_window_label: sourceWindowLabel,
+                        mother_resize_to_width: motherResizeToWidth,
+                    });
+                } catch (e2) {
+                    Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                        error: String(e2),
+                        blockId: payload.blockId,
+                    });
+                    return;
+                }
             } else {
                 Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
                     error: msg,

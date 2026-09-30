@@ -217,6 +217,24 @@ cef::wrap_task! {
     }
 }
 
+/// How long a promoted floater with a snapshot stays hidden waiting for its
+/// renderer to put the snapshot up. SPEC_TEAROFF_PAINT_LATENCY §4 phase 3.1.
+const SNAPSHOT_SHOW_WAIT: std::time::Duration = std::time::Duration::from_millis(80);
+
+static SNAPSHOT_ACKS: std::sync::OnceLock<Mutex<HashMap<String, std::sync::mpsc::Sender<()>>>> =
+    std::sync::OnceLock::new();
+
+fn snapshot_acks() -> &'static Mutex<HashMap<String, std::sync::mpsc::Sender<()>>> {
+    SNAPSHOT_ACKS.get_or_init(Default::default)
+}
+
+/// The promoted floater `label` has its snapshot up: show it now.
+pub fn on_snapshot_shown(label: &str) {
+    if let Some(tx) = snapshot_acks().lock().ok().and_then(|mut a| a.remove(label)) {
+        let _ = tx.send(());
+    }
+}
+
 /// Promoted floaters whose pool refill waits for their content to reveal.
 /// Refilling spawns a whole renderer process, which used to compete with the
 /// floater's own bootstrap for the CPU in the half second the user is
@@ -522,7 +540,11 @@ pub fn promote_pane_pool_window(
                     "[pane-pool] SetWindowPos failed"
                 );
             }
-            let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
+            // With a snapshot to show, stay hidden until the renderer has put
+            // it up (below): otherwise the first visible frame is the splash.
+            if snapshot.is_none() {
+                let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
+            }
         }
 
         // Rename `floating-pool-<uuid>` → `floating-<uuid>` so the promoted
@@ -580,6 +602,13 @@ pub fn promote_pane_pool_window(
         // label so `awaitPanePoolPromote` rewrites its `?windowLabel=` param —
         // otherwise the renderer keeps addressing the host by the dead pool
         // label (spec §5.2).
+        let snapshot_shown = snapshot.map(|_| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            if let Ok(mut acks) = snapshot_acks().lock() {
+                acks.insert(new_label.clone(), tx);
+            }
+            rx
+        });
         crate::events::emit_event_to_window(
             state,
             &new_label,
@@ -594,6 +623,17 @@ pub fn promote_pane_pool_window(
                 "snapshot": snapshot,
             }),
         );
+
+        if let Some(shown) = snapshot_shown {
+            let acked = shown.recv_timeout(SNAPSHOT_SHOW_WAIT).is_ok();
+            if let Ok(mut acks) = snapshot_acks().lock() {
+                acks.remove(&new_label);
+            }
+            tracing::info!(target: "pool:pane", label = %new_label, acked, "[pane-pool] showing floater after its snapshot");
+            unsafe {
+                let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
+            }
+        }
 
         defer_pane_pool_refill(state, &new_label);
 

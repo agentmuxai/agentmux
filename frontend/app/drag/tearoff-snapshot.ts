@@ -21,6 +21,13 @@ const MAX_AGE_MS = 10_000;
 /** How long a tear-off waits for a capture still in flight. */
 const TAKE_BUDGET_MS = 60;
 
+/**
+ * The largest picture (base64 chars) passed along. It travels in the
+ * open_floating_pane_window request, whose body the host caps at 2 MiB
+ * (axum's default); a bigger one would fail the tear-off itself.
+ */
+export const MAX_SNAPSHOT_CHARS = 1_000_000;
+
 let held: { blockId: string; at: number; picture: Promise<string | null> } | null = null;
 
 /** Start capturing `blockId` (a base64 JPEG), replacing any earlier picture. */
@@ -54,6 +61,10 @@ export async function takeTearOffSnapshot(blockId: string): Promise<string | und
     });
     const picture = await Promise.race([h.picture, budget]);
     clearTimeout(timer);
+    if (picture && picture.length > MAX_SNAPSHOT_CHARS) {
+        Logger.info("dnd:cross", "tear-off snapshot too large, dropped", { blockId, chars: picture.length });
+        return undefined;
+    }
     return picture ?? undefined;
 }
 

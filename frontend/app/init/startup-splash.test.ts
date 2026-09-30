@@ -71,11 +71,29 @@ describe("startup splash fade", () => {
         expect(document.getElementById("startup-loading")).toBeNull();
     });
 
-    it("once the splash is fading, a late picture isn't shown", async () => {
+    it("once the splash is fading, a late picture isn't shown, but the host still hears back", async () => {
         const { fadeOutStartupSplash, showTearOffSnapshot } = await import("./startup-splash");
         const el = mountSplash();
         fadeOutStartupSplash();
-        showTearOffSnapshot("AAAA");
+        const onShown = vi.fn();
+        showTearOffSnapshot("AAAA", onShown);
         expect(el.querySelector("img")).toBeNull();
+        expect(onShown).toHaveBeenCalledOnce();
+    });
+
+    it("tells the host once the picture is decoded, even if decoding fails", async () => {
+        const { showTearOffSnapshot } = await import("./startup-splash");
+        mountSplash();
+        Object.defineProperty(HTMLImageElement.prototype, "decode", {
+            configurable: true,
+            value: () => Promise.reject(new Error("bad jpeg")),
+        });
+        try {
+            const onShown = vi.fn();
+            showTearOffSnapshot("AAAA", onShown);
+            await vi.waitFor(() => expect(onShown).toHaveBeenCalledOnce());
+        } finally {
+            delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+        }
     });
 });

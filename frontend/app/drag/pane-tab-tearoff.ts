@@ -203,6 +203,14 @@ async function openFloatingPaneWindow(args: Record<string, unknown>): Promise<bo
         return true;
     } catch (e) {
         if (!String(e).includes("currently closing")) {
+            if (args.snapshot) {
+                // The picture is best-effort: never let it fail the tear-off.
+                Logger.warn("dnd:cross", "open_floating_pane_window failed with a snapshot — retrying without it", {
+                    error: String(e),
+                    paneId: args.pane_id,
+                });
+                return openFloatingPaneWindow({ ...args, snapshot: undefined });
+            }
             Logger.error("dnd:cross", "open_floating_pane_window failed", { error: String(e), paneId: args.pane_id });
             return false;
         }

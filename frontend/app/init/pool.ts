@@ -121,7 +121,9 @@ export async function awaitPanePoolPromote(): Promise<void> {
                 cleanup();
                 markPoolPromoted(() => getApi().setWindowInitStatus("revealed"));
                 // The source's picture of the pane, until its content reveals.
-                if (payload.snapshot) showTearOffSnapshot(payload.snapshot);
+                if (payload.snapshot) {
+                    showTearOffSnapshot(payload.snapshot, () => getApi().setWindowInitStatus("snapshot-shown"));
+                }
                 const url = new URL(window.location.href);
                 url.searchParams.set("floatingPaneId", payload.paneId);
                 // Match cold-path contract: omit workspaceId when empty so
