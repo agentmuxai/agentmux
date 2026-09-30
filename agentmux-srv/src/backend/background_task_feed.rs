@@ -58,6 +58,11 @@ pub(crate) enum TaskFeedEvent {
         tool_use_id: Option<String>,
         status: BackgroundTaskStatus,
     },
+    /// `background_tasks_changed`: the CLI's full list of live tasks.
+    Snapshot { live: Vec<String> },
+    /// A turn boundary (`result`, or a new session segment's `init`), where
+    /// tasks that left the snapshot without an end event are settled.
+    Boundary,
 }
 
 fn str_field<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -78,8 +83,23 @@ fn terminal_status(s: &str) -> BackgroundTaskStatus {
 /// Pure parse of one stdout line. `None` for anything that isn't a task-feed
 /// line about a shell task.
 pub(crate) fn parse(line: &Value) -> Option<TaskFeedEvent> {
-    if str_field(line, "type")? != "system" {
-        return None;
+    match str_field(line, "type")? {
+        "system" => {}
+        "result" => return Some(TaskFeedEvent::Boundary),
+        _ => return None,
+    }
+    match str_field(line, "subtype")? {
+        "init" => return Some(TaskFeedEvent::Boundary),
+        "background_tasks_changed" => {
+            let live = line
+                .get("tasks")
+                .and_then(Value::as_array)?
+                .iter()
+                .filter_map(|t| str_field(t, "task_id").map(str::to_string))
+                .collect();
+            return Some(TaskFeedEvent::Snapshot { live });
+        }
+        _ => {}
     }
     let task_id = str_field(line, "task_id")?.to_string();
     match str_field(line, "subtype")? {
@@ -141,6 +161,15 @@ struct Pending {
     /// The Agent call whose subagent issued this Bash call; `None` for the
     /// agent's own.
     owner: Option<String>,
+    /// Listed in at least one `background_tasks_changed` snapshot. Only then
+    /// does its absence from a later one mean anything: most shell tasks are
+    /// never listed at all.
+    in_snapshot: bool,
+    /// Left the snapshot, with no end event yet, at this time. A task that
+    /// ends normally leaves the snapshot one line before its end event, so
+    /// this alone can't end it; it is settled at the next snapshot or turn
+    /// boundary if the end event still hasn't come.
+    vanished_at_ms: Option<i64>,
 }
 
 /// Bound on `TaskFeed::owners`. Entries are normally consumed by the
@@ -198,6 +227,8 @@ impl TaskFeed {
                         started_at_ms: now_ms,
                         backgrounded,
                         owner,
+                        in_snapshot: false,
+                        vanished_at_ms: None,
                     },
                 );
                 observed
@@ -230,28 +261,68 @@ impl TaskFeed {
                 // srv restart); completing a row that doesn't exist is a no-op.
                 let id = tool_use_id
                     .or_else(|| pending.filter(|p| p.backgrounded).map(|p| p.tool_use_id));
-                // The CLI usually reports an end twice (`task_updated`, then
-                // `task_notification`). Only a still-running row is completed,
-                // so the first end time stands and subscribers hear it once.
-                let running = |id: &str| matches!(store.background_task_get(id), Ok(Some(row)) if row.status == BackgroundTaskStatus::Running);
                 match id {
-                    Some(id) if running(&id) => {
-                        match store.background_task_complete(&id, status, now_ms) {
-                            Ok(rows) => rows,
-                            Err(e) => {
-                                tracing::warn!(target: "background_tasks", block_id, node_id = %id, error = %e,
-                                "failed to complete a background task from the CLI's task feed");
-                                false
-                            }
-                        }
-                    }
-                    _ => false,
+                    Some(id) => complete_if_running(store, block_id, &id, status, now_ms),
+                    None => false,
                 }
             }
+            TaskFeedEvent::Snapshot { live } => {
+                // Settle what already vanished in an earlier snapshot and is
+                // still missing, before marking what vanished in this one.
+                let changed = self.settle_vanished(store, block_id, Some(live.as_slice()));
+                for (task_id, p) in self.pending.iter_mut() {
+                    if live.contains(task_id) {
+                        p.in_snapshot = true;
+                        p.vanished_at_ms = None;
+                    } else if p.in_snapshot && p.vanished_at_ms.is_none() {
+                        p.vanished_at_ms = Some(now_ms);
+                    }
+                }
+                changed
+            }
+            TaskFeedEvent::Boundary => self.settle_vanished(store, block_id, None),
         };
         if changed {
             if let Some(broker) = broker {
                 publish_background_task_updated(broker, block_id);
+            }
+        }
+        changed
+    }
+
+    /// End every task that left the snapshot and got no end event since: the
+    /// CLI stopped tracking it without saying so (a subagent's task, dropped
+    /// when the CLI started a new session segment, per the 2026-09-30 retro).
+    /// With `still_live`, a vanished task listed again is kept. The row ends
+    /// `stopped`, at the time it left the snapshot.
+    fn settle_vanished(
+        &mut self,
+        store: &Store,
+        block_id: &str,
+        still_live: Option<&[String]>,
+    ) -> bool {
+        let settled: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(task_id, p)| {
+                p.vanished_at_ms.is_some() && !still_live.is_some_and(|live| live.contains(task_id))
+            })
+            .map(|(task_id, _)| task_id.clone())
+            .collect();
+        let mut changed = false;
+        for task_id in settled {
+            let Some(p) = self.pending.remove(&task_id) else {
+                continue;
+            };
+            if p.backgrounded {
+                let at = p.vanished_at_ms.unwrap_or_default();
+                changed |= complete_if_running(
+                    store,
+                    block_id,
+                    &p.tool_use_id,
+                    BackgroundTaskStatus::Stopped,
+                    at,
+                );
             }
         }
         changed
@@ -282,6 +353,32 @@ impl TaskFeed {
                     self.owners.insert(id.to_string(), parent.to_string());
                 }
             }
+        }
+    }
+}
+
+/// Complete `tool_use_id`'s row if it is still running. The CLI usually
+/// reports an end twice (`task_updated`, then `task_notification`); only a
+/// still-running row is completed, so the first end time stands and
+/// subscribers hear it once.
+fn complete_if_running(
+    store: &Store,
+    block_id: &str,
+    tool_use_id: &str,
+    status: BackgroundTaskStatus,
+    at_ms: i64,
+) -> bool {
+    let running = matches!(store.background_task_get(tool_use_id),
+        Ok(Some(row)) if row.status == BackgroundTaskStatus::Running);
+    if !running {
+        return false;
+    }
+    match store.background_task_complete(tool_use_id, status, at_ms) {
+        Ok(changed) => changed,
+        Err(e) => {
+            tracing::warn!(target: "background_tasks", block_id, node_id = %tool_use_id, error = %e,
+                "failed to complete a background task from the CLI's task feed");
+            false
         }
     }
 }
@@ -374,9 +471,11 @@ mod tests {
         let agent = json!({"type":"system","subtype":"task_started","task_id":"a1","tool_use_id":"toolu_a",
                            "description":"Map code","task_type":"local_agent","is_backgrounded":true});
         assert_eq!(parse(&agent), None);
+        // `init` isn't a task line, but it is a turn boundary: see
+        // `TaskFeedEvent::Boundary`.
         assert_eq!(
             parse(&json!({"type":"system","subtype":"init","session_id":"s"})),
-            None
+            Some(TaskFeedEvent::Boundary)
         );
         assert_eq!(parse(&json!({"type":"assistant","message":{}})), None);
         assert_eq!(parse(&updated("t", json!({"status":"running"}))), None);
@@ -648,5 +747,169 @@ mod tests {
                 .status,
             BackgroundTaskStatus::Stopped
         );
+    }
+
+    // --- `background_tasks_changed` snapshots -------------------------------
+    //
+    // The retro in docs/retro/retro-agent-pane-progress-flicker-and-orphaned-
+    // background-tasks-2026-09-30.md: the CLI dropped a subagent's two
+    // background tasks with no end event; their only trace was leaving the
+    // snapshot. Measured on real streams, a task that ends normally also leaves
+    // the snapshot one line BEFORE its end event, so leaving alone can't mean
+    // "stopped": it is settled at the next snapshot or turn boundary.
+
+    fn snapshot(task_ids: &[&str]) -> Value {
+        let tasks: Vec<Value> = task_ids
+            .iter()
+            .map(|t| json!({"task_id": t, "task_type": "local_bash", "description": "x"}))
+            .collect();
+        json!({"type":"system","subtype":"background_tasks_changed","tasks":tasks})
+    }
+    fn init() -> Value {
+        json!({"type":"system","subtype":"init","cwd":"/w","tools":[]})
+    }
+    fn result() -> Value {
+        json!({"type":"result","subtype":"success","is_error":false})
+    }
+    fn status_of(store: &Store, tool: &str) -> BackgroundTaskStatus {
+        store.background_task_get(tool).unwrap().unwrap().status
+    }
+
+    /// Opaz, 2026-09-29 09:44 UTC: in the snapshot, then gone from it, never
+    /// an end event, then the CLI starts a new session segment.
+    #[test]
+    fn a_task_dropped_from_the_snapshot_without_an_end_event_is_stopped_at_the_next_boundary() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("brsbiubq6", "toolu_orphan", true, true),
+            10,
+        );
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &snapshot(&["aead97a", "brsbiubq6"]),
+            20,
+        );
+        feed.apply(&store, None, "blk", &snapshot(&["aead97a"]), 30);
+        assert_eq!(
+            status_of(&store, "toolu_orphan"),
+            BackgroundTaskStatus::Running,
+            "not settled yet"
+        );
+
+        assert!(feed.apply(&store, None, "blk", &init(), 40));
+        let row = store.background_task_get("toolu_orphan").unwrap().unwrap();
+        assert_eq!(
+            (row.status, row.ended_at_ms),
+            (BackgroundTaskStatus::Stopped, Some(30))
+        );
+        assert!(feed.pending.is_empty());
+    }
+
+    /// The normal shape: the snapshot drops the task, and its end event
+    /// follows on the next line. The real status must win.
+    #[test]
+    fn a_normal_end_right_after_the_snapshot_keeps_its_real_status() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("bzs6opq7c", "toolu_ok", true, false),
+            10,
+        );
+        feed.apply(&store, None, "blk", &snapshot(&["bzs6opq7c"]), 20);
+        feed.apply(&store, None, "blk", &snapshot(&[]), 30);
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &updated("bzs6opq7c", json!({"status":"completed","end_time":31})),
+            31,
+        );
+        feed.apply(&store, None, "blk", &result(), 40);
+        let row = store.background_task_get("toolu_ok").unwrap().unwrap();
+        assert_eq!(
+            (row.status, row.ended_at_ms),
+            (BackgroundTaskStatus::Done, Some(31))
+        );
+    }
+
+    #[test]
+    fn a_later_snapshot_also_settles_a_vanished_task() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("t1", "toolu_a", true, false),
+            10,
+        );
+        feed.apply(&store, None, "blk", &snapshot(&["t1"]), 20);
+        feed.apply(&store, None, "blk", &snapshot(&[]), 30);
+        assert!(feed.apply(&store, None, "blk", &snapshot(&[]), 40));
+        assert_eq!(status_of(&store, "toolu_a"), BackgroundTaskStatus::Stopped);
+    }
+
+    #[test]
+    fn a_task_back_in_the_next_snapshot_is_not_settled() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("t1", "toolu_a", true, false),
+            10,
+        );
+        feed.apply(&store, None, "blk", &snapshot(&["t1"]), 20);
+        feed.apply(&store, None, "blk", &snapshot(&[]), 30);
+        feed.apply(&store, None, "blk", &snapshot(&["t1"]), 40);
+        feed.apply(&store, None, "blk", &result(), 50);
+        assert_eq!(status_of(&store, "toolu_a"), BackgroundTaskStatus::Running);
+    }
+
+    /// Most shell tasks never appear in a snapshot at all (measured: 124 of
+    /// 163). A snapshot that doesn't list a task it never listed says nothing
+    /// about it.
+    #[test]
+    fn a_task_never_listed_in_a_snapshot_is_left_alone() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("t1", "toolu_a", true, false),
+            10,
+        );
+        feed.apply(&store, None, "blk", &snapshot(&["other"]), 20);
+        feed.apply(&store, None, "blk", &init(), 30);
+        assert_eq!(status_of(&store, "toolu_a"), BackgroundTaskStatus::Running);
+    }
+
+    #[test]
+    fn a_vanished_foreground_task_is_forgotten_without_a_row() {
+        let store = store();
+        let mut feed = TaskFeed::default();
+        feed.apply(
+            &store,
+            None,
+            "blk",
+            &started("t1", "toolu_fg", false, false),
+            10,
+        );
+        feed.apply(&store, None, "blk", &snapshot(&["t1"]), 20);
+        feed.apply(&store, None, "blk", &snapshot(&[]), 30);
+        assert!(!feed.apply(&store, None, "blk", &result(), 40));
+        assert!(store.background_task_get("toolu_fg").unwrap().is_none());
+        assert!(feed.pending.is_empty());
     }
 }
