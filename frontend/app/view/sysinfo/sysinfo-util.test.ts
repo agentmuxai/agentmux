@@ -36,14 +36,10 @@ describe("computePlotMargins", () => {
 });
 
 describe("buildPlotAxisLabelOptions", () => {
-    it("anchors both axis labels at the origin: the opposite of Plot's defaults", () => {
-        // x's default for a temporal/quantitative scale is "right" (past the last
-        // tick); y's default is "top" (above the first tick). Both sit away from
-        // the origin — this asserts the anchor that instead sits at the origin.
-        expect(buildPlotAxisLabelOptions()).toEqual({
-            x: { labelAnchor: "left" },
-            y: { labelAnchor: "bottom" },
-        });
+    it("turns both axis labels off: time and the unit are inferred from the ticks and title", () => {
+        // `label: null` is how Plot suppresses an axis label; `undefined`
+        // would let it fall back to the channel name ("time", "%", …).
+        expect(buildPlotAxisLabelOptions()).toEqual({ x: { label: null }, y: { label: null } });
     });
 });
 
