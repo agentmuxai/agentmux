@@ -15,8 +15,8 @@ vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
 }));
 vi.mock("./crossTabDrag", () => ({ clearCrossTabDrop: () => hub.crossTabCleared++ }));
 
-import { beginDrag, endDrag, session } from "@/app/drag/drag-session";
-import { endTileDrag, isTileDragUnderway, releaseTileDrag, startTileDrag } from "./tile-drag";
+import { beginDrag, endDrag, isUnderway, session } from "@/app/drag/drag-session";
+import { endTileDrag, releaseTileDrag, startTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 
 function fakeModel(tabId = "tab-1") {
@@ -40,7 +40,7 @@ describe("tile drag", () => {
         expect(hub.crossTabCleared).toBe(1);
         expect(hub.payloads).toEqual([{ kind: "tile", node, sourceTabId: "tab-1" }]);
         expect(session()).toMatchObject({ kind: "tile", source: { nodeId: "node-1", tabId: "tab-1" }, released: false });
-        expect(isTileDragUnderway()).toBe(true);
+        expect(isUnderway("tile")).toBe(true);
     });
 
     it("the source's release resets the local state but keeps the payload for the cross-window monitor", () => {
@@ -51,7 +51,7 @@ describe("tile drag", () => {
         expect(model.activeDrag()).toBe(false);
         expect(hub.payloads).not.toContain(null);
         expect(session()?.released).toBe(true);
-        expect(isTileDragUnderway()).toBe(false);
+        expect(isUnderway("tile")).toBe(false);
     });
 
     it("end-of-drag cleanup ends the tile session", () => {
@@ -64,6 +64,6 @@ describe("tile drag", () => {
         beginDrag("pane-tab", { blockId: "b9" });
         endTileDrag("dragend");
         expect(session()?.kind).toBe("pane-tab");
-        expect(isTileDragUnderway()).toBe(false);
+        expect(isUnderway("tile")).toBe(false);
     });
 });

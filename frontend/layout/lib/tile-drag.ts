@@ -41,9 +41,3 @@ export function releaseTileDrag(model: LayoutModel): void {
 export function endTileDrag(reason: DragEndReason): void {
     if (session()?.kind === "tile") endDrag(reason);
 }
-
-/** A tile drag has started and its source hasn't released it yet. */
-export function isTileDragUnderway(): boolean {
-    const s = session();
-    return s?.kind === "tile" && !s.released;
-}
