@@ -206,7 +206,6 @@ const KNOWN_LIVE_UNREGISTERED = [
     "connlist",
     "connlistaws",
     "fileappend",
-    "filejoin",
     "recordtevent",
     "resolveids",
     "setrtinfo",

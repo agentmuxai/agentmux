@@ -11,104 +11,40 @@
 
 import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { getApi } from "@/app/store/app-api";
+import {
+    AUDIO_EXTENSIONS,
+    basenameOf,
+    describeMediaError,
+    dirnameOf,
+    extOf,
+    fetchMediaBlob,
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+} from "@/app/element/local-media";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { getWebServerEndpoint } from "@/util/endpoints";
-import { fetch } from "@/util/fetchutil";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { registerFileDropTarget, type DragFiles, type DropVerdict, type FileDropHook } from "@/app/drag/file-drop";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 
+export { basenameOf, dirnameOf, extOf };
+
 const META_PATH = "media:path" as const;
 
-const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
-const VIDEO_EXTENSIONS = ["webm", "mp4", "mov"];
-// PCM WAV only — Chromium's <audio> element supports it natively and
-// unconditionally (open format, no codec-licensing gate), unlike MP4/MOV
-// which need the CEF build's proprietary-codec flag. Not adding mkv:
-// Chromium's <video> element doesn't reliably accept the Matroska
-// container itself for direct playback regardless of codec support
-// (browsers generally only support WebM, a constrained Matroska profile —
-// see the "Post-implementation corrections" note in the spec doc).
-const AUDIO_EXTENSIONS = ["wav"];
 // Fixed default filter for directory-mode watching — not user-configurable
 // in v1 (SPEC_MEDIA_PANE_2026_07_26.md open question #3 leans toward this).
 const ALL_MEDIA_EXTENSIONS = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
-
-export function extOf(path: string): string {
-    const idx = path.lastIndexOf(".");
-    return idx === -1 ? "" : path.slice(idx + 1).toLowerCase();
-}
-
-// Containing directory of `path`, matching whichever separator style it
-// uses. Empty string if `path` has no separator (shouldn't happen for an
-// absolute path from the native dialog, but fail closed rather than throw).
-export function dirnameOf(path: string): string {
-    const lastSlash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-    return lastSlash === -1 ? "" : path.slice(0, lastSlash);
-}
-
-// File name of `path` (the part after the last separator), matching
-// whichever separator style it uses. Returns `path` unchanged if it has no
-// separator.
-export function basenameOf(path: string): string {
-    const lastSlash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-    return lastSlash === -1 ? path : path.slice(lastSlash + 1);
-}
-
-// Surfaces the browser's actual MediaError code/message instead of a
-// generic "failed" string — code 4 (MEDIA_ERR_SRC_NOT_SUPPORTED) is what
-// Chromium reports when it has no registered decoder for the file's codec,
-// which is exactly what happens for H.264/AAC MP4s on a CEF build compiled
-// without proprietary_codecs=true. Distinguishing that from a genuinely
-// corrupt file (would show as code 3, MEDIA_ERR_DECODE) is the whole point
-// of showing this instead of one flat message for every failure.
-function describeMediaError(el: HTMLMediaElement | undefined): string {
-    const err = el?.error;
-    if (!err) return "unknown error";
-    const codeNames: Record<number, string> = {
-        1: "MEDIA_ERR_ABORTED",
-        2: "MEDIA_ERR_NETWORK",
-        3: "MEDIA_ERR_DECODE",
-        4: "MEDIA_ERR_SRC_NOT_SUPPORTED (likely a missing/disabled codec for this container, not a corrupt file)",
-    };
-    const codeName = codeNames[err.code] ?? `code ${err.code}`;
-    return err.message ? `${codeName}: ${err.message}` : codeName;
-}
-
-function streamUrl(path: string): string {
-    return getWebServerEndpoint() + "/agentmux/stream-local-file?path=" + encodeURIComponent(path);
-}
-
-// `<img src>`/`<video src>` can't attach the `X-AuthKey` header
-// stream-local-file requires (it lives in `authed_routes`, and the
-// query-string `?authkey=` fallback is deliberately restricted to the
-// `/ws` upgrade route only — see auth_middleware's 2026-05-11 audit
-// comment in agentmux-srv/src/server/mod.rs). Fetch the bytes ourselves
-// with the header (same pattern as fetchMuxFile in mux-file.ts) and
-// hand the element a blob object URL instead. Caller owns revoking it.
-async function fetchMediaBlob(path: string): Promise<Blob> {
-    const headers: Record<string, string> = {};
-    if (globalThis.window != null) {
-        const authKey = getApi()?.getAuthKey?.();
-        if (authKey) headers["X-AuthKey"] = authKey;
-    }
-    const resp = await fetch(streamUrl(path), { headers });
-    if (!resp.ok) {
-        throw new Error(`${resp.status} ${resp.statusText}`);
-    }
-    return await resp.blob();
-}
 
 const MEDIA_MIME_TYPES = new Set([
     "image/png",
     "image/jpeg",
     "image/gif",
     "image/webp",
+    "image/svg+xml",
     "video/webm",
     "video/mp4",
     "video/quicktime",
