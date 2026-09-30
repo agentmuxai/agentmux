@@ -128,7 +128,7 @@ impl FileStore {
         guard: Option<(&str, Option<&str>)>,
     ) -> Result<bool, StoreError> {
         debug_assert!(!drop.contains(&name), "replace_file would drop the file it writes");
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
         let opts_json = serde_json::to_string(&FileOpts::default())?;
         let written = self.write_txn(|tx| {
             if let Some((guard, Some(expected))) = guard {

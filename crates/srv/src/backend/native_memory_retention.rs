@@ -94,10 +94,7 @@ mod tests {
     const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
     fn backdate(store: &Store, version_id: &str, days_ago: i64) {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
+        let now_ms = agentmux_common::time::now_ms();
         let conn = store.conn().lock().unwrap();
         conn.execute(
             "UPDATE db_agent_native_memory_versions SET created_at = ?1 WHERE id = ?2",

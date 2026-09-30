@@ -79,9 +79,7 @@ const BROKER_SWEEP_INTERVAL_SECS: u64 = 60;
 // Lambda's own REVIEW_NOTIFICATION_TTL_SECONDS delivery window.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
-fn now_unix_secs() -> i64 {
-    agentmux_common::time::now_secs()
-}
+use agentmux_common::time::now_secs as now_unix_secs;
 
 /// Is `ts_secs` (a reagent signature's claimed signing time) within
 /// `REAGENT_SIG_MAX_AGE_SECS` of `now`? Extracted as a pure function (takes

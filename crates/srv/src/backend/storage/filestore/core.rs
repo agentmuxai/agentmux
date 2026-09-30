@@ -166,10 +166,6 @@ impl FileStore {
         })
     }
 
-    pub(super) fn now_ms() -> i64 {
-        agentmux_common::time::now_ms()
-    }
-
     /// Run `f` as one `BEGIN IMMEDIATE` transaction: committed if it returns
     /// `Ok`, rolled back otherwise. Every mutation goes through here.
     ///
@@ -270,7 +266,7 @@ impl FileStore {
         meta: FileMeta,
         opts: FileOpts,
     ) -> Result<(), StoreError> {
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
         let file = MuxFile {
             zoneid: zone_id.to_string(),
             name: name.to_string(),
@@ -398,7 +394,7 @@ impl FileStore {
         {
             let mut cache = self.cache.lock().unwrap();
             if let Some(entry) = cache.get_mut(&key) {
-                entry.last_access_ms = Self::now_ms();
+                entry.last_access_ms = agentmux_common::time::now_ms();
                 return Ok(entry.file.clone());
             }
         }
@@ -486,7 +482,7 @@ impl FileStore {
         data: &[u8],
     ) -> Result<(), StoreError> {
         let key = (zone_id.to_string(), name.to_string());
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
 
         // Write directly to DB (write-through for full writes, matching Go's
         // WriteFile), in one transaction: a failure part-way keeps the old
@@ -623,7 +619,7 @@ impl FileStore {
         name: &str,
         data: &[u8],
     ) -> Result<AppendPos, StoreError> {
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
         let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Raw, now)?;
         // Nothing written, nothing for the cache to follow (its modts must
         // keep matching the database's).
@@ -670,7 +666,7 @@ impl FileStore {
         merge: bool,
     ) -> Result<(), StoreError> {
         let key = (zone_id.to_string(), name.to_string());
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
 
         // Merge base read from the database in the same transaction as the
         // update, not from `stat` — this process's cached row can predate
@@ -762,7 +758,7 @@ impl FileStore {
     #[allow(dead_code)]
     pub fn flush_cache(&self) -> Result<(usize, usize), StoreError> {
         let ttl_ms = (CACHE_TTL_SECS * 1000) as i64;
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
         let cutoff_ms = now - ttl_ms;
 
         let (dirty_keys, stale_keys): (Vec<_>, Vec<_>) = {

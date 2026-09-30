@@ -51,9 +51,7 @@ const TSIDX_FILENAME: &str = crate::backend::agent_session::session_io::TSIDX_FI
 // Shared helpers — used by both the RPC handlers and the sweep
 // ---------------------------------------------------------------------------
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 /// Compress `data` with gzip and write to `dest_path`.
 fn write_gz(data: &[u8], dest_path: &Path) -> Result<(), String> {

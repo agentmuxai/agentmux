@@ -228,6 +228,4 @@ async fn run_outbound_loop(
     }
 }
 
-fn now_ms() -> u64 {
-    agentmux_common::time::now_ms_u64()
-}
+use agentmux_common::time::now_ms_u64 as now_ms;

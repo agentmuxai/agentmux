@@ -75,9 +75,7 @@ pub struct BundleVersionSummary {
     pub created_at: i64,
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 /// Hashes `name` + `instructions` together (not `instructions` alone) —
 /// unlike native memory, where a version's whole identity IS its content, a

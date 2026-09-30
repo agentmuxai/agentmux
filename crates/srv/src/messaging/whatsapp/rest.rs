@@ -142,9 +142,7 @@ pub(crate) fn normalize_phone(raw: &str) -> String {
     raw.chars().filter(|c| c.is_ascii_digit()).collect()
 }
 
-fn now_ms() -> u64 {
-    agentmux_common::time::now_ms_u64()
-}
+use agentmux_common::time::now_ms_u64 as now_ms;
 
 #[cfg(test)]
 mod tests {

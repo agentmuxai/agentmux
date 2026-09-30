@@ -155,8 +155,7 @@ pub fn dlog(msg: &str) {
         use std::io::Write;
         let path = std::env::temp_dir().join("agentmux-close-debug.txt");
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+            let ms = agentmux_common::time::now_ms_u64();
             let _ = writeln!(f, "[{}] {}", ms, msg);
         }
         tracing::info!("[close-debug] {}", msg);

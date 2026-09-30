@@ -47,9 +47,7 @@ use rusqlite::params;
 use super::error::StoreError;
 use super::store::Store;
 
-fn now_secs() -> i64 {
-    agentmux_common::time::now_secs()
-}
+use agentmux_common::time::now_secs;
 
 /// 32 bytes of CSPRNG randomness, hex-encoded (64 chars). Same source as
 /// `agent_jekt_keys::random_key_bytes` — `uuid`'s v4 generation is already

@@ -269,7 +269,7 @@ fn test_cache_evicts_stale_clean_entries() {
     // Backdate the cache entry's last_access_ms beyond the TTL
     {
         let ttl_ms = (CACHE_TTL_SECS * 1000 + 1000) as i64; // TTL + 1s in the past
-        let now = FileStore::now_ms();
+        let now = agentmux_common::time::now_ms();
         let mut cache = store.cache.lock().unwrap();
         if let Some(entry) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
             entry.last_access_ms = now - ttl_ms;
@@ -782,7 +782,7 @@ fn test_lru_access_promotes_entry() {
             e.last_access_ms = 1; // artificially oldest
         }
         if let Some(e) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
-            e.last_access_ms = FileStore::now_ms();
+            e.last_access_ms = agentmux_common::time::now_ms();
         }
     }
 
@@ -817,7 +817,7 @@ fn test_lru_ttl_still_works_alongside_lru() {
     // Backdate the entry beyond TTL.
     {
         let ttl_ms = (CACHE_TTL_SECS * 1000 + 1000) as i64;
-        let now = FileStore::now_ms();
+        let now = agentmux_common::time::now_ms();
         let mut cache = store.cache.lock().unwrap();
         if let Some(entry) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
             entry.last_access_ms = now - ttl_ms;

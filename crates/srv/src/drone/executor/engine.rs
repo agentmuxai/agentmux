@@ -234,9 +234,7 @@ async fn mark_state(
     g.insert(id.to_string(), state);
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 /// Returns the layered topological order of the graph. Each layer is
 /// the set of blocks whose dependencies are already satisfied —

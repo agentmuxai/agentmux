@@ -579,9 +579,7 @@ impl SagaLog {
     }
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 /// Discriminant name for a `Command`. Uses the serde tag (the
 /// `cmd` field of the snake_case-tagged enum) so the saga log row

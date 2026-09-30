@@ -521,9 +521,7 @@ mod threshold_tests {
     }
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 fn register_fleet_group_create(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
