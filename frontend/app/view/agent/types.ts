@@ -512,7 +512,18 @@ export interface ContextItem {
     kind: "global_memory" | "personal_memory" | "running_summary" | "compaction_summary" | "continuation_packet";
     /** Entry name, file name, or a fixed label for the kind. */
     name: string;
+    /** Global Memory only: AgentMux's own system entry, or the workspace's. */
+    tier?: "system" | "workspace";
+    /** Personal Memory only: the file it was read from. */
+    path?: string;
+    /** Global Memory only: the entry's id. */
+    bundleId?: string;
+    /** How much of it went out when a delivery was cut (spec §3.4 step 3). Absent = full. */
+    delivered?: "full" | "partial" | "omitted";
+    /** Of what was delivered: a partial item's slice, 0 when omitted. */
     sizeBytes: number;
+    /** The whole entry's estimated tokens, whatever was delivered (memory items). */
+    sourceTokens?: number;
     /** Estimated — labelled "(est.)" wherever shown. */
     tokens: number;
     /** ≤160 chars, shown while the card is collapsed. */
@@ -537,6 +548,8 @@ export interface ContextDeliveryNode {
     trigger?: "manual" | "auto";
     items: ContextItem[];
     timestamp: number;
+    /** Memory deliveries: how large Personal Memory is against the context window. */
+    sizeBand?: "low" | "mid" | "high" | "critical";
 }
 
 /**

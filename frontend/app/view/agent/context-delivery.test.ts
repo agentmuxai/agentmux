@@ -138,13 +138,26 @@ describe("contextDeliveryTitle", () => {
         expect(contextDeliveryTitle(summaryNode("auto"))).toBe("Agent given a summary of the conversation (auto-compact)");
     });
 
-    it("counts items for other deliveries", () => {
-        const node = { ...summaryNode("manual"), reason: "clear" as const };
-        node.items = [
-            { kind: "global_memory", name: "App API", sizeBytes: 10, tokens: 3 },
-            { kind: "personal_memory", name: "MEMORY.md", sizeBytes: 10, tokens: 3 },
-        ];
-        expect(contextDeliveryTitle(node)).toBe("Given to the agent · after /clear · 2 items");
+    const memoryNode = (reason: "startup" | "clear" | "compaction", delivered?: "partial" | "omitted") => ({
+        ...summaryNode("manual"),
+        reason,
+        items: [
+            { kind: "global_memory" as const, name: "App API", sizeBytes: 10, tokens: 3 },
+            { kind: "personal_memory" as const, name: "notes.md", sizeBytes: 10, tokens: 3, ...(delivered ? { delivered } : {}) },
+        ],
+    });
+
+    it("counts items for a first delivery", () => {
+        expect(contextDeliveryTitle(memoryNode("clear"))).toBe("Given to the agent · after /clear · 2 items");
+        expect(contextDeliveryTitle(memoryNode("startup"))).toBe("Given to the agent · new session · 2 items");
+    });
+
+    it("says re-delivered only after a compaction", () => {
+        expect(contextDeliveryTitle(memoryNode("compaction"))).toBe("Memory re-delivered after compaction · 2 items");
+    });
+
+    it("counts items the part cap cut", () => {
+        expect(contextDeliveryTitle(memoryNode("startup", "omitted"))).toBe("Given to the agent · new session · 2 items · 1 cut");
     });
 });
 

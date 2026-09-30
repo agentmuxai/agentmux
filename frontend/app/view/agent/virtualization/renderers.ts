@@ -144,15 +144,27 @@ export function estimateExpandedJekt(message: string): number {
 
 const SHELL_COLLAPSED_PX = 32;
 
-// Title row plus a one-line excerpt.
-const CONTEXT_DELIVERY_COLLAPSED_PX = 52;
-const CONTEXT_DELIVERY_ITEM_HEAD_PX = 28;
+const CONTEXT_DELIVERY_TITLE_PX = 30;
+const CONTEXT_DELIVERY_EXCERPT_PX = 22;
+const CONTEXT_DELIVERY_ITEM_HEAD_PX = 24;
+const CONTEXT_DELIVERY_ADVICE_PX = 40;
 
-/** Title, then per item a head row and its body, capped like a jekt's. */
+/**
+ * A compaction summary card: title plus excerpt. A memory card: title plus a
+ * row per item (always shown), plus the size advice when Personal Memory is large.
+ */
+function estimateCollapsedContextDelivery(node: ContextDeliveryNode): number {
+    const summaryCard = node.items.length === 1 && node.items[0].kind === "compaction_summary";
+    const rows = summaryCard ? CONTEXT_DELIVERY_EXCERPT_PX : node.items.length * CONTEXT_DELIVERY_ITEM_HEAD_PX;
+    const advice = node.sizeBand === "high" || node.sizeBand === "critical" ? CONTEXT_DELIVERY_ADVICE_PX : 0;
+    return CONTEXT_DELIVERY_TITLE_PX + rows + advice;
+}
+
+/** Collapsed, then each item with text: its head row and its body, capped like a jekt's. */
 function estimateExpandedContextDelivery(node: ContextDeliveryNode): number {
     return node.items.reduce(
-        (sum, item) => sum + CONTEXT_DELIVERY_ITEM_HEAD_PX + (item.body ? estimateExpandedJekt(item.body) : 0),
-        CONTEXT_DELIVERY_COLLAPSED_PX,
+        (sum, item) => sum + (item.body ? CONTEXT_DELIVERY_ITEM_HEAD_PX + estimateExpandedJekt(item.body) : 0),
+        estimateCollapsedContextDelivery(node),
     );
 }
 const SHELL_EXPANDED_PX = 200;
@@ -239,7 +251,7 @@ export function estimateNodeForState(
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
             case "ambient_narration": return estimateTextHeight(node.text);
-            case "context_delivery":  return CONTEXT_DELIVERY_COLLAPSED_PX;
+            case "context_delivery":  return estimateCollapsedContextDelivery(node);
         }
     }
     // expanded
