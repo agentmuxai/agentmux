@@ -60,9 +60,7 @@ pub struct NativeMemoryVersionSummary {
     pub created_at: i64,
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 /// SHA-256 hex digest of a memory file's content — used both to populate
 /// `content_hash` on insert and, later, by §4.5 drift detection to compare
@@ -554,10 +552,7 @@ mod tests {
     /// An ISO-8601 stamp for "now", so versions inserted by a test land
     /// inside the rollout window.
     fn now_iso() -> String {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let secs = agentmux_common::time::now_secs_u64();
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.query_row(
             "SELECT strftime('%Y-%m-%dT%H:%M:%S+00:00', ?1, 'unixepoch')",

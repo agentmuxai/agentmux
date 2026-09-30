@@ -375,10 +375,8 @@ pub(super) fn resolve_agent_definition_id(
     crate::backend::agent_resolve::resolve_agent_id(&state.mstore, agent_id)
 }
 
-/// Current unix time in milliseconds (0 if the clock is before the epoch).
-pub(super) fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+// Current unix time in milliseconds (0 if the clock is before the epoch).
+pub(super) use agentmux_common::time::now_ms;
 
 /// Parse + validate a saved per-agent `ui:zoom` content blob for seeding a new
 /// agent block's `term:zoom`. Returns `Some(z)` only for a parseable,

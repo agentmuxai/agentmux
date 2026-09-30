@@ -29,10 +29,8 @@ pub const META_SESSION_TOKEN_ESTIMATE: &str = "session:token_estimate";
 /// Debounce interval: at most one Store write per second.
 const FLUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 
-/// Returns the current Unix timestamp in milliseconds.
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+// Returns the current Unix timestamp in milliseconds.
+use agentmux_common::time::now_ms;
 
 /// In-memory accumulator for session stats.  One per controller instance.
 ///

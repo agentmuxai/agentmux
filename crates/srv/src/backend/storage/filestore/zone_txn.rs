@@ -110,7 +110,7 @@ impl FileStore {
         zone_id: &str,
         f: impl FnOnce(&mut ZoneTxn<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
         let mut touched = Vec::new();
         let out = self.write_txn(|tx| {
             let mut z = ZoneTxn { tx, zone_id: zone_id.to_string(), now, touched: Vec::new() };

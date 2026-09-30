@@ -53,9 +53,7 @@ use super::{AppState, HostIpc};
 /// verified locally, not a one-time nonce scheme).
 const UI_AUTOMATION_SIG_MAX_AGE_SECS: i64 = 300;
 
-fn now_unix_secs() -> i64 {
-    agentmux_common::time::now_secs()
-}
+use agentmux_common::time::now_secs as now_unix_secs;
 
 /// Verify `auth` proves the caller genuinely is `auth.agent_id` (via that
 /// agent's own jekt key — an attacker without agent_id's key cannot

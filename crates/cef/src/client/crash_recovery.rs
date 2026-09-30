@@ -63,10 +63,7 @@ impl AgentMuxHandler {
         const RENDERER_TERMINATED_LOG_MIN_GAP: Duration = Duration::from_millis(100);
         static LAST_LOGGED_AT_MS: AtomicU64 = AtomicU64::new(0);
         static SUPPRESSED_SINCE: AtomicU64 = AtomicU64::new(0);
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let now_ms = agentmux_common::time::now_ms_u64();
         let last_ms = LAST_LOGGED_AT_MS.load(Ordering::Relaxed);
         if now_ms.saturating_sub(last_ms) < RENDERER_TERMINATED_LOG_MIN_GAP.as_millis() as u64 {
             SUPPRESSED_SINCE.fetch_add(1, Ordering::Relaxed);

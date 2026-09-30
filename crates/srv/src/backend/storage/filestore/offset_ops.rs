@@ -29,7 +29,7 @@ impl FileStore {
         }
 
         let key = (zone_id.to_string(), name.to_string());
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
 
         let pds = PART_DATA_SIZE as i64;
 

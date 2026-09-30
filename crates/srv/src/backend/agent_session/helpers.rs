@@ -6,9 +6,7 @@
 
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
 
-pub(crate) fn now_ms() -> u64 {
-    agentmux_common::time::now_ms_u64()
-}
+pub(crate) use agentmux_common::time::now_ms_u64 as now_ms;
 
 /// Ensure a file exists in `zone`. No-op when present.
 pub(crate) fn ensure_file(filestore: &FileStore, zone: &str, name: &str) -> Result<(), String> {

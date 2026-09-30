@@ -512,7 +512,7 @@ impl FileStore {
         data: &[u8],
         stamp_file: &str,
     ) -> Result<AppendPos, StoreError> {
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
         let opts_json = serde_json::to_string(&super::FileOpts::default())?;
         let (pos, new_size, stamp_size) = self.write_txn(|tx| {
             let (pos, new_size) = Self::append_in_tx(tx, zone_id, name, data, AppendMode::Lines, now)?;
@@ -548,7 +548,7 @@ impl FileStore {
     /// line's index and `lines - first_line` how many were appended.
     #[allow(dead_code)] // wired into the transcript writers in 5a-3
     pub fn append_lines(&self, zone_id: &str, name: &str, data: &[u8]) -> Result<AppendPos, StoreError> {
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms();
         let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Lines, now)?;
         // Blank-only input normalizes to nothing: no write, no cache update.
         if new_size > pos.offset {

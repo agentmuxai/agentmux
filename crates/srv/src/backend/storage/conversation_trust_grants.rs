@@ -21,9 +21,7 @@ use rusqlite::params;
 use super::error::StoreError;
 use super::store::Store;
 
-fn now_secs() -> i64 {
-    agentmux_common::time::now_secs()
-}
+use agentmux_common::time::now_secs;
 
 impl Store {
     /// True if `agent_id` has explicitly granted `requester_agent_id` access

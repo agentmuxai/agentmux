@@ -153,9 +153,7 @@ pub fn remote_for(request_id: &str) -> Option<RemoteRequest> {
     REMOTE.lock().unwrap_or_else(|e| e.into_inner()).get(request_id).cloned()
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 fn entries() -> std::sync::MutexGuard<'static, HashMap<String, Entry>> {
     ENTRIES.lock().unwrap_or_else(|e| e.into_inner())

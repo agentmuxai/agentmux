@@ -335,9 +335,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 #[cfg(test)]
 mod tests {

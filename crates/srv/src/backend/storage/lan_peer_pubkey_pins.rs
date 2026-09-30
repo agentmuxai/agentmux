@@ -31,9 +31,7 @@ use rusqlite::params;
 use super::error::StoreError;
 use super::store::Store;
 
-fn now_secs() -> i64 {
-    agentmux_common::time::now_secs()
-}
+use agentmux_common::time::now_secs;
 
 impl Store {
     /// Look up the pinned public key for a remote agent_id, if one exists.
