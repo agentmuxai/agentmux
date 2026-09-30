@@ -510,3 +510,57 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
         expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
     });
 });
+
+describe("DocumentRow — context delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.2)", () => {
+    const BODY = "This session is being continued from a previous conversation.\n\nSummary:\n1. Intent:\n   Fix the console sign-in.";
+    const card = (): DocumentNode => ({
+        type: "context_delivery",
+        id: "context-delivery-compaction-x",
+        reason: "compaction",
+        trigger: "manual",
+        timestamp: 0,
+        items: [
+            {
+                kind: "compaction_summary",
+                name: "Conversation summary (written by Claude Code)",
+                sizeBytes: BODY.length,
+                tokens: 30,
+                excerpt: "Fix the console sign-in.",
+                body: BODY,
+            },
+        ],
+    });
+
+    const renderCard = (pinned: boolean, onTogglePin = () => {}) => {
+        const node = card();
+        const [n] = createSignal<DocumentNode>(node);
+        const [state] = createSignal<DocumentState>({
+            ...emptyState(),
+            pinnedNodes: pinned ? new Set([node.id]) : new Set(),
+        });
+        return render(() => (
+            <DocumentRow node={n} documentState={state} onToggleCollapse={() => {}} onTogglePin={onTogglePin} />
+        ));
+    };
+
+    it("shows the title and excerpt collapsed, not the summary text", () => {
+        const { container } = renderCard(false);
+        expect(screen.getByText("Agent given a summary of the conversation (manual compact)")).toBeInTheDocument();
+        expect(screen.getByText("Fix the console sign-in.")).toBeInTheDocument();
+        expect(container.querySelector(".agent-context-delivery-body")).toBeNull();
+        expect(container.querySelector(".agent-user-message-content")).toBeNull();
+    });
+
+    it("shows each item's name and full text when pinned open", () => {
+        const { container } = renderCard(true);
+        expect(screen.getByText("Conversation summary (written by Claude Code)")).toBeInTheDocument();
+        expect(container.querySelector(".agent-context-delivery-body")?.textContent).toBe(BODY);
+    });
+
+    it("pins on click", async () => {
+        const onTogglePin = vi.fn();
+        renderCard(false, onTogglePin);
+        await userEvent.click(screen.getByText("Agent given a summary of the conversation (manual compact)"));
+        expect(onTogglePin).toHaveBeenCalledTimes(1);
+    });
+});

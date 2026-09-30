@@ -83,6 +83,11 @@ export function rowDisclosure(node: DocumentNode, f: RowFlags): Disclosure {
             // (SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24 §D).
             return node.isStartup ? pinnable(f) : FIXED_OPEN;
 
+        case "context_delivery":
+            // Title, size and excerpt by default; pin to read every item
+            // (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.2).
+            return pinnable(f);
+
         case "shell":
             // Pin-to-expand only: unlike tools, a running shell stays
             // collapsed by default (its spec §11).

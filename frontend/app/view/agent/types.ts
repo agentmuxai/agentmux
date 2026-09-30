@@ -55,7 +55,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
+export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
 
 /**
  * Raw markdown text block
@@ -502,6 +502,41 @@ export interface MemoryReinjectionNode {
     /** Driven by Personal-memory bytes alone, never the combined total — §3.4.2. */
     sizeBand: "low" | "mid" | "high" | "critical";
     at: number;
+}
+
+/**
+ * One piece of content the agent was given without the user typing it.
+ * docs/specs/SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.1.
+ */
+export interface ContextItem {
+    kind: "global_memory" | "personal_memory" | "running_summary" | "compaction_summary" | "continuation_packet";
+    /** Entry name, file name, or a fixed label for the kind. */
+    name: string;
+    sizeBytes: number;
+    /** Estimated — labelled "(est.)" wherever shown. */
+    tokens: number;
+    /** ≤160 chars, shown while the card is collapsed. */
+    excerpt?: string;
+    /** The full text, when the transcript already holds it (the compaction summary). */
+    body?: string;
+}
+
+/**
+ * A context delivery: everything the agent was given at one moment, shown as
+ * one card with a row per item. The compaction summary is the first kind
+ * (CD1): Claude Code writes it after `/compact` and echoes it as a user frame,
+ * which used to render as if the user had typed it.
+ * docs/specs/SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.
+ */
+export interface ContextDeliveryNode {
+    type: "context_delivery";
+    /** Deterministic, so live and replay land on the same node. */
+    id: string;
+    reason: "startup" | "clear" | "compaction" | "resume_fresh";
+    /** Compaction only. */
+    trigger?: "manual" | "auto";
+    items: ContextItem[];
+    timestamp: number;
 }
 
 /**
