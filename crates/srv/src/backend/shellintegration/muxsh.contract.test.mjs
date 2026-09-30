@@ -32,7 +32,7 @@ import {
 function loadManifest() {
     // crates/srv/src/backend/shellintegration/ -> repo root is four levels up.
     const here = dirname(fileURLToPath(import.meta.url));
-    const manifestPath = join(here, "..", "..", "..", "..", "docs", "specs", "app-api-manifest.json");
+    const manifestPath = join(here, "..", "..", "..", "..", "..", "docs", "specs", "app-api-manifest.json");
     return JSON.parse(readFileSync(manifestPath, "utf8"));
 }
 
