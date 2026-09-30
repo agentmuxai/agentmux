@@ -20,6 +20,7 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "hooks/useWorkingIndicator.ts",
     "components/AgentProgressBar.tsx",
     "activity/promotion-clock.ts",
+    "startup/sendStartupSequence.ts",
 ];
 
 /**
@@ -28,4 +29,4 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
  * nothing stopped it. Lower this whenever an extraction shrinks the file;
  * raising it needs a reason in the PR.
  */
-export const AGENT_VIEW_MAX_LINES = 2498;
+export const AGENT_VIEW_MAX_LINES = 2446;
