@@ -1,0 +1,98 @@
+name: ReAgent review (GitHub Actions)
+
+# Runs ReAgent's Claude reviewer directly on this repo's own free GitHub
+# Actions minutes instead of AWS Lambda, for the ~80% of claude-reviewer's
+# 30-day invocations this repo (public) accounted for. Design and
+# rationale: a5af/reagent's
+# specs/agentmux-pr-review-via-github-actions-2026-09-29.md.
+#
+# Security model (same established pattern as this repo's own
+# codex-review-gate.yml, see that workflow's header comment): pull_request_target
+# runs the WORKFLOW FILE from main, so a fork PR cannot alter what this job
+# does, and grants secrets/credentials even for a fork-originated PR. This
+# job never checks out the PR's own code at all -- the reviewer container
+# clones it itself, over HTTPS with a per-command token, inside a process
+# that (by ReAgent's own existing design, providers/base.py's cli_env())
+# never holds AWS or GitHub credentials while reading it. That is exactly
+# the same trust boundary ReAgent's Lambda-based webhook path already uses
+# for every repo it reviews, fork or not -- trust.py, not the transport,
+# decides whether to act.
+#
+# HARD CONSTRAINT for any future edit to this file: never add a step that
+# runs actions/checkout against the PR's head ref or any fork-supplied ref.
+# If a future need arises to read the diff from a workflow step directly,
+# use the GitHub API (gh pr diff), not a checkout of untrusted code.
+#
+# Image: pulled from the same container image build ReAgent's Lambda
+# (claude-reviewer) uses -- one Dockerfile, one build, two invocation
+# paths, not a second implementation to maintain. The exact URI is a repo
+# variable (not hardcoded) because the CDK-managed Lambda asset image's ARN
+# isn't exposed as a stable public property for external reference (see
+# a5af/reagent's infrastructure/lib/reagent-stack.ts, the
+# AgentmuxActionsReviewerRole comment). Set it once via:
+#   gh variable set REAGENT_REVIEWER_IMAGE_URI --repo agentmuxai/agentmux --body <uri>
+# before flipping the cutover flag (spec's Implementation Order step 3) --
+# until it's set, this workflow will fail loudly on `docker run`, not
+# silently produce a wrong review.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write # aws-actions/configure-aws-credentials (OIDC, no static keys)
+  contents: read
+
+jobs:
+  review:
+    # reagentx caught this on PR #4009: without this gate, EVERY comment on
+    # ANY issue in the repo (not just a PR) spun up AWS OIDC credential
+    # exchange, ECR login, and a docker pull before build_task()'s own
+    # "not a PR" filter ever ran downstream. Same gate shape as this repo's
+    # own codex-review-gate.yml uses for the identical problem.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Job-level, not workflow-level -- same reasoning as codex-review-gate.yml's
+    # identical comment: a run the `if:` above skips (a non-PR issue comment)
+    # must not occupy this group, or it can cancel/block an actually-running
+    # review a second earlier. cancel-in-progress is false: a synchronize
+    # mid-review shouldn't cancel a review still in flight for the prior
+    # head -- reviewer_handler.py's stale-event short-circuit already
+    # handles "message head != current head" safely, and
+    # review_claims.py's DynamoDB claim prevents any duplicate post.
+    concurrency:
+      group: reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::050544946291:role/reagent-actions-agentmux-role
+          aws-region: us-east-1
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Run ReAgent reviewer
+        env:
+          REVIEWER_IMAGE: ${{ vars.REAGENT_REVIEWER_IMAGE_URI }}
+        run: |
+          if [ -z "$REVIEWER_IMAGE" ]; then
+            echo "::error::REAGENT_REVIEWER_IMAGE_URI repository variable is not set. See this workflow file's header comment." >&2
+            exit 1
+          fi
+          docker run --rm \
+            -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            -e GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
+            -e AWS_DEFAULT_REGION=us-east-1 \
+            -e GITHUB_EVENT_PATH=/tmp/event.json \
+            -v "$GITHUB_EVENT_PATH:/tmp/event.json:ro" \
+            --entrypoint python \
+            "$REVIEWER_IMAGE" \
+            github_actions_entrypoint.py
