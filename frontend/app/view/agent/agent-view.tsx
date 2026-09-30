@@ -77,7 +77,7 @@ import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentSessionNotices } from "./components/AgentSessionNotices";
-import { AgentShellInfoPanel } from "./components/AgentShellInfoPanel";
+import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
 import { ShutdownPendingBanner } from "./shutdown/ShutdownPendingBanner";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
@@ -86,13 +86,11 @@ import { AgentAuthPanel, AgentDocumentView } from "./components/AgentDocumentVie
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentSearchBar } from "./components/AgentSearchBar";
-import { AgentShellSubblock } from "./components/AgentShellSubblock";
 import { collapseDrawerOnShellExit } from "./shell-exit-collapse";
 import { ForkProviderFallbackBanner } from "./components/ForkProviderFallbackBanner";
 import { PaneRow } from "./components/PaneRow";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
-import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
-import { AgentStashModal } from "./components/AgentStashModal";
+import { AgentStashDrawer } from "./components/AgentStashDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
@@ -134,11 +132,6 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "./open-trace";
-
-// Shell drawer's height until the user drags it (then `term:shellheight`
-// wins). 80% of the drawers' shared 220px default — the shell opens on its
-// own for every `!cmd`, so it should take less of the transcript by default.
-const SHELL_DRAWER_DEFAULT_HEIGHT = 176;
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
@@ -1878,74 +1871,17 @@ export const AgentPresentationView = ({
             <PaneLoadingCover phase={readiness.phase} />
             {/* Shutdown log while the pane closes in place (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5). */}
             <ShutdownOverlay blockId={model.blockId} agentName={agentName()} />
-            {/* Stash drawer — top-anchored, directly under the pane header
-                where its own backpack toggle lives
-                (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.1).
-                Replaced the former `agent-stash` MODAL; the header icon
-                (agent-model.ts's endIconButtons) drives `stashOpen` through
-                the three callbacks wired in onMount above.
-
-                Deliberately OUTSIDE `.agent-view-zoomed`, exactly like the
-                Shell drawer below, for two reasons beyond symmetry: the
-                drag-to-resize math reads `ev.clientY` (visual px) and writes
-                a `height` (layout px), which CSS `zoom` makes disagree —
-                the same coordinate-space trap
-                SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md
-                records for the shell — and §3.2a's composer-scale density
-                values are already tuned small, so compounding them with a
-                per-pane zoom would read as either unusable or enormous
-                rather than merely scaled. It stays a flex child of
-                `.agent-view` so the transcript below still shrinks to make
-                room for it. */}
-            <Show when={paneModel.state.stashOpen}>
-                {/* Rendered as a DIRECT flex child of `.agent-view`, with no
-                    wrapper div, and that placement is load-bearing rather
-                    than incidental (reagentx P1 on PR #3540). The 50% height
-                    cap lives on `.agent-stash-drawer-resizable` — the same
-                    element that holds BOTH the content body and the resize
-                    handle — and a percentage `max-height` only resolves
-                    against a containing block whose height is definite.
-                    `.agent-view` is `height: 100%` (agent-view.scss), so it
-                    qualifies; an intermediate auto-height wrapper would NOT,
-                    and the percentage would compute to `none`. The first cut
-                    had exactly that wrapper, which let the inner element
-                    render at its full dragged height while the wrapper
-                    clipped it — carrying the bottom-edge handle into the
-                    clipped-away region, where it was invisible and
-                    unreachable, so a drawer dragged past 50% could never be
-                    shrunk again. See _stash-drawer.scss for the flex
-                    compression that keeps the handle on screen instead. */}
-                <ResizableDetailsDrawer
-                    blockId={model.blockId}
-                    anchor="top"
-                    classPrefix="agent-stash-drawer"
-                    persistMetaKey="agent:stashheight"
-                    persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
-                >
-                    <AgentStashModal
-                        agentId={agentId}
-                        agentName={agentName()}
-                        // Prefer cmd:cwd (the actual launch cwd, set by
-                        // launchAgentDefinition) over
-                        // AgentDefinition.working_directory, which is often
-                        // empty or a stale default for template-launched and
-                        // continuation agents.
-                        workingDirectory={
-                            (block()?.meta?.["cmd:cwd"] as string) ||
-                            currentAgent()?.working_directory ||
-                            ""
-                        }
-                        // No loadable definition (quick-launch pane) → default
-                        // to the Memory tab; the Accounts tab works from
-                        // agentId alone but Memory is the more useful default
-                        // for a pane with no saved definition yet.
-                        initialTab={currentAgent() ? "accounts" : "memory"}
-                        // No `onClose` — closing is the header icon's job, so
-                        // the Memory tab hides its footer Close button rather
-                        // than rendering a dead one (§3.4).
-                    />
-                </ResizableDetailsDrawer>
-            </Show>
+            {/* Stash drawer: a DIRECT flex child of `.agent-view`, outside
+                `.agent-view-zoomed` (components/AgentStashDrawer.tsx). */}
+            <AgentStashDrawer
+                open={paneModel.state.stashOpen}
+                blockId={model.blockId}
+                persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
+                agentId={agentId}
+                agentName={agentName()}
+                workingDirectory={(block()?.meta?.["cmd:cwd"] as string) || currentAgent()?.working_directory || ""}
+                hasDefinition={currentAgent() != null}
+            />
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
             {/* Portaled above the tab strip; see components/AgentProgressBar.tsx. */}
             <AgentProgressBar
@@ -2337,61 +2273,18 @@ export const AgentPresentationView = ({
                 />
             </div>
             </div>
-            {/* Details panel — just the shell + control bar now. Activity-log
-                lines write directly into the terminal (handleShellTermReady)
-                instead of a separate panel here. Docked BELOW the composer
-                (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md): the shell
-                stacks under the text input (which shifts up to make room,
-                since this region hugs the pane bottom).
-
-                Deliberately OUTSIDE `.agent-view-zoomed` — see the note on the root
-                element. The terminal has to render at a 1:1 device-pixel ratio, so it
-                must not be inside the per-pane `zoom`. It stays a flex child of
-                `.agent-view` so the composer still shifts up to make room for it.
-                Same move `agent-view.scss:350` records for the progress bar, and the
-                same cure as SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md. */}
-            <Show when={paneModel.state.detailsOpen}>
-                    <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
-                        {/* One line: what this shell is, and what the agent
-                            has left running. Takes the slot AgentControlBar
-                            used to occupy with session UI — see
-                            SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §4. */}
-                        <AgentShellInfoPanel
-                            blockId={model.blockId}
-                            shellSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
-                            cwd={block()?.meta?.["cmd:cwd"] as string | undefined}
-                        />
-                        {/* Drag-to-height drawer wrapping the terminal — the actual
-                            scrollable/resizable content. */}
-                        <ResizableDetailsDrawer
-                            blockId={model.blockId}
-                            persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
-                            defaultHeight={SHELL_DRAWER_DEFAULT_HEIGHT}
-                        >
-                            {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
-                                real xterm+PTY terminal, spawned lazily on first
-                                drawer open via a headless term sub-block. */}
-                            <AgentShellSubblock
-                                parentBlockId={model.blockId}
-                                cwd={block()?.meta?.["cmd:cwd"] ?? ""}
-                                existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
-                                // No `agentPaneZoom` prop any more. The shell used to
-                                // divide the pane's zoom out of its own font-size math
-                                // to fake independence; now it genuinely IS independent,
-                                // because it renders outside `.agent-view-zoomed`.
-                                onSubBlockCreated={(subBlockId) => {
-                                    void RpcApi.SetMetaCommand(TabRpcClient, {
-                                        oref: MOS.makeORef("block", model.blockId),
-                                        meta: { "term:shellsubblockid": subBlockId } as any,
-                                    });
-                                }}
-                                onTermReady={handleShellTermReady}
-                                onTermDispose={handleShellTermDispose}
-                                onShellExited={handleShellExited}
-                            />
-                        </ResizableDetailsDrawer>
-                    </div>
-            </Show>
+            {/* Shell drawer: outside `.agent-view-zoomed`, a flex child of
+                `.agent-view` (components/AgentShellDrawer.tsx). */}
+            <AgentShellDrawer
+                open={paneModel.state.detailsOpen}
+                blockId={model.blockId}
+                shellSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                cwd={block()?.meta?.["cmd:cwd"] as string | undefined}
+                persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
+                onTermReady={handleShellTermReady}
+                onTermDispose={handleShellTermDispose}
+                onShellExited={handleShellExited}
+            />
         </div>
         </AgentDormancyProvider>
     );
