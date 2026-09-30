@@ -57,4 +57,43 @@ describe("startup splash fade", () => {
         fadeOutStartupSplash();
         expect(onReveal).not.toHaveBeenCalled();
     });
+
+    it("covers the splash with the torn-off pane's picture, which fades out with it", async () => {
+        const { fadeOutStartupSplash, markPoolPromoted, showTearOffSnapshot } = await import("./startup-splash");
+        markPoolPromoted();
+        const el = mountSplash();
+        showTearOffSnapshot("AAAA");
+        const img = el.querySelector("img")!;
+        expect(img.src).toBe("data:image/jpeg;base64,AAAA");
+        expect(img.style.position).toBe("absolute");
+        fadeOutStartupSplash();
+        vi.advanceTimersByTime(90 + 120);
+        expect(document.getElementById("startup-loading")).toBeNull();
+    });
+
+    it("once the splash is fading, a late picture isn't shown, but the host still hears back", async () => {
+        const { fadeOutStartupSplash, showTearOffSnapshot } = await import("./startup-splash");
+        const el = mountSplash();
+        fadeOutStartupSplash();
+        const onShown = vi.fn();
+        showTearOffSnapshot("AAAA", onShown);
+        expect(el.querySelector("img")).toBeNull();
+        expect(onShown).toHaveBeenCalledOnce();
+    });
+
+    it("tells the host once the picture is decoded, even if decoding fails", async () => {
+        const { showTearOffSnapshot } = await import("./startup-splash");
+        mountSplash();
+        Object.defineProperty(HTMLImageElement.prototype, "decode", {
+            configurable: true,
+            value: () => Promise.reject(new Error("bad jpeg")),
+        });
+        try {
+            const onShown = vi.fn();
+            showTearOffSnapshot("AAAA", onShown);
+            await vi.waitFor(() => expect(onShown).toHaveBeenCalledOnce());
+        } finally {
+            delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+        }
+    });
 });

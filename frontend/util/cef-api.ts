@@ -772,7 +772,7 @@ export function buildCefApi(): AppApi {
         },
 
         // --- Init ---
-        setWindowInitStatus: (status: "ready" | "wave-ready" | "revealed") => {
+        setWindowInitStatus: (status: "ready" | "wave-ready" | "revealed" | "snapshot-shown") => {
             const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
             invokeCommand("set_window_init_status", { status, label }).catch(console.error);
         },
