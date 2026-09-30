@@ -16,6 +16,12 @@ const shots = vi.hoisted(() => ({
 }));
 vi.mock("@/app/store/global", () => ({
     getApi: () => ({
+        browserPanes: {
+            screenshot: (blockId: string) => {
+                shots.calls.push(`browser:${blockId}`);
+                return Promise.resolve({ png_base64: "browser-page" });
+            },
+        },
         windows: {
             captureViewport: (label: string) => {
                 shots.calls.push(label);
@@ -85,6 +91,14 @@ describe("tear-off snapshot", () => {
         expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
         // The pane's CSS rect at 2 device px per CSS px.
         expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
+    });
+
+    it("a native browser pane is captured from its own page, not the window's", async () => {
+        mountPane("b1");
+        document.querySelector('[data-blockid="b1"]')!.innerHTML = `<div class="browser-view"><div class="browser-placeholder"></div></div>`;
+        prewarmTearOffSnapshot("b1");
+        expect(await takeTearOffSnapshot("b1")).toBe("browser-page");
+        expect(shots.calls).toEqual(["browser:b1"]);
     });
 
     it("a pane with no element on screen (a background pane tab) captures nothing", async () => {
