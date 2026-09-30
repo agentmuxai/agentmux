@@ -263,10 +263,7 @@ fn require_local_agent_row(mstore: &Store, agent_id: &str) -> Result<(), String>
 /// credential gate (Codex P1 on #3584). A failed stamp is only logged — for a
 /// user agent the block's `agentId` already names its row.
 fn record_agent_open_launch(mstore: &Store, agent_id: &str, block_id: &str) -> Result<(), String> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now = agentmux_common::time::now_ms();
     match mstore.instance_record_launch(agent_id, block_id, now) {
         Ok(true) => {
             let mut stamp = obj::MetaMapType::new();
@@ -734,10 +731,7 @@ async fn open_agent_inner(
                         Some(c) => c,
                         None => {
                             let picked = pick_agent_color(&agent.id).to_string();
-                            let now_ms = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis() as i64)
-                                .unwrap_or(0);
+                            let now_ms = agentmux_common::time::now_ms();
                             // Best-effort: a store error here shouldn't block
                             // opening the agent — the pane just stays uncolored
                             // this session and we retry next open.
@@ -1292,10 +1286,7 @@ pub(super) fn observe_project_instructions(
     if files.is_empty() {
         return;
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now = agentmux_common::time::now_ms();
     let observations: Vec<ProjectInstructionObservation> = files
         .iter()
         .map(|f| ProjectInstructionObservation {

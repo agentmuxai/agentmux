@@ -84,12 +84,7 @@ enum Act {
     Notify(super::notify_menu::NotifyMenuAction),
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+use agentmux_common::time::now_ms;
 
 /// Build the whole menu: notification section (if any), then the original
 /// launcher items. Rebuilt wholesale on every change — it is a handful of

@@ -590,10 +590,7 @@ async fn fetch_m2m_token(
         return Err(CredentialFailure::Other("m2m token response missing access_token".to_string()));
     }
     let expires_in = json["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64)
+    let expires_at = (agentmux_common::time::now_secs())
         + expires_in;
 
     if let Err(e) = mstore.agent_credential_save_token(agent_id, &access_token, expires_at) {

@@ -18,7 +18,6 @@ pub mod types;
 #[cfg(test)]
 mod tests;
 
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // ---- Constants ----
 
@@ -63,10 +62,7 @@ pub use types::*;
 
 /// Get current time as Unix milliseconds.
 fn now_unix_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    agentmux_common::time::now_ms_u64()
 }
 
 /// Compute SHA-256 hex digest of a string (for audit log privacy).

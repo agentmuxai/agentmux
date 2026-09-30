@@ -3,7 +3,6 @@
 
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -53,10 +52,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore_cfs.clone();
             let broker = broker_cfs.clone();
             async move {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now = agentmux_common::time::now_ms();
                 let skill = AgentSkill {
                     id: uuid::Uuid::new_v4().to_string(),
                     agent_id: cmd.agent_id,

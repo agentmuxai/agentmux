@@ -358,11 +358,7 @@ pub fn wrap_jekt_message(
     priority: &str,
     held_sent_at_ms: Option<i64>,
 ) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let now_secs = agentmux_common::time::now_secs_u64();
     // A held message shows when it was sent, and how long it waited — never
     // the replay time as if it were current (durable jekt spec §2.4).
     let (ts_secs, held_field) = match held_sent_at_ms {

@@ -489,10 +489,7 @@ pub async fn handle_muxspect_dock(
             .into_response();
     }
 
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now_ms = agentmux_common::time::now_ms();
 
     // One process_broker read, reused for every node — same rationale as
     // handle_muxspect_describe: derive from one snapshot, not N reads that
@@ -944,10 +941,7 @@ pub async fn handle_muxspect_verify_sender(
         }));
     }
 
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now_ms = agentmux_common::time::now_ms();
 
     Json(classify_sender(&q.name, &candidates, now_ms)).into_response()
 }

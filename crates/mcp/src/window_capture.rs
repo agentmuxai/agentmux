@@ -681,10 +681,7 @@ pub(crate) fn audit_log_capture_window(
     resolved: &Option<(CaptureTier, String)>,
 ) {
     let entry = serde_json::json!({
-        "timestamp": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        "timestamp": agentmux_common::time::now_secs_u64(),
         "agent_id": agent_slug().unwrap_or_else(|_| "unknown".to_string()),
         "tool": "CaptureWindow",
         // "pid=N" or "title_contains=\"...\"" — whichever targeting mode
@@ -772,10 +769,7 @@ pub(crate) fn window_listing_entry(w: &AgentMuxWindowInfo) -> Value {
 /// tool's own result.
 pub(crate) fn audit_log_discover_windows(include_self: bool, include_foreign: bool, windows: &[Value]) {
     let entry = serde_json::json!({
-        "timestamp": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        "timestamp": agentmux_common::time::now_secs_u64(),
         "agent_id": agent_slug().unwrap_or_else(|_| "unknown".to_string()),
         "tool": "DiscoverWindows",
         // Both flags — reagentx P2 on PR #2845. `include_foreign` is the one

@@ -30,7 +30,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use tokio::time::interval;
 
@@ -546,10 +546,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
         for SweepOutcome { agent_id, block_id, progress } in outcomes {
             last_published.insert(block_id.clone(), progress.clone());
 
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
+            let ts = agentmux_common::time::now_ms_u64();
 
             broker.publish(MuxEvent {
                 event: EVENT_AGENT_PROGRESS.to_string(),

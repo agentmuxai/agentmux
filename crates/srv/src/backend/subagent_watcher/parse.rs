@@ -538,10 +538,7 @@ pub(super) fn read_journal_counts(path: &Path, offset: u64) -> Result<(usize, us
 }
 
 pub(super) fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms_u64()
 }
 
 /// Derive the Claude Code config directory for a host agent. Only matches

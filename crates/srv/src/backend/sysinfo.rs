@@ -1172,10 +1172,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
             }
         }
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
+        let now = agentmux_common::time::now_ms();
 
         let ts_data = TimeSeriesData { ts: now, values, uptime_secs: Some(uptime_secs()) };
 

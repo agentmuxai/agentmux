@@ -109,10 +109,7 @@ pub fn write_hang_dump(pid: u32, dir: &Path) -> Result<PathBuf, String> {
     };
 
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = agentmux_common::time::now_secs_u64();
     let path = dir.join(dump_file_name(secs, pid));
     let file = std::fs::File::create(&path).map_err(|e| format!("create {}: {e}", path.display()))?;
 

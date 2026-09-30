@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 use chrono::Utc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
@@ -102,10 +101,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store_cfa.clone();
             let broker = broker_cfa.clone();
             async move {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now = agentmux_common::time::now_ms();
                 // slug is empty here — agent_def_insert auto-derives it
                 // from name AND collision-resolves AND mutates the
                 // struct so we serialize the resolved value back to
@@ -373,10 +369,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore_sfc.clone();
             let broker = broker_sfc.clone();
             async move {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now = agentmux_common::time::now_ms();
                 let content = AgentContent {
                     agent_id: cmd.agent_id,
                     content_type: cmd.content_type,
@@ -429,10 +422,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err(format!("importagentfromclaw: path does not exist: {}", cmd.workspace_path));
                 }
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now = agentmux_common::time::now_ms();
 
                 // Detect provider from .claude/settings.json if present
                 let mut provider = "claude".to_string();
@@ -570,10 +560,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker_ifa.clone();
             async move {
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now = agentmux_common::time::now_ms();
 
                 let mut imported: Vec<String> = Vec::new();
                 let mut skipped: Vec<String> = Vec::new();

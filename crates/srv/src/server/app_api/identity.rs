@@ -105,10 +105,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     ("unknown".to_string(), false, None)
                 };
 
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 let existing = id_store.identity_get(&account_id).ok().flatten();
                 let created_at = existing.as_ref()
                     .map(|a| a.created_at)

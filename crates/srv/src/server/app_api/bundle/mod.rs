@@ -248,10 +248,7 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 memory.is_global = false;
                 memory.sort_order = 0;
 
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 if memory.created_at == 0 { memory.created_at = now; }
                 memory.updated_at = now;
 

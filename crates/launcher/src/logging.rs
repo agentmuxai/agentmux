@@ -23,10 +23,7 @@ pub(crate) fn log(msg: &str) {
         .open(&path)
     {
         use std::io::Write;
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let secs = agentmux_common::time::now_secs_u64();
         let _ = writeln!(f, "[{}] v{} {}", secs, env!("CARGO_PKG_VERSION"), msg);
     }
 }

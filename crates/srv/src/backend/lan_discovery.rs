@@ -10,7 +10,6 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use parking_lot::{Mutex, RwLock};
@@ -566,10 +565,7 @@ impl LanDiscovery {
             // peer would sit in the map forever and this very loop would keep
             // polling it every cycle.
             let any_pruned = {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
+                let now = agentmux_common::time::now_secs_u64();
                 let mut instances = self.instances.write();
                 let before = instances.len();
                 instances.retain(|_, inst| {
@@ -949,10 +945,7 @@ impl LanDiscovery {
                     .unwrap_or_default()
                     .to_string();
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
+                let now = agentmux_common::time::now_secs_u64();
 
                 let address = info
                     .get_addresses()
@@ -1069,10 +1062,7 @@ impl LanDiscovery {
 
     /// Get current list of discovered LAN peers (excludes self).
     pub fn get_instances(&self) -> Vec<LanInstance> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = agentmux_common::time::now_secs_u64();
         self.instances
             .read()
             .values()

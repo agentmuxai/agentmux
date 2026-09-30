@@ -54,10 +54,7 @@ use super::{AppState, HostIpc};
 const UI_AUTOMATION_SIG_MAX_AGE_SECS: i64 = 300;
 
 fn now_unix_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    agentmux_common::time::now_secs()
 }
 
 /// Verify `auth` proves the caller genuinely is `auth.agent_id` (via that

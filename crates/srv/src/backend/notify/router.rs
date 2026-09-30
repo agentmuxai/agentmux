@@ -427,12 +427,7 @@ fn spawn_ticker(r: std::sync::Weak<Router>) {
     });
 }
 
-pub fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+pub use agentmux_common::time::now_ms;
 
 /// Strip control + bidi-override characters and cap length — the only
 /// user-influenced text that reaches a title (§9.1).

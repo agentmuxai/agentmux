@@ -830,10 +830,7 @@ impl PersistentSubprocessController {
                         }
                     }
                     if let Some(store) = mstore_read.as_deref() {
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis() as i64)
-                            .unwrap_or(0);
+                        let now_ms = agentmux_common::time::now_ms();
                         task_feed.apply(
                             store,
                             broker_read.as_deref(),
