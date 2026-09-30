@@ -17,7 +17,7 @@ pub(crate) fn init_logging(log_dir: &std::path::Path) -> tracing_appender::non_b
     let _ = std::fs::create_dir_all(log_dir);
 
     // Delete log files older than 7 days to prevent unbounded growth.
-    cleanup_old_logs(log_dir, 7);
+    agentmux_common::log_retention::cleanup_old_logs(log_dir, 7);
 
     let log_prefix = format!("agentmux-host-v{}.log", version);
     let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
@@ -104,23 +104,4 @@ pub(crate) fn init_logging(log_dir: &std::path::Path) -> tracing_appender::non_b
     );
 
     guard
-}
-
-fn cleanup_old_logs(log_dir: &std::path::Path, days: u64) {
-    let cutoff = std::time::SystemTime::now()
-        - std::time::Duration::from_secs(days * 86400);
-    let Ok(entries) = std::fs::read_dir(log_dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.to_string_lossy().contains(".log.") {
-            continue;
-        }
-        if let Ok(meta) = entry.metadata() {
-            if let Ok(modified) = meta.modified() {
-                if modified < cutoff {
-                    let _ = std::fs::remove_file(&path);
-                }
-            }
-        }
-    }
 }

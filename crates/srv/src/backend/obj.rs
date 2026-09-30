@@ -509,9 +509,7 @@ pub struct MuxObjUpdate {
 
 // ---- Helpers ----
 
-fn is_zero_i64(v: &i64) -> bool {
-    *v == 0
-}
+use crate::backend::rpc_types::is_zero_i64;
 
 /// Serialize any StoreObj to JSON bytes, including the "otype" field.
 /// This matches Go's `obj.ToJson()`.

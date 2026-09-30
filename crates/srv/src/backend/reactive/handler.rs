@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message};
 use super::types::*;
-use super::{now_unix_millis, sha256_hex, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
+use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 // ---- Rate Limiter ----
 
@@ -1798,7 +1798,7 @@ impl Handler {
             source_agent: source_agent.map(|s| s.to_string()),
             target_agent: target_agent.to_string(),
             block_id: block_id.to_string(),
-            message_hash: sha256_hex(message),
+            message_hash: audit_hash(message),
             message_length: message.len(),
             success,
             error_message: error_message.map(|s| s.to_string()),

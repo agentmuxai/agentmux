@@ -26,6 +26,7 @@ use rusqlite::params;
 
 use super::error::StoreError;
 use super::store::Store;
+use super::agent_lan_keys::random_seed_bytes;
 
 use agentmux_common::time::now_secs;
 
@@ -33,16 +34,6 @@ use agentmux_common::time::now_secs;
 /// `agent_jekt_key_ensure` call), not invalidated in place — see
 /// docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md §2.
 const JEKT_KEY_TTL_SECS: i64 = 24 * 60 * 60;
-
-/// 32 bytes of randomness via two v4 UUIDs — avoids adding a `rand`/`getrandom`
-/// dependency; `uuid`'s v4 generation is already CSPRNG-backed and `uuid` is
-/// already a dependency used throughout this codebase for ids.
-fn random_key_bytes() -> [u8; 32] {
-    let mut bytes = [0u8; 32];
-    bytes[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes
-}
 
 impl Store {
     /// Load this agent's signing key if one has already been minted, without
@@ -103,7 +94,7 @@ impl Store {
                 return Ok(existing);
             }
             let conn = self.conn.lock().unwrap();
-            let fresh = random_key_bytes();
+            let fresh = random_seed_bytes();
             let encoded = BASE64.encode(fresh);
             // Guarded on the stale created_at we just read so two
             // concurrent rotators for the same overdue agent_id agree on
@@ -122,7 +113,7 @@ impl Store {
                 .map_err(|e| StoreError::Other(format!("agent_jekt_key: stored key is not valid base64: {e}")));
         }
         let conn = self.conn.lock().unwrap();
-        let fresh = random_key_bytes();
+        let fresh = random_seed_bytes();
         let encoded = BASE64.encode(fresh);
         conn.execute(
             "INSERT OR IGNORE INTO db_agent_jekt_keys (agent_id, hmac_key, created_at) VALUES (?1, ?2, ?3)",

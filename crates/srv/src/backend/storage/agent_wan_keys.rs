@@ -44,17 +44,7 @@ use super::store::Store;
 
 use agentmux_common::time::now_secs;
 
-/// 32 bytes of randomness via two v4 UUIDs — same rationale as
-/// `agent_lan_keys::random_seed_bytes` and `agent_jekt_keys::random_key_bytes`:
-/// avoids adding a `rand`/`getrandom` dependency, `uuid`'s v4 generation is
-/// already CSPRNG-backed, and `ed25519_dalek::SigningKey::from_bytes` accepts
-/// any 32 bytes of randomness as a valid seed.
-fn random_seed_bytes() -> [u8; 32] {
-    let mut bytes = [0u8; 32];
-    bytes[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes
-}
+use super::agent_lan_keys::random_seed_bytes;
 
 /// An agent's WAN signing keypair, both halves base64-encoded for
 /// storage/transport, plus the version the publish/rotation phases will use.

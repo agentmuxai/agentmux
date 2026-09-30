@@ -1254,13 +1254,6 @@ pub fn get_cli_login_status(state: &Arc<AppState>) -> Result<serde_json::Value, 
     Ok(serde_json::json!({ "active": active, "credential_changed": credential_changed, "generation": generation }))
 }
 
-/// Single-quote a value for embedding in the POSIX launch script
-/// `open_login_terminal` writes on macOS.
-#[cfg(target_os = "macos")]
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
 /// Spawn the CLI login command in a NEW visible console window so the OS can
 /// open a browser (the piped/PTY paths used by `run_cli_login` are headless
 /// and block the browser from launching — confirmed for Claude v2.1.x).
@@ -1364,7 +1357,7 @@ pub fn open_login_terminal(args: &serde_json::Value) -> Result<serde_json::Value
         ));
         let mut script = String::from("#!/bin/sh\n");
         for (k, v) in &auth_env {
-            script.push_str(&format!("export {}={}\n", k, shell_quote(v)));
+            script.push_str(&format!("export {}={}\n", k, agentmux_common::shell_quote::posix_single_quote(v)));
         }
         script.push_str(&format!("{}\nrm -f -- \"$0\"\n", cmd_str));
         // reagent P1 on #2260 (surfaced via this file's inclusion in that
