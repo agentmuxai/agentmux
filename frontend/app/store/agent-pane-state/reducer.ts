@@ -877,6 +877,18 @@ export function update(
             return { state: nextState, events };
         }
 
+        case "ModelEndedTurn":
+        case "ModelMessageStarted": {
+            // Deliberately not a liveness event (no bumpEvent): the stream
+            // lines carrying these already refresh liveness through the
+            // flush path. See `modelEndedTurn` on the Streaming phase.
+            const phase = state.turnPhase;
+            if (phase.kind !== "Streaming") return { state, events: [] };
+            const ended = command.type === "ModelEndedTurn";
+            if ((phase.modelEndedTurn ?? false) === ended) return { state, events: [] };
+            return { state: { ...state, turnPhase: { ...phase, modelEndedTurn: ended } }, events: [] };
+        }
+
         case "TokensOut": {
             const next = {
                 input: state.turnTokens?.input ?? 0,
