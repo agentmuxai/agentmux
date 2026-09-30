@@ -257,6 +257,17 @@ async fn route_command(
             let initial_meta = args.get("initial_meta").and_then(|v| v.as_str());
             commands::window::open_subwindow(state, parent, initial_view, initial_meta)
         }
+        "capture_window_viewport" => {
+            // The calling window's own viewport, unclipped, for its tear-off
+            // snapshot (browser_api::routes::capture_window_viewport).
+            let label = args
+                .get("label")
+                .and_then(|v| v.as_str())
+                .ok_or("capture_window_viewport: label is required")?;
+            let quality = args.get("quality").and_then(|v| v.as_u64()).unwrap_or(80) as u8;
+            let jpeg = crate::browser_api::routes::capture_window_viewport(state, label, quality).await?;
+            Ok(serde_json::json!({ "jpeg_base64": jpeg }))
+        }
         "open_floating_pane_window" => {
             // Floating-pane tear-off — a chromeless window showing just the
             // torn-off pane. Windows: unowned WS_POPUP+WS_EX_TOOLWINDOW HWND
