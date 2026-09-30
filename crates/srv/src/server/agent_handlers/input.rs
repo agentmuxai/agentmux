@@ -1078,7 +1078,7 @@ pub async fn run_agent_turn(
             // container.rs) since the loopback address this process sees is
             // not reachable from the container's own network namespace.
             // #2939 workstream 1 (host integration) — this alone doesn't
-            // finish that workstream: crates/mcp/agentmux-bashwrap also
+            // finish that workstream: agentmux-mcp/agentmux-bashwrap also
             // need to actually exist in the container image, which they do
             // not yet.
             if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {

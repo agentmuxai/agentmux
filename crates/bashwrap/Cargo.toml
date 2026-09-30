@@ -22,7 +22,7 @@ which = "6"
 anyhow = "1"
 # RFC3339 timestamps for the `PreCompact` hook's compaction_started
 # payload (`precompact.rs`). Matches the version already pinned by
-# crates/srv/agentmux-cef.
+# agentmux-srv/agentmux-cef.
 chrono = "0.4"
 # PTY-backed bash invocation — required so external commands (grep, npm,
 # cargo, ...) see isatty=1 on stdout and stay line-buffered. Plain pipes
