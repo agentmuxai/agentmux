@@ -748,15 +748,16 @@ fn candidate_label_under_cursor_locked(
 ///
 /// A cached HWND can be stale, and Windows reuses a destroyed window's HWND
 /// value, so a stale entry can equal a live window. Each step guards that:
-/// 1. `root` must belong to this process; if it doesn't, any cached match
-///    is a reused value.
-/// 2. A browser's own host handle, when CEF gives one, says for certain.
+/// Only window labels count: a browser pane's browser sits inside its
+/// window, so its host handle has the same root.
+/// 1. `root` must be a visible CEF Views top-level window of this process,
+///    so not another app's window, a menu or a tooltip a reused value could
+///    land on.
+/// 2. A window's own host handle, when CEF gives one, says for certain.
 /// 3. Otherwise `window_hwnds`, bound at Views window creation (app/mod.rs)
-///    and evicted on close (client/lifecycle.rs), trusted only when `root`
-///    is a visible CEF Views top-level window (so not a menu, tooltip or
-///    other window a reused value could land on), exactly one label is
-///    cached for it, and that label's browser doesn't place itself in
-///    another window. Two labels on one HWND means one is stale and nothing
+///    and evicted on close (client/lifecycle.rs), trusted only when exactly
+///    one window label is cached for `root` and that label's browser doesn't
+///    place itself in another window. Two labels on one HWND means one is stale and nothing
 ///    says which: no target. Past that there is no identity to check off
 ///    the UI thread (a Views window's own handle is only reachable there);
 ///    the rest of the host trusts `window_hwnds` the same way.
@@ -770,32 +771,17 @@ fn label_for_top_level(
     browsers: &std::collections::HashMap<String, cef::Browser>,
     root: *mut std::ffi::c_void,
 ) -> Option<String> {
-    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-
-    let mut pid: u32 = 0;
-    unsafe { GetWindowThreadProcessId(root as _, &mut pid) };
-    if pid != unsafe { GetCurrentProcessId() } {
+    if !is_own_views_top_level(root) {
         return None;
     }
 
     for (label, browser) in browsers.iter() {
-        if host_top_level(browser) == Some(root) {
+        if is_instance_label(label) && host_top_level(browser) == Some(root) {
             return Some(label.clone());
         }
     }
 
-    if !is_views_top_level(root) {
-        return None;
-    }
-    let cached: Vec<String> = ctx
-        .state
-        .window_hwnds
-        .lock()
-        .iter()
-        .filter(|(_, &h)| h == root as isize)
-        .map(|(l, _)| l.clone())
-        .collect();
+    let cached = cached_window_labels(ctx, root);
     let [label] = cached.as_slice() else {
         return None;
     };
@@ -816,11 +802,17 @@ fn label_for_top_level(
     None
 }
 
-/// A visible CEF Views top-level window (class `Chrome_WidgetWin_*`).
+/// A visible CEF Views top-level window (class `Chrome_WidgetWin_*`) of
+/// this process.
 #[cfg(target_os = "windows")]
-fn is_views_top_level(hwnd: *mut std::ffi::c_void) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, IsWindowVisible};
-    if unsafe { IsWindowVisible(hwnd as _) } == 0 {
+fn is_own_views_top_level(hwnd: *mut std::ffi::c_void) -> bool {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
+    };
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(hwnd as _, &mut pid) };
+    if pid != unsafe { GetCurrentProcessId() } || unsafe { IsWindowVisible(hwnd as _) } == 0 {
         return false;
     }
     let mut buf = [0u16; 64];
@@ -842,14 +834,30 @@ fn host_top_level(browser: &cef::Browser) -> Option<*mut std::ffi::c_void> {
     Some(if top.is_null() { h } else { top })
 }
 
-/// "main" has its own live top-level window in `window_hwnds`, so a pool
-/// window can't be the one serving it. An entry left by a recreated Views
-/// window is dead and doesn't count.
+/// The window labels `window_hwnds` has cached for `hwnd`.
+#[cfg(target_os = "windows")]
+fn cached_window_labels(ctx: &HookContext, hwnd: *mut std::ffi::c_void) -> Vec<String> {
+    ctx.state
+        .window_hwnds
+        .lock()
+        .iter()
+        .filter(|(l, &h)| h == hwnd as isize && is_instance_label(l))
+        .map(|(l, _)| l.clone())
+        .collect()
+}
+
+/// "main" has its own window in `window_hwnds`, so a pool window can't be
+/// the one serving it. The entry counts only if it still identifies main's
+/// window: a visible CEF Views top-level of this process that no other
+/// window label claims. An entry left by a recreated Views window is dead,
+/// or its value reused by some other window, and doesn't count.
 #[cfg(target_os = "windows")]
 fn main_has_live_window(ctx: &HookContext) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
-    let main = ctx.state.window_hwnds.lock().get("main").copied();
-    main.is_some_and(|h| h != 0 && unsafe { IsWindow(h as _) } != 0)
+    let Some(h) = ctx.state.window_hwnds.lock().get("main").copied() else {
+        return false;
+    };
+    let h = h as *mut std::ffi::c_void;
+    !h.is_null() && is_own_views_top_level(h) && cached_window_labels(ctx, h) == ["main"]
 }
 
 #[cfg(target_os = "windows")]
