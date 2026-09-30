@@ -1191,33 +1191,42 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     );
     tlog("LoadWidgets", t);
 
+    // Window services that don't paint. They load alongside the render and
+    // install when loaded; initMux doesn't wait for them, because its end is
+    // what starts the content-reveal gate (initMuxWrap → scheduleRevealLift),
+    // and on a tear-off every ms here is brain splash on screen.
+    // SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md §2.3, phase 1.1.
+    const windowServices = Promise.all([
+        // Auto pane-overlay clip: any DOM element tagged `data-pane-overlay`
+        // participates in browser-pane clipping.
+        // docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md.
+        import("@/app/platform/pane-overlay-auto"),
+        // Sound notifications: subscribes to agent-pane reducer events and
+        // plays a polite SFX on turn-complete (and other configured signals).
+        // docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md.
+        import("@/app/notification/sound"),
+        // OS notifications (native toasts): forward pane events + focus to
+        // the srv Router and handle toast-click activation.
+        // docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md.
+        import("@/app/notification/os/os-notify-bridge"),
+        // `block:reveal`: srv asks THIS window to reveal a block another
+        // window's revealBlock couldn't reach.
+        // SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3.
+        import("@/app/util/reveal-block-events"),
+    ]);
+
     t = performance.now();
     const elem = document.getElementById("main");
     render(App, elem);
     tlog("SolidJS render", t);
 
-    // Start the auto pane-overlay clip service. Any DOM element tagged
-    // `data-pane-overlay` automatically participates in browser-pane
-    // clipping. See docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md.
-    const { startPaneOverlayAutoService } = await import("@/app/platform/pane-overlay-auto");
-    startPaneOverlayAutoService();
-
-    // Sound notifications. Subscribes to agent-pane reducer events and
-    // plays a polite SFX on turn-complete (and other configured signals).
-    // See docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md.
-    const { installSoundService } = await import("@/app/notification/sound");
-    installSoundService();
-
-    // OS notifications (native toasts): forward pane events + focus to the srv
-    // Router and handle toast-click activation. See
-    // docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md.
-    const { installOsNotifyBridge } = await import("@/app/notification/os/os-notify-bridge");
-    installOsNotifyBridge();
-
-    // `block:reveal`: srv asks THIS window to reveal a block another window's
-    // revealBlock couldn't reach. SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3.
-    const { installBlockRevealEvents } = await import("@/app/util/reveal-block-events");
-    installBlockRevealEvents();
+    fireAndForget(async () => {
+        const [overlay, sound, osNotify, blockReveal] = await windowServices;
+        overlay.startPaneOverlayAutoService();
+        sound.installSoundService();
+        osNotify.installOsNotifyBridge();
+        blockReveal.installBlockRevealEvents();
+    });
 
     // Refresh the Claude model catalog from the authoritative /v1/models list
     // (backend `providers.models`, account OAuth token). Fire-and-forget: the

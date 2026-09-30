@@ -14,6 +14,8 @@
 //
 // Spec: docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.5
 
+import { markPoolPromoted } from "./startup-splash";
+
 /** True when the current renderer was spawned as a tab/new-window pool window. */
 export function isPoolMode(): boolean {
     if (typeof window === "undefined") return false;
@@ -60,6 +62,7 @@ export async function awaitPoolPromote(): Promise<{ initialView: string | null; 
             "pool:promote",
             (payload) => {
                 cleanup();
+                markPoolPromoted();
                 const url = new URL(window.location.href);
                 url.searchParams.set("workspaceId", payload.workspaceId);
                 url.searchParams.delete("pool");
@@ -73,6 +76,7 @@ export async function awaitPoolPromote(): Promise<{ initialView: string | null; 
             "pool:new-window",
             (payload) => {
                 cleanup();
+                markPoolPromoted();
                 const url = new URL(window.location.href);
                 url.searchParams.delete("pool");
                 window.history.replaceState({}, "", url.toString());
@@ -115,6 +119,7 @@ export async function awaitPanePoolPromote(): Promise<void> {
             "pool:pane-promote",
             (payload) => {
                 cleanup();
+                markPoolPromoted(() => getApi().setWindowInitStatus("revealed"));
                 const url = new URL(window.location.href);
                 url.searchParams.set("floatingPaneId", payload.paneId);
                 // Match cold-path contract: omit workspaceId when empty so
