@@ -57,15 +57,17 @@ vi.mock("@/app/store/services", () => ({
     WorkspaceService: { SetActiveTab: async (ws: string, tab: string) => calls.push(`SetActiveTab:${ws}:${tab}`) },
 }));
 
-import { revealBlock, revealBlockLocally } from "./reveal-block";
+import { revealBlock, revealBlockLocally, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
-function modelWithPane(nodeId: string, members: string[], magnified?: string) {
+function modelWithPane(nodeId: string, members: string[], magnified?: string, minimized = false) {
     return {
         magnifiedNodeId: magnified,
-        getNodeByBlockId: (b: string) => (members.includes(b) ? { id: nodeId } : null),
+        getNodeByBlockId: (b: string) =>
+            members.includes(b) ? { id: nodeId, ...(minimized ? { minimized: true } : {}) } : null,
         focusNode: (id: string) => calls.push(`focusNode:${id}`),
         magnifyNodeToggle: (id: string) => calls.push(`unmagnify:${id}`),
+        minimizeNodeToggle: (id: string) => calls.push(`restore:${id}`),
     };
 }
 
@@ -125,6 +127,65 @@ describe("revealBlockLocally", () => {
         models.t1 = modelWithPane("n1", ["agentB"]);
         await revealBlockLocally("agentB", { tabId: "t2" });
         expect(calls[0]).toBe("setActiveTab:t2");
+    });
+
+    it("restores a minimized pane before focusing it (focusNode alone leaves it collapsed)", async () => {
+        models.t2 = modelWithPane("pane", ["agentA", "agentB"], undefined, true);
+        await revealBlockLocally("agentB");
+        expect(calls).toEqual([
+            "setActiveTab:t2",
+            "restore:pane",
+            "stack:pane:agentB",
+            "focusNode:pane",
+            "caret:agentB",
+        ]);
+    });
+});
+
+describe("showBlockInPane — visible in its layout, no focus", () => {
+    const node = (id: string, minimized = false) => ({ id, ...(minimized ? { minimized: true } : {}) }) as any;
+
+    it("minimized: restores it, then switches its pane to it", () => {
+        showBlockInPane(modelWithPane("pane", ["a"]) as any, node("pane", true), "a");
+        expect(calls).toEqual(["restore:pane", "stack:pane:a"]);
+    });
+
+    it("already visible: never calls the minimize toggle (it would minimize it)", () => {
+        showBlockInPane(modelWithPane("pane", ["a"]) as any, node("pane"), "a");
+        expect(calls).toEqual(["stack:pane:a"]);
+    });
+
+    it("another pane magnified: un-magnifies it; its own magnify is left alone", () => {
+        showBlockInPane(modelWithPane("pane", ["a"], "other") as any, node("pane"), "a");
+        expect(calls).toEqual(["unmagnify:other", "stack:pane:a"]);
+        calls.length = 0;
+        showBlockInPane(modelWithPane("pane", ["a"], "pane") as any, node("pane"), "a");
+        expect(calls).toEqual(["stack:pane:a"]);
+    });
+
+    it("minimized behind a magnified sibling: both undone", () => {
+        showBlockInPane(modelWithPane("pane", ["a"], "other") as any, node("pane", true), "a");
+        expect(calls).toEqual(["restore:pane", "unmagnify:other", "stack:pane:a"]);
+    });
+
+    it("never focuses, moves the caret or switches the window tab", () => {
+        showBlockInPane(modelWithPane("pane", ["a"], "other") as any, node("pane", true), "a");
+        expect(calls.some((c) => /^(focusNode|caret|setActiveTab)/.test(c))).toBe(false);
+    });
+});
+
+describe("showBlockWithoutFocus — an agent's file-open into an existing pane", () => {
+    it("finds the block's tab and shows it there without switching to that tab", async () => {
+        models.t2 = modelWithPane("pane", ["agentA", "agentB"], "other", true);
+        expect(await showBlockWithoutFocus("agentB")).toBe(true);
+        expect(calls).toEqual(["restore:pane", "unmagnify:other", "stack:pane:agentB"]);
+    });
+
+    it("a block not in a built layout here: false, nothing touched", async () => {
+        expect(await showBlockWithoutFocus("elsewhere")).toBe(false);
+        models.t2 = undefined;
+        expect(await showBlockWithoutFocus("agentB")).toBe(false);
+        expect(calls).toEqual([]);
     });
 });
 

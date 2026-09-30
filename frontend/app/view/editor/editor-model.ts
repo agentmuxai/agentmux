@@ -58,6 +58,8 @@ import type { CommandReadEditorFileResult } from "@/app/store/rpc-api";
 import { registerFileDropTarget } from "@/app/drag/file-drop";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
+import { openPendingFiles } from "./pending-open-files";
+import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -294,8 +296,13 @@ export class EditorViewModel {
             createEffect(() => {
                 const pending = this.meta()?.[META_PENDING_OPEN_FILES];
                 if (!Array.isArray(pending) || pending.length === 0) return;
-                const processed = pending.filter((p): p is string => typeof p === "string" && p.length > 0);
-                for (const path of processed) void this.openFile(path);
+                // Show the pane too (restore / stack tab / un-magnify), but
+                // don't switch window tabs or take the user's caret.
+                const processed = openPendingFiles(
+                    pending,
+                    (path) => void this.openFile(path),
+                    () => void showBlockWithoutFocus(this.blockId)
+                );
                 fireAndForget(() => {
                     // Re-read fresh (not the `pending` snapshot above) right
                     // before writing, and remove only the entries THIS run
