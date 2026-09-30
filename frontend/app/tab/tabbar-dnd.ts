@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal } from "solid-js";
+import { beginDrag, endDrag, isUnderway, markReleased, session, type DragEndReason } from "@/app/drag/drag-session";
 
 
 /** Half the gap opened on each side of an insertion point (px). Total visual gap = 2 × GAP_PX. */
@@ -9,9 +10,29 @@ export const GAP_PX = 12;
 
 // ── Shared drag state ──────────────────────────────────────────────────────
 
-export let globalDragTabId: string | null = null;
-export function setGlobalDragTabId(id: string | null): void {
-    globalDragTabId = id;
+// A window-tab drag lives on the drag session.
+// docs/specs/SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §5.1.
+
+/** `crossWindow` is false for a lone-tab drag, which only the native strip merge may handle. */
+export function startWindowTabDrag(tabId: string, wsId: string, crossWindow: boolean): void {
+    beginDrag("window-tab", { tabId, wsId }, { crossWindow });
+}
+
+/**
+ * The source's onDrop. pragmatic fires it for every release, before the tab
+ * bar's monitor, so the session is only marked released; the monitor ends it.
+ */
+export function releaseWindowTabDrag(): void {
+    if (session()?.kind === "window-tab") markReleased();
+}
+
+export function endWindowTabDrag(reason: DragEndReason): void {
+    if (session()?.kind === "window-tab") endDrag(reason);
+}
+
+/** The window tab this window is dragging, until its source releases it. Reactive. */
+export function draggedWindowTabId(): string | null {
+    return isUnderway("window-tab") ? (session()?.source?.tabId ?? null) : null;
 }
 
 // Set true if Escape is pressed at any point during the current tab drag,
@@ -83,9 +104,10 @@ export const tabWrapperRefs = new Map<string, HTMLDivElement>();
  * The dragged tab is excluded from the registry scan.
  */
 export function computeInsertionPoint(clientX: number): InsertionPoint | null {
+    const dragged = draggedWindowTabId();
     const tabs: { tabId: string; left: number; right: number }[] = [];
     for (const [tabId, el] of tabWrapperRefs) {
-        if (tabId === globalDragTabId) continue;
+        if (tabId === dragged) continue;
         const rect = el.getBoundingClientRect();
         tabs.push({ tabId, left: rect.left, right: rect.right });
     }
@@ -131,9 +153,10 @@ export function computeNearestTab(
     let bestTabId: string | null = null;
     let bestDist = Infinity;
     let bestSide: "left" | "right" = "left";
+    const dragged = draggedWindowTabId();
 
     for (const [tabId, el] of tabWrapperRefs) {
-        if (tabId === globalDragTabId) continue;
+        if (tabId === dragged) continue;
         const rect = el.getBoundingClientRect();
         const midX = rect.left + rect.width / 2;
         const dist = Math.abs(clientX - midX);

@@ -24,7 +24,8 @@ import {
     computeInsertionPoint,
     InsertionPoint,
     dragActivatedTabIds,
-    globalDragTabId,
+    draggedWindowTabId,
+    endWindowTabDrag,
     setHoveredDropTabId,
     dragEscaped,
     setDragEscaped,
@@ -100,15 +101,15 @@ export function useTabDragAndDrop(
         // the move cursor to the strip's own drop target.
         //
         // The listener is installed ONCE here (not in the monitor's
-        // onDragStart) and gated on `globalDragTabId` — the module flag
-        // droppable-tab sets for the whole duration of a tab drag. This
+        // onDragStart) and gated on the window-tab drag session, which
+        // spans the whole tab drag. This
         // keeps it alive across HMR (which does not re-run a monitor's
         // onDragStart) and independent of pragmatic's monitor dispatch.
         // macOS/Linux already dodge the circle-slash via preventUnhandled,
         // so this is Windows-only.
         if (isWindows()) {
             const onTearOffDragOver = (e: DragEvent) => {
-                if (globalDragTabId == null) return; // not a tab drag
+                if (draggedWindowTabId() == null) return; // not a tab drag
                 const rect = tabBarScrollRef()?.getBoundingClientRect();
                 const overStrip =
                     rect != null &&
@@ -130,12 +131,11 @@ export function useTabDragAndDrop(
         // events are unreliable during an active HTML5 drag, but keyboard
         // events are still delivered to the page normally, so a plain
         // `keydown` listener works — gated the same way as the Windows
-        // tear-off-cursor listener above (`globalDragTabId` is the shared
-        // "a tab drag is in flight" flag). Sets a flag `onDrop` below checks
+        // tear-off-cursor listener above. Sets a flag `onDrop` below checks
         // before deciding tear-off vs. reorder, rather than trying to
         // interrupt the drag itself (there's no such API for HTML5 DnD).
         const onDragEscape = (e: KeyboardEvent) => {
-            if (globalDragTabId == null) return; // not a tab drag
+            if (draggedWindowTabId() == null) return; // not a tab drag
             if (e.key !== "Escape") return;
             setDragEscaped(true);
         };
@@ -155,6 +155,11 @@ export function useTabDragAndDrop(
             },
 
             onDrop: ({ source, location }) => {
+                // Every window-tab release reaches this monitor, after the
+                // source's onDrop (pragmatic: source, targets, monitors).
+                // Nothing below reads the session.
+                endWindowTabDrag("drop");
+
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;
                 const input = location.current.input;

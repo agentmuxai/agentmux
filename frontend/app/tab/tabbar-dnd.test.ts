@@ -10,10 +10,14 @@ import {
     markTabMerged,
     wasTabRecentlyMerged,
     tabWrapperRefs,
-    setGlobalDragTabId,
+    startWindowTabDrag,
+    releaseWindowTabDrag,
+    endWindowTabDrag,
+    draggedWindowTabId,
     decideTabRelease,
     TEAR_PAST_PX,
 } from "./tabbar-dnd";
+import { beginDrag, endDrag, session } from "@/app/drag/drag-session";
 
 // ── computeInsertIndex ────────────────────────────────────────────────────────
 //
@@ -156,12 +160,12 @@ function makeFakeEl(left: number, width: number): HTMLDivElement {
 describe("computeNearestTab", () => {
     beforeEach(() => {
         tabWrapperRefs.clear();
-        setGlobalDragTabId(null);
+        endDrag("cancel");
     });
 
     afterEach(() => {
         tabWrapperRefs.clear();
-        setGlobalDragTabId(null);
+        endDrag("cancel");
     });
 
     test("returns null when no tabs registered", () => {
@@ -170,14 +174,14 @@ describe("computeNearestTab", () => {
 
     test("returns null when only the dragged tab is registered", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
         expect(computeNearestTab(50, 15)).toBeNull();
     });
 
     test("returns the only non-dragged tab", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // mid=50
         tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // mid=150
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
 
         const result = computeNearestTab(130, 15);
         expect(result?.tabId).toBe("tab-b");
@@ -186,7 +190,7 @@ describe("computeNearestTab", () => {
     test("cursor left of midpoint → side is 'left'", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // mid=50
         tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // mid=150
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
 
         // cursor at 120 — left of tab-b's midpoint (150)
         const result = computeNearestTab(120, 15);
@@ -197,7 +201,7 @@ describe("computeNearestTab", () => {
     test("cursor right of midpoint → side is 'right'", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // mid=50
         tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // mid=150
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
 
         // cursor at 180 — right of tab-b's midpoint (150)
         const result = computeNearestTab(180, 15);
@@ -212,7 +216,7 @@ describe("computeNearestTab", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
         tabWrapperRefs.set("tab-b", makeFakeEl(100, 100));
         tabWrapperRefs.set("tab-c", makeFakeEl(200, 100));
-        setGlobalDragTabId("tab-b"); // dragging tab-b
+        startWindowTabDrag("tab-b", "ws-1", true); // dragging tab-b
 
         // cursor at 40 — closer to tab-a (mid=50, dist=10) than tab-c (mid=250, dist=210)
         expect(computeNearestTab(40, 15)?.tabId).toBe("tab-a");
@@ -224,7 +228,7 @@ describe("computeNearestTab", () => {
     test("cursor exactly at midpoint → side is 'left'", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // mid=50
         tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // mid=150
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
 
         // exactly at tab-b midpoint (150) → clientX < midX is false → "right"
         // but clientX === midX: 150 < 150 is false → side = "right"
@@ -236,7 +240,7 @@ describe("computeNearestTab", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // mid=50  ← dragging
         tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // mid=150
         tabWrapperRefs.set("tab-c", makeFakeEl(200, 100)); // mid=250
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
 
         // cursor at 60 — closest to tab-a (mid=50) but it's excluded
         // next closest: tab-b (mid=150, dist=90) over tab-c (mid=250, dist=190)
@@ -256,11 +260,11 @@ describe("computeNearestTab", () => {
 describe("computeInsertionPoint", () => {
     beforeEach(() => {
         tabWrapperRefs.clear();
-        setGlobalDragTabId(null);
+        endDrag("cancel");
     });
     afterEach(() => {
         tabWrapperRefs.clear();
-        setGlobalDragTabId(null);
+        endDrag("cancel");
     });
 
     test("returns null when no tabs are registered", () => {
@@ -269,7 +273,7 @@ describe("computeInsertionPoint", () => {
 
     test("returns null when only the dragged tab is registered", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
         expect(computeInsertionPoint(50)).toBeNull();
     });
 
@@ -309,7 +313,7 @@ describe("computeInsertionPoint", () => {
         tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // dragged, excluded
         tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // center 150
         tabWrapperRefs.set("tab-c", makeFakeEl(200, 100)); // center 250
-        setGlobalDragTabId("tab-a");
+        startWindowTabDrag("tab-a", "ws-1", true);
         // just left of tab-b's center → before tab-b
         expect(computeInsertionPoint(149)).toEqual({ beforeTabId: null, afterTabId: "tab-b" });
         // just right of tab-b's center → after tab-b (well short of the gap midpoint)
@@ -421,5 +425,55 @@ describe("decideTabRelease", () => {
 
     test("with no strip rect nothing happens", () => {
         expect(decideTabRelease({ ...base, stripRect: null, input: at(200, 200) })).toBe("none");
+    });
+});
+
+// ── the window-tab drag session ──────────────────────────────────────────────
+
+describe("window-tab drag session", () => {
+    afterEach(() => endDrag("cancel"));
+
+    test("start begins a window-tab session with its tab, workspace and eligibility", () => {
+        startWindowTabDrag("tab-a", "ws-1", true);
+        expect(session()).toMatchObject({
+            kind: "window-tab",
+            source: { tabId: "tab-a", wsId: "ws-1" },
+            payload: { crossWindow: true },
+            released: false,
+        });
+        expect(draggedWindowTabId()).toBe("tab-a");
+    });
+
+    test("a lone-tab drag is not cross-window eligible", () => {
+        startWindowTabDrag("tab-a", "ws-1", false);
+        expect(session()?.payload?.crossWindow).toBe(false);
+    });
+
+    test("the source's release keeps the session but no tab counts as dragged", () => {
+        startWindowTabDrag("tab-a", "ws-1", true);
+        releaseWindowTabDrag();
+        expect(session()?.released).toBe(true);
+        expect(draggedWindowTabId()).toBeNull();
+    });
+
+    test("the tab bar's monitor ends it", () => {
+        startWindowTabDrag("tab-a", "ws-1", true);
+        releaseWindowTabDrag();
+        endWindowTabDrag("drop");
+        expect(session()).toBeNull();
+    });
+
+    test("never releases or ends another kind of drag", () => {
+        beginDrag("tile", { nodeId: "n1" });
+        releaseWindowTabDrag();
+        endWindowTabDrag("drop");
+        expect(session()).toMatchObject({ kind: "tile", released: false });
+        expect(draggedWindowTabId()).toBeNull();
+    });
+
+    test("a stranded window-tab drag stops counting once another drag begins", () => {
+        startWindowTabDrag("tab-a", "ws-1", true);
+        beginDrag("tile", { nodeId: "n1" });
+        expect(draggedWindowTabId()).toBeNull();
     });
 });
