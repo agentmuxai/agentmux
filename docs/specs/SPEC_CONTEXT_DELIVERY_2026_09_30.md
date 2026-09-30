@@ -197,6 +197,7 @@ interface ContextItem {
   excerpt?: string;         // ≤160 chars, for the collapsed row
   bodyRef?: string;         // where the full text is kept (§3.4)
   body?: string;            // inline only for compaction_summary (§3.3)
+  delivered?: "full" | "partial" | "omitted";  // §3.4 step 3; absent = full
 }
 ```
 
@@ -226,20 +227,23 @@ interface ContextItem {
 **Nothing new is sent.** The summary is already in the model's context,
 so sending it again would deliver it twice and cost a turn.
 
-- **Recognise** Claude Code's frame when it is a string-content user
-  frame that directly follows a `compact_boundary` (before any assistant
-  or genuine user frame), **and** at least one of these holds:
-  - it carries `isSynthetic: true`;
-  - it starts with `This session is being continued from a previous
-    conversation`.
+- **Recognise** Claude Code's frame, a string-content user frame, by two
+  signals: it carries `isSynthetic: true`, and it starts with `This
+  session is being continued from a previous conversation`.
+  - **Directly after a `compact_boundary`** (before any assistant or
+    other user-text frame), either signal is enough.
+  - **With no boundary in view,** both are required. History pagination
+    parses each page separately, newest first
+    (`useHistoryPagination.ts:185-195,520-532`), so a summary at the top
+    of a page can't see the boundary that ends the older page.
+  - Otherwise the frame stays a normal user message.
 
   Every summary frame in the local transcript store (3 of 3) has
   `isSynthetic: true` and directly follows a boundary, and no other
-  string-content user frame is marked synthetic. Requiring the boundary
-  plus either signal survives a change to the CLI's wording or to the
-  flag. Without a boundary, the frame stays a normal user message.
+  string-content user frame is marked synthetic. With a boundary, the
+  rule survives a change to either the wording or the flag.
 - **Emit** a `context_delivery` with `reason: "compaction"`, the boundary's
-  `trigger`, and one item:
+  `trigger` when there is one, and one item:
   - `kind: "compaction_summary"`, name "Conversation summary (written by
     Claude Code)";
   - an excerpt taken from the first non-heading line of the summary (its
@@ -249,9 +253,10 @@ so sending it again would deliver it twice and cost a turn.
 - **Header:** "Agent given a summary of the conversation (manual compact)
   · ~2.3k tok", with the excerpt under it. This is the owner's "Agent
   injected with summary: key points…".
-- **Id:** built from the boundary's timestamp (`compact-boundary.ts`
-  already builds a stable id), so live and replay produce the same node
-  and never show it twice.
+- **Id:** the frame's own `uuid`, so the live copy and every replayed copy
+  share one node, whichever page it's parsed on. Without a `uuid`, the id
+  falls back to the boundary's id, then to the frame's timestamp and
+  size. **Time:** the frame's own `timestamp`, then the boundary's.
 - **It must not end a hidden-turn window** (`stream-parser.ts:738-744`),
   and it's never treated as the user's own message. Neither the
   activity summary nor "last user message" logic should use it.
@@ -268,15 +273,38 @@ so sending it again would deliver it twice and cost a turn.
    bundle id. The running summary becomes its own item when it's
    included (`memory_delivery_handlers.rs:324-326`). The frame keeps its
    subtype; the new fields are additions.
-2. **One producer for both paths.** When the fallback's hidden turn is
-   accepted (`input.rs:1381-1403`, `hidden: true`), srv appends the same
-   `agentmux_memory_injected` frame that the hook path writes. The
-   frontend stops building the node itself (`memory-reinjection.ts:311-355`).
-   Both paths then persist identically and replay with real names and
-   sizes.
-3. **Bodies on expand.** This revisits D6. D6 said "the user sees a label
+2. **One producer for both paths: srv composes the fallback too.** Today
+   the frontend composes the fallback's text itself and sends srv only the
+   flattened string (`memory-reinjection-controller.ts:226-244`;
+   `agent_handlers/input.rs:1392-1408`). srv then can't know which items,
+   bundle ids or paths went out, and re-reading memory later could report
+   a newer version than the one sent.
+   - A new RPC `memorydelivery:compose {block_id, reason}` composes the
+     delivery on srv with the same code the hook uses. It returns
+     `{delivery_id, text, items}` and keeps the item list, immutable,
+     under `delivery_id`.
+   - The hidden turn carries `delivery_id` next to `hidden: true`.
+   - When srv accepts that input, it appends the
+     `agentmux_memory_injected` frame from the stored item list, so the
+     frame always describes exactly what was sent.
+   - The frontend stops composing and stops building the node
+     (`memory-reinjection.ts:311-355`). Both paths then persist
+     identically and replay with real names and sizes.
+3. **Record what was delivered, not the source.** The hook caps a
+   delivery at eight 9,000-character parts and cuts the rest with a
+   notice (`memory_delivery.rs:24-27,176-188`). Items are projected
+   onto the text actually delivered:
+   - an item wholly inside the delivered text is `full`;
+   - one cut by the cap is `partial`: its size, tokens and body are those
+     of the delivered slice;
+   - one entirely past the cap is `omitted`, with no body and size 0.
+
+   The card shows partial and omitted items with a "cut" mark, and the
+   header says how many ("3 items · 1 cut"). The fallback path, which
+   has no cap, records every item as `full`.
+4. **Bodies on expand.** This revisits D6. D6 said "the user sees a label
    only", and the owner now wants to see each item.
-   - Each delivery's composed text is stored per item under the notice id,
+   - Each delivery's delivered text (step 3) is stored per item under the notice id,
      in the agent's transcript zone. It's retained exactly as long as the
      transcript, and nothing new leaves the machine.
    - A new RPC `contextdelivery:get {block_id, delivery_id, item}` returns
@@ -284,7 +312,7 @@ so sending it again would deliver it twice and cost a turn.
    - Deliveries from before this change have no stored body. Their rows
      say "Content from before 2026-10 isn't kept." For Global Memory they
      offer "Open current version in the Armory" via `bundleId`.
-4. **Header per reason** (§3.2). "Re-delivered" appears only when the
+5. **Header per reason** (§3.2). "Re-delivered" appears only when the
    reason is compaction. A new session reads "Given to the agent · new
    session".
 
@@ -316,6 +344,7 @@ Both bodies are available at spawn and are stored as in §3.4.
 | Old hook frames (no `kind`/`name` fields) | a card whose names come from the label prefix "[AgentMux System] X" / "[Workspace] X"; no bodies |
 | Old fallback hidden lines | a card whose Global names come from their `# [AgentMux System] X` headings, with Personal as "Personal file N"; no bodies |
 | Old compaction summaries | the new compaction card, with the full body, because the text is in the transcript |
+| A summary at the top of a history page, its boundary on the older page | the compaction card, recognised by both signals (§3.3); no trigger shown |
 
 The node type is renamed with a parser alias: `memory_reinjection` is
 read as `context_delivery`.
@@ -327,12 +356,17 @@ read as `context_delivery`.
     message, live and on replay;
   - the same text without a preceding boundary stays a user message;
   - replaying twice gives one node (stable id);
+  - a summary alone at the top of a page, flagged and worded, becomes the
+    same card (same id) as when its boundary is on the same page;
   - the frame doesn't end a hidden window.
 - **Memory card:**
   - the hook frame with new fields gives one row per item, with the right
     tier, path and size;
-  - the fallback path produces the same persisted frame (srv test in
-    `input.rs`);
+  - the fallback path produces the same persisted frame, built from the
+    item list stored under its `delivery_id`, even if memory changes
+    between compose and send (srv test in `input.rs`);
+  - a delivery over the part cap marks the cut item `partial` with the
+    delivered slice's size, and later items `omitted`;
   - old frames and old hidden lines render with the names in §4.
 - **Bodies:** `contextdelivery:get` returns the stored text for the
   owning block only, and refuses other blocks' deliveries.
@@ -347,8 +381,8 @@ read as `context_delivery`.
 | Phase | What ships | Size |
 |---|---|---|
 | **CD1** | Compaction summary as a card (§3.3). Frontend only, render-only. | small |
-| **CD2** | Per-item memory card (§3.1, §3.2, §3.4 steps 1, 2, 4). srv fields, one producer, frontend rows. | medium |
-| **CD3** | Bodies on expand (§3.4 step 3): storage, RPC, expanded rows. | medium |
+| **CD2** | Per-item memory card (§3.1, §3.2, §3.4 steps 1, 2, 3, 5). srv fields, srv-composed fallback, delivered-slice items, frontend rows. | medium |
+| **CD3** | Bodies on expand (§3.4 step 4): storage, RPC, expanded rows. | medium |
 | **CD4** | Continuation-packet card (§3.5). | small |
 | **CD5** | Renames (§1.3). Spec and index updates so "ambient" means model calls only. | small |
 
