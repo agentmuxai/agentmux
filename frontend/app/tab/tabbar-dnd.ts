@@ -150,6 +150,48 @@ export function computeNearestTab(
 /**
  * Computes the backend insertion index for ReorderTab (remove-then-insert semantics).
  */
+// Pixels past the tab strip's bottom edge before a drag becomes a
+// tear-off (Chrome uses a similar small threshold). 24 px is enough
+// to filter out brief excursions while the user is still hunting for
+// the drop position; small enough that the tear feels intentional.
+// See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.1.
+// Pixels past the tab bar's bottom edge before tear-off triggers. Was
+// 24px historically, which left a ~24-pixel zone where the user saw
+// only the OS drag image with no real window. Lowered to 5 to match
+// Chrome's perceived-instant tear-off (just enough to filter trembles).
+// Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.2.
+export const TEAR_PAST_PX = 5;
+
+export type TabRelease = "abort" | "tear-off" | "reorder" | "none";
+
+/**
+ * What releasing a window-tab drag does, from the strip's rect and the
+ * release point. `ip` is the last computed insertion point: it tracks the
+ * cursor's X only, so it can be set even for a release below the strip.
+ */
+export function decideTabRelease(r: {
+    escaped: boolean;
+    ip: InsertionPoint | null;
+    input: { clientX: number; clientY: number };
+    stripRect: { left: number; right: number; top: number; bottom: number } | null;
+    tabCount: number;
+    draggedTabId: string | null;
+}): TabRelease {
+    if (r.escaped) return "abort";
+    const { input, stripRect: rect } = r;
+    const dropInsideBar =
+        rect != null &&
+        input.clientY >= rect.top && input.clientY <= rect.bottom &&
+        input.clientX >= rect.left && input.clientX <= rect.right;
+    // Lone tabs never tear: it would trade one single-tab window for another
+    // and strand the source. Their cross-window exit is the host mouse-hook
+    // remount.
+    const releasedBelowStrip = rect != null && input.clientY > rect.bottom + TEAR_PAST_PX;
+    if (!dropInsideBar && releasedBelowStrip && r.draggedTabId != null && r.tabCount > 1) return "tear-off";
+    if (dropInsideBar && r.ip != null && r.draggedTabId != null) return "reorder";
+    return "none";
+}
+
 export function computeInsertIndex(
     sourceIndex: number,
     targetIndex: number,
