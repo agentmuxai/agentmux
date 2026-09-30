@@ -184,6 +184,9 @@ export interface LayoutTreeFocusNodeAction extends LayoutTreeAction {
 export interface LayoutTreeMagnifyNodeToggleAction extends LayoutTreeAction {
     type: LayoutTreeActionType.MagnifyNodeToggle;
     nodeId: string;
+    /** false: commit without requesting node focus (a programmatic un-magnify
+     *  that must not move the user's focus). Default true. */
+    focused?: boolean;
 }
 
 export interface LayoutTreeClearTreeAction extends LayoutTreeAction {
