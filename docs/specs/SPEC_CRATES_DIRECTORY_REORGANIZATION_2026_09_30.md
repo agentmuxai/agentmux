@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-30
-**Status:** proposed — awaiting operator go-ahead on the freeze window (§5). Nothing moved yet.
+**Status:** active — spec #4072; the move is PR #4076 (operator go-ahead 2026-09-30; freeze started 16:43 UTC, announcement only, frontend-only and docs-only PRs exempt).
 **Scope:** folder layout of `agentmux-*` crates in this repo, and every path that points at them. Package names, binary names and Rust module paths do not change.
 
 ## 1. What changes
@@ -58,7 +58,8 @@ different ways, so each class has its own check.
 |---|---|---|---|
 | ts-rs `#[ts(export, export_to = "../../frontend/types/rpc/")]` in `agentmux-srv` | 374 in 48 files | **Silent:** bindings are written to `crates/frontend/types/rpc/` instead of `frontend/types/rpc/` | `scripts/check-rpc-bindings.sh` (committed bindings must equal generated), plus an explicit check that `crates/frontend/` does not exist after `cargo test` |
 | `include_str!` / `include_bytes!` climbing to repo-root files | 8, listed below | Loud: compile error | CI build on all three OSes |
-| `env!("CARGO_MANIFEST_DIR")` joins to repo-root paths | 9 uses, review each | Test or runtime path wrong | Tests; review every hit by hand |
+| `env!("CARGO_MANIFEST_DIR")` joins to repo-root paths | 9 uses; 4 climb to the root with one `.parent()` and need two (`agentmux-common/src/api_types.rs`, `agentmux-common/src/redact.rs`, `agentmux-srv/src/backend/reactive/types.rs`, `agentmux-srv/src/backend/rpc_types/block.rs`) | Tests read the wrong folder and fail | Tests; review every hit by hand |
+| `agentmux-cef/build.rs` reads the workspace lockfile as `../Cargo.lock` (build scripts run in the crate folder) | 1 | **Silent:** the version panel's CEF row falls back to "unknown" | Check the version panel on a built app; found during implementation |
 | `path = "../agentmux-common"` in each crate's `Cargo.toml` | 5 | Loud: cargo error | Any build |
 | `agentmux-launcher/build.rs` and `src/tray/windows.rs` pointing at `../agentmux-cef/resources/win/agentmux.ico` | 2 | Wrong or missing exe icon (build.rs); tray icon falls back (runtime) | Windows packaging run; check the exe icon by eye |
 

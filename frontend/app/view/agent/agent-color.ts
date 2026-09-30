@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Per-agent color assignment — frontend counterpart of
-// agentmux-srv/src/backend/agent_color.rs.
+// crates/srv/src/backend/agent_color.rs.
 //
 // Duplicated here (not shared) because agent launch has two independent
 // meta-building paths — the backend's `agent.open` RPC
@@ -18,7 +18,7 @@
 // Deliberately NOT derived from tab.tsx's TAB_COLORS — that array was
 // desaturated for the tab strip (docs/specs/SPEC_TAB_COLOR_DESATURATION_2026_08_13.md)
 // and agent pane borders must keep the original vivid hues. Mirrors
-// agentmux-srv/src/backend/agent_color.rs::AGENT_COLOR_PALETTE (same 14
+// crates/srv/src/backend/agent_color.rs::AGENT_COLOR_PALETTE (same 14
 // hexes, same order — keep both in sync if this list changes).
 export const AGENT_COLOR_PALETTE: string[] = [
     "#ef4444", // Red

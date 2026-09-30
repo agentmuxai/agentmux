@@ -5,7 +5,7 @@
 # Why
 # ---
 # Native window drag / floating-pane edge-resize on macOS calls
-# CefWindow::BeginWindowDrag() via raw FFI (agentmux-cef/src/ui_tasks.rs). That
+# CefWindow::BeginWindowDrag() via raw FFI (crates/cef/src/ui_tasks.rs). That
 # struct slot exists ONLY in a framework built from the agentmuxai/cef fork
 # (branch agentmux/7778-drag-rightclick-and-transparency). Bundle the upstream
 # prebuilt CEF (the cef-dll-sys cargo cache) instead and the native drag path

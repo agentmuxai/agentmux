@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // v1 composable model — standalone MCP Server primitive
-// (agentmux-srv/src/server/app_api/mcp.rs). Agent-scoped: every command is
+// (crates/srv/src/server/app_api/mcp.rs). Agent-scoped: every command is
 // `check_s1`-gated (ctx.agent_id must equal the request's agent_id), so
 // these only work from an authenticated agent connection. The mcp.catalog.*
 // commands are the window-scoped counterpart (no agent_id, global rows

@@ -74,7 +74,7 @@ export function resolveDisplayActiveTabId(input: ActiveTabDisplayInput): string 
     // the REAL active tab is optimistically hidden (mid-close), highlight the
     // neighbor the backend is about to promote — next tab in the list, else
     // previous, mirroring handle_delete_tab's `tab_ids.get(pos) ?? pos-1`
-    // (agentmux-srv/src/reducer/tab.rs). The strip therefore shows the FINAL
+    // (crates/srv/src/reducer/tab.rs). The strip therefore shows the FINAL
     // post-close state from the first frame; the backend's update then
     // changes nothing visibly.
     if (!hiddenTabIds.has(realActiveTabId)) return realActiveTabId;

@@ -402,4 +402,78 @@
         font-size: 0.9em;
         color: var(--secondary-text-color);
     }
+
+    // Video and audio (§5). A video keeps one 16:9 stage from placeholder to
+    // poster to player, so its row never changes height.
+    .am-media-stage {
+        position: relative;
+        width: 100%;
+        max-height: min(60vh, 640px);
+        aspect-ratio: 16 / 9;
+        overflow: hidden;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--secondary-text-color) 10%, transparent);
+
+        .am-media-poster,
+        .am-media-player {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+    }
+
+    .am-media-stage-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4em;
+        background: linear-gradient(transparent 55%, rgb(0 0 0 / 35%));
+    }
+
+    .am-media-play {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.6em;
+        height: 2.6em;
+        border: none;
+        border-radius: 50%;
+        background: var(--accent-color);
+        color: white;
+        cursor: pointer;
+
+        &:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+    }
+
+    .am-media-av-label {
+        display: inline-flex;
+        gap: 0.5em;
+        font-size: 0.9em;
+    }
+
+    .am-media-audio-card {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6em;
+        padding: 0.3em 0.8em 0.3em 0.3em;
+        border: 1px solid color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
+        border-radius: 999px;
+
+        .am-media-play {
+            width: 2em;
+            height: 2em;
+        }
+    }
+
+    audio.am-media-player {
+        width: min(100%, 480px);
+    }
 }

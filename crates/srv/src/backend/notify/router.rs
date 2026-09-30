@@ -1,0 +1,1023 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Notification Router — the side-effecting shell around `policy.rs`
+//! (`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md` §3, §5).
+//!
+//! Owns: settings resolution, agent-name lookup + sanitization, body
+//! redaction (§9), publishing on the mps broker, a 500 ms tick task for
+//! debounce release, and the single pending "activate on next window" slot
+//! for a click that arrived while no window was open.
+//!
+//! One Router per broker (i.e. per `AppState`), kept in a small registry
+//! keyed by the broker's identity rather than as an `AppState` field: it is
+//! created lazily by the first WS connection and outlives any one connection.
+//! Keying by broker (not a single global) means a second `AppState` in the
+//! same process — tests, or any future multi-state setup — never has its
+//! events published onto someone else's bus.
+
+use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::backend::mps::{Broker, MuxEvent};
+use crate::backend::obj::{Block, Tab, Window, Workspace};
+use crate::backend::storage::store::Store;
+use crate::backend::wconfig::ConfigState;
+
+use super::policy::{
+    Action, Family, FocusReport, Input, NotifyKind, PolicyState, Preview, Request, Settings, TrayState, When,
+};
+
+pub const EVENT_NOTIFICATION: &str = "notification";
+pub const EVENT_NOTIFICATION_RETRACT: &str = "notification:retract";
+pub const EVENT_NOTIFICATION_ACTIVATE: &str = "notification:activate";
+/// Tray snapshot (`TrayState`), published on change with persist=1 so a
+/// presenter that (re)subscribes gets the current state immediately.
+pub const EVENT_NOTIFICATION_STATE: &str = "notification:state";
+/// `block.reveal`: the named window's renderer reveals the block itself
+/// (`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md` §4.3). Payload: `BlockRevealEvent`.
+pub const EVENT_BLOCK_REVEAL: &str = "block:reveal";
+
+/// Where `block.reveal` reveals a block — also the `block:reveal` payload.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BlockRevealEvent {
+    pub block_id: String,
+    pub tab_id: String,
+    /// The open window showing the block's workspace; only it acts.
+    pub window_id: String,
+}
+
+/// srv-internal sources, fed from places that must not block (the broker's
+/// publish path, the jekt delivery path) and drained by the router's task.
+enum Internal {
+    /// `own_blocks_only`: the source is process-global (the reactive handler
+    /// is shared by every AppState), so drop blocks this Router's store
+    /// doesn't know.
+    Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
+    /// Raw question text — redacted by `emit` like a renderer report.
+    /// `count`: how many questions the call asks (0 = unknown).
+    InputWaiting { block_id: String, question: Option<String>, count: usize },
+    /// Resolve through the SAME ordered queue as the srv-side emits, so a
+    /// resolve can never overtake the emit it cancels (Codex P2 on #3662).
+    Resolve { block_id: String, family: Family },
+    /// A controller's authoritative `turn_active` (from `controllerstatus`).
+    TurnStatus { block_id: String, active: bool },
+    /// The user stopped/interrupted this block's turn in its pane.
+    TurnStopped { block_id: String },
+}
+
+/// How long after a user Stop the turn-ended transition it causes is treated
+/// as "the user's own action", not "finished".
+const STOP_GRACE_MS: i64 = 15_000;
+/// Cap on tracked blocks' turn state (see `Internal::TurnStatus` handling).
+const TURN_MAP_MAX: usize = 1024;
+
+/// What the Router does with a `controllerstatus` turn transition.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TurnTransition {
+    /// Turn (re)started: anything "finished" for this block is moot.
+    Started,
+    /// Turn really ended: notify "finished" (subject to policy).
+    Finished,
+    /// No transition, first sighting, or ended by the user's own Stop.
+    Nothing,
+}
+
+/// `(blockid, turn_active)` from a serialized `BlockControllerRuntimeStatus`.
+/// `turn_active` is `skip_serializing_if = "is_false"`, so a turn that ENDED
+/// arrives with the field absent — absent means false (Codex P1 on #3705;
+/// treating it as "unknown" dropped every end-of-turn and "finished" never
+/// fired).
+pub fn parse_turn_status(d: &serde_json::Value) -> Option<(String, bool)> {
+    let block_id = d.get("blockid")?.as_str()?.to_string();
+    let active = d.get("turn_active").and_then(|v| v.as_bool()).unwrap_or(false);
+    Some((block_id, active))
+}
+
+/// Pure: `prev` = last known `turn_active` for the block (None = never seen,
+/// e.g. right after srv start — a replayed/first status is not a transition).
+pub fn turn_transition(prev: Option<bool>, active: bool, stopped_recently: bool) -> TurnTransition {
+    match (prev, active) {
+        (Some(true), true) | (Some(false), false) => TurnTransition::Nothing,
+        (_, true) => TurnTransition::Started,
+        (Some(true), false) if !stopped_recently => TurnTransition::Finished,
+        _ => TurnTransition::Nothing,
+    }
+}
+
+/// A click's target is picked up by a newly opened window only this long
+/// after the click (rich-content spec §3.3 D) — never "jumps to an old block
+/// much later".
+pub const PENDING_ACTIVATION_MAX_AGE_MS: i64 = 30_000;
+
+/// Where a toast click lands (rich-content spec §3.3 A). Resolved by srv from
+/// its own store for the notification the click acked — never taken from the
+/// toast's launch argument (§3.4).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClickTarget {
+    pub block_id: String,
+    pub tab_id: String,
+    /// `None` when the tab belongs to no workspace any more.
+    pub workspace_id: Option<String>,
+    /// Every `Window` object showing that workspace. Whether one is actually
+    /// open is the policy's call (a connected frontend reports it).
+    pub window_ids: Vec<String>,
+}
+
+/// Walk block → tab → workspace → windows. `None` when the block or its tab
+/// is gone. BLOCKING (store reads).
+pub fn resolve_click_target(store: &Store, block_id: &str) -> Option<ClickTarget> {
+    let block = store.get::<Block>(block_id).ok().flatten()?;
+    let tab_id = block.parentoref.strip_prefix("tab:")?.to_string();
+    store.get::<Tab>(&tab_id).ok().flatten()?;
+    let workspace_id = store
+        .get_all::<Workspace>()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|w| w.tabids.contains(&tab_id) || w.pinnedtabids.contains(&tab_id))
+        .map(|w| w.oid);
+    let mut window_ids: Vec<String> = match &workspace_id {
+        Some(ws) => store
+            .get_all::<Window>()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| &w.workspaceid == ws)
+            .map(|w| w.oid)
+            .collect(),
+        None => Vec::new(),
+    };
+    window_ids.sort();
+    Some(ClickTarget { block_id: block_id.to_string(), tab_id, workspace_id, window_ids })
+}
+
+/// What a click asks of the launcher (the `notify.ack` response).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AckOutcome {
+    /// The ack named a live notification. An unknown id (a toast from before
+    /// an srv restart) still raises the app (§3.3 F).
+    pub known: bool,
+    /// The window to raise, when one is open. For a pane's toast it is the
+    /// window showing the pane; otherwise the most recently focused window.
+    pub window_id: Option<String>,
+    /// For a pane whose workspace is open in no window: open a window on it.
+    pub workspace_id: Option<String>,
+    /// Kept for launchers older than `window_id`: false means "open a window".
+    pub has_window: bool,
+}
+
+/// A click that arrived while its pane's workspace was open in no window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingActivation {
+    pub block_id: String,
+    pub tab_id: String,
+    pub workspace_id: Option<String>,
+    pub at_ms: i64,
+}
+
+/// Pure: may a window showing `workspace_id` (None = an older frontend that
+/// doesn't say) take `pending` at `now_ms`?
+pub fn may_take_pending(pending: &PendingActivation, workspace_id: Option<&str>, now_ms: i64) -> bool {
+    if now_ms - pending.at_ms > PENDING_ACTIVATION_MAX_AGE_MS {
+        return false;
+    }
+    match (pending.workspace_id.as_deref(), workspace_id) {
+        (Some(want), Some(have)) => want == have,
+        _ => true,
+    }
+}
+
+/// Of `window_ids` (a workspace's windows), the one a connected frontend
+/// reports open. Two open windows on one workspace: prefer the one the user
+/// was last in.
+fn pick_open_window(p: &PolicyState, window_ids: &[String]) -> Option<String> {
+    let raise = p.raise_window();
+    let open: Vec<&String> = window_ids.iter().filter(|w| p.window_open(w)).collect();
+    open.iter().find(|w| Some(w.as_str()) == raise.as_deref()).or(open.first()).map(|w| (*w).clone())
+}
+
+const AGENT_NAME_MAX: usize = 32;
+const BODY_MAX: usize = 80;
+/// Rich-content spec §1.2: the summary line's cap, before the `…`.
+const SUMMARY_MAX: usize = 90;
+
+pub struct Router {
+    policy: Mutex<PolicyState>,
+    broker: Arc<Broker>,
+    config: Arc<ConfigState>,
+    store: Arc<Store>,
+    /// A click whose pane's workspace was open in no window: taken by the
+    /// window the launcher opens on that workspace.
+    pending_activation: Mutex<Option<PendingActivation>>,
+    internal: tokio::sync::mpsc::UnboundedSender<Internal>,
+    last_tray: Mutex<Option<TrayState>>,
+    /// block_id → last `turn_active` seen in `controllerstatus`.
+    turn_active: Mutex<std::collections::HashMap<String, bool>>,
+    /// block_id → when the user last stopped its turn (epoch ms).
+    stopped_at: Mutex<std::collections::HashMap<String, i64>>,
+}
+
+type Registry = Mutex<std::collections::HashMap<usize, Arc<Router>>>;
+static ROUTERS: OnceLock<Registry> = OnceLock::new();
+
+fn registry() -> &'static Registry {
+    ROUTERS.get_or_init(Default::default)
+}
+
+fn key(broker: &Arc<Broker>) -> usize {
+    Arc::as_ptr(broker) as usize
+}
+
+/// The router for this broker, if a connection has created it yet.
+pub fn get(broker: &Arc<Broker>) -> Option<Arc<Router>> {
+    registry().lock().unwrap_or_else(|e| e.into_inner()).get(&key(broker)).cloned()
+}
+
+/// Get-or-create the router for this broker. Idempotent.
+///
+/// On creation it also attaches the srv-side sources: an observer on the
+/// broker (`agentfailure` → `AgentCrashed`) and the reactive handler's
+/// needs-review hook (`ESCALATE=required` jekt → `MessageNeedsReview`).
+pub fn init(
+    broker: Arc<Broker>,
+    config: Arc<ConfigState>,
+    store: Arc<Store>,
+    reactive: &'static crate::backend::reactive::ReactiveHandler,
+) -> Arc<Router> {
+    let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+    reg.entry(key(&broker))
+        .or_insert_with(|| {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let r = Arc::new(Router {
+                policy: Mutex::new(PolicyState::new()),
+                broker: broker.clone(),
+                config,
+                store,
+                pending_activation: Mutex::new(None),
+                internal: tx,
+                last_tray: Mutex::new(None),
+                turn_active: Mutex::new(Default::default()),
+                stopped_at: Mutex::new(Default::default()),
+            });
+            spawn_ticker(Arc::downgrade(&r));
+            spawn_internal(Arc::downgrade(&r), rx);
+            attach_sources(&r, &broker, reactive);
+            r
+        })
+        .clone()
+}
+
+/// Both hooks run on hot, lock-holding paths (the broker's publish; jekt
+/// delivery). They only parse and enqueue — never call back into the broker
+/// or touch the store inline.
+fn attach_sources(r: &Arc<Router>, broker: &Arc<Broker>, reactive: &'static crate::backend::reactive::ReactiveHandler) {
+    let tx = r.internal.clone();
+    broker.add_observer(Arc::new(move |ev: &MuxEvent| {
+        // "Finished" comes from the controller's own turn state, not from the
+        // renderer's reducer — which can report turn-ended mid-turn (e.g. a
+        // queued message released straight into the next turn), producing
+        // "finished" toasts for an agent that is still working.
+        if ev.event == crate::backend::mps::EVENT_CONTROLLER_STATUS {
+            // No `is_agent_pane` filter: the subprocess controller (Codex,
+            // Gemini, …) publishes `is_agent_pane: false` for its agent panes
+            // (Codex P1 on #3705), and only real agent turns ever report
+            // turn_active=true (shell controllers hardcode false), so a
+            // true→false edge is agent-specific on its own.
+            if let Some((block_id, active)) = ev.data.as_ref().and_then(parse_turn_status) {
+                let _ = tx.send(Internal::TurnStatus { block_id, active });
+            }
+            return;
+        }
+        if ev.event != crate::backend::mps::EVENT_AGENT_FAILURE {
+            return;
+        }
+        let Some(block_id) = ev.scopes.iter().find_map(|s| s.strip_prefix("block:")) else { return };
+        let code = ev.data.as_ref().and_then(|d| d.get("code")).and_then(|c| c.as_str()).unwrap_or("");
+        if let Some(body) = failure_body(code) {
+            let _ = tx.send(Internal::Emit {
+                kind: NotifyKind::AgentCrashed,
+                block_id: block_id.to_string(),
+                body: Some(body.to_string()),
+                // Per-broker observer: already scoped to this AppState.
+                own_blocks_only: false,
+            });
+        }
+    }));
+    let tx = r.internal.clone();
+    reactive.add_needs_review_hook(Arc::new(move |block_id: &str| {
+        let _ = tx.send(Internal::Emit {
+            kind: NotifyKind::MessageNeedsReview,
+            block_id: block_id.to_string(),
+            // Fixed text only — never the message, sender or trust label
+            // (spec §9.1: the toast can only say "go look").
+            body: Some("Open AgentMux to see the sender and trust level before it acts.".to_string()),
+            own_blocks_only: true,
+        });
+    }));
+}
+
+fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::UnboundedReceiver<Internal>) {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            let Some(r) = r.upgrade() else { return };
+            match msg {
+                Internal::Emit { kind, block_id, body, own_blocks_only } => {
+                    // Store lookups — off the async workers.
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if own_blocks_only && !r.owns_block(&block_id) {
+                            return;
+                        }
+                        r.emit_fixed(kind, &block_id, body)
+                    })
+                    .await;
+                }
+                Internal::InputWaiting { block_id, question, count } => {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        r.emit(NotifyKind::InputWaiting, &block_id, question.as_deref(), count)
+                    })
+                    .await;
+                }
+                Internal::Resolve { block_id, family } => r.resolve(&block_id, family),
+                Internal::TurnStopped { block_id } => {
+                    {
+                        let mut stopped = r.stopped_at.lock().unwrap_or_else(|e| e.into_inner());
+                        // Bounded: entries past the grace window can't matter.
+                        let now = now_ms();
+                        stopped.retain(|_, t| now - *t < STOP_GRACE_MS);
+                        stopped.insert(block_id.clone(), now);
+                    }
+                    r.resolve(&block_id, Family::Turn);
+                }
+                Internal::TurnStatus { block_id, active } => {
+                    let prev = {
+                        let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
+                        // Bounded: forgetting an IDLE block is
+                        // harmless — its next `true` still reads as Started.
+                        if turns.len() > TURN_MAP_MAX {
+                            turns.retain(|_, active| *active);
+                        }
+                        turns.insert(block_id.clone(), active)
+                    };
+                    let stopped_recently = r
+                        .stopped_at
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(&block_id)
+                        .is_some_and(|t| now_ms() - *t < STOP_GRACE_MS);
+                    match turn_transition(prev, active, stopped_recently) {
+                        TurnTransition::Started => {
+                            // A new turn: the earlier stop no longer applies
+                            // to it (Codex P2 on #3705).
+                            r.stopped_at.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+                            r.resolve(&block_id, Family::Turn)
+                        }
+                        TurnTransition::Finished => {
+                            let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None, 0))
+                                .await;
+                        }
+                        TurnTransition::Nothing => {}
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// `AgentFailure.code` → the fixed body for its toast; `None` = don't notify.
+/// Only `agent_deleted` (a user action) is skipped. `killed` is NOT a user
+/// Stop — those go through the controllers' kill arm and are never
+/// classified (host_spawn.rs) — it means a signal/137, most often the OOM
+/// killer: exactly the "stopped while you were away" case (ReAgent P1 on
+/// #3654). Detail/stderr never reach a toast.
+pub fn failure_body(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "rate_limited" => "Hit a rate limit.",
+        "overloaded" => "The model provider is overloaded.",
+        "usage_limit" => "Reached its usage limit.",
+        "auth" => "Needs you to sign in again.",
+        "context_exceeded" => "Ran out of context.",
+        "max_turns" => "Reached its turn limit.",
+        "network" => "Lost its network connection.",
+        "spawn_failure" => "Couldn't start.",
+        "no_output" | "unknown_non_zero" => "Exited unexpectedly.",
+        "killed" => "Was stopped by the system (possibly out of memory).",
+        _ => return None,
+    })
+}
+
+fn spawn_ticker(r: std::sync::Weak<Router>) {
+    // Only when a Tokio runtime exists (always true in srv; unit tests of the
+    // pure policy never reach here).
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut iv = tokio::time::interval(std::time::Duration::from_millis(500));
+        loop {
+            iv.tick().await;
+            match r.upgrade() {
+                Some(r) => {
+                    r.step(Input::Tick);
+                }
+                None => return,
+            }
+        }
+    });
+}
+
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Strip control + bidi-override characters and cap length — the only
+/// user-influenced text that reaches a title (§9.1).
+pub fn sanitize_name(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !c.is_control() && !is_bidi_control(*c))
+        .collect();
+    let trimmed = cleaned.trim();
+    let mut out: String = trimmed.chars().take(AGENT_NAME_MAX).collect();
+    if out.is_empty() {
+        out = "An agent".to_string();
+    }
+    out
+}
+
+fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Rich-content spec §1.2: the agent's session summary as a single line —
+/// controls and bidi stripped, whitespace collapsed, capped at 90 characters.
+/// A summary that trips the jekt keyword list is dropped, not replaced: it is
+/// decoration, not something the user needs to be told is hidden.
+pub fn sanitize_summary(raw: &str) -> Option<String> {
+    if crate::backend::reactive::sanitize::is_sensitive_message(raw) {
+        return None;
+    }
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !is_bidi_control(*c))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    let mut out: String = line.chars().take(SUMMARY_MAX).collect();
+    if line.chars().count() > SUMMARY_MAX {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// Rich-content spec §2.1: " (+N more)" after the (already truncated) first
+/// question, so the count survives truncation. No body, no suffix — the
+/// title "has a question" stands on its own.
+pub fn with_question_count(body: Option<String>, count: usize) -> Option<String> {
+    body.map(|b| if count > 1 { format!("{b} (+{} more)", count - 1) } else { b })
+}
+
+/// §9.2 body policy: first line, sanitized, truncated, and replaced wholesale
+/// when it trips the same credential/destructive keyword list the jekt tier
+/// gate uses.
+pub fn redact_body(raw: &str, preview: Preview) -> Option<String> {
+    if preview == Preview::None {
+        return None;
+    }
+    let max = if preview == Preview::Full { 200 } else { BODY_MAX };
+    let first = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if crate::backend::reactive::sanitize::is_sensitive_message(raw) {
+        return Some("Contains sensitive content — open AgentMux to view.".to_string());
+    }
+    let cleaned: String = first.chars().filter(|c| !c.is_control() && !is_bidi_control(*c)).collect();
+    let mut out: String = cleaned.chars().take(max).collect();
+    if cleaned.chars().count() > max {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// `notify:quiethours` = `"HH:MM-HH:MM"` in local time. If `now` is inside
+/// the window, return when it ends (epoch ms); `None` outside it or on a
+/// malformed/empty value. A window whose end is before its start spans
+/// midnight ("22:00-08:00"). Equal start and end means "off".
+pub fn quiet_hours_until(spec: &str, now: chrono::DateTime<chrono::Local>) -> Option<i64> {
+    use chrono::{NaiveTime, TimeZone};
+    let (a, b) = spec.trim().split_once('-')?;
+    let start = NaiveTime::parse_from_str(a.trim(), "%H:%M").ok()?;
+    let end = NaiveTime::parse_from_str(b.trim(), "%H:%M").ok()?;
+    if start == end {
+        return None;
+    }
+    let t = now.time();
+    let today = now.date_naive();
+    let end_date = if start < end {
+        if !(t >= start && t < end) {
+            return None;
+        }
+        today
+    } else if t >= start {
+        today + chrono::Days::new(1)
+    } else if t < end {
+        today
+    } else {
+        return None;
+    };
+    chrono::Local
+        .from_local_datetime(&end_date.and_time(end))
+        .earliest()
+        .map(|dt| dt.timestamp_millis())
+}
+
+fn setting_bool(extra: &std::collections::HashMap<String, serde_json::Value>, key: &str, default: bool) -> bool {
+    extra.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
+}
+
+fn setting_str<'a>(extra: &'a std::collections::HashMap<String, serde_json::Value>, key: &str) -> Option<&'a str> {
+    extra.get(key).and_then(|v| v.as_str())
+}
+
+/// Resolve the policy's settings view from `settings.json` (§8).
+pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json::Value>) -> Settings {
+    let mut s = Settings {
+        enabled: setting_bool(extra, "notify:os:enabled", true),
+        when: match setting_str(extra, "notify:os:when") {
+            Some("always") => When::Always,
+            Some("never") => When::Never,
+            _ => When::Unfocused,
+        },
+        preview: match setting_str(extra, "notify:os:preview") {
+            Some("full") => Preview::Full,
+            Some("none") => Preview::None,
+            _ => Preview::Redacted,
+        },
+        kind_enabled: Default::default(),
+        pause_until_ms: extra.get("notify:pause:until").and_then(|v| v.as_i64()).unwrap_or(0),
+        pause_allow_attention: setting_bool(extra, "notify:pause:allowattention", false),
+        quiet_until_ms: setting_str(extra, "notify:quiethours")
+            .and_then(|spec| quiet_hours_until(spec, chrono::Local::now()))
+            .unwrap_or(0),
+        show_summary: setting_bool(extra, "notify:os:summary", true),
+    };
+    for kind in [
+        NotifyKind::InputWaiting,
+        NotifyKind::TurnCompleted,
+        NotifyKind::TurnErrored,
+        NotifyKind::AgentCrashed,
+        NotifyKind::MessageNeedsReview,
+    ] {
+        if let Some(sfx) = kind.setting_suffix() {
+            s.kind_enabled.insert(kind, setting_bool(extra, &format!("notify:os:{sfx}"), true));
+        }
+    }
+    s
+}
+
+impl Router {
+    fn settings(&self) -> Settings {
+        settings_from_extra(&self.config.get_settings().extra)
+    }
+
+    /// Does this Router's store know the block? BLOCKING (SQLite).
+    fn owns_block(&self, block_id: &str) -> bool {
+        matches!(self.store.get::<Block>(block_id), Ok(Some(_)))
+    }
+
+    /// The block's sanitized agent name and session summary, from one read.
+    /// BLOCKING (SQLite behind `Store`'s process-wide mutex) — only ever
+    /// reached through `emit` / `emit_fixed`, which callers must run off the
+    /// async workers (`spawn_blocking`; the #1782 failure class, see
+    /// websocket.rs's controllerinput note). Not cached: the summary changes
+    /// every turn and emits are rare, so the read the summary needs anyway
+    /// also serves the name.
+    fn block_labels(&self, block_id: &str) -> (String, Option<String>) {
+        let block = self.store.get::<Block>(block_id).ok().flatten();
+        let meta = |key: &str| {
+            block.as_ref().map(|b| crate::backend::obj::meta_get_string(&b.meta, key, "")).unwrap_or_default()
+        };
+        let mut raw_name = meta("agentName");
+        if raw_name.is_empty() {
+            raw_name = meta("agentId");
+        }
+        (sanitize_name(&raw_name), sanitize_summary(&meta("term:ambient_summary")))
+    }
+
+    /// Run the policy and publish what it decided. `Activate` is returned,
+    /// not published: only `ack` produces it, and it needs a store lookup.
+    fn step(&self, input: Input) -> Vec<Action> {
+        let settings = self.settings();
+        let now = now_ms();
+        let (actions, tray) = {
+            let mut p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
+            let actions = p.step(input, now, &settings);
+            (actions, p.tray_state(&settings, now))
+        };
+        for a in &actions {
+            self.publish(a);
+        }
+        self.publish_tray_if_changed(tray);
+        actions
+    }
+
+    fn publish_tray_if_changed(&self, tray: TrayState) {
+        {
+            let mut last = self.last_tray.lock().unwrap_or_else(|e| e.into_inner());
+            if last.as_ref() == Some(&tray) {
+                return;
+            }
+            *last = Some(tray.clone());
+        }
+        self.broker.publish(MuxEvent {
+            event: EVENT_NOTIFICATION_STATE.to_string(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 1,
+            data: serde_json::to_value(&tray).ok(),
+        });
+    }
+
+    fn publish(&self, action: &Action) {
+        let (event, data) = match action {
+            Action::Show(n) => (EVENT_NOTIFICATION, serde_json::to_value(n).ok()),
+            Action::Retract { id, tag } => (EVENT_NOTIFICATION_RETRACT, Some(serde_json::json!({ "id": id, "tag": tag }))),
+            // Resolved and published by `ack`.
+            Action::Activate { .. } => return,
+        };
+        self.publish_event(event, data);
+    }
+
+    fn publish_event(&self, event: &str, data: Option<serde_json::Value>) {
+        tracing::info!(event, "notify: publish");
+        self.broker.publish(MuxEvent {
+            event: event.to_string(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 0,
+            data,
+        });
+    }
+
+    // ── Source entry points ───────────────────────────────────────────────
+
+    /// A frontend reports a pane event. `question` is only used for
+    /// `InputWaiting` and goes through `redact_body`; `question_count` adds
+    /// " (+N more)" after it.
+    ///
+    /// BLOCKING (the block lookup hits the store) — call from
+    /// `spawn_blocking`, never inline on an async worker.
+    pub fn emit(&self, kind: NotifyKind, block_id: &str, question: Option<&str>, question_count: usize) {
+        let preview = self.settings().preview;
+        let body = match kind {
+            NotifyKind::InputWaiting => {
+                with_question_count(question.and_then(|q| redact_body(q, preview)), question_count)
+            }
+            _ => None,
+        };
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
+    }
+
+    /// srv-internal sources: the body is app-controlled fixed text, so it is
+    /// not redacted — only the preview=none setting strips it (in policy).
+    /// BLOCKING, like `emit`.
+    pub fn emit_fixed(&self, kind: NotifyKind, block_id: &str, body: Option<String>) {
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
+    }
+
+    /// srv-observed "agent is waiting on you" (Phase 5). Non-blocking: safe
+    /// from the controller's stdout reader thread. Coalesces with the
+    /// renderer's own report for the same block (same `input:` group).
+    pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>, count: usize) {
+        let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question, count });
+    }
+
+    /// Queued emit with no body (turn outcomes).
+    pub fn emit_nonblocking(&self, kind: NotifyKind, block_id: &str) {
+        let _ = self.internal.send(Internal::Emit {
+            kind,
+            block_id: block_id.to_string(),
+            body: None,
+            own_blocks_only: false,
+        });
+    }
+
+    /// The user stopped this block's turn: cancel "finished" for it, and don't
+    /// turn the resulting turn-end into one (queued, ordered).
+    pub fn turn_stopped_nonblocking(&self, block_id: &str) {
+        let _ = self.internal.send(Internal::TurnStopped { block_id: block_id.to_string() });
+    }
+
+    /// Ordered counterpart of `resolve`: queued behind any emit already sent
+    /// for the same block.
+    pub fn resolve_nonblocking(&self, block_id: &str, family: Family) {
+        let _ = self.internal.send(Internal::Resolve { block_id: block_id.to_string(), family });
+    }
+
+    pub fn resolve(&self, block_id: &str, family: Family) {
+        self.step(Input::Resolve { block_id: block_id.to_string(), family });
+    }
+
+    pub fn test(&self) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::Test,
+            block_id: String::new(),
+            agent_name: String::new(),
+            body: Some("You'll see alerts like this when an agent needs you.".to_string()),
+            summary: None,
+        }));
+    }
+
+    pub fn focus(&self, conn_id: &str, report: FocusReport) {
+        self.step(Input::Focus { conn_id: conn_id.to_string(), report });
+    }
+
+    pub fn disconnect(&self, conn_id: &str) {
+        self.step(Input::Disconnect { conn_id: conn_id.to_string() });
+    }
+
+    /// Presenter feedback (rich-content spec §3.3 A–D, F). For a click on a
+    /// pane's toast: find the open window showing the pane and tell only it
+    /// to select the pane (`notification:activate` names the window); if the
+    /// pane's workspace is open nowhere, park the click for the window the
+    /// launcher will open on it. The outcome tells the launcher what to raise
+    /// or open — every click ends with something in front.
+    ///
+    /// BLOCKING (store reads) — call from `spawn_blocking`.
+    pub fn ack(&self, id: &str, clicked: bool) -> AckOutcome {
+        let actions = self.step(Input::Ack { id: id.to_string(), clicked });
+        // A live notification always retracts on ack; an unknown id yields nothing.
+        let known = !actions.is_empty();
+        let activated = actions.into_iter().find_map(|a| match a {
+            Action::Activate { id, block_id } => Some((id, block_id)),
+            _ => None,
+        });
+        let target = activated.as_ref().and_then(|(_, block_id)| resolve_click_target(&self.store, block_id));
+        let (open_window, raise, any_window) = {
+            let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
+            let pick = target.as_ref().and_then(|t| pick_open_window(&p, &t.window_ids));
+            (pick, p.raise_window(), p.has_window())
+        };
+        let mut outcome = AckOutcome { known, window_id: None, workspace_id: None, has_window: any_window };
+        match (activated, target) {
+            (Some((id, _)), Some(t)) => {
+                if let Some(window_id) = open_window {
+                    self.publish_event(
+                        EVENT_NOTIFICATION_ACTIVATE,
+                        Some(serde_json::json!({
+                            "id": id,
+                            "block_id": t.block_id,
+                            "tab_id": t.tab_id,
+                            "window_id": window_id,
+                            "workspace_id": t.workspace_id,
+                            "at_ms": now_ms(),
+                        })),
+                    );
+                    outcome.window_id = Some(window_id);
+                    outcome.has_window = true;
+                } else {
+                    tracing::info!(workspace = ?t.workspace_id, "notify: click target's workspace is open in no window");
+                    outcome.workspace_id = t.workspace_id.clone();
+                    outcome.has_window = false;
+                    *self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()) = Some(PendingActivation {
+                        block_id: t.block_id,
+                        tab_id: t.tab_id,
+                        workspace_id: t.workspace_id,
+                        at_ms: now_ms(),
+                    });
+                }
+            }
+            (Some((_, block_id)), None) => {
+                tracing::info!(block_id, "notify: click target is gone; raising the app");
+                outcome.window_id = raise;
+            }
+            // A summary toast, or an id this srv never issued: raise the app.
+            (None, _) if clicked => outcome.window_id = raise,
+            (None, _) => {}
+        }
+        outcome
+    }
+
+    /// `block.reveal`: the block's tab and the open window showing it,
+    /// resolved exactly as a toast click is (`resolve_click_target` + the
+    /// same open-window pick). `None` when the block is gone or its
+    /// workspace is open in no window.
+    ///
+    /// BLOCKING (store reads) — call from `spawn_blocking`.
+    pub fn reveal_target(&self, block_id: &str) -> Option<BlockRevealEvent> {
+        let t = resolve_click_target(&self.store, block_id)?;
+        let window_id = {
+            let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
+            pick_open_window(&p, &t.window_ids)
+        }?;
+        Some(BlockRevealEvent { block_id: t.block_id, tab_id: t.tab_id, window_id })
+    }
+
+    /// Tell `target.window_id`'s renderer to reveal the block.
+    pub fn publish_block_reveal(&self, target: &BlockRevealEvent) {
+        self.publish_event(EVENT_BLOCK_REVEAL, serde_json::to_value(target).ok());
+    }
+
+    /// One-shot: the pane a click asked for while its workspace was open in
+    /// no window. Only a window on that workspace takes it (`workspace_id`
+    /// None = an older frontend, which takes any), and only for 30 s.
+    pub fn take_pending_activation(&self, workspace_id: Option<&str>) -> Option<PendingActivation> {
+        let mut slot = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
+        let now = now_ms();
+        if slot.as_ref().is_some_and(|p| now - p.at_ms > PENDING_ACTIVATION_MAX_AGE_MS) {
+            *slot = None;
+        }
+        if slot.as_ref().is_some_and(|p| may_take_pending(p, workspace_id, now)) {
+            return slot.take();
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_sanitization_strips_bidi_and_controls_and_caps() {
+        assert_eq!(sanitize_name("lark"), "lark");
+        assert_eq!(sanitize_name("evil\u{202E}txt.exe"), "eviltxt.exe");
+        assert_eq!(sanitize_name("a\nb\tc"), "abc");
+        assert_eq!(sanitize_name("   "), "An agent");
+        assert_eq!(sanitize_name(&"x".repeat(100)).chars().count(), AGENT_NAME_MAX);
+    }
+
+    /// Against the REAL serialized status type, not a hand-written JSON — the
+    /// omitted-when-false field is exactly what a hand-written fixture hid.
+    #[test]
+    fn parses_real_serialized_controller_status_including_omitted_false() {
+        use crate::backend::blockcontroller::BlockControllerRuntimeStatus;
+        let mk = |turn_active: bool| BlockControllerRuntimeStatus {
+            blockid: "b1".into(),
+            version: 1,
+            shellprocstatus: "running".into(),
+            shellprocconnname: "local".into(),
+            shellprocexitcode: 0,
+            shellprocpid: None,
+            shellprocname: String::new(),
+            spawn_ts_ms: None,
+            is_agent_pane: false,
+            turn_active,
+        };
+        let started = serde_json::to_value(mk(true)).unwrap();
+        let ended = serde_json::to_value(mk(false)).unwrap();
+        assert!(ended.get("turn_active").is_none(), "precondition: false is omitted on the wire");
+        assert_eq!(parse_turn_status(&started), Some(("b1".to_string(), true)));
+        assert_eq!(parse_turn_status(&ended), Some(("b1".to_string(), false)));
+        assert_eq!(parse_turn_status(&serde_json::json!({"turn_active": true})), None);
+        // End to end with the transition rule: start then end = Finished.
+        let (_, a) = parse_turn_status(&started).unwrap();
+        let (_, b) = parse_turn_status(&ended).unwrap();
+        assert_eq!(turn_transition(None, a, false), TurnTransition::Started);
+        assert_eq!(turn_transition(Some(a), b, false), TurnTransition::Finished);
+    }
+
+    #[test]
+    fn turn_transitions_come_only_from_real_flips() {
+        use TurnTransition::*;
+        // First sighting (srv start / replay) is never a transition to "finished".
+        assert_eq!(turn_transition(None, false, false), Nothing);
+        assert_eq!(turn_transition(None, true, false), Started);
+        // Real end of a turn.
+        assert_eq!(turn_transition(Some(true), false, false), Finished);
+        // Ended by the user's own Stop.
+        assert_eq!(turn_transition(Some(true), false, true), Nothing);
+        // Repeated statuses are not transitions.
+        assert_eq!(turn_transition(Some(true), true, false), Nothing);
+        assert_eq!(turn_transition(Some(false), false, false), Nothing);
+        // Next turn starts.
+        assert_eq!(turn_transition(Some(false), true, false), Started);
+    }
+
+    #[test]
+    fn quiet_hours_windows() {
+        use chrono::TimeZone;
+        let at = |h, m| chrono::Local.with_ymd_and_hms(2026, 9, 24, h, m, 0).unwrap();
+        let ms = |d: u32, h, m| chrono::Local.with_ymd_and_hms(2026, 9, d, h, m, 0).unwrap().timestamp_millis();
+        // Spans midnight.
+        assert_eq!(quiet_hours_until("22:00-08:00", at(23, 30)), Some(ms(25, 8, 0)));
+        assert_eq!(quiet_hours_until("22:00-08:00", at(6, 0)), Some(ms(24, 8, 0)));
+        assert_eq!(quiet_hours_until("22:00-08:00", at(12, 0)), None);
+        assert_eq!(quiet_hours_until("22:00-08:00", at(8, 0)), None, "end is exclusive");
+        // Same-day window.
+        assert_eq!(quiet_hours_until("12:00-13:30", at(12, 45)), Some(ms(24, 13, 30)));
+        assert_eq!(quiet_hours_until("12:00-13:30", at(14, 0)), None);
+        // Off / malformed.
+        assert_eq!(quiet_hours_until("", at(12, 0)), None);
+        assert_eq!(quiet_hours_until("09:00-09:00", at(9, 0)), None);
+        assert_eq!(quiet_hours_until("nonsense", at(12, 0)), None);
+        assert_eq!(quiet_hours_until("25:00-08:00", at(1, 0)), None);
+    }
+
+    #[test]
+    fn failure_classes_map_to_fixed_bodies_and_skip_user_deletes() {
+        assert_eq!(failure_body("auth"), Some("Needs you to sign in again."));
+        assert_eq!(failure_body("unknown_non_zero"), Some("Exited unexpectedly."));
+        assert_eq!(failure_body("killed"), Some("Was stopped by the system (possibly out of memory)."));
+        assert_eq!(failure_body("agent_deleted"), None);
+        assert_eq!(failure_body("<script>"), None);
+    }
+
+    #[test]
+    fn pending_activation_is_scoped_to_its_workspace_and_expires() {
+        let p = PendingActivation { block_id: "b".into(), tab_id: "t".into(), workspace_id: Some("ws1".into()), at_ms: 1_000 };
+        assert!(may_take_pending(&p, Some("ws1"), 2_000));
+        assert!(!may_take_pending(&p, Some("ws2"), 2_000), "another workspace's window must not steal it");
+        assert!(may_take_pending(&p, None, 2_000), "an older frontend doesn't say");
+        assert!(may_take_pending(&p, Some("ws1"), 1_000 + PENDING_ACTIVATION_MAX_AGE_MS));
+        assert!(!may_take_pending(&p, Some("ws1"), 1_001 + PENDING_ACTIVATION_MAX_AGE_MS), "30 s, then gone");
+        let orphan = PendingActivation { workspace_id: None, ..p };
+        assert!(may_take_pending(&orphan, Some("ws2"), 2_000));
+    }
+
+    #[test]
+    fn click_target_walks_block_to_tab_workspace_and_windows() {
+        let store = Store::open_in_memory().unwrap();
+        crate::backend::wcore::ensure_initial_data(&store).unwrap();
+        let block = store.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let t = resolve_click_target(&store, &block.oid).expect("resolves");
+        let ws = store.get_all::<Workspace>().unwrap().into_iter().next().unwrap();
+        let win = store.get_all::<Window>().unwrap().into_iter().next().unwrap();
+        assert_eq!(t.workspace_id.as_deref(), Some(ws.oid.as_str()));
+        assert!(ws.tabids.contains(&t.tab_id) || ws.pinnedtabids.contains(&t.tab_id));
+        assert_eq!(t.window_ids, vec![win.oid]);
+        assert_eq!(resolve_click_target(&store, "gone"), None);
+    }
+
+    #[test]
+    fn body_redaction() {
+        assert_eq!(redact_body("\n  Which branch?\nmore", Preview::Redacted).as_deref(), Some("Which branch?"));
+        assert_eq!(redact_body("Paste your API token here", Preview::Redacted).as_deref(),
+            Some("Contains sensitive content — open AgentMux to view."));
+        assert_eq!(redact_body("ok", Preview::None), None);
+        let long = "y".repeat(300);
+        assert_eq!(redact_body(&long, Preview::Redacted).unwrap().chars().count(), BODY_MAX + 1);
+        assert_eq!(redact_body(&long, Preview::Full).unwrap().chars().count(), 201);
+        assert_eq!(redact_body("   \n  ", Preview::Redacted), None);
+    }
+
+    #[test]
+    fn summary_sanitization() {
+        assert_eq!(sanitize_summary("Fix resize repaint delay").as_deref(), Some("Fix resize repaint delay"));
+        assert_eq!(sanitize_summary("  two\nlines\tand   spaces ").as_deref(), Some("two lines and spaces"));
+        assert_eq!(sanitize_summary("evil\u{202E}gnp.exe").as_deref(), Some("evilgnp.exe"));
+        assert_eq!(sanitize_summary("   "), None);
+        assert_eq!(sanitize_summary(""), None);
+        // Sensitive → dropped entirely, never "sensitive content".
+        assert_eq!(sanitize_summary("Rotate the api_key for staging"), None);
+        let long = "word ".repeat(40);
+        let s = sanitize_summary(&long).unwrap();
+        assert_eq!(s.chars().count(), SUMMARY_MAX + 1);
+        assert!(s.ends_with('…'));
+    }
+
+    #[test]
+    fn question_count_suffix_survives_truncation() {
+        let long = "q".repeat(300);
+        let body = with_question_count(redact_body(&long, Preview::Redacted), 3).unwrap();
+        assert!(body.ends_with("… (+2 more)"), "{body}");
+        assert_eq!(with_question_count(Some("Which branch?".into()), 1).as_deref(), Some("Which branch?"));
+        assert_eq!(with_question_count(Some("Which branch?".into()), 0).as_deref(), Some("Which branch?"));
+        assert_eq!(with_question_count(None, 4), None, "no text → the title stands alone");
+    }
+
+    #[test]
+    fn settings_defaults_and_overrides() {
+        let mut extra = std::collections::HashMap::new();
+        let s = settings_from_extra(&extra);
+        assert!(s.enabled);
+        assert!(s.show_summary);
+        assert_eq!(s.when, When::Unfocused);
+        assert_eq!(s.preview, Preview::Redacted);
+        extra.insert("notify:os:when".into(), serde_json::json!("never"));
+        extra.insert("notify:os:preview".into(), serde_json::json!("none"));
+        extra.insert("notify:os:turncompleted".into(), serde_json::json!(false));
+        extra.insert("notify:os:enabled".into(), serde_json::json!(false));
+        extra.insert("notify:pause:until".into(), serde_json::json!(1234));
+        extra.insert("notify:os:agentcrashed".into(), serde_json::json!(false));
+        extra.insert("notify:os:summary".into(), serde_json::json!(false));
+        let s = settings_from_extra(&extra);
+        assert!(!s.show_summary);
+        assert_eq!(s.pause_until_ms, 1234);
+        assert!(!s.pause_allow_attention);
+        assert_eq!(s.kind_enabled.get(&NotifyKind::AgentCrashed), Some(&false));
+        assert_eq!(s.kind_enabled.get(&NotifyKind::MessageNeedsReview), Some(&true));
+        assert!(!s.enabled);
+        assert_eq!(s.when, When::Never);
+        assert_eq!(s.preview, Preview::None);
+        assert_eq!(s.kind_enabled.get(&NotifyKind::TurnCompleted), Some(&false));
+        assert_eq!(s.kind_enabled.get(&NotifyKind::InputWaiting), Some(&true));
+    }
+}

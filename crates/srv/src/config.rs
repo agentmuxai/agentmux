@@ -1,0 +1,385 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
+#[derive(Parser, Debug, Default)]
+#[command(name = "agentmux-srv", about = "AgentMux Rust backend server")]
+pub struct CliArgs {
+    /// Path to wave data directory (overrides AGENTMUX_DATA_HOME)
+    #[arg(long = "wavedata")]
+    pub wavedata: Option<PathBuf>,
+
+    /// Instance identifier (used for multi-version coexistence)
+    #[arg(long = "instance", default_value = "default")]
+    pub instance: String,
+
+    /// Run without a launcher or desktop host (container, server, CI).
+    /// Read early by `headless::prepare_env`; see
+    /// docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md.
+    #[arg(long = "headless")]
+    pub headless: bool,
+
+    /// Headless: read the auth key from this file instead of generating one.
+    #[arg(long = "auth-key-file")]
+    pub auth_key_file: Option<PathBuf>,
+
+    /// Headless: fixed loopback port for the web listener (default: OS-chosen).
+    #[arg(long = "web-port")]
+    pub web_port: Option<u16>,
+
+    /// Headless: fixed loopback port for the websocket listener (default: OS-chosen).
+    #[arg(long = "ws-port")]
+    pub ws_port: Option<u16>,
+
+    /// Headless: serve the built frontend (a directory holding index.html)
+    /// at `/`; health stays at `/health`.
+    #[arg(long = "frontend-dir")]
+    pub frontend_dir: Option<PathBuf>,
+
+    /// Headless: also accept this browser origin (e.g. https://app.example.com)
+    /// for CORS and the /ws check, beside loopback. Repeatable.
+    #[arg(long = "allowed-origin")]
+    pub allowed_origins: Vec<String>,
+
+    /// Headless: where srv keeps secrets (API keys, OAuth accounts, cloud
+    /// credentials). Default `file`: owner-only files under the shared dir,
+    /// for machines with no OS keychain.
+    #[arg(long = "secret-store", value_enum)]
+    pub secret_store: Option<SecretStoreKind>,
+
+    #[command(subcommand)]
+    pub command: Option<SrvCommand>,
+}
+
+/// `--secret-store`: see `identity::secret_store`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecretStoreKind {
+    /// The OS keychain, as the desktop app uses.
+    Keychain,
+    /// Owner-only files, one per secret.
+    File,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SrvCommand {
+    /// Run pending data migrations and exit. Invoked by the launcher before
+    /// starting the daemon so the srv always starts with clean migrated state.
+    Migrate {
+        /// Print pending migrations without applying them.
+        #[arg(long)]
+        dry_run: bool,
+        /// List all migrations and their applied/pending status.
+        #[arg(long)]
+        list: bool,
+        /// Check every APPLIED migration post-condition (row counts, marker
+        /// files) instead of running anything. Exit 0 if every check holds or
+        /// is not verifiable, 3 if any is a mismatch or errored (2 is clap usage-error, so a typoed flag never reads as a data finding). This is the
+        /// doctor pass from SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1:
+        /// db_migrations only records that up() returned Ok, never that it
+        /// wrote what it was meant to.
+        #[arg(long)]
+        verify: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub auth_key: String,
+    /// A separate, narrowly-scoped credential for LAN peer discovery
+    /// (mDNS TXT record + UDP broadcast responder) — NOT `auth_key`.
+    /// Minted fresh per-launch, internal to srv only (never needs to
+    /// leave this process except via the LAN broadcast itself, unlike
+    /// `auth_key` which the launcher/frontend also need — see
+    /// `LanDiscovery`'s doc comment). Broadcasting the full-access
+    /// `auth_key` to anything that can receive an mDNS multicast packet
+    /// or send a UDP probe used to mean a passive LAN listener got
+    /// standing access to the ENTIRE local `/agentmux/service` surface,
+    /// not just LAN-forwarding — this key is accepted only by the two
+    /// routes LAN peer forwarding actually needs
+    /// (`lan_or_full_auth_middleware` in `server/mod.rs`), so a captured
+    /// value's blast radius shrinks to "can forward jekts to this
+    /// instance and query which agents live here." See
+    /// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §2.1/§3
+    /// LAN P0-1.
+    pub lan_key: String,
+    /// Shared secret proving a `host_ipc.Register` caller is really the
+    /// paired CEF host, not an agent process (agents share `auth_key` too
+    /// — see `host_ipc.rs::handle_register`'s doc comment). `None` when
+    /// nobody set `AGENTMUX_HOST_REG_SECRET` — `handle_register` then
+    /// refuses every registration rather than accepting one unauthenticated,
+    /// since there's nothing to check the caller against. Sourced from the
+    /// launcher (`agentmux-launcher::srv_spawner::SrvSpawnResult::host_reg_secret`,
+    /// minted once and reused across host-only crash-restarts, exactly
+    /// like `auth_key`) or, in host-owned-spawn/dev mode, from the host
+    /// itself (`crates/cef/src/sidecar.rs::spawn_backend`, which
+    /// generates it alongside its own `auth_key`).
+    pub host_reg_secret: Option<String>,
+    /// Empty when unset. Paths stay `PathBuf` (read with `var_os`) so a home
+    /// directory that isn't valid UTF-8 still reaches the stores intact
+    /// (Codex P2 on #3893).
+    pub data_home: PathBuf,
+    pub config_home: PathBuf,
+    pub app_path: String,
+    #[allow(dead_code)]
+    pub is_dev: bool,
+    pub version: &'static str,
+    pub build_time: &'static str,
+    pub instance_id: String,
+}
+
+impl Config {
+    /// Build config from env vars + CLI args.
+    /// Removes AGENTMUX_AUTH_KEY from the environment after reading (matching Go behavior).
+    pub fn from_env_and_args(args: &CliArgs) -> Result<Self, String> {
+        let auth_key = std::env::var("AGENTMUX_AUTH_KEY")
+            .map_err(|_| "AGENTMUX_AUTH_KEY environment variable is required".to_string())?;
+
+        if auth_key.is_empty() {
+            return Err("AGENTMUX_AUTH_KEY must not be empty".to_string());
+        }
+
+        // Remove from env after read (matching Go authkey.go:50)
+        std::env::remove_var("AGENTMUX_AUTH_KEY");
+
+        // CLI flag wins over env. The launcher sets the canonical
+        // `AGENTMUX_DATA_DIR` and `AGENTMUX_CONFIG_DIR` via
+        // `agentmux_common::DataPaths::to_env_vars`. Pre-unification
+        // names (`AGENTMUX_DATA_HOME`, `AGENTMUX_CONFIG_HOME`) are no
+        // longer set — no fallback (symmetry; partial-rollout isn't a
+        // supported scenario per spec §3.4 "no migration").
+        // An empty `--wavedata ""` counts as absent, as it does for the lock
+        // headless takes (`headless::effective_data_dir`) — otherwise the lock
+        // and the stores would pick different directories (Codex P2 on #3893).
+        let data_home = args
+            .wavedata
+            .clone()
+            .filter(|p| !p.as_os_str().is_empty())
+            .or_else(|| std::env::var_os("AGENTMUX_DATA_DIR").map(PathBuf::from))
+            .unwrap_or_default();
+
+        let config_home = std::env::var_os("AGENTMUX_CONFIG_DIR").map(PathBuf::from).unwrap_or_default();
+        let app_path = std::env::var("AGENTMUX_APP_PATH").unwrap_or_default();
+        // is_dev is now derived from AGENTMUX_RUNTIME_MODE (the
+        // canonical env var emitted by the unified DataPaths layer).
+        // Legacy AGENTMUX_DEV is no longer set by the launcher.
+        let is_dev = matches!(
+            agentmux_common::RuntimeMode::from_env(),
+            Some(agentmux_common::RuntimeMode::Dev { .. })
+        );
+
+        // Two v4 UUIDs concatenated for margin over a single UUID's 122 bits
+        // of randomness — same "avoid a rand/getrandom dependency just for
+        // this" reasoning as agent_jekt_keys.rs's random_key_bytes(), but
+        // kept as a plain string here (not raw bytes) since this only ever
+        // travels as a String — an mDNS TXT record value / UDP JSON field /
+        // HTTP header — never binary-serialized or HMAC-keyed.
+        let lan_key = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+
+        // Optional — only set by a launcher/host that knows about this
+        // credential. Scrub it from the env the same way AGENTMUX_AUTH_KEY
+        // is scrubbed above, so it can't be read back out of this
+        // process's own environment later (e.g. by a shell tool an agent
+        // asks this process to run — not applicable to srv itself, but
+        // matching the auth_key precedent costs nothing).
+        let host_reg_secret = std::env::var("AGENTMUX_HOST_REG_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
+        if host_reg_secret.is_some() {
+            std::env::remove_var("AGENTMUX_HOST_REG_SECRET");
+        }
+
+        Ok(Config {
+            auth_key,
+            lan_key,
+            host_reg_secret,
+            data_home,
+            config_home,
+            app_path,
+            is_dev,
+            version: env!("CARGO_PKG_VERSION"),
+            build_time: option_env!("BUILD_TIME").unwrap_or("dev"),
+            instance_id: args.instance.clone(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Serialize config tests — they mutate process-global env vars
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Lock helper that recovers from poisoned mutex. A panic in any
+    /// test would otherwise propagate poison to all later tests via
+    /// `lock().unwrap()` and produce noise unrelated to the actual
+    /// failing test.
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Clear every env var our config reads so each test starts from
+    /// a known state, regardless of leakage from prior tests.
+    fn clear_env() {
+        for k in [
+            "AGENTMUX_AUTH_KEY",
+            "AGENTMUX_DATA_DIR",
+            "AGENTMUX_DATA_HOME",
+            "AGENTMUX_CONFIG_DIR",
+            "AGENTMUX_CONFIG_HOME",
+            "AGENTMUX_APP_PATH",
+            "AGENTMUX_RUNTIME_MODE",
+            "AGENTMUX_DEV",
+            "AGENTMUX_HOST_REG_SECRET",
+        ] {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[test]
+    fn missing_auth_key_errors() {
+        let _lock = lock();
+        clear_env();
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
+        let result = Config::from_env_and_args(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("AGENTMUX_AUTH_KEY"));
+    }
+
+    #[test]
+    fn empty_auth_key_errors() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
+        let result = Config::from_env_and_args(&args);
+        assert!(result.is_err());
+        clear_env();
+    }
+
+    #[test]
+    fn cli_wavedata_overrides_env() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-12345");
+        std::env::set_var("AGENTMUX_DATA_DIR", "/from/env");
+        let args = CliArgs {
+            wavedata: Some("/from/cli".into()),
+            instance: "default".to_string(),
+            command: None,
+            ..Default::default()
+        };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.data_home, PathBuf::from("/from/cli"));
+        assert!(std::env::var("AGENTMUX_AUTH_KEY").is_err());
+        clear_env();
+    }
+
+    #[test]
+    fn empty_cli_wavedata_counts_as_absent() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-empty-wavedata");
+        std::env::set_var("AGENTMUX_DATA_DIR", "/from/env");
+        let args = CliArgs { wavedata: Some(PathBuf::new()), ..Default::default() };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.data_home, PathBuf::from("/from/env"));
+        clear_env();
+    }
+
+    #[test]
+    fn env_var_parsing() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
+        std::env::set_var("AGENTMUX_DATA_DIR", "/data");
+        std::env::set_var("AGENTMUX_CONFIG_DIR", "/config");
+        std::env::set_var("AGENTMUX_APP_PATH", "/app");
+        std::env::set_var("AGENTMUX_RUNTIME_MODE", "dev:main");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.data_home, PathBuf::from("/data"));
+        assert_eq!(config.config_home, PathBuf::from("/config"));
+        assert_eq!(config.app_path, "/app");
+        assert!(config.is_dev);
+        clear_env();
+    }
+
+    /// A data or config dir that isn't valid UTF-8 (a Unix home with such a
+    /// name) is kept byte for byte, not dropped: `std::env::var` would call it
+    /// absent, and the stores would open under the default root instead.
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_dirs_are_kept() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let _lock = lock();
+        clear_env();
+        let data = OsStr::from_bytes(b"/home/caf\xe9/data");
+        let conf = OsStr::from_bytes(b"/home/caf\xe9/config");
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-non-utf8");
+        std::env::set_var("AGENTMUX_DATA_DIR", data);
+        std::env::set_var("AGENTMUX_CONFIG_DIR", conf);
+        let config = Config::from_env_and_args(&CliArgs::default()).unwrap();
+        assert_eq!(config.data_home.as_os_str(), data);
+        assert_eq!(config.config_home.as_os_str(), conf);
+        clear_env();
+    }
+
+    #[test]
+    fn host_reg_secret_defaults_to_none_when_unset() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-1");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.host_reg_secret, None);
+        clear_env();
+    }
+
+    #[test]
+    fn host_reg_secret_is_read_and_scrubbed_from_env() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-2");
+        std::env::set_var("AGENTMUX_HOST_REG_SECRET", "the-shared-secret");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.host_reg_secret, Some("the-shared-secret".to_string()));
+        assert!(std::env::var("AGENTMUX_HOST_REG_SECRET").is_err());
+        clear_env();
+    }
+
+    #[test]
+    fn lan_key_is_generated_nonempty_and_distinct_from_auth_key() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert!(!config.lan_key.is_empty());
+        assert_ne!(
+            config.lan_key, config.auth_key,
+            "the LAN-broadcast credential must never equal the full-access auth_key"
+        );
+        clear_env();
+    }
+
+    #[test]
+    fn lan_key_is_freshly_generated_per_call_not_a_fixed_constant() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None, ..Default::default() };
+        let first = Config::from_env_and_args(&args).unwrap().lan_key;
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
+        let second = Config::from_env_and_args(&args).unwrap().lan_key;
+        assert_ne!(first, second, "each process launch must mint its own lan_key");
+        clear_env();
+    }
+}

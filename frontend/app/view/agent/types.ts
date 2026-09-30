@@ -611,7 +611,7 @@ export interface HistoryLinkNode {
 /**
  * Pane-open continuity notice — "the conversation below won't be continued",
  * known before anything is spawned (`useResumePreflight`, backed by
- * `agentmux-srv/src/backend/resume_preflight.rs`).
+ * `crates/srv/src/backend/resume_preflight.rs`).
  *
  * A render-time synthetic like `HistoryLinkNode`: injected by
  * `injectResumePreflight`, never persisted, never in the reducer store. It is

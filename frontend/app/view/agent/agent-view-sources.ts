@@ -24,9 +24,14 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "activity/useAttachedTaskAxis.ts",
     "components/AgentStashDrawer.tsx",
     "components/AgentShellDrawer.tsx",
+    "components/AgentBottomPanels.tsx",
     "failure/useAccountBinding.ts",
     "failure/useAuthHealth.ts",
     "agent-media.tsx",
+    "hooks/usePaneReveal.ts",
+    "hooks/useLiveFeedRollOff.ts",
+    "hooks/useTurnReconciliation.ts",
+    "hooks/turn-confirmation.ts",
 ];
 
 /**
@@ -35,4 +40,4 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
  * nothing stopped it. Lower this whenever an extraction shrinks the file;
  * raising it needs a reason in the PR.
  */
-export const AGENT_VIEW_MAX_LINES = 2110;
+export const AGENT_VIEW_MAX_LINES = 1504;

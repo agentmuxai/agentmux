@@ -40,11 +40,16 @@ function paneAcceptsInput(blockData: Block): boolean {
 
 
 /**
- * Split the pane in the given direction, spawning a new pane of the same type
- * that inherits the source pane's meta (view, controller, cwd, connection, etc.).
- * Agent panes strip agent-specific fields so the new pane shows the agent picker.
+ * The block a split of `blockData` creates. A view that declares
+ * `splitBlockDef` gets exactly that (agent: a fresh picker,
+ * SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md). Any other view gets a
+ * pane of the same type that inherits the source pane's meta (view,
+ * controller, cwd, connection, etc.).
  */
-async function handleSplitPane(blockData: Block, direction: SplitDirection): Promise<void> {
+function splitBlockDef(blockData: Block): BlockDef {
+    const declared = paneTabCapability(blockData.meta?.view, "splitBlockDef");
+    if (declared) return declared();
+
     const sourceConn = blockData.meta?.connection;
     const meta: Record<string, unknown> = { ...(blockData.meta ?? {}) };
     // Only inherit connection for non-local connections (SSH/WSL).
@@ -53,16 +58,15 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
     if (!sourceConn || sourceConn === "local") {
         delete meta["connection"];
     }
-    // A view can declare meta a split must not copy (`splitDropsMeta`, Pane
-    // Tab contract Phase 5) — the agent pane drops its agent-specific fields
-    // so the new pane shows the picker instead of re-launching the same agent.
-    for (const key of paneTabCapability(blockData.meta?.view, "splitDropsMeta") ?? []) {
-        delete meta[key];
-    }
-    // Any view: the "Always on top" tack belongs to the source pane's floating
-    // window; the new split is docked (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §6.3).
+    // The "Always on top" tack belongs to the source pane's floating window;
+    // the new split is docked (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §6.3).
     delete meta[FLOATING_ONTOP_META_KEY];
-    const blockDef: BlockDef = { meta };
+    return { meta };
+}
+
+/** Split the pane in the given direction. */
+async function handleSplitPane(blockData: Block, direction: SplitDirection): Promise<void> {
+    const blockDef = splitBlockDef(blockData);
 
     try {
         switch (direction) {

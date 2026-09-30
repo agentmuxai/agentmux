@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Shared audit-log fetch, sourced from ReactiveHandler's ring buffer
-// (agentmux-srv/src/backend/reactive/handler.rs). Imported by both the
+// (crates/srv/src/backend/reactive/handler.rs). Imported by both the
 // Audit manager (shows everything) and the Supervisor manager (shows only
 // Supervisor-originated rows, filtered client-side on `outcome`).
 
@@ -26,7 +26,7 @@ export interface AuditEntry {
      *  "nudge_sent" only when delivery actually succeeded; "nudge_failed"
      *  when a nudge was attempted but delivery itself failed (see
      *  `success`/`error_message`). Mirrors AuditLogEntry.outcome
-     *  (agentmux-srv/src/backend/reactive/types.rs). */
+     *  (crates/srv/src/backend/reactive/types.rs). */
     outcome?: string;
     /** Supervisor's stated reasoning, populated alongside `outcome`. */
     reason?: string;

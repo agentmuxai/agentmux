@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// MPS event-name constants — mirrors agentmux-srv/src/backend/mps.rs:22-54.
+// MPS event-name constants — mirrors crates/srv/src/backend/mps.rs:22-54.
 // Use these instead of bare string literals so typos are caught at build time
 // and grepping for an event name finds all its usages in one search.
 
@@ -17,7 +17,7 @@ export const WpsEvent = {
     // pair) — applied in one Solid batch() flush so the UI can't paint a
     // half-applied intermediate state. Mirrors
     // WS_EVENT_MUX_OBJ_BATCHED_UPDATES in
-    // agentmux-srv/src/backend/eventbus.rs. See
+    // crates/srv/src/backend/eventbus.rs. See
     // docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
     MuxObjBatchedUpdates: "waveobj:batchedupdates",
     InstallProgress: "install_progress",
@@ -85,7 +85,7 @@ export const WpsEvent = {
     // most other block-scoped events here: a pane can have more than one
     // `/btw` in flight, and each overlay must only see its own answer).
     // Mirrors `mps::EVENT_BTW_ANSWER_CHUNK`
-    // (agentmux-srv/src/server/agent_handlers/side_question.rs's
+    // (crates/srv/src/server/agent_handlers/side_question.rs's
     // `publish_chunk`). Payload:
     // `{ blockId: string, requestId: string, event: AgentEvent, done: boolean }`
     // — `event` is the SAME tagged `AgentEvent` union every normal turn

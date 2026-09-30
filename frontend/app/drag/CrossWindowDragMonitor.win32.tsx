@@ -364,7 +364,7 @@ async function performTearOff(
         // CRITICAL: invoke the IPC FIRST, then mutate the layout on
         // success. If we delete the layout node up front and the IPC
         // fails (e.g. the H.7 mid-close gate in
-        // `agentmux-cef/src/commands/floating_pane.rs` rejects with
+        // `crates/cef/src/commands/floating_pane.rs` rejects with
         // "a pane is currently closing; retry shortly", or any other
         // error path), the pane would be orphaned — still in
         // `blockids` but with no layout node and no floater.

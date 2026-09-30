@@ -9,7 +9,7 @@
 
 ## What this libcef contains that upstream's doesn't
 
-1. **`CefWindow::BeginWindowDrag()`** — appended to the `_cef_window_t` C struct, called via raw FFI by `agentmux-cef/src/ui_tasks.rs::StartWindowDragTask` to dispatch `xdg_toplevel.move` (Wayland) / `_NET_WM_MOVERESIZE` (X11/XWayland) on the user's left-click drag of the title-bar area.
+1. **`CefWindow::BeginWindowDrag()`** — appended to the `_cef_window_t` C struct, called via raw FFI by `crates/cef/src/ui_tasks.rs::StartWindowDragTask` to dispatch `xdg_toplevel.move` (Wayland) / `_NET_WM_MOVERESIZE` (X11/XWayland) on the user's left-click drag of the title-bar area.
 2. **Right-click passthrough on HTCAPTION** — lets right-clicks on the drag region reach the renderer (for the pane-header context menu).
 3. **Transparency broadening** — deferred `SetBackgroundOpaque(false)` + WebContents transparency cascade. Foundation for Wayland window transparency. Root cause identified (views::SolidBackground / kColorPrimaryBackground); fix in progress.
 

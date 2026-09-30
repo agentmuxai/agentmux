@@ -52,7 +52,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Codex P1 on PR #3231: this script's candidates were validated by file
 # PRESENCE only (libcef.so + icudtl.dat exist) — never by version. A
 # pre-existing local ~/cef-build tree from before a CEF milestone bump (e.g.
-# still on 148 after agentmux-cef/Cargo.toml moved to 152) would be silently
+# still on 148 after crates/cef/Cargo.toml moved to 152) would be silently
 # accepted, producing a runtime/binding-version mismatch bundle. Same
 # technique scripts/verify-angle-libs.sh already uses for binary inspection
 # (`grep -a` for a plain-text marker) — CEF's own version string is embedded

@@ -30,12 +30,11 @@
  * Spec: SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §2.
  */
 
-import { atoms, MOS } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { addWidgetAsPaneTab, closeBlockInStack } from "@/layout/index";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
-
-const AGENT_WIDGET_KEY = "defwidget@agent";
+import { agentPickerBlockDef } from "./agent-picker-blockdef";
 
 // In-flight closes keyed by blockId. The picker path awaits a `pane.open`
 // RPC before closing, so a fast double-click on × would otherwise add two
@@ -68,7 +67,7 @@ async function closeAgentTabImpl({ layoutModel, ownNodeId, blockId }: CloseAgent
     const revealGen = holdLeafRevealGate(node.id);
     try {
         try {
-            await addWidgetAsPaneTab(layoutModel, node.id, pickerBlockDef());
+            await addWidgetAsPaneTab(layoutModel, node.id, agentPickerBlockDef());
         } catch (e) {
             // Couldn't create the replacement — fall back to today's
             // behavior rather than leaving the tab un-closable.
@@ -90,10 +89,4 @@ function shouldReturnToPicker(node: { id: string; data?: TabLayoutData }, ownNod
     if (stack.length > 1) return false;
     const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
     return meta?.view === "agent" && !!meta?.["agentId"];
-}
-
-/** The same block definition "+" → Agent uses, so the replacement tab is
- *  indistinguishable from a freshly added one. */
-function pickerBlockDef(): BlockDef {
-    return atoms.fullConfigAtom()?.widgets?.[AGENT_WIDGET_KEY]?.blockdef ?? { meta: { view: "agent" } };
 }

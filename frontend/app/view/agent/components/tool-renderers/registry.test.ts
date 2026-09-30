@@ -140,6 +140,6 @@ describe("tool-renderer registry — built-ins (parity)", () => {
         // 30s, ~7× the 4.32s measured worst case. Costs nothing on the happy
         // path; if this test ever genuinely takes 30s something is wedged and
         // the failure is real. Same reasoning as IO_TIMEOUT in
-        // agentmux-srv/tests/subprocess_io.rs (issue #2863 / PR #2911).
+        // crates/srv/tests/subprocess_io.rs (issue #2863 / PR #2911).
     }, 30_000);
 });

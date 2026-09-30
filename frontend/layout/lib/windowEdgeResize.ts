@@ -8,7 +8,7 @@
 // untouched, exactly as before).
 //
 // Host plumbing (Windows-first): the CEF host's window-edge-resize wndproc
-// hook (agentmux-cef/src/client/wndproc.rs) forwards three renderer events
+// hook (crates/cef/src/client/wndproc.rs) forwards three renderer events
 // during a native size loop:
 //
 //   windowresize:begin {}                     — first WM_SIZING of a session

@@ -59,6 +59,7 @@ import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
+import { readZoom } from "@/app/store/zoom-factor";
 
 /** This-machine-only preference — no cross-device sync, no existing
  *  localStorage precedent in this component tree to extend (a new small
@@ -980,11 +981,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // app.tsx) writes `term:zoom` for any block whose `viewType ===
     // "agent"`; the picker just needs to read + apply.
     const block = props.model.blockAtom;
-    const zoomFactor = createMemo(() => {
-        const z = block()?.meta?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
+    const zoomFactor = createMemo(() => readZoom(block()?.meta));
 
     // Shared between both branches below (fallback and real-content) — see
     // pickerReady/showPickerOverlay's own comments above for why a single

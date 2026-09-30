@@ -9,7 +9,7 @@
 import { RpcClient } from "../rpc-client";
 
 // GENERATED from their Rust definitions by ts-rs
-// (agentmux-srv/src/backend/rpc_types/bundle.rs).
+// (crates/srv/src/backend/rpc_types/bundle.rs).
 export type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/CommandMemoryDeliveryClaimFallbackData";
 export type { MemoryDeliveryClaimFallbackResult } from "@/types/rpc/MemoryDeliveryClaimFallbackResult";
 import type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/CommandMemoryDeliveryClaimFallbackData";

@@ -21,7 +21,7 @@ import type { LogFn } from "./useAgentControllerStatus";
  *
  * Encodes the wire contract: `BlockControllerRuntimeStatus.is_agent_pane` and
  * `.turn_active` are both `#[serde(skip_serializing_if = "is_false")]`
- * (agentmux-srv/src/backend/blockcontroller/mod.rs), so a `false` value is
+ * (crates/srv/src/backend/blockcontroller/mod.rs), so a `false` value is
  * OMITTED from the JSON rather than sent as `false`. A turn-END event for an
  * agent pane therefore looks like `{ is_agent_pane: true }` with `turn_active`
  * absent — which must read as `false`, not "no signal". Only a present

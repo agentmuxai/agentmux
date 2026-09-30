@@ -17,7 +17,7 @@ export const DISPLAY_NAME_MAX_LEN = 64;
 
 /**
  * The bootstrap workspace name a fresh AgentMux data directory seeds on
- * first-ever launch (`agentmux-srv/src/backend/wcore/mod.rs`,
+ * first-ever launch (`crates/srv/src/backend/wcore/mod.rs`,
  * `create_workspace(store, "Starter workspace")`). Never renamed by the
  * user, so it carries no more identifying information than "no name at
  * all" — the spec's own example table

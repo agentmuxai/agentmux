@@ -1,0 +1,2631 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Unified data-path resolution for AgentMux.
+//!
+//! Single source of truth for where state lives on disk. Replaces the
+//! launcher / host / sidecar trio of independent path computations
+//! (see docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md §3) and the
+//! per-version isolation pattern it set up (data was keyed on the
+//! build version so My Agents reset on every patch bump). The current
+//! model keys data on a *channel* — a stable identifier that spans
+//! versions within the same compat band, so agents survive rebuilds.
+//! See docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md and discussion
+//! #1026 for the channel design and rationale.
+//!
+//! Layout:
+//!
+//! ```text
+//! ~/.agentmux/
+//! ├── shared/                       (cookies, credentials, account-wide)
+//! ├── channels/<channel>/           (installed + portable + custom)
+//! │   ├── data/, config/, logs/, cef-cache/, agents/
+//! │   └── runtime/                  (lock + IPC, single instance per channel)
+//! └── dev/<branch>/                 (per-branch dev isolation)
+//!     └── (same children as channels/<channel>/)
+//! ```
+//!
+//! Channel resolution (via [`DataPaths::resolve`]):
+//! - `AGENTMUX_CHANNEL=<name>` env override wins for `Installed` /
+//!   `Portable` modes — lets the operator point a released binary at
+//!   any channel for parallel-channel testing.
+//! - `RuntimeMode::Installed` / `Portable` w/o override → build-time
+//!   default from `AGENTMUX_BUILD_CHANNEL_DEFAULT` (set by the
+//!   packaging script; defaults to `"stable"` if unset, e.g. for
+//!   `cargo run`).
+//! - `RuntimeMode::Dev { branch }` → channel name is `dev-<branch>`
+//!   for diagnostics; on-disk path stays at `~/.agentmux/dev/<branch>/`
+//!   (NOT under `channels/`). Both the host (`agentmux-cef`) and
+//!   launcher (`agentmux-launcher`) use [`DataPaths::resolve_path_only`]
+//!   for dev builds to ignore `AGENTMUX_CHANNEL` — a dev session
+//!   launched from inside a parent agentmux pane mustn't inherit
+//!   the parent's channel and break per-branch isolation. Channel
+//!   override is intentionally NOT supported in dev mode; if you
+//!   want a different channel, use a portable build.
+
+use crate::RuntimeMode;
+use std::path::{Path, PathBuf};
+
+/// Build-time default channel for `Installed` / `Portable` modes.
+/// Set by the packaging script (`task package` exports
+/// `AGENTMUX_BUILD_CHANNEL_DEFAULT=local-<branch>`; release CI exports
+/// `stable`). Falls back to `"stable"` when the binary is built
+/// without the env (e.g. plain `cargo build` / `cargo run` for tests).
+const BUILD_CHANNEL_DEFAULT: &str =
+    match option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
+        Some(s) => s,
+        None => "stable",
+    };
+
+/// Channel names that would collide with sibling dirs at
+/// `~/.agentmux/` or with reserved subdir names inside a channel.
+/// Rejected by [`sanitize_channel_name`].
+const RESERVED_CHANNEL_NAMES: &[&str] = &[
+    "shared",
+    "snapshots",
+    "dev",
+    "versions",
+    "channels",
+    "runtime",
+];
+
+/// All paths a launcher / host / srv needs. Computed once by the
+/// launcher; downstream binaries read paths from env vars set by the
+/// launcher rather than recomputing (avoids the legacy desync risk
+/// where each binary made its own portable / dev-mode determination).
+#[derive(Debug, Clone)]
+pub struct DataPaths {
+    /// `~/.agentmux/` itself — the resolved root. Account-wide config
+    /// that predates the unified layout (e.g. the launcher's
+    /// `config.toml`) lives directly here. Honors
+    /// `AGENTMUX_HOME_OVERRIDE` for tests.
+    pub home_dir: PathBuf,
+
+    /// Top-level dir for this channel+mode. All per-channel paths
+    /// below are children. Either `~/.agentmux/channels/<channel>/`
+    /// (installed / portable / AGENTMUX_CHANNEL override) or
+    /// `~/.agentmux/dev/<branch>/` (dev mode without env override).
+    ///
+    /// Note: the field name is `instance_dir` for backward compat with
+    /// downstream call sites; semantically it's now the *channel* root,
+    /// not the *version* root.
+    pub instance_dir: PathBuf,
+
+    /// Channel identifier this resolution used (e.g. `"stable"`,
+    /// `"local-main"`, `"dev-main"`, or a user-specified custom
+    /// channel from `AGENTMUX_CHANNEL`). Surfaced for diagnostics,
+    /// logging, and the launcher splash; downstream binaries usually
+    /// don't need it (paths are passed via env vars).
+    pub channel: String,
+
+    /// `instance_dir/data/` — srv DB (objects.db, sagas.db, …).
+    pub data_dir: PathBuf,
+
+    /// `instance_dir/config/` — settings.json, repos.json, etc.
+    pub config_dir: PathBuf,
+
+    /// `instance_dir/logs/` — host + srv + launcher logs (rotated).
+    pub logs_dir: PathBuf,
+
+    /// `instance_dir/cef-cache/` — Chromium runtime cache (regenerable).
+    pub cef_cache_dir: PathBuf,
+
+    /// `instance_dir/agents/` — agent workspace state.
+    pub agents_dir: PathBuf,
+
+    /// `instance_dir/runtime/` — single-instance lock + IPC (pid,
+    /// lockfile, ipc-port, named-pipe). One set per version+mode.
+    pub instance_runtime_dir: PathBuf,
+
+    /// `~/.agentmux/shared/` — version-independent, account-wide
+    /// state (cookies, OAuth tokens, API keys, dictionary downloads).
+    pub shared_dir: PathBuf,
+
+    /// Snapshot of the [`RuntimeMode`] this resolution used. Helpful
+    /// for logging and feature gates.
+    pub mode: RuntimeMode,
+}
+
+impl DataPaths {
+    /// Resolve all paths for the given version + mode. Honors
+    /// `AGENTMUX_HOME_OVERRIDE` for tests (replaces `~/.agentmux` root).
+    ///
+    /// Returns `Err` if the input contains values that cannot be
+    /// represented as a safe single-segment subpath — e.g. `..` in the
+    /// version string, or a Dev branch that sanitizes to empty. This
+    /// is belt-and-braces safety: parse-time sanitization in
+    /// [`crate::RuntimeMode`] should already have caught these, but a
+    /// `RuntimeMode::Dev { branch }` constructed directly (e.g. by a
+    /// test or future caller) is also rejected here.
+    pub fn resolve(version: &str, mode: &RuntimeMode) -> Result<Self, String> {
+        Self::resolve_internal(version, mode, /* honor_env_channel = */ true)
+    }
+
+    /// Like [`Self::resolve`], but ignores the `AGENTMUX_CHANNEL` env
+    /// override and uses only the mode-based default channel. Mirror
+    /// of [`RuntimeMode::current_path_only`] for path resolution.
+    ///
+    /// Used by dev-build self-detection paths in `agentmux-cef`'s
+    /// `main.rs` and `sidecar.rs`. Those paths run when a dev host
+    /// has been launched from inside a parent AgentMux instance (e.g.
+    /// `task dev` invoked from inside an agent pane in a portable
+    /// build), where the child would otherwise inherit the parent's
+    /// `AGENTMUX_*` env — including `AGENTMUX_CHANNEL` — and write
+    /// into the parent's channel instead of `dev/<branch>/`. That
+    /// cross-contamination would also trip the channel's single-
+    /// instance lock and route every "open" back to the parent
+    /// window. Path-based mode detection is authoritative for dev
+    /// builds; channel resolution here mirrors that discipline.
+    /// Codex P1 follow-up on PR #1027.
+    pub fn resolve_path_only(version: &str, mode: &RuntimeMode) -> Result<Self, String> {
+        Self::resolve_internal(version, mode, /* honor_env_channel = */ false)
+    }
+
+    fn resolve_internal(
+        version: &str,
+        mode: &RuntimeMode,
+        honor_env_channel: bool,
+    ) -> Result<Self, String> {
+        let root = resolve_root()?;
+        // `version` is still validated for path safety even though it
+        // no longer appears in the on-disk path — it flows into
+        // logging, the migration framework (Increment B), and
+        // `meta.json` records, so a traversal-laced value mustn't
+        // round-trip into a future path build by accident.
+        sanitize_path_segment(version)
+            .ok_or_else(|| format!("invalid version string for path: {:?}", version))?;
+
+        // Channel resolution: env override > mode default. Dev mode's
+        // *channel name* and *path* diverge intentionally — name is
+        // `dev-<branch>` for diagnostics; path stays at
+        // `~/.agentmux/dev/<branch>/` so per-branch isolation works
+        // unchanged from Phase 1.
+        let (channel, instance_dir) =
+            resolve_channel_and_dir(mode, &root, honor_env_channel)?;
+
+        // For Installed/Portable builds, version-scope the mutable
+        // runtime dirs so two concurrent release versions don't share
+        // SQLite DBs or Chromium caches. Dev builds are already
+        // branch-isolated via their path; no extra scoping needed.
+        //
+        // Layout after this change:
+        //   channels/<ch>/versions/<v>/data/      ← objects.db, sagas.db …
+        //   channels/<ch>/versions/<v>/logs/
+        //   channels/<ch>/versions/<v>/cef-cache/
+        //   channels/<ch>/versions/<v>/runtime/   ← ipc-port, lock
+        //   channels/<ch>/config/                 ← settings (channel-wide)
+        //   channels/<ch>/agents/                 ← agent defs (survive upgrades)
+        //
+        // See SPEC_VERSION_ISOLATION_2026_06_01.md §5 Phase 2.
+        let version_dir = match mode {
+            RuntimeMode::Installed | RuntimeMode::Portable => {
+                instance_dir.join("versions").join(version)
+            }
+            RuntimeMode::Dev { .. } => instance_dir.clone(),
+        };
+
+        let data_dir = version_dir.join("data");
+        let logs_dir = version_dir.join("logs");
+        let cef_cache_dir = version_dir.join("cef-cache");
+        let instance_runtime_dir = version_dir.join("runtime");
+        // config and agents stay channel-wide so settings and agent
+        // definitions persist across version upgrades.
+        let config_dir = instance_dir.join("config");
+        let agents_dir = instance_dir.join("agents");
+        let shared_dir = root.join("shared");
+
+        Ok(Self {
+            home_dir: root,
+            instance_dir,
+            channel,
+            data_dir,
+            config_dir,
+            logs_dir,
+            cef_cache_dir,
+            agents_dir,
+            instance_runtime_dir,
+            shared_dir,
+            mode: mode.clone(),
+        })
+    }
+
+    /// Create every directory that may be written to. Idempotent.
+    /// Safe to call on every launch.
+    ///
+    /// Makes the AgentMux root owner-only first (issue #3682): it holds
+    /// per-agent jekt HMAC keys and LAN private keys (in the DBs), provider
+    /// login state (identity dirs) and logs, and on Unix every directory
+    /// below it was otherwise created with the process umask — typically
+    /// `0755`, readable by other local users wherever the home dir is
+    /// traversable (macOS `/Users/<name>` is `0755` by default). Tightening
+    /// the root blocks traversal into everything beneath it, including dirs
+    /// srv creates later with plain `create_dir_all` (`shared/`, `archives/`).
+    /// Best-effort: a root this process cannot chmod (owned by another user,
+    /// read-only mount) is logged and the launch continues, as before.
+    pub fn ensure_dirs(&self) -> Result<(), String> {
+        match ensure_owner_only_dir(&self.home_dir) {
+            Ok(OwnerOnlyOutcome::Tightened { previous_mode }) => tracing::warn!(
+                root = %self.home_dir.display(),
+                previous_mode = format!("{previous_mode:o}"),
+                "AgentMux data root was readable by other local users; tightened it to owner-only (0700)"
+            ),
+            Ok(OwnerOnlyOutcome::Created) => tracing::info!(
+                root = %self.home_dir.display(),
+                "created AgentMux data root owner-only (0700)"
+            ),
+            Ok(OwnerOnlyOutcome::AlreadyPrivate | OwnerOnlyOutcome::NotApplicable) => {}
+            Err(e) => tracing::warn!(
+                root = %self.home_dir.display(),
+                error = %e,
+                "could not make the AgentMux data root owner-only; continuing"
+            ),
+        }
+        for d in [
+            &self.instance_dir,
+            &self.data_dir,
+            &self.config_dir,
+            &self.logs_dir,
+            &self.cef_cache_dir,
+            &self.agents_dir,
+            &self.instance_runtime_dir,
+            &self.shared_dir,
+        ] {
+            std::fs::create_dir_all(d)
+                .map_err(|e| format!("failed to create {}: {}", d.display(), e))?;
+        }
+        // The data dir's `db/` subdir is the canonical srv DB home;
+        // mirrors legacy ensure_dirs() and lets srv unconditionally
+        // open `data_dir/db/objects.db`.
+        std::fs::create_dir_all(self.data_dir.join("db"))
+            .map_err(|e| format!("failed to create db dir: {}", e))?;
+        Ok(())
+    }
+
+    /// Env vars to pass to host + srv subprocesses. The launcher
+    /// computes `DataPaths` once and exports these; downstream
+    /// binaries read them via [`Self::from_env`] instead of
+    /// recomputing.
+    ///
+    /// Returns `OsString` (not `String`) so paths with non-UTF-8 bytes
+    /// — possible on Linux/macOS for users with exotic home dirs —
+    /// round-trip losslessly. `Command::env(k, v)` accepts any
+    /// `AsRef<OsStr>`, so the OsString flows through to children
+    /// unchanged. The mode value is the only `String`-typed entry
+    /// (it's a fixed ASCII vocabulary).
+    pub fn to_env_vars(&self) -> Vec<(&'static str, std::ffi::OsString)> {
+        use std::ffi::OsString;
+        let mut vars: Vec<(&'static str, OsString)> = vec![
+            ("AGENTMUX_INSTANCE_DIR", self.instance_dir.clone().into_os_string()),
+            ("AGENTMUX_DATA_DIR", self.data_dir.clone().into_os_string()),
+            ("AGENTMUX_CONFIG_DIR", self.config_dir.clone().into_os_string()),
+            ("AGENTMUX_LOG_DIR", self.logs_dir.clone().into_os_string()),
+            ("AGENTMUX_CEF_CACHE_DIR", self.cef_cache_dir.clone().into_os_string()),
+            ("AGENTMUX_AGENTS_DIR", self.agents_dir.clone().into_os_string()),
+            (
+                "AGENTMUX_INSTANCE_RUNTIME_DIR",
+                self.instance_runtime_dir.clone().into_os_string(),
+            ),
+            ("AGENTMUX_SHARED_DIR", self.shared_dir.clone().into_os_string()),
+            ("AGENTMUX_RUNTIME_MODE", OsString::from(self.mode.to_env_string())),
+            // Channel propagated so downstream binaries can log it +
+            // surface in diagnostics. NOT used to recompute paths
+            // (paths flow through the dir vars above).
+            ("AGENTMUX_CHANNEL", OsString::from(self.channel.clone())),
+        ];
+        // Dev mode also exports AGENTMUX_CLONE_ID so child processes
+        // (host, srv) can reconstruct the full `Dev { branch, clone_id }`
+        // variant via [`RuntimeMode::from_env_with_clone`]. The
+        // mode-string format (`dev:<branch>`) was kept backward-compatible
+        // and doesn't carry clone_id itself — see runtime_mode.rs.
+        if let RuntimeMode::Dev { clone_id: Some(id), .. } = &self.mode {
+            vars.push(("AGENTMUX_CLONE_ID", OsString::from(id.clone())));
+        }
+        vars
+    }
+
+    /// Reconstruct from env vars set by the launcher. Returns
+    /// `None` if any required var is missing — fail-fast vs.
+    /// silently falling back to legacy paths the way the old
+    /// sidecar.rs did.
+    ///
+    /// Uses `var_os` (not `var`) so non-UTF-8 path bytes survive.
+    pub fn from_env() -> Option<Self> {
+        let instance_dir = std::env::var_os("AGENTMUX_INSTANCE_DIR")?;
+        let data_dir = std::env::var_os("AGENTMUX_DATA_DIR")?;
+        let config_dir = std::env::var_os("AGENTMUX_CONFIG_DIR")?;
+        let logs_dir = std::env::var_os("AGENTMUX_LOG_DIR")?;
+        let cef_cache_dir = std::env::var_os("AGENTMUX_CEF_CACHE_DIR")?;
+        let agents_dir = std::env::var_os("AGENTMUX_AGENTS_DIR")?;
+        let instance_runtime_dir = std::env::var_os("AGENTMUX_INSTANCE_RUNTIME_DIR")?;
+        let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")?;
+        // Pair AGENTMUX_RUNTIME_MODE with AGENTMUX_CLONE_ID so the Dev
+        // variant carries its clone discriminator. Legacy single-var
+        // form (no AGENTMUX_CLONE_ID set) leaves clone_id as None,
+        // which falls back to the pre-PR two-level dev path layout.
+        let mode = RuntimeMode::from_env_with_clone()?;
+        // Channel is required from the launcher (same fail-fast
+        // discipline as every other dir var). Missing AGENTMUX_CHANNEL
+        // means the launcher didn't export it — that's a launcher /
+        // srv version skew, surface it loudly rather than silently
+        // defaulting and risking a wrong-channel write.
+        let channel = std::env::var("AGENTMUX_CHANNEL").ok()?;
+
+        // Re-resolve home_dir (the agentmux root) on the consumer
+        // side rather than transmitting it via env — it's a function
+        // of the AGENTMUX_HOME_OVERRIDE env (test only) and the OS
+        // home dir, which are stable across the launcher → host hop.
+        let home_dir = resolve_root().ok()?;
+
+        Some(Self {
+            home_dir,
+            instance_dir: PathBuf::from(instance_dir),
+            channel,
+            data_dir: PathBuf::from(data_dir),
+            config_dir: PathBuf::from(config_dir),
+            logs_dir: PathBuf::from(logs_dir),
+            cef_cache_dir: PathBuf::from(cef_cache_dir),
+            agents_dir: PathBuf::from(agents_dir),
+            instance_runtime_dir: PathBuf::from(instance_runtime_dir),
+            shared_dir: PathBuf::from(shared_dir),
+            mode,
+        })
+    }
+
+    /// `~/.agentmux/shared/identities/` — root for per-bundle OAuth
+    /// credential directories. Lives under `shared_dir` so it's
+    /// account-wide and version-independent: upgrading agentmux does
+    /// not move a user's bundle credentials. Per
+    /// `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.1.
+    ///
+    /// When [`isolated_auth_enabled`] is set, this resolves to
+    /// `instance_dir/identities/` instead — a channel-scoped credential
+    /// tree, now the DEFAULT for every non-`"stable"` channel as of
+    /// `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`
+    /// (this doc comment previously said "opt-in only; default behavior
+    /// above is unchanged" — that was accurate before that spec, stale
+    /// since, corrected 2026-08-16). Originally scoped to destructive
+    /// Armory testing (delete-account flows) that must never touch the
+    /// real global identity store other channels/instances use.
+    ///
+    /// **Isolating this directory isolates a provider's conversation
+    /// transcripts too**, since e.g. Claude Code's `projects/` lives
+    /// inside the same per-bundle directory tree as its credentials —
+    /// see [`identity_history_dir`] for the always-global path those
+    /// transcripts are kept reachable at regardless of this flag, and
+    /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// §4.1 for why that split exists.
+    /// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`.
+    pub fn identities_dir(&self) -> PathBuf {
+        if isolated_auth_enabled() {
+            self.instance_dir.join("identities")
+        } else {
+            self.shared_dir.join("identities")
+        }
+    }
+
+    /// `~/.agentmux/shared/identities/<bundle_id>/<provider_dir>/<history_subdir>/`
+    /// — ALWAYS this location, regardless of [`isolated_auth_enabled`].
+    /// Conversation transcripts must survive a channel/build change even
+    /// when the surrounding credential directory ([`identities_dir`]) is
+    /// isolated per-channel for Armory testing — history and credentials
+    /// are different data-persistence categories (CONVERSATION HISTORY
+    /// vs CREDENTIAL in
+    /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// P1) and must not share one isolation switch just because they
+    /// happen to live under the same directory as far as the provider
+    /// CLI is concerned. Callers that isolate credentials are expected
+    /// to redirect the isolated `<bundle_id>/<provider_dir>/<history_subdir>`
+    /// subpath to this location via [`ensure_history_link`] rather than
+    /// letting the provider CLI write real session data there directly.
+    ///
+    /// `history_subdir` is caller-supplied rather than hardcoded — it is
+    /// NOT the same directory name for every provider (reagentx P1 on PR
+    /// #2605: this used to hardcode `"projects"`, which is Claude-
+    /// specific; Codex uses `"sessions"`, Gemini uses `"history"`, per
+    /// `docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` §2.1).
+    /// Callers should read this from
+    /// `ProviderConfig::history_native_subdir`, the single source of
+    /// truth for which providers have a linkable directory at all.
+    ///
+    /// `bundle_id`/`provider_dir` are not path-validated here — callers
+    /// must use [`sanitize_path_segment`]-checked values, same
+    /// requirement as [`identity_dir`].
+    pub fn identity_history_dir(&self, bundle_id: &str, provider_dir: &str, history_subdir: &str) -> PathBuf {
+        self.shared_dir
+            .join("identities")
+            .join(bundle_id)
+            .join(provider_dir)
+            .join(history_subdir)
+    }
+
+    /// `~/.agentmux/shared/identities/<bundle_id>/` — a specific
+    /// bundle's credential root, when `bundle_id` is a safe path
+    /// segment. Returns `None` for empty / `.` / `..` / any segment
+    /// containing `/`, `\`, drive-letter colons, or Windows-reserved
+    /// characters (same rules as the version/branch sanitizer in
+    /// `resolve`).
+    ///
+    /// Defensive return type: `bundle_id` flows from `auth.start`
+    /// request bodies (PR C) into `create_dir_all`, so an
+    /// unvalidated `PathBuf::join` would let a crafted id escape the
+    /// identities root and write outside the bundle area. codex P1
+    /// follow-up on #981.
+    ///
+    /// Per-provider subdirectories (e.g. `claude/`, `codex/`) hang
+    /// off this when the bundle gains an OAuth binding (PR C). The
+    /// directory is created lazily by the bundle / OAuth flow that
+    /// needs it — `ensure_dirs()` does not pre-create it.
+    pub fn identity_dir(&self, bundle_id: &str) -> Option<PathBuf> {
+        sanitize_path_segment(bundle_id).map(|safe| self.identities_dir().join(safe))
+    }
+
+    /// `~/.agentmux/shared/providers/<auth_dir_name>/` — the DEFAULT provider
+    /// config + auth dir. Lives under `shared_dir`, so it is account-wide,
+    /// version-independent, AND channel-independent: every instance / channel /
+    /// version logs in ONCE and shares it. This is the structural fix for the
+    /// per-channel "validate-spin" regression — there is no empty-per-instance
+    /// auth dir to spin on. The per-identity override (`identity_dir`) still
+    /// takes precedence for explicit multi-account bundles. `auth_dir_name`
+    /// comes from the static provider registry (e.g. "claude"), never user
+    /// input. Retro:
+    /// `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`.
+    pub fn provider_auth_dir(&self, auth_dir_name: &str) -> PathBuf {
+        self.shared_dir.join("providers").join(auth_dir_name)
+    }
+
+    /// `instance_dir/wan-identity/` — the channel-wide WAN identity store
+    /// (`wan.db`: the instance key, agent WAN keys, and WAN verification
+    /// state). Beside `config/` and `agents/` rather than under the
+    /// per-version `data_dir`, so an upgrade keeps the same instance and the
+    /// same agent keys. Deliberately not `identity/`, which would sit next to
+    /// the unrelated `identities/`. For dev builds this is the branch (or
+    /// clone) dir, so each dev checkout is its own instance.
+    /// `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.2.
+    pub fn wan_identity_dir(&self) -> PathBuf {
+        self.instance_dir.join("wan-identity")
+    }
+}
+
+/// Best-effort: ensure `link_path` (a `projects/` subdirectory inside an
+/// [`isolated_auth_enabled`]-isolated provider credential dir) is a
+/// directory junction (Windows) / symlink (Unix) pointing at
+/// `target_dir` (the always-global [`DataPaths::identity_history_dir`]),
+/// so a provider's session transcripts stay reachable across a
+/// channel/build change even though the credential directory around them
+/// is per-channel isolated. See
+/// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+/// §4.1.
+///
+/// A Windows **junction** (not a symlink) is used deliberately —
+/// `std::os::windows::fs::symlink_dir` requires `SeCreateSymbolicLinkPrivilege`
+/// (admin, or Developer Mode enabled), which this app cannot assume every
+/// user has; junctions need no special privilege. Uses the `junction`
+/// crate (`FSCTL_SET_REPARSE_POINT` under the hood) rather than
+/// hand-rolled reparse-point FFI, for the same reason this codebase's own
+/// `bundle.rs` comment notes about Windows symlink privilege requirements
+/// — this is credential-adjacent storage, not a place to improvise
+/// low-level filesystem code.
+///
+/// Idempotent: a no-op if `link_path` is already a link pointing at
+/// `target_dir`. If a REAL directory already exists at `link_path` (data
+/// written before this function existed, or before `isolated_auth_enabled`
+/// applied to this bundle), its entries are moved into `target_dir` one
+/// by one via `rename` (atomic, same-volume — always true here, both
+/// live under the single `~/.agentmux` tree) before the now-empty
+/// directory is replaced with the link. **Never deletes or overwrites
+/// data**: an entry whose name already exists at the target is left
+/// exactly where it was, under the old per-channel path, rather than
+/// risking clobbering real history — it becomes reachable again once a
+/// human resolves the name collision, rather than silently lost. Any
+/// I/O error at any step is returned to the caller, who is expected to
+/// treat this as best-effort (log and continue spawning) per the same
+/// philosophy as the jekt-key injection in `agent_config.rs`.
+pub fn ensure_history_link(link_path: &std::path::Path, target_dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(target_dir)?;
+    // The `junction` crate creates the link via a plain `fs::create_dir`
+    // (not `create_dir_all`) on `link_path` itself, so its parent must
+    // already exist. Unix's `symlink` has the same requirement. Real
+    // production callers already have this (the isolated identity dir is
+    // created before this function runs), but this function must not
+    // depend on caller ordering to be correct/testable on its own.
+    if let Some(parent) = link_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    #[cfg(windows)]
+    let already_correct = junction::exists(link_path).unwrap_or(false)
+        && junction::get_target(link_path).ok().as_deref() == Some(target_dir);
+    #[cfg(unix)]
+    let already_correct = std::fs::symlink_metadata(link_path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+        && std::fs::read_link(link_path).ok().as_deref() == Some(target_dir);
+    #[cfg(not(any(windows, unix)))]
+    let already_correct = false;
+
+    if already_correct {
+        return Ok(());
+    }
+
+    match std::fs::symlink_metadata(link_path) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
+            // Pre-existing REAL directory: migrate its contents (never
+            // clobbering an existing target entry), then remove the
+            // now-empty directory so a link can take its place.
+            for entry in std::fs::read_dir(link_path)? {
+                let entry = entry?;
+                let dest = target_dir.join(entry.file_name());
+                if !dest.exists() {
+                    std::fs::rename(entry.path(), &dest)?;
+                }
+            }
+            // Only remove if migration left it empty (i.e. every entry
+            // moved, or there were none) — a leftover name collision
+            // means real, un-migrated data is still here, and this must
+            // not silently paper over that by leaving a directory where
+            // a link was expected. Surfacing the removal error is the
+            // signal to the caller that this bundle needs manual review.
+            std::fs::remove_dir(link_path)?;
+        }
+        Ok(meta) if meta.file_type().is_symlink() => {
+            // A link already exists but pointed at something else (stale/
+            // wrong target from a prior version of this function). Safe
+            // to drop: no data lives directly at a link path, only at
+            // whatever it points to, which this doesn't touch.
+            #[cfg(windows)]
+            {
+                let _ = junction::delete(link_path);
+            }
+            #[cfg(unix)]
+            {
+                let _ = std::fs::remove_file(link_path);
+            }
+        }
+        Ok(_) => {
+            // A plain file (or anything else that's neither a real
+            // directory nor a link) sits where a link needs to go.
+            // Nothing in this codebase is expected to ever put a file
+            // named "projects" here, but reagentx P2 on PR #2605 caught
+            // that the previous version of this match arm silently
+            // deleted it via remove_file/junction::delete with no
+            // migration — directly contradicting this function's own
+            // never-delete-data guarantee. Surface an error instead of
+            // guessing what to do with unexpected real data.
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "ensure_history_link: {} exists and is neither a directory nor a link; \
+                     refusing to delete it",
+                    link_path.display()
+                ),
+            ));
+        }
+        Err(_) => {
+            // Nothing at link_path yet — normal first-time case.
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        junction::create(target_dir, link_path)?;
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target_dir, link_path)?;
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "ensure_history_link: no directory-link mechanism on this platform",
+        ));
+    }
+
+    Ok(())
+}
+
+/// What [`ensure_owner_only_dir`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerOnlyOutcome {
+    /// The directory did not exist; it was created with mode `0700`.
+    Created,
+    /// It existed with group/other permission bits set; those were removed.
+    /// `previous_mode` is the old permission bits (e.g. `0o755`).
+    Tightened { previous_mode: u32 },
+    /// It already had no group/other access. Nothing changed.
+    AlreadyPrivate,
+    /// Nothing to do here: not a Unix platform (Windows scopes the user
+    /// profile, and so `~/.agentmux`, to its owner through ACLs), or `dir`
+    /// is the user's home directory itself — a misconfigured
+    /// `AGENTMUX_HOME_OVERRIDE`/`AGENTMUX_DATA_HOME` pointing at `$HOME`
+    /// must not chmod the whole home to `0700`.
+    NotApplicable,
+}
+
+/// Make `dir` owner-only on Unix: create it `0700` if missing (its parents
+/// with the normal umask — they are the user's, not AgentMux's), or strip
+/// group/other bits from an existing directory, keeping the owner bits as
+/// they were. See [`DataPaths::ensure_dirs`] for why (#3682).
+///
+/// Follows a symlinked root to its target, as every other access to the root
+/// already does. Errors if `dir` exists but is not a directory.
+pub fn ensure_owner_only_dir(dir: &Path) -> std::io::Result<OwnerOnlyOutcome> {
+    ensure_owner_only_dir_inner(dir, dirs::home_dir().as_deref())
+}
+
+fn ensure_owner_only_dir_inner(dir: &Path, user_home: Option<&Path>) -> std::io::Result<OwnerOnlyOutcome> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+        if let Some(home) = user_home {
+            let same = match (std::fs::canonicalize(dir), std::fs::canonicalize(home)) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => dir == home,
+            };
+            if same {
+                return Ok(OwnerOnlyOutcome::NotApplicable);
+            }
+        }
+
+        match std::fs::metadata(dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = dir.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                // Non-recursive on purpose: only the root itself is ours to
+                // make private. The requested mode is still masked by the
+                // umask, which can only remove bits — never add group/other.
+                match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+                    Ok(()) => return Ok(OwnerOnlyOutcome::Created),
+                    // Lost a race with a concurrent launch: fall through and
+                    // check what that one created.
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(e) => return Err(e),
+            Ok(_) => {}
+        }
+
+        let meta = std::fs::metadata(dir)?;
+        if !meta.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("{} exists and is not a directory", dir.display()),
+            ));
+        }
+        let mode = meta.permissions().mode() & 0o777;
+        if mode & 0o077 == 0 {
+            return Ok(OwnerOnlyOutcome::AlreadyPrivate);
+        }
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode & 0o700))?;
+        Ok(OwnerOnlyOutcome::Tightened { previous_mode: mode })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (dir, user_home);
+        Ok(OwnerOnlyOutcome::NotApplicable)
+    }
+}
+
+/// Isolated per-channel auth (identity accounts + OAuth credential dirs).
+/// Read directly at every call site rather than cached on `DataPaths` so
+/// `identities_dir()` behaves consistently regardless of whether the
+/// caller built its `DataPaths` via `resolve()` (launcher) or
+/// `from_env()` (downstream host/srv).
+///
+/// Resolution order:
+/// 1. `AGENTMUX_ISOLATED_AUTH=1` / `=0` — explicit override, always wins.
+/// 2. Otherwise, defaults to isolated for every channel except
+///    `"stable"`. `stable` is the real release channel — the
+///    daily-driver install(s) this machine's actual work depends on —
+///    and keeps the old always-global behavior so nobody's production
+///    login gets wiped by a channel-name coincidence. Every `task dev`
+///    branch and every `task package` local build now starts with a
+///    genuinely empty identity store by default, so routine testing
+///    actually exercises the real OAuth login/relogin surfaces instead
+///    of silently inheriting a fully-authenticated global session.
+/// 3. If `AGENTMUX_CHANNEL` isn't set yet (e.g. a bare `cargo test`
+///    invocation before any `DataPaths` has been resolved/exported),
+///    stays global — conservative default when channel context is
+///    unknown, not a guess.
+///
+/// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (the
+/// underlying mechanism — channel-scoped store + credential dirs — this
+/// flag drives, still authoritative) and
+/// `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (this
+/// default, amending the July 27 spec's "isolation must never be the
+/// default" stance).
+pub fn isolated_auth_enabled() -> bool {
+    isolated_auth_reason().is_isolated()
+}
+
+/// Which rule decided [`isolated_auth_enabled`]'s result — for boot-time
+/// diagnostics (see `bootstrap.rs`'s "shared store: attached" log line)
+/// so a developer staring at a fresh, empty Armory can tell at a glance
+/// whether that's an explicit choice or the new channel default, rather
+/// than re-deriving it from two env vars by hand. Callers that only need
+/// the boolean should use [`isolated_auth_enabled`] directly — this
+/// exists purely so the two never drift (one resolution, two views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolatedAuthReason {
+    /// `AGENTMUX_ISOLATED_AUTH=1`.
+    ExplicitOptIn,
+    /// `AGENTMUX_ISOLATED_AUTH` is set to anything other than exactly
+    /// `"1"` (`"0"`, `""`, a typo like `"false"`, anything). Fail-safe by
+    /// construction: before this default-by-channel change,
+    /// `isolated_auth_enabled()` was `.map(|v| v == "1")` — every
+    /// non-`"1"` value already meant global, including malformed ones.
+    /// Preserving that exact rule (rather than only special-casing `"0"`)
+    /// means a typo in an opt-out attempt can't silently isolate a
+    /// non-stable channel instead of the safe fallback (reagentx P2 on
+    /// PR #2431).
+    ExplicitOptOut,
+    /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
+    ChannelDefaultIsolated,
+    /// No override; `AGENTMUX_CHANNEL` is `"stable"` or unset entirely.
+    ChannelDefaultGlobal,
+}
+
+impl IsolatedAuthReason {
+    pub fn is_isolated(self) -> bool {
+        matches!(self, Self::ExplicitOptIn | Self::ChannelDefaultIsolated)
+    }
+
+    /// Short, log-friendly label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitOptIn => "explicit opt-in",
+            Self::ExplicitOptOut => "explicit opt-out",
+            Self::ChannelDefaultIsolated => "channel default — isolated",
+            Self::ChannelDefaultGlobal => "channel default — global",
+        }
+    }
+}
+
+pub fn isolated_auth_reason() -> IsolatedAuthReason {
+    match std::env::var("AGENTMUX_ISOLATED_AUTH") {
+        // Exactly "1" isolates. Any OTHER value the var is explicitly set
+        // to — "0", "", a typo — falls to ExplicitOptOut, not through to
+        // the channel default. See ExplicitOptOut's doc comment: this
+        // preserves the pre-existing `.map(|v| v == "1")` fail-safe rule
+        // for every malformed value, not just "0".
+        Ok(v) if v == "1" => IsolatedAuthReason::ExplicitOptIn,
+        Ok(_) => IsolatedAuthReason::ExplicitOptOut,
+        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
+            Ok(ch) if ch != "stable" => IsolatedAuthReason::ChannelDefaultIsolated,
+            _ => IsolatedAuthReason::ChannelDefaultGlobal,
+        },
+    }
+}
+
+/// Isolated per-channel `settings.json`. Same shape and same reasoning as
+/// [`isolated_auth_enabled`] — see
+/// `docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`.
+///
+/// Resolution order:
+/// 1. `AGENTMUX_ISOLATED_SETTINGS=1` / `=0` — explicit override, always wins.
+/// 2. Otherwise, defaults to isolated for every channel except `"stable"`.
+///    `stable` is the real release channel — the daily-driver install(s)
+///    this machine's actual work depends on — and keeps the old
+///    always-global behavior, so nobody's real window theme/pinned
+///    widgets/voice API key gets silently blanked by a channel-name
+///    coincidence. Every `task dev` branch and every `task package` local
+///    build now starts with a genuinely default `settings.json` — the
+///    motivating case was `network:lan_discovery` silently carrying
+///    `true` into a brand-new build from a decision made in an unrelated
+///    channel weeks earlier.
+/// 3. If `AGENTMUX_CHANNEL` isn't set yet, stays global — conservative
+///    default when channel context is unknown, not a guess.
+///
+/// Deliberately a SEPARATE flag from `AGENTMUX_ISOLATED_AUTH`, not a
+/// shared `AGENTMUX_ISOLATED` umbrella — see the spec's Open Questions
+/// §1 for why.
+pub fn isolated_settings_enabled() -> bool {
+    isolated_settings_reason().is_isolated()
+}
+
+/// Which rule decided [`isolated_settings_enabled`]'s result — for
+/// boot-time diagnostics, mirroring [`IsolatedAuthReason`] exactly (see
+/// that type's doc comment for the rationale: one resolution, two views,
+/// so the boolean and the log line can never drift apart).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolatedSettingsReason {
+    /// `AGENTMUX_ISOLATED_SETTINGS=1`.
+    ExplicitOptIn,
+    /// `AGENTMUX_ISOLATED_SETTINGS` is set to anything other than exactly
+    /// `"1"` — fail-safe by construction, same rule as
+    /// `IsolatedAuthReason::ExplicitOptOut` and for the same reason: a
+    /// typo'd opt-out attempt must not silently isolate a non-stable
+    /// channel instead of falling back to the safe (global) state.
+    ExplicitOptOut,
+    /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
+    ChannelDefaultIsolated,
+    /// No override; `AGENTMUX_CHANNEL` is `"stable"` or unset entirely.
+    ChannelDefaultGlobal,
+}
+
+impl IsolatedSettingsReason {
+    pub fn is_isolated(self) -> bool {
+        matches!(self, Self::ExplicitOptIn | Self::ChannelDefaultIsolated)
+    }
+
+    /// Short, log-friendly label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitOptIn => "explicit opt-in",
+            Self::ExplicitOptOut => "explicit opt-out",
+            Self::ChannelDefaultIsolated => "channel default — isolated",
+            Self::ChannelDefaultGlobal => "channel default — global",
+        }
+    }
+}
+
+pub fn isolated_settings_reason() -> IsolatedSettingsReason {
+    match std::env::var("AGENTMUX_ISOLATED_SETTINGS") {
+        Ok(v) if v == "1" => IsolatedSettingsReason::ExplicitOptIn,
+        Ok(_) => IsolatedSettingsReason::ExplicitOptOut,
+        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
+            Ok(ch) if ch != "stable" => IsolatedSettingsReason::ChannelDefaultIsolated,
+            _ => IsolatedSettingsReason::ChannelDefaultGlobal,
+        },
+    }
+}
+
+/// Skip the automatic, EAGER MuxBus cloud-session reconnect
+/// (`CloudSubscriber::init_global`, called at boot) on a randomized
+/// per-build local-package channel. See
+/// `docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md`
+/// for the incident this closes.
+///
+/// `CloudSubscriber::init_global` (`crates/srv/src/bootstrap.rs`) runs
+/// unconditionally on every launch and performs a real, synchronous
+/// OS-keychain read of the single global `muxbus:global` credential
+/// almost immediately. On macOS that read requires interactive OS consent
+/// the first time a given code signature touches it — and every local
+/// `task package:macos`/`task package`/`task package:linux` build bakes a
+/// brand-new, randomized per-build channel (and, on macOS, a bundle
+/// identifier derived from it) into the binary. So every fresh local
+/// build looks like a never-before-seen app to the Keychain, and the same
+/// already-`Always Allow`'d credential prompts again on every single
+/// local rebuild — indefinitely, since a new random channel is minted
+/// every time.
+///
+/// **This gates ONLY the one-shot eager call at boot** — not every future
+/// MuxBus interaction on that channel. `muxbus.status` (reagentx P0/P1 on
+/// PR #3248, round 2) instead checks whether
+/// `muxbus::cloud_subscriber::get_global_subscriber()` has been
+/// initialized — `None` until either this flag let boot initialize it
+/// (stable/dev channels), or a user explicitly completes `muxbus.login`
+/// on an isolated channel, which lazily initializes it right there. That
+/// split is what makes "only prompt once the user actually enables
+/// MuxBus" true: skipping the eager boot call must not permanently wall
+/// off every other MuxBus code path on that process for its whole
+/// lifetime, or an explicit login would "succeed" while silently never
+/// opening a WebSocket (reagentx P1, round 2) and the status bar's
+/// 60-second poll would keep hitting Keychain regardless of this flag
+/// (reagentx P0, round 2).
+///
+/// Resolution order:
+/// 1. `AGENTMUX_ISOLATED_MUXBUS=1` / `=0` — explicit override, always wins.
+/// 2. Otherwise, defaults to isolated (skip the eager reconnect) for a
+///    **local package channel** — `AGENTMUX_CHANNEL` is set, isn't
+///    `"stable"`, and doesn't start with `"dev-"`. `stable` is the real
+///    release channel; `dev-<branch>[-<clone-id>]` (`RuntimeMode::Dev`'s
+///    channel format, below) is `task dev`'s **stable, per-branch**
+///    channel name — reused across every `task dev`
+///    invocation on that branch, unlike a package build's channel, which
+///    mints a brand-new random hash on literally every single build. A
+///    dev session therefore doesn't have the "never-before-seen app to
+///    Keychain every time" problem this flag exists to solve, and
+///    isolating it anyway would be a pure regression (reagentx P1 on PR
+///    #3248, round 1 + round 2: dev sessions losing automatic MuxBus
+///    reconnect, and thus WAN notifications, for the entire session).
+///    This is a **deliberate narrowing** relative to
+///    [`isolated_auth_enabled`]/[`isolated_settings_enabled`], which
+///    isolate `dev-*` too — those exist to make local testing exercise
+///    the real Armory/settings flow, a goal `dev-*`'s stability doesn't
+///    undermine the same way it undermines this flag's actual, narrower
+///    motivation (avoiding a repeat OS prompt from a randomized
+///    per-build identity).
+/// 3. If `AGENTMUX_CHANNEL` isn't set yet, stays global — conservative
+///    default when channel context is unknown, not a guess.
+///
+/// Deliberately a separate flag from `AGENTMUX_ISOLATED_AUTH`/
+/// `AGENTMUX_ISOLATED_SETTINGS`, not folded into either — MuxBus's cloud
+/// session is a different kind of credential (one real cloud account, not
+/// per-provider OAuth or local UI prefs) and callers should be able to
+/// isolate one without the others.
+pub fn isolated_muxbus_reconnect_enabled() -> bool {
+    isolated_muxbus_reconnect_reason().is_isolated()
+}
+
+/// Which rule decided [`isolated_muxbus_reconnect_enabled`]'s result —
+/// mirrors [`IsolatedAuthReason`]/[`IsolatedSettingsReason`] exactly, same
+/// rationale (one resolution, two views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolatedMuxbusReconnectReason {
+    /// `AGENTMUX_ISOLATED_MUXBUS=1`.
+    ExplicitOptIn,
+    /// `AGENTMUX_ISOLATED_MUXBUS` is set to anything other than exactly
+    /// `"1"` — fail-safe by construction, same rule as
+    /// `IsolatedAuthReason::ExplicitOptOut` and for the same reason: a
+    /// typo'd opt-out attempt must not silently isolate a non-stable
+    /// channel instead of falling back to the safe (global/reconnect)
+    /// state.
+    ExplicitOptOut,
+    /// No override; `AGENTMUX_CHANNEL` is set, isn't `"stable"`, and
+    /// doesn't start with `"dev-"` — a randomized local-package channel.
+    ChannelDefaultIsolated,
+    /// No override; `AGENTMUX_CHANNEL` is `"stable"`, starts with
+    /// `"dev-"`, or is unset entirely.
+    ChannelDefaultGlobal,
+}
+
+impl IsolatedMuxbusReconnectReason {
+    pub fn is_isolated(self) -> bool {
+        matches!(self, Self::ExplicitOptIn | Self::ChannelDefaultIsolated)
+    }
+
+    /// Short, log-friendly label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitOptIn => "explicit opt-in",
+            Self::ExplicitOptOut => "explicit opt-out",
+            Self::ChannelDefaultIsolated => "channel default — isolated",
+            Self::ChannelDefaultGlobal => "channel default — global",
+        }
+    }
+}
+
+pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
+    match std::env::var("AGENTMUX_ISOLATED_MUXBUS") {
+        Ok(v) if v == "1" => IsolatedMuxbusReconnectReason::ExplicitOptIn,
+        Ok(_) => IsolatedMuxbusReconnectReason::ExplicitOptOut,
+        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
+            Ok(ch) if ch != "stable" && !ch.starts_with("dev-") => {
+                IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+            }
+            _ => IsolatedMuxbusReconnectReason::ChannelDefaultGlobal,
+        },
+    }
+}
+
+/// The AgentMux root (`~/.agentmux`) — the single resolver for it.
+///
+/// Public because srv had its own copy (`backend/base.rs::get_mux_data_dir`)
+/// reading a *different* env var and failing differently: where this returns
+/// `Err`, that one fell back to `PathBuf::from("/")`, so a host with no
+/// resolvable home directory wrote to `/.agentmux` instead of refusing.
+/// A10 of docs/analysis/TRACKING_ARCHITECTURE_REFACTOR_A1_A15_2026_06_18.md.
+///
+/// Two env vars are honoured, in this order, because both already exist in
+/// the wild and silently dropping either would move where a live install
+/// finds its data:
+///
+/// - `AGENTMUX_HOME_OVERRIDE` — this module's own, used by tests.
+/// - `AGENTMUX_DATA_HOME` — srv's own, read at startup and relied on by the
+///   MSIX packaging path (`blockcontroller/shell/lifecycle.rs`). It is
+///   deliberately **stripped** from pane environments, not exported into them:
+///   it is one of the identity vars invariant I7 removes so a pane cannot
+///   inherit and resolve another instance's data dir
+///   (`backend/pane_env.rs`, test `the_identity_vars_that_caused_the_breach_are_stripped`).
+///
+/// NOT to be confused with `AGENTMUX_DATA_DIR`, which the launcher exports
+/// and which names the per-channel *data* directory
+/// (`<root>/channels/<channel>/data`), not the root. The similar names are
+/// exactly why srv ended up with a second resolver.
+pub fn agentmux_root() -> Result<PathBuf, String> {
+    // `var_os`: a root that isn't valid UTF-8 must not read as unset.
+    for var in ["AGENTMUX_HOME_OVERRIDE", "AGENTMUX_DATA_HOME"] {
+        if let Some(s) = std::env::var_os(var) {
+            if !s.is_empty() {
+                return Ok(PathBuf::from(s));
+            }
+        }
+    }
+    let home = dirs::home_dir().ok_or_else(|| "dirs::home_dir() returned None".to_string())?;
+    Ok(home.join(".agentmux"))
+}
+
+fn resolve_root() -> Result<PathBuf, String> {
+    agentmux_root()
+}
+
+/// Sanitize a string for use as a single filesystem path segment.
+/// Rejects empty, `.`, `..`, segments containing path separators, and
+/// any character that has filesystem-special meaning on Windows (which
+/// is the most restrictive of the platforms we target). Used as belt-
+/// and-braces protection in `DataPaths::resolve` to prevent traversal
+/// even when callers pass a directly-constructed `RuntimeMode::Dev` or
+/// odd version string.
+///
+/// Why `:` is rejected: on Windows `C:temp` is a drive-relative path,
+/// not a literal filename, so `PathBuf::join("versions").join("C:temp")`
+/// would resolve OUTSIDE the intended `~/.agentmux/versions/` subtree.
+fn sanitize_path_segment(s: &str) -> Option<String> {
+    // Reject whitespace padding rather than silently normalizing it
+    // away — otherwise distinct caller-supplied ids like "foo" and
+    // " foo " would alias to the same directory. bundle_id is a real
+    // caller-supplied identifier (passed through RPC payloads), so
+    // this matters for credential isolation. codex P2 follow-up on
+    // #981. Internally-generated version strings + branch names
+    // shouldn't carry padding anyway, so this is no-op for them.
+    if s != s.trim() {
+        return None;
+    }
+    if s.is_empty() || s == "." || s == ".." {
+        return None;
+    }
+    // Filesystem separators + Windows-reserved characters + NUL.
+    if s
+        .chars()
+        .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'))
+    {
+        return None;
+    }
+    Some(s.to_string())
+}
+
+/// Sanitize a string for use as a channel name. Same path-segment
+/// safety rules as [`sanitize_path_segment`] plus:
+/// - Length capped at 64 chars (channel names show up in logs + the
+///   launcher splash + may eventually be displayed in a picker, so
+///   the cap is for UI sanity, not security).
+/// - Rejects names in [`RESERVED_CHANNEL_NAMES`] that would collide
+///   with sibling dirs at `~/.agentmux/` or reserved subdir names
+///   inside a channel.
+/// - The synonym `"default"` maps to `"stable"` (per
+///   `SPEC_DATA_CHANNELS_2026_05_24.md` §7.5).
+fn sanitize_channel_name(s: &str) -> Option<String> {
+    let base = sanitize_path_segment(s)?;
+    if base.len() > 64 {
+        return None;
+    }
+    if RESERVED_CHANNEL_NAMES.contains(&base.as_str()) {
+        return None;
+    }
+    if base == "default" {
+        return Some("stable".to_string());
+    }
+    Some(base)
+}
+
+/// Resolve the channel name and on-disk channel dir for a given mode.
+/// Pure function over (env, mode, root). When `honor_env_channel` is
+/// `true`, `AGENTMUX_CHANNEL` overrides the mode default; when `false`,
+/// the env is ignored and resolution depends only on `mode` +
+/// build-time defaults. The `false` path is used by dev-build self-
+/// detection (see [`DataPaths::resolve_path_only`]).
+///
+/// Resolution order (mirrors `SPEC_DATA_CHANNELS_2026_05_24.md` §2.2):
+///   1. (only if `honor_env_channel`) `AGENTMUX_CHANNEL` env override —
+///      any mode → path is `<root>/channels/<channel>/`. Lets the
+///      operator point any binary at any channel for parallel-channel
+///      testing.
+///   2. No override (or env-channel disallowed), mode = Dev { branch }
+///      → channel name is `dev-<branch>`, path stays at
+///      `<root>/dev/<branch>/` (unchanged from Phase 1).
+///   3. Same conditions, mode = Installed | Portable → channel name is
+///      [`BUILD_CHANNEL_DEFAULT`] (set at build time by the packaging
+///      script), path is `<root>/channels/<channel>/`.
+fn resolve_channel_and_dir(
+    mode: &RuntimeMode,
+    root: &Path,
+    honor_env_channel: bool,
+) -> Result<(String, PathBuf), String> {
+    // (1) Explicit env override — only when caller opted in.
+    if honor_env_channel {
+        if let Ok(raw) = std::env::var("AGENTMUX_CHANNEL") {
+            if !raw.is_empty() {
+                let channel = sanitize_channel_name(&raw).ok_or_else(|| {
+                    format!("invalid AGENTMUX_CHANNEL value: {:?}", raw)
+                })?;
+                let dir = root.join("channels").join(&channel);
+                return Ok((channel, dir));
+            }
+        }
+    }
+
+    // (2) Dev mode default: dev-<branch>[-<clone_id>], path under
+    // dev/<branch>/[<clone_id>/]. The clone_id nests one level deeper
+    // so two clones of the same branch don't collide on data dir,
+    // lockfile, or named-pipe IPC. When clone_id is None (legacy
+    // env-string round-trip or direct test construction) the layout
+    // falls back to the original two-level form for back-compat.
+    // See SPEC_DATA_CHANNELS_2026_05_24.md §2.4 and
+    // docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md.
+    if let RuntimeMode::Dev { branch, clone_id } = mode {
+        let safe_branch = sanitize_path_segment(branch).ok_or_else(|| {
+            format!("invalid dev branch for path: {:?}", branch)
+        })?;
+        let safe_clone = clone_id
+            .as_deref()
+            .and_then(sanitize_path_segment)
+            .filter(|s| !s.is_empty());
+        let (channel, dir) = match safe_clone {
+            Some(c) => (
+                format!("dev-{}-{}", safe_branch, c),
+                root.join("dev").join(safe_branch).join(c),
+            ),
+            None => (
+                format!("dev-{}", safe_branch),
+                root.join("dev").join(safe_branch),
+            ),
+        };
+        return Ok((channel, dir));
+    }
+
+    // (3) Installed / Portable default: build-time channel.
+    let channel = sanitize_channel_name(BUILD_CHANNEL_DEFAULT).ok_or_else(|| {
+        format!(
+            "compile-time AGENTMUX_BUILD_CHANNEL_DEFAULT is invalid: {:?}",
+            BUILD_CHANNEL_DEFAULT
+        )
+    })?;
+    let dir = root.join("channels").join(&channel);
+    Ok((channel, dir))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TEST_ENV_LOCK;
+    use tempfile::TempDir;
+
+    /// RAII guard that restores process state on drop, even if the
+    /// test panics. Without Drop-based cleanup, a panic inside `f`
+    /// would leave AGENTMUX_HOME_OVERRIDE set with a stale tempdir
+    /// path AND poison the mutex; subsequent tests recover from poison
+    /// but inherit the wrong env value.
+    struct HomeOverrideGuard {
+        _tmp: TempDir,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for HomeOverrideGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        }
+    }
+
+    fn with_home_override<F: FnOnce(&Path)>(f: F) {
+        let lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().expect("tempdir");
+        let path = tmp.path().to_path_buf();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", &path);
+        let _guard = HomeOverrideGuard { _tmp: tmp, _lock: lock };
+        f(&path);
+        // _guard drops here, removing the env var even if f panicked
+        // (the panic still propagates after Drop runs).
+    }
+
+    /// Helper: clear AGENTMUX_CHANNEL inside an existing
+    /// with_home_override block to test pure mode-default resolution.
+    /// Channel resolution reads the live env var, so individual tests
+    /// must clear it to avoid leakage from sibling tests running
+    /// concurrently inside the same process (TEST_ENV_LOCK serializes
+    /// HOME_OVERRIDE but the channel var is a separate axis).
+    fn clear_channel_env() {
+        std::env::remove_var("AGENTMUX_CHANNEL");
+    }
+
+    /// A10 compatibility guarantee. srv's old `get_mux_data_dir` read
+    /// AGENTMUX_DATA_HOME; this module's resolver read AGENTMUX_HOME_OVERRIDE.
+    /// Consolidating onto one resolver must not move where a live install
+    /// finds its data, so BOTH are honoured — and an install that only ever
+    /// set AGENTMUX_DATA_HOME must still resolve to exactly that path.
+    #[test]
+    fn agentmux_root_honours_srvs_env_var_for_existing_installs() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        let tmp = TempDir::new().expect("tempdir");
+        std::env::set_var("AGENTMUX_DATA_HOME", tmp.path());
+        let got = agentmux_root().expect("root resolves");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        assert_eq!(got, tmp.path(), "AGENTMUX_DATA_HOME must still win");
+    }
+
+    /// With neither var set the answer is `~/.agentmux` — unchanged from both
+    /// pre-consolidation resolvers, which is the case every default install is
+    /// in. Asserted against dirs::home_dir() rather than a literal so this
+    /// fails if the default layout ever moves.
+    #[test]
+    fn agentmux_root_defaults_to_home_dot_agentmux() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        let got = agentmux_root().expect("root resolves");
+        let want = dirs::home_dir().expect("home").join(".agentmux");
+        assert_eq!(got, want);
+    }
+
+    /// Precedence is documented, not accidental: HOME_OVERRIDE is this
+    /// module's test hook and wins, so a test that sets it is not silently
+    /// overridden by an AGENTMUX_DATA_HOME leaked from the ambient
+    /// environment.
+    #[test]
+    fn agentmux_root_prefers_home_override_over_data_home() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let a = TempDir::new().expect("tempdir");
+        let b = TempDir::new().expect("tempdir");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", a.path());
+        std::env::set_var("AGENTMUX_DATA_HOME", b.path());
+        let got = agentmux_root().expect("root resolves");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        assert_eq!(got, a.path());
+    }
+
+    /// An empty value is not a path. Both resolvers skipped empty strings
+    /// before; the consolidated one must too, or `AGENTMUX_DATA_HOME=```
+    /// in a shell profile would redirect every install to "".
+    #[test]
+    fn agentmux_root_ignores_empty_env_values() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "");
+        std::env::set_var("AGENTMUX_DATA_HOME", "");
+        let got = agentmux_root().expect("root resolves");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        assert_eq!(got, dirs::home_dir().expect("home").join(".agentmux"));
+    }
+
+    #[test]
+    fn installed_paths_under_default_channel() {
+        with_home_override(|root| {
+            clear_channel_env();
+            let ver = "0.41.0";
+            let p = DataPaths::resolve(ver, &RuntimeMode::Installed).unwrap();
+            // Channel-level root (instance_dir).
+            assert_eq!(p.channel, "stable");
+            let ch = root.join("channels").join("stable");
+            assert_eq!(p.instance_dir, ch);
+            // Version-scoped dirs live under versions/<ver>/.
+            let vd = ch.join("versions").join(ver);
+            assert_eq!(p.data_dir,             vd.join("data"));
+            assert_eq!(p.logs_dir,             vd.join("logs"));
+            assert_eq!(p.cef_cache_dir,        vd.join("cef-cache"));
+            assert_eq!(p.instance_runtime_dir, vd.join("runtime"));
+            // Channel-wide dirs stay at instance_dir level.
+            assert_eq!(p.config_dir,  ch.join("config"));
+            assert_eq!(p.agents_dir,  ch.join("agents"));
+            assert_eq!(p.shared_dir,  root.join("shared"));
+        });
+    }
+
+    #[test]
+    fn two_installed_versions_have_distinct_data_dirs() {
+        with_home_override(|root| {
+            clear_channel_env();
+            let p1 = DataPaths::resolve("0.40.2", &RuntimeMode::Installed).unwrap();
+            let p2 = DataPaths::resolve("0.41.0", &RuntimeMode::Installed).unwrap();
+            // Same channel root — agents and config are shared.
+            assert_eq!(p1.instance_dir, p2.instance_dir);
+            assert_eq!(p1.agents_dir,   p2.agents_dir);
+            assert_eq!(p1.config_dir,   p2.config_dir);
+            // Different versioned dirs — concurrent writes are safe.
+            assert_ne!(p1.data_dir,             p2.data_dir);
+            assert_ne!(p1.cef_cache_dir,        p2.cef_cache_dir);
+            assert_ne!(p1.instance_runtime_dir, p2.instance_runtime_dir);
+            // Paths contain the version string.
+            assert!(p1.data_dir.to_string_lossy().contains("0.40.2"));
+            assert!(p2.data_dir.to_string_lossy().contains("0.41.0"));
+            let _ = root; // suppress unused warning
+        });
+    }
+
+    #[test]
+    fn the_wan_identity_dir_is_channel_wide_not_per_version() {
+        // An upgrade must keep the same WAN instance and agent keys
+        // (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2).
+        with_home_override(|root| {
+            clear_channel_env();
+            let p1 = DataPaths::resolve("0.40.2", &RuntimeMode::Installed).unwrap();
+            let p2 = DataPaths::resolve("0.41.0", &RuntimeMode::Installed).unwrap();
+            assert_eq!(p1.wan_identity_dir(), root.join("channels").join("stable").join("wan-identity"));
+            assert_eq!(p1.wan_identity_dir(), p2.wan_identity_dir());
+            assert!(!p1.wan_identity_dir().starts_with(&p1.data_dir));
+        });
+    }
+
+    #[test]
+    fn home_dir_resolves_to_root() {
+        // The agentmux root (~/.agentmux/ or AGENTMUX_HOME_OVERRIDE)
+        // is exposed via DataPaths.home_dir for legacy account-wide
+        // state like the launcher's config.toml. Resolve in both
+        // installed and dev modes; both should point at the same root.
+        with_home_override(|root| {
+            clear_channel_env();
+            let inst = DataPaths::resolve("0.33.641", &RuntimeMode::Installed).unwrap();
+            assert_eq!(inst.home_dir, root);
+            let dev = DataPaths::resolve(
+                "0.33.641",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: None,
+                },
+            )
+            .unwrap();
+            assert_eq!(dev.home_dir, root);
+        });
+    }
+
+    #[test]
+    fn portable_paths_match_installed() {
+        with_home_override(|root| {
+            clear_channel_env();
+            let inst = DataPaths::resolve("0.33.639", &RuntimeMode::Installed).unwrap();
+            let port = DataPaths::resolve("0.33.639", &RuntimeMode::Portable).unwrap();
+            // Portable + Installed share a default channel (no env
+            // override → both fall through to BUILD_CHANNEL_DEFAULT),
+            // so their data dirs are the same. Multi-instance
+            // isolation is now channel-keyed: if you want two
+            // independent portables, override AGENTMUX_CHANNEL on one.
+            assert_eq!(inst.channel, port.channel);
+            assert_eq!(inst.instance_dir, port.instance_dir);
+            assert_eq!(inst.data_dir, port.data_dir);
+            // shared/ is mode-independent.
+            assert_eq!(inst.shared_dir, root.join("shared"));
+            assert_eq!(port.shared_dir, root.join("shared"));
+        });
+    }
+
+    #[test]
+    fn dev_paths_under_branch_and_clone_id() {
+        // Two clones of the same branch must resolve to distinct
+        // instance dirs when clone_id is supplied. Same branch +
+        // different clone_id → different paths → distinct lockfile
+        // and pipe namespaces downstream.
+        with_home_override(|root| {
+            clear_channel_env();
+            let a = DataPaths::resolve(
+                "0.39.0",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: Some("aaaaaaaa00000000".into()),
+                },
+            )
+            .unwrap();
+            let b = DataPaths::resolve(
+                "0.39.0",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: Some("bbbbbbbb00000000".into()),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                a.instance_dir,
+                root.join("dev").join("main").join("aaaaaaaa00000000")
+            );
+            assert_eq!(
+                b.instance_dir,
+                root.join("dev").join("main").join("bbbbbbbb00000000")
+            );
+            assert_ne!(a.instance_dir, b.instance_dir);
+            assert_eq!(a.channel, "dev-main-aaaaaaaa00000000");
+            assert_eq!(b.channel, "dev-main-bbbbbbbb00000000");
+        });
+    }
+
+    #[test]
+    fn dev_paths_legacy_two_level_when_clone_id_none() {
+        // Backward compat: a Dev variant without clone_id (e.g.
+        // constructed by an older launcher binary, or by the
+        // env-string parser) MUST land at the pre-PR two-level dev
+        // path so existing in-flight dev sessions don't lose their
+        // state on first launch after the upgrade.
+        with_home_override(|root| {
+            clear_channel_env();
+            let p = DataPaths::resolve(
+                "0.39.0",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: None,
+                },
+            )
+            .unwrap();
+            assert_eq!(p.instance_dir, root.join("dev").join("main"));
+            assert_eq!(p.channel, "dev-main");
+        });
+    }
+
+    #[test]
+    fn dev_paths_under_dev_branch() {
+        with_home_override(|root| {
+            clear_channel_env();
+            let mode = RuntimeMode::Dev {
+                branch: "main".into(),
+                clone_id: None,
+            };
+            let p = DataPaths::resolve("0.33.639", &mode).unwrap();
+            // Dev mode default: on-disk path stays under dev/<branch>/
+            // (unchanged from Phase 1), channel name is "dev-<branch>"
+            // for diagnostics. The two diverge intentionally — see
+            // resolve_channel_and_dir doc.
+            assert_eq!(p.channel, "dev-main");
+            assert_eq!(p.instance_dir, root.join("dev").join("main"));
+            assert_eq!(p.data_dir, root.join("dev").join("main").join("data"));
+            assert_eq!(p.shared_dir, root.join("shared"));
+        });
+    }
+
+    #[test]
+    fn env_override_redirects_any_mode_under_channels() {
+        // AGENTMUX_CHANNEL is absolute precedence. Even Dev mode,
+        // which would otherwise land at dev/<branch>/, lands under
+        // channels/<override>/ when the env is set. This is the
+        // "test a hot-fix build against the live stable data" path
+        // from SPEC_DATA_CHANNELS_2026_05_24.md §2.2.
+        with_home_override(|root| {
+            std::env::set_var("AGENTMUX_CHANNEL", "experiment");
+            // Cleanup via Drop so a test panic doesn't leak it.
+            struct ChannelGuard;
+            impl Drop for ChannelGuard {
+                fn drop(&mut self) {
+                    std::env::remove_var("AGENTMUX_CHANNEL");
+                }
+            }
+            let _g = ChannelGuard;
+
+            let inst = DataPaths::resolve("0.33.639", &RuntimeMode::Installed).unwrap();
+            assert_eq!(inst.channel, "experiment");
+            assert_eq!(inst.instance_dir, root.join("channels").join("experiment"));
+
+            let port = DataPaths::resolve("0.33.639", &RuntimeMode::Portable).unwrap();
+            assert_eq!(port.channel, "experiment");
+            assert_eq!(port.instance_dir, root.join("channels").join("experiment"));
+
+            let dev = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
+            )
+            .unwrap();
+            // Override beats the dev/<branch>/ default — channel name
+            // matches the override, path lands under channels/, not dev/.
+            assert_eq!(dev.channel, "experiment");
+            assert_eq!(dev.instance_dir, root.join("channels").join("experiment"));
+        });
+    }
+
+    #[test]
+    fn env_override_rejects_unsafe_or_reserved_names() {
+        with_home_override(|_root| {
+            // Reserved (would collide with sibling dirs / inner dirs).
+            for bad in ["shared", "snapshots", "dev", "versions", "channels", "runtime"] {
+                std::env::set_var("AGENTMUX_CHANNEL", bad);
+                let r = DataPaths::resolve("0.33.639", &RuntimeMode::Installed);
+                std::env::remove_var("AGENTMUX_CHANNEL");
+                assert!(
+                    r.is_err(),
+                    "AGENTMUX_CHANNEL={:?} should be rejected as reserved",
+                    bad
+                );
+            }
+
+            // Path-unsafe (traversal, separators, Windows-reserved).
+            // NUL not tested here — Windows' WinAPI rejects NUL in
+            // env-var values at the syscall level, so `set_var` would
+            // panic before our sanitizer runs. NUL rejection is
+            // covered by the direct-call sanitize_path_segment path
+            // in identity_dir_rejects_unsafe_segments.
+            for bad in ["..", ".", "a/b", "a\\b", "C:foo", "a*b"] {
+                std::env::set_var("AGENTMUX_CHANNEL", bad);
+                let r = DataPaths::resolve("0.33.639", &RuntimeMode::Installed);
+                std::env::remove_var("AGENTMUX_CHANNEL");
+                assert!(
+                    r.is_err(),
+                    "AGENTMUX_CHANNEL={:?} should be rejected as path-unsafe",
+                    bad
+                );
+            }
+
+            // Empty string treated as "not set" — falls through to
+            // mode-based default. Documents the behavior so a
+            // `.env`-set empty value doesn't surprise.
+            std::env::set_var("AGENTMUX_CHANNEL", "");
+            let r = DataPaths::resolve("0.33.639", &RuntimeMode::Installed);
+            std::env::remove_var("AGENTMUX_CHANNEL");
+            assert!(r.is_ok(), "empty AGENTMUX_CHANNEL should fall through to default");
+            assert_eq!(r.unwrap().channel, "stable");
+        });
+    }
+
+    #[test]
+    fn env_override_default_is_synonym_for_stable() {
+        with_home_override(|root| {
+            std::env::set_var("AGENTMUX_CHANNEL", "default");
+            let r = DataPaths::resolve("0.33.639", &RuntimeMode::Installed);
+            std::env::remove_var("AGENTMUX_CHANNEL");
+            let r = r.unwrap();
+            // "default" maps to "stable" per spec §7.5; on-disk path
+            // is channels/stable/, not channels/default/.
+            assert_eq!(r.channel, "stable");
+            assert_eq!(r.instance_dir, root.join("channels").join("stable"));
+        });
+    }
+
+    #[test]
+    fn channel_name_length_capped_at_64() {
+        with_home_override(|_root| {
+            // 64 chars OK, 65 rejected. The cap is for UI sanity, not
+            // security — channel names show up in logs and the
+            // launcher splash.
+            let ok = "a".repeat(64);
+            std::env::set_var("AGENTMUX_CHANNEL", &ok);
+            let r = DataPaths::resolve("0.33.639", &RuntimeMode::Installed);
+            std::env::remove_var("AGENTMUX_CHANNEL");
+            assert!(r.is_ok(), "64-char channel should be accepted");
+
+            let too_long = "a".repeat(65);
+            std::env::set_var("AGENTMUX_CHANNEL", &too_long);
+            let r = DataPaths::resolve("0.33.639", &RuntimeMode::Installed);
+            std::env::remove_var("AGENTMUX_CHANNEL");
+            assert!(r.is_err(), "65-char channel should be rejected");
+        });
+    }
+
+    #[test]
+    fn dev_branch_traversal_via_runtime_mode_still_rejected() {
+        // Dev mode resolution sanitizes the branch via the same
+        // sanitize_path_segment as before — channel rename doesn't
+        // weaken the traversal-safety guarantees. Reproduces the
+        // pre-channel test for parity.
+        with_home_override(|_root| {
+            clear_channel_env();
+            let r = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Dev { branch: "..".into(), clone_id: None },
+            );
+            assert!(r.is_err());
+            let r = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Dev { branch: "foo/bar".into(), clone_id: None },
+            );
+            assert!(r.is_err());
+        });
+    }
+
+    #[test]
+    fn identity_dir_rejects_unsafe_segments() {
+        // bundle_id flows from auth.start request bodies into
+        // create_dir_all. Without sanitization a crafted id would
+        // escape the identities root. The function must return None
+        // for traversal attempts, separator-bearing segments, and
+        // Windows-reserved characters. codex P1 follow-up on #981.
+        with_home_override(|_root| {
+            let p = DataPaths::resolve("0.33.639", &RuntimeMode::Installed).unwrap();
+
+            // Happy path — a normal UUID-shaped id resolves.
+            assert!(p.identity_dir("abc-123-uuid").is_some());
+
+            // Path traversal.
+            assert_eq!(p.identity_dir(".."), None);
+            assert_eq!(p.identity_dir("."), None);
+            assert_eq!(p.identity_dir("../../../etc"), None);
+            assert_eq!(p.identity_dir("a/b"), None);
+            assert_eq!(p.identity_dir("a\\b"), None);
+
+            // Empty / whitespace-only.
+            assert_eq!(p.identity_dir(""), None);
+            assert_eq!(p.identity_dir("   "), None);
+
+            // Windows-reserved characters.
+            assert_eq!(p.identity_dir("C:foo"), None);
+            assert_eq!(p.identity_dir("foo*bar"), None);
+            assert_eq!(p.identity_dir("foo?bar"), None);
+            assert_eq!(p.identity_dir("with\0nul"), None);
+        });
+    }
+
+    #[test]
+    fn provider_auth_dir_is_shared_and_channel_independent() {
+        // The DEFAULT provider auth lives under shared_dir, so it resolves to the
+        // SAME path regardless of channel / version / mode — the structural fix
+        // for the per-channel "validate-spin" regression. It must NOT live under
+        // the per-channel config dir (which is where the regression put it).
+        // Retro: docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md
+        with_home_override(|_root| {
+            clear_channel_env();
+            let installed = DataPaths::resolve("0.42.0", &RuntimeMode::Installed).unwrap();
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+
+            let a = installed.provider_auth_dir("claude");
+            assert_eq!(
+                a,
+                dev.provider_auth_dir("claude"),
+                "provider auth dir must not vary by channel / mode (instance-independent)"
+            );
+            assert!(
+                a.ends_with("shared/providers/claude"),
+                "provider auth dir must live under shared/providers/: {a:?}"
+            );
+            assert!(
+                !a.starts_with(&installed.config_dir),
+                "provider auth dir must NOT be under the per-channel config dir"
+            );
+        });
+    }
+
+    /// RAII guard clearing `AGENTMUX_ISOLATED_AUTH` on drop, even on panic —
+    /// mirrors `HomeOverrideGuard` above.
+    struct IsolatedAuthGuard;
+    impl Drop for IsolatedAuthGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        }
+    }
+
+    #[test]
+    fn identities_dir_is_shared_on_stable_channel() {
+        // stable is the real release channel — the one default this
+        // spec (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md)
+        // deliberately does not change. AGENTMUX_CHANNEL is set to
+        // "stable" explicitly (mirroring what a real host/srv process
+        // always has via from_env(), per to_env_vars()) rather than left
+        // unset, so this test exercises the "stable" branch of the
+        // resolution order specifically, not the "channel unknown"
+        // fallback covered by identities_dir_is_shared_when_channel_unset.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+            let installed = DataPaths::resolve("0.42.0", &RuntimeMode::Installed).unwrap();
+            assert_eq!(installed.channel, "stable");
+            std::env::set_var("AGENTMUX_CHANNEL", "stable");
+
+            assert!(installed.identities_dir().ends_with("shared/identities"));
+            std::env::remove_var("AGENTMUX_CHANNEL");
+        });
+    }
+
+    #[test]
+    fn identities_dir_is_isolated_by_default_on_non_stable_channel() {
+        // The behavior change this spec introduces: a task-dev branch
+        // (or any local task-package build, or a custom AGENTMUX_CHANNEL
+        // override) now gets an isolated identity store with NO explicit
+        // AGENTMUX_ISOLATED_AUTH set at all — contrast with the old
+        // identities_dir_is_shared_by_default, which asserted the
+        // opposite for this exact case.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+            std::env::set_var("AGENTMUX_CHANNEL", &dev.channel);
+
+            assert_eq!(dev.identities_dir(), dev.instance_dir.join("identities"));
+            assert!(
+                !dev.identities_dir().starts_with(&dev.shared_dir),
+                "isolated-by-default identities_dir must NOT live under the global shared_dir"
+            );
+            std::env::remove_var("AGENTMUX_CHANNEL");
+        });
+    }
+
+    #[test]
+    fn identities_dir_is_shared_when_channel_unset() {
+        // Conservative fallback: no AGENTMUX_CHANNEL in the process env
+        // at all (e.g. a bare `cargo test`/`cargo run` outside the
+        // launcher's from_env() chain) — stay global rather than guess.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+            // AGENTMUX_CHANNEL deliberately left unset here, unlike the
+            // isolated-by-default test above.
+
+            assert!(dev.identities_dir().ends_with("shared/identities"));
+        });
+    }
+
+    #[test]
+    fn identities_dir_is_per_channel_when_isolated_auth_explicitly_set() {
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+            let _guard = IsolatedAuthGuard;
+
+            let dev_a = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "branch-a".into(), clone_id: None },
+            )
+            .unwrap();
+            let dev_b = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "branch-b".into(), clone_id: None },
+            )
+            .unwrap();
+
+            assert_ne!(
+                dev_a.identities_dir(),
+                dev_b.identities_dir(),
+                "isolated identities_dir must differ per channel"
+            );
+            assert_eq!(dev_a.identities_dir(), dev_a.instance_dir.join("identities"));
+            assert!(
+                !dev_a.identities_dir().starts_with(&dev_a.shared_dir),
+                "isolated identities_dir must NOT live under the global shared_dir"
+            );
+        });
+    }
+
+    #[test]
+    fn identities_dir_is_shared_when_isolated_auth_explicitly_disabled_on_non_stable_channel() {
+        // The escape hatch: AGENTMUX_ISOLATED_AUTH=0 overrides the new
+        // channel-based default back to global sharing, even on a
+        // non-stable channel.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+            let _guard = IsolatedAuthGuard;
+
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+            std::env::set_var("AGENTMUX_CHANNEL", &dev.channel);
+
+            assert!(dev.identities_dir().ends_with("shared/identities"));
+            std::env::remove_var("AGENTMUX_CHANNEL");
+        });
+    }
+
+    #[test]
+    fn isolated_auth_reason_classifies_all_four_states() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        clear_channel_env();
+
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ExplicitOptIn);
+        assert!(isolated_auth_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ExplicitOptOut);
+        assert!(!isolated_auth_reason().is_isolated());
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultIsolated);
+        assert!(isolated_auth_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultGlobal);
+        assert!(!isolated_auth_reason().is_isolated());
+
+        clear_channel_env();
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultGlobal);
+        assert!(!isolated_auth_reason().is_isolated());
+    }
+
+    #[test]
+    fn isolated_auth_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
+        // reagentx P2 on PR #2431: a typo'd opt-out attempt (anything other
+        // than exactly "1") must land on ExplicitOptOut (global), matching
+        // the pre-existing `.map(|v| v == "1")` rule for every non-"1"
+        // value — it must NOT fall through to the channel default and
+        // silently isolate a non-stable channel just because the intended
+        // "0" was misspelled.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+
+        for malformed in ["false", "no", "TRUE", "2", ""] {
+            std::env::set_var("AGENTMUX_ISOLATED_AUTH", malformed);
+            assert_eq!(
+                isolated_auth_reason(),
+                IsolatedAuthReason::ExplicitOptOut,
+                "AGENTMUX_ISOLATED_AUTH={malformed:?} on a non-stable channel must fail safe to global, not isolate"
+            );
+            assert!(!isolated_auth_reason().is_isolated());
+        }
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        clear_channel_env();
+    }
+
+    /// RAII guard clearing `AGENTMUX_ISOLATED_SETTINGS` on drop, even on
+    /// panic — mirrors `IsolatedAuthGuard` above.
+    struct IsolatedSettingsGuard;
+    impl Drop for IsolatedSettingsGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        }
+    }
+
+    #[test]
+    fn isolated_settings_reason_classifies_all_four_states() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        clear_channel_env();
+        let _guard = IsolatedSettingsGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "1");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ExplicitOptIn);
+        assert!(isolated_settings_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "0");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ExplicitOptOut);
+        assert!(!isolated_settings_reason().is_isolated());
+
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ChannelDefaultIsolated);
+        assert!(isolated_settings_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ChannelDefaultGlobal);
+        assert!(!isolated_settings_reason().is_isolated());
+
+        clear_channel_env();
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ChannelDefaultGlobal);
+        assert!(!isolated_settings_reason().is_isolated());
+    }
+
+    #[test]
+    fn isolated_settings_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
+        // Same fail-safe rule as isolated_auth_reason's equivalent test
+        // (reagentx P2 on PR #2431) — a typo'd opt-out must land on
+        // ExplicitOptOut (global), not silently isolate.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        let _guard = IsolatedSettingsGuard;
+
+        for malformed in ["false", "no", "TRUE", "2", ""] {
+            std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", malformed);
+            assert_eq!(
+                isolated_settings_reason(),
+                IsolatedSettingsReason::ExplicitOptOut,
+                "AGENTMUX_ISOLATED_SETTINGS={malformed:?} on a non-stable channel must fail safe to global, not isolate"
+            );
+            assert!(!isolated_settings_reason().is_isolated());
+        }
+
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        clear_channel_env();
+    }
+
+    #[test]
+    fn isolated_settings_and_isolated_auth_are_independent_flags() {
+        // Open question §1 in the spec: these must not accidentally share
+        // state — setting one must not affect the other's resolution.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        let _guard_a = IsolatedAuthGuard;
+        let _guard_s = IsolatedSettingsGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+        assert!(!isolated_auth_enabled());
+        assert!(
+            isolated_settings_enabled(),
+            "AGENTMUX_ISOLATED_AUTH=0 must not disable settings isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "0");
+        assert!(!isolated_settings_enabled());
+        assert!(
+            isolated_auth_enabled(),
+            "AGENTMUX_ISOLATED_SETTINGS=0 must not disable auth isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        clear_channel_env();
+    }
+
+    /// RAII guard clearing `AGENTMUX_ISOLATED_MUXBUS` on drop, even on
+    /// panic — mirrors `IsolatedSettingsGuard` above.
+    struct IsolatedMuxbusReconnectGuard;
+    impl Drop for IsolatedMuxbusReconnectGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        }
+    }
+
+    #[test]
+    fn isolated_muxbus_reconnect_reason_classifies_all_four_states() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        clear_channel_env();
+        let _guard = IsolatedMuxbusReconnectGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "1");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ExplicitOptIn
+        );
+        assert!(isolated_muxbus_reconnect_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "0");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ExplicitOptOut
+        );
+        assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+        );
+        assert!(isolated_muxbus_reconnect_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultGlobal
+        );
+        assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+
+        clear_channel_env();
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultGlobal
+        );
+        assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+    }
+
+    #[test]
+    fn isolated_muxbus_reconnect_reason_exempts_task_dev_channels() {
+        // reagentx P1 on PR #3248 (both rounds): a `dev-<branch>` channel
+        // (RuntimeMode::Dev's channel format) must NOT be isolated by
+        // default — it's stable/per-branch, not a randomized per-build
+        // local-package channel, so it never has the "never-before-seen
+        // app to Keychain every time" problem this flag targets, and
+        // isolating it anyway silently drops automatic MuxBus reconnect
+        // (and WAN notifications) for the entire `task dev` session.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        clear_channel_env();
+        let _guard = IsolatedMuxbusReconnectGuard;
+
+        for dev_channel in ["dev-main", "dev-some-branch", "dev-some-branch-a1b2c3d4"] {
+            std::env::set_var("AGENTMUX_CHANNEL", dev_channel);
+            assert_eq!(
+                isolated_muxbus_reconnect_reason(),
+                IsolatedMuxbusReconnectReason::ChannelDefaultGlobal,
+                "dev channel {dev_channel:?} must NOT be isolated by default"
+            );
+            assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+        }
+
+        // A local-package channel (no "dev-" prefix) is still isolated —
+        // the exemption is specific to "dev-", not "anything but stable".
+        std::env::set_var("AGENTMUX_CHANNEL", "local-main-abc123-9");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+        );
+        assert!(isolated_muxbus_reconnect_reason().is_isolated());
+
+        clear_channel_env();
+    }
+
+    #[test]
+    fn isolated_muxbus_reconnect_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
+        // Same fail-safe rule as isolated_auth_reason's/isolated_settings_reason's
+        // equivalent tests (reagentx P2 on PR #2431) — a typo'd opt-out must
+        // land on ExplicitOptOut (reconnect stays on), not silently isolate.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        let _guard = IsolatedMuxbusReconnectGuard;
+
+        for malformed in ["false", "no", "TRUE", "2", ""] {
+            std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", malformed);
+            assert_eq!(
+                isolated_muxbus_reconnect_reason(),
+                IsolatedMuxbusReconnectReason::ExplicitOptOut,
+                "AGENTMUX_ISOLATED_MUXBUS={malformed:?} on a non-stable channel must fail safe to global, not isolate"
+            );
+            assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+        }
+
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        clear_channel_env();
+    }
+
+    #[test]
+    fn isolated_muxbus_reconnect_is_independent_of_auth_and_settings_isolation() {
+        // Same independence guarantee as
+        // isolated_settings_and_isolated_auth_are_independent_flags — a
+        // separate flag on purpose (see the production doc comment).
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        // NOT "dev-some-branch": muxbus reconnect deliberately exempts
+        // dev-* channels (see isolated_muxbus_reconnect_reason's doc
+        // comment) while auth/settings do not — a dev channel would make
+        // this independence test's own channel-default assertions below
+        // wrong for muxbus specifically, unrelated to what this test
+        // actually checks (that the three env-var overrides don't leak
+        // into each other). A local-package-shaped channel keeps all
+        // three flags isolated by their shared channel default, so the
+        // test only exercises the override independence it's named for.
+        std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
+        let _guard_a = IsolatedAuthGuard;
+        let _guard_s = IsolatedSettingsGuard;
+        let _guard_m = IsolatedMuxbusReconnectGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "0");
+        assert!(!isolated_muxbus_reconnect_enabled());
+        assert!(
+            isolated_auth_enabled(),
+            "AGENTMUX_ISOLATED_MUXBUS=0 must not disable auth isolation"
+        );
+        assert!(
+            isolated_settings_enabled(),
+            "AGENTMUX_ISOLATED_MUXBUS=0 must not disable settings isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+        assert!(!isolated_auth_enabled());
+        assert!(
+            isolated_muxbus_reconnect_enabled(),
+            "AGENTMUX_ISOLATED_AUTH=0 must not disable muxbus-reconnect isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        clear_channel_env();
+    }
+
+    #[test]
+    fn ensure_dirs_creates_everything() {
+        with_home_override(|_root| {
+            clear_channel_env();
+            let p = DataPaths::resolve("0.33.639", &RuntimeMode::Installed).unwrap();
+            p.ensure_dirs().unwrap();
+            assert!(p.instance_dir.is_dir());
+            assert!(p.data_dir.is_dir());
+            assert!(p.data_dir.join("db").is_dir());
+            assert!(p.config_dir.is_dir());
+            assert!(p.logs_dir.is_dir());
+            assert!(p.cef_cache_dir.is_dir());
+            assert!(p.agents_dir.is_dir());
+            assert!(p.instance_runtime_dir.is_dir());
+            assert!(p.shared_dir.is_dir());
+        });
+    }
+
+    #[test]
+    fn env_vars_round_trip() {
+        with_home_override(|_root| {
+            clear_channel_env();
+            let p1 = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: None,
+                },
+            )
+            .unwrap();
+            // Apply each env var, then read back.
+            for (k, v) in p1.to_env_vars() {
+                std::env::set_var(k, v);
+            }
+            let p2 = DataPaths::from_env().expect("round-trip");
+            assert_eq!(p1.instance_dir, p2.instance_dir);
+            assert_eq!(p1.data_dir, p2.data_dir);
+            assert_eq!(p1.shared_dir, p2.shared_dir);
+            assert_eq!(p1.mode, p2.mode);
+            assert_eq!(p1.channel, p2.channel);
+            // Cleanup
+            for (k, _) in p1.to_env_vars() {
+                std::env::remove_var(k);
+            }
+        });
+    }
+
+    #[test]
+    fn resolve_rejects_dev_branch_traversal() {
+        // Even if a caller manages to construct a Dev variant with an
+        // unsafe branch (bypassing parse_mode_string sanitization),
+        // resolve() must catch it.
+        with_home_override(|_root| {
+            clear_channel_env();
+            let mode = RuntimeMode::Dev {
+                branch: "..".into(),
+                clone_id: None,
+            };
+            assert!(DataPaths::resolve("0.33.639", &mode).is_err());
+            let mode = RuntimeMode::Dev {
+                branch: "foo/bar".into(),
+                clone_id: None,
+            };
+            assert!(DataPaths::resolve("0.33.639", &mode).is_err());
+        });
+    }
+
+    #[test]
+    fn resolve_rejects_traversal_version() {
+        with_home_override(|_root| {
+            clear_channel_env();
+            assert!(DataPaths::resolve("..", &RuntimeMode::Installed).is_err());
+            assert!(DataPaths::resolve(
+                "0.33.639/etc",
+                &RuntimeMode::Installed
+            )
+            .is_err());
+            // Drive-relative on Windows: `PathBuf::join("versions")
+            // .join("C:temp")` would resolve outside the intended
+            // ~/.agentmux/versions/ subtree because `C:temp` is a
+            // drive-relative path, not a literal filename.
+            assert!(DataPaths::resolve("C:temp", &RuntimeMode::Installed).is_err());
+            // Other Windows-reserved chars also rejected.
+            for v in ["a*b", "a?b", "a|b", "a<b", "a>b", "a\"b"] {
+                assert!(
+                    DataPaths::resolve(v, &RuntimeMode::Installed).is_err(),
+                    "should reject version with reserved char: {:?}",
+                    v
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn from_env_fails_fast_on_missing_vars() {
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Clear all expected vars.
+        for k in [
+            "AGENTMUX_INSTANCE_DIR",
+            "AGENTMUX_DATA_DIR",
+            "AGENTMUX_CONFIG_DIR",
+            "AGENTMUX_LOG_DIR",
+            "AGENTMUX_CEF_CACHE_DIR",
+            "AGENTMUX_AGENTS_DIR",
+            "AGENTMUX_INSTANCE_RUNTIME_DIR",
+            "AGENTMUX_SHARED_DIR",
+            "AGENTMUX_RUNTIME_MODE",
+            "AGENTMUX_CHANNEL",
+        ] {
+            std::env::remove_var(k);
+        }
+        assert!(DataPaths::from_env().is_none());
+    }
+
+    #[test]
+    fn from_env_fails_fast_when_channel_missing() {
+        // Symmetric to from_env_fails_fast_on_missing_vars but
+        // isolates the channel-specific case: a launcher built with
+        // the new code will always export AGENTMUX_CHANNEL; a missing
+        // value indicates a launcher/srv version skew that must fail
+        // loudly rather than silently fall back to a wrong-channel
+        // write. Pre-set all other vars to confirm channel is what's
+        // gating.
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for (k, v) in [
+            ("AGENTMUX_INSTANCE_DIR", "/tmp/x"),
+            ("AGENTMUX_DATA_DIR", "/tmp/x/data"),
+            ("AGENTMUX_CONFIG_DIR", "/tmp/x/config"),
+            ("AGENTMUX_LOG_DIR", "/tmp/x/logs"),
+            ("AGENTMUX_CEF_CACHE_DIR", "/tmp/x/cef"),
+            ("AGENTMUX_AGENTS_DIR", "/tmp/x/agents"),
+            ("AGENTMUX_INSTANCE_RUNTIME_DIR", "/tmp/x/runtime"),
+            ("AGENTMUX_SHARED_DIR", "/tmp/x/shared"),
+            ("AGENTMUX_RUNTIME_MODE", "installed"),
+        ] {
+            std::env::set_var(k, v);
+        }
+        std::env::remove_var("AGENTMUX_CHANNEL");
+        assert!(
+            DataPaths::from_env().is_none(),
+            "from_env() must refuse when AGENTMUX_CHANNEL is missing"
+        );
+        // Cleanup
+        for k in [
+            "AGENTMUX_INSTANCE_DIR",
+            "AGENTMUX_DATA_DIR",
+            "AGENTMUX_CONFIG_DIR",
+            "AGENTMUX_LOG_DIR",
+            "AGENTMUX_CEF_CACHE_DIR",
+            "AGENTMUX_AGENTS_DIR",
+            "AGENTMUX_INSTANCE_RUNTIME_DIR",
+            "AGENTMUX_SHARED_DIR",
+            "AGENTMUX_RUNTIME_MODE",
+        ] {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[test]
+    fn resolve_path_only_ignores_env_channel() {
+        // resolve_path_only is the dev-build / nested-launch self-detection
+        // variant — it deliberately ignores AGENTMUX_CHANNEL because a host (dev
+        // OR a portable launched nested inside another AgentMux) inherits the
+        // parent's channel env and would cross-contaminate.
+        //
+        // Codex P1 regression test on PR #1027 (dev), extended for the nested
+        // portable case the launcher relies on (crates/launcher/src/data_dir.rs).
+        with_home_override(|root| {
+            // Use a NON-default channel value so "ignored" (→ baked default) is
+            // distinguishable from "honored" (→ this value). BUILD_CHANNEL_DEFAULT
+            // is "stable" in tests, so an override of "beta" that gets ignored
+            // resolves to "stable" — a name the env never set. (A "stable" override
+            // would be tautological against the default.)
+            std::env::set_var("AGENTMUX_CHANNEL", "beta");
+            struct ChannelGuard;
+            impl Drop for ChannelGuard {
+                fn drop(&mut self) {
+                    std::env::remove_var("AGENTMUX_CHANNEL");
+                }
+            }
+            let _g = ChannelGuard;
+
+            let dev = DataPaths::resolve_path_only(
+                "0.33.639",
+                &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
+            )
+            .unwrap();
+            // Dev path_only ignores "beta" → stays under dev/main/.
+            assert_eq!(dev.channel, "dev-main");
+            assert_eq!(dev.instance_dir, root.join("dev").join("main"));
+
+            let inst = DataPaths::resolve_path_only(
+                "0.33.639",
+                &RuntimeMode::Installed,
+            )
+            .unwrap();
+            // Installed path_only ignores "beta" → baked default "stable".
+            assert_eq!(inst.channel, "stable");
+            assert_eq!(inst.instance_dir, root.join("channels").join("stable"));
+
+            // Portable path_only ALSO ignores the env channel — the behavior the
+            // launcher relies on for a NESTED portable launch. A build launched
+            // inside another AgentMux pane inherits AGENTMUX_CHANNEL=<parent> and
+            // must resolve to its OWN baked channel, NOT the leaked one — else it
+            // adopts the parent's data dir + cef-cache and CEF's user-data-dir
+            // singleton forwards it into the parent. "beta" ignored → baked
+            // "stable".
+            let port = DataPaths::resolve_path_only(
+                "0.33.639",
+                &RuntimeMode::Portable,
+            )
+            .unwrap();
+            assert_eq!(
+                port.channel, "stable",
+                "nested portable must IGNORE the leaked AGENTMUX_CHANNEL=beta"
+            );
+            assert_eq!(port.instance_dir, root.join("channels").join("stable"));
+
+            // Sanity / B6: regular `resolve` DOES honor the override in every mode
+            // (Dev AND Portable) → "beta". This proves (a) the divergence is solely
+            // on the path_only variant, (b) the assertions above are not tautological
+            // against the default, and (c) an EXPLICIT standalone AGENTMUX_CHANNEL is
+            // still honored for portables (parallel-channel testing, PR #1027).
+            let dev_env = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
+            )
+            .unwrap();
+            assert_eq!(dev_env.channel, "beta");
+            assert_eq!(dev_env.instance_dir, root.join("channels").join("beta"));
+
+            let port_env = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Portable,
+            )
+            .unwrap();
+            assert_eq!(
+                port_env.channel, "beta",
+                "standalone portable still HONORS an explicit AGENTMUX_CHANNEL"
+            );
+            assert_eq!(port_env.instance_dir, root.join("channels").join("beta"));
+        });
+    }
+
+    #[test]
+    fn sanitize_channel_name_accepts_normal_names() {
+        // The happy path — make sure stable / beta / local-main
+        // and friends all sanitize cleanly. Catches regressions in
+        // case the reserved list grows by mistake.
+        assert_eq!(sanitize_channel_name("stable"), Some("stable".into()));
+        assert_eq!(sanitize_channel_name("beta"), Some("beta".into()));
+        assert_eq!(
+            sanitize_channel_name("local-main"),
+            Some("local-main".into())
+        );
+        assert_eq!(
+            sanitize_channel_name("dev-main"),
+            Some("dev-main".into())
+        );
+        assert_eq!(
+            sanitize_channel_name("experiment_42"),
+            Some("experiment_42".into())
+        );
+    }
+
+    // ensure_history_link — real filesystem operations (junction on
+    // Windows, symlink on Unix), not mocked, per
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §4.1. This is credential-adjacent storage code; these tests
+    // actually create the link and read a file back THROUGH it, rather
+    // than only asserting the `Result` came back `Ok`.
+
+    #[test]
+    fn ensure_history_link_makes_files_written_at_target_visible_through_link() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        ensure_history_link(&link_path, &target_dir).expect("link creation must succeed");
+
+        std::fs::write(target_dir.join("session-1.jsonl"), b"hello").unwrap();
+        let via_link = std::fs::read(link_path.join("session-1.jsonl"))
+            .expect("a file written at the global target must be readable through the isolated link path");
+        assert_eq!(via_link, b"hello");
+    }
+
+    #[test]
+    fn ensure_history_link_is_idempotent() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        ensure_history_link(&link_path, &target_dir).unwrap();
+        std::fs::write(target_dir.join("session-1.jsonl"), b"hello").unwrap();
+
+        // A second call against the already-correct link must not touch
+        // (let alone lose) the file that's already there.
+        ensure_history_link(&link_path, &target_dir).expect("re-calling on an already-correct link must succeed");
+        assert!(link_path.join("session-1.jsonl").exists());
+    }
+
+    #[test]
+    fn ensure_history_link_migrates_pre_existing_real_directory_contents() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        // Simulate pre-fix state: link_path is a REAL directory with real
+        // session data already in it (written before this function
+        // existed / before isolation applied to this bundle).
+        std::fs::create_dir_all(&link_path).unwrap();
+        std::fs::write(link_path.join("old-session.jsonl"), b"pre-existing history").unwrap();
+
+        ensure_history_link(&link_path, &target_dir).expect("migration + link creation must succeed");
+
+        // The old file must now live at the global target, not be lost,
+        // and must still be reachable via the (now-linked) original path.
+        assert_eq!(
+            std::fs::read(target_dir.join("old-session.jsonl")).unwrap(),
+            b"pre-existing history",
+            "pre-existing history must be migrated to the global target, not lost"
+        );
+        assert_eq!(
+            std::fs::read(link_path.join("old-session.jsonl")).unwrap(),
+            b"pre-existing history",
+            "migrated history must still be reachable at the original (now-linked) path"
+        );
+    }
+
+    #[test]
+    fn ensure_history_link_never_overwrites_a_name_collision_at_the_target() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(target_dir.join("session-1.jsonl"), b"global version").unwrap();
+        std::fs::create_dir_all(&link_path).unwrap();
+        std::fs::write(link_path.join("session-1.jsonl"), b"isolated version -- must not be lost").unwrap();
+
+        // The link can't be created while link_path is a non-empty real
+        // directory (the colliding entry blocks the migration's cleanup
+        // remove_dir) -- this must surface as an error, not silently
+        // clobber either copy.
+        let result = ensure_history_link(&link_path, &target_dir);
+        assert!(result.is_err(), "a name collision must surface as an error, not silently pick a winner");
+
+        // Neither copy was touched.
+        assert_eq!(std::fs::read(target_dir.join("session-1.jsonl")).unwrap(), b"global version");
+        assert_eq!(
+            std::fs::read(link_path.join("session-1.jsonl")).unwrap(),
+            b"isolated version -- must not be lost"
+        );
+    }
+
+    // reagentx P2 on PR #2605: the previous version of this function's
+    // fallback match arm treated "a plain file at link_path" the same as
+    // "a stale link at link_path" and deleted it outright with no
+    // migration, contradicting the function's own doc comment.
+    #[test]
+    fn ensure_history_link_refuses_to_delete_a_plain_file_at_the_link_path() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        std::fs::create_dir_all(link_path.parent().unwrap()).unwrap();
+        std::fs::write(&link_path, b"unexpected real file, not a directory or a link").unwrap();
+
+        let result = ensure_history_link(&link_path, &target_dir);
+        assert!(result.is_err(), "a plain file at the link path must surface as an error, never be silently deleted");
+        assert_eq!(
+            std::fs::read(&link_path).unwrap(),
+            b"unexpected real file, not a directory or a link",
+            "the file must still exist, untouched, after the refused operation"
+        );
+    }
+
+    // chatgpt-codex-connector + reagentx both claimed on PR #2605 that
+    // `std::fs::symlink_metadata` reports a Windows junction as
+    // `is_dir()=true, is_symlink()=false` — which, if true, would mean
+    // `ensure_history_link`'s `meta.is_dir() && !meta.file_type().is_symlink()`
+    // migration-branch check incorrectly treats a stale junction as a
+    // real directory. Verified empirically (twice, independently) that
+    // this claim is FALSE for the actual Rust std + toolchain this crate
+    // builds with: a real junction reports `is_dir()=false,
+    // is_symlink()=true` via `symlink_metadata` — `is_dir()=true` only
+    // shows up via `fs::metadata` (which follows the link, as
+    // documented). Kept as a permanent test, not deleted after
+    // resolving the review thread, so a future "fix" for this
+    // non-existent bug doesn't silently reintroduce one by "fixing"
+    // something that was already correct.
+    #[cfg(windows)]
+    #[test]
+    fn windows_junction_is_reported_as_symlink_not_as_a_real_directory() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link = tmp.path().join("isolated").join("linked");
+        let target = tmp.path().join("global");
+        ensure_history_link(&link, &target).unwrap();
+
+        assert!(junction::exists(&link).unwrap(), "sanity: this must actually be a junction");
+
+        let meta = std::fs::symlink_metadata(&link).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "a Windows junction must report is_symlink()=true via symlink_metadata"
+        );
+        assert!(
+            !meta.is_dir(),
+            "a Windows junction must NOT report is_dir()=true via symlink_metadata (only via the \
+             link-following fs::metadata) — if this ever changes, ensure_history_link's migration \
+             branch needs the junction::exists() check the (currently incorrect) review claimed was missing"
+        );
+    }
+    // ── #3682: the AgentMux root is owner-only on Unix ──────────────────────
+
+    #[cfg(unix)]
+    fn mode_of(p: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    fn set_mode(p: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_creates_a_missing_root_0700() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("parent").join(".agentmux");
+        assert_eq!(ensure_owner_only_dir_inner(&root, None).unwrap(), OwnerOnlyOutcome::Created);
+        assert_eq!(mode_of(&root), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_leaves_parents_it_had_to_create_at_the_normal_umask() {
+        // Only the root is AgentMux's to make private; a parent dir it had to
+        // create (a custom AGENTMUX_DATA_HOME) belongs to the user.
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path().join("parent");
+        let root = parent.join(".agentmux");
+        ensure_owner_only_dir_inner(&root, None).unwrap();
+        assert_ne!(mode_of(&parent), 0o700, "parent must not be forced owner-only");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_tightens_an_existing_world_readable_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::create_dir(&root).unwrap();
+        set_mode(&root, 0o755);
+        assert_eq!(
+            ensure_owner_only_dir_inner(&root, None).unwrap(),
+            OwnerOnlyOutcome::Tightened { previous_mode: 0o755 }
+        );
+        assert_eq!(mode_of(&root), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_keeps_the_owner_bits_it_found() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::create_dir(&root).unwrap();
+        set_mode(&root, 0o570);
+        assert_eq!(
+            ensure_owner_only_dir_inner(&root, None).unwrap(),
+            OwnerOnlyOutcome::Tightened { previous_mode: 0o570 }
+        );
+        assert_eq!(mode_of(&root), 0o500);
+        set_mode(&root, 0o700); // so TempDir can clean up
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_is_a_no_op_on_an_already_private_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::create_dir(&root).unwrap();
+        set_mode(&root, 0o700);
+        assert_eq!(ensure_owner_only_dir_inner(&root, None).unwrap(), OwnerOnlyOutcome::AlreadyPrivate);
+        assert_eq!(mode_of(&root), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_never_touches_the_users_home_itself() {
+        // A misconfigured AGENTMUX_DATA_HOME=$HOME must not chmod ~ to 0700.
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        set_mode(&home, 0o755);
+        assert_eq!(
+            ensure_owner_only_dir_inner(&home, Some(&home)).unwrap(),
+            OwnerOnlyOutcome::NotApplicable
+        );
+        assert_eq!(mode_of(&home), 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_refuses_a_file_where_the_root_should_be() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::write(&root, b"not a dir").unwrap();
+        assert!(ensure_owner_only_dir_inner(&root, None).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_dirs_leaves_the_root_owner_only_and_still_creates_the_tree() {
+        with_home_override(|root| {
+            clear_channel_env();
+            set_mode(root, 0o755); // an install from before #3682
+            let paths = DataPaths::resolve("0.0.0", &RuntimeMode::Installed).unwrap();
+            paths.ensure_dirs().unwrap();
+            assert_eq!(mode_of(root), 0o700);
+            for d in [&paths.data_dir, &paths.config_dir, &paths.agents_dir, &paths.shared_dir] {
+                assert!(d.is_dir(), "{} not created", d.display());
+            }
+            assert!(paths.data_dir.join("db").is_dir());
+        });
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn owner_only_is_not_applicable_off_unix() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        assert_eq!(ensure_owner_only_dir_inner(&root, None).unwrap(), OwnerOnlyOutcome::NotApplicable);
+        // Nothing created either — ensure_dirs' own create_dir_all does that.
+        assert!(!root.exists());
+    }
+}

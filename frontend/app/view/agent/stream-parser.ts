@@ -50,7 +50,7 @@ export const STARTUP_HEADING_RE = /^# Session Context\b/;
 
 /**
  * Matches a full `[JEKT:...]...[/JEKT]` marker block spanning the whole
- * message. Produced by `wrap_jekt_message` (`agentmux-srv/src/backend/
+ * message. Produced by `wrap_jekt_message` (`crates/srv/src/backend/
  * reactive/sanitize.rs`) and `wrapJektMessage` (`muxbus-cloud/muxbus/server/
  * src/index.ts`) — the two current producers of this format. Group 1 is the
  * structured tag's field string (`FROM=... TO=... TIER=...`); group 2 is

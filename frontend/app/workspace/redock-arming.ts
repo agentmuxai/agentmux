@@ -22,7 +22,7 @@
  * even after the velocity gate had explicitly rejected the entry, which is the
  * bug the spec above exists to fix. Dwell is now measured only from samples
  * that actually confirmed a target at a qualifying speed; the host supplies a
- * heartbeat (`agentmux-cef/src/ui_tasks/drag.rs`, `DRAG_TICK_ID`) so those
+ * heartbeat (`crates/cef/src/ui_tasks/drag.rs`, `DRAG_TICK_ID`) so those
  * samples keep arriving while stationary. Do not reintroduce a timeout-based
  * arming path here.
  */

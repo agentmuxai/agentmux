@@ -1,0 +1,1315 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Platform info commands for the CEF host.
+// Ported from src-tauri/src/commands/platform.rs without Tauri dependencies.
+
+use std::io::Read;
+use std::sync::Arc;
+
+use crate::state::AppState;
+
+const SETTINGS_TEMPLATE: &str = include_str!("../../../../settings-template.jsonc");
+
+/// Get the current OS platform name.
+pub fn get_platform() -> serde_json::Value {
+    let platform = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other,
+    };
+    serde_json::json!(platform)
+}
+
+/// Get the current user's username.
+pub fn get_user_name() -> serde_json::Value {
+    serde_json::json!(whoami::username())
+}
+
+/// Get the system hostname.
+pub fn get_host_name() -> serde_json::Value {
+    let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    serde_json::json!(hostname)
+}
+
+/// Check if THIS build is a `task dev` build — resolved from the host exe
+/// PATH (`is_dev_self`), NOT `AGENTMUX_RUNTIME_MODE`. A running dev AgentMux
+/// leaks that env into descendant processes, which would otherwise flip a
+/// packaged build to "DEV" (the status-bar badge).
+pub fn get_is_dev() -> serde_json::Value {
+    serde_json::json!(agentmux_common::is_dev_self())
+}
+
+/// Get the app data directory path (version-specific).
+pub fn get_data_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let dir = state.version_data_dir.lock();
+    match dir.as_ref() {
+        Some(d) => Ok(serde_json::json!(d)),
+        None => Err("Data dir not initialized yet".to_string()),
+    }
+}
+
+/// Get the app config directory path (version-specific).
+pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let dir = state.version_config_dir.lock();
+    match dir.as_ref() {
+        Some(d) => Ok(serde_json::json!(d)),
+        None => Err("Config dir not initialized yet".to_string()),
+    }
+}
+
+/// Get the AgentMux account-wide root (`~/.agentmux/`) — `user_home_dir`, set
+/// from `paths.home_dir` (sidecar.rs; the same root in portable / installed /
+/// override modes, not a per-channel or `<portable>/data` subdir). Used by the
+/// frontend for per-agent paths (e.g. the working dir). (The shared
+/// provider auth dir under it is srv's `provider.ensureauthdir`.)
+pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let dir = state.user_home_dir.lock();
+    match dir.as_ref() {
+        Some(d) => Ok(serde_json::json!(d)),
+        None => Err("User home dir not initialized yet".to_string()),
+    }
+}
+
+/// Get an environment variable value.
+///
+/// Security: refuses keys whose name suggests a secret (cloud keys, API
+/// tokens, passwords, the AgentMux auth key, etc.). `get_env` is reachable by
+/// any IPC caller holding the bearer token — including agent processes and
+/// browser-pane code — so an unrestricted reader is a direct
+/// credential-exfiltration path. The legitimate frontend never depends on this
+/// command in the CEF host (the `getEnv` shim returns "" and resolves real
+/// values from window globals), so the denylist is transparent to the app.
+/// See reports security sweep 2026-06-12 (get-env-unrestricted).
+pub fn get_env(args: &serde_json::Value) -> serde_json::Value {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if is_sensitive_env_key(key) {
+        tracing::warn!(key = %key, "get_env: refused to expose a secret-looking env var");
+        return serde_json::Value::Null;
+    }
+    match std::env::var(key) {
+        Ok(val) => serde_json::json!(val),
+        Err(_) => serde_json::Value::Null,
+    }
+}
+
+/// True if an env-var name looks like it holds a secret and must not be
+/// exposed over the IPC `get_env` command. Substring match on the
+/// upper-cased key so prefixed/suffixed variants (AWS_SECRET_ACCESS_KEY,
+/// GITHUB_TOKEN, AGENTMUX_AUTH_KEY, …) are all caught.
+fn is_sensitive_env_key(key: &str) -> bool {
+    const NEEDLES: [&str; 7] = [
+        "KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH",
+    ];
+    let upper = key.to_ascii_uppercase();
+    NEEDLES.iter().any(|needle| upper.contains(needle))
+}
+
+/// The ephemeral build label of a local portable, read from the
+/// `agentmux-portable.marker` file the packaging script writes next to
+/// the launcher (`scripts/package-portable.sh`). Format on disk:
+/// `AgentMux portable build <label>\n`, e.g.
+/// `AgentMux portable build 0.39.2+g9dd2d78.dirty.20260528T2203.21046`.
+///
+/// Read from the MARKER (not baked via `option_env!`) on purpose: the
+/// label changes every build, and the marker is rewritten on every
+/// `task package`, so reading it at runtime is always accurate and
+/// costs no recompile — whereas a compile-time bake would go stale any
+/// time `agentmux-cef` itself wasn't rebuilt (e.g. a frontend-only
+/// rebuild). Released / installed / dev builds have no marker → returns
+/// `None` and the UI falls back to the plain version + git hash.
+///
+/// The host runs from `<portable>/runtime/` and the marker is packaged INTO
+/// `runtime/`, so it sits right next to this exe (the `exe_dir` candidate). We
+/// also check one level up (the extract root) for robustness against older
+/// portables that wrote the marker at the root.
+fn read_build_label() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    let candidates = [
+        Some(exe_dir.join("agentmux-portable.marker")),
+        exe_dir.parent().map(|p| p.join("agentmux-portable.marker")),
+    ];
+    for cand in candidates.into_iter().flatten() {
+        if let Ok(contents) = std::fs::read_to_string(&cand) {
+            if let Some(label) = contents.trim().strip_prefix("AgentMux portable build ") {
+                let label = label.trim();
+                if !label.is_empty() {
+                    return Some(label.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
+    Some(s) => s,
+    None => "stable",
+};
+
+/// Get details for the About modal.
+pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
+    let version = env!("CARGO_PKG_VERSION");
+    let endpoints = state.backend_endpoints.lock();
+    let channel = agentmux_common::DataPaths::from_env()
+        .map(|p| p.channel)
+        .unwrap_or_else(|| BUILD_CHANNEL_DEFAULT.to_string());
+
+    serde_json::json!({
+        "version": version,
+        // Exact local-build label matching the portable's folder/ZIP name
+        // (null for released / installed / dev builds). Lets the user tie
+        // a running instance back to the artifact on disk.
+        "buildLabel": read_build_label(),
+        "gitHash": env!("AGENTMUX_GIT_HASH"),
+        "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
+        "cefVersion": env!("AGENTMUX_CEF_VERSION"),
+        "channel": channel,
+        "platform": match std::env::consts::OS {
+            "macos" => "darwin",
+            "windows" => "win32",
+            other => other,
+        },
+        "arch": std::env::consts::ARCH,
+        "backendEndpoints": {
+            "ws": endpoints.ws_endpoint,
+            "web": endpoints.web_endpoint,
+        }
+    })
+}
+
+/// Get comprehensive host info for the hostname popover.
+pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
+    let version = env!("CARGO_PKG_VERSION");
+    let endpoints = state.backend_endpoints.lock();
+    let ipc_port = *state.ipc_port.lock();
+    let debug_port = *state.debug_port.lock();
+    let data_dir = state.version_data_dir.lock().clone().unwrap_or_default();
+    let pid = std::process::id();
+
+    // Resolve primary local IP
+    let local_ip = local_ip_address().unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let os_info = format!("{} {}",
+        match std::env::consts::OS {
+            "windows" => "Windows",
+            "macos" => "macOS",
+            "linux" => "Linux",
+            other => other,
+        },
+        std::env::consts::ARCH
+    );
+
+    serde_json::json!({
+        "hostname": whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
+        "os": os_info,
+        "localIp": local_ip,
+        "version": version,
+        "dataDir": data_dir,
+        "pid": pid,
+        "ports": {
+            "ipc": format!("127.0.0.1:{}", ipc_port),
+            "web": endpoints.web_endpoint,
+            "ws": endpoints.ws_endpoint,
+            // "off": release builds run no CDP server unless AGENTMUX_CDP_PORT
+            // opts in (#3681, `crate::cdp_port`).
+            "devtools": if debug_port == 0 { "off".to_string() } else { format!("127.0.0.1:{}", debug_port) },
+        }
+    })
+}
+
+/// Get the primary non-loopback IPv4 address.
+fn local_ip_address() -> Option<String> {
+    // Connect a UDP socket to an external address to determine the local IP
+    // (doesn't actually send data — just resolves the route)
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
+}
+
+/// Get the documentation site URL.
+pub fn get_docsite_url(state: &Arc<AppState>) -> serde_json::Value {
+    let endpoints = state.backend_endpoints.lock();
+    if !endpoints.web_endpoint.is_empty() {
+        serde_json::json!(format!("http://{}/docsite/", endpoints.web_endpoint))
+    } else {
+        serde_json::json!("https://docs.agentmux.ai")
+    }
+}
+
+/// Open a file in the best available code editor.
+pub fn open_in_editor(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing path".to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Use explorer.exe directly instead of cmd /C start to avoid shell injection.
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+        return Ok(serde_json::Value::Null);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let cli_editors = ["code", "cursor", "zed", "subl", "atom"];
+        for editor in &cli_editors {
+            if std::process::Command::new(editor).arg(path).spawn().is_ok() {
+                return Ok(serde_json::Value::Null);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
+
+    #[allow(unreachable_code)]
+    Ok(serde_json::Value::Null)
+}
+
+/// Open one of this instance's own directories in the OS file manager — the
+/// host popover's Data-path link.
+///
+/// Takes a closed `target` enum, never a path: the host resolves the directory
+/// itself, so the renderer cannot ask it to open an arbitrary location.
+/// Spec: SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md §4.
+pub fn open_in_file_manager(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let target = args.get("target").and_then(|v| v.as_str());
+    let data_dir = state.version_data_dir.lock().clone();
+    let path = resolve_file_manager_target(target, data_dir.as_deref())?;
+    spawn_file_manager(&path)?;
+    Ok(serde_json::Value::Null)
+}
+
+/// Map a `target` to a directory that exists. `data` is the only target today.
+fn resolve_file_manager_target(
+    target: Option<&str>,
+    data_dir: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    let dir = match target {
+        Some("data") => data_dir.ok_or_else(|| "Data dir not initialized yet".to_string())?,
+        Some(other) => return Err(format!("Unknown file manager target: {other}")),
+        None => return Err("Missing target".to_string()),
+    };
+    let path = std::path::PathBuf::from(dir);
+    if !path.is_dir() {
+        return Err(format!("Directory does not exist: {}", path.display()));
+    }
+    Ok(path)
+}
+
+/// The program and argv that open `path` (a directory) in the platform's file
+/// manager. `None` on a platform we don't support. The path is always a
+/// single argv element — no shell anywhere.
+fn file_manager_command(path: &std::path::Path) -> Option<(&'static str, Vec<std::ffi::OsString>)> {
+    #[cfg(target_os = "windows")]
+    {
+        // Explorer ignores a forward-slash path and opens its default folder
+        // instead, so normalise to backslashes.
+        let p = path.to_string_lossy().replace('/', "\\");
+        return Some(("explorer.exe", vec![p.into()]));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Some(("open", vec![path.as_os_str().to_owned()]));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return Some(("xdg-open", vec![path.as_os_str().to_owned()]));
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Spawn the file manager detached from our stdio, and reap it on a
+/// background thread so a quick-exiting launcher (`open`, `xdg-open`) doesn't
+/// linger as a zombie. Explorer's exit code is meaningless (it commonly exits
+/// 1 on success), so only a failure to spawn is an error.
+fn spawn_file_manager(path: &std::path::Path) -> Result<(), String> {
+    let (program, args) =
+        file_manager_command(path).ok_or_else(|| "Unsupported platform".to_string())?;
+    match spawn_detached(program, &args) {
+        Ok(()) => Ok(()),
+        // No xdg-open on this Linux box — try GIO before giving up.
+        #[cfg(target_os = "linux")]
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let mut gio_args = vec![std::ffi::OsString::from("open")];
+            gio_args.extend(args);
+            spawn_detached("gio", &gio_args).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    "No file manager handler found (tried xdg-open and gio)".to_string()
+                } else {
+                    format!("Failed to open file manager: {e}")
+                }
+            })
+        }
+        Err(e) => Err(format!("Failed to open file manager: {e}")),
+    }
+}
+
+fn spawn_detached(program: &str, args: &[std::ffi::OsString]) -> std::io::Result<()> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// Ensure settings.json exists in the config directory with the latest template.
+pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let config_dir_str = state
+        .version_config_dir
+        .lock()
+        .clone()
+        .ok_or_else(|| "Config dir not initialized yet".to_string())?;
+    let config_dir = std::path::PathBuf::from(&config_dir_str);
+
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("Failed to create config dir: {}", e))?;
+
+    let settings_path = config_dir.join("settings.json");
+
+    // Read existing user values (strips JSONC comments, parses JSON)
+    let existing = read_settings_jsonc(&settings_path);
+
+    // Merge user values into fresh template
+    let merged = merge_into_template(SETTINGS_TEMPLATE, &existing);
+    std::fs::write(&settings_path, &merged)
+        .map_err(|e| format!("Failed to write settings.json: {}", e))?;
+
+    Ok(serde_json::json!(settings_path.to_string_lossy()))
+}
+
+// --- Settings helpers (ported from src-tauri/src/commands/platform.rs) ---
+
+pub(crate) fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+    if !path.exists() {
+        return serde_json::Map::new();
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            let stripped = json_comments::StripComments::new(content.as_bytes());
+            let mut json_bytes = Vec::new();
+            std::io::BufReader::new(stripped)
+                .read_to_end(&mut json_bytes)
+                .unwrap_or_default();
+            let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(serde_json::Value::Object(map)) => map,
+                _ => serde_json::Map::new(),
+            }
+        }
+        Err(_) => serde_json::Map::new(),
+    }
+}
+
+fn strip_trailing_commas(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut last_comma_pos: Option<usize> = None;
+
+    for ch in input.chars() {
+        if in_string {
+            result.push(ch);
+            if ch == '"' {
+                let backslashes = result[..result.len() - 1]
+                    .chars()
+                    .rev()
+                    .take_while(|&c| c == '\\')
+                    .count();
+                if backslashes % 2 == 0 {
+                    in_string = false;
+                }
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_string = true;
+                last_comma_pos = None;
+                result.push(ch);
+            }
+            ',' => {
+                last_comma_pos = Some(result.len());
+                result.push(ch);
+            }
+            '}' | ']' => {
+                if let Some(pos) = last_comma_pos {
+                    result.replace_range(pos..pos + 1, " ");
+                }
+                last_comma_pos = None;
+                result.push(ch);
+            }
+            _ if ch.is_whitespace() => {
+                result.push(ch);
+            }
+            _ => {
+                last_comma_pos = None;
+                result.push(ch);
+            }
+        }
+    }
+    result
+}
+
+fn merge_into_template(
+    template: &str,
+    user_settings: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if user_settings.is_empty() {
+        return template.to_string();
+    }
+
+    let mut remaining: std::collections::HashMap<&str, &serde_json::Value> =
+        user_settings.iter().map(|(k, v)| (k.as_str(), v)).collect();
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in template.lines() {
+        if let Some(key) = extract_commented_setting_key(line) {
+            if let Some(value) = remaining.remove(key) {
+                let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+                let val_str = serde_json::to_string(value).unwrap_or_default();
+                lines.push(format!("{}\"{}\": {},", indent, key, val_str));
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !remaining.is_empty() {
+        if let Some(brace_pos) = lines.iter().rposition(|l| l.trim() == "}") {
+            let mut extra: Vec<String> = Vec::new();
+            extra.push(String::new());
+            extra.push("    // -- User Overrides --".to_string());
+            let mut sorted_keys: Vec<&&str> = remaining.keys().collect();
+            sorted_keys.sort();
+            for key in sorted_keys {
+                let value = remaining[*key];
+                let val_str = serde_json::to_string(value).unwrap_or_default();
+                extra.push(format!("    \"{}\": {},", key, val_str));
+            }
+            for (i, line) in extra.into_iter().enumerate() {
+                lines.insert(brace_pos + i, line);
+            }
+        }
+    }
+
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+/// Open a URL in the system's default browser (IPC command wrapper).
+pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let url = args
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing url".to_string())?;
+    open_url_in_default_browser(url)?;
+    Ok(serde_json::Value::Null)
+}
+
+/// Open a URL in the system's default browser.
+///
+/// Shared by the `open_external` IPC command and by `on_before_popup`'s
+/// external-link routing (`target="_blank"` / `window.open` from the app UI).
+/// Validates the scheme first — defends against command injection and unexpected
+/// protocol handlers.
+pub fn open_url_in_default_browser(url: &str) -> Result<(), String> {
+    // Allow safe URL schemes. vscode:// is included so that file-path links
+    // with a :line suffix can open the file at the correct line in VS Code.
+    let allowed = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("devtools://")
+        || url.starts_with("vscode://");
+    if !allowed {
+        return Err(format!("Refusing to open URL with unsupported scheme: {}", url));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Use rundll32 url.dll,FileProtocolHandler instead of explorer.exe or
+        // cmd /C start. Explorer is a file manager — when it is already running
+        // (always the case on Windows), passing a URL to a second explorer
+        // instance is unreliable and sometimes opens a file-manager window.
+        // cmd.exe interprets & and | in URLs as command separators (injection).
+        // url.dll,FileProtocolHandler is the Windows built-in URL dispatcher:
+        // it reads HKCR\https\shell\open\command and always opens the default
+        // browser, handling any printable characters in the URL safely.
+        let _ = std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// True if `url` is an http(s) URL whose host is NOT this app's own loopback
+/// origin — i.e. a link to the outside world (github.com, docs.agentmux.ai, …).
+///
+/// The app UI is always served from `http://127.0.0.1:<ipc_port>` (or
+/// `http://localhost:<vite_port>` in dev), so any other host is external.
+/// `on_before_popup` uses this to decide whether a `target="_blank"` link
+/// should open in the system browser (external) or navigate in-app (internal /
+/// browser-pane). Non-http schemes return false — they are not ours to route.
+pub fn is_external_http_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    let rest = match lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))
+    {
+        Some(r) => r,
+        None => return false,
+    };
+    // authority = everything before the first '/', '?' or '#'
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // drop any userinfo ("user:pass@host") then any ":port" suffix
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let host = host.split(':').next().unwrap_or(host);
+    !matches!(host, "127.0.0.1" | "localhost" | "0.0.0.0" | "")
+}
+
+/// True if `url` looks like an **OAuth 2 / OpenID Connect authorization
+/// request** — the kind of popup a "Sign in with Google/GitHub/Microsoft/…"
+/// button opens. Used by `on_before_popup` to scope which browser-pane
+/// `window.open` popups are allowed to become a real child popup window (so
+/// the auth handshake completes in the pane): ONLY genuine auth flows, never
+/// arbitrary `window.open` popups (ad windows, chat widgets, print dialogs),
+/// which would otherwise spawn rogue top-level windows
+/// (docs/specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md).
+///
+/// Heuristic (host-agnostic — no brittle provider allowlist): the path names a
+/// standard authorization endpoint, OR the query carries the OAuth
+/// authorization-request parameter cluster (`response_type` + `client_id`).
+/// Matches Google (`/o/oauth2/v2/auth`), GitHub (`/login/oauth/authorize`),
+/// Microsoft (`/oauth2/v2.0/authorize`), Apple (`/auth/authorize`), Auth0/Okta
+/// (`/authorize`), and generic OAuth2 — without matching a "Read more" popup.
+pub fn is_oauth_authorization_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return false;
+    }
+    // Split path from query.
+    let after_scheme = lower.splitn(2, "://").nth(1).unwrap_or("");
+    let (path_part, query_part) = match after_scheme.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (after_scheme, ""),
+    };
+    // Path names a standard authorization endpoint.
+    let path_is_authorize = ["/oauth", "/authorize", "/o/oauth2", "/login/oauth", "/auth/authorize"]
+        .iter()
+        .any(|needle| path_part.contains(needle));
+    // Query carries the OAuth authorization-request parameter cluster.
+    let query_has_oauth_params =
+        query_part.contains("response_type=") && query_part.contains("client_id=");
+    path_is_authorize || query_has_oauth_params
+}
+
+/// Known identity-provider hosts that a browser pane is allowed to open a real
+/// native sign-in popup to. This allowlist — NOT URL shape — is the security
+/// boundary: browser panes load untrusted/attacker-controlled pages, and URL
+/// heuristics alone (OAuth-looking path/params) let any such page spawn
+/// unlimited native phishing windows (reagent P1 on PR #2545; the popup-
+/// explosion class SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md
+/// prevents). An attacker cannot serve from these domains, so gating the
+/// native popup on a known-IdP host makes it safe. A self-hosted / unlisted
+/// IdP simply doesn't get the in-pane popup (falls back to the system browser).
+/// Extend deliberately.
+const IDP_HOSTS_EXACT: &[&str] = &[
+    "accounts.google.com",           // Google (incl. GIS)
+    "github.com",                    // GitHub OAuth
+    "login.microsoftonline.com",     // Microsoft / Entra ID
+    "login.live.com",                // Microsoft consumer
+    "login.microsoft.com",
+    "appleid.apple.com",             // Apple
+    "www.facebook.com",              // Facebook Login
+    "facebook.com",
+    "discord.com",                   // Discord
+    "gitlab.com",                    // GitLab
+    "login.salesforce.com",          // Salesforce
+    "slack.com",                     // Slack
+    "www.linkedin.com",              // LinkedIn
+    "linkedin.com",
+    "id.atlassian.com",              // Atlassian
+    "auth.atlassian.com",
+    "login.yahoo.com",               // Yahoo
+    "www.dropbox.com",               // Dropbox
+];
+
+/// Host SUFFIXES for identity providers that give each tenant its own
+/// subdomain (Okta, Auth0, Azure AD B2C, Cognito, …). Matched as `.suffix` so
+/// `evil-okta.com` does NOT match `.okta.com` (must be a real subdomain).
+const IDP_HOST_SUFFIXES: &[&str] = &[
+    ".okta.com",
+    ".oktapreview.com",
+    ".auth0.com",
+    ".b2clogin.com",         // Azure AD B2C
+    ".amazoncognito.com",    // AWS Cognito
+    ".onelogin.com",
+    ".pingidentity.com",
+];
+
+/// True if `host` (no port) is a known identity provider from the allowlist
+/// above. The security gate for allowing a native in-pane OAuth popup.
+pub fn is_known_idp_host(host: &str) -> bool {
+    let host = host.split(':').next().unwrap_or(host);
+    IDP_HOSTS_EXACT.contains(&host)
+        || IDP_HOST_SUFFIXES.iter().any(|suf| host.ends_with(suf))
+}
+
+/// The lowercased `host[:port]` authority of an http(s) URL, or `None` for a
+/// non-http / malformed URL. Used to compare origins (a popup to a *different*
+/// host than the pane's current page). Deliberately host+port, not full origin
+/// with scheme — good enough to tell "same site" from "cross-site" for the
+/// OAuth-popup gate, and tolerant of http/https mixups.
+pub fn url_host(url: &str) -> Option<String> {
+    let lower = url.trim().to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+/// Schemes a browser pane is allowed to *navigate* to. Everything web-ish
+/// (pages, inline content, devtools, websockets) plus the loopback app origin.
+/// Anything else is a non-web protocol whose navigation Chromium would, by
+/// default, hand to the OS shell (`ShellExecute` on Windows) — which can launch
+/// an OS-registered handler, and if that handler is elevated, raise a **UAC**
+/// prompt. `on_before_browse` blocks navigations to disallowed schemes for
+/// browser panes so embedded web content can never reach an OS protocol handler
+/// (see docs/reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md).
+const PANE_ALLOWED_NAV_SCHEMES: &[&str] = &[
+    "http", "https", "about", "data", "blob", "ws", "wss", "devtools",
+    "chrome-devtools", "chrome",
+    // "View Page Source" (browser-pane context menu, SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md)
+    // navigates via a `view-source:<url>` prefix. Like `chrome-devtools:`,
+    // Chromium renders this internally (a read-only source view) — it is
+    // never handed to the OS shell, so it carries none of the UAC/OS-handoff
+    // risk this allowlist exists to block. IMPORTANT: being in this list is
+    // NOT sufficient on its own for "view-source" — see
+    // `is_disallowed_pane_nav_scheme`'s nested-scheme check below. Membership
+    // here only says the OUTER `view-source:` prefix itself isn't handed to
+    // the OS shell; it says nothing about what comes after the colon.
+    "view-source",
+];
+
+/// The scheme of `url` (lowercased) if it has one — the run of
+/// `[a-z0-9+.-]` before the first `:`, per RFC 3986. Returns `None` for a
+/// scheme-relative or relative URL (no valid scheme → resolves against the
+/// current http(s) origin, always safe).
+fn url_scheme(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let colon = trimmed.find(':')?;
+    let scheme = &trimmed[..colon];
+    if scheme.is_empty() {
+        return None;
+    }
+    let mut chars = scheme.chars();
+    // First char must be a letter; the rest letters/digits/+/-/. (RFC 3986).
+    let first_ok = chars.next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false);
+    let rest_ok = scheme
+        .chars()
+        .skip(1)
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    if first_ok && rest_ok {
+        Some(scheme.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+/// True if a browser pane must NOT be allowed to navigate to `url` because its
+/// scheme is a non-web external protocol that Chromium would hand to the OS
+/// shell. A relative/scheme-less URL, or one of `PANE_ALLOWED_NAV_SCHEMES`, is
+/// allowed (returns false).
+pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
+    match url_scheme(url) {
+        None => false, // relative / scheme-less — resolves against current origin
+        Some(scheme) => {
+            if !PANE_ALLOWED_NAV_SCHEMES.contains(&scheme.as_str()) {
+                return true;
+            }
+            // `view-source:` wraps an arbitrary NESTED target URL that
+            // Chromium fetches and renders as source text — `url_scheme`
+            // above only inspects up to the FIRST colon, so
+            // `view-source:file:///etc/passwd` has outer scheme
+            // "view-source" (allowed) while the nested target
+            // (`file:///etc/passwd`) was never validated at all. A
+            // compromised/malicious page loaded in the pane can trigger this
+            // itself via `window.location`, letting it read and display
+            // local file contents in the pane — exactly what this allowlist
+            // exists to prevent (reagentx P0 on PR #2599). Restrict the
+            // nested target to http(s) specifically — narrower than the
+            // full `PANE_ALLOWED_NAV_SCHEMES` list, since that's the only
+            // thing `browser_panes::navigation::view_source()` itself ever
+            // generates (it always prepends `view-source:` to the pane's
+            // own already-http(s) `frame.url()`).
+            if scheme == "view-source" {
+                let nested = url.trim().splitn(2, ':').nth(1).unwrap_or("");
+                let nested_scheme = url_scheme(nested);
+                return !matches!(nested_scheme.as_deref(), Some("http") | Some("https"));
+            }
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod external_url_tests {
+    use super::{is_disallowed_pane_nav_scheme, is_external_http_url, is_oauth_authorization_url, url_host};
+
+    #[test]
+    fn known_idp_hosts_match_only_real_providers() {
+        use super::is_known_idp_host;
+        for h in [
+            "accounts.google.com", "github.com", "login.microsoftonline.com",
+            "appleid.apple.com", "dev-12345.okta.com", "acme.auth0.com",
+            "contoso.b2clogin.com", "myapp.amazoncognito.com", "discord.com",
+        ] {
+            assert!(is_known_idp_host(h), "should be a known IdP: {h}");
+        }
+        // Attacker-controlled / lookalike hosts must NOT match.
+        for h in [
+            "evil.com", "accounts.google.com.evil.com", "evil-okta.com",
+            "notauth0.com", "google.com", "login.evil.com", "",
+        ] {
+            assert!(!is_known_idp_host(h), "must NOT be a known IdP: {h}");
+        }
+        // Port is ignored.
+        assert!(is_known_idp_host("accounts.google.com:443"));
+    }
+
+    #[test]
+    fn url_host_extracts_authority_for_cross_origin_check() {
+        assert_eq!(url_host("https://accounts.google.com/o/oauth2/v2/auth?x=1"), Some("accounts.google.com".into()));
+        assert_eq!(url_host("https://claude.ai/login"), Some("claude.ai".into()));
+        assert_eq!(url_host("http://user@evil.com:8080/x"), Some("evil.com:8080".into()));
+        assert_eq!(url_host("about:blank"), None);
+        assert_eq!(url_host(""), None);
+        // Same host, different path → same host (so same-origin popup is rejected).
+        assert_eq!(url_host("https://evil.com/oauth?response_type=code&client_id=x"), url_host("https://evil.com/"));
+    }
+
+    #[test]
+    fn oauth_authorization_urls_match() {
+        for u in [
+            // Google Identity Services (the reported flow)
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&scope=openid&response_type=code&redirect_uri=y",
+            "https://github.com/login/oauth/authorize?client_id=x&scope=repo",
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=x&response_type=code",
+            "https://appleid.apple.com/auth/authorize?client_id=x&response_type=code",
+            "https://dev-abc.okta.com/oauth2/default/v1/authorize?client_id=x&response_type=token",
+            // param-cluster only (unusual path)
+            "https://auth.example.com/go?response_type=code&client_id=abc&redirect_uri=z",
+        ] {
+            assert!(is_oauth_authorization_url(u), "should match OAuth: {u}");
+        }
+    }
+
+    #[test]
+    fn non_oauth_popups_do_not_match() {
+        for u in [
+            "https://example.com/article/read-more",
+            "https://ads.example.com/popup?campaign=42",
+            "https://chat.example.com/widget",
+            "about:blank",
+            "https://example.com/authorized-users", // 'authorize' substring but not an endpoint path...
+            "https://example.com/print?doc=1",
+        ] {
+            // Note: /authorized-users contains "/authorize" — accept the rare
+            // false positive rather than over-fit; it's still gesture-gated and
+            // lifecycle-managed. Assert the clearly-non-auth ones.
+            if u.contains("/authorize") { continue; }
+            assert!(!is_oauth_authorization_url(u), "should NOT match OAuth: {u}");
+        }
+    }
+
+    #[test]
+    fn external_sites_are_external() {
+        assert!(is_external_http_url("https://github.com/agentmuxai/agentmux/issues/new"));
+        assert!(is_external_http_url("https://docs.agentmux.ai/config"));
+        assert!(is_external_http_url("http://example.com:8080/x?y=1#z"));
+        assert!(is_external_http_url("https://user@evil.com/path"));
+    }
+
+    #[test]
+    fn loopback_app_origin_is_internal() {
+        assert!(!is_external_http_url("http://127.0.0.1:54469/"));
+        assert!(!is_external_http_url("http://localhost:5173/?windowLabel=window-x"));
+        assert!(!is_external_http_url("http://127.0.0.1:1/agentmux/browser/foo"));
+    }
+
+    #[test]
+    fn non_http_schemes_are_not_routed() {
+        assert!(!is_external_http_url("about:blank"));
+        assert!(!is_external_http_url("data:text/html,hi"));
+        assert!(!is_external_http_url("blob:abc"));
+        assert!(!is_external_http_url("vscode://file/x"));
+    }
+
+    #[test]
+    fn web_schemes_are_allowed_pane_nav() {
+        for u in [
+            "https://claude.ai/login",
+            "http://127.0.0.1:5173/",
+            "about:blank",
+            "data:text/html,hi",
+            "blob:https://x/abc",
+            "devtools://devtools/bundled/x.html",
+            "/relative/path",
+            "//scheme-relative/path",
+            "?just=query",
+        ] {
+            assert!(!is_disallowed_pane_nav_scheme(u), "should allow: {u}");
+        }
+    }
+
+    #[test]
+    fn non_web_external_schemes_are_blocked_pane_nav() {
+        // These are the OS-handoff schemes that can raise a UAC prompt.
+        for u in [
+            "ms-cxh://x",
+            "microsoft-edge://x",
+            "tel:+15551234",
+            "mailto:a@b.com",
+            "vscode://file/x",
+            "steam://run/1",
+            "callto:foo",
+            "custom-installer://elevate",
+        ] {
+            assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
+        }
+    }
+
+    #[test]
+    fn view_source_of_http_https_is_allowed() {
+        for u in [
+            "view-source:https://example.com/page",
+            "view-source:http://127.0.0.1:5173/",
+        ] {
+            assert!(!is_disallowed_pane_nav_scheme(u), "should allow: {u}");
+        }
+    }
+
+    #[test]
+    fn view_source_of_non_http_nested_scheme_is_blocked() {
+        // reagentx P0 on PR #2599: view-source: wraps an arbitrary nested
+        // target that Chromium fetches and renders as source text.
+        // url_scheme() only inspects up to the FIRST colon, so a naive
+        // allowlist entry for "view-source" alone would let a page navigate
+        // itself to view-source:file:///... and have local file contents
+        // rendered in the pane.
+        for u in [
+            "view-source:file:///etc/passwd",
+            "view-source:file:///C:/Windows/System32/config/SAM",
+            "view-source:chrome://settings",
+            "view-source:vscode://file/x",
+            "view-source:",
+            "view-source:not-a-url",
+        ] {
+            assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
+        }
+    }
+}
+
+/// Open the system file manager at the given path.
+/// Directories are opened directly; files are revealed (selected) in their
+/// parent directory.
+///
+/// | Platform | Directory        | File                        |
+/// |----------|------------------|-----------------------------|
+/// | Windows  | `explorer <dir>` | `explorer /select,<file>`   |
+/// | macOS    | `open <dir>`     | `open -R <file>`            |
+/// | Linux    | `xdg-open <dir>` | `xdg-open <parent dir>`     |
+pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let file_path = args
+        .get("filePath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing filePath".to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Convert forward slashes (from JS normalisation) back to backslashes.
+        let native = file_path.replace('/', "\\");
+        let is_dir = std::path::Path::new(&native).is_dir();
+        let arg = if is_dir {
+            // Open the directory itself.
+            native.clone()
+        } else {
+            // /select,<path> must be a single argument — the comma delimits the
+            // switch from the path. Reveals the file in its parent directory.
+            format!("/select,{}", native)
+        };
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(arg)
+            .spawn()
+            .map_err(|e| format!("Failed to open in Explorer: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let is_dir = std::path::Path::new(file_path).is_dir();
+        if is_dir {
+            let _ = std::process::Command::new("open")
+                .arg(file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open directory in Finder: {}", e))?;
+        } else {
+            let _ = std::process::Command::new("open")
+                .args(["-R", file_path])
+                .spawn()
+                .map_err(|e| format!("Failed to reveal file in Finder: {}", e))?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let path = std::path::Path::new(file_path);
+        let open_path = if path.is_dir() {
+            file_path
+        } else {
+            path.parent().and_then(|p| p.to_str()).unwrap_or(file_path)
+        };
+        let _ = std::process::Command::new("xdg-open")
+            .arg(open_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
+    }
+
+    Ok(serde_json::Value::Null)
+}
+
+/// Extensions the Media pane can display. Kept in sync by hand with
+/// `IMAGE_EXTENSIONS`/`VIDEO_EXTENSIONS`/`AUDIO_EXTENSIONS` in
+/// `frontend/app/view/media/media.tsx` — there's no shared-constant
+/// mechanism across the Rust host / TS frontend boundary, so a change to
+/// one list needs the same change here. Deliberately no `mkv`: Chromium's
+/// `<video>` element doesn't reliably accept the Matroska container for
+/// direct playback regardless of the codec inside, so listing it here
+/// would let a user pick a file that then fails to render.
+/// Hold for the lifetime of a native file dialog: on Windows it steps
+/// "Always on top" floaters down so the (unowned) dialog can't end up behind
+/// one (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.1). No-op elsewhere.
+#[cfg(target_os = "windows")]
+fn host_dialog_guard() -> crate::floating_pane::HostDialogGuard {
+    crate::floating_pane::HostDialogGuard::new()
+}
+#[cfg(not(target_os = "windows"))]
+fn host_dialog_guard() -> NoDialogGuard {
+    NoDialogGuard
+}
+#[cfg(not(target_os = "windows"))]
+struct NoDialogGuard;
+
+const MEDIA_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+const MEDIA_VIDEO_EXTENSIONS: &[&str] = &["webm", "mp4", "mov"];
+const MEDIA_AUDIO_EXTENSIONS: &[&str] = &["wav"];
+
+/// Show a native "open file" dialog, filtered to the Media pane's supported
+/// image/video/audio types, and return the chosen path (or `null` if the
+/// user cancelled). Used by the Media pane (SPEC_MEDIA_PANE_2026_07_26.md)
+/// so pointing it at a clip doesn't require typing/pasting an absolute path.
+///
+/// `rfd::FileDialog::pick_file` blocks the calling thread until the user
+/// responds — wrapped in `spawn_blocking` so it doesn't stall a shared
+/// Tokio worker, matching `get_window_position`'s precedent in `ipc.rs`.
+pub async fn show_open_file_dialog(
+    _args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let path = tokio::task::spawn_blocking(|| {
+        let _dialog_guard = host_dialog_guard();
+        rfd::FileDialog::new()
+            .add_filter(
+                "Supported media",
+                &[MEDIA_IMAGE_EXTENSIONS, MEDIA_VIDEO_EXTENSIONS, MEDIA_AUDIO_EXTENSIONS].concat(),
+            )
+            .add_filter("Images", MEDIA_IMAGE_EXTENSIONS)
+            .add_filter("Videos", MEDIA_VIDEO_EXTENSIONS)
+            .add_filter("Audio", MEDIA_AUDIO_EXTENSIONS)
+            .pick_file()
+    })
+    .await
+    .map_err(|e| format!("show_open_file_dialog: task join error: {e}"))?;
+    Ok(match path {
+        Some(p) => serde_json::json!(p.to_string_lossy()),
+        None => serde_json::Value::Null,
+    })
+}
+
+/// File picker for Armory Bundle Format (`.abf`) files — Phase 3 of
+/// docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §4 Step 1.
+/// `show_open_file_dialog` can't be reused: it takes no filter argument and
+/// its own filter list is hard-coded to image/video/audio extensions, with
+/// no generic filter mechanism elsewhere in this module — this mirrors its
+/// shape with an `.abf` filter instead. The filter is advisory only (a
+/// non-`.abf` file picked here still just fails `unzip_bundle_import`'s
+/// "not a valid zip archive" check server-side, same as today).
+pub async fn show_open_bundle_dialog(
+    _args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let path = tokio::task::spawn_blocking(|| {
+        let _dialog_guard = host_dialog_guard();
+        rfd::FileDialog::new()
+            .add_filter("Armory Bundle", &["abf"])
+            .pick_file()
+    })
+    .await
+    .map_err(|e| format!("show_open_bundle_dialog: task join error: {e}"))?;
+    Ok(match path {
+        Some(p) => serde_json::json!(p.to_string_lossy()),
+        None => serde_json::Value::Null,
+    })
+}
+
+/// The extension every layout file carries
+/// (docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.1). Mirrors
+/// `agentmux-srv`'s `layout_file::LAYOUT_EXTENSION`, which refuses any other.
+const LAYOUT_EXTENSION: &str = ".agentmux-layout.json";
+
+/// A layout name as a file stem: path separators and characters Windows
+/// rejects become `-`; empty becomes `layout`.
+fn layout_file_stem(name: &str) -> String {
+    let stem: String = name
+        .trim()
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '-' } else { c })
+        .collect();
+    let stem = stem.trim_matches(['.', ' ']).to_string();
+    if stem.is_empty() {
+        "layout".to_string()
+    } else {
+        stem
+    }
+}
+
+/// The path the dialog returned, with the layout extension added if the user
+/// typed a bare name. OS dialogs append a filter's extension inconsistently,
+/// and a double extension like this one least of all.
+fn with_layout_extension(path: std::path::PathBuf) -> std::path::PathBuf {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(LAYOUT_EXTENSION) {
+        return path;
+    }
+    // Case-insensitive, like the check above (ReAgent P2 on #3787): `x.JSON`
+    // becomes `x.agentmux-layout.json`, not `x.JSON.agentmux-layout.json`.
+    // `.json` is ASCII, so cutting its byte length off the end is safe.
+    let base = if lower.ends_with(".json") { &name[..name.len() - ".json".len()] } else { name.as_str() };
+    path.with_file_name(format!("{base}{LAYOUT_EXTENSION}"))
+}
+
+/// Save dialog for a layout file — Phase 1 of
+/// docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §6.1, and the first save dialog
+/// in the app. Opens in `~/.agentmux/shared/layouts/` (created if missing,
+/// cross-channel so a layout saved in one build is found by every other) with
+/// `<defaultName>.agentmux-layout.json` suggested; the user may save
+/// anywhere. Returns the chosen absolute path, or `null` on cancel. Writes
+/// nothing itself — the srv's `layout.save` does.
+pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let stem = layout_file_stem(args.get("defaultName").and_then(|v| v.as_str()).unwrap_or(""));
+    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts"));
+    if let Some(dir) = &dir {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let path = tokio::task::spawn_blocking(move || {
+        let _dialog_guard = host_dialog_guard();
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Save layout")
+            .set_file_name(format!("{stem}{LAYOUT_EXTENSION}"))
+            .add_filter("AgentMux layout", &["agentmux-layout.json", "json"]);
+        if let Some(dir) = dir.filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.save_file()
+    })
+    .await
+    .map_err(|e| format!("show_save_layout_dialog: task join error: {e}"))?;
+    Ok(match path {
+        Some(p) => serde_json::json!(with_layout_extension(p).to_string_lossy()),
+        None => serde_json::Value::Null,
+    })
+}
+
+/// Open dialog for a layout file — Phase 2 of
+/// docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.5. Opens in
+/// `~/.agentmux/shared/layouts/`, filtered to layout files. Returns the
+/// chosen absolute path, or `null` on cancel. Reads nothing itself — the
+/// srv's `layout.preview` / `layout.open` do, and they refuse any path not
+/// ending in `.agentmux-layout.json`.
+pub async fn show_open_layout_dialog(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts"));
+    let path = tokio::task::spawn_blocking(move || {
+        let _dialog_guard = host_dialog_guard();
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Open layout")
+            .add_filter("AgentMux layout", &["agentmux-layout.json"]);
+        if let Some(dir) = dir.filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.pick_file()
+    })
+    .await
+    .map_err(|e| format!("show_open_layout_dialog: task join error: {e}"))?;
+    Ok(match path {
+        Some(p) => serde_json::json!(p.to_string_lossy()),
+        None => serde_json::Value::Null,
+    })
+}
+
+#[cfg(test)]
+mod layout_dialog_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn names_become_safe_file_stems() {
+        assert_eq!(layout_file_stem("Review setup"), "Review setup");
+        assert_eq!(layout_file_stem("a/b\\c:d*e?f\"g<h>i|j"), "a-b-c-d-e-f-g-h-i-j");
+        assert_eq!(layout_file_stem("  "), "layout");
+        assert_eq!(layout_file_stem("..."), "layout");
+    }
+
+    #[test]
+    fn the_extension_is_added_only_when_missing() {
+        let dir = PathBuf::from("layouts");
+        assert_eq!(with_layout_extension(dir.join("x")), dir.join("x.agentmux-layout.json"));
+        assert_eq!(with_layout_extension(dir.join("x.json")), dir.join("x.agentmux-layout.json"));
+        assert_eq!(with_layout_extension(dir.join("x.JSON")), dir.join("x.agentmux-layout.json"));
+        assert_eq!(with_layout_extension(dir.join("café.Json")), dir.join("café.agentmux-layout.json"));
+        assert_eq!(
+            with_layout_extension(dir.join("x.agentmux-layout.json")),
+            dir.join("x.agentmux-layout.json")
+        );
+        assert_eq!(
+            with_layout_extension(dir.join("X.AgentMux-Layout.JSON")),
+            dir.join("X.AgentMux-Layout.JSON")
+        );
+    }
+}
+
+fn extract_commented_setting_key(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("//")?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+#[cfg(test)]
+mod file_manager_tests {
+    use super::{file_manager_command, resolve_file_manager_target};
+
+    #[test]
+    fn resolves_data_target_to_existing_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap();
+        assert_eq!(resolve_file_manager_target(Some("data"), Some(d)).unwrap(), dir.path());
+    }
+
+    #[test]
+    fn rejects_unknown_or_missing_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str();
+        // Anything but "data" is refused — including a target that looks like a path.
+        for t in ["config", "", "DATA", "../data", r"C:\Windows"] {
+            assert!(resolve_file_manager_target(Some(t), d).is_err(), "target {t:?} must be refused");
+        }
+        assert_eq!(resolve_file_manager_target(None, d).unwrap_err(), "Missing target");
+    }
+
+    #[test]
+    fn rejects_uninitialized_or_missing_dir() {
+        assert_eq!(
+            resolve_file_manager_target(Some("data"), None).unwrap_err(),
+            "Data dir not initialized yet"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("does-not-exist");
+        assert!(resolve_file_manager_target(Some("data"), gone.to_str()).is_err());
+        // A file is not a directory.
+        let file = dir.path().join("f.txt");
+        std::fs::write(&file, "x").unwrap();
+        assert!(resolve_file_manager_target(Some("data"), file.to_str()).is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_uses_explorer_with_backslashes() {
+        let (prog, args) = file_manager_command(std::path::Path::new("C:/Users/me/.agentmux/data")).unwrap();
+        assert_eq!(prog, "explorer.exe");
+        assert_eq!(args, vec![std::ffi::OsString::from(r"C:\Users\me\.agentmux\data")]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_uses_open() {
+        let (prog, args) = file_manager_command(std::path::Path::new("/Users/me/.agentmux/data")).unwrap();
+        assert_eq!(prog, "open");
+        assert_eq!(args, vec![std::ffi::OsString::from("/Users/me/.agentmux/data")]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_uses_xdg_open() {
+        let (prog, args) = file_manager_command(std::path::Path::new("/home/me/.agentmux/data")).unwrap();
+        assert_eq!(prog, "xdg-open");
+        assert_eq!(args, vec![std::ffi::OsString::from("/home/me/.agentmux/data")]);
+    }
+}

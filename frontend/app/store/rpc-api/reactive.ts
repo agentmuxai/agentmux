@@ -3,7 +3,7 @@
 
 // Jekt/muxbus registration status for one agent — powers the Stash
 // "Registration" tab (issue #2696). Backed by the `reactive.registrations`
-// WS RPC command (agentmux-srv/src/server/reactive.rs's
+// WS RPC command (crates/srv/src/server/reactive.rs's
 // register_reactive_ws_handlers), not the pre-existing `/agentmux/reactive/*`
 // HTTP routes (those exist for cross-instance/LAN server-to-server
 // forwarding, not frontend consumption — this file is the first frontend

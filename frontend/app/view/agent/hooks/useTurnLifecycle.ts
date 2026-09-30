@@ -27,7 +27,7 @@ import * as MOS from "@/app/store/mos";
 import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
+import { isStopping, SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import type { Accessor } from "solid-js";
 import type { DocumentNode, SessionStats } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -140,7 +140,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         // The reducer's TurnEnd handler does the cross-atom cleanup
         // in one shot: merges live tokens into stats, clears
         // tool/tokens, and transitions the phase to Done.
-        const wasStopping = getTurnPhase().kind === "Interrupting";
+        const wasStopping = isStopping(getTurnPhase());
         opts.model.dispatchPane({ type: "TurnEnd", stats });
         if (wasStopping) {
             const interruptedNode: DocumentNode = {
@@ -236,7 +236,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // RequestStop and out on TurnEnd / disconnect.
     let stopFallbackTimer: number | null = null;
     createEffect(() => {
-        const stopping = getTurnPhase().kind === "Interrupting";
+        const stopping = isStopping(getTurnPhase());
         if (stopFallbackTimer != null) {
             clearTimeout(stopFallbackTimer);
             stopFallbackTimer = null;
@@ -244,7 +244,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         if (stopping) {
             stopFallbackTimer = window.setTimeout(() => {
                 stopFallbackTimer = null;
-                if (getTurnPhase().kind === "Interrupting") {
+                if (isStopping(getTurnPhase())) {
                     finalizeTurn(null);
                 }
             }, 1500);

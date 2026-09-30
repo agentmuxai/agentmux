@@ -13,7 +13,7 @@
  *
  * Spec: none — the SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23 doc this
  * used to name was never committed. The zone layout in
- * agentmux-srv/src/backend/agent_session/mod.rs is the contract.
+ * crates/srv/src/backend/agent_session/mod.rs is the contract.
  */
 
 import { createRoot, type Owner } from "solid-js";

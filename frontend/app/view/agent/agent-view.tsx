@@ -14,7 +14,7 @@ import {
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { isAuthFailure, workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { isAuthFailure, isStopping, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
@@ -27,16 +27,13 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     getApi,
     getBlockMetaKeyAtom,
-    getSettingsKeyAtom,
     openOrFocusPaneByView,
     MOS,
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { BlockService } from "@/app/store/services";
-import { createPaneReadiness } from "@/app/store/pane-readiness";
+import { readZoom } from "@/app/store/zoom-factor";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
-import { scheduleOnSettle } from "@/app/util/settle-detector";
 import {
     accountLabel,
     loadAccounts,
@@ -47,7 +44,6 @@ import { ErrorBoundary } from "@/element/errorboundary";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
-    batch,
     createEffect,
     createMemo,
     createSignal,
@@ -55,7 +51,6 @@ import {
     onCleanup,
     onMount,
     Show,
-    untrack,
     type Accessor,
     type JSX,
 } from "solid-js";
@@ -68,27 +63,21 @@ import { isBangCommand } from "./bang-command";
 import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
-import { ActivityDock } from "./components/ActivityDock";
+import { AgentBottomPanels } from "./components/AgentBottomPanels";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
-import { AgentSessionNotices } from "./components/AgentSessionNotices";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
-import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
-import { ShutdownPendingBanner } from "./shutdown/ShutdownPendingBanner";
-import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
-import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
-import { AgentAuthPanel, AgentDocumentView } from "./components/AgentDocumentView";
-import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
-import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
+import { AgentDocumentView } from "./components/AgentDocumentView";
+import { AgentFooter } from "./components/AgentFooter";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { collapseDrawerOnShellExit } from "./shell-exit-collapse";
-import { ForkProviderFallbackBanner } from "./components/ForkProviderFallbackBanner";
-import { PaneRow } from "./components/PaneRow";
-import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentStashDrawer } from "./components/AgentStashDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
+import { usePaneReveal } from "./hooks/usePaneReveal";
+import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
+import { useFocusRepoll, useHeldMessageDelivery } from "./hooks/useTurnReconciliation";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -102,7 +91,8 @@ import { requestAgentTakeover } from "./failure/takeover";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
-import { didTurnJustEnd, useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
+import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
+import { createTurnConfirmation } from "./hooks/turn-confirmation";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { createTranscriptSettleLatch } from "./transcript-cursor";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
@@ -112,8 +102,6 @@ import type { AgentDefinition } from "@/app/store/rpc-api";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { injectGapRows, injectHistoryLink } from "./inject-history-link";
-import { liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "./live-feed";
-import { userIsInteracting } from "./stream-scheduler";
 import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
 import { useResumePreflight } from "./hooks/useResumePreflight";
 import { openOrFocusHistoryTab } from "./open-history-tab";
@@ -123,7 +111,6 @@ import { createAgentAtoms } from "./state";
 import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
-import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "./open-trace";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
@@ -404,64 +391,11 @@ export const AgentPresentationView = ({
     // that lives inside AgentDocumentView. This drives the enter-animation
     // gate on the streaming buffer.
     let historyReadyFn: (() => void) | undefined;
-    // Brain-spinner loading overlay (see
-    // docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md):
-    // shown from mount, cross-fades out once real content has actually
-    // painted, so a content-heavy pane never sits blank while it replays.
-    //
-    // `onHistoryReady` fires right after the NDJSON parse/dispatch — BEFORE
-    // the resulting DOM's layout/paint, which is the dominant cost for heavy
-    // sessions (500-600ms, see SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md).
-    // Starting the fade there (or after any flat delay) would make the
-    // overlay disappear before painting finishes for exactly the
-    // content-heavy case this exists to cover — reproducing the blank
-    // window instead of fixing it. `scheduleOnSettle` (same Long-Task-quiet
-    // detector `tab-reveal.ts` uses for the analogous tab-switch case) waits
-    // for the main thread to actually go quiet post-dispatch before the
-    // fade starts. `showLoadingOverlay` then unmounts the overlay entirely
-    // once the fade transition has had time to finish, instead of leaving
-    // an invisible-but-present pointer-events:none div forever.
-    // One readiness authority for this pane — see
-    // docs/specs/SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md. Phase 1 changes no
-    // behaviour: the same two conditions gate the reveal, the fade still runs for
-    // 220ms, and the overlay still unmounts after it. What changes is that "may the
-    // pane appear" is now ONE stated decision instead of several components each
-    // deciding independently — a prerequisite for collapsing the four overlapping
-    // loading indicators (two were measured on screen at once) in later phases.
-    //
-    // The phase maps onto exactly what the two old booleans encoded:
-    //   assembling → covered, not yet fading   (was: !historyLoaded && showOverlay)
-    //   revealing  → covered, fading            (was:  historyLoaded && showOverlay)
-    //   live       → unmounted                  (was: !showOverlay)
+    // The loading cover and when the pane may appear (hooks/usePaneReveal.ts).
     // Before useHistoryPagination below, so a pane mounting without a My
     // Agents click (startup restore) still records its history phases.
-    beginAgentOpenOnMount(model.blockId, agentName());
-    onCleanup(() => finishAgentOpen(model.blockId, "closed"));
-    const readiness = createPaneReadiness({ label: `block:${model.blockId}` });
-    const releaseHistoryGate = readiness.gate("history");
-    const releaseAuthGate = readiness.gate("auth");
-    // Separate from `historyLoaded` below: this only means "the transcript
-    // has actually painted" — the effect after `status` is defined (further
-    // down) decides whether that's enough to start the fade, or whether the
-    // auth-panel pop-in flicker fix also needs to hold the overlay a bit
-    // longer.
-    const [historyPainted, setHistoryPainted] = createSignal(false);
-    let cancelSettleWait: (() => void) | undefined;
-    let loadingOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
-    // Two extra rAFs between "settle detected" and actually starting the
-    // fade — see the doc comment on scheduleOnSettle's call site below for
-    // why: Long-Task quiet alone can be reached before the browser has
-    // actually PAINTED this pane's content (live-reported flicker,
-    // 2026-08-11). Tracked so a pane close mid-transition doesn't write to
-    // disposed signals.
-    let settlePaintRaf1: number | undefined;
-    let settlePaintRaf2: number | undefined;
-    onCleanup(() => {
-        cancelSettleWait?.();
-        clearTimeout(loadingOverlayFadeTimeout);
-        if (settlePaintRaf1 !== undefined) cancelAnimationFrame(settlePaintRaf1);
-        if (settlePaintRaf2 !== undefined) cancelAnimationFrame(settlePaintRaf2);
-    });
+    const reveal = usePaneReveal({ blockId: model.blockId, agentName });
+    const readiness = reveal.readiness;
     // Where the history load ended, handed to the live stream so it places
     // its records after that history (Phase 5a-4, transcript-cursor.ts).
     const transcriptSettle = createTranscriptSettleLatch();
@@ -479,37 +413,13 @@ export const AgentPresentationView = ({
         // backend. Read at restore time — after this component's body, so
         // the live-feed consts declared below are set.
         restoreTurns: () =>
-            liveFeedOn() && outputFormat() === "claude-stream-json" ? liveFeedTurns + 1 : undefined,
+            liveFeed.liveFeedOn() && outputFormat() === "claude-stream-json" ? liveFeed.liveFeedTurns + 1 : undefined,
         onHistoryReady: () => {
             historyReadyFn?.();
             // A pane opens with K turns, not the load window's worth (§6.9).
-            scheduleRollOff();
-            cancelSettleWait = scheduleOnSettle(() => {
-                // `scheduleOnSettle` only watches for Long-Task quiet
-                // (no synchronous block >50ms) — but this pane's actual
-                // reveal work (AgentDocumentVirtualList's measure
-                // ResizeObserver, scroll-pin/anchor-restore effects) is
-                // spread across several async/RAF-scheduled steps that
-                // never register as one long task each. "No long tasks
-                // observed" can therefore be reached before the browser has
-                // actually PAINTED the resulting rows — starting the fade
-                // there let the spinner finish disappearing while the pane
-                // was still genuinely blank underneath, then the real
-                // content popped in abruptly once that async chain finally
-                // caught up (live-reported flicker, 2026-08-11, repro:
-                // switch tabs, screenshot-burst the transition — spinner
-                // fully faded by ~400ms, content not visible until ~500ms).
-                // A double requestAnimationFrame is the standard "wait for
-                // an actual paint to have happened" technique: the second
-                // callback is guaranteed to run only after whatever was
-                // queued as of the first one's frame has been painted.
-                settlePaintRaf1 = requestAnimationFrame(() => {
-                    settlePaintRaf2 = requestAnimationFrame(() => {
-                        markAgentOpen(model.blockId, "painted");
-                        setHistoryPainted(true);
-                    });
-                });
-            });
+            liveFeed.scheduleRollOff();
+            // Start the fade once the history has actually painted.
+            reveal.startPaintWait();
         },
         // Schema v2: apply DocumentState + pane overlay after NDJSON replay.
         onSnapshotOverlay: ({ documentState, detailsOpen }) => {
@@ -534,154 +444,20 @@ export const AgentPresentationView = ({
     // set by the restore/pagination clamp paths (scopeClamped) OR derived
     // from a live clamp — after the reducer's StreamFlush trim, the fresh
     // session_outcome divider is always the first document node.
-    // ---- The live feed (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9) ----
-    // The pane keeps the turn in flight plus the last K finished turns;
-    // older ones roll off into History, which follows the transcript. Read
-    // once at mount, like agent:turnscopedtail. Providers whose transcript
-    // lacks the user's messages keep today's behaviour (`liveFeedSupported`).
-    const liveFeedSetting = untrack(() => getSettingsKeyAtom("agent:livefeed")()) !== false;
-    const liveFeedTurns = resolveLiveFeedTurns(untrack(() => getSettingsKeyAtom("agent:livefeedturns")()));
-    const liveFeedOn = (): boolean =>
-        liveFeedSetting && liveFeedSupported(outputFormat(), block()?.meta?.["controller"] as string | undefined);
-    // Whether the reader follows the bottom — handed over by the document view.
-    let followingBottom: Accessor<boolean> = () => true;
-    // Turns rolled off the front since mount, and the gap rows between kept turns.
-    const [rolledOffTurns, setRolledOffTurns] = createSignal(0);
-    const [gapsBefore, setGapsBefore] = createSignal<ReadonlySet<string>>(new Set());
-    let rollOffDisposed = false;
-    onCleanup(() => {
-        rollOffDisposed = true;
+    // The live feed: the turn in flight plus the last K finished turns; older
+    // ones roll off into History (hooks/useLiveFeedRollOff.ts). Created here,
+    // after the history hook; the callbacks above that call into it
+    // (onHistoryReady, restoreTurns) run only once this body has finished.
+    const liveFeed = useLiveFeedRollOff({
+        blockId: model.blockId,
+        paneModel,
+        outputFormat,
+        block,
+        agentAtoms,
+        hidden,
+        history,
     });
-
-    /** One roll-off pass: a single reducer command, planned on its current nodes. */
-    const runRollOff = (): void => {
-        if (!liveFeedOn() || rollOffDisposed) return;
-        const [docState, setDocState] = agentAtoms().documentStateAtom;
-        const pinnedIds = untrack(docState).pinnedNodes;
-        const events = paneModel.dispatchDoc({
-            type: "RollOff",
-            keepTurns: liveFeedTurns,
-            visibleIds: visibleIdsOf(layoutSnapshot(model.blockId)),
-            keepIds: pinnedIds,
-            pinned: untrack(followingBottom),
-        });
-        const ev = events.find((e) => e.type === "turns-rolled-off");
-        if (!ev || ev.type !== "turns-rolled-off") return;
-        const present = new Set(untrack(paneModel.document).map((n) => n.id));
-        const prune = (set: Set<string>): Set<string> => {
-            let changed = false;
-            const next = new Set<string>();
-            for (const id of set) {
-                if (present.has(id)) next.add(id);
-                else changed = true;
-            }
-            return changed ? next : set;
-        };
-        batch(() => {
-            setRolledOffTurns((n) => n + ev.prefixTurns);
-            setGapsBefore((prev) => {
-                const next = new Set<string>();
-                for (const id of prev) if (present.has(id)) next.add(id);
-                for (const id of ev.gapsBefore) next.add(id);
-                return next;
-            });
-            // The view's own id sets must not keep ids that are gone.
-            setDocState((prev) => {
-                const collapsedNodes = prune(prev.collapsedNodes);
-                const expandedTools = prune(prev.expandedTools);
-                const pinnedNodes = prune(prev.pinnedNodes);
-                return collapsedNodes === prev.collapsedNodes &&
-                    expandedTools === prev.expandedTools &&
-                    pinnedNodes === prev.pinnedNodes
-                    ? prev
-                    : { ...prev, collapsedNodes, expandedTools, pinnedNodes };
-            });
-        });
-        if (ev.blockedTurns > 0) {
-            console.debug(`[live-feed] ${model.blockId}: ${ev.blockedTurns} older turn(s) kept (not in the transcript)`);
-        }
-    };
-
-    /**
-     * Schedule a pass off the input path: when the browser is idle, stepping
-     * aside while the user types, but never later than ROLL_OFF_DEADLINE_MS —
-     * a deferred pass is re-queued, not dropped (§6.9).
-     */
-    const ROLL_OFF_DEADLINE_MS = 1_000;
-    let rollOffQueued = false;
-    const whenIdle = (cb: () => void, timeoutMs: number): void => {
-        const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o: { timeout: number }) => number })
-            .requestIdleCallback;
-        if (ric) ric(cb, { timeout: Math.max(1, timeoutMs) });
-        else setTimeout(cb, Math.min(50, Math.max(0, timeoutMs)));
-    };
-    function scheduleRollOff(): void {
-        if (!liveFeedOn() || rollOffQueued) return;
-        rollOffQueued = true;
-        const deadline = performance.now() + ROLL_OFF_DEADLINE_MS;
-        const attempt = (): void => {
-            if (rollOffDisposed) return;
-            const left = deadline - performance.now();
-            if (left > 0 && userIsInteracting()) return whenIdle(attempt, left);
-            rollOffQueued = false;
-            runRollOff();
-        };
-        whenIdle(attempt, ROLL_OFF_DEADLINE_MS);
-    }
-
-    // Backstop for paths that add many turns at once without a turn end or a
-    // send (a restore, a large history load): a pass whenever the feed first
-    // holds clearly more turns than it keeps. A memo, so it fires on the
-    // transition, not on every flush.
-    const feedOverBudget = createMemo(() => {
-        if (!liveFeedOn()) return false;
-        let turns = 0;
-        for (const n of paneModel.document()) if (n.type === "user_message") turns++;
-        return turns > liveFeedTurns + 3;
-    });
-    createEffect(
-        on(feedOverBudget, (over) => {
-            if (over) scheduleRollOff();
-        }),
-    );
-
-    // Roll-off points besides the history load and turn end (below): the next
-    // send, and the pane going out of view.
-    createEffect(
-        on(
-            () => {
-                const doc = paneModel.document();
-                const last = doc[doc.length - 1];
-                return last?.type === "user_message" ? last.id : null;
-            },
-            (id) => {
-                if (id) scheduleRollOff();
-            },
-            { defer: true },
-        ),
-    );
-    createEffect(
-        on(
-            hidden,
-            (hidden) => {
-                if (hidden) scheduleRollOff();
-            },
-            { defer: true },
-        ),
-    );
-
-    const earlierHistoryAvailable = createMemo(() => {
-        if (history.scopeClamped()) return true;
-        if (liveFeedOn() && (rolledOffTurns() > 0 || history.historyOffset() > 0)) return true;
-        const first = paneModel.document()[0];
-        return first?.type === "session_outcome" && first.outcome === "fresh";
-    });
-    // "N earlier turns" only when N is the whole story: everything before the
-    // feed was loaded from line 0 and rolled off here.
-    const earlierTurnsKnown = (): number | undefined =>
-        liveFeedOn() && rolledOffTurns() > 0 && history.historyOffset() === 0 && !history.scopeClamped()
-            ? rolledOffTurns()
-            : undefined;
+    const { liveFeedOn, gapsBefore, earlierHistoryAvailable, earlierTurnsKnown } = liveFeed;
 
     // Read-side view of the document with the "Open Agent History" link row
     // injected as a normal, scrolling document node (§3.2 of
@@ -744,65 +520,16 @@ export const AgentPresentationView = ({
     // before onMount fires). Also consumed by dropAttach + usePtyWidth below.
     let rootRef: HTMLDivElement | undefined;
 
-    // Bumped exactly once per genuine, backend-confirmed turn completion —
-    // the `turn_active: true -> false` edge, fed ONLY by live controllerstatus
-    // events (see trackTurnJustEnded below, and NOT reconcileTurnActive — the
-    // mount-time one-shot deliberately does not participate; reagent P1 on
-    // PR #2241). This is the trigger useAgentActivitySummary/
-    // useNextPromptSuggestion use instead of TurnPhase.kind === "Done" (which
-    // over-triggers — see
-    // docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md).
-    // `wasTurnActive` is plain (non-reactive) — it only exists to detect the
-    // edge, not to be read anywhere.
-    let wasTurnActive: boolean | undefined;
-    const [turnJustEndedAtom, setTurnJustEndedAtom] = createSignal(0);
-
-    // Dispatches ReconcileTurnActive to the pane reducer so TurnPhase follows
-    // the backend's live turn state — used by BOTH the mount-time one-shot
-    // (useAgentControllerStatus's Phase 3 GetControllerStatus) and every live
-    // controllerstatus event. Does NOT touch turnJustEndedAtom — see
-    // trackTurnJustEnded for why that's kept separate.
-    function reconcileTurnActive(active: boolean): void {
-        paneModel.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active }, "system");
-    }
-
-    // Feeds the turnJustEndedAtom edge-detector. Deliberately called ONLY
-    // from the live useControllerStatusEvents subscription (up from onMount,
-    // always current), never from the mount-time GetControllerStatus
-    // one-shot. That one-shot can resolve up to ~300s late — after Phase 1/2's
-    // auth wait — by which point the live subscription may have already
-    // tracked a real turn starting AND ending. Letting the stale snapshot
-    // also drive wasTurnActive could clobber the correct live-tracked state
-    // back to a value that no longer reflects reality, making the next live
-    // event compute a spurious edge and re-fire the Haiku RPC for a turn that
-    // isn't actually ending — reintroducing the over-trigger bug this fix
-    // closes (reagent P1 on PR #2241).
-    function trackTurnJustEnded(active: boolean): void {
-        const turnJustEnded = didTurnJustEnd(wasTurnActive, active);
-        // Update BEFORE calling flushPendingControllerRefresh below, not
-        // after: that call synchronously checks isBackendTurnConfirmedIdle()
-        // (backed by this same wasTurnActive) at call time, before any
-        // await — the OLD ordering left it reading the STALE (pre-update)
-        // value on exactly the genuine turn-end edge this call exists to
-        // react to, so the deferred refresh's own safety gate saw the
-        // turn as still "active" and refused to run — stranding it
-        // forever on this trigger (the reactive turnIdle effect could
-        // still rescue it asynchronously, but only if it happened to fire
-        // separately). Codex P1 on PR #2338 (twenty-first re-review).
-        wasTurnActive = active;
-        if (turnJustEnded) {
-            setTurnJustEndedAtom((n) => n + 1);
-            // Run any controller refresh /login deferred because this exact
-            // turn was still active when it succeeded — see
-            // SlashCommandContext.deferControllerRefreshUntilIdle's doc
-            // comment. No-ops if nothing is pending. `commands` is defined
-            // further down this component body, but this function is only
-            // ever invoked from async event callbacks registered after the
-            // full component setup (including `commands`) has run. Codex
-            // P1 on PR #2338 (thirteenth re-review).
-            void commands.flushPendingControllerRefresh();
-        }
-    }
+    // Whether the backend's turn is confirmed active / idle, and the
+    // turn-end edge (hooks/turn-confirmation.ts). onTurnEnded reads `commands`,
+    // defined further down this body; it only ever runs from async event
+    // callbacks registered after the full setup has run (Codex P1 on #2338).
+    const turnConfirmation = createTurnConfirmation({
+        reconcile: (active) =>
+            paneModel.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active }, "system"),
+        onTurnEnded: () => void commands.flushPendingControllerRefresh(),
+    });
+    const { turnJustEndedAtom, reconcileTurnActive, trackTurnJustEnded } = turnConfirmation;
 
     // Turn-end ghost-tool scrub (user report 2026-08-10: a ~1s `git status`
     // call stuck as a "running \u00b7 45m" dock row for the rest of the session).
@@ -819,7 +546,7 @@ export const AgentPresentationView = ({
     createEffect(
         on(turnJustEndedAtom, (n) => {
             if (n === 0) return;
-            scheduleRollOff();
+            liveFeed.scheduleRollOff();
             const timer = setTimeout(() => {
                 if (workingFromPhase(paneModel.state.turnPhase)) return;
                 paneModel.dispatchDoc({
@@ -928,60 +655,9 @@ export const AgentPresentationView = ({
         },
     });
 
-    // Brain-spinner loading overlay, part 2 (part 1 is the historyPainted/
-    // scheduleOnSettle chain above `status`'s own definition — this has to
-    // live down here since it reads `status.launchPhase()`). A fresh
-    // agent's mount-time launch-flow.ts runs Phase 1 (resolving-cli) then
-    // Phase 2 (checking-auth) before AgentAuthPanel's authUrl/authNotice can
-    // ever become non-null; when they do, that panel pops into normal flex
-    // flow between the scroll region and the composer strip/AgentFooter,
-    // pushing both down with no warning — often well after historyPainted
-    // already flipped true for a brand-new, empty-history agent (live-
-    // reported flicker, 2026-08-17: "bottom paints first, then gets pushed
-    // down"). Hold the fade until the launch flow has moved past the two
-    // phases that can still cause that pop-in, so it happens hidden behind
-    // the mask instead — same principle as the historyPainted rAF-pair fix
-    // above, just gating on a different async source. Bounded by a 3s
-    // safety timeout so a launch path that never calls setLaunchPhase (a
-    // future code path, a test double) can't leave the pane stuck behind
-    // the spinner forever — worse than the flicker this exists to fix.
-    const [authPhaseTimedOut, setAuthPhaseTimedOut] = createSignal(false);
-    let authPhaseSafetyTimeout: ReturnType<typeof setTimeout> | undefined;
-    onMount(() => {
-        authPhaseSafetyTimeout = setTimeout(() => setAuthPhaseTimedOut(true), 3000);
-    });
-    onCleanup(() => clearTimeout(authPhaseSafetyTimeout));
-    const authPhaseSettled = createMemo(() => {
-        if (authPhaseTimedOut()) return true;
-        const phase = status.launchPhase();
-        return phase !== null && phase.kind !== "resolving-cli" && phase.kind !== "checking-auth";
-    });
-    // Report each dependency to the readiness controller as it completes, rather
-    // than re-deriving "are we done yet" from a conjunction. Same two conditions,
-    // same resulting moment — but now each one STATES that it is finished, so a
-    // stuck reveal names the gate (`readiness.pendingGates()`) instead of being an
-    // unexplained hang. Both releases are idempotent, so re-running this effect on
-    // an unrelated signal change is harmless.
-    createEffect(() => {
-        if (historyPainted()) releaseHistoryGate();
-    });
-    createEffect(() => {
-        if (authPhaseSettled()) releaseAuthGate();
-    });
-    // `revealing` → `live`: hold the overlay mounted for the fade's own duration
-    // (matching PaneLoadingCover.scss's transition) before unmounting, so it fades
-    // as one visual unit with the spinner instead of vanishing mid-transition.
-    createEffect(() => {
-        if (readiness.phase() === "revealing") {
-            // Where the open landed: `first-login`/`auth-expired` means the
-            // pane now waits on the user, which the open's time excludes.
-            noteAgentOpen(model.blockId, {
-                auth: untrack(() => status.launchPhase()?.kind ?? status.authStatus()),
-            });
-            agentOpenRevealed(model.blockId);
-            loadingOverlayFadeTimeout = setTimeout(() => readiness.revealComplete(), 220);
-        }
-    });
+    // Hold the reveal until the launch flow is past the phases that can pop
+    // the auth panel in; then fade (hooks/usePaneReveal.ts).
+    reveal.connectLaunchStatus(status);
 
     // status.isLoading() is `flowRunning() || !agentReady()` — it never
     // becomes true during relogin()/loginViaTerminal(),
@@ -1077,84 +753,15 @@ export const AgentPresentationView = ({
         },
     });
 
-    // Focus/visibility-triggered re-poll — the mount-time GetControllerStatus
-    // (onControllerStatus above) is one-shot, and the live useControllerStatusEvents
-    // subscription only self-heals a missed turn-end if a LATER live event
-    // arrives. If the single turn-end push is missed (backgrounded window, a
-    // MPS reconnect gap, a pane remount that doesn't re-trigger the MPS
-    // persisted-event replay — see REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
-    // §3/§4 item 5) nothing else corrects it until the *next* turn starts.
-    // Re-poll on every background→foreground transition to drive the two
-    // effects below (turnJustEnded edge-tracking, deferred controller-refresh
-    // recovery), independent of event-bus replay semantics. Skips the
-    // initial `true` at mount (already covered by the one-shot above) via
-    // `{ defer: true }`.
-    //
-    // Deliberately does NOT call reconcileTurnActive from this snapshot
-    // (removed per direct user request — "Working" state must not depend on
-    // window focus at all). `turn_active` isn't a clean boolean: it reads
-    // transiently false during the gap between one CLI round's session_end
-    // and the next round's start (the same phenomenon StreamFlushObserved's
-    // Done->Streaming re-promotion exists to paper over on a different
-    // path), and this poll fires on the single most common user action —
-    // clicking/refocusing a pane to check on it — making that race far more
-    // visible than it needs to be. The live useControllerStatusEvents
-    // subscription below still reconciles TurnPhase from the backend's
-    // periodic status heartbeat (persistent.rs's spawn_status_heartbeat,
-    // every 20s while a turn is active) independent of focus, so the
-    // original stuck-Working-forever gap this mechanism was built for is
-    // still bounded — just by that heartbeat's cadence instead of an
-    // instant refocus, not left uncovered entirely.
-    const windowFocused = makeWindowFocusSignal();
-    createEffect(
-        on(
-            windowFocused,
-            (focused) => {
-                if (!focused) return;
-                void BlockService.GetControllerStatus(model.blockId)
-                    .then((rts) => {
-                        if (!rts) return;
-                        const active = !!rts.turn_active;
-                        // Mirror the live useControllerStatusEvents handler below —
-                        // reagent P2: a turn-end detected ONLY via this focus poll
-                        // (the missed-live-push case this mechanism exists for)
-                        // must still bump turnJustEndedAtom, or
-                        // useAgentActivitySummary/useNextPromptSuggestion silently
-                        // never fire for that turn's completion.
-                        trackTurnJustEnded(active);
-                        // Independent of the turnJustEnded edge above: this RPC
-                        // response is itself a fresh, authoritative confirmation of
-                        // idleness whenever active is false — attempt the deferred
-                        // refresh unconditionally on that, not only when
-                        // trackTurnJustEnded's edge detector fires. didTurnJustEnd
-                        // requires prev===true (a CONFIRMED active state to
-                        // transition FROM); a pane whose backend state was never
-                        // confirmed either way before this poll (wasTurnActive
-                        // undefined — e.g. the live confirming controllerstatus
-                        // push was itself missed, the exact gap this poll exists to
-                        // self-heal) computes turnJustEnded=false here even though
-                        // this is the FIRST time idleness has been confirmed. The
-                        // reactive turnPhaseAtom effect (below) can't rescue this
-                        // either: ReconcileTurnActive no-ops (same state reference)
-                        // once local turnPhase already reads idle/Done, so it never
-                        // re-fires off this same confirmation. Without this call,
-                        // a /login deferred mid-turn — where the turn then ends via
-                        // session_end while the live idle controllerstatus push is
-                        // lost — would leave the refresh (and any held messages)
-                        // stuck until the user happens to send another message.
-                        // codex P1 on PR #2338 (twenty-eighth re-review).
-                        if (!active) {
-                            void commands.flushPendingControllerRefresh();
-                        }
-                    })
-                    .catch(() => {
-                        // Best-effort — the live subscription and next mount remain
-                        // as fallbacks; nothing user-visible to report on failure.
-                    });
-            },
-            { defer: true }
-        )
-    );
+    // Re-poll turn state on refocus, to recover a missed turn-end push
+    // (hooks/useTurnReconciliation.ts).
+    useFocusRepoll({
+        blockId: model.blockId,
+        windowFocused: makeWindowFocusSignal(),
+        trackTurnJustEnded,
+        // `commands` is declared further down; only read once a poll resolves.
+        flushPendingControllerRefresh: () => commands.flushPendingControllerRefresh(),
+    });
 
     // Subscribe to Claude Code OSC window-title extractions and write them
     // to term:osc_title block metadata (free fallback signal — see
@@ -1295,7 +902,7 @@ export const AgentPresentationView = ({
         // (never the mount-time GetControllerStatus one-shot — see
         // trackTurnJustEnded's own doc comment for why). Codex P1 on
         // PR #2338 (nineteenth re-review).
-        isBackendTurnActive: () => wasTurnActive === true,
+        isBackendTurnActive: turnConfirmation.isBackendTurnActive,
         // Deliberately NOT `!isBackendTurnActive()` (which would treat
         // `undefined` — never confirmed either way, e.g. a pane that
         // mounts mid-turn before its first live controllerstatus event
@@ -1309,7 +916,7 @@ export const AgentPresentationView = ({
         // otherwise have a deferred /login refresh flushed prematurely,
         // killing that still-active (just never locally confirmed) turn.
         // reagent P1 on PR #2338 (twenty-first re-review).
-        isBackendTurnConfirmedIdle: () => wasTurnActive === false,
+        isBackendTurnConfirmedIdle: turnConfirmation.isBackendTurnConfirmedIdle,
         backToPicker: () => model.backToPicker(),
         // /fork — same fork-to-sibling-tab action as the pane's right-click
         // "Quick Fork" context-menu item (agent-model.ts's
@@ -1492,44 +1099,13 @@ export const AgentPresentationView = ({
         onBindAccount,
     });
 
-    // Deliver queued-while-busy ("send now") messages at the next tool-call
-    // boundary — the agent finishes its current step and then picks them up
-    // (the CLI consumes a stdin message at its next inference, after the
-    // in-flight tool's result). Falls back to turn end (Idle/Done) so a
-    // tool-less turn still delivers. Holding until here is what lets ArrowUp
-    // recall an un-sent message first.
-    let prevTool: string | null = null;
-    createEffect(() => {
-        const tool = paneModel.state.currentTool;
-        const phaseKind = paneModel.state.turnPhase.kind;
-        const newToolCall = tool !== null && tool !== prevTool;
-        prevTool = tool;
-        const turnIdle = phaseKind === "Idle" || phaseKind === "Done";
-        if ((newToolCall || turnIdle) && commands.hasHeldMessages()) {
-            void commands.flushHeldMessages();
-        }
-        // Independent of the above: run any controller refresh /login
-        // deferred because a turn was active when it succeeded, the moment
-        // this pane's OWN turnPhase reflects idle — regardless of whether
-        // there are any held messages to otherwise trigger it. Deliberately
-        // reacts to turnPhaseAtom directly rather than relying solely on
-        // trackTurnJustEnded's live-controllerstatus-event edge detector:
-        // (1) a turn also ends via the independent session_end -> TurnEnd
-        // stream path (useTurnLifecycle.ts's finalizeTurn), which is not
-        // synchronized with the controllerstatus event stream reagent P1
-        // found flushHeldMessages/trackTurnJustEnded alone don't cover; (2)
-        // a pane that mounts onto an ALREADY-active turn never initializes
-        // trackTurnJustEnded's wasTurnActive (deliberately, to avoid a
-        // false busy->idle edge on the very first live event — see its own
-        // doc comment), so if /login succeeds during that pre-existing turn
-        // and it ends before any OTHER live event arrives,
-        // didTurnJustEnd(undefined, false) never fires and — with no held
-        // messages either — nothing would ever run the deferred refresh at
-        // all. Codex P1 on PR #2338 (seventeenth re-review, both points).
-        // No-ops when nothing is pending.
-        if (turnIdle) {
-            void commands.flushPendingControllerRefresh();
-        }
+    // Held "send now" messages go out at the next tool call or turn end
+    // (hooks/useTurnReconciliation.ts).
+    useHeldMessageDelivery({
+        paneModel,
+        hasHeldMessages: commands.hasHeldMessages,
+        flushHeldMessages: commands.flushHeldMessages,
+        flushPendingControllerRefresh: commands.flushPendingControllerRefresh,
     });
 
     // On first connect (no existing session), send the startup sequence as the
@@ -1581,12 +1157,7 @@ export const AgentPresentationView = ({
     });
 
     // Per-pane zoom: read term:zoom from block meta (same key as terminal panes).
-    const zoomFactor = createMemo(() => {
-        const meta = block()?.meta;
-        const z = meta?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
+    const zoomFactor = createMemo(() => readZoom(block()?.meta));
 
     // Persistence is owned by the universal zoom framework — see the
     // note below where the inline handlers were removed.
@@ -1704,7 +1275,7 @@ export const AgentPresentationView = ({
             <AgentProgressBar
                 mount={progressBarMount}
                 active={paneBusy()}
-                stopping={paneModel.state.turnPhase.kind === "Interrupting"}
+                stopping={isStopping(paneModel.state.turnPhase)}
             />
             {/* /btw side-question overlay — ephemeral, floats over the whole
                 pane (position: absolute against .agent-view, styles/_btw.scss),
@@ -1791,9 +1362,7 @@ export const AgentPresentationView = ({
                     onLoadOlder={liveFeedOn() ? undefined : history.loadOlder}
                     loadingOlder={history.loadingOlder}
                     hasOlderHistory={() => !liveFeedOn() && history.historyOffset() > 0}
-                    followingRef={(f) => {
-                        followingBottom = f;
-                    }}
+                    followingRef={(f) => liveFeed.setFollowingBottom(f)}
                     scrollCommand={scroll.command}
                     scrollToBottomRef={(fn) => {
                         scrollToBottomFn = fn;
@@ -1808,206 +1377,31 @@ export const AgentPresentationView = ({
                 />
             </div>
 
-            {/* Login UI — bottom-docked like AgentDecisionPanel/
-                AgentQuestionPanel below, not inside the scrollable document.
-                See #2429 follow-up: it used to render inside
-                AgentDocumentView's header slot, which pinned it to the top
-                of the scroll area. */}
-            <AgentAuthPanel
-                authUrl={status.authUrl}
-                authNotice={status.authNotice}
-                onDismissAuthNotice={() => status.setAuthNotice(null)}
-                onCancelLogin={status.cancelLogin}
-                onUseTerminal={status.useTerminalInstead}
+            {/* Login, decisions, questions, queue, recovery banners, activity
+                dock, working row and session notices
+                (components/AgentBottomPanels.tsx). */}
+            <AgentBottomPanels
+                blockId={model.blockId}
+                agentId={agentId}
+                agentName={agentName()}
                 authProviderId={provider()?.id ?? providerKey()}
-                launchPhase={status.launchPhase}
-            />
-
-            {/* The separate blue "Log in" bar that used to render here on
-                `status.canRetry()` is GONE — it was a second CTA for the
-                identical action (relogin()) as the failure row below, and the
-                two could be on screen simultaneously (a pane reopened after an
-                auth failure seeds the row from persisted block meta while the
-                mount-time launch flow independently sets canRetry). That case
-                now raises a synthetic `turnAttempted: false` auth failure
-                instead (see the createEffect above), so it renders through the
-                one shared row, labelled "Log in" and still passing
-                `retryAfterLogin: false`.
-
-                `status.canRetry()` itself is DELIBERATELY still live — it is
-                not only a display gate: useAgentCommands reads it to fast-fail
-                sends into an unauthenticated agent, and /login reads it too.
-                Deleting the signal along with this bar would silently re-open
-                that hole. See
-                docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md. */}
-
-            {/* Permission decision panel — surfaced when one or more
-                tool calls are gated by the CLI awaiting user approval.
-                Sits above the queue so it can't be missed. The panel
-                renders nothing when no ToolNode is in pending_approval.
-                Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §5. */}
-            <AgentDecisionPanel
-                pending={pendingDecisions}
+                providerId={provider()?.id ?? ""}
+                block={block}
+                paneModel={paneModel}
+                status={status}
+                log={log}
+                pendingDecisions={pendingDecisions}
                 onDecide={handleDecide}
-                onDefer={() => {
-                    // Logging only — the panel itself manages the
-                    // minimized state (per doc §7 + §4.3) so the
-                    // prompt remains reachable.
-                    log("agent", "Decision minimized");
-                }}
-            />
-
-            {/* AskUserQuestion panel — surfaced when a tool call is in
-                `awaiting_answer` (the agent asked the user a structured
-                question and is blocked on the answer). Submitting delivers a
-                tool_result over the persistent controller's stdin. Cancel
-                (button / Escape) is a REAL protocol-level decline via
-                `handleCancel`, not a UI-only dismiss — replaces the old
-                "Answer later" minimize, which never told the agent anything.
-                Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
-                docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md. */}
-            <AgentQuestionPanel
-                pending={pendingQuestions}
+                pendingQuestions={pendingQuestions}
                 onAnswer={handleAnswer}
                 onCancel={handleCancel}
-                isDormant={hidden}
-            />
-
-            {/* Queue sits directly below the feed so the user's newly-
-                typed message lands next to the live conversation it's
-                queued against. Previously lived below the activity log;
-                repositioning per SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.
-                No "Send now" affordance — Esc on an empty composer delivers
-                a queued message immediately instead (mirrors Claude Code
-                CLI). See SPEC_AGENT_ESCAPE_STEER_QUEUED_MESSAGE_2026_07_06.md. */}
-            <PendingMessagesPanel pendingMessages={pendingMessages} />
-
-            {/* PR F — Disconnected banner. Visible when the stream
-                tore down while a turn was in flight (kind=Disconnected).
-                Sits above the status line so the working spinner (which
-                is already suppressed because `isWorking(Disconnected) =
-                false`) doesn't overlay the disconnect message. The
-                Reconnect button re-subscribes; the reducer's
-                `StreamSubscribe` arm clears the phase to Idle. Spec
-                docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md
-                §6.4. */}
-            {/* Credentials-revoked disclosure chip — appears when an identity
-                account this agent was linked to is deleted (or unlinked)
-                while the pane is live. Honest wording: the running process
-                still holds working tokens until restarted; enforcement lands
-                at the next spawn (layer 3).
-                SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3. */}
-            <AgentCredentialsRevokedChip agentId={agentId} />
-            {/* Something other than the user asked to shut this agent down:
-                15 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). */}
-            <ShutdownPendingBanner blockId={model.blockId} agentId={agentId} agentName={agentName()} />
-            {/* Failure-recovery row — per-error-class actions + auto-retry,
-                rendered through the shared PaneRow accessory primitive.
-                SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16. */}
-            <Show when={failureUI.row()}>
-                {(row) => (
-                    <PaneRow
-                        sigil={row().sigil}
-                        title={row().title}
-                        meta={row().meta}
-                        accent={row().accent}
-                        actions={row().actions}
-                        expanded={row().expanded}
-                    >
-                        <div class="agent-failure-detail">
-                            <div>{row().detail}</div>
-                            <Show when={row().stderrTail}>
-                                <pre class="agent-failure-stderr">{row().stderrTail}</pre>
-                            </Show>
-                        </div>
-                    </PaneRow>
-                )}
-            </Show>
-            <AgentDisconnectedBanner
-                phase={(() => paneModel.state.turnPhase)}
-                onReconnect={() => {
-                    // Standard stream-reconnect path: dispatch
-                    // `StreamSubscribe` against the live pane. If the
-                    // backend has auto-reconnected between render and
-                    // click, the second subscribe is harmless — the
-                    // reducer's Disconnected→Idle transition is the
-                    // same regardless of who calls it.
-                    paneModel.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "user");
-                }}
-            />
-            {/* Non-Claude quick-fork fallback note — SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md
-                §4.4. Set once on the new block's meta right after a fork
-                lands with no `--fork-session` support; stays for the pane's
-                lifetime, no dismiss button (quick-fork.ts). */}
-            <ForkProviderFallbackBanner meta={() => block()?.meta} />
-
-            {/* Pinned activity dock — long-running shells (and later crons /
-                subagents) sit just above the composer so task status is adjacent
-                to where the user's attention already is. Moved from the top per
-                SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
-            <ActivityDock
-                documentNodes={paneModel.document}
-                blockId={model.blockId}
+                hidden={hidden}
+                pendingMessages={pendingMessages}
+                failureRow={failureUI.row}
                 backgroundTasksAtom={backgroundTasksAtom}
-            />
-
-            {/* Working indicator — the turn's own status, so it sits directly
-                above the composer, with the dock's long-running tasks stacked
-                above it. Reads bottom-up as narrowing scope: what's running in
-                the background (dock) → what this turn is doing right now
-                (here) → where you type.
-
-                Normal-flow row, not the overlay it used to be — see the
-                .agent-document-scroll-region comment above for what that
-                change removed. When it appears or disappears it changes the
-                scroll region's clientHeight, which
-                AgentDocumentVirtualList's clientHeight ResizeObserver already
-                re-pins on; that observer was written for exactly this family
-                of normal-flow siblings (the retry bar, decision/question
-                panels, PendingMessagesPanel), so the row simply joins them
-                rather than needing its own tracked height signal.
-
-                Shows spinner + elapsed while loading, "✓ Worked · Ns" on
-                completion. Acts as a visual turn delimiter; stays until the
-                next message is sent.
-                See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2 and
-                SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md. */}
-            <div class="agent-working-row-anchor">
-                <Show when={workingRowVisible()}>
-                    <AgentWorkingRow
-                        loading={workingRowLoading()}
-                        stopping={paneModel.state.turnPhase.kind === "Interrupting"}
-                        currentTool={paneModel.state.currentTool}
-                        currentToolArg={paneModel.state.currentToolArg}
-                        toolPromoted={hasPromotedTool()}
-                        sessionStats={paneModel.state.sessionStats}
-                        turnTokens={paneModel.state.turnTokens}
-                        launchPhase={status.launchPhase()}
-                        onCancelLogin={status.cancelLogin}
-                        hasAuthUrl={!!status.authUrl()}
-                        waitingReason={(() => {
-                            const phase = paneModel.state.turnPhase;
-                            return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
-                        })()}
-                        retryAfterMs={(() => {
-                            const phase = paneModel.state.turnPhase;
-                            return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
-                        })()}
-                        compacting={paneModel.state.compacting}
-                        reconnecting={paneModel.state.reconnecting}
-                    />
-                </Show>
-            </div>
-
-            {/* Session banners (interrupted / resume-failed / large /
-                archived). Above the strip, NOT inside the Shell drawer where
-                they used to live: a conversation-level disclosure can't be
-                gated behind a terminal toggle — see
-                SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3. */}
-            <AgentSessionNotices
-                blockId={model.blockId}
-                blockAtom={block}
-                providerId={provider()?.id ?? ""}
+                workingRowVisible={workingRowVisible}
+                workingRowLoading={workingRowLoading}
+                hasPromotedTool={hasPromotedTool}
             />
 
             {/* Composer status strip — single 28-32px row with live
