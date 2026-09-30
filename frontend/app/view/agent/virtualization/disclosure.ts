@@ -84,9 +84,10 @@ export function rowDisclosure(node: DocumentNode, f: RowFlags): Disclosure {
             return node.isStartup ? pinnable(f) : FIXED_OPEN;
 
         case "context_delivery":
-            // Title, size and excerpt by default; pin to read every item
-            // (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.2).
-            return pinnable(f);
+            // Title and item rows by default; pin to read the items' text
+            // (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.2). Nothing to open when
+            // no item carries text (memory, until CD3).
+            return node.items.some((i) => i.body) ? pinnable(f) : FIXED_OPEN;
 
         case "shell":
             // Pin-to-expand only: unlike tools, a running shell stays

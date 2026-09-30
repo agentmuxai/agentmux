@@ -42,15 +42,29 @@ const REASON_LABEL: Record<ContextDeliveryNode["reason"], string> = {
     resume_fresh: "session continued",
 };
 
+const MEMORY_KINDS = new Set(["global_memory", "personal_memory", "running_summary"]);
+
+/** True for the single-item compaction summary card, which shows an excerpt, not rows. */
+export function isCompactionSummaryCard(node: ContextDeliveryNode): boolean {
+    return node.items.length === 1 && node.items[0].kind === "compaction_summary";
+}
+
 /** The card's one-line title (spec §3.2). */
 export function contextDeliveryTitle(node: ContextDeliveryNode): string {
-    const only = node.items.length === 1 ? node.items[0] : null;
-    if (only?.kind === "compaction_summary") {
+    if (isCompactionSummaryCard(node)) {
         const how = node.trigger === "auto" ? "auto-compact" : node.trigger === "manual" ? "manual compact" : null;
         return how ? `Agent given a summary of the conversation (${how})` : "Agent given a summary of the conversation";
     }
     const n = node.items.length;
-    return `Given to the agent · ${REASON_LABEL[node.reason]} · ${n} ${n === 1 ? "item" : "items"}`;
+    const count = `${n} ${n === 1 ? "item" : "items"}`;
+    const cut = node.items.filter((i) => i.delivered === "partial" || i.delivered === "omitted").length;
+    const tail = cut > 0 ? `${count} · ${cut} cut` : count;
+    // "Re-delivered" only after a compaction: a new session or /clear is a
+    // first delivery, not a repeat.
+    if (node.reason === "compaction" && node.items.every((i) => MEMORY_KINDS.has(i.kind))) {
+        return `Memory re-delivered after compaction · ${tail}`;
+    }
+    return `Given to the agent · ${REASON_LABEL[node.reason]} · ${tail}`;
 }
 
 /**

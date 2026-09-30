@@ -55,13 +55,34 @@ struct Delivery {
     notice_sent: bool,
 }
 
-/// One entry of a delivery as the notice shows it.
+/// One item of a delivery as the notice shows it: one card row
+/// (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.1, §3.4). `label` and `source` are
+/// what older builds read; the rest is per-item detail. Sizes are those of
+/// what was delivered, so an item cut by the part cap reports its slice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct EntrySize {
     pub label: String,
+    /// `global`, `personal`, or `summary` for the running summary.
     pub source: &'static str,
     pub size_bytes: usize,
     pub tokens: usize,
+    /// `global_memory`, `personal_memory` or `running_summary`.
+    pub kind: &'static str,
+    pub name: String,
+    /// Global Memory only: `system` (AgentMux's own) or `workspace`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    /// Personal Memory only: the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// `full`, `partial` or `omitted` (§3.4 step 3).
+    pub delivered: &'static str,
+    /// The whole entry's size, whatever was delivered: what the Personal
+    /// Memory size band measures, so a cut delivery still warns.
+    pub source_size_bytes: usize,
+    pub source_tokens: usize,
 }
 
 /// How long a claim on one event (a session start, a compaction) holds: the
@@ -324,11 +345,12 @@ fn compose_delivery(state: &AppState, block_id: &str, agent_uid: Option<&str>, r
     let summary = (reason == Reason::Compact)
         .then(|| crate::backend::continuity_state::running_summary_section(&state.mstore, block_id))
         .flatten();
-    let text = memory_delivery::compose(&entries, reason, summary.as_deref())?;
-    let parts = memory_delivery::split_into_parts(&text, memory_delivery::MAX_PART_CHARS, memory_delivery::HOOK_PARTS);
+    let composed = memory_delivery::compose_items(&entries, reason, summary.as_deref())?;
+    let (parts, delivered_chars) =
+        memory_delivery::split_into_parts_counted(&composed.text, memory_delivery::MAX_PART_CHARS, memory_delivery::HOOK_PARTS);
     let acked = vec![false; parts.len()];
     Some(Delivery {
-        entries: entries.iter().map(entry_size).collect(),
+        entries: delivery_items(&entries, &composed, delivered_chars),
         summary_bytes: summary.map_or(0, |s| s.len()),
         parts,
         acked,
@@ -347,6 +369,10 @@ fn global_entries(state: &AppState) -> Vec<Entry> {
             label: format!("{} {}", if s.is_system { "[AgentMux System]" } else { "[Workspace]" }, s.name),
             tier: Tier::Global,
             text: s.text,
+            name: s.name,
+            system: s.is_system,
+            bundle_id: Some(s.id),
+            path: None,
         })
         .collect()
 }
@@ -370,14 +396,67 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
     files
         .into_iter()
         .filter_map(|(name, path)| {
-            let text = std::fs::read_to_string(path).ok()?;
-            (!text.trim().is_empty()).then_some(Entry { label: name, tier: Tier::Personal, text })
+            let text = std::fs::read_to_string(&path).ok()?;
+            (!text.trim().is_empty()).then_some(Entry {
+                label: name.clone(),
+                tier: Tier::Personal,
+                text,
+                name,
+                system: false,
+                bundle_id: None,
+                path: Some(path.to_string_lossy().into_owned()),
+            })
         })
         .collect()
 }
 
-fn entry_size(e: &Entry) -> EntrySize {
-    EntrySize { label: e.label.clone(), source: e.tier.as_str(), size_bytes: e.size_bytes(), tokens: e.estimated_tokens() }
+/// The notice's items, in delivery order, sized by what the parts carried.
+fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, delivered_chars: usize) -> Vec<EntrySize> {
+    let chars: Vec<char> = composed.text.chars().collect();
+    composed
+        .spans
+        .iter()
+        .map(|span| {
+            let delivered = memory_delivery::Delivered::of(span, delivered_chars);
+            let slice: String = chars[span.start..span.end.min(delivered_chars).max(span.start)].iter().collect();
+            let (size_bytes, tokens) = (slice.len(), slice.chars().count().div_ceil(4));
+            let whole: String = chars[span.start..span.end].iter().collect();
+            let (source_size_bytes, source_tokens) = (whole.len(), (span.end - span.start).div_ceil(4));
+            match span.entry.map(|i| &entries[i]) {
+                Some(e) => EntrySize {
+                    label: e.label.clone(),
+                    source: e.tier.as_str(),
+                    size_bytes,
+                    tokens,
+                    kind: match e.tier {
+                        Tier::Global => "global_memory",
+                        Tier::Personal => "personal_memory",
+                    },
+                    name: e.name.clone(),
+                    tier: (e.tier == Tier::Global).then_some(if e.system { "system" } else { "workspace" }),
+                    bundle_id: e.bundle_id.clone(),
+                    path: e.path.clone(),
+                    delivered: delivered.as_str(),
+                    source_size_bytes,
+                    source_tokens,
+                },
+                None => EntrySize {
+                    label: "Running summary".into(),
+                    source: "summary",
+                    size_bytes,
+                    tokens,
+                    kind: "running_summary",
+                    name: "Running summary (AgentMux)".into(),
+                    tier: None,
+                    bundle_id: None,
+                    path: None,
+                    delivered: delivered.as_str(),
+                    source_size_bytes,
+                    source_tokens,
+                },
+            }
+        })
+        .collect()
 }
 
 fn part_response(d: &Delivery, part: usize) -> PartResponse {
@@ -423,7 +502,20 @@ mod tests {
     fn delivery(parts: usize) -> Delivery {
         Delivery {
             parts: (1..=parts).map(|i| format!("part {i}")).collect(),
-            entries: vec![EntrySize { label: "notes.md".into(), source: "personal", size_bytes: 5, tokens: 2 }],
+            entries: vec![EntrySize {
+                label: "notes.md".into(),
+                source: "personal",
+                size_bytes: 5,
+                tokens: 2,
+                kind: "personal_memory",
+                name: "notes.md".into(),
+                tier: None,
+                bundle_id: None,
+                path: None,
+                delivered: "full",
+                source_size_bytes: 5,
+                source_tokens: 2,
+            }],
             summary_bytes: 0,
             acked: vec![false; parts],
             created_ms: 1_790_000_000_000,
@@ -542,5 +634,53 @@ mod tests {
         );
         assert!(entries.iter().all(|e| e.tier == Tier::Personal));
         assert!(personal_entries_in(&dir.path().join("missing")).is_empty());
+    }
+
+    fn item(label: &str, tier: Tier, text: &str) -> Entry {
+        Entry {
+            label: label.into(),
+            tier,
+            text: text.into(),
+            name: label.into(),
+            system: label.starts_with("sys"),
+            bundle_id: (tier == Tier::Global).then(|| format!("id-{label}")),
+            path: (tier == Tier::Personal).then(|| format!("/mem/{label}")),
+        }
+    }
+
+    #[test]
+    fn items_carry_their_detail_and_follow_the_cut() {
+        let entries = [
+            item("sys-api", Tier::Global, &"a".repeat(100)),
+            item("rules", Tier::Global, &"b".repeat(100)),
+            item("notes.md", Tier::Personal, &"c".repeat(100)),
+        ];
+        let composed = memory_delivery::compose_items(&entries, Reason::Compact, Some(&"d".repeat(50))).unwrap();
+        // Cut halfway through the second global entry.
+        let cut = composed.spans[1].start + 40;
+        let items = delivery_items(&entries, &composed, cut);
+
+        assert_eq!(items.len(), 4);
+        assert_eq!((items[0].kind, items[0].tier, items[0].delivered, items[0].size_bytes), ("global_memory", Some("system"), "full", 100));
+        assert_eq!(items[0].bundle_id.as_deref(), Some("id-sys-api"));
+        assert_eq!((items[1].tier, items[1].delivered, items[1].size_bytes), (Some("workspace"), "partial", 40));
+        assert_eq!((items[2].kind, items[2].delivered, items[2].size_bytes), ("personal_memory", "omitted", 0));
+        // The whole entry's size survives the cut, for the size band.
+        assert_eq!((items[2].source_size_bytes, items[2].source_tokens), (100, 25));
+        assert_eq!((items[1].source_size_bytes, items[1].size_bytes), (100, 40));
+        assert_eq!(items[2].path.as_deref(), Some("/mem/notes.md"));
+        assert_eq!((items[3].kind, items[3].source, items[3].delivered), ("running_summary", "summary", "omitted"));
+    }
+
+    #[test]
+    fn an_uncut_delivery_reports_every_item_whole() {
+        let entries = [item("rules", Tier::Global, "rules text"), item("n.md", Tier::Personal, "notes")];
+        let composed = memory_delivery::compose_items(&entries, Reason::Startup, None).unwrap();
+        let items = delivery_items(&entries, &composed, composed.text.chars().count());
+        assert!(items.iter().all(|i| i.delivered == "full"));
+        assert_eq!(items.iter().map(|i| i.size_bytes).collect::<Vec<_>>(), vec![10, 5]);
+        let json = serde_json::to_value(&items[1]).unwrap();
+        assert!(json.get("tier").is_none() && json.get("bundle_id").is_none(), "{json}");
+        assert_eq!(json["path"], "/mem/n.md");
     }
 }

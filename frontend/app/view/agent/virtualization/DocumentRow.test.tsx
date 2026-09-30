@@ -564,3 +564,55 @@ describe("DocumentRow — context delivery card (SPEC_CONTEXT_DELIVERY_2026_09_3
         expect(onTogglePin).toHaveBeenCalledTimes(1);
     });
 });
+
+describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.4, CD2a)", () => {
+    const memoryCard = (sizeBand: "low" | "high" = "low"): DocumentNode => ({
+        type: "context_delivery",
+        id: "memory-injected-s1-compact-1",
+        reason: "compaction",
+        timestamp: 0,
+        sizeBand,
+        items: [
+            { kind: "global_memory", name: "App API", tier: "system", bundleId: "b-1", sizeBytes: 3400, tokens: 850 },
+            { kind: "global_memory", name: "Rules", tier: "workspace", delivered: "partial", sizeBytes: 600, tokens: 150 },
+            { kind: "personal_memory", name: "notes.md", path: "/mem/notes.md", delivered: "omitted", sizeBytes: 0, tokens: 0 },
+        ],
+    });
+
+    const renderMemory = (node: DocumentNode, onTogglePin = () => {}) => {
+        const [n] = createSignal<DocumentNode>(node);
+        const [state] = createSignal<DocumentState>(emptyState());
+        return render(() => (
+            <DocumentRow node={n} documentState={state} onToggleCollapse={() => {}} onTogglePin={onTogglePin} />
+        ));
+    };
+
+    it("lists every item without opening the card", () => {
+        renderMemory(memoryCard());
+        expect(screen.getByText("Memory re-delivered after compaction · 3 items · 2 cut")).toBeInTheDocument();
+        expect(screen.getByText("App API")).toBeInTheDocument();
+        expect(screen.getByText("AgentMux system")).toBeInTheDocument();
+        expect(screen.getByText("Workspace")).toBeInTheDocument();
+        expect(screen.getByText("Personal")).toBeInTheDocument();
+        expect(screen.getByText("notes.md")).toHaveAttribute("title", "/mem/notes.md");
+    });
+
+    it("marks items the part cap cut", () => {
+        renderMemory(memoryCard());
+        expect(screen.getByText("cut")).toBeInTheDocument();
+        expect(screen.getByText("not sent")).toBeInTheDocument();
+    });
+
+    it("has no chevron and doesn't pin when there's no text to open", async () => {
+        const onTogglePin = vi.fn();
+        const { container } = renderMemory(memoryCard(), onTogglePin);
+        expect(container.querySelector(".agent-context-delivery-chevron")).toBeNull();
+        await userEvent.click(screen.getByText("App API"));
+        expect(onTogglePin).not.toHaveBeenCalled();
+    });
+
+    it("shows the size advice when Personal Memory is large", () => {
+        renderMemory(memoryCard("high"));
+        expect(screen.getByText(/Personal memory has grown large/)).toBeInTheDocument();
+    });
+});
