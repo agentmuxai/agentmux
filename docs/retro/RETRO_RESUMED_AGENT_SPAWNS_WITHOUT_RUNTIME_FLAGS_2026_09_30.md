@@ -8,8 +8,10 @@
 ## 1. What happened
 
 AgentX's pane strip read **`Bypass · Sonnet 5.5 · high`**, but the agent was
-actually running on **Opus 5.5 at medium effort**. None of the three settings in
-the strip had been applied to the running process.
+actually running on **Opus 5.5 at medium effort**. Of the three settings in
+the strip, model and effort had not been applied to the running process;
+permission mode had (row below) — its own translation from `bypass` to
+`default` is by design, not part of this bug.
 
 What the pane showed against what ran:
 

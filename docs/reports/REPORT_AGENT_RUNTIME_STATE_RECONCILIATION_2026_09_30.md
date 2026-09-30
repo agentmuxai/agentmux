@@ -129,11 +129,14 @@ selected":
    mismatched, and worse, (b) "correcting" that apparent mismatch by sending
    `set_permission_mode: bypass` would put the CLI into REAL bypass mode,
    undoing the exact protection `buildRuntimeArgs.ts` exists for. Compare and
-   apply the **normalized** value (the same `bypass` → `default` rule
-   `buildRuntimeArgs.ts` already applies) rather than the raw
-   `agent:runtime.permissionMode`; a control-protocol agent's reconciled
-   target is always `default`, never `bypass` itself, and `set_permission_mode`
-   is only ever called with that normalized value. (Codex P2 on this PR.)
+   apply the **normalized** value (the same rule `buildRuntimeArgs.ts` already
+   applies: `bypass` → `default` for a control-protocol agent, every other
+   mode — `plan`, `auto`, `acceptEdits`, `default` itself — passed through
+   unchanged) rather than the raw `agent:runtime.permissionMode`. Only the
+   `bypass` case is ever remapped; the other modes' `set_permission_mode`
+   calls carry the user's own selection verbatim, and a fix that always
+   targets `default` would silently disable them. (Codex P2 on this PR, x2 —
+   the first pass here already needed a correction of its own.)
 
    **Permission mode also has no live CLI readback at all in this CLI
    version.** `get_settings.applied` (confirmed by reading its schema
