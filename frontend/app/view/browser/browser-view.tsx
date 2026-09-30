@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { elementDragInFlight } from "@/app/drag/element-drag-state";
+import { isAnyUnderway } from "@/app/drag/drag-session";
 import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
@@ -28,6 +28,11 @@ const LOADING_SPINNER_FADE_MS = 200;
 // 50-90ms on Windows, and are usually prewarmed before the drag starts
 // (use-drag-snapshot.ts).
 const DRAG_SNAPSHOT_CAP_MS = 500;
+
+// The in-app (pragmatic) drags: a whole pane, a Window Tab, a Pane Tab. The
+// page is a native window drawn above the DOM and can't see them, so the
+// catcher below is shown from each one's start until its source releases it.
+const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab"] as const;
 
 /**
  * Covers the page for the length of an in-app drag (a pane, a Pane Tab, a
@@ -315,7 +320,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         </div>
                     </Show>
                 </Show>
-                <Show when={elementDragInFlight()}>
+                <Show when={isAnyUnderway(ELEMENT_DRAG_KINDS)}>
                     <BrowserDragCatcher takeSnapshot={dragSnapshot.take} />
                 </Show>
             </div>

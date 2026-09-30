@@ -14,7 +14,7 @@ import { isWindows } from "@/util/platformutil";
 import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
-import { markEscaped, session } from "@/app/drag/drag-session";
+import { markEscaped, onSessionEnded, session } from "@/app/drag/drag-session";
 import { endTileDrag } from "@/layout/lib/tile-drag";
 import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
 import { WorkspaceService } from "../store/services";
@@ -281,20 +281,15 @@ export function useTabDragAndDrop(
         //
         //    A stuck activeDrag is a DEAD TAB — the overlay-container sits
         //    over the entire tile area with pointer-events:auto and eats
-        //    every click — so the cleanup runs from three layers:
-        //    a) pragmatic's monitor onDrop (normal path),
-        //    b) a window dragend listener (pragmatic's dispatch can be
-        //       skipped on Win11 swallowed-drag paths — same rationale as
-        //       TileLayout's own resetDragState safety net),
-        //    c) a capture-phase pointerdown listener: a pointerdown cannot
-        //       happen mid-drag (the button is held), so any pointerdown
-        //       with spring-activated tabs still recorded means the drag
-        //       ended without (a) or (b) firing — clean up before the
-        //       stuck overlay swallows the click's target.
+        //    every click — so it runs whenever the tile session ends:
+        //    normally from pragmatic's monitor onDrop below, otherwise from
+        //    the drag session's safety net (a window dragend pragmatic's
+        //    dispatch skipped on Win11 swallowed-drag paths, or a pointerdown
+        //    after a drag that ended unobserved) or a new drag replacing a
+        //    stranded one.
         const cleanupTileDragState = () => {
             setHoveredDropTabId(null);
             clearCrossTabDrop();
-            endTileDrag("drop");
             // Reset EVERY tab's overlay, not just the spring-activated
             // set: the SOURCE tab's activeDrag is normally reset by its
             // own draggable's onDrop, but that dispatch is skipped
@@ -317,19 +312,12 @@ export function useTabDragAndDrop(
                 }
             }, 250);
         };
-        const cleanupTileMonitor = monitorForElements({
-            canMonitor: ({ source }) => source.data.type === tileItemType,
-            onDrop: cleanupTileDragState,
-        });
-        const onWindowDragEnd = () => {
-            if (dragActivatedTabIds.size > 0) cleanupTileDragState();
-        };
-        const onWindowPointerDown = () => {
-            if (dragActivatedTabIds.size > 0) {
-                // Reaching this net means the drag ended UNOBSERVED (no
-                // monitor onDrop, no window dragend) — log loudly with
-                // each tab's overlay state so field diags can pinpoint
-                // what wedged. (SPEC_PANE_DRAG_TO_TAB addendum A2.)
+        const stopTileSubscriber = onSessionEnded(({ session: s, reason }) => {
+            if (s.kind !== "tile") return;
+            if (reason === "unobserved") {
+                // The drag ended with no monitor onDrop and no window
+                // dragend: log each tab's overlay state so field diags can
+                // pinpoint what wedged. (SPEC_PANE_DRAG_TO_TAB addendum A2.)
                 Logger.warn("dnd", "pointerdown net fired — drag ended unobserved", {
                     activated: [...dragActivatedTabIds],
                     overlays: tabIds().map((id) => ({
@@ -337,17 +325,22 @@ export function useTabDragAndDrop(
                         activeDrag: getLayoutModelForTabById(id)?.activeDrag() ?? null,
                     })),
                 });
-                cleanupTileDragState();
             }
-        };
-        window.addEventListener("dragend", onWindowDragEnd);
-        window.addEventListener("pointerdown", onWindowPointerDown, true);
+            cleanupTileDragState();
+        });
+        const cleanupTileMonitor = monitorForElements({
+            canMonitor: ({ source }) => source.data.type === tileItemType,
+            onDrop: () => {
+                // Ending the session runs the cleanup (the subscriber above).
+                if (session()?.kind === "tile") endTileDrag("drop");
+                else cleanupTileDragState();
+            },
+        });
 
         onCleanup(() => {
             cleanupStripDrop();
             cleanupTileMonitor();
-            window.removeEventListener("dragend", onWindowDragEnd);
-            window.removeEventListener("pointerdown", onWindowPointerDown, true);
+            stopTileSubscriber();
         });
     });
 
