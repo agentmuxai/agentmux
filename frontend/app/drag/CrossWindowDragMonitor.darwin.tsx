@@ -20,6 +20,7 @@ import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endReleasedSession } from "./drag-session";
+import { onWindowDrag } from "./window-drag-events";
 
 export type DragItemPayload =
     // sourceTabId: the tab the tile drag originated in — consumed by the
@@ -103,10 +104,10 @@ function CrossWindowDragMonitor(): JSX.Element {
             if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
         };
 
-        document.addEventListener("dragover", handleDragOver);
+        const stopDragOver = onWindowDrag({ kinds: ["tile", "window-tab", "pane-tab"], over: handleDragOver });
         document.addEventListener("dragend", handleDragEnd);
         onCleanup(() => {
-            document.removeEventListener("dragover", handleDragOver);
+            stopDragOver();
             document.removeEventListener("dragend", handleDragEnd);
         });
     });
