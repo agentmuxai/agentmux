@@ -8,6 +8,7 @@
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { FLOATING_ONTOP_META_KEY } from "./floating-ontop-meta";
+import { splitBlockDefFor } from "./split-block-def";
 import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
@@ -47,9 +48,12 @@ function paneAcceptsInput(blockData: Block): boolean {
  * controller, cwd, connection, etc.).
  */
 function splitBlockDef(blockData: Block): BlockDef {
-    const declared = paneTabCapability(blockData.meta?.view, "splitBlockDef");
-    if (declared) return declared();
+    return splitBlockDefFor(blockData, () => copiedSplitBlockDef(blockData));
+}
 
+/** A same-type pane inheriting `blockData`'s meta, for a view with no
+ *  `splitBlockDef`. */
+function copiedSplitBlockDef(blockData: Block): BlockDef {
     const sourceConn = blockData.meta?.connection;
     const meta: Record<string, unknown> = { ...(blockData.meta ?? {}) };
     // Only inherit connection for non-local connections (SSH/WSL).
