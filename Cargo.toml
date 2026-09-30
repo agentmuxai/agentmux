@@ -23,20 +23,21 @@ codegen-units = 16  # Parallel codegen - uses multiple CPU cores
 strip = true
 opt-level = 2       # Still optimized, but not as aggressive as "s"
 
-# ─── CEF 152 binding patch ──────────────────────────────────────────────
-# `cef-dll-sys` 152.1.0+152.0.6 on crates.io is generated from upstream
-# CEF 152 headers, which do NOT include
-# `CefWindow::BeginWindowDrag()` (the AgentMux source patch lives in
-# `agentmuxai/cef@agentmux/7977-drag-rightclick-and-transparency`,
-# ported from the 148-era `7778` branch — PR #3 on that repo). Without
+# ─── CEF 154 binding patch ──────────────────────────────────────────────
+# `cef-dll-sys` 154.2.0+154.0.28 on crates.io is generated from upstream
+# CEF 154 headers, which do NOT include
+# `CefWindow::BeginWindowDrag()` (the AgentMux source patch lives on
+# `agentmuxai/cef` branch `8037`, ported from `7977` in agentmuxai/cef#10;
+# the binding side is `agentmuxai/cef-rs` branch `agentmux/154`,
+# agentmuxai/cef-rs#1). Without
 # the binding-side field, our `--features patched-libcef` flag fails to
 # compile against CEF on Linux (`error[E0609]: no field begin_window_drag
 # on type _cef_window_t` at `agentmux-cef/src/ui_tasks.rs:215`).
 #
-# The fork at `agentmuxai/cef-rs@agentmux/fix-links-collision-152` appends
-# the `begin_window_drag` slot to the linux_x86_64 binding — same
-# mechanical edit (888 -> 896 byte struct size) carried for 148 since CEF
-# 146. Also carries a `links` value rename (`cef_dll_wrapper` ->
+# The fork at `agentmuxai/cef-rs@agentmux/154` appends the
+# `begin_window_drag` slot to the linux_x86_64 binding — same mechanical
+# edit (888 -> 896 byte struct size, with an `offset_of!` assertion pinning
+# the slot at 888) carried since CEF 146. Also carries a `links` value rename (`cef_dll_wrapper` ->
 # `cef_dll_wrapper_agentmux`), needed while this repo went through a
 # temporary Windows-152/macOS+Linux-148 staged rollout
 # (SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md Phase C, PR #3204)
@@ -62,6 +63,7 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 #
 # See: docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md §5,
 # docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md,
+# docs/specs/SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md,
 # docs/specs/SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md
 [patch.crates-io]
-cef-dll-sys = { git = "https://github.com/agentmuxai/cef-rs", rev = "9b0abfe649f4535c2af2a05bebe82681d21e9109" }
+cef-dll-sys = { git = "https://github.com/agentmuxai/cef-rs", rev = "9568a644ce2fd471d1f8812d953228bfec28c4fc" }
