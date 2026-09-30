@@ -15,6 +15,11 @@
  * clipped CDP screenshot (the block-scoped `browserPanes.screenshot`) makes
  * Chromium briefly change the visible page's viewport to render the clip,
  * which flickered the window as the drag began.
+ *
+ * A native browser pane is the exception: its page is a separate CEF browser
+ * drawn above the DOM placeholder, so the window's capture shows only the
+ * placeholder. It keeps its own screenshot, of its own whole page (no clip,
+ * so no flicker).
  */
 
 import { getApi } from "@/app/store/global";
@@ -102,7 +107,12 @@ export function prewarmTearOffSnapshot(blockId: string): void {
         return;
     }
     const r = el.getBoundingClientRect();
-    const picture = capturePane({ left: r.left, top: r.top, width: r.width, height: r.height }).then(
+    const capture = el.querySelector(".browser-placeholder")
+        ? getApi()
+              .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
+              .then((shot) => shot?.png_base64 || null)
+        : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height });
+    const picture = capture.then(
         (b64) => {
             Logger.debug("dnd:cross", "tear-off snapshot captured", { blockId, ms: Date.now() - at });
             return b64;
