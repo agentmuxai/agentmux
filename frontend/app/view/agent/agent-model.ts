@@ -27,7 +27,8 @@ import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
-import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
+import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 
@@ -514,10 +515,15 @@ export class AgentViewModel {
         // that rule, in the path the UI actually launches through.
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
         const isPersistent = isPersistentLaunch(provider, agentMode);
-        const cliArgs = selectLaunchArgs(provider, agentMode);
-        if (agent.provider_flags) {
-            cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
-        }
+        // The runtime config the strip will show, resolved BEFORE the args so
+        // the two are built from the same value. `cmd:args` must already carry
+        // `--model`/`--effort`: a continuation spawns the CLI at launch, before
+        // any send, and a running persistent process never re-reads `cmd:args`
+        // — so without them it runs on the CLI's own default while the strip
+        // reads the selection (docs/retro/
+        // RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
+        const runtimeConfig = resolveInitialRuntimeConfig(overrides?.model, provider.models);
+        const cliArgs = buildPaneArgs(provider, agentMode, runtimeConfig, agent.provider_flags);
         // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
         // comment, and fork-session-args.ts's doc comment for the two real
         // bugs (reagent + Codex, PR #2725) this resolution now guards
@@ -791,7 +797,6 @@ export class AgentViewModel {
             // effort — see resolveInitialRuntimeConfig's own doc comment
             // for why launchAgentDefinition never set this key at all
             // before now).
-            const runtimeConfig = resolveInitialRuntimeConfig(overrides?.model, provider.models);
             const meta: Record<string, unknown> = {
                 agentId: agent.id,
                 agentProvider: effectiveProvider,

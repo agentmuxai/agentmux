@@ -37,8 +37,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { staticTabId } from "@/app/store/global";
-import { buildRuntimeArgs } from "./buildRuntimeArgs";
-import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "./launch-args";
+import { buildPaneArgs } from "./buildRuntimeArgs";
+import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "./launch-args";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
 
@@ -83,14 +83,10 @@ export async function applyRuntimeChange(
     // from block meta on every turn, so a runtime change applies to the next
     // one with no controller churn at all.
     if (provider && isPersistentLaunch(provider, agentMode)) {
-        const baseArgs = selectLaunchArgs(provider, agentMode);
         // `--fork-session` is deliberately not reapplied — it is a one-shot
         // launch intent, unlike provider_flags which describe how this agent
         // always runs. See withProviderFlags' own doc.
-        const updatedArgs = withProviderFlags(
-            buildRuntimeArgs(baseArgs, updated, provider.id),
-            blockMeta?.[PROVIDER_FLAGS_META_KEY],
-        );
+        const updatedArgs = buildPaneArgs(provider, agentMode, updated, blockMeta?.[PROVIDER_FLAGS_META_KEY]);
         await RpcApi.SetMetaCommand(TabRpcClient, {
             oref,
             meta: { "cmd:args": updatedArgs },

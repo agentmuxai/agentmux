@@ -11,6 +11,7 @@
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import { getProvider } from "./providers";
+import { selectLaunchArgs, withProviderFlags, type LaunchArgsProvider } from "./launch-args";
 
 /**
  * Permission mode → CLI flags mapping.
@@ -198,4 +199,30 @@ export function getRuntimeConfig(blockMeta: Record<string, any> | undefined): Ag
         model: raw.model ?? DEFAULT_RUNTIME_CONFIG.model,
         effort: raw.effort ?? DEFAULT_RUNTIME_CONFIG.effort,
     };
+}
+
+/**
+ * The CLI args a pane must run with: the catalog's base args for its
+ * controller and mode, the runtime config (`agent:runtime`) applied on top,
+ * then the agent's own `provider_flags`.
+ *
+ * THE single composition. Launch (`agent-model.ts`), the per-send rebuild
+ * (`useAgentCommands.ts`) and a runtime change (`runtime-apply.ts`) all call
+ * this, so what the pane is launched with can't drift from what the strip
+ * shows. Launch used to skip the middle step: it wrote `agent:runtime` into
+ * block meta next to a `cmd:args` with no `--model`/`--effort`, and a resumed
+ * agent — which spawns before any send — ran on the CLI's own default
+ * (Opus 5.5) while the strip read Sonnet.
+ * docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md.
+ *
+ * One-shot launch intents (`--fork-session`) are NOT part of this: the caller
+ * appends them for the launch only, so a later rebuild never re-forks.
+ */
+export function buildPaneArgs(
+    provider: LaunchArgsProvider & { id: string },
+    agentMode: string | undefined,
+    runtime: AgentRuntimeConfig | null | undefined,
+    providerFlags: unknown,
+): string[] {
+    return withProviderFlags(buildRuntimeArgs(selectLaunchArgs(provider, agentMode), runtime, provider.id), providerFlags);
 }
