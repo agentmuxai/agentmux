@@ -14,7 +14,7 @@ import {
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
@@ -34,7 +34,6 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService } from "@/app/store/services";
-import { muxEventSubscribe } from "@/app/store/mps";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
@@ -47,7 +46,6 @@ import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { sleep } from "@/util/util";
 import {
     batch,
     createEffect,
@@ -99,8 +97,7 @@ import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { useAccountBinding } from "./failure/useAccountBinding";
-import { retryRecheckAfterBind } from "./failure/recheck-after-bind";
-import { decideSyntheticRow } from "./failure/synthetic-row";
+import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
 import { requestAgentTakeover } from "./failure/takeover";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
@@ -1415,59 +1412,9 @@ export const AgentPresentationView = ({
             void status.startLaunchFlow();
         }
     };
-    // Pre-launch auth failure → the SAME failure row every other auth failure
-    // uses, instead of the separate blue "Log in" bar this replaced
-    // (docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md).
-    //
-    // The DECISION lives in decideSyntheticRow (failure/synthetic-row.ts) and
-    // is unit-tested there; this is wiring only. It was extracted after this
-    // effect produced several P1s across PR #2951 — it sits inline in the pane
-    // component and no existing harness can reach it, so the logic was
-    // unassertable while it lived here.
-    //
-    // Tracks BOTH canRetry and the failure signal. Tracking the failure is
-    // what lets a dismissed REAL failure fall back to this row while the agent
-    // is still unauthenticated (reagent P1) — without it the pane kept no login
-    // affordance at all, strictly worse than the undismissable bar it replaced.
-    // Dismissing THIS row still sticks; decideSyntheticRow tells the two apart
-    // from the previous value, which is why that state is threaded here.
-    let prevFailure: PaneFailure | null = null;
-    let syntheticDismissed = false;
-    createEffect(() => {
-        const decision = decideSyntheticRow({
-            canRetry: status.canRetry(),
-            current: paneModel.state.failure,
-            previous: prevFailure,
-            syntheticDismissed,
-        });
-        prevFailure = untrack(() => paneModel.state.failure);
-        syntheticDismissed = decision.syntheticDismissed;
-        if (decision.action === "raise") {
-            paneModel.dispatchPane(
-                {
-                    type: "FailureObserved",
-                    at: Date.now(),
-                    turnAttempted: false,
-                    failure: {
-                        code: "auth",
-                        title: "Not signed in",
-                        detail:
-                            "This agent hasn't been signed in to its provider yet, so it never started. " +
-                            "Sign in to launch it — nothing has run, so there's no turn to retry.",
-                        retryable: true,
-                    },
-                },
-                "system",
-            );
-            // Keep prevFailure in step with what we just dispatched, so the
-            // re-run this write triggers sees "our row is showing" rather than
-            // "a row just appeared from nowhere".
-            prevFailure = untrack(() => paneModel.state.failure);
-        } else if (decision.action === "retract") {
-            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
-            prevFailure = null;
-        }
-    });
+    // Pre-launch auth failure → the "Not signed in" failure row
+    // (failure/useAuthHealth.ts).
+    useSyntheticAuthRow({ canRetry: status.canRetry, paneModel });
 
     // Bind/switch account for this agent (failure/useAccountBinding.ts).
     const { authEmail, bindCandidates, onBindAccount, onSwitchAccount, refreshLinkedAccountId } = useAccountBinding({
@@ -1476,67 +1423,14 @@ export const AgentPresentationView = ({
         bindExistingAccount: status.bindExistingAccount,
     });
 
-    // Declare the auth-blocking state resolved: clears canRetry/authNotice
-    // (notifyControllerHealthy) and, ONLY when the live failure is actually
-    // an auth failure, clears it too — never unconditionally, so an
-    // unrelated concurrent failure (rate_limited, context_exceeded, …) that
-    // happens to be showing isn't silently wiped. Shared by two independent
-    // proofs of health: a live controllerstatus event showing an active turn
-    // (below), and a verified auth re-check after an external bind (below).
-    const declareAuthHealthy = () => {
-        status.notifyControllerHealthy();
-        if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
-            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
-        }
-    };
-
-    // Bounded retry around recheckAuthAfterBind — NOT a stylistic choice, a
-    // correctness fix. `agentidentities:changed` is published by the
-    // backend SYNCHRONOUSLY inside the `LinkAgentIdentityCommand` handler,
-    // before it even responds to the RPC (agent_handlers/identity.rs:590-611);
-    // RPC responses and WS events share one in-order connection, so this
-    // pane's subscription below fires before `bindAccountToAgent`'s own
-    // `SetMetaCommand` — which only runs AFTER that same Link RPC resolves
-    // client-side — has refreshed `cmd:env` to the newly-bound account's
-    // dir. The very first recheck therefore reads STALE env and fails on
-    // essentially every bind, not as an edge case but as the common case —
-    // reagentx P1 on PR #2969. Retry ladder lives in recheck-after-bind.ts,
-    // unit-tested there (dependency-injected, no DOM/RPC mocking needed) —
-    // kept out of this file for the same reason
-    // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md's retrospective
-    // extracted decideSyntheticRow out of here after several P1s: inline
-    // logic in this component is unassertable by any existing harness.
-    const recheckAuthAfterBindWithRetry = () =>
-        retryRecheckAfterBind({
-            recheck: status.recheckAuthAfterBind,
-            stillBlocked: () => status.canRetry() || paneSnapshot(model.blockId)?.failure?.data.code === "auth",
-            sleep,
-            onHealthy: declareAuthHealthy,
-        });
-
-    // Auto-unblock: a bind can happen from ANYWHERE (the Armory's
-    // Bind-to-Agent menu, the per-agent Identity tab, or this pane's own
-    // "Bind account" above) — this pane must notice regardless of source.
-    // `agentidentities:changed:<agentId>` already fires on every one of
-    // those; nothing previously listened for it here.
-    //
-    // Re-verifies via CheckCliAuth before declaring healthy (a bind event is
-    // not itself proof the new credential works) and NEVER auto-retries a
-    // turn — see recheckAuthAfterBind's and declareAuthHealthy's own doc
-    // comments. SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2.
-    createEffect(() => {
-        const agentDefinitionId = getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined;
-        if (!agentDefinitionId) return;
-        const unsub = muxEventSubscribe({
-            eventType: `agentidentities:changed:${agentDefinitionId}`,
-            handler: () => {
-                void refreshLinkedAccountId();
-                const blocked = status.canRetry() || paneSnapshot(model.blockId)?.failure?.data.code === "auth";
-                if (!blocked) return;
-                void recheckAuthAfterBindWithRetry();
-            },
-        });
-        onCleanup(unsub);
+    // Declaring auth healthy, and the auto-unblock after a bind from anywhere
+    // (failure/useAuthHealth.ts).
+    const { declareAuthHealthy } = useAuthHealth({
+        blockId: model.blockId,
+        agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
+        paneModel,
+        status,
+        refreshLinkedAccountId,
     });
 
     const failureUI = useAgentFailure({
