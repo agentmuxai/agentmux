@@ -138,7 +138,7 @@ Sources: `memory_delivery.rs:45-52`; `memory_delivery_handlers.rs:184-301`;
 ### 2.2 The Compact button
 
 - **AgentMux doesn't send a summary.** The button sends the literal user
-  turn `/compact` (`frontend/…/agent/agent-view.tsx:2890`).
+  turn `/compact` (`frontend/…/agent/agent-view.tsx:2881`).
 - **Claude Code writes its own summary** and echoes it on stdout as a
   plain-string user frame: `{"type":"user","message":{"role":"user",
   "content":"This session is being continued from a previous
@@ -349,6 +349,24 @@ read as `context_delivery`.
 | **CD5** | Renames (§1.3). Spec and index updates so "ambient" means model calls only. | small |
 
 CD1 fixes the most visible problem and doesn't depend on the others.
+
+**Every phase ships its docs with it** (§8). A phase isn't done until the
+pages it changes are updated.
+
+## 8. Docs to update
+
+User docs live in the public `agentmuxai/agentmux-docs` repo
+(docs.agentmux.ai), at `src/content/docs/`.
+
+| Doc | Change | Phase |
+|---|---|---|
+| `internals/conversation-overhead.md:105` | It says AgentMux "does not trigger or control" compaction, but the Compact button sends `/compact`. Say what triggers compaction, and what the pane shows afterwards: the compacted row and the summary card. | CD1 |
+| `memory.md`, "How Memory bundles are reached" (:38) | Add delivery after launch: `/clear`, compaction and a fresh session after a failed resume re-deliver memory; normal resume doesn't. Describe the card and its per-item rows. | CD2 (CD3 adds expanding rows) |
+| `glossary.md` | Add **ambient** (model calls AgentMux makes on its own, never content sent to the agent) and **context delivery** (content the agent is given without the user typing it, shown as a card). | CD1 |
+| `armory.md:51` | "Ambient provider credentials" uses the third meaning of ambient (§1.2). Leave it until the follow-up rename (§7, Q4), then say "host login". | follow-up |
+| `agentmux` `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` | Amend D6 ("label only") to point here once CD3 lands; point its notice section at the card. | CD2, CD3 |
+| `agentmux` `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md` | State that "ambient" names how a call is made, and that content sent to the agent is a context delivery. | CD5 |
+| `agentmux` `docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md` | Point its label-node section at the card. | CD2 |
 
 ## 7. Open questions
 
