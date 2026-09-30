@@ -3,7 +3,8 @@
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { AgentViewModel } from "./agent-model";
-import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "./agent-pane-tab";
+import { agentPaneTab } from "./agent-pane-tab";
+import { agentPickerBlockDef } from "./agent-picker-blockdef";
 import { AgentBlockContent } from "./agent-block-content";
 import { buildAgentPaneChromeModel } from "./agent-pane-chrome-model";
 
@@ -25,7 +26,8 @@ export const agentPaneTabManifest: PaneTabManifest = {
         lifecycle: "keepAlive",
         header: "surface",
         paneZoom: {},
-        splitDropsMeta: AGENT_SPLIT_DROPPED_META,
+        // A split opens a fresh picker, not a copy of this agent's pane.
+        splitBlockDef: agentPickerBlockDef,
         noPadding: true,
     },
     tab: agentPaneTab,
