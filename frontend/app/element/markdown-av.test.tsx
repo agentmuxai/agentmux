@@ -120,6 +120,22 @@ describe("video", () => {
         await waitFor(() => expect(c.textContent).toContain("MEDIA_ERR_SRC_NOT_SUPPORTED"));
     });
 
+    it("frees the played file's blob as soon as playback fails (Codex P2 on #4073)", async () => {
+        const revoked: string[] = [];
+        vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => `blob:av/${++urls}`, revokeObjectURL: (u: string) => revoked.push(u) }));
+        serve(4 * MB, "video/mp4");
+        const c = mount("![repro](clip.mp4)");
+        await waitFor(() => expect(c.querySelector(".am-media-play")).not.toBeNull());
+        fireEvent.click(c.querySelector(".am-media-play")!);
+        await waitFor(() => expect(c.querySelector("video[controls]")).not.toBeNull());
+        const v = c.querySelector("video[controls]") as HTMLVideoElement;
+        const src = v.getAttribute("src")!;
+        Object.defineProperty(v, "error", { value: { code: 4, message: "" } });
+        fireEvent.error(v);
+        await waitFor(() => expect(c.textContent).toContain("can't play"));
+        expect(revoked).toContain(src);
+    });
+
     it("shows a card that opens the Media pane over the 200 MB cap", async () => {
         serve(300 * MB);
         const c = mount("![repro](big.mp4)");
