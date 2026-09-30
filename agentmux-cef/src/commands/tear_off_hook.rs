@@ -719,33 +719,137 @@ fn candidate_label_under_cursor_locked(
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
     let root = if root.is_null() { hwnd } else { root };
 
+    let label = label_for_top_level(ctx, browsers, root)?;
+    if label == ctx.dragged_label {
+        return None;
+    }
+    // TabDrag mode: the source window is NOT a candidate. Its own
+    // pragmatic-dnd reorder owns the strip while the cursor is over
+    // it — emitting tearoff:hover-changed at it on every mouse move
+    // would race that (two writers, differently-timed and
+    // differently-converted, on one insertionPoint signal), and
+    // button-up over the source is owned by the in-window reorder
+    // anyway. TearOff mode keeps the source as a candidate: that's
+    // the cancel-back drop target. (reagent PR #2086 P1)
+    if matches!(ctx.mode, HookMode::TabDrag { .. }) && label == ctx.source_label {
+        return None;
+    }
+    if !is_instance_label(&label) {
+        return None;
+    }
+    Some(label)
+}
+
+/// The label of the browser whose top-level window is `root`, from the live
+/// window under the cursor back to its owner. `BrowserHost::window_handle()`
+/// alone can't answer this: in CEF Views mode it is often null, and
+/// otherwise a child of the top-level window, so comparing it with the root
+/// never matched and every release reported no target. Only window labels
+/// count: a browser pane's browser sits inside its window, so its host
+/// handle has the same root.
+///
+/// A cached HWND can be stale, and Windows reuses a destroyed window's HWND
+/// value, so a stale entry can equal a live window. Each step guards that:
+/// 1. `root` must be a visible CEF Views top-level window of this process,
+///    so not another app's window, a menu or a tooltip a reused value could
+///    land on.
+/// 2. A window's own host handle, when CEF gives one, says for certain.
+/// 3. Otherwise `window_hwnds`, bound at Views window creation (app/mod.rs)
+///    and evicted on close (client/lifecycle.rs), trusted only when exactly
+///    one window label is cached for `root` and that label's browser doesn't
+///    place itself in another window. Two labels on one HWND means one is
+///    stale and nothing says which: no target. Past that there is no
+///    identity to check off the UI thread (a Views window's own handle is
+///    only reachable there); the rest of the host trusts `window_hwnds` the
+///    same way.
+///    A promoted pool window serving the primary keeps its `window-pool-*`
+///    entry, while its renderer registered "main" and has no backend window
+///    of its own under the pool label; that is "main", the same rule the
+///    redock resolver uses (commands/window/motion.rs). It doesn't consult
+///    `window_hwnds["main"]`, whose value could be stale or reused; only the
+///    live main browser's own host handle can veto it.
+#[cfg(target_os = "windows")]
+fn label_for_top_level(
+    ctx: &HookContext,
+    browsers: &std::collections::HashMap<String, cef::Browser>,
+    root: *mut std::ffi::c_void,
+) -> Option<String> {
+    if !is_own_views_top_level(root) {
+        return None;
+    }
+
     for (label, browser) in browsers.iter() {
-        if label == &ctx.dragged_label {
-            continue;
-        }
-        // TabDrag mode: the source window is NOT a candidate. Its own
-        // pragmatic-dnd reorder owns the strip while the cursor is over
-        // it — emitting tearoff:hover-changed at it on every mouse move
-        // would race that (two writers, differently-timed and
-        // differently-converted, on one insertionPoint signal), and
-        // button-up over the source is owned by the in-window reorder
-        // anyway. TearOff mode keeps the source as a candidate: that's
-        // the cancel-back drop target. (reagent PR #2086 P1)
-        if matches!(ctx.mode, HookMode::TabDrag { .. }) && label == &ctx.source_label {
-            continue;
-        }
-        if !is_instance_label(label) {
-            continue;
-        }
-        use cef::{ImplBrowser, ImplBrowserHost};
-        if let Some(host) = browser.host() {
-            let h = host.window_handle();
-            if !h.0.is_null() && h.0 as *mut std::ffi::c_void == root {
-                return Some(label.clone());
-            }
+        if is_instance_label(label) && host_top_level(browser) == Some(root) {
+            return Some(label.clone());
         }
     }
+
+    let cached = cached_window_labels(ctx, root);
+    let [label] = cached.as_slice() else {
+        return None;
+    };
+    if let Some(browser) = browsers.get(label) {
+        // Its host handle names a different window: this entry is stale.
+        return match host_top_level(browser) {
+            Some(_) => None,
+            None => Some(label.clone()),
+        };
+    }
+    // A pool window serving the primary: its renderer registered "main",
+    // so the pool label has no backend window of its own. The live main
+    // browser vetoes it when its own host handle places main elsewhere.
+    if label.starts_with("window-pool-") && ctx.state.backend_window_id(label).is_none() {
+        let main = browsers.get("main")?;
+        return match host_top_level(main) {
+            Some(elsewhere) if elsewhere != root => None,
+            _ => Some("main".to_string()),
+        };
+    }
     None
+}
+
+/// A visible CEF Views top-level window (class `Chrome_WidgetWin_*`) of
+/// this process.
+#[cfg(target_os = "windows")]
+fn is_own_views_top_level(hwnd: *mut std::ffi::c_void) -> bool {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
+    };
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(hwnd as _, &mut pid) };
+    if pid != unsafe { GetCurrentProcessId() } || unsafe { IsWindowVisible(hwnd as _) } == 0 {
+        return false;
+    }
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetClassNameW(hwnd as _, buf.as_mut_ptr(), buf.len() as i32) };
+    n > 0 && String::from_utf16_lossy(&buf[..n as usize]).starts_with("Chrome_WidgetWin_")
+}
+
+/// The top-level window of the browser's host handle, when CEF gives one.
+#[cfg(target_os = "windows")]
+fn host_top_level(browser: &cef::Browser) -> Option<*mut std::ffi::c_void> {
+    use cef::{ImplBrowser, ImplBrowserHost};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+
+    let h = browser.host()?.window_handle().0 as *mut std::ffi::c_void;
+    if h.is_null() {
+        return None;
+    }
+    let top = unsafe { GetAncestor(h as _, GA_ROOT) } as *mut std::ffi::c_void;
+    Some(if top.is_null() { h } else { top })
+}
+
+/// The window labels `window_hwnds` has cached for `hwnd`.
+#[cfg(target_os = "windows")]
+fn cached_window_labels(ctx: &HookContext, hwnd: *mut std::ffi::c_void) -> Vec<String> {
+    ctx.state
+        .window_hwnds
+        .lock()
+        .iter()
+        .filter(|(l, &h)| h == hwnd as isize && is_instance_label(l))
+        .map(|(l, _)| l.clone())
+        .collect()
 }
 
 #[cfg(target_os = "windows")]
