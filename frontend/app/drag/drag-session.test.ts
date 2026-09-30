@@ -7,7 +7,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { beginDrag, endDrag, isUnderway, markEscaped, markReleased, onSessionEnded, session } from "./drag-session";
+import { beginDrag, endDrag, isAnyUnderway, isUnderway, markEscaped, markReleased, onSessionEnded, session } from "./drag-session";
 import { isPaneTabSource, isTabSource, isTileSource, paneTabItemType, tabItemType, tileItemType } from "./drag-types";
 
 afterEach(() => {
@@ -106,5 +106,54 @@ describe("drag types", () => {
         expect(isPaneTabSource({ type: paneTabItemType })).toBe(true);
         expect(isTileSource({ type: tabItemType })).toBe(false);
         expect(isTabSource(undefined)).toBe(false);
+    });
+});
+
+describe("isAnyUnderway", () => {
+    afterEach(() => endDrag("cancel"));
+
+    it("is true for a listed kind from its start until its source releases it", () => {
+        const kinds = ["tile", "window-tab", "pane-tab"] as const;
+        expect(isAnyUnderway(kinds)).toBe(false);
+        beginDrag("pane-tab", { blockId: "b1" });
+        expect(isAnyUnderway(kinds)).toBe(true);
+        markReleased();
+        expect(isAnyUnderway(kinds)).toBe(false);
+    });
+
+    it("ignores kinds not listed", () => {
+        beginDrag("files");
+        expect(isAnyUnderway(["tile", "window-tab", "pane-tab"])).toBe(false);
+    });
+});
+
+describe("the safety net", () => {
+    afterEach(() => endDrag("cancel"));
+
+    it("a window dragend ends a drag nothing else ended", () => {
+        const ended = vi.fn();
+        const off = onSessionEnded(ended);
+        beginDrag("pane-tab", { blockId: "b1" });
+        window.dispatchEvent(new Event("dragend"));
+        expect(session()).toBeNull();
+        expect(ended).toHaveBeenCalledWith(expect.objectContaining({ reason: "dragend" }));
+        off();
+    });
+
+    it("a pointerdown with a drag still open ends it as unobserved", () => {
+        const ended = vi.fn();
+        const off = onSessionEnded(ended);
+        beginDrag("tile", { nodeId: "n1" });
+        window.dispatchEvent(new Event("pointerdown"));
+        expect(session()).toBeNull();
+        expect(ended).toHaveBeenCalledWith(expect.objectContaining({ reason: "unobserved" }));
+        off();
+    });
+
+    it("leaves a file drag to the file-drop controller", () => {
+        beginDrag("files");
+        window.dispatchEvent(new Event("dragend"));
+        window.dispatchEvent(new Event("pointerdown"));
+        expect(session()?.kind).toBe("files");
     });
 });
