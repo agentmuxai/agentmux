@@ -50,7 +50,7 @@ function repoRoot(): string {
     let dir = path.dirname(fileURLToPath(import.meta.url));
     for (let i = 0; i < 8; i++) {
         if (
-            fs.existsSync(path.join(dir, "agentmux-srv")) &&
+            fs.existsSync(path.join(dir, "crates", "srv")) &&
             fs.existsSync(path.join(dir, "frontend"))
         ) {
             return dir;
@@ -92,7 +92,7 @@ function deriveContract(root: string): Contract {
     // NAME is a string literal or a `pub const … &str = "…"`. Both forms
     // appear; consts are resolved against every const defined in the
     // crate (not just COMMAND_*-prefixed ones).
-    const rsFiles = walk(path.join(root, "agentmux-srv", "src"), [".rs"]);
+    const rsFiles = walk(path.join(root, "crates", "srv", "src"), [".rs"]);
     const constMap = new Map<string, string>();
     const constRe = /pub const (\w+)\s*:\s*&str\s*=\s*"([^"]+)"\s*;/g;
     for (const f of rsFiles) {
