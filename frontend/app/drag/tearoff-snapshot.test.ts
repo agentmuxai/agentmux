@@ -208,6 +208,24 @@ describe("window-tab snapshot", () => {
         ]);
     });
 
+    it("no picture of a window showing a browser pane: it would be a grey placeholder", async () => {
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        el.getClientRects = () => [{}] as unknown as DOMRectList;
+        document.body.appendChild(el);
+        prewarmWindowTabSnapshot("t1");
+        expect(shots.calls).toEqual([]);
+        expect(await takeWindowTabSnapshot("t1")).toBeUndefined();
+    });
+
+    it("a browser pane in a background tab (not on screen) doesn't prevent it", async () => {
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        document.body.appendChild(el); // jsdom: no client rects, like display:none
+        prewarmWindowTabSnapshot("t1");
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+    });
+
     it("a window tab's picture is never handed to a pane with the same id, or vice versa", async () => {
         prewarmWindowTabSnapshot("x1");
         expect(await takeTearOffSnapshot("x1")).toBeUndefined();
