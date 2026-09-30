@@ -346,7 +346,7 @@ declare global {
         setActiveTab: (tabId: string) => void;
         createTab: () => void;
         closeTab: (workspaceId: string, tabId: string) => void;
-        setWindowInitStatus: (status: "ready" | "wave-ready" | "revealed") => void;
+        setWindowInitStatus: (status: "ready" | "wave-ready" | "revealed" | "snapshot-shown") => void;
         onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => void;
         sendLog: (log: string) => void;
         sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void;

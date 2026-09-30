@@ -21,6 +21,7 @@ vi.mock("@/app/store/global", () => ({
 }));
 
 import {
+    MAX_SNAPSHOT_CHARS,
     paneDragCandidate,
     prewarmTearOffSnapshot,
     resetTearOffSnapshotForTests,
@@ -69,6 +70,12 @@ describe("tear-off snapshot", () => {
         vi.useFakeTimers();
         prewarmTearOffSnapshot("b1");
         vi.advanceTimersByTime(10_001);
+        expect(await takeTearOffSnapshot("b1")).toBeUndefined();
+    });
+
+    it("drops a picture too large for the open-window request", async () => {
+        shots.next = Promise.resolve({ png_base64: "x".repeat(MAX_SNAPSHOT_CHARS + 1) });
+        prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b1")).toBeUndefined();
     });
 
