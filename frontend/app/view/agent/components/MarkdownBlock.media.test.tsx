@@ -15,7 +15,7 @@ vi.mock("@/util/fetchutil", () => ({ fetch: (...a: unknown[]) => h.fetch(...a) }
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 
-import { AgentMediaProvider } from "../agent-media";
+import { AgentMediaProvider, AgentPaneProviders } from "../agent-media";
 import type { MarkdownNode } from "../types";
 import { MarkdownBlock } from "./MarkdownBlock";
 
@@ -43,6 +43,19 @@ describe("MarkdownBlock inline media", () => {
         ));
         await waitFor(() => expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:mb"));
         expect(new URL(h.fetch.mock.calls[0][0] as string).searchParams.get("path")).toBe("D:/proj/shots/after.png");
+    });
+
+    it.each([
+        [{ meta: { "cmd:cwd": "D:/launched" } }, { working_directory: "D:/defined" }, "D:/launched/shots/after.png"],
+        [{ meta: {} }, { working_directory: "D:/defined" }, "D:/defined/shots/after.png"],
+    ])("the pane's providers prefer the launch cwd over the definition's directory", async (block, agent, want) => {
+        const { container } = render(() => (
+            <AgentPaneProviders dormant={() => false} block={() => block} agent={() => agent}>
+                <MarkdownBlock node={node} />
+            </AgentPaneProviders>
+        ));
+        await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+        expect(new URL(h.fetch.mock.calls[0][0] as string).searchParams.get("path")).toBe(want);
     });
 
     it("loads nothing outside an agent pane", () => {
