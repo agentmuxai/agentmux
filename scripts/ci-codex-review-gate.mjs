@@ -25,12 +25,27 @@
 //     (#3562 sat pending). See quotaAttribution for overlapping requests.
 //     A later real verdict on the head still wins.
 //
+// What ReAgent posts (a5af/reagent spec codex-efficiency-2026-09-30):
+//   - quota skip: while Codex's quota is exhausted ReAgent stops asking and
+//     instead keeps one ISSUE COMMENT per PR, edited in place for each head
+//     it skips, carrying `<!-- reagent:codex-skipped reason=quota
+//     head=<sha> -->`. From reagentx-workflow[bot] only (anyone can type the
+//     marker), it counts as a quota answer for that head, but only when
+//     Codex itself has said nothing about the head: ReAgent may write it
+//     before reading Codex's answers. It is never carried to a later head.
+//
 // Codex only reviews when asked by a5af, not a bot. ReAgent decides when
 // to ask (a5af/reagent lambdas/codex_policy.py): after it approves a head,
 // then again only when a push touches a file Codex flagged, or when a
 // write-access commenter says "@reagentx-workflow codex re-review". After an
 // OK it does NOT re-ask for a docs-only diff, so this gate carries an OK
-// across exactly that diff. This gate only reads.
+// across exactly that diff. After findings it does NOT re-ask when only doc
+// files Codex flagged changed, so findings whose inline comments (matched to
+// the review by pull_request_review_id) are all on docs pass on the head, and
+// carry to a later head like an OK: only while they are Codex's latest word
+// and only docs changed since (a code change makes ReAgent re-ask). Findings
+// on any non-doc file, or on files unknown, fail or wait as before. This
+// gate only reads.
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
@@ -39,11 +54,15 @@ export const STATUS_CONTEXT = "Codex review";
 // codex_policy.py reads the same marker from the same author.
 export const TRIGGER_AUTHOR = "a5af";
 
+// ReAgent's GitHub App, the only author whose quota-skip marker counts.
+export const SKIP_AUTHOR = "reagentx-workflow[bot]";
+
 const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 // Straight or curly apostrophe.
 const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
 const USAGE_LIMIT = /reached your Codex usage limits/i;
 const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
+const SKIPPED_HEAD = /<!--\s*reagent:codex-skipped\s+reason=quota\s+head=([0-9a-f]{7,40})\s*-->/i;
 
 // Mirrors is_docs_only_path in reagent's codex_policy.py; keep them in step.
 // Narrower than ci-classify-changes.mjs's rule on purpose: CLAUDE.md, AGENTS.md
@@ -113,9 +132,49 @@ function quotaAttribution({ comments, reviews }) {
     return attributed;
 }
 
-/** Every Codex verdict that names a commit, oldest first. */
-function codexOutputs({ comments = [], reviews = [] }) {
+/** The head a ReAgent quota-skip comment names, or null. */
+export function skippedHead(comment) {
+    if (comment?.user?.login !== SKIP_AUTHOR) return null;
+    const m = SKIPPED_HEAD.exec(comment.body ?? "");
+    return m ? m[1].toLowerCase() : null;
+}
+
+/** Review id -> Set of the paths its inline comments are on. */
+function filesByReview(reviewComments) {
+    const byReview = new Map();
+    for (const c of reviewComments) {
+        if (c.pull_request_review_id == null || !c.path) continue;
+        if (!byReview.has(c.pull_request_review_id)) byReview.set(c.pull_request_review_id, new Set());
+        byReview.get(c.pull_request_review_id).add(c.path);
+    }
+    return byReview;
+}
+
+/** Findings whose flagged files are known and all docs. */
+function isDocsOnlyFindings(o) {
+    return o?.kind === "findings" && o.files.size > 0 && [...o.files].every(isDocsOnlyPath);
+}
+
+/**
+ * ReAgent's quota skips, as `quota` outputs, oldest first. ReAgent edits one
+ * comment in place per outage, so its last edit dates the skip of the head
+ * it now names. Not Codex verdicts: see evaluateCodexGate for precedence.
+ */
+function reagentSkips(comments = []) {
+    return comments
+        .filter((c) => skippedHead(c))
+        .map((c) => ({ kind: "quota", at: c.updated_at ?? c.created_at, sha: skippedHead(c) }))
+        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
+/**
+ * Every Codex verdict that names a commit, oldest first. Findings carry
+ * `files`, the paths of their inline comments (empty when `reviewComments`
+ * has none for them).
+ */
+function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
     const quotaHeads = quotaAttribution({ comments, reviews });
+    const flagged = filesByReview(reviewComments);
     return [
         ...comments
             .filter((c) => c.user?.login === CODEX_LOGIN)
@@ -132,37 +191,49 @@ function codexOutputs({ comments = [], reviews = [] }) {
         // does not count for it either: only a Codex OK passes.
         ...reviews
             .filter((r) => r.user?.login === CODEX_LOGIN && r.state !== "DISMISSED")
-            .map((r) => ({ kind: "findings", at: r.submitted_at, sha: reviewedCommit(r.body) })),
+            .map((r) => ({
+                kind: "findings",
+                at: r.submitted_at,
+                sha: reviewedCommit(r.body),
+                files: flagged.get(r.id) ?? new Set(),
+            })),
     ]
         .filter((o) => o.sha !== null)
         .sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
 /** Codex's most recent verdict on any commit of the PR, or null. */
-export function latestCodexOutput({ comments = [], reviews = [] }) {
-    return codexOutputs({ comments, reviews }).at(-1) ?? null;
+export function latestCodexOutput({ comments = [], reviews = [], reviewComments = [] }) {
+    return codexOutputs({ comments, reviews, reviewComments }).at(-1) ?? null;
 }
 
 /**
- * Decide the status for `headSha` from the PR's issue comments and reviews
- * (GitHub REST shapes). The latest Codex output naming this head wins, so a
- * spontaneous findings review after an OK takes the OK back.
+ * Decide the status for `headSha` from the PR's issue comments, reviews and
+ * review comments (GitHub REST shapes). The latest Codex output naming this
+ * head wins, so a spontaneous findings review after an OK takes the OK back.
+ * A ReAgent quota skip counts only when Codex has said nothing about the
+ * head: ReAgent can post or edit it before reading Codex's answers, so its
+ * date can trail a real verdict it must not override.
  *
- * With nothing on the head, an OK carries over when Codex's latest verdict
- * is that OK and `filesSinceLatest` (the diff from its commit to the head,
- * null if unknown) is docs-only.
+ * With nothing on the head, Codex's latest verdict (never a skip) carries
+ * over when it is an OK or findings only on docs, and `filesSinceLatest`
+ * (the diff from its commit to the head, null if unknown) is docs-only.
  */
-export function evaluateCodexGate({ headSha, comments = [], reviews = [], filesSinceLatest = null }) {
+export function evaluateCodexGate({ headSha, comments = [], reviews = [], reviewComments = [], filesSinceLatest = null }) {
     const head = headSha.toLowerCase();
     const short = head.slice(0, 10);
-    const all = codexOutputs({ comments, reviews });
-    const onHead = all.filter((o) => head.startsWith(o.sha)).at(-1);
+    const all = codexOutputs({ comments, reviews, reviewComments });
+    const namesHead = (o) => head.startsWith(o.sha);
+    const onHead = all.filter(namesHead).at(-1) ?? reagentSkips(comments).filter(namesHead).at(-1);
 
     if (onHead?.kind === "ok") {
         return { state: "success", description: `Codex found no major issues in ${short}` };
     }
     if (onHead?.kind === "quota") {
         return { state: "success", description: `Codex is out of review quota; ${short} passes without it` };
+    }
+    if (isDocsOnlyFindings(onHead)) {
+        return { state: "success", description: `Codex only flagged docs in ${short}; see its comments` };
     }
     if (onHead?.kind === "findings") {
         return {
@@ -175,8 +246,14 @@ export function evaluateCodexGate({ headSha, comments = [], reviews = [], filesS
     }
 
     const latest = all.at(-1);
-    if (latest?.kind === "ok" && Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath)) {
+    // ReAgent re-asks for any non-doc change after either verdict, so both
+    // carry only across a docs-only diff; a code change waits for Codex.
+    const onlyDocsSince = Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath);
+    if (latest?.kind === "ok" && onlyDocsSince) {
         return { state: "success", description: `Codex OK on ${latest.sha}; only docs changed since` };
+    }
+    if (isDocsOnlyFindings(latest) && onlyDocsSince) {
+        return { state: "success", description: `Codex only flagged docs in ${latest.sha}; see its comments` };
     }
     return {
         state: "pending",
@@ -233,17 +310,20 @@ async function main() {
     }
     const pull = await (await gh(`/repos/${repo}/pulls/${pr}`, token)).json();
     const headSha = pull.head.sha;
-    const [comments, reviews] = await Promise.all([
+    const [comments, reviews, reviewComments] = await Promise.all([
         ghAll(`/repos/${repo}/issues/${pr}/comments`, token),
         ghAll(`/repos/${repo}/pulls/${pr}/reviews`, token),
+        // Inline comments: the files each findings review flagged.
+        ghAll(`/repos/${repo}/pulls/${pr}/comments`, token),
     ]);
-    // Only an OK on an earlier commit can carry, so only then is the diff worth fetching.
-    const latest = latestCodexOutput({ comments, reviews });
+    // Only an OK or docs-only findings on an earlier commit can carry, so
+    // only then is the diff worth fetching.
+    const latest = latestCodexOutput({ comments, reviews, reviewComments });
     const filesSinceLatest =
-        latest?.kind === "ok" && !headSha.toLowerCase().startsWith(latest.sha)
+        (latest?.kind === "ok" || isDocsOnlyFindings(latest)) && !headSha.toLowerCase().startsWith(latest.sha)
             ? await changedFiles(repo, latest.sha, headSha, token)
             : null;
-    const result = evaluateCodexGate({ headSha, comments, reviews, filesSinceLatest });
+    const result = evaluateCodexGate({ headSha, comments, reviews, reviewComments, filesSinceLatest });
     console.log(`#${pr} ${headSha.slice(0, 10)}: ${result.state} — ${result.description}`);
     if (DRY_RUN) return;
     await gh(`/repos/${repo}/statuses/${headSha}`, token, {
