@@ -388,7 +388,7 @@
         "dnd:enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable drag-and-drop file attach onto an agent pane. Default true."
+          "description": "Enable dropping files onto agent and terminal panes. Default true."
         },
         "dnd:concurrency": {
           "type": "integer",
@@ -403,7 +403,7 @@
         "attachments:enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Paste or drop images into the agent composer as attachments (thumbnails above the text). False restores the old behavior: dropped images are copied into the working folder like any other file. Default true. See docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md."
+          "description": "Paste or drop files (images and any other kind) into the agent composer as attachments, shown as tiles above the text. False restores the old behavior: pasted and dropped files are copied into the working folder. Default true. See docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md and SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md."
         },
         "attachments:maxfiles": {
           "type": "integer",

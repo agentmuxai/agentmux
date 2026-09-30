@@ -10,7 +10,22 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const hub = vi.hoisted(() => ({ ingest: vi.fn(), info: vi.fn(), container: false, splice: vi.fn(), copy: vi.fn() }));
+const hub = vi.hoisted(() => ({
+    ingest: vi.fn(),
+    info: vi.fn(),
+    container: false,
+    splice: vi.fn(),
+    copy: vi.fn(),
+    attachmentsEnabled: undefined as boolean | undefined,
+}));
+vi.mock("@/app/store/global", async (orig) => {
+    const real = (await orig()) as { getSettingsKeyAtom: (key: string) => () => unknown };
+    return {
+        ...real,
+        getSettingsKeyAtom: (key: string) =>
+            key === "attachments:enabled" ? () => hub.attachmentsEnabled : real.getSettingsKeyAtom(key),
+    };
+});
 vi.mock("@/app/drag/file-drop-actions", () => ({
     copyIntoWorkdir: (...a: unknown[]) => hub.copy(...a),
 }));
@@ -149,6 +164,24 @@ describe("AgentFooter with attachments", () => {
             expect(tray).not.toHaveBeenCalled();
         } finally {
             hub.container = false;
+        }
+    });
+
+    it("attachments:enabled off: a paste is copied into the working folder, like a drop", () => {
+        const { ta, draft } = setup();
+        hub.attachmentsEnabled = false;
+        hub.copy.mockReset().mockResolvedValue([]);
+        const tray = vi.spyOn(draft, "uploadFiles");
+        const file = new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
+        const ev = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: { files: [file] } });
+        try {
+            ta.dispatchEvent(ev);
+            expect(hub.copy).toHaveBeenCalledTimes(1);
+            expect(hub.copy.mock.calls[0][1]).toEqual({ files: [file] });
+            expect(tray).not.toHaveBeenCalled();
+        } finally {
+            hub.attachmentsEnabled = undefined;
         }
     });
 

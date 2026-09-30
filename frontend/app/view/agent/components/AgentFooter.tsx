@@ -9,7 +9,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type 
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { atoms, pushNotification } from "@/app/store/global";
+import { atoms, getSettingsKeyAtom, pushNotification } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
@@ -529,6 +529,10 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         });
     };
     const inContainer = () => !!draftBlockId && isContainerPane(draftBlockId);
+    // `attachments:enabled` off means files go to the working folder instead
+    // of the tray, for a paste exactly as for a drop (useAgentDropAttach).
+    const attachmentsSetting = getSettingsKeyAtom("attachments:enabled");
+    const pasteToWorkdir = () => inContainer() || attachmentsSetting() === false;
     // The same copy a drop makes, notices and @mentions included. Paste
     // ignores `dnd:*`.
     const pasteIntoWorkdir = (source: CopySource) =>
@@ -541,7 +545,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
 
     const pasteAttachmentsFromMenu = (paths: string[]) => {
         if (!attachmentDraft) return;
-        if (inContainer()) {
+        if (pasteToWorkdir()) {
             void pasteIntoWorkdir({ paths });
             return;
         }
@@ -552,7 +556,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (!attachmentDraft) return;
         const files = Array.from(e.clipboardData?.files ?? []);
         if (files.length === 0) return;
-        if (inContainer()) {
+        if (pasteToWorkdir()) {
             void pasteIntoWorkdir({ files });
             return;
         }
