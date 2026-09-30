@@ -339,3 +339,310 @@ mod agent_define_core_bundle_provisioning_tests {
         assert_eq!(bundles_after_first, bundles_after_second, "skip path must not leak an extra bundle");
     }
 }
+
+/// Atomically allocate an agent working directory.
+///
+/// Tries to atomically create `desired` via `std::fs::create_dir`. If
+/// that fails because the directory already exists, tries `<desired>-1`,
+/// `<desired>-2`, …, up to `-99`. The atomic `create_dir` (NOT
+/// `create_dir_all` for the leaf) is the reservation mechanism: two
+/// concurrent callers competing for the same path race on the OS
+/// `mkdir` syscall and one wins; the loser sees `AlreadyExists` and
+/// moves on.
+///
+/// Caller is responsible for distinguishing auto-generated paths from
+/// user-specified ones — this function rewrites the path on collision,
+/// which would clobber a user's intent if they pointed an agent at
+/// `~/projects/myrepo` and that already had a `CLAUDE.md`.
+pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
+    let p = std::path::Path::new(desired);
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("allocate_agent_workdir: parent {}: {e}", parent.display()))?;
+        }
+    }
+    match std::fs::create_dir(p) {
+        Ok(()) => return Ok(desired.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(format!("allocate_agent_workdir: create_dir({}): {e}", desired)),
+    }
+    for n in 1..=99u32 {
+        let candidate = format!("{desired}-{n}");
+        match std::fs::create_dir(std::path::Path::new(&candidate)) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("allocate_agent_workdir: create_dir({candidate}): {e}")),
+        }
+    }
+    Err(format!(
+        "allocate_agent_workdir: too many collisions (>99) under {desired}-N — clean up old runs"
+    ))
+}
+
+pub(crate) async fn agent_define_core(
+    mstore: Arc<Store>,
+    id_store: Arc<Store>,
+    broker: Arc<crate::backend::mps::Broker>,
+    cmd: CommandAgentDefineData,
+) -> Result<AgentDefineResult, String> {
+    if cmd.name.trim().is_empty() {
+        return Err("agent.define: name is required".to_string());
+    }
+
+    // Validate if_exists early so a typo is caught even for new definitions,
+    // not only when a matching definition already exists.
+    let if_exists = cmd.if_exists.as_deref().unwrap_or("skip");
+    if !matches!(if_exists, "skip" | "update" | "error") {
+        return Err(format!(
+            "agent.define: unknown if_exists value '{if_exists}'; valid: skip, update, error"
+        ));
+    }
+
+    // Resolve provider: explicit `provider` wins; fall back to inference from
+    // `model` prefix; default to "claude" when neither is supplied.
+    let provider = if !cmd.provider.is_empty() {
+        if providers::get_provider(&cmd.provider).is_none() {
+            return Err(format!(
+                "agent.define: unknown provider '{}'; valid: claude, codex, gemini, qwen, kimi, openclaw, pi, copilot",
+                cmd.provider
+            ));
+        }
+        cmd.provider.clone()
+    } else if !cmd.model.is_empty() {
+        let inferred = agent_define::infer_provider_from_model(&cmd.model);
+        if providers::get_provider(&inferred).is_none() {
+            return Err(format!(
+                "agent.define: cannot infer provider from model '{}'; set provider explicitly",
+                cmd.model
+            ));
+        }
+        inferred
+    } else {
+        "claude".to_string()
+    };
+
+    let create_stub = cmd.create_instance_stub.unwrap_or(true);
+
+    let now = agentmux_common::time::now_ms();
+
+    // Gates the fresh-insert path below (the "no existing match" case, where
+    // `def` — built from `provider` — is what actually gets written). The
+    // "update" branch further down re-validates against the EXISTING
+    // agent's actual provider (not this possibly-defaulted `provider`,
+    // which may not reflect an unspecified `cmd.provider` on an update
+    // call) right before its own write — this check doesn't gate that path.
+    let cmd_model_vendor_base_url = cmd.model_vendor_base_url.clone().unwrap_or_default();
+    agent_define::validate_vendor_base_url(&provider, &cmd_model_vendor_base_url)?;
+
+    // Build the new definition struct up-front so agent_def_find_or_insert
+    // can use it as both the lookup key and the insert payload.
+    // agent_def_find_or_insert holds a single mutex guard for the check +
+    // conditional insert — closing the TOCTOU window between list and insert.
+    let mut def = AgentDefinition {
+        id: uuid::Uuid::new_v4().to_string(),
+        slug: String::new(), // resolved by agent_def_find_or_insert
+        name: cmd.name.clone(),
+        icon: cmd.icon.clone(),
+        provider: provider.clone(),
+        description: cmd.description.clone(),
+        working_directory: cmd.working_directory.clone(),
+        shell: cmd.shell.clone(),
+        environment: cmd.environment.clone(),
+        // Persist the requested model as a CLI flag so the agent launches
+        // with the specified model rather than the provider default.
+        provider_flags: if cmd.model.is_empty() {
+            String::new()
+        } else {
+            format!("--model {}", cmd.model)
+        },
+        auto_start: 0,
+        restart_on_crash: 0,
+        idle_timeout_minutes: 0,
+        created_at: now,
+        agent_type: cmd.agent_type.clone(),
+        agent_bus_id: String::new(),
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: String::new(),
+        branch_label: String::new(),
+        updated_at: now,
+        user_hidden: 0,
+        container_image: cmd.container_image.clone(),
+        container_volumes: cmd.container_volumes.clone(),
+        container_name: String::new(), // assigned by ContainerManager on first spawn
+        use_ambient_login: 0,
+        model_vendor_base_url: cmd_model_vendor_base_url.clone(),
+        auto_continue_enabled: 0,
+        memory_id: String::new(),
+        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+    };
+
+    // Atomic check-then-insert.
+    // Returns Some(existing) if a row matched by name/slug already exists;
+    // None if the row was freshly inserted (def.slug now holds resolved slug).
+    let existing_opt = mstore.agent_def_find_or_insert(&mut def)
+        .map_err(|e| format!("agent.define: find_or_insert: {e}"))?;
+
+    if let Some(existing) = existing_opt {
+        // A definition with this name/slug already exists — apply if_exists policy.
+        match if_exists {
+            "skip" => {
+                // Honor create_instance_stub even on skip: a definition that was
+                // created with create_instance_stub=false (or imported via another
+                // path) might not have a stub yet; a subsequent idempotent call
+                // with create_instance_stub=true should make it visible in My Agents.
+                // Only fire agents:changed when the stub was actually newly inserted.
+                let (stub_id, stub_new) = if create_stub {
+                    match agent_define::make_stub_idempotent(&mstore, &existing.id, &existing.name, now) {
+                        Ok((id, new)) => (Some(id), new),
+                        Err(e) => {
+                            tracing::warn!(id = %existing.id, err = %e, "agent.define: skip stub failed (non-fatal)");
+                            (None, false)
+                        }
+                    }
+                } else {
+                    (None, false)
+                };
+                if stub_new {
+                    broker.publish(crate::backend::mps::MuxEvent {
+                        event: "agents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                tracing::info!(id = %existing.id, slug = %existing.slug, stub = stub_id.is_some(), "agent.define: skipped (exists)");
+                return Ok(AgentDefineResult {
+                    definition_id: existing.id.clone(),
+                    slug: existing.slug.clone(),
+                    action: "skipped".to_string(),
+                    instance_stub_id: stub_id,
+                });
+            }
+            "error" => {
+                return Err(format!(
+                    "agent.define: definition '{}' already exists (if_exists=error)",
+                    cmd.name.trim()
+                ));
+            }
+            "update" => {
+                let mut updated = existing.clone();
+                // provider was already validated/defaulted above; only
+                // overwrite if the caller explicitly supplied a provider or model.
+                if !cmd.provider.is_empty() || !cmd.model.is_empty() { updated.provider = provider.clone(); }
+                // Persist the model as a CLI flag so the agent launches with
+                // the requested model rather than the provider default.
+                // If the provider changes but no model is supplied, clear stale
+                // flags from the old provider so the new provider's default is used.
+                if !cmd.model.is_empty() {
+                    updated.provider_flags = format!("--model {}", cmd.model);
+                } else if !cmd.provider.is_empty() {
+                    updated.provider_flags = String::new();
+                }
+                if !cmd.icon.is_empty()     { updated.icon = cmd.icon.clone(); }
+                if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
+                if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
+                if !cmd.shell.is_empty()    { updated.shell = cmd.shell.clone(); }
+                // `None` = don't touch; `Some(_)` (including `Some("")`) sets
+                // it explicitly — the caller MUST be able to pass `Some("")`
+                // to clear a stale override, or a provider change away from
+                // a vendor-capable provider (see validation below) would
+                // permanently block every future agent.define call for this
+                // agent, since there'd be no way to ever un-set the old value.
+                if let Some(url) = &cmd.model_vendor_base_url { updated.model_vendor_base_url = url.clone(); }
+                // Authoritative check for this write: validates the FINAL
+                // effective (provider, override) pair — catches both a
+                // freshly-supplied override against the real provider, and a
+                // provider change that leaves a stale override from before
+                // now invalid (the caller must clear it explicitly rather
+                // than silently carrying an inconsistent combination).
+                agent_define::validate_vendor_base_url(&updated.provider, &updated.model_vendor_base_url)?;
+                if !cmd.environment.is_empty() { updated.environment = cmd.environment.clone(); }
+                // name update intentionally omitted — the slug is immutable;
+                // renaming would create a slug mismatch. Use updateagent for renames.
+                let did_update = mstore.agent_def_update(&mut updated)
+                    .map_err(|e| format!("agent.define: update: {e}"))?;
+                if !did_update {
+                    return Err("agent.define: update: row was deleted between find and update".to_string());
+                }
+                agent_define::persist_define_content(&mstore, &updated.id, &cmd, now);
+                let stub_id = if create_stub {
+                    match agent_define::make_stub_idempotent(&mstore, &updated.id, &updated.name, now) {
+                        Ok((id, _new)) => Some(id),
+                        Err(e) => {
+                            tracing::warn!(id = %updated.id, err = %e, "agent.define: update stub failed (non-fatal)");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                broker.publish(crate::backend::mps::MuxEvent {
+                    event: "agents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                tracing::info!(id = %updated.id, slug = %updated.slug, stub = stub_id.is_some(), "agent.define: updated");
+                return Ok(AgentDefineResult {
+                    definition_id: updated.id.clone(),
+                    slug: updated.slug.clone(),
+                    action: "updated".to_string(),
+                    instance_stub_id: stub_id,
+                });
+            }
+            other => {
+                return Err(format!("agent.define: unknown if_exists value '{other}'"));
+            }
+        }
+    }
+
+    // Fresh insert — def.slug is now set by agent_def_find_or_insert.
+    // Every agent gets its own dedicated ABF bundle
+    // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2). Done here,
+    // after the atomic find-or-insert has confirmed this is a genuinely
+    // NEW definition — not before, or every idempotent `if_exists=skip`/
+    // `update` call against an existing name would leak an unbound bundle
+    // (see `agent_def_provision_and_bind_bundle`'s own doc comment).
+    mstore.agent_def_provision_and_bind_bundle(&id_store, &mut def, now);
+    // Create the stub first so that listeners handling agents:changed can
+    // immediately find the new agent via ListRecentSessionsCommand. The
+    // definition is already committed; a stub failure is non-fatal (log +
+    // continue) and we still broadcast so callers see the new definition.
+    let stub_id = if create_stub {
+        match agent_define::make_stub_idempotent(&mstore, &def.id, &def.name, now) {
+            Ok((id, _new)) => Some(id),
+            Err(e) => {
+                tracing::warn!(id = %def.id, err = %e, "agent.define: stub failed (definition committed, non-fatal)");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    broker.publish(crate::backend::mps::MuxEvent {
+        event: "agents:changed".to_string(),
+        scopes: vec![],
+        sender: String::new(),
+        persist: 0,
+        data: None,
+    });
+    agent_define::persist_define_content(&mstore, &def.id, &cmd, now);
+
+    tracing::info!(
+        id = %def.id,
+        slug = %def.slug,
+        stub = stub_id.is_some(),
+        "agent.define: created"
+    );
+
+    Ok(AgentDefineResult {
+        definition_id: def.id.clone(),
+        slug: def.slug.clone(),
+        action: "created".to_string(),
+        instance_stub_id: stub_id,
+    })
+}
