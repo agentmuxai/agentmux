@@ -101,7 +101,7 @@ import { AgentStashModal } from "./components/AgentStashModal";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
-import { useActivityLog } from "./hooks/useActivityLog";
+import { useShellLogBridge } from "./hooks/useShellLogBridge";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -144,38 +144,6 @@ import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpe
 // wins). 80% of the drawers' shared 220px default — the shell opens on its
 // own for every `!cmd`, so it should take less of the transcript by default.
 const SHELL_DRAWER_DEFAULT_HEIGHT = 176;
-
-// Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
-// pattern). Used by sanitizeLogTextForTerminal below to strip escape sequences
-// out of arbitrary text (e.g. a bang command's subprocess stdout/stderr) before
-// it's wrapped in formatLogLine's own SGR color codes and written into the live
-// shell Terminal — otherwise embedded sequences in that text could move the
-// cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
-// rendered state (this text is not our own trusted output; it's shell-command
-// output the user chose to run).
-const ANSI_SEQUENCE_RE = new RegExp(
-    "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
-        "[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|" +
-        "(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))",
-    "g"
-);
-
-/**
- * Strips ANSI escape sequences and other terminal control bytes from `text`,
- * then converts bare `\n` to `\r\n` so multi-line text renders as separate
- * lines instead of a cursor staircase (xterm.js, like a real terminal,
- * treats `\n` as line-feed-only — it doesn't imply carriage return).
- */
-const sanitizeLogTextForTerminal = (text: string): string => {
-    const withoutAnsi = text
-        .replace(ANSI_SEQUENCE_RE, "")
-        // Any stray control byte not part of a matched sequence above
-        // (malformed/truncated escapes, bare ESC, BEL, CR, etc.) — \t and \n
-        // are kept; \n is converted to \r\n next.
-        .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
-    return withoutAnsi.replace(/\n/g, "\r\n");
-};
-
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
@@ -396,61 +364,14 @@ export const AgentPresentationView = ({
         (window as unknown as { __agentLayout?: () => unknown }).__agentLayout = () => layoutSnapshot(model.blockId);
     }
 
-    // Activity log — collects per-session diagnostic entries from launch
-    // flow, subprocess lifecycle, slash commands, errors, etc. `log` is
-    // passed down to every hook whose signature takes a `LogFn`, but only
-    // "system"-tagged entries (bang-command output, `useAgentCommands.ts`'s
-    // `dispatchBangCommand`; slash-command results, `commands/dispatch.ts`)
-    // are genuinely user-initiated console-style interactions written into
-    // the shell terminal (AgentShellSubblock's `onTermReady`) — everything
-    // else (launch-flow status, auth prompts, CLI resolution, etc.) is
-    // passive app-internal noise the shell should stay clean of. First cut
-    // redirected every tag, which made the shell open with a wall of
-    // "[cli] checking for claude...", "[auth] ..." etc. sitting above the
-    // real prompt — reported live after removing the separate log panel.
-    // `logLines` stays as a backlog (system-tagged entries only) so a bang
-    // command's output logged while the drawer is closed still shows once
-    // it reopens. `logFlushedCount` tracks how many of `logLines()` have
-    // already been written into *some* terminal instance (live or
-    // replayed) — every write, whether live or catch-up, advances it.
-    // Without this, each drawer close/reopen replayed the entire backlog
-    // again on top of whatever real PTY content the terminal (now durably)
-    // restored (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md).
-    const { lines: logLines, append: appendLog } = useActivityLog();
-    const [termWrite, setTermWrite] = createSignal<((text: string) => void) | null>(null);
-    let logFlushedCount = 0;
-
-    const formatLogLine = (tag: string, text: string, level?: "info" | "error" | "warn"): string => {
-        const body = `[${tag}] ${sanitizeLogTextForTerminal(text)}`;
-        if (level === "error") return `\x1b[31m${body}\x1b[0m`;
-        if (level === "warn") return `\x1b[33m${body}\x1b[0m`;
-        return `\x1b[90m${body}\x1b[0m`;
-    };
-
-    const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
-        if (tag !== "system") return;
-        appendLog(tag, text, level);
-        const write = termWrite();
-        if (write) {
-            write(formatLogLine(tag, text, level));
-            logFlushedCount = logLines().length;
-        }
-    };
-
-    // Fired once per terminal mount (drawer open) — replays only the log
-    // lines added since the last flush (whether that flush was this same
-    // catch-up on a prior mount, or a live write while the drawer was open),
-    // then keeps the write function around so `log` above writes live from
-    // here on.
-    const handleShellTermReady = (write: (text: string) => void) => {
-        const all = logLines();
-        for (let i = logFlushedCount; i < all.length; i++) {
-            write(formatLogLine(all[i].tag, all[i].text, all[i].level));
-        }
-        logFlushedCount = all.length;
-        setTermWrite(() => write);
-    };
-    const handleShellTermDispose = () => setTermWrite(null);
+    // The shell drawer's log bridge: which log lines reach the shell terminal,
+    // and the backlog replayed when it mounts (hooks/useShellLogBridge.ts).
+    const {
+        log,
+        onTermReady: handleShellTermReady,
+        onTermDispose: handleShellTermDispose,
+        clearTermWrite,
+    } = useShellLogBridge();
 
     /**
      * The drawer's shell process exited cleanly — the human typed `exit`.
@@ -469,7 +390,7 @@ export const AgentPresentationView = ({
         void collapseDrawerOnShellExit({
             parentBlockId: model.blockId,
             exitedSubBlockId: exitedId,
-            clearTermWrite: () => setTermWrite(null),
+            clearTermWrite,
             collapseDrawer: () => paneModel.dispatchPane({ type: "DetailsCollapse" }, "system"),
             setMeta: (args) =>
                 RpcApi.SetMetaCommand(TabRpcClient, { oref: args.oref, meta: args.meta as any }),
