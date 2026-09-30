@@ -79,6 +79,7 @@ function toItem(x: RawFrame): ContextItem {
         ...(delivered ? { delivered } : {}),
         sizeBytes: num(x.size_bytes),
         tokens: num(x.tokens),
+        ...(typeof x.source_tokens === "number" ? { sourceTokens: num(x.source_tokens) } : {}),
     };
 }
 
@@ -101,7 +102,11 @@ export function buildMemoryInjectedNode(
 
     const timestamp = str(e.timestamp) ?? null;
     const parsed = timestamp != null ? Date.parse(timestamp) : NaN;
-    const personalTokens = items.filter((i) => i.kind === "personal_memory").reduce((sum, i) => sum + i.tokens, 0);
+    // The whole of Personal Memory, not just what fit: a cut delivery is
+    // exactly when the size advice matters (ReAgent P1 on #4041).
+    const personalTokens = items
+        .filter((i) => i.kind === "personal_memory")
+        .reduce((sum, i) => sum + (i.sourceTokens ?? i.tokens), 0);
 
     return {
         type: "context_delivery",
