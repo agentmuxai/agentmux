@@ -4,6 +4,7 @@
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 6).
 
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
+import { isStopping } from "@/app/store/agent-pane-state/types";
 import { Show, type Accessor, type ComponentProps } from "solid-js";
 import type { UseAgentFailureResult } from "../hooks/useAgentFailure";
 import type { UseAgentControllerStatus } from "../hooks/useAgentControllerStatus";
@@ -227,7 +228,7 @@ export const AgentBottomPanels = (props: {
             <Show when={props.workingRowVisible()}>
                 <AgentWorkingRow
                     loading={props.workingRowLoading()}
-                    stopping={props.paneModel.state.turnPhase.kind === "Interrupting"}
+                    stopping={isStopping(props.paneModel.state.turnPhase)}
                     currentTool={props.paneModel.state.currentTool}
                     currentToolArg={props.paneModel.state.currentToolArg}
                     toolPromoted={props.hasPromotedTool()}

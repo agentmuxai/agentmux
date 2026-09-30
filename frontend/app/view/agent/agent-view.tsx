@@ -14,7 +14,7 @@ import {
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { isAuthFailure, workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { isAuthFailure, isStopping, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
@@ -1275,7 +1275,7 @@ export const AgentPresentationView = ({
             <AgentProgressBar
                 mount={progressBarMount}
                 active={paneBusy()}
-                stopping={paneModel.state.turnPhase.kind === "Interrupting"}
+                stopping={isStopping(paneModel.state.turnPhase)}
             />
             {/* /btw side-question overlay — ephemeral, floats over the whole
                 pane (position: absolute against .agent-view, styles/_btw.scss),
