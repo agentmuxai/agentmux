@@ -12,8 +12,9 @@ import { Tab } from "./tab";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import {
     GAP_PX,
-    globalDragTabId,
-    setGlobalDragTabId,
+    startWindowTabDrag,
+    releaseWindowTabDrag,
+    draggedWindowTabId,
     insertionPoint,
     setInsertionPoint,
     bouncingTabId,
@@ -46,7 +47,7 @@ export interface DroppableTabProps {
 
 export function DroppableTab(props: DroppableTabProps): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
-    const [isDragging, setIsDragging] = createSignal(false);
+    const isDragging = () => draggedWindowTabId() === props.tabId;
     const [naturalWidth, setNaturalWidth] = createSignal<number | null>(null);
     // Own window label — drives the lone-tab drag policy below (a
     // standalone torn-off window's single tab must be draggable to
@@ -134,10 +135,9 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // by PR #1175 (darwin/linux only). In-window tab reorder still
                 // works via pragmatic-dnd's own drop targets.
                 if (!isWindows()) preventUnhandled.start();
-                setGlobalDragTabId(props.tabId);
+                startWindowTabDrag(props.tabId, props.workspaceId, !isLoneTabDrag());
                 setDragEscaped(false);
                 setInsertionPoint(null);
-                setIsDragging(true);
                 // Lone-tab drags carry NO cross-window payload: the HTML5
                 // pipeline's outcomes for a tab (tear-off to a new window,
                 // append-merge via CrossWindowDropOverlay) are all wrong for a
@@ -174,8 +174,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             },
             onDrop: () => {
                 if (!isWindows()) preventUnhandled.stop();
-                setGlobalDragTabId(null);
-                setIsDragging(false);
+                releaseWindowTabDrag();
                 // Belt-and-suspenders hook teardown. Ordinarily the hook
                 // self-uninstalled on the WM_LBUTTONUP that produced this
                 // dragend (LL hooks run before the event reaches the app),
