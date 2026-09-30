@@ -12,6 +12,7 @@ import { getWebServerEndpoint } from "@/util/endpoints";
 import { fireAndForget } from "@/util/util";
 import { Terminal } from "@xterm/xterm";
 import { handleAgentIdChange } from "./termagent";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 // OSC 9283 — AgentMux meta commands
 export function handleOscMuxCommand(data: string, blockId: string, loaded: boolean): boolean {
@@ -263,10 +264,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
             if (cmd.data && Object.keys(cmd.data).length > 0) {
                 setTimeout(() => {
                     fireAndForget(async () => {
-                        await RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: MOS.makeORef("block", blockId),
-                            meta: { "cmd:env": cmd.data },
-                        }).catch((e) => console.log("error setting cmd:env (OSC 16162 E)", e));
+                        await setBlockMeta(blockId, { "cmd:env": cmd.data }).catch((e) => console.log("error setting cmd:env (OSC 16162 E)", e));
                     });
                 }, 0);
 
@@ -277,10 +275,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                 // Empty payload: clear agent identity
                 setTimeout(() => {
                     fireAndForget(async () => {
-                        await RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: MOS.makeORef("block", blockId),
-                            meta: { "cmd:env": null },
-                        }).catch((e) => console.log("error clearing cmd:env", e));
+                        await setBlockMeta(blockId, { "cmd:env": null }).catch((e) => console.log("error clearing cmd:env", e));
                     });
                 }, 0);
                 handleAgentIdChange(blockId, undefined, atoms.staticTabId());

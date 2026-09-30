@@ -33,11 +33,10 @@
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { getAllBlockComponentModelEntries } from "@/app/store/block-component-registry";
 import { getBlockComponentModel, getFocusedBlockId, MOS } from "@/app/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { fireAndForget } from "@/util/util";
 import { createSignal } from "solid-js";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 // Zoom constants
 export { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
@@ -96,7 +95,7 @@ function getBlockZoom(blockId: string): number | null {
 // Returns the actual clamped/rounded zoom that was written, so a caller
 // that needs to know the resulting value (the all-panes stepper below)
 // doesn't have to re-read it back — MOS's local cache is NOT updated
-// synchronously by this call. RpcApi.SetMetaCommand is fire-and-forget;
+// synchronously by this call. setBlockMeta is fire-and-forget;
 // the cache only updates later, when the backend pushes a MuxObjUpdate
 // event back (global.ts's initGlobalEventSubs → MOS.updateMuxObject). A
 // getBlockZoom() call immediately after this one would read the STALE
@@ -106,10 +105,7 @@ function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = 
     const metaValue = Math.abs(newZoom - 1.0) < 0.01 ? null : newZoom;
 
     fireAndForget(() =>
-        RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: MOS.makeORef("block", blockId),
-            meta: { "term:zoom": metaValue },
-        })
+        setBlockMeta(blockId, { "term:zoom": metaValue })
     );
 
     // Suppressed by the all-panes stepper below, which shows one summary
@@ -176,7 +172,7 @@ function stepAllPanes(step: number, direction: 1 | -1): void {
         // the user can read it. One summary toast is shown below instead.
         //
         // Uses stepZoom's OWN return value, not a getBlockZoom() re-read —
-        // the write it just fired is an async RpcApi.SetMetaCommand, and
+        // the write it just fired is an async setBlockMeta, and
         // MOS's local cache isn't updated until the backend pushes a
         // MuxObjUpdate event back. Re-reading here would see the STALE
         // pre-step value on every call (ReAgent P1, PR #3090).

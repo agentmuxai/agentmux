@@ -18,6 +18,7 @@ import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-en
 import { Logger } from "@/util/logger";
 import { accountLabel, type Account } from "./identity-model";
 import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 /** One agent's row-worth of binding context for the submenu. */
 export interface BindCandidate {
@@ -200,10 +201,7 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
                 if (typeof v === "string") prevEnv[k] = v;
             }
         }
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: MOS.makeORef("block", blockId),
-            meta: { "cmd:env": { ...prevEnv, [envVar]: dir } },
-        });
+        await setBlockMeta(blockId, { "cmd:env": { ...prevEnv, [envVar]: dir } });
         const tabId = findTabIdForBlock(blockId);
         if (tabId) {
             await RpcApi.ControllerResyncCommand(TabRpcClient, {

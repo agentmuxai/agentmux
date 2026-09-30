@@ -3,7 +3,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MOS } from "@/app/store/global";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 export interface PaneHueOption {
     label: string;
@@ -172,10 +172,7 @@ export function paneTabBgForEffectiveColor(
  * reset the agent's identity color everywhere else.
  */
 export function setHue(blockId: string, hue: number | null, agentId?: string): void {
-    void RpcApi.SetMetaCommand(TabRpcClient, {
-        oref: MOS.makeORef("block", blockId),
-        meta: { "frame:hue": hue } as any,
-    });
+    void setBlockMeta(blockId, { "frame:hue": hue } as any);
     if (hue != null && agentId) {
         void RpcApi.SetAgentContentCommand(TabRpcClient, {
             agent_id: agentId,

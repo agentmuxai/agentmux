@@ -3,13 +3,11 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 6).
 
-import { MOS } from "@/app/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { Show, type JSX } from "solid-js";
 import { AgentShellInfoPanel } from "./AgentShellInfoPanel";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 import { ResizableDetailsDrawer } from "./ResizableDetailsDrawer";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 // Shell drawer's height until the user drags it (then `term:shellheight`
 // wins). 80% of the drawers' shared 220px default — the shell opens on its
@@ -67,10 +65,7 @@ export const AgentShellDrawer = (props: {
                     // to fake independence; now it genuinely IS independent,
                     // because it renders outside `.agent-view-zoomed`.
                     onSubBlockCreated={(subBlockId) => {
-                        void RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: MOS.makeORef("block", props.blockId),
-                            meta: { "term:shellsubblockid": subBlockId } as MetaType,
-                        });
+                        void setBlockMeta(props.blockId, { "term:shellsubblockid": subBlockId } as MetaType);
                     }}
                     onTermReady={props.onTermReady}
                     onTermDispose={props.onTermDispose}

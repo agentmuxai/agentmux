@@ -111,6 +111,7 @@ import { createAgentAtoms } from "./state";
 import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
@@ -305,10 +306,7 @@ export const AgentPresentationView = ({
         // most once per turn (TokensIn at message_start).
         createEffect(() => {
             const tokens = (paneModel.state.lastContextTokens ?? null);
-            void RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", model.blockId),
-                meta: { "term:ctx-tokens": tokens ?? null } as any,
-            });
+            void setBlockMeta(model.blockId, { "term:ctx-tokens": tokens ?? null } as any);
         });
     }
 
