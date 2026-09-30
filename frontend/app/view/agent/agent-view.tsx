@@ -32,6 +32,7 @@ import {
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { readZoom } from "@/app/store/zoom-factor";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import {
     accountLabel,
@@ -1156,12 +1157,7 @@ export const AgentPresentationView = ({
     });
 
     // Per-pane zoom: read term:zoom from block meta (same key as terminal panes).
-    const zoomFactor = createMemo(() => {
-        const meta = block()?.meta;
-        const z = meta?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
+    const zoomFactor = createMemo(() => readZoom(block()?.meta));
 
     // Persistence is owned by the universal zoom framework — see the
     // note below where the inline handlers were removed.

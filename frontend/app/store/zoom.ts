@@ -37,11 +37,10 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { fireAndForget } from "@/util/util";
 import { createSignal } from "solid-js";
+import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
 
 // Zoom constants
-export const MIN_ZOOM = 0.5;
-export const MAX_ZOOM = 2.0;
-export const DEFAULT_ZOOM = 1.0;
+export { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
 export const KEYBOARD_STEP = 0.1; // 10% increments for keyboard
 export const WHEEL_STEP = 0.05; // 5% increments for scroll wheel
 const MICRO_STEP = 0.01; // fine step for skip-to-next-size logic
@@ -53,10 +52,6 @@ let zoomIndicatorTimeout: NodeJS.Timeout | null = null;
 
 // Chrome zoom (title bar + status bar)
 export const [chromeZoomAtom, setChromeZoomSignal] = createSignal<number>(DEFAULT_ZOOM);
-
-function clampZoom(factor: number): number {
-    return Math.min(Math.max(factor, MIN_ZOOM), MAX_ZOOM);
-}
 
 function roundZoom(factor: number): number {
     return Math.round(factor * 100) / 100; // Round to 0.01 increments

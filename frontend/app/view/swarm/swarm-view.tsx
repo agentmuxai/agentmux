@@ -26,6 +26,7 @@ import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
+import { readZoom } from "@/app/store/zoom-factor";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -39,11 +40,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
     const model = props.model;
     const ctx = props.ctx;
 
-    const zoomFactor = createMemo(() => {
-        const z = ctx.meta()?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
+    const zoomFactor = createMemo(() => readZoom(ctx.meta()));
     const setZoom = (next: number): void => {
         const clamped = Math.max(0.5, Math.min(2.0, Math.round(next * 100) / 100));
         void ctx.setMeta({ "term:zoom": clamped === 1.0 ? null : clamped });

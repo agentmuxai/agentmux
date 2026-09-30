@@ -21,6 +21,7 @@ import { createMemo, type JSX } from "solid-js";
 import type { AgentViewModel } from "../agent-model";
 import { AgentHistoryView } from "./AgentHistoryView";
 import { HISTORY_SOURCE_BLOCK_ID_META_KEY } from "../open-history-tab";
+import { readZoom } from "@/app/store/zoom-factor";
 
 export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.Element {
     const block = model.blockAtom;
@@ -37,11 +38,7 @@ export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.E
     // onto whichever block is focused regardless of view type, so a
     // history tab needs to read it back the identical way to respond to
     // zoom at all.
-    const zoomFactor = createMemo(() => {
-        const z = block()?.meta?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
+    const zoomFactor = createMemo(() => readZoom(block()?.meta));
 
     return (
         // `.agent-view` is not just a marker class — it's the scoping root
