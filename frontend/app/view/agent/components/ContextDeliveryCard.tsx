@@ -56,7 +56,7 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
                     {props.node.items.length === 1 ? ITEM_ICON[props.node.items[0].kind] : "📥"}
                 </span>
                 <span class="agent-context-delivery-title">{contextDeliveryTitle(props.node)}</span>
-                <span class="agent-context-delivery-size">~{formatCompactNumber(totalTokens(props.node))} tok</span>
+                <span class="agent-context-delivery-size">~{formatCompactNumber(totalTokens(props.node))} tok (est.)</span>
                 <Show when={!props.pinned && props.node.items[0]?.excerpt}>
                     <span class="agent-context-delivery-excerpt">{props.node.items[0].excerpt}</span>
                 </Show>
@@ -70,7 +70,7 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
                             <span class="agent-context-delivery-item-icon">{ITEM_ICON[item.kind]}</span>
                             <span class="agent-context-delivery-item-name">{item.name}</span>
                             <span class="agent-context-delivery-item-size">
-                                {formatCompactNumber(item.sizeBytes)} B · ~{formatCompactNumber(item.tokens)} tok
+                                {formatCompactNumber(item.sizeBytes)} B · ~{formatCompactNumber(item.tokens)} tok (est.)
                             </span>
                         </div>
                         <Show when={item.body}>
