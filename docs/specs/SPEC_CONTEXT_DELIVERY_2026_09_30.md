@@ -279,10 +279,19 @@ so sending it again would deliver it twice and cost a turn.
    `agent_handlers/input.rs:1392-1408`). srv then can't know which items,
    bundle ids or paths went out, and re-reading memory later could report
    a newer version than the one sent.
-   - A new RPC `memorydelivery:compose {block_id, reason}` composes the
-     delivery on srv with the same code the hook uses. It returns
-     `{delivery_id, text, items}` and keeps the item list, immutable,
+   - A new RPC `memorydelivery:compose {block_id, reason}` collects the
+     items on srv with the same code the hook uses, and returns
+     `{delivery_id, text, items}`. It keeps the item list, immutable,
      under `delivery_id`.
+   - **The fallback's wire format doesn't change.** `text` is the
+     fallback's own message: the same `<system-reminder>` envelope and
+     `REINJECTION_SIGNATURE` it sends today
+     (`memory-reinjection.ts`, `composeReinjectionMessage`), with the
+     entries inside. Replay recognises the provider's echo of a hidden
+     turn by that envelope (`isMemoryReinjectionMessage`,
+     `is_hidden_reinjection_text`), so it must stay. Only the item
+     collection and bookkeeping are shared with the hook, never its
+     composed text. What the model receives is unchanged (§3.6).
    - The hidden turn carries `delivery_id` next to `hidden: true`.
    - When srv accepts that input, it appends the
      `agentmux_memory_injected` frame from the stored item list, so the
@@ -308,7 +317,13 @@ so sending it again would deliver it twice and cost a turn.
      in the agent's transcript zone. It's retained exactly as long as the
      transcript, and nothing new leaves the machine.
    - A new RPC `contextdelivery:get {block_id, delivery_id, item}` returns
-     one body.
+     one body. It's authorized by **transcript**, not by block: srv
+     resolves the requesting block to its agent's transcript zone
+     (`agent:<defId>:current`) and serves the body only if the delivery
+     was stored in that zone. A card replayed in a later pane of the same
+     agent, which `useHistoryPagination.ts` does on a cross-block
+     continuation, can still expand; a block of another agent can't read
+     it.
    - Deliveries from before this change have no stored body. Their rows
      say "Content from before 2026-10 isn't kept." For Global Memory they
      offer "Open current version in the Armory" via `bundleId`.
@@ -368,8 +383,12 @@ read as `context_delivery`.
   - a delivery over the part cap marks the cut item `partial` with the
     delivered slice's size, and later items `omitted`;
   - old frames and old hidden lines render with the names in §4.
-- **Bodies:** `contextdelivery:get` returns the stored text for the
-  owning block only, and refuses other blocks' deliveries.
+- **Bodies:** `contextdelivery:get` returns the stored text to any
+  block of the same agent (same transcript zone), including a later pane
+  on a cross-block continuation, and refuses blocks of other agents.
+- **Fallback wire format:** the fallback's message from
+  `memorydelivery:compose` still carries the `<system-reminder>`
+  envelope and signature, and replay still hides its echo.
 - **Digest:** a transcript with each delivery kind yields the same digest
   as one without them.
 - **Live check (as for P2):** new session, `/clear`, manual `/compact`,
