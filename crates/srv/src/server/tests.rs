@@ -329,6 +329,54 @@ async fn cors_exposes_zonefileinfo_header_to_cross_origin_callers() {
     );
 }
 
+// SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §5: a video poster reads its file's
+// first bytes with `Range`. The request also carries X-AuthKey, so it's
+// preflighted: `Range` must be an allowed request header, or the browser
+// refuses the GET before it's sent.
+#[tokio::test]
+async fn cors_preflight_allows_the_range_request_header() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::OPTIONS)
+        .uri("/agentmux/stream-local-file?path=x")
+        .header("Origin", "http://localhost:5173")
+        .header("Access-Control-Request-Method", "GET")
+        .header("Access-Control-Request-Headers", "x-authkey,range")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let allowed = resp
+        .headers()
+        .get("access-control-allow-headers")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+    assert!(allowed.contains("range"), "expected range in Access-Control-Allow-Headers, got {allowed:?}");
+}
+
+// Codex P2 on #4073: the frontend reads a ranged file's total size from
+// `Content-Range`, which isn't CORS-safelisted, so it must be exposed like
+// X-ZoneFileInfo or `Response.headers.get()` returns null.
+#[tokio::test]
+async fn cors_exposes_content_range_to_cross_origin_callers() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/file?zoneid=nonexistent&name=term")
+        .header("Origin", "http://localhost:5173")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let expose = resp
+        .headers()
+        .get("access-control-expose-headers")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+    assert!(expose.contains("content-range"), "expected Content-Range in Access-Control-Expose-Headers, got {expose:?}");
+}
+
 #[tokio::test]
 async fn service_get_client_data() {
     let app = test_router();
