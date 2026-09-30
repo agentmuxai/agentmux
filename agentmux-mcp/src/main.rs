@@ -4091,6 +4091,48 @@ mod tests {
     /// `audit_log_capture_window()` themselves).
     static DATA_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// Sets both AgentMux root env vars for one test and restores them on drop,
+    /// panics included, holding `DATA_HOME_ENV_LOCK` throughout. Both are set or
+    /// cleared every time: `agentmux_root()` reads `AGENTMUX_HOME_OVERRIDE`
+    /// ahead of `AGENTMUX_DATA_HOME`, so a test that only set the latter would
+    /// silently test the ambient override instead (Codex P2 on #4030).
+    struct RootEnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    fn root_env(home_override: Option<&std::path::Path>, data_home: Option<&std::path::Path>) -> RootEnvGuard {
+        // A panicking test poisons the lock; the env is restored by the
+        // guard's drop regardless, so the next test can proceed.
+        let lock = DATA_HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut saved = Vec::new();
+        for (var, value) in [("AGENTMUX_HOME_OVERRIDE", home_override), ("AGENTMUX_DATA_HOME", data_home)] {
+            saved.push((var, std::env::var_os(var)));
+            // SAFETY: test-only, serialized by DATA_HOME_ENV_LOCK.
+            unsafe {
+                match value {
+                    Some(v) => std::env::set_var(var, v),
+                    None => std::env::remove_var(var),
+                }
+            }
+        }
+        RootEnvGuard { saved, _lock: lock }
+    }
+
+    impl Drop for RootEnvGuard {
+        fn drop(&mut self) {
+            for (var, value) in self.saved.drain(..) {
+                // SAFETY: test-only, still serialized by DATA_HOME_ENV_LOCK.
+                unsafe {
+                    match value {
+                        Some(v) => std::env::set_var(var, v),
+                        None => std::env::remove_var(var),
+                    }
+                }
+            }
+        }
+    }
+
     /// Mirrors `agentmux-srv`'s `prune_old_screenshots_deletes_only_stale_pngs`
     /// (`ui_handlers.rs`) exactly — same bug class, same fix, same test shape
     /// (reagent P1/P2 on this tool's own PR, #2709 round 1).
@@ -4127,16 +4169,9 @@ mod tests {
     /// which this function replicates rather than reinventing.
     #[test]
     fn capture_window_dir_honors_agentmux_data_home_override() {
-        // SAFETY: test-only; DATA_HOME_ENV_LOCK held for the env var's
-        // entire mutated lifetime serializes this against every other test
-        // that touches AGENTMUX_DATA_HOME (see that lock's own doc comment
-        // — cargo runs tests in parallel by default, so this isn't optional).
-        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/custom-agentmux-home") };
-        let dir = capture_window_dir().unwrap();
-        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
+        let _env = root_env(None, Some(std::path::Path::new("/tmp/custom-agentmux-home")));
         assert_eq!(
-            dir,
+            capture_window_dir().unwrap(),
             std::path::PathBuf::from("/tmp/custom-agentmux-home/tmp/capture-window")
         );
     }
@@ -4149,20 +4184,12 @@ mod tests {
     /// srv (docs/specs/SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §5.1 #5).
     #[test]
     fn capture_window_dir_uses_the_shared_root_resolver() {
-        // SAFETY: test-only; DATA_HOME_ENV_LOCK serializes every test that
-        // touches either root env var (see the lock's doc comment).
-        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/override-root");
-            std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/data-home-root");
-        }
-        let dir = capture_window_dir();
-        unsafe {
-            std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
-            std::env::remove_var("AGENTMUX_DATA_HOME");
-        }
+        let _env = root_env(
+            Some(std::path::Path::new("/tmp/override-root")),
+            Some(std::path::Path::new("/tmp/data-home-root")),
+        );
         assert_eq!(
-            dir.unwrap(),
+            capture_window_dir().unwrap(),
             std::path::PathBuf::from("/tmp/override-root/tmp/capture-window")
         );
     }
@@ -4241,10 +4268,7 @@ mod tests {
     #[test]
     fn audit_log_capture_window_appends_ndjson_for_success_and_failure() {
         let dir = tempfile::tempdir().unwrap();
-        // SAFETY: test-only; see DATA_HOME_ENV_LOCK's own doc comment for
-        // why this guard (not just the tempdir) is required.
-        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", dir.path()) };
+        let _env = root_env(None, Some(dir.path()));
 
         audit_log_capture_window(
             "first query",
@@ -4257,8 +4281,6 @@ mod tests {
             &None,
         );
         audit_log_capture_window("second query", &Err(anyhow::anyhow!("no match")), &None);
-
-        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
 
         let log_path = dir.path().join("tmp/capture-window/capture-window-audit.log");
         let content = std::fs::read_to_string(&log_path).unwrap();
@@ -4292,16 +4314,13 @@ mod tests {
     #[test]
     fn a_failed_capture_still_audits_its_resolved_tier_and_target() {
         let dir = tempfile::tempdir().unwrap();
-        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", dir.path()) };
+        let _env = root_env(None, Some(dir.path()));
 
         let resolved = Some((
             CaptureTier::OtherUser,
             "pid=99 <non-AgentMux window>".to_string(),
         ));
         audit_log_capture_window("pid=99", &Err(anyhow::anyhow!("withheld")), &resolved);
-
-        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
 
         let log_path = dir.path().join("tmp/capture-window/capture-window-audit.log");
         let content = std::fs::read_to_string(&log_path).unwrap();
@@ -4505,8 +4524,7 @@ mod tests {
     #[test]
     fn audit_log_discover_windows_appends_ndjson_with_window_list() {
         let dir = tempfile::tempdir().unwrap();
-        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", dir.path()) };
+        let _env = root_env(None, Some(dir.path()));
 
         let windows = vec![json!({
             "pid": 4242,
@@ -4515,8 +4533,6 @@ mod tests {
             "is_self": false,
         })];
         audit_log_discover_windows(false, false, &windows);
-
-        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
 
         let log_path = dir.path().join("tmp/capture-window/capture-window-audit.log");
         let content = std::fs::read_to_string(&log_path).unwrap();
