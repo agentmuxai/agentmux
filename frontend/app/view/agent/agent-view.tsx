@@ -32,7 +32,6 @@ import {
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { BlockService } from "@/app/store/services";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import {
     accountLabel,
@@ -86,6 +85,7 @@ import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { usePaneReveal } from "./hooks/usePaneReveal";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
+import { useFocusRepoll, useHeldMessageDelivery } from "./hooks/useTurnReconciliation";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -761,84 +761,15 @@ export const AgentPresentationView = ({
         },
     });
 
-    // Focus/visibility-triggered re-poll — the mount-time GetControllerStatus
-    // (onControllerStatus above) is one-shot, and the live useControllerStatusEvents
-    // subscription only self-heals a missed turn-end if a LATER live event
-    // arrives. If the single turn-end push is missed (backgrounded window, a
-    // MPS reconnect gap, a pane remount that doesn't re-trigger the MPS
-    // persisted-event replay — see REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
-    // §3/§4 item 5) nothing else corrects it until the *next* turn starts.
-    // Re-poll on every background→foreground transition to drive the two
-    // effects below (turnJustEnded edge-tracking, deferred controller-refresh
-    // recovery), independent of event-bus replay semantics. Skips the
-    // initial `true` at mount (already covered by the one-shot above) via
-    // `{ defer: true }`.
-    //
-    // Deliberately does NOT call reconcileTurnActive from this snapshot
-    // (removed per direct user request — "Working" state must not depend on
-    // window focus at all). `turn_active` isn't a clean boolean: it reads
-    // transiently false during the gap between one CLI round's session_end
-    // and the next round's start (the same phenomenon StreamFlushObserved's
-    // Done->Streaming re-promotion exists to paper over on a different
-    // path), and this poll fires on the single most common user action —
-    // clicking/refocusing a pane to check on it — making that race far more
-    // visible than it needs to be. The live useControllerStatusEvents
-    // subscription below still reconciles TurnPhase from the backend's
-    // periodic status heartbeat (persistent.rs's spawn_status_heartbeat,
-    // every 20s while a turn is active) independent of focus, so the
-    // original stuck-Working-forever gap this mechanism was built for is
-    // still bounded — just by that heartbeat's cadence instead of an
-    // instant refocus, not left uncovered entirely.
-    const windowFocused = makeWindowFocusSignal();
-    createEffect(
-        on(
-            windowFocused,
-            (focused) => {
-                if (!focused) return;
-                void BlockService.GetControllerStatus(model.blockId)
-                    .then((rts) => {
-                        if (!rts) return;
-                        const active = !!rts.turn_active;
-                        // Mirror the live useControllerStatusEvents handler below —
-                        // reagent P2: a turn-end detected ONLY via this focus poll
-                        // (the missed-live-push case this mechanism exists for)
-                        // must still bump turnJustEndedAtom, or
-                        // useAgentActivitySummary/useNextPromptSuggestion silently
-                        // never fire for that turn's completion.
-                        trackTurnJustEnded(active);
-                        // Independent of the turnJustEnded edge above: this RPC
-                        // response is itself a fresh, authoritative confirmation of
-                        // idleness whenever active is false — attempt the deferred
-                        // refresh unconditionally on that, not only when
-                        // trackTurnJustEnded's edge detector fires. didTurnJustEnd
-                        // requires prev===true (a CONFIRMED active state to
-                        // transition FROM); a pane whose backend state was never
-                        // confirmed either way before this poll (wasTurnActive
-                        // undefined — e.g. the live confirming controllerstatus
-                        // push was itself missed, the exact gap this poll exists to
-                        // self-heal) computes turnJustEnded=false here even though
-                        // this is the FIRST time idleness has been confirmed. The
-                        // reactive turnPhaseAtom effect (below) can't rescue this
-                        // either: ReconcileTurnActive no-ops (same state reference)
-                        // once local turnPhase already reads idle/Done, so it never
-                        // re-fires off this same confirmation. Without this call,
-                        // a /login deferred mid-turn — where the turn then ends via
-                        // session_end while the live idle controllerstatus push is
-                        // lost — would leave the refresh (and any held messages)
-                        // stuck until the user happens to send another message.
-                        // codex P1 on PR #2338 (twenty-eighth re-review).
-                        if (!active) {
-                            void commands.flushPendingControllerRefresh();
-                        }
-                    })
-                    .catch(() => {
-                        // Best-effort — the live subscription and next mount remain
-                        // as fallbacks; nothing user-visible to report on failure.
-                    });
-            },
-            { defer: true }
-        )
-    );
+    // Re-poll turn state on refocus, to recover a missed turn-end push
+    // (hooks/useTurnReconciliation.ts).
+    useFocusRepoll({
+        blockId: model.blockId,
+        windowFocused: makeWindowFocusSignal(),
+        trackTurnJustEnded,
+        // `commands` is declared further down; only read once a poll resolves.
+        flushPendingControllerRefresh: () => commands.flushPendingControllerRefresh(),
+    });
 
     // Subscribe to Claude Code OSC window-title extractions and write them
     // to term:osc_title block metadata (free fallback signal — see
@@ -1176,44 +1107,13 @@ export const AgentPresentationView = ({
         onBindAccount,
     });
 
-    // Deliver queued-while-busy ("send now") messages at the next tool-call
-    // boundary — the agent finishes its current step and then picks them up
-    // (the CLI consumes a stdin message at its next inference, after the
-    // in-flight tool's result). Falls back to turn end (Idle/Done) so a
-    // tool-less turn still delivers. Holding until here is what lets ArrowUp
-    // recall an un-sent message first.
-    let prevTool: string | null = null;
-    createEffect(() => {
-        const tool = paneModel.state.currentTool;
-        const phaseKind = paneModel.state.turnPhase.kind;
-        const newToolCall = tool !== null && tool !== prevTool;
-        prevTool = tool;
-        const turnIdle = phaseKind === "Idle" || phaseKind === "Done";
-        if ((newToolCall || turnIdle) && commands.hasHeldMessages()) {
-            void commands.flushHeldMessages();
-        }
-        // Independent of the above: run any controller refresh /login
-        // deferred because a turn was active when it succeeded, the moment
-        // this pane's OWN turnPhase reflects idle — regardless of whether
-        // there are any held messages to otherwise trigger it. Deliberately
-        // reacts to turnPhaseAtom directly rather than relying solely on
-        // trackTurnJustEnded's live-controllerstatus-event edge detector:
-        // (1) a turn also ends via the independent session_end -> TurnEnd
-        // stream path (useTurnLifecycle.ts's finalizeTurn), which is not
-        // synchronized with the controllerstatus event stream reagent P1
-        // found flushHeldMessages/trackTurnJustEnded alone don't cover; (2)
-        // a pane that mounts onto an ALREADY-active turn never initializes
-        // trackTurnJustEnded's wasTurnActive (deliberately, to avoid a
-        // false busy->idle edge on the very first live event — see its own
-        // doc comment), so if /login succeeds during that pre-existing turn
-        // and it ends before any OTHER live event arrives,
-        // didTurnJustEnd(undefined, false) never fires and — with no held
-        // messages either — nothing would ever run the deferred refresh at
-        // all. Codex P1 on PR #2338 (seventeenth re-review, both points).
-        // No-ops when nothing is pending.
-        if (turnIdle) {
-            void commands.flushPendingControllerRefresh();
-        }
+    // Held "send now" messages go out at the next tool call or turn end
+    // (hooks/useTurnReconciliation.ts).
+    useHeldMessageDelivery({
+        paneModel,
+        hasHeldMessages: commands.hasHeldMessages,
+        flushHeldMessages: commands.flushHeldMessages,
+        flushPendingControllerRefresh: commands.flushPendingControllerRefresh,
     });
 
     // On first connect (no existing session), send the startup sequence as the
