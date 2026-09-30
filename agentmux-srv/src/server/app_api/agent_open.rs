@@ -531,9 +531,7 @@ async fn open_agent_inner(
                     cli_args.extend(agent.provider_flags.split_whitespace().map(str::to_string));
                 }
 
-                let agent_slug = agent.name.to_lowercase()
-                    .chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-                    .collect::<String>();
+                let agent_slug = agentmux_common::slug::path_slug(&agent.name);
                 // Shared with native-memory resolution so the two can never
                 // disagree about where a blank-working_directory agent
                 // actually runs — they did, and Personal Bundle broke for the
