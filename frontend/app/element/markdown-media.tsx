@@ -200,7 +200,12 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
                                 title="Open in Media pane"
                                 style={ratio() ? { "aspect-ratio": ratio() } : undefined}
                                 onClick={() => openInMediaPane(props.path)}
-                                onError={() => setState({ kind: "missing" })}
+                                onError={() => {
+                                    // Undecodable: free the blob now, not at unmount.
+                                    if (url) URL.revokeObjectURL(url);
+                                    url = undefined;
+                                    setState({ kind: "missing" });
+                                }}
                             />
                         )}
                     </Show>
