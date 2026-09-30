@@ -70,14 +70,21 @@ Extract the focus-free part into one exported helper in `reveal-block.ts`:
 ```ts
 /** Make blockId's pane visible within its layout, without switching window
  *  tabs, moving layout focus or the caret. */
-export function showBlockInPane(model: LayoutModel, nodeId: string, blockId: string): void {
-    const leaf = findNode(model.treeState.rootNode, nodeId);
-    if (leaf?.minimized) model.minimizeNodeToggle(nodeId); // restore (toggle's restore branch)
+export function showBlockInPane(model: LayoutModel, node: LayoutNode, blockId: string): void {
+    if (node.minimized) model.minimizeNodeToggle(node.id); // restore (toggle's restore branch)
     const magnified = model.magnifiedNodeId;
-    if (magnified && magnified !== nodeId) model.magnifyNodeToggle(magnified);
-    setActiveBlockInStack(model, nodeId, blockId);
+    if (magnified && magnified !== node.id) model.magnifyNodeToggle(magnified, true, false); // commit, no focus
+    setActiveBlockInStack(model, node.id, blockId);
 }
 ```
+
+A plain `magnifyNodeToggle` is not focus-free: `LayoutModel.treeReducer` sets
+`shouldRequestFocus` for every `MagnifyNodeToggle` and calls
+`focusManager.requestNodeFocus()` once it commits. So the action gains
+`focused?: boolean`. With `focused: false`, the un-magnify still commits and
+persists, but it doesn't request focus. `LayoutModel.magnifyNodeToggle(nodeId,
+setState = true, focused = true)` passes it through. Every existing caller
+keeps the default.
 
 `revealBlockLocally` calls it in place of its current un-magnify and stack
 lines, then keeps its own `focusNode` and caret steps. Reveal therefore gains
@@ -91,12 +98,19 @@ In `EditorViewModel`'s `META_PENDING_OPEN_FILES` drain
 pushed by `maybe_reuse_editor_pane` (`agentmux-srv/src/server/app_api/pane.rs:351-409`).
 After it schedules `openFile()` for a non-empty batch:
 
-1. Resolve the layout model of the tab holding this block, via
-   `getLayoutModelForTabById`. The pane running the drain is mounted, so its
-   tab's layout exists. Do **not** call `setActiveTab`.
+1. Find the tab holding this block with `reveal-block.ts`'s `findTabHolding`.
+   It reads `Tab.blockids` from this window's workspace, pinned tabs first. The
+   drain has only a block id, and no layout API maps a block to its tab.
+   Then get that tab's layout with `getLayoutModelForTabById`. The pane running
+   the drain is mounted, so its tab's layout exists. Do **not** call
+   `setActiveTab`.
 2. `node = model.getNodeByBlockId(this.blockId)`. For a stack member this
    returns the shared pane node, which is what `showBlockInPane` expects.
-3. `showBlockInPane(model, node.id, this.blockId)`.
+3. `showBlockInPane(model, node, this.blockId)`.
+
+Steps 1–3 are one exported helper, `showBlockWithoutFocus(blockId)`. It
+returns false, touching nothing, when the block isn't in a built layout in this
+window.
 
 The Editor is a keep-alive view (`pane-leaf-chrome.tsx:333-439`), so the
 drain can run while it's a hidden stack member or minimized. That is the
@@ -117,7 +131,8 @@ effect already runs in the right place at the right time.
   or it would minimize a visible pane. Its last-expanded-pane guard applies
   only to minimizing, so restoring is always allowed.
 - `magnifyNodeToggle` on the magnified pane un-magnifies it. Skip it when the
-  target itself is the magnified pane.
+  target itself is the magnified pane. Pass `focused: false` (see above), or
+  the un-magnify moves the user's focus.
 - `setActiveBlockInStack` is already a no-op for a single-block pane or the
   already-active member.
 
@@ -131,6 +146,9 @@ effect already runs in the right place at the right time.
   - Background member of a stack: becomes the active block.
   - None of the above: no change.
   - No focus or caret change in any case.
+- **`LayoutModel`:** `magnifyNodeToggle(id, true, false)` commits and
+  persists the un-magnify without calling `requestNodeFocus`. The default
+  still calls it.
 - **Editor drain:**
   - A pending batch on a minimized Editor calls the helper once, and the pane
     is visible afterwards.
@@ -160,8 +178,10 @@ effect already runs in the right place at the right time.
 
 ## Files
 
-- `frontend/app/util/reveal-block.ts`: `showBlockInPane`;
-  `revealBlockLocally` uses it.
+- `frontend/app/util/reveal-block.ts`: `showBlockInPane`,
+  `showBlockWithoutFocus`; `revealBlockLocally` uses the first.
+- `frontend/layout/lib/types.ts`, `layoutModel.ts`, `layoutMagnify.ts`: the
+  `focused` flag on `MagnifyNodeToggle`.
 - `frontend/app/view/editor/editor-model.ts`: the drain calls it.
 - Tests next to each (`reveal-block.test.ts`, the editor drain's test file).
 - No backend change.
