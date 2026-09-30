@@ -87,7 +87,11 @@
     color: var(--main-text-color);
     text-align: left;
     cursor: default;
-    transition: all 0.15s;
+    // Not `all`: that also animates the inherited `visibility` that hides
+    // window and pane tabs, so this would pop in a frame late when shown
+    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
+    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
+    transition-duration: 0.15s;
     min-width: 0;
 
     &:hover,
@@ -164,7 +168,11 @@
     color: var(--main-text-color);
     text-align: left;
     cursor: default;
-    transition: all 0.15s;
+    // Not `all`: that also animates the inherited `visibility` that hides
+    // window and pane tabs, so this would pop in a frame late when shown
+    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
+    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
+    transition-duration: 0.15s;
     min-width: 0;
 
     &:hover,

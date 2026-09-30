@@ -76,3 +76,23 @@ export function tabContainerVisibility(
         hiddenLaidOut,
     };
 }
+
+/**
+ * Which window tab to display: the committed `activetabid`, or the tab a
+ * `setActiveTab` is switching to when that one is warm (it exists, and has
+ * already been shown while inactive tabs are kept laid out) — so a warm
+ * switch swaps in the same frame as the optimistic pill instead of after
+ * the round trip (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md
+ * §5.2). A cold destination still waits for the backend and its reveal gate.
+ */
+export function resolveDisplayedTabId(input: {
+    committed: string;
+    intent: string | null;
+    tabIds: readonly string[];
+    keepLaidOut: boolean;
+    wasShown: (tabId: string) => boolean;
+}): string {
+    const { committed, intent, tabIds, keepLaidOut, wasShown } = input;
+    if (intent == null || intent === committed) return committed;
+    return keepLaidOut && tabIds.includes(intent) && wasShown(intent) ? intent : committed;
+}

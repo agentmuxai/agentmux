@@ -18,6 +18,25 @@ import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
 import { holdRevealGate, logUngatedReveal, scheduleRevealLift, tabWasShown } from "./tab-reveal";
 import { activeTabId, workspace } from "./window-identity";
+import { createEffect, createRoot, createSignal } from "solid-js";
+
+// The window tab `setActiveTab` is switching to, from before its RPC until
+// the committed `activeTabId` catches up (or the RPC fails, or a newer
+// switch replaces it). `workspace.tsx` shows a warm destination (already
+// shown, kept laid out) from this in the same frame as the optimistic pill,
+// instead of after the round trip
+// (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.2).
+// Cleared on catch-up, not when the RPC resolves: the Workspace push can
+// land after the RPC's reply, and dropping the intent first would show the
+// source tab again for a frame.
+const [switchIntentTabId, setSwitchIntentTabId] = createSignal<string | null>(null);
+export { switchIntentTabId };
+createRoot(() =>
+    createEffect(() => {
+        const intent = switchIntentTabId();
+        if (intent != null && activeTabId() === intent) setSwitchIntentTabId(null);
+    })
+);
 
 export function createTab() {
     const ws = workspace();
@@ -131,8 +150,13 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) holdRevealGate(tabId);
+    setSwitchIntentTabId(tabId);
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
+    } catch (e) {
+        // The backend didn't move: show the committed tab again.
+        if (mySeq === tabSwitchSeq) setSwitchIntentTabId(null);
+        throw e;
     } finally {
         // Pair with holdRevealGate above. Also lifts the gate on
         // the RPC-throws path so the user isn't stuck on a hidden
