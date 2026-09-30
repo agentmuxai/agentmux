@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** active — items 1, 2, 4, 5, 10 and 12 shipped, 11 in part, the `agent-view.tsx` split through step 9, and the inline-test moves of §4 (see §0.1).
+**Status:** active — items 1, 2, 4, 5, 10 and 12 shipped (#4029, #4030, #4032, #4052, #4050, #4048); `agent-view.tsx` split through step 9 (#4039–#4055); inline-test moves (#4054, #4056). Details in §0.1.
 **Baseline:** `main` @ `4b5814f47` (v0.58.3). Every `path:line` below was read on that commit.
 **Related:**
 [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) (the first agent-view split plan; 7 of 12 steps landed, the file grew anyway),
