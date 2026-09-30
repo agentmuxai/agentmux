@@ -42,6 +42,7 @@ import { modelTurnCommand } from "./model-turn-signal";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
+import { noteTaskFrame } from "./activity/task-outcomes";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
@@ -521,6 +522,12 @@ export function useAgentStream({
                     queue.scheduleFlush();
                     continue;
                 }
+
+                // Observe only — the frame keeps flowing below. A background
+                // task's end is on this stream (`system/task_notification`);
+                // the dock reads it from here so it never depends on srv's
+                // live registry having watched the task (activity/task-outcomes.ts).
+                if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
 
                 // Real compaction-boundary completion data (Tier 1/2 —
                 // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
