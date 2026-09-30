@@ -1,7 +1,7 @@
 # Window-tab switches: why they still look jittery next to pane tabs, and how to make them one frame
 
 **Date:** 2026-09-30
-**Status:** analysis. Findings are in §2–§3 and recommendations in §5. Recommendations 1 (explicit transition lists plus a CI gate, without the reveal backstop) and 2 (the optimistic warm swap) are implemented in the PR that adds this doc. 3–5 are not yet.
+**Status:** analysis. Findings are in §2–§3 and recommendations in §5. Recommendations 1 (explicit transition lists plus a CI gate, without the reveal backstop) and 2 (the optimistic warm swap) are implemented in the PR that adds this doc, with the results in §7. 3–5 are not yet.
 **Author:** korp
 **Trigger:** Repo owner, 2026-09-30: *"The pane tabs switching are instant and fast, but window tabs are still jittery and slow. is there a img fix for that too? can we make it faster?"*
 **Related:** `ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md` (the 09-24 analysis: keep inactive tabs laid out, #3686/#3687; its items 3 and 5 are still open), `SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md` (the tear-off snapshot work this question refers to), `SPEC_TAB_CONTENT_REVEAL_GATE.md`, `ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md`.
@@ -139,3 +139,32 @@ Each is small and can ship on its own. Measure each with the §6 method; the bar
 A switch passes when the pill and the content change in the same screenshot and no later screenshot within 200 ms changes the content area, allowing for live content such as charts and streaming agents.
 
 The scripts used here are about 150 lines of Node plus a small Pillow diff. They should land as `scripts/tab-switch-frames.mjs` with recommendation 1, so the before and after of each step is on record.
+
+## 7. Implemented and measured (recommendations 1 and 2)
+
+**What shipped:**
+- The 12 rules list their properties, and `scripts/check-no-transition-all.sh` (CI) keeps `transition: all` out.
+- `setActiveTab` publishes a switch intent before its RPC (`tab-actions.ts` `switchIntentTabId`). It is cleared when the committed `activeTabId` catches up, when the RPC fails, or when a newer switch replaces it; never merely because the RPC returned, since the Workspace push can land after the reply. `workspace.tsx` displays a warm destination from it (`resolveDisplayedTabId`).
+- **One addition the first trace called for.** Swapping in the input task also moved the swap's own cost there. On a large tab that cost is mostly the inherited `visibility` / `pointer-events` flip restyling every element of *both* tabs. So the tab being left now takes `content-visibility: hidden` for two frames, under the displayed tab (`z-index: 1`), and only then its `visibility: hidden` / `pointer-events: none` (`tabContainerVisibility`'s `leaving`). `content-visibility` isn't inherited and also skips the tab's paint. Hiding it with `opacity: 0` alone was tried first: it halved the style work, but the leaving tab was still painted, which cancelled the gain.
+
+**A/B on one dev instance, same 7 window tabs** (two heavy: 6,800 and 11,000 elements; five light: about 970 each). 12 warm switches per run; frame times from trace screenshots; runs taken back to back:
+
+| Median, 12 switches | `main` | this change |
+|---|---|---|
+| Pill on screen | 21 ms | 58 ms, together with the content |
+| **Content on screen** | **71 ms** (46–101) | **58 ms** (31–87) |
+| Switches with a later content step | 5 / 12 | **0 / 12** |
+| Switch into a light tab | 46–57 ms | 31–38 ms |
+
+**Reading it:**
+- The late frame is gone.
+- The pill and the content change in one frame.
+- The content arrives about 13 ms sooner on the median, and about 15–20 ms sooner into light tabs.
+- **The trade:** on a heavy tab, the pill now waits for the content instead of showing 40–60 ms ahead of it. That is how Chrome and pane tabs behave. The pill no longer promises a tab that isn't there yet.
+
+**What's left, and the next step.** A switch into a heavy tab still costs 70–90 ms. That is restyling every element of the incoming tab (its inherited `visibility` flips back) and painting it for the first time since it was hidden, and every `visibility`-based hide has to pay it.
+
+The way past it is to give each window tab its own compositor layer (`will-change: opacity`) and hide it with `opacity: 0` alone. A switch then restyles and repaints nothing on the main thread: the compositor just draws a different layer, as Chrome swaps tab surfaces. Before doing that, measure and solve:
+- GPU memory, roughly one window-sized layer per tab;
+- raster of hidden layers while agents stream (they are dormant, so probably small);
+- keyboard focus and hit-testing, since `opacity: 0` content is still focusable. `inert` would bring back the subtree restyle, so this needs its own design.

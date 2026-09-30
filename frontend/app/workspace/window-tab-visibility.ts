@@ -64,19 +64,21 @@ export function tabContainerVisibility(
     keepLaidOut: boolean,
     gated: boolean,
     /**
-     * The tab was displayed until this frame (kept laid out only). It hides
-     * with `opacity: 0` alone, under the displayed tab, and takes its
-     * inherited `visibility: hidden` / `pointer-events: none` a couple of
-     * frames later: those restyle every element in the tab, which on a
-     * large tab cost as much as showing the new one, all in the switch's
-     * own frame (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §7).
+     * The tab was displayed until this frame (kept laid out only). For a
+     * couple of frames it hides with `content-visibility: hidden`, under the
+     * displayed tab, and only then takes its inherited `visibility: hidden` /
+     * `pointer-events: none`. Those restyle every element in the tab, which
+     * on a large tab cost as much as showing the new one, all in the
+     * switch's own frame; `content-visibility` isn't inherited and also
+     * skips the tab's paint, which `opacity: 0` alone did not
+     * (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §7).
      */
     leaving = false
 ): TabContainerVisibility {
     const hiddenLaidOut = keepLaidOut && !displayed;
     if (hiddenLaidOut && leaving) {
         return {
-            "content-visibility": "visible",
+            "content-visibility": "hidden",
             visibility: null,
             opacity: "0",
             "pointer-events": "auto",
