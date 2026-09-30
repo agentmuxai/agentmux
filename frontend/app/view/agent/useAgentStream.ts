@@ -38,6 +38,7 @@
 import { getFileSubject } from "@/app/store/mps";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
+import { modelTurnCommand } from "./model-turn-signal";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -673,6 +674,10 @@ export function useAgentStream({
                 // for this turn; message_delta carries the running output_tokens.
                 {
                     const inner = rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
+                    // Whether the main agent's model has ended its turn, for the
+                    // busy predicate (`modelEndedTurn` on the Streaming phase).
+                    const turnCommand = modelTurnCommand(rawEvent);
+                    if (turnCommand) model.dispatchPane(turnCommand);
                     if (inner?.type === "message_start") {
                         // input_tokens is only the uncached prompt; cache_creation/
                         // cache_read carry the rest of the real prompt size. Keep

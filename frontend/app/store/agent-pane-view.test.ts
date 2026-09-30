@@ -31,6 +31,7 @@ import {
     registerPane,
     snapshot,
 } from "./agent-pane-state-store";
+import { AGENT_VIEW_SOURCES } from "../view/agent/agent-view-sources";
 
 const BLOCK = "view-contract";
 
@@ -110,7 +111,11 @@ describe("the mirror must not creep back (A6 acceptance, grep-shaped)", () => {
     const store = readFileSync(join(__dirname, "agent-pane-state-store.ts"), "utf8");
     const registration = readFileSync(join(__dirname, "agent-pane-registration.ts"), "utf8");
     const viewState = readFileSync(join(__dirname, "..", "view", "agent", "state.ts"), "utf8");
-    const agentView = readFileSync(join(__dirname, "..", "view", "agent", "agent-view.tsx"), "utf8");
+    // agent-view.tsx and every module split out of it (agent-view-sources.ts):
+    // code moved out of the file must stay under this guard.
+    const agentView = AGENT_VIEW_SOURCES.map((rel) =>
+        readFileSync(join(__dirname, "..", "view", "agent", rel), "utf8"),
+    ).join("\n");
 
     it("the store has no projection-setter interface", () => {
         // Declarations and typed fields, not mentions — both files explain

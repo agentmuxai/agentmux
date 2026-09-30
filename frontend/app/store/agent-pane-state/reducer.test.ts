@@ -3450,3 +3450,57 @@ describe("agent-pane-state reducer", () => {
 // `workingByLegacy` was the dual-write invariant helper (turnActive ||
 // stopping) — removed in PR G alongside the legacy fields it read.
 // Use `isWorking(state)` directly.
+
+// Whether the model has ended its turn (`stop_reason: end_turn`) while the
+// turn is still open. The busy predicate's background-work carve-out applies
+// only then; mid-turn, the model is working even with no tool call running
+// (docs/retro/retro-agent-pane-progress-flicker-and-orphaned-background-tasks-2026-09-30.md).
+describe("ModelEndedTurn / ModelMessageStarted", () => {
+    const flag = (s: AgentPaneState) =>
+        s.turnPhase.kind === "Streaming" ? s.turnPhase.modelEndedTurn : "not streaming";
+
+    it("a new Streaming turn starts with the model still working", () => {
+        expect(flag(streaming())).toBeFalsy();
+    });
+
+    it("ModelEndedTurn marks the streaming turn's model as done", () => {
+        const r = update(streaming(), { type: "ModelEndedTurn" });
+        expect(flag(r.state)).toBe(true);
+        expect(r.events).toEqual([]);
+    });
+
+    it("keeps the rest of the Streaming phase", () => {
+        const s0 = streaming(100);
+        const r = update(s0, { type: "ModelEndedTurn" });
+        expect(r.state.turnPhase).toEqual({ ...s0.turnPhase, modelEndedTurn: true });
+    });
+
+    it("ModelMessageStarted clears it: the model is working again", () => {
+        const s1 = update(streaming(), { type: "ModelEndedTurn" }).state;
+        expect(flag(update(s1, { type: "ModelMessageStarted" }).state)).toBe(false);
+    });
+
+    it("is a same-ref no-op when nothing changes", () => {
+        const s0 = streaming();
+        expect(update(s0, { type: "ModelMessageStarted" }).state).toBe(s0);
+        const s1 = update(s0, { type: "ModelEndedTurn" }).state;
+        expect(update(s1, { type: "ModelEndedTurn" }).state).toBe(s1);
+    });
+
+    it("does nothing outside a Streaming turn", () => {
+        const s0 = ready();
+        expect(update(s0, { type: "ModelEndedTurn" }).state).toBe(s0);
+        expect(update(s0, { type: "ModelMessageStarted" }).state).toBe(s0);
+    });
+
+    it("the next turn starts fresh", () => {
+        const ended = update(streaming(100), { type: "ModelEndedTurn" }).state;
+        const done = update(ended, { type: "TurnEnd", stats: null }).state;
+        const next = update(update(done, { type: "TurnStart", at: 200 }).state, {
+            type: "StreamFlushObserved",
+            addedCount: 1,
+            at: 200,
+        }).state;
+        expect(flag(next)).toBeFalsy();
+    });
+});
