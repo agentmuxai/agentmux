@@ -65,8 +65,10 @@ fn now_unix_millis() -> u64 {
     agentmux_common::time::now_ms_u64()
 }
 
-/// Compute SHA-256 hex digest of a string (for audit log privacy).
-fn sha256_hex(input: &str) -> String {
+/// A short hex hash of a message, so the audit log can tell messages apart
+/// without storing their text. `DefaultHasher`, not SHA-256: privacy, not
+/// security (it was named `sha256_hex` until the §5.3 #7 cleanup).
+fn audit_hash(input: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     // Use a fast non-crypto hash for audit log (privacy, not security)

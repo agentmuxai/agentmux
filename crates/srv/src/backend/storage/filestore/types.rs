@@ -24,9 +24,8 @@ pub struct FileOpts {
     pub append: bool,
 }
 
-fn is_zero_i64(v: &i64) -> bool {
-    *v == 0
-}
+use crate::backend::rpc_types::is_zero_i64;
+
 fn is_zero_i32(v: &i32) -> bool {
     *v == 0
 }
