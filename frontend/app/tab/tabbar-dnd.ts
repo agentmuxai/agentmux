@@ -170,9 +170,6 @@ export function computeNearestTab(
     return { tabId: bestTabId, side: bestSide };
 }
 
-/**
- * Computes the backend insertion index for ReorderTab (remove-then-insert semantics).
- */
 // Pixels past the tab strip's bottom edge before a drag becomes a
 // tear-off (Chrome uses a similar small threshold). 24 px is enough
 // to filter out brief excursions while the user is still hunting for
@@ -215,6 +212,9 @@ export function decideTabRelease(r: {
     return "none";
 }
 
+/**
+ * Computes the backend insertion index for ReorderTab (remove-then-insert semantics).
+ */
 export function computeInsertIndex(
     sourceIndex: number,
     targetIndex: number,
