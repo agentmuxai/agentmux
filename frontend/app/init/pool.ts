@@ -58,11 +58,20 @@ export async function awaitPoolPromote(): Promise<{ initialView: string | null; 
         };
 
         // tear-off promote: push workspaceId so initHostNewWindow reattaches.
-        unsub1 = await listenEvent<{ workspaceId: string; initialView?: string | null; initialMeta?: string | null }>(
+        unsub1 = await listenEvent<{
+            workspaceId: string;
+            initialView?: string | null;
+            initialMeta?: string | null;
+            snapshot?: string | null;
+        }>(
             "pool:promote",
             (payload) => {
                 cleanup();
                 markPoolPromoted();
+                // The torn-off tab's picture, until its content reveals.
+                if (payload.snapshot) {
+                    showTearOffSnapshot(payload.snapshot, () => getApi().setWindowInitStatus("snapshot-shown"));
+                }
                 const url = new URL(window.location.href);
                 url.searchParams.set("workspaceId", payload.workspaceId);
                 url.searchParams.delete("pool");

@@ -392,6 +392,7 @@ pub fn tear_off_pool_promote(
         None,
         None,
         false, // tab tear-off, not a tray panel
+        args.get("snapshot").and_then(|v| v.as_str()),
     ) {
         Some(label) => Ok(serde_json::json!(label)),
         None => {

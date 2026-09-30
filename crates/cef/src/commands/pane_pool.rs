@@ -228,7 +228,26 @@ fn snapshot_acks() -> &'static Mutex<HashMap<String, std::sync::mpsc::Sender<()>
     SNAPSHOT_ACKS.get_or_init(Default::default)
 }
 
-/// The promoted floater `label` has its snapshot up: show it now.
+/// Register for the renderer's "snapshot-shown" ack BEFORE emitting the
+/// promote event that carries the snapshot. Shared with the window pool.
+pub(crate) fn expect_snapshot_shown(label: &str) -> std::sync::mpsc::Receiver<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Ok(mut acks) = snapshot_acks().lock() {
+        acks.insert(label.to_string(), tx);
+    }
+    rx
+}
+
+/// Wait, bounded, for that ack; forget the registration either way.
+pub(crate) fn wait_snapshot_shown(label: &str, shown: std::sync::mpsc::Receiver<()>) -> bool {
+    let acked = shown.recv_timeout(SNAPSHOT_SHOW_WAIT).is_ok();
+    if let Ok(mut acks) = snapshot_acks().lock() {
+        acks.remove(label);
+    }
+    acked
+}
+
+/// The promoted window `label` has its snapshot up: show it now.
 pub fn on_snapshot_shown(label: &str) {
     if let Some(tx) = snapshot_acks().lock().ok().and_then(|mut a| a.remove(label)) {
         let _ = tx.send(());
@@ -602,13 +621,7 @@ pub fn promote_pane_pool_window(
         // label so `awaitPanePoolPromote` rewrites its `?windowLabel=` param —
         // otherwise the renderer keeps addressing the host by the dead pool
         // label (spec §5.2).
-        let snapshot_shown = snapshot.map(|_| {
-            let (tx, rx) = std::sync::mpsc::channel();
-            if let Ok(mut acks) = snapshot_acks().lock() {
-                acks.insert(new_label.clone(), tx);
-            }
-            rx
-        });
+        let snapshot_shown = snapshot.map(|_| expect_snapshot_shown(&new_label));
         crate::events::emit_event_to_window(
             state,
             &new_label,
@@ -625,10 +638,7 @@ pub fn promote_pane_pool_window(
         );
 
         if let Some(shown) = snapshot_shown {
-            let acked = shown.recv_timeout(SNAPSHOT_SHOW_WAIT).is_ok();
-            if let Ok(mut acks) = snapshot_acks().lock() {
-                acks.remove(&new_label);
-            }
+            let acked = wait_snapshot_shown(&new_label, shown);
             tracing::info!(target: "pool:pane", label = %new_label, acked, "[pane-pool] showing floater after its snapshot");
             unsafe {
                 let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
