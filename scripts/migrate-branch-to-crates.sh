@@ -44,6 +44,30 @@ fi
 
 run() { if (( DRY_RUN )); then echo "  would run: $*"; else "$@"; fi; }
 
+# In-place edit that behaves the same with GNU sed (Linux, Git Bash) and BSD
+# sed (macOS): `sed -i -E` means different things to the two, so write to a
+# temp file and copy back (copying keeps the file's mode).
+sed_inplace() {
+    local f="$1" tmp
+    shift
+    tmp=$(mktemp)
+    sed -E "$@" "$f" > "$tmp"
+    cat "$tmp" > "$f"
+    rm -f "$tmp"
+}
+
+# Untracked files under an old folder (for example new files brought back by
+# `git stash pop` after the rebase) aren't in the branch's history, so this
+# script can't move them safely. Stop and say so, rather than report success
+# while they sit outside the Cargo workspace.
+untracked_old=$(git ls-files --others --exclude-standard | grep -E "^agentmux-($CRATES)/" || true)
+if [[ -n "$untracked_old" ]]; then
+    echo "migrate-branch-to-crates: untracked files are under an old folder:" >&2
+    echo "$untracked_old" >&2
+    echo "Commit them on this branch (git add <file> && git commit), then run this again; it will move them." >&2
+    exit 1
+fi
+
 # 1. Files the branch added under an old folder.
 moved=0
 while IFS= read -r f; do
@@ -70,10 +94,10 @@ while IFS= read -r f; do
         continue
     fi
     if [[ "$f" == crates/* ]]; then
-        sed -i -E "s#\.\./agentmux-($CRATES)([/\"'\\\\])#../\1\2#g" "$f"
-        sed -i -E 's#export_to = "\.\./\.\./frontend/#export_to = "../../../frontend/#g' "$f"
+        sed_inplace "$f" -e "s#\.\./agentmux-($CRATES)([/\"'\\\\])#../\1\2#g" \
+            -e 's#export_to = "\.\./\.\./frontend/#export_to = "../../../frontend/#g'
     fi
-    sed -i -E "s#(^|[^A-Za-z0-9_-])agentmux-($CRATES)/#\1crates/\2/#g" "$f"
+    sed_inplace "$f" -e "s#(^|[^A-Za-z0-9_-])agentmux-($CRATES)/#\1crates/\2/#g"
     if [[ "$(cksum < "$f")" != "$before" ]]; then
         echo "rewrite: $f"
         git add -- "$f"
@@ -86,7 +110,7 @@ if (( DRY_RUN )); then
     exit 0
 fi
 
-left=$(git ls-files | grep -E "^agentmux-($CRATES)/" || true)
+left=$( { git ls-files; git ls-files --others --exclude-standard; } | grep -E "^agentmux-($CRATES)/" || true)
 if [[ -n "$left" ]]; then
     echo "migrate-branch-to-crates: files are still under an old folder:" >&2
     echo "$left" >&2
