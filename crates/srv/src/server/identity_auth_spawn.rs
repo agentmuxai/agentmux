@@ -133,7 +133,7 @@ pub(crate) fn spawn_auth_cli(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
+        // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
         #[cfg(windows)]
         {
             use agentmux_common::win32::CREATE_NO_WINDOW;

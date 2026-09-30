@@ -57,7 +57,7 @@ impl std::ops::DerefMut for SrvGuard {
 }
 
 /// Owned kill-on-close Job Object handle. Same call shapes as the
-/// launcher's production J0 (`agentmux-launcher/src/job_object.rs`), kept
+/// launcher's production J0 (`crates/launcher/src/job_object.rs`), kept
 /// test-local rather than exported across crates — the needed surface is
 /// this small.
 #[cfg(windows)]

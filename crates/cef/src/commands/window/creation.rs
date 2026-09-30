@@ -785,7 +785,7 @@ pub(crate) fn reproject_from_snapshot_and_stage_closures(
 /// by the caller — NOT derived positionally from `Client.windowids[0]`.
 /// reagent (P0, PR #2017, 2026-07-08) caught that the earlier design did
 /// exactly that, on the assumption index 0 was reliably `"main"`; it isn't —
-/// `focus_window` (`agentmux-srv/.../wcore/window.rs:164`) reorders
+/// `focus_window` (`crates/srv/.../wcore/window.rs:164`) reorders
 /// `Client.windowids` to put the last-focused window at index 0 on every
 /// focus change, so index 0 is "whichever window the user looked at last,"
 /// not a stable identity. Filtering `main_window_id` out BY VALUE (wherever

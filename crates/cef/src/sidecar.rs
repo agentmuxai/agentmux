@@ -88,7 +88,7 @@ pub fn use_launcher_endpoints(
              refusing to fall back to spawn_backend (would create a \
              duplicate srv against the same data dir). This is a \
              launcher bug; check the AGENTMUXSRV-ESTART parse path in \
-             agentmux-launcher/src/srv_spawner.rs::parse_estart."
+             crates/launcher/src/srv_spawner.rs::parse_estart."
                 .to_string(),
         ));
     }
@@ -363,7 +363,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 
     // Parse ESTART from stderr. A second channel carries AGENTMUXSRV-MIGRATING
     // pings so the async ESTART waiter can extend its deadline when migrations are
-    // running (same pattern as agentmux-launcher/src/srv_spawner.rs).
+    // running (same pattern as crates/launcher/src/srv_spawner.rs).
     let (tx, mut rx) = tokio::sync::mpsc::channel::<BackendSpawnResult>(1);
     let (migration_tx, mut migration_rx) = tokio::sync::mpsc::channel::<()>(4);
     // Third channel: a fatal migration failure. srv reports it on stderr and
@@ -631,6 +631,6 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
 }
 
 // Phase B.1: removed `create_job_object_for_child`. Host no longer
-// owns a Job Object; launcher's J0 (in agentmux-launcher/src/main.rs)
+// owns a Job Object; launcher's J0 (in crates/launcher/src/main.rs)
 // covers srv via direct AssignProcessToJobObject. The same windows-sys
 // FFI pattern lives in the launcher now.

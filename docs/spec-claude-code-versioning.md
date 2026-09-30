@@ -17,7 +17,7 @@ versions, breaking reproducibility and making regressions harder to bisect.
 |------|----------|---------|
 | `docker/Dockerfile.agent-agentmux` line 36 | `ARG CLAUDE_VERSION=2.1.285` | Fallback for local `docker build` without passing the arg |
 | `.github/workflows/container-image.yml` line 16 | `default: '2.1.285'` | Default used when CI is triggered via `workflow_dispatch` without an explicit version input |
-| `agentmux-srv/src/backend/providers.rs` | `pinned_version: "2.1.285"` (CLAUDE static) | Version the backend sidecar installs |
+| `crates/srv/src/backend/providers.rs` | `pinned_version: "2.1.285"` (CLAUDE static) | Version the backend sidecar installs |
 | `frontend/app/view/agent/providers/catalog.ts` (re-exported via `./index`) | `pinnedVersion: "2.1.285"` (PROVIDERS.claude) | Version surfaced in the UI. Corrected 2026-08-27 — this file used to be a single `providers/index.ts`, split into `types.ts`/`catalog.ts`/`model-overlay.ts` for readability; the pin moved with it but this doc wasn't updated at the time. |
 | `frontend/app/view/agent/providers/catalog.ts` (same object) | `models: [{ value: "opus", label: "Opus 5.5", ... }]` | The curated UI label for the `opus` family alias — **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
 
@@ -50,7 +50,7 @@ introducing a version of the same imprecision.)
 1. Check the latest release: `npm view @anthropic-ai/claude-code version`
 2. In `docker/Dockerfile.agent-agentmux`: update `ARG CLAUDE_VERSION=<new>`
 3. In `.github/workflows/container-image.yml`: update `default: '<new>'`
-4. In `agentmux-srv/src/backend/providers.rs`: update the CLAUDE static's `pinned_version`
+4. In `crates/srv/src/backend/providers.rs`: update the CLAUDE static's `pinned_version`
 5. In `frontend/app/view/agent/providers/catalog.ts`: update `PROVIDERS.claude.pinnedVersion`
 6. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
    matches what the pinned CLI currently resolves that alias to (e.g. `opus` → "Opus 5")

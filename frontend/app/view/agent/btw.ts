@@ -121,7 +121,7 @@ export function buildBtwContextSnapshot(nodes: DocumentNode[]): string {
  * askSideQuestion(model.blockId, question, paneModel.document())`.
  *
  * Calls the backend's `AskSideQuestionCommand`
- * (`agentmux-srv/src/server/agent_handlers/side_question.rs`), which mints
+ * (`crates/srv/src/server/agent_handlers/side_question.rs`), which mints
  * `request_id` and returns immediately — the actual answer streams
  * separately as `WpsEvent.BtwAnswerChunk` events scoped
  * `block:<blockId>:btw:<requestId>` (see `mps-events.ts` and

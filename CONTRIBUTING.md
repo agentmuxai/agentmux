@@ -57,15 +57,23 @@ AgentMux is a **four-process Rust desktop application** running a bundled Chromi
 
 ```
 agentmux/
-├── agentmux-cef/         # CEF host app (Rust + cef-rs + bundled Chromium)
-├── agentmux-launcher/    # Portable launcher (325 KB)
-├── agentmux-srv/         # Rust async backend server (Tokio + Axum)
-├── agentmux-common/      # Shared utilities across the Rust crates
+├── crates/
+│   ├── cef/              # CEF host app (Rust + cef-rs + bundled Chromium)
+│   ├── launcher/         # Portable launcher (325 KB)
+│   ├── srv/              # Rust async backend server (Tokio + Axum)
+│   ├── common/           # Shared utilities across the Rust crates
+│   ├── mcp/              # MCP server each agent talks to (the App API)
+│   └── bashwrap/         # Streaming bash wrapper for agent shell calls
 ├── frontend/             # SolidJS + TypeScript UI (Vite)
 ├── docs/                 # Architecture docs, specs, guides
 ├── scripts/              # Build and version management scripts
 └── Taskfile.yml          # Build task definitions
 ```
+
+Each crate lives in `crates/<name>/` and its package (and binary) is named `agentmux-<name>`,
+so `crates/srv/` builds with `cargo build -p agentmux-srv`. A new crate follows the same rule.
+Dated docs (specs, retros, reports) written before 2026-09-30 still say `agentmux-<name>/`;
+read that as `crates/<name>/`.
 
 ### Frontend (`frontend/`)
 
@@ -78,13 +86,13 @@ Key subdirectories:
 - `frontend/app/store/` — signals + 4-layer reducer stack state management
 - `frontend/app/element/` — reusable UI components
 
-### CEF Host (`agentmux-cef/`)
+### CEF Host (`crates/cef/`)
 
 The native desktop layer — handles window management, system tray, browser pane lifecycle, and IPC between the frontend and backend. Bundles its own Chromium via CEF; no system WebView is used.
 
 Changes here require rebuilding: `task build:host` followed by restarting `task dev`.
 
-### Rust Backend (`agentmux-srv/`)
+### Rust Backend (`crates/srv/`)
 
 The async backend server — auto-spawned by the launcher, never launched manually. Handles:
 
@@ -98,13 +106,13 @@ The async backend server — auto-spawned by the launcher, never launched manual
 
 Changes here require `task build:backend` followed by restarting `task dev`.
 
-### Launcher (`agentmux-launcher/`)
+### Launcher (`crates/launcher/`)
 
 The portable entry-point process (~325 KB). It owns process and single-instance
 lifecycle so the host and backend can stay focused on the app:
 
 - **Single-instance enforcement** keyed on `hash(data_dir + version)`
-  (`agentmux-launcher/src/hash.rs`, invariant I1) — a second launch of the same
+  (`crates/launcher/src/hash.rs`, invariant I1) — a second launch of the same
   instance forwards an "open new window" request to the running host instead of
   starting a duplicate.
 - **Job Object (Windows)** — the launcher creates the job that owns the whole

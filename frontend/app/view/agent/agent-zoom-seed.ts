@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Per-agent zoom seeding — frontend counterpart of
-// agentmux-srv/src/server/app_api/mod.rs::parse_seed_zoom. Extracted out
+// crates/srv/src/server/app_api/mod.rs::parse_seed_zoom. Extracted out
 // of agent-model.ts::launchAgentDefinition (SPEC_AGENT_ZOOM_PERSISTENCE_
 // 2026_06_22.md; the frontend-path gap is documented in
 // SPEC_AGENT_COLOR_2026_08_08.md §3.5) so the clamp/validate contract has

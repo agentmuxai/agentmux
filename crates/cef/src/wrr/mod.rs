@@ -9,7 +9,7 @@
 // `Command::ReportHwnd*` over the existing launcher IPC pipe.
 // The launcher's reducer arm classifies divergences and emits
 // `Event::HwndDriftDetected` (see
-// `agentmux-launcher/src/wrr/mod.rs`).
+// `crates/launcher/src/wrr/mod.rs`).
 //
 // Pure event-driven: every report is in response to an OS
 // notification, never on a timer. The one heartbeat-shaped

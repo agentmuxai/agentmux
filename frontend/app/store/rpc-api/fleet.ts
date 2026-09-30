@@ -3,7 +3,7 @@
 
 // Fleet control — select, broadcast, and bulk-act on many agents at once.
 // See docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md and
-// agentmux-srv/src/server/app_api/fleet.rs (the RPC handlers this binds to).
+// crates/srv/src/server/app_api/fleet.rs (the RPC handlers this binds to).
 
 import { RpcClient } from "../rpc-client";
 

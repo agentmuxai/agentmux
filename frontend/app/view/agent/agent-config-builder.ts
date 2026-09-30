@@ -20,7 +20,7 @@ import type { AgentConfigFile, AgentDefinition, AgentSkill } from "@/app/store/r
  * `skill_type` value that materializes a skill as an Agent Skills-format
  * `.claude/skills/<slug>/SKILL.md` instead of a `.claude/commands/<trigger>.md`
  * slash command. Mirrors `SKILL_TYPE_AGENT_SKILL` in
- * `agentmux-srv/src/backend/agent_config.rs` — keep the two in sync.
+ * `crates/srv/src/backend/agent_config.rs` — keep the two in sync.
  */
 const SKILL_TYPE_AGENT_SKILL = "agent-skill";
 
@@ -129,7 +129,7 @@ export function buildConfigFiles(
     // PreToolUse:Bash hook (under the `hooks` key) so live streaming
     // engages on every session. User-supplied legacy hooks content
     // and user settings.json content both merge in. Mirror of
-    // agentmux-srv/src/backend/agent_config.rs build_settings_with_hooks —
+    // crates/srv/src/backend/agent_config.rs build_settings_with_hooks —
     // keep the two paths in sync.
     //
     // FILE LOCATION (v0.33.805+): Claude Code reads project hooks from
@@ -166,7 +166,7 @@ function expandTemplate(content: string, vars: Record<string, string>): string {
  * alphanumeric + dash/underscore, consecutive dashes collapsed, trimmed to
  * 64 chars. Falls back to "agent" if the input has no valid characters.
  *
- * Mirrors `derive_slug` in `agentmux-srv/src/backend/storage/agents.rs` —
+ * Mirrors `derive_slug` in `crates/srv/src/backend/storage/agents.rs` —
  * keep the two in sync, or a SKILL.md preview built here won't match the
  * path the authoritative Rust launch path actually writes to.
  */
@@ -199,7 +199,7 @@ const SKILL_DESCRIPTION_MAX_LEN = 1024;
  * YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
  * §7.3.1), so `JSON.stringify` on a plain string produces a valid,
  * correctly-escaped YAML value — same reasoning as `render_skill_md` in
- * `agentmux-srv/src/backend/agent_config.rs`, which this mirrors.
+ * `crates/srv/src/backend/agent_config.rs`, which this mirrors.
  */
 export function renderSkillMd(slug: string, description: string, body: string): string {
     const desc = description.trim()
@@ -216,7 +216,7 @@ export function renderSkillMd(slug: string, description: string, body: string): 
  * OUTSIDE the agent's working directory (reagent P1, PR #2322). Returns
  * `null` for anything containing "/" or "\\", or that is exactly "."/"..";
  * callers skip writing that skill's command file entirely. Mirrors
- * `sanitize_trigger` in `agentmux-srv/src/backend/agent_config.rs`.
+ * `sanitize_trigger` in `crates/srv/src/backend/agent_config.rs`.
  */
 export function sanitizeTrigger(trigger: string): string | null {
     if (!trigger || trigger === "." || trigger === "..") {
@@ -235,7 +235,7 @@ export function sanitizeTrigger(trigger: string): string | null {
  * deliberately DO permit underscores, so it isn't spec-valid here as-is —
  * hyphenate underscores (and re-collapse any resulting run of hyphens)
  * rather than reusing it directly (Codex P1, PR #2322). Mirrors
- * `skill_name_slug` in `agentmux-srv/src/backend/agent_config.rs`.
+ * `skill_name_slug` in `crates/srv/src/backend/agent_config.rs`.
  */
 function skillNameSlug(name: string): string {
     const collapsed = deriveSlug(name)
@@ -256,7 +256,7 @@ function skillNameSlug(name: string): string {
  * "-3", ... until unique within `used`, truncating the base first so the
  * suffixed result never exceeds the spec's 64-character max (Codex P2, PR
  * #2322). Mirrors `unique_skill_slug` in
- * `agentmux-srv/src/backend/agent_config.rs`.
+ * `crates/srv/src/backend/agent_config.rs`.
  */
 export function uniqueSkillSlug(name: string, used: Set<string>): string {
     const MAX_LEN = 64;
@@ -294,7 +294,7 @@ export const SESSION_START_HOOK_PARTS = 8;
  * get first refusal; AgentMux's own entries always stay last.
  *
  * Mirror of `prepend_user_hook_array` in
- * `agentmux-srv/src/backend/agent_config.rs` — keep the two in sync.
+ * `crates/srv/src/backend/agent_config.rs` — keep the two in sync.
  */
 function prependUserHookArray(hooksObj: Record<string, unknown>, key: string, userValue: unknown): void {
     if (!Array.isArray(userValue)) {
@@ -317,7 +317,7 @@ function prependUserHookArray(hooksObj: Record<string, unknown>, key: string, us
  * short-circuit before our rewrite/observation fires.
  *
  * Mirror of `build_settings_with_hooks` in
- * `agentmux-srv/src/backend/agent_config.rs`. The two paths must stay
+ * `crates/srv/src/backend/agent_config.rs`. The two paths must stay
  * in sync — keep changes aligned across both files (Codex P1, PR #2378:
  * this mirror originally lagged the Rust builder by one hook type,
  * so agents launched through the standard picker never got PreCompact
@@ -338,7 +338,7 @@ export function buildSettingsWithHooks(
     // so two separate entries are registered, each with a different
     // static `--trigger=` argv baked in so the binary knows which fired
     // without needing it from stdin (PreCompact's stdin payload carries
-    // no `trigger` field; see `agentmux-bashwrap/src/precompact.rs`).
+    // no `trigger` field; see `crates/bashwrap/src/precompact.rs`).
     const agentmuxPrecompactManual = {
         matcher: "manual",
         hooks: [

@@ -13,13 +13,13 @@ use serde::{Deserialize, Serialize};
 // ---- v7 Bundle command shapes ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGetBundleData {
     pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDeleteBundleData {
     pub id: String,
 }
@@ -30,13 +30,13 @@ pub struct CommandDeleteBundleData {
 /// `json!({"deleted": ..})` before this type existed to name it for the
 /// RPC bindings generator.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DeleteBundleResult {
     pub deleted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandReorderGlobalBundlesData {
     /// Full ordered list of global bundle ids. Each id's `sort_order`
     /// becomes its position in this list.
@@ -49,13 +49,13 @@ pub struct CommandReorderGlobalBundlesData {
 /// deserializes `()` ONLY from JSON `null`, so a unit Req would reject every
 /// real call at runtime while passing every CI gate (the `bookmarks.list` bug).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListBundlesData {}
 
 /// Input for `getclaudeglobalconfig`. Same reasoning as
 /// `CommandListBundlesData` — read-only, no parameters, but still not `()`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGetClaudeGlobalConfigData {}
 
 /// Request for `upsertmemory` / `upsertsystemmemory`: the `Bundle` row itself
@@ -67,7 +67,7 @@ pub struct CommandGetClaudeGlobalConfigData {}
 /// `content_hash`. Absent = today's unconditional save. See
 /// docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandUpsertBundleData {
     #[serde(flatten)]
     pub bundle: crate::backend::storage::store::Bundle,
@@ -84,7 +84,7 @@ pub struct CommandUpsertBundleData {
 /// One `db_bundle_versions` row's metadata, no `name`/`instructions` —
 /// the same fields `bundle_version_meta_json` (app_api) puts on the MCP wire.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GlobalMemoryVersionMeta {
     pub id: String,
     pub content_hash: String,
@@ -101,20 +101,20 @@ pub struct GlobalMemoryVersionMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemoryHistoryData {
     pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GlobalMemoryHistoryResult {
     /// Newest first.
     pub versions: Vec<GlobalMemoryVersionMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemoryDiffData {
     /// Both versions must belong to this entry.
     pub id: String,
@@ -123,7 +123,7 @@ pub struct CommandGlobalMemoryDiffData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GlobalMemoryDiffResult {
     /// Same format as `NativeMemoryDiffResult::diff`, preceded by a
     /// `- name:` / `+ name:` pair when the entry was renamed.
@@ -133,7 +133,7 @@ pub struct GlobalMemoryDiffResult {
 /// `memorydelivery:claim_fallback` — the frontend's hidden memory reinjection
 /// asks whether to deliver (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandMemoryDeliveryClaimFallbackData {
     pub block_id: String,
     /// The reinjection's reason: `compaction` or `fresh_session`.
@@ -143,39 +143,39 @@ pub struct CommandMemoryDeliveryClaimFallbackData {
 /// Reply to `memorydelivery:claim_fallback`: `false` when Claude Code's
 /// `SessionStart` hook already delivered this event.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MemoryDeliveryClaimFallbackResult {
     pub deliver: bool,
 }
 
 /// `globalmemory:sections` — no arguments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemorySectionsData {}
 
 /// `globalmemory:import_sources` — no arguments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemoryImportSourcesData {}
 
 /// `globalmemory:import` — source `index` of the list `list_id` from
 /// `globalmemory:import_sources`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemoryImportData {
     pub list_id: String,
     pub index: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemoryRevertData {
     pub id: String,
     pub target_version_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GlobalMemoryRevertResult {
     /// The new `source: "revert"` version. `null` only for a system-tier
     /// entry whose revert target is byte-identical to what's stored — that
@@ -186,7 +186,7 @@ pub struct GlobalMemoryRevertResult {
 
 /// Result of `reorderglobalbrain`. Was an inline `json!({"updated": n})`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ReorderGlobalBundlesResult {
     /// How many rows had their `sort_order` rewritten. `usize` to match
     /// `Store::bundle_reorder`'s own return type rather than casting at the

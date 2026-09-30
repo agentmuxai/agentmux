@@ -104,7 +104,7 @@ pub(crate) fn link_history_if_isolated(
 /// (`backend::providers::get_provider(id)`) so the resolver / spawn
 /// path / OAuth-start handler never drift on which env var redirects
 /// each CLI's config home. The single source of truth lives in
-/// `agentmux-srv/src/backend/providers.rs`.
+/// `crates/srv/src/backend/providers.rs`.
 pub(crate) fn compute_and_ensure_bundle_dir(
     into_bundle_id: Option<&str>,
     provider_id: &str,

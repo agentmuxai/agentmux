@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// Router, Subdrone. Stored as `kind` field on `FlowNode.data`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub enum BlockKind {
     Agent,
     Condition,
@@ -42,7 +42,7 @@ impl BlockKind {
 // the Rust type keeps every existing consumer untouched while the declaration
 // becomes generated.
 #[ts(rename = "DroneFlowNode")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FlowNode {
     pub id: String,
     /// xyflow position. Saved as-is.
@@ -78,7 +78,7 @@ fn is_blank(v: &Option<String>) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
 #[ts(rename = "DroneNodePosition")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NodePosition {
     pub x: f64,
     pub y: f64,
@@ -92,7 +92,7 @@ pub struct NodePosition {
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename = "DroneFlowEdge")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FlowEdge {
     pub id: String,
     pub source: String,
@@ -107,7 +107,7 @@ pub struct FlowEdge {
 
 /// Top-level graph payload — what the canvas saves and the executor reads.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DroneGraph {
     #[serde(default)]
     pub nodes: Vec<FlowNode>,
@@ -116,7 +116,7 @@ pub struct DroneGraph {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DroneViewport {
     pub x: f64,
     pub y: f64,
@@ -131,7 +131,7 @@ impl Default for DroneViewport {
 
 /// Wstore row shape. Matches `db_drone_definitions` schema.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DroneDefinition {
     pub id: String,
     pub name: String,
@@ -149,7 +149,7 @@ pub struct DroneDefinition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub enum RunStatus {
     Running,
     Done,
@@ -168,7 +168,7 @@ impl RunStatus {
 
 /// One row in `db_drone_runs`. Append-only history of executions.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DroneRun {
     pub id: String,
     pub drone_id: String,
@@ -192,7 +192,7 @@ pub struct DroneRun {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(rename = "DroneBlockState")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockState {
     /// A `String` in Rust so a row written by a newer build still reads back,
     /// but the closed set on the TS side is real and the frontend branches on

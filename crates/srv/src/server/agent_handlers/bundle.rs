@@ -552,7 +552,7 @@ fn resolve_shared_claude_provider_dir() -> std::path::PathBuf {
 /// errors (permission denied, etc.) still propagate as `Err`, not
 /// silently folded into "missing."
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ClaudeGlobalConfig {
     pub path: String,
     /// Genuinely `string | null`, not an optional property: a plain

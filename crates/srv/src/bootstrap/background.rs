@@ -219,7 +219,7 @@ pub fn spawn_background_subsystems(
     // investigates; skipping `init_global` entirely is not a no-op the way
     // the comment above might suggest.
     //
-    // `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER` exists so `agentmux-srv/tests/
+    // `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER` exists so `crates/srv/tests/
     // integration_test.rs` can spawn the real binary without that read
     // firing. Those tests spawn an ad-hoc/dev-signed `target/debug`
     // binary, which is never on the Keychain ACL's trusted-signature list

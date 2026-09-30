@@ -4,7 +4,7 @@
 /**
  * OAuth service catalog (frontend) — which account providers can be connected
  * via the Armory's service-OAuth flow, and how. This is the frontend
- * view of the per-provider config in `agentmux-srv/src/identity/oauth_client.rs`
+ * view of the per-provider config in `crates/srv/src/identity/oauth_client.rs`
  * (`config_for`). See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1/§12.3.
  *
  * v1 wires GitHub (device flow) as the reference provider. The backend's

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// `attachments.ingest` — hand the backend OS paths (from a drop or a native
 /// clipboard read) to copy into the attachment store and process.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAttachmentsIngestData {
     /// The agent pane asking. Progress events are scoped `block:<id>`.
     pub block_id: String,
@@ -30,7 +30,7 @@ pub struct CommandAttachmentsIngestData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentsIngestResult {
     pub batch_id: String,
     /// Files accepted into the batch, in order. `index` keys every event.
@@ -50,7 +50,7 @@ pub struct AttachmentsIngestResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentPending {
     pub index: u32,
     pub path: String,
@@ -60,7 +60,7 @@ pub struct AttachmentPending {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentRejected {
     pub path: String,
     pub name: String,
@@ -71,7 +71,7 @@ pub struct AttachmentRejected {
 
 /// `attachments.cancel` — stop processing the rest of a batch.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAttachmentsCancelData {
     pub batch_id: String,
 }
@@ -80,7 +80,7 @@ pub struct CommandAttachmentsCancelData {
 /// working folder (`cmd:cwd`). Container panes use this for pasted files:
 /// their agents can't see the store.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAttachmentsCopyToWorkdirData {
     pub block_id: String,
     pub id: String,
@@ -89,7 +89,7 @@ pub struct CommandAttachmentsCopyToWorkdirData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentsCopyToWorkdirResult {
     /// Where the file landed.
     pub path: String,
@@ -98,13 +98,13 @@ pub struct AttachmentsCopyToWorkdirResult {
 /// `attachments.info` — look up processed attachments by id (transcript
 /// replay, lightbox details).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAttachmentsInfoData {
     pub ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentsInfoResult {
     /// One entry per requested id that is still in the store. Ids that were
     /// swept by retention are simply absent.
@@ -113,7 +113,7 @@ pub struct AttachmentsInfoResult {
 
 /// A processed attachment. `id` is the hex SHA-256 of the original bytes.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentInfo {
     pub id: String,
     /// Display name. Not part of the stored content — the same bytes can
@@ -158,7 +158,7 @@ pub struct AttachmentInfo {
 
 /// An attachment as carried by a message: the id plus the name the user saw.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentRef {
     pub id: String,
     pub name: String,
@@ -166,7 +166,7 @@ pub struct AttachmentRef {
 
 /// `attachment:progress` event payload.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentProgressEvent {
     pub batch_id: String,
     pub index: u32,
@@ -180,7 +180,7 @@ pub struct AttachmentProgressEvent {
 
 /// `attachment:ready` event payload.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentReadyEvent {
     pub batch_id: String,
     pub index: u32,
@@ -189,7 +189,7 @@ pub struct AttachmentReadyEvent {
 
 /// `attachment:failed` event payload.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentFailedEvent {
     pub batch_id: String,
     pub index: u32,
@@ -200,7 +200,7 @@ pub struct AttachmentFailedEvent {
 
 /// `attachment:batch-done` event payload — every item is ready, failed or cancelled.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AttachmentBatchDoneEvent {
     pub batch_id: String,
 }

@@ -135,7 +135,7 @@ impl ksni::Tray for AgentMuxTray {
 
 /// The brand mark as an SNI pixmap (ARGB32, network byte order).
 fn brand_pixmap() -> Option<ksni::Icon> {
-    const PNG: &[u8] = include_bytes!("../../../assets/favicon-71x71.png");
+    const PNG: &[u8] = include_bytes!("../../../../assets/favicon-71x71.png");
     let mut decoder = png::Decoder::new(std::io::Cursor::new(PNG));
     decoder.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
     let mut reader = decoder.read_info().ok()?;

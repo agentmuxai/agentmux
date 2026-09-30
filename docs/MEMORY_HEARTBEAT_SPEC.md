@@ -2,7 +2,7 @@
 
 **PR:** #311 — `feat(cef): in-process GPU, renderer limit, memory heartbeat`
 **Version:** v0.33.62
-**Module:** `agentmux-cef/src/memory_heartbeat.rs`
+**Module:** `crates/cef/src/memory_heartbeat.rs`
 
 ---
 

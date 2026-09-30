@@ -1174,14 +1174,14 @@ export class EditorViewModel {
      *     — the same client-side path applyTabPreset uses for every preset
      *     widget — which sidesteps the gap entirely. The constructed
      *     BlockDef mirrors exactly what the backend's build_pane_meta
-     *     (agentmux-srv/src/server/app_api/pane.rs) would have produced for
+     *     (crates/srv/src/server/app_api/pane.rs) would have produced for
      *     `pane.open { view: "editor", file }` on the openToTheSide path.
      *  3. Explicit setActiveTab() AFTER the block exists. Belt-and-suspenders
      *     alongside CreateTab's own `activate=true` (3rd arg below): the
      *     reducer itself only auto-activates a workspace's very FIRST tab
      *     ever (see create_tab_second_tab_does_not_steal_active in
      *     reducer.rs), but the service layer already compensates —
-     *     `agentmux-srv/src/server/service/workspace.rs`'s CreateTab handler
+     *     `crates/srv/src/server/service/workspace.rs`'s CreateTab handler
      *     dispatches a follow-up SetActiveTab whenever `activate=true` and
      *     the reducer didn't auto-activate, so this call is redundant in
      *     practice, not a workaround for a live bug (#2155's "activate arg

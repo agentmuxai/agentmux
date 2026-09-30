@@ -47,7 +47,7 @@ use windows::UI::Notifications::{
 use super::{Notification, Presenter, UserAction};
 
 /// Must match the host's `SetCurrentProcessExplicitAppUserModelID`
-/// (`agentmux-cef/src/lib.rs`) so toasts and taskbar grouping agree.
+/// (`crates/cef/src/lib.rs`) so toasts and taskbar grouping agree.
 pub const AUMID: &str = "AgentMuxCorp.AgentMux";
 
 /// This instance's toast group. Every AgentMux instance on the machine (the
@@ -66,7 +66,7 @@ pub fn group_for(data_dir: &std::path::Path) -> String {
     }
     format!("am-{:012x}", h & 0xffff_ffff_ffff)
 }
-const ICON_PNG: &[u8] = include_bytes!("../../../assets/favicon-150x150.png");
+const ICON_PNG: &[u8] = include_bytes!("../../../../assets/favicon-150x150.png");
 /// Upper bound on waiting for the WinRT thread at startup (see `spawn`).
 const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 

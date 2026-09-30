@@ -158,7 +158,7 @@ Same single-instance scope as the rest of this tool family: `muxsh` operates
 on the instance the calling pane belongs to. Cross-instance operation is not
 implemented here.
 
-Implementation: `agentmux-srv/src/backend/shellintegration/muxsh.mjs` (core),
+Implementation: `crates/srv/src/backend/shellintegration/muxsh.mjs` (core),
 `lib/muxclient.mjs` (shared auth/fetch plumbing), and the per-shell `muxsh`
 delegators in the same directory. Route field names are checked against
 `docs/specs/app-api-manifest.json` from both the Rust and Node sides — see

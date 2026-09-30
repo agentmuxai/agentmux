@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::state::AppState;
 
-const SETTINGS_TEMPLATE: &str = include_str!("../../../settings-template.jsonc");
+const SETTINGS_TEMPLATE: &str = include_str!("../../../../settings-template.jsonc");
 
 /// Get the current OS platform name.
 pub fn get_platform() -> serde_json::Value {

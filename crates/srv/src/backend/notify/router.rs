@@ -39,7 +39,7 @@ pub const EVENT_BLOCK_REVEAL: &str = "block:reveal";
 
 /// Where `block.reveal` reveals a block — also the `block:reveal` payload.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockRevealEvent {
     pub block_id: String,
     pub tab_id: String,

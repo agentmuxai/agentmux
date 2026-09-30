@@ -43,7 +43,7 @@ cd "$(dirname "$0")/.."
 # a naming wart, not a bug, and flagging them would make this gate noise.
 report="$(grep -rnE \
     '(muxbus_load|muxbus_save|muxbus_clear|load_valid_token|ensure_agent_credential|relay_token)[[:space:]]*\(' \
-    --include='*.rs' agentmux-srv/src \
+    --include='*.rs' crates/srv/src \
     | grep 'state\.mstore' || true)"
 
 if [[ -n "$report" ]]; then

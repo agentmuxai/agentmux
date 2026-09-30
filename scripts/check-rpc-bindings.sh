@@ -2,7 +2,7 @@
 # check-rpc-bindings.sh — CI gate for the generated RPC type bindings.
 #
 # THE RULE: `frontend/types/rpc/*.ts` is generated from the Rust types in
-# `agentmux-srv/src/backend/rpc_types/` by `ts-rs`, and what is committed must
+# `crates/srv/src/backend/rpc_types/` by `ts-rs`, and what is committed must
 # match what the generator currently produces.
 #
 # WHY THIS EXISTS

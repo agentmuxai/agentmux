@@ -10,7 +10,7 @@
  * Three places must agree with this list, and `markdown-semantic.test.tsx`
  * checks all three: the sanitizer allowlist (`markdown.tsx`), the stylesheet
  * (`markdown.scss`), and the Operator Config entry that tells agents about it
- * (`agentmux-srv/operator-config-seed.json`, id `operator-config-rich-output`).
+ * (`crates/srv/operator-config-seed.json`, id `operator-config-rich-output`).
  */
 export const AM_SPAN_CLASSES = [
     "am-ok",

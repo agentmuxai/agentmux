@@ -257,7 +257,7 @@ pub fn close_window_by_label(
 /// outer top-level — without it, `SetWindowPos` would only shift the
 /// child within its parent, not move the outer floater.
 /// Class name of the floating-pane outer HWND
-/// (`agentmux-cef/src/floating_pane.rs::CLASS_NAME`). Kept in sync so
+/// (`crates/cef/src/floating_pane.rs::CLASS_NAME`). Kept in sync so
 /// `find_main_window` can EnumWindows-skip floaters when CEF Views
 /// hides the main window's HWND.
 // Use floater_class_name() (not a const) so both files agree on the

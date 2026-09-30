@@ -7,7 +7,7 @@
  * Pins the two contracts that are easy to break silently:
  * - the tray-icon toggle writes exactly `app:showtray` (on by default) and the
  *   background toggle exactly `app:runinbackground` (off by default) — the
- *   keys `agentmux-launcher/src/background_config.rs` reads before the app runs;
+ *   keys `crates/launcher/src/background_config.rs` reads before the app runs;
  * - start at login writes exactly `app:startatlogin` (the one property the
  *   tray's check item also writes, and the launcher applies to the OS login
  *   entry), is off by default, and a host/launcher that can't manage a login

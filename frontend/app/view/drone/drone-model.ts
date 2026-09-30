@@ -620,7 +620,7 @@ export class DroneViewModel {
 }
 
 /** Shape of one `dronerun:<id>` event payload as emitted by
- *  `agentmux-srv/src/drone/executor/engine.rs::RunEvent`
+ *  `crates/srv/src/drone/executor/engine.rs::RunEvent`
  *  (`#[serde(tag = "kind", rename_all = "snake_case")]`). */
 interface RunEventWire {
     kind:

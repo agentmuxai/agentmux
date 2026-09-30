@@ -40,7 +40,7 @@ export function removeMemberFromStack(data: TabLayoutData, blockId: string): boo
 /**
  * Add `blockId` to its leaf's stack in place (a leaf with no stack becomes a
  * two-member stack), optionally as the visible tab. Mirrors the backend's
- * `push_stack_member` (`agentmux-srv/src/backend/layout/mod.rs`), so a
+ * `push_stack_member` (`crates/srv/src/backend/layout/mod.rs`), so a
  * `stackpush` action from `CreateBlockInStack` lands the same way on both
  * sides. The caller commits the tree.
  * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
@@ -50,7 +50,7 @@ export function removeMemberFromStack(data: TabLayoutData, blockId: string): boo
  * (a plain append, then optionally activated there) — the cross-pane
  * counterpart to `moveMemberInStack`'s same-leaf reorder. Mirrors the
  * backend's cross-leaf branch of `move_stack_member`
- * (`agentmux-srv/src/backend/layout/mod.rs`): `remove_stack_member` +
+ * (`crates/srv/src/backend/layout/mod.rs`): `remove_stack_member` +
  * `push_stack_member`-style append, composed the same way.
  *
  * - `"moved"`: the source keeps at least one member.
@@ -96,7 +96,7 @@ export function addMemberToStack(data: TabLayoutData, blockId: string, activate:
 /**
  * Splice `blockId` to `position` relative to `targetBlockId` within the SAME
  * leaf's stack. Both must already be members. Mirrors the backend's
- * `reorder_within_leaf` (`agentmux-srv/src/backend/layout/mod.rs`) exactly,
+ * `reorder_within_leaf` (`crates/srv/src/backend/layout/mod.rs`) exactly,
  * including the one subtlety that makes this a distinct function rather than
  * a `removeMemberFromStack` + `addMemberToStack` composition: only touches
  * `blockId`/`activeBlockId` when `activate` is explicitly set — reordering
@@ -119,7 +119,7 @@ export function moveMemberInStack(
         // Not a real move — nothing to reorder against — but still honor
         // `activate` like every other branch below does. Mirrors the
         // backend's identical guard (`move_stack_member`,
-        // agentmux-srv/src/backend/layout/mod.rs) — ReAgent P2 on PR #3444:
+        // crates/srv/src/backend/layout/mod.rs) — ReAgent P2 on PR #3444:
         // without this, filtering `blockId` out of `members` below also
         // removes `targetBlockId` (same id), so `next.indexOf(targetBlockId)`
         // returns -1 and every position variant silently reorders the stack

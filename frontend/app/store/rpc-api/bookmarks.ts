@@ -4,7 +4,7 @@
 // Browser pane bookmarks — a global (shared_dir-backed) flat list, not
 // per-agent or per-channel. See
 // docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md and
-// agentmux-srv/src/server/app_api/bookmarks.rs.
+// crates/srv/src/server/app_api/bookmarks.rs.
 
 import { RpcClient } from "../rpc-client";
 import type { BookmarksResult } from "@/types/rpc/BookmarksResult";

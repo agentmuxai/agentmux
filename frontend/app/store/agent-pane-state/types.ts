@@ -581,7 +581,7 @@ export type AgentPaneCommand =
     /**
      * Reconciliation from `BlockControllerRuntimeStatus.turn_active`
      * (backend-verified, from the health monitor wired to the NDJSON
-     * stream — see `agentmux-srv/src/backend/blockcontroller/health.rs`),
+     * stream — see `crates/srv/src/backend/blockcontroller/health.rs`),
      * fetched via `GetControllerStatus` at mount AND dispatched on every
      * live `controllerstatus` MPS event thereafter (useControllerStatusEvents).
      * Bidirectional:

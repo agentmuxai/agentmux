@@ -10,7 +10,7 @@
 # The matching contract:
 #   - agentmux-cef sets xdg_toplevel.app_id = "agentmux-<channel>-<version>"
 #     via the WindowDelegate::linux_window_properties override
-#     (agentmux-cef/src/app/window_settings.rs::linux_app_id()).
+#     (crates/cef/src/app/window_settings.rs::linux_app_id()).
 #   - This script installs ~/.local/share/applications/<app-id>.desktop —
 #     basename and StartupWMClass both match that app_id.
 #   - The .desktop's Icon=agentmux references the shared icon installed

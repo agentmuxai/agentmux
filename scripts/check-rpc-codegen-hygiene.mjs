@@ -97,7 +97,7 @@ function serdeRenameWithoutTsRename() {
     const TS = /#\[ts\([^\]]*\brename\s*=/;
     const hits = [];
 
-    for (const f of walk("agentmux-srv/src", ".rs")) {
+    for (const f of walk("crates/srv/src", ".rs")) {
         const lines = fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n").split("\n");
         for (let i = 0; i < lines.length; i++) {
             if (!/^#\[derive\(.*\bts_rs::TS\b.*\)\]/.test(lines[i])) continue;
@@ -143,7 +143,7 @@ function serdeRenameWithoutTsRename() {
 // ---------------------------------------------------------------------------
 function typedHandlersHandSerializing() {
     const hits = [];
-    for (const f of walk("agentmux-srv/src/server", ".rs")) {
+    for (const f of walk("crates/srv/src/server", ".rs")) {
         const src = fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n");
         let idx = 0;
         while (true) {

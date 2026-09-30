@@ -9,7 +9,7 @@
  * because `agentmux-launcher` reads settings.json directly, before the
  * frontend exists, and "disabled" is the form that fail-safe read wants —
  * an unreadable or absent value must mean "show the splash"
- * (`agentmux-launcher/src/splash_config.rs`). A polarity slip here would
+ * (`crates/launcher/src/splash_config.rs`). A polarity slip here would
  * silently hide the splash for every user who ever opened Settings, so the
  * mapping is pinned in both directions.
  */

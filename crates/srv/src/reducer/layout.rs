@@ -1552,7 +1552,7 @@ mod tests {
     // same shape (lookup tab → mutate `tab.rootnode` via pure helper
     // → emit Event::Layout*); the unit tests below verify state
     // mutation and event shape per arm. The pure helpers themselves
-    // have their own ~40 tests in `agentmux-srv/src/backend/layout/`.
+    // have their own ~40 tests in `crates/srv/src/backend/layout/`.
 
     fn leaf_node(id: &str, block_id: &str) -> agentmux_common::LayoutNode {
         agentmux_common::LayoutNode {

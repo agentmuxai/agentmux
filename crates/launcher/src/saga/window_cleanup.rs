@@ -61,7 +61,7 @@
 // **CPD-3 update.** Both `IssueCmd::Host` actions
 // (`Command::ReapPanes` and `Command::DrainPoolIfLast`) are now LIVE:
 // the coordinator dispatches them through `HostPipe::send_command()`
-// (see `agentmux-launcher/src/saga/mod.rs::apply_action`). This saga
+// (see `crates/launcher/src/saga/mod.rs::apply_action`). This saga
 // also overrides `Saga::timeout()` to 30s (vs. 5s default) since
 // pane drain on a workspace with many panes can legitimately take
 // that long — see SPEC_CROSS_PROCESS_DISPATCH §3.10.

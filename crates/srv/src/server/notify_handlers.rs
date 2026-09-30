@@ -31,7 +31,7 @@ use super::AppState;
 /// `input_waiting` only; the router redacts it (§9.2).
 #[derive(serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub enum NotifyPaneEvent {
     /// Ignored since srv's controller status became the source of truth for
     /// turns (the renderer's reducer can report turn-ended mid-turn). Kept so
@@ -48,7 +48,7 @@ pub enum NotifyPaneEvent {
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyEmitParams {
     pub block_id: String,
     pub event: NotifyPaneEvent,
@@ -60,7 +60,7 @@ pub struct NotifyEmitParams {
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyFocusParams {
     pub window_focused: bool,
     #[ts(optional)]
@@ -71,14 +71,14 @@ pub struct NotifyFocusParams {
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyAckParams {
     pub id: String,
     pub clicked: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyAckResult {
     /// False when the click's window isn't open — an older launcher opens a
     /// window; the new one picks the pane up via `notify.takeactivation`.
@@ -97,7 +97,7 @@ pub struct NotifyAckResult {
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyTakeActivationParams {
     /// The asking window's workspace; only a click for that workspace is
     /// handed over.
@@ -107,7 +107,7 @@ pub struct NotifyTakeActivationParams {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyTakeActivationResult {
     #[ts(optional)]
     pub block_id: Option<String>,
@@ -116,23 +116,23 @@ pub struct NotifyTakeActivationResult {
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyNoArgs {}
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyOk {
     pub ok: bool,
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockRevealParams {
     pub block_id: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockRevealResult {
     /// The block exists and its workspace is open in a window, which was
     /// told to reveal it (`block:reveal`).

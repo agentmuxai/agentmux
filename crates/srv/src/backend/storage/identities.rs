@@ -38,7 +38,7 @@ use super::store::Store;
 /// `PlaintextDev` exists for local dev convenience and must never be
 /// the default path in production builds.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub enum SecretRef {
     Env {
@@ -115,7 +115,7 @@ pub enum SecretRef {
 /// `db_agent_identity_links` junction). Replaces the browser
 /// localStorage identity store.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct IdentityAccount {
     pub id: String,
     pub name: String,
@@ -191,7 +191,7 @@ fn repair_bare_backslashes(raw: &str) -> String {
 
 /// Junction row: which identity an agent uses for a given provider.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentIdentityLink {
     pub agent_id: String,
     pub account_id: String,

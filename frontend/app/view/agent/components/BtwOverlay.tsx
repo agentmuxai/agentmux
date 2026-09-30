@@ -66,7 +66,7 @@ export interface BtwOverlayProps {
 
 /**
  * `WpsEvent.BtwAnswerChunk` payload — mirrors `publish_chunk` in
- * `agentmux-srv/src/server/agent_handlers/side_question.rs`. See that
+ * `crates/srv/src/server/agent_handlers/side_question.rs`. See that
  * constant's doc comment (`mps-events.ts`) for the full contract.
  */
 interface BtwAnswerChunkPayload {

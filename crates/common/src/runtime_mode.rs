@@ -327,7 +327,7 @@ fn sanitize_clone_id(s: &str) -> String {
 }
 
 // Tiny FNV-1a-64 kept inline so agentmux-common doesn't have to depend
-// on agentmux-launcher. Matches `agentmux-launcher/src/hash.rs`
+// on agentmux-launcher. Matches `crates/launcher/src/hash.rs`
 // byte-for-byte so hashes are interchangeable.
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;

@@ -88,7 +88,7 @@ pub(crate) fn spawn_host_supervised(
         // this hand-off is from its real parent THIS run and adopt our srv.
         // Without it a Windows `task dev` host ignored the env hand-off and
         // spawned a second srv on the same data dir (#3868 follow-up). See
-        // agentmux-cef/src/lib.rs::launcher_is_genuine_parent.
+        // crates/cef/src/lib.rs::launcher_is_genuine_parent.
         .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
         .envs(host_env.iter().cloned())
         // Auto-start (issue #2977 WS2): translate the launcher's own
@@ -206,7 +206,7 @@ pub(crate) fn spawn_host_unix(
         // (it could be a stale value inherited from a parent agentmux pane);
         // this lets the host verify the hand-off is genuinely ours THIS run
         // and adopt our launcher-owned srv instead of double-spawning. See
-        // agentmux-cef/src/main.rs::launcher_is_genuine_parent.
+        // crates/cef/src/main.rs::launcher_is_genuine_parent.
         .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
         .envs(host_env.iter().cloned())
         // Auto-start (issue #2977 WS2) — same translation as the Windows
@@ -322,7 +322,7 @@ fn kill_process_group(child: &tokio::process::Child, signal: libc::c_int, signal
 
 /// SIGTERM an entire process group — gives a process that installs a signal
 /// handler (srv does: SIGINT/SIGTERM → `shell_sessions.stop_all()`,
-/// `agentmux-srv/src/main.rs`) a chance to run its own graceful shutdown
+/// `crates/srv/src/main.rs`) a chance to run its own graceful shutdown
 /// before the harder `kill_process_group_forcefully` follows. Matters
 /// specifically for srv: its tracked agent shells (`shell_node.rs`) are each
 /// spawned into THEIR OWN process group (`.process_group(0)`, same mechanism

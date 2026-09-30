@@ -10,9 +10,9 @@
 // tracked in the launcher's live in-memory `WindowMirror.last_rect` — gone
 // the moment the launcher process exits.
 //
-// `Window.pos`/`Window.winsize` (agentmux-srv/src/backend/obj.rs) already
+// `Window.pos`/`Window.winsize` (crates/srv/src/backend/obj.rs) already
 // existed as fields, and the `SetWindowPosAndSize` RPC
-// (agentmux-srv/src/server/service/window_mutate.rs) already existed to
+// (crates/srv/src/server/service/window_mutate.rs) already existed to
 // write them — this file is the first caller of that RPC.
 
 use std::collections::HashMap;

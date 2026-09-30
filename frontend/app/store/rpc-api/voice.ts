@@ -4,7 +4,7 @@
 // Settings -> Recording section: live existence check for the local
 // whisper.cpp CLI/model file paths. See
 // docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §3 and
-// agentmux-srv/src/server/app_api/voice.rs.
+// crates/srv/src/server/app_api/voice.rs.
 
 import { RpcClient } from "../rpc-client";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";

@@ -3,7 +3,7 @@
 // The pinned CLI version for each npm-installed provider lives in FOUR
 // places that must agree (the follow-up SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG
 // §"Single-source-of-truth" recommended and this test implements). A fifth,
-// the CEF host's own installer (`agentmux-cef/src/commands/providers.rs`
+// the CEF host's own installer (`crates/cef/src/commands/providers.rs`
 // CLAUDE_VERSION etc.), was removed on 2026-09-26 along with that unused
 // installer — srv's install.* commands are the only installer:
 //
@@ -11,7 +11,7 @@
 //      (re-exported as PROVIDERS via ./index — the module was a single
 //      index.ts at pin #4 below's time; split for readability 2026-07-xx,
 //      the pin moved but nothing re-audited references to the old path)
-//   2. agentmux-srv/src/backend/providers.rs        `pinned_version`
+//   2. crates/srv/src/backend/providers.rs        `pinned_version`
 //   3. .github/workflows/container-image.yml        `claude_version` default
 //      (claude only — the container image is a Claude agent image)
 //   4. docker/Dockerfile.agent-agentmux              `ARG CLAUDE_VERSION=`
@@ -68,7 +68,7 @@ function srvArgs(source: string, staticName: string, field: string): string[] | 
 }
 
 describe("CLI pin consistency across registries", () => {
-    const srvSource = read("agentmux-srv/src/backend/providers.rs");
+    const srvSource = read("crates/srv/src/backend/providers.rs");
 
     // provider key in PROVIDERS → srv static name
     const registries: Array<[keyof typeof PROVIDERS & string, string]> = [

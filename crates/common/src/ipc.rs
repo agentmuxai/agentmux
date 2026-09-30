@@ -753,7 +753,7 @@ pub enum Command {
     /// **Status: live.** Cross-process dispatch (CPD-1 through CPD-5)
     /// shipped; the saga coordinator's `apply_action` for
     /// `PipeTarget::Host` writes this command through `host_pipe`
-    /// (`agentmux-launcher/src/host_pipe/`) and waits on the
+    /// (`crates/launcher/src/host_pipe/`) and waits on the
     /// `Event::PoolWindowAdded { saga_id: Some(N) }` echo. Host's
     /// implicit `spawn_pool_window` call inside `promote_pool_window`
     /// remains the organic refill path for non-saga-driven
@@ -880,7 +880,7 @@ pub enum Command {
     /// the launcher into its `StartupEventSink` so it renders live in
     /// the splash telemetry panel — same stage/label shape as the
     /// launcher's own internal `saga`/`backend`/`host` stages
-    /// (`agentmux-launcher/src/startup_events.rs`), just sourced from
+    /// (`crates/launcher/src/startup_events.rs`), just sourced from
     /// inside the host process instead.
     ///
     /// The host can only send this AFTER `connect_to_launcher`

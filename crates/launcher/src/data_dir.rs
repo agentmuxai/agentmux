@@ -64,7 +64,7 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     // A portable/installed build launched from INSIDE another AgentMux pane
     // inherits the parent's AGENTMUX_CHANNEL + AGENTMUX_RUNTIME_MODE (the srv
     // sets AGENTMUX=1 and the full AGENTMUX_* path env for every pane shell —
-    // `agentmux-srv/.../blockcontroller/shell.rs`). Honoring that *leaked*
+    // `crates/srv/.../blockcontroller/shell.rs`). Honoring that *leaked*
     // channel makes the new build adopt the PARENT's data dir + cef-cache, so
     // Chromium's user-data-dir singleton forwards it into the parent and it exits
     // ("Opening in existing browser session", CEF exit 24) — the build you
@@ -84,7 +84,7 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     };
     // The launcher MUST use `resolve_path_only` (not `resolve`) whenever it
     // ignores the ambient channel — so AGENTMUX_CHANNEL is dropped symmetrically
-    // with the host's dev/nested branch in agentmux-cef/src/main.rs and
+    // with the host's dev/nested branch in crates/cef/src/main.rs and
     // sidecar.rs. Without this the launcher would honor a leaked `AGENTMUX_CHANNEL`
     // and write the lockfile + IPC files into `channels/<override>/runtime/`,
     // while the host (path-only) looks elsewhere — launcher/host disagreement on

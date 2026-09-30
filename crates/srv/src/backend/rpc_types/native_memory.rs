@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// Metadata for one `*.md` file in the agent's native memory folder.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryFileMeta {
     pub filename: String,
     /// True only for `MEMORY.md` (the Claude Code index file).
@@ -33,13 +33,13 @@ pub struct NativeMemoryFileMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryListData {
     pub agent_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryListResult {
     pub files: Vec<NativeMemoryFileMeta>,
     /// The folder was found by a guess (a blank working directory and no
@@ -51,14 +51,14 @@ pub struct NativeMemoryListResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryReadFileData {
     pub agent_id: String,
     pub filename: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryReadFileResult {
     pub content: String,
 }
@@ -112,7 +112,7 @@ fn default_detail() -> serde_json::Value {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryWriteFileData {
     pub agent_id: String,
     pub filename: String,
@@ -146,7 +146,7 @@ pub struct CommandNativeMemoryWriteFileData {
 /// directly) so the storage layer never needs a serde dependency just to
 /// satisfy an RPC wire shape.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryVersionMeta {
     pub id: String,
     pub content_hash: String,
@@ -164,7 +164,7 @@ pub struct NativeMemoryVersionMeta {
 /// the human "release this folder" action. Releasing goes through the
 /// host's confirmation window, not an RPC.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryClaimsData {
     pub agent_id: String,
 }
@@ -174,13 +174,13 @@ pub struct CommandNativeMemoryClaimsData {
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). Adopting one goes
 /// through the host's confirmation window, not an RPC.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryAdoptionListData {
     pub agent_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryAdoptionListResult {
     /// `None` until the agent has a verified memory folder (its first spawn,
     /// or a working directory).
@@ -188,14 +188,14 @@ pub struct NativeMemoryAdoptionListResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryHistoryData {
     pub agent_id: String,
     pub filename: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryHistoryResult {
     /// Newest first — matches `agent_native_memory_version_list`'s own
     /// ordering.
@@ -203,7 +203,7 @@ pub struct NativeMemoryHistoryResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryDiffData {
     /// reagent P1: required so the handler can verify BOTH versions belong
     /// to this agent before returning their content — unlike list/read/
@@ -217,7 +217,7 @@ pub struct CommandNativeMemoryDiffData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryDiffResult {
     /// A minimal line-based diff: one line per input line, prefixed `"  "`
     /// (context), `"- "` (removed, present in `from` only), or `"+ "`
@@ -226,7 +226,7 @@ pub struct NativeMemoryDiffResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryRevertData {
     pub agent_id: String,
     pub filename: String,
@@ -234,7 +234,7 @@ pub struct CommandNativeMemoryRevertData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NativeMemoryRevertResult {
     /// The newly created version (source `"revert"`) whose content now
     /// matches `target_version_id` — the prior latest version is left

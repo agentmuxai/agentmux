@@ -20,11 +20,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ALLOWED=(
-    "agentmux-srv/src/backend/name_resolution.rs"
-    "agentmux-srv/src/server/name_resolution.rs"
+    "crates/srv/src/backend/name_resolution.rs"
+    "crates/srv/src/server/name_resolution.rs"
 )
 
-violations=$(grep -rn --include='*.rs' 'resolve_name_to_uid' agentmux-srv agentmux-mcp agentmux-common agentmux-launcher agentmux-bashwrap 2>/dev/null \
+violations=$(grep -rn --include='*.rs' 'resolve_name_to_uid' crates/srv crates/mcp crates/common crates/launcher crates/bashwrap 2>/dev/null \
     | grep -v -F "${ALLOWED[0]}" \
     | grep -v -F "${ALLOWED[1]}" \
     || true)

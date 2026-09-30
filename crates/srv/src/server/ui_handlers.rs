@@ -5,7 +5,7 @@
 //! the browser-pane deep-control tools `BrowserNavigate` / `BrowserBack` /
 //! `BrowserForward` / `BrowserReload` / `BrowserEval` / `BrowserDispatchKey`
 //! / `BrowserFocusElement` / `BrowserFocusInfo`) — proxies to the paired CEF
-//! host's `/agentmux/browser/*` CDP routes (`agentmux-cef/src/browser_api/`).
+//! host's `/agentmux/browser/*` CDP routes (`crates/cef/src/browser_api/`).
 //! See docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md for the
 //! browser-pane tools' own design (they additionally require the caller's
 //! own pane to be a dedicated browser pane — enforced host-side, not here).

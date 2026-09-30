@@ -79,7 +79,7 @@ pub const PANE_ENV_KEEP: &[&str] = &[
 
 /// The nesting sentinel. Presence tells a launcher started from a pane to
 /// ignore ambient `AGENTMUX_*` and re-derive from its own exe path
-/// (`agentmux-launcher/src/data_dir.rs`).
+/// (`crates/launcher/src/data_dir.rs`).
 pub const NESTING_SENTINEL_KEY: &str = "AGENTMUX";
 
 /// Keys in *this process's* environment that must not cross into a pane.

@@ -26,6 +26,6 @@ docsite/
 test-results/
 backend-test/
 src-tauri/
-agentmux-cef/cef_binary/
-agentmux-cef/resources/
+crates/cef/cef_binary/
+crates/cef/resources/
 *.log

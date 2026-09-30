@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Same supportedOS manifest as the host (agentmux-cef/build.rs) — the launcher
+// Same supportedOS manifest as the host (crates/cef/build.rs) — the launcher
 // is the top-level exe and child processes can inherit OS-version behavior, so
 // keep both manifested to report the true Windows version. See the host
 // build.rs for the GPU-init rationale.
@@ -32,7 +32,7 @@ fn main() {
     // timestamp stamp. Tracking it here forces a recompile of agentmux-launcher
     // (only) when the label changes between local builds, so the baked
     // option_env!("AGENTMUX_BUILD_LABEL") in main.rs reflects the new stamp.
-    // We do NOT track this in agentmux-common/build.rs because common is a
+    // We do NOT track this in crates/common/build.rs because common is a
     // foundational crate — recompiling it every build destroys incremental caching.
     println!("cargo:rerun-if-env-changed=AGENTMUX_BUILD_LABEL");
 
@@ -44,7 +44,7 @@ fn main() {
         res.set("ProductName", "AgentMux");
         res.set("CompanyName", "AgentMux");
         res.set("InternalName", "agentmux-launcher");
-        let icon_path = std::path::Path::new("../agentmux-cef/resources/win/agentmux.ico");
+        let icon_path = std::path::Path::new("../cef/resources/win/agentmux.ico");
         if icon_path.exists() {
             res.set_icon(icon_path.to_str().unwrap());
         }

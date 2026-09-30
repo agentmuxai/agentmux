@@ -21,14 +21,14 @@ use serde::{Deserialize, Serialize};
 /// `skill.list`, `skill.catalog.list_for_agent` — everything scoped to one
 /// agent. Both are `check_s1`-gated on this field.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillAgentScopeData {
     pub agent_id: String,
 }
 
 /// `skill.get`, `skill.delete` — one skill row addressed within an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillAgentItemData {
     pub agent_id: String,
     pub id: String,
@@ -38,7 +38,7 @@ pub struct SkillAgentItemData {
 /// attach/detach a catalog skill to an agent. `skill_id` rather than `id`
 /// because the row being addressed is the skill, not the binding.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillAgentBindingData {
     pub agent_id: String,
     pub skill_id: String,
@@ -46,7 +46,7 @@ pub struct SkillAgentBindingData {
 
 /// `skill.catalog.bind_to_bundle`, `skill.catalog.unbind_from_bundle`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillBundleBindingData {
     pub bundle_id: String,
     pub skill_id: String,
@@ -54,14 +54,14 @@ pub struct SkillBundleBindingData {
 
 /// `skill.catalog.list_for_bundle`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillBundleScopeData {
     pub bundle_id: String,
 }
 
 /// `skill.catalog.delete` — window-scoped, so no agent or bundle key.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillCatalogItemData {
     pub id: String,
 }
@@ -71,7 +71,7 @@ pub struct SkillCatalogItemData {
 /// only from JSON `null`, so a unit Req would reject every real call while
 /// compiling and passing every CI gate (the `bookmarks.list` bug).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillCatalogListData {}
 
 fn default_skill_type() -> String {
@@ -94,7 +94,7 @@ fn default_skill_type() -> String {
 /// `default_skill_type` exists so an omitted `skill_type` becomes `"prompt"`,
 /// and the rest treat `""` as "not provided".
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandSkillUpsertData {
     pub agent_id: String,
     #[serde(default)]
@@ -113,7 +113,7 @@ pub struct CommandSkillUpsertData {
 /// `skill.catalog.upsert` — window-scoped, so no agent key. Same field rules as
 /// `CommandSkillUpsertData`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandSkillCatalogUpsertData {
     #[serde(default)]
     pub id: String,
@@ -130,7 +130,7 @@ pub struct CommandSkillCatalogUpsertData {
 
 /// `skill.catalog.upsert_for_bundle` — bundle-scoped. Same field rules again.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandSkillCatalogUpsertForBundleData {
     pub bundle_id: String,
     #[serde(default)]
@@ -152,7 +152,7 @@ pub struct CommandSkillCatalogUpsertForBundleData {
 /// `deleted` is false when no row with that id existed — the delete is
 /// idempotent, so this is "was something actually removed", not an error flag.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillDeleteResult {
     pub deleted: bool,
 }
@@ -162,7 +162,7 @@ pub struct SkillDeleteResult {
 /// real failure returns `Err`. The field is kept (rather than making these
 /// return nothing) because the frontend already reads it.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillBindResult {
     pub bound: bool,
 }
@@ -170,7 +170,7 @@ pub struct SkillBindResult {
 /// Result of the three unbind commands. Unlike `bound` above this one IS
 /// computed: false means there was no binding to remove.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillUnbindResult {
     pub unbound: bool,
 }

@@ -32,7 +32,7 @@ use crate::registry::RecordScope;
 
 /// A user-defined AI agent in the user's agent-definition catalog.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentDefinition {
     pub id: String,
     /// Stable, filesystem-safe identifier. Drives working directory,
@@ -287,7 +287,7 @@ pub struct InstanceUpdate {
 /// existing schema conventions (`NOT NULL DEFAULT ''`). Callers
 /// that need structured absence can use `.is_empty()`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentInstance {
     pub id: String,
     pub definition_id: String,
@@ -1174,7 +1174,7 @@ impl Store {
     /// always passes back `old.branch_label.clone()` unchanged, so it's a
     /// no-op for that caller. `renameagentdefinitiontitle` is the one
     /// deliberate exception that supplies a real change — see
-    /// `agentmux-srv/src/server/agent_handlers/template.rs` and
+    /// `crates/srv/src/server/agent_handlers/template.rs` and
     /// docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
     ///
     /// Self-stamps `updated_at` with the current time and writes it back into

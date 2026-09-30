@@ -127,7 +127,7 @@ Works identically across `task dev`, portable, and installed builds. Full refere
 
 ## Widgets
 
-Every widget is pinned by default — the widget bar shows the full set directly, collapsing to icon-only when the title bar is narrow. The canonical list is `agentmux-srv/src/config/widgets.json`.
+Every widget is pinned by default — the widget bar shows the full set directly, collapsing to icon-only when the title bar is narrow. The canonical list is `crates/srv/src/config/widgets.json`.
 
 | Widget | Icon | View | Description |
 |--------|------|------|-------------|

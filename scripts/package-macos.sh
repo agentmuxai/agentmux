@@ -25,7 +25,7 @@
 #   - CHANNEL  : local-<slug>-<branch-hash>-<build-id> — the data-dir key.
 #                PER-BUILD isolation, same scheme as Windows/Linux. Baked at
 #                compile time via AGENTMUX_BUILD_CHANNEL_DEFAULT (see
-#                agentmux-common/build.rs). Release DMGs use
+#                crates/common/build.rs). Release DMGs use
 #                RELEASE_CHANNEL=stable (task package:release:macos, and CI's
 #                build-macos.yml).
 #
@@ -135,7 +135,7 @@ echo "────────────────────────�
 # same reasoning as scripts/package.sh's identical note. Until then, prune
 # ~/.agentmux/channels/local-* manually.
 
-# Export BEFORE cargo builds — agentmux-common/build.rs reads this via
+# Export BEFORE cargo builds — crates/common/build.rs reads this via
 # option_env! and bakes it in; it declares rerun-if-env-changed so a changed
 # channel actually forces a recompile instead of serving a stale cache.
 export AGENTMUX_BUILD_CHANNEL_DEFAULT="$CHANNEL"
@@ -162,7 +162,7 @@ CERT="${MACOS_SIGN_CERT:-$(security find-identity -v -p codesigning 2>/dev/null 
 ENTITLEMENTS="$REPO_ROOT/build/entitlements.mac.plist"
 # Bundle id: ai.agentmux.<channel>.<version>
 # Channel matches AGENTMUX_BUILD_CHANNEL_DEFAULT compiled into the binaries
-# (agentmux-common/src/data_paths.rs), keeping OS identity and runtime channel
+# (crates/common/src/data_paths.rs), keeping OS identity and runtime channel
 # in sync. Version suffix makes every release a distinct macOS app, so
 # double-clicking any build works without needing `open -n`.
 # Sanitize channel to the bundle-id charset [A-Za-z0-9.-]; VERSION (semver) is
@@ -297,7 +297,7 @@ ditto "dist/Frameworks/Chromium Embedded Framework.framework" \
 # show a "Notifications may include alerts…" permission prompt on first launch
 # of every new version (dual-bundle registration — main app + Alerts helper each
 # prompt independently). With --disable-notifications in on_before_command_line_
-# processing (agentmux-cef/src/app.rs) CEF never spawns the Alerts helper, so
+# processing (crates/cef/src/app.rs) CEF never spawns the Alerts helper, so
 # omitting it from the bundle is safe and eliminates both prompts permanently.
 # See docs/retro/retro-macos-notification-double-prompt-regression-2026-06-22.md
 HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (GPU)" "AgentMux Helper (Plugin)" \

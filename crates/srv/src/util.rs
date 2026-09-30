@@ -31,7 +31,7 @@ pub fn open_browser(url: &str) {
         let mut cmd = std::process::Command::new("cmd");
         crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
         cmd.arg("/C").raw_arg(format!("start \"\" \"{url}\""));
-        // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
+        // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
         use agentmux_common::win32::CREATE_NO_WINDOW;
         cmd.creation_flags(CREATE_NO_WINDOW);
         let _ = cmd.spawn();
