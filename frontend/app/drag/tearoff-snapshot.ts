@@ -100,21 +100,28 @@ async function capturePane(rect: CssRect): Promise<string | null> {
     }
 }
 
+/** Scales tried, in order, for a viewport picture too large for the request. */
+const SHRINK_SCALES = [0.5, 0.35, 0.25];
+
 /**
  * The whole viewport, for a window-tab tear-off: the new window is the source
- * window's size, so the picture fills it as is. Halved if it wouldn't fit the
- * request that carries it.
+ * window's size, so the picture fills it as is. Shrunk step by step if it
+ * wouldn't fit the request that carries it; null if nothing fits.
  */
 async function captureWindow(): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
     if (jpeg_base64.length <= MAX_SNAPSHOT_CHARS) return jpeg_base64;
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
-        const w = Math.max(1, Math.round(full.width / 2));
-        const h = Math.max(1, Math.round(full.height / 2));
-        const canvas = new OffscreenCanvas(w, h);
-        canvas.getContext("2d")?.drawImage(full, 0, 0, w, h);
-        return await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }));
+        for (const scale of SHRINK_SCALES) {
+            const w = Math.max(1, Math.round(full.width * scale));
+            const h = Math.max(1, Math.round(full.height * scale));
+            const canvas = new OffscreenCanvas(w, h);
+            canvas.getContext("2d")?.drawImage(full, 0, 0, w, h);
+            const small = await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }));
+            if (small.length <= MAX_SNAPSHOT_CHARS) return small;
+        }
+        return null;
     } finally {
         full.close();
     }
