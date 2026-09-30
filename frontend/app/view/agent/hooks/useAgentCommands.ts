@@ -33,8 +33,7 @@ import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "../launch-args";
-import { hasBlockingForegroundToolCall } from "../activity/tool-adapter";
-import { paneBusyForInput } from "../working-indicator";
+import { busyInputFromState, paneBusyForInput } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
@@ -1226,15 +1225,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // subset of the predicate.
             const live = paneSnapshot(opts.blockId);
             if (
-                !paneBusyForInput({
-                    showingLaunchActivity: opts.showingLaunchActivity?.() ?? false,
-                    turnPhase: live?.turnPhase ?? { kind: "Idle" },
-                    compacting: live?.compacting ?? null,
-                    reconnecting: live?.reconnecting ?? null,
-                    hasAttachedBackgroundWork:
-                        live?.attachedTask != null || live?.registryAttachedTaskSince != null,
-                    hasBlockingForegroundToolCall: hasBlockingForegroundToolCall(opts.documentNodes()),
-                })
+                !paneBusyForInput(
+                    busyInputFromState(live, opts.documentNodes(), opts.showingLaunchActivity?.() ?? false),
+                )
             ) {
                 await flushHeldMessages();
             }
