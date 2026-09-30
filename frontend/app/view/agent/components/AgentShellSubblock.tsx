@@ -30,6 +30,7 @@ import { readText as clipboardReadText, writeText as clipboardWriteText } from "
 import { handleShellDrawerKeydown } from "./shell-drawer-keys";
 import { buildShellDrawerClipboardItems, type ShellDrawerMenuDeps } from "./shell-drawer-menu";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { readZoom } from "@/app/store/zoom-factor";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
 // is-fading transition duration — keep in sync if either changes.
@@ -162,11 +163,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         return id ? MOS.getMuxObjectAtom<Block>(`block:${id}`) : null;
     });
 
-    const termZoom = createMemo(() => {
-        const z = subBlockAtom()?.()?.meta?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
+    const termZoom = createMemo(() => readZoom(subBlockAtom()?.()?.meta));
 
     // Agent-lock gating (SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md):
     // while an agent is actively driving THIS shell via PtyShellInput/

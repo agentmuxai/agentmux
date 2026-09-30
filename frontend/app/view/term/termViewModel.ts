@@ -37,6 +37,7 @@ import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
 import { basicTermModels, termModels } from "./term-models";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
+import { readZoom } from "@/app/store/zoom-factor";
 
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
  *  term.tsx). */
@@ -230,12 +231,7 @@ class TermViewModel {
             return connAtom();
         });
 
-        this.termZoomAtom = createMemo<number>(() => {
-            const zoomFactor = this.meta()?.["term:zoom"];
-            if (zoomFactor == null) return 1.0;
-            if (typeof zoomFactor !== "number" || isNaN(zoomFactor)) return 1.0;
-            return Math.max(0.5, Math.min(2.0, zoomFactor));
-        });
+        this.termZoomAtom = createMemo<number>(() => readZoom(this.meta()));
 
         this.fontSizeAtom = createMemo<number>(() => {
             const meta = this.meta();

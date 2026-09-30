@@ -60,6 +60,7 @@ import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
 import { openPendingFiles } from "./pending-open-files";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
+import { readZoom } from "@/app/store/zoom-factor";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -410,11 +411,7 @@ export class EditorViewModel {
         // createRoot under the hood) — a bare createMemo here wouldn't have
         // a tracking owner and would snapshot once.
         this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
-            createMemo<number>(() => {
-                const z = this.meta()?.["term:zoom"];
-                if (typeof z !== "number" || isNaN(z)) return 1.0;
-                return Math.max(0.5, Math.min(2.0, z));
-            }),
+            createMemo<number>(() => readZoom(this.meta())),
         );
 
         // Pane title — full file path of active tab, with `*` for dirty.

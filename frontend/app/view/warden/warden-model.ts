@@ -3,6 +3,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, type Accessor } from "solid-js";
+import { readZoom } from "@/app/store/zoom-factor";
 
 export type WardenSection = "host" | "lan" | "internet" | "audit" | "supervisor";
 
@@ -47,11 +48,7 @@ export class WardenViewModel {
         this.blockId = ctx.blockId;
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
-        this.zoomAtom = createMemo<number>(() => {
-            const z = meta()?.["term:zoom"];
-            if (typeof z !== "number" || isNaN(z)) return 1.0;
-            return Math.max(0.5, Math.min(2.0, z));
-        });
+        this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<WardenSection>(() => {
             const s = meta()?.["warden:section"];
             return isWardenSection(s) ? s : "host";
