@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use axum::{
     body::Body,
     extract::{Path as AxumPath, Query, State},
-    http::StatusCode,
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
 };
 use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::backend::base::expand_home_dir_safe;
 use crate::backend::{docsite, schema};
@@ -196,8 +197,12 @@ fn mime_from_path(path: &std::path::Path) -> &'static str {
 /// this route isn't a stricter one-off next to an already-shipped read path
 /// with the same shape. Size-capped (see `STREAM_LOCAL_FILE_MAX_BYTES`)
 /// rather than truly unbounded.
+///
+/// Honours a single `Range` (`206 Partial Content`), so a `<video>` poster can
+/// read just the start of a file.
 pub(super) async fn handle_stream_local_file(
     Query(params): Query<LocalFileQueryParams>,
+    headers: HeaderMap,
 ) -> Response {
     let raw_path = match &params.path {
         Some(p) if !p.is_empty() => p.as_str(),
@@ -244,7 +249,21 @@ pub(super) async fn handle_stream_local_file(
             .into_response();
     }
 
-    let file = match tokio::fs::File::open(path).await {
+    let total = metadata.len();
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map_or(ByteRange::Full, |h| parse_byte_range(h, total));
+    if range == ByteRange::Unsatisfiable {
+        return Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+            .header(header::ACCEPT_RANGES, "bytes")
+            .body(Body::empty())
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
+    let mut file = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         Err(e) => {
             return (
@@ -254,11 +273,178 @@ pub(super) async fn handle_stream_local_file(
                 .into_response()
         }
     };
-    let stream = tokio_util::io::ReaderStream::new(file);
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", mime_from_path(path))
-        .header("Content-Length", metadata.len().to_string())
-        .body(Body::from_stream(stream))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    let builder = Response::builder()
+        .header(header::CONTENT_TYPE, mime_from_path(path))
+        .header(header::ACCEPT_RANGES, "bytes");
+    let response = match range {
+        // Only the requested bytes: seek, then cap the streamed read. Lets a
+        // <video> poster read a file's first bytes without fetching all of it
+        // (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §5).
+        ByteRange::Partial(start, end) => {
+            if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("stream-local-file: {e}")})),
+                )
+                    .into_response();
+            }
+            let len = end - start + 1;
+            builder
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"))
+                .header(header::CONTENT_LENGTH, len.to_string())
+                .body(Body::from_stream(tokio_util::io::ReaderStream::new(file.take(len))))
+        }
+        _ => builder
+            .status(StatusCode::OK)
+            .header(header::CONTENT_LENGTH, total.to_string())
+            .body(Body::from_stream(tokio_util::io::ReaderStream::new(file))),
+    };
+    response.unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// A request's `Range`, resolved against the file's size.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ByteRange {
+    /// No usable range: serve the whole file (`200`).
+    Full,
+    /// Inclusive byte offsets, both within the file (`206`).
+    Partial(u64, u64),
+    /// A valid range that starts past the end (`416`).
+    Unsatisfiable,
+}
+
+/// Parses a single `bytes=` range (`a-b`, `a-`, or the suffix form `-n`).
+/// Anything this doesn't understand — another unit, several ranges, `b < a`,
+/// junk — serves the whole file, which RFC 9110 §14.2 allows a server to do
+/// for any `Range` it chooses to ignore.
+pub(super) fn parse_byte_range(header: &str, total: u64) -> ByteRange {
+    let Some(spec) = header.trim().strip_prefix("bytes=") else {
+        return ByteRange::Full;
+    };
+    if spec.contains(',') {
+        return ByteRange::Full;
+    }
+    let Some((a, b)) = spec.split_once('-') else {
+        return ByteRange::Full;
+    };
+    let (a, b) = (a.trim(), b.trim());
+    if a.is_empty() {
+        let Ok(n) = b.parse::<u64>() else {
+            return ByteRange::Full;
+        };
+        if n == 0 || total == 0 {
+            return ByteRange::Unsatisfiable;
+        }
+        return ByteRange::Partial(total.saturating_sub(n), total - 1);
+    }
+    let Ok(start) = a.parse::<u64>() else {
+        return ByteRange::Full;
+    };
+    let end = if b.is_empty() {
+        None
+    } else {
+        match b.parse::<u64>() {
+            Ok(e) if e >= start => Some(e),
+            _ => return ByteRange::Full,
+        }
+    };
+    if start >= total {
+        return ByteRange::Unsatisfiable;
+    }
+    ByteRange::Partial(start, end.map_or(total - 1, |e| e.min(total - 1)))
+}
+
+#[cfg(test)]
+mod stream_local_file_range_tests {
+    use super::*;
+    use axum::http::{header, HeaderMap, HeaderValue};
+
+    // ── parse_byte_range ────────────────────────────────────────────────
+
+    #[test]
+    fn a_closed_range_is_partial() {
+        assert_eq!(parse_byte_range("bytes=0-99", 1000), ByteRange::Partial(0, 99));
+        assert_eq!(parse_byte_range("bytes=100-199", 1000), ByteRange::Partial(100, 199));
+    }
+
+    #[test]
+    fn an_end_past_the_file_is_clamped() {
+        assert_eq!(parse_byte_range("bytes=900-5000", 1000), ByteRange::Partial(900, 999));
+    }
+
+    #[test]
+    fn an_open_range_runs_to_the_end() {
+        assert_eq!(parse_byte_range("bytes=500-", 1000), ByteRange::Partial(500, 999));
+    }
+
+    #[test]
+    fn a_suffix_range_is_the_last_n_bytes() {
+        assert_eq!(parse_byte_range("bytes=-100", 1000), ByteRange::Partial(900, 999));
+        assert_eq!(parse_byte_range("bytes=-5000", 1000), ByteRange::Partial(0, 999));
+    }
+
+    #[test]
+    fn a_start_past_the_end_is_unsatisfiable() {
+        assert_eq!(parse_byte_range("bytes=1000-", 1000), ByteRange::Unsatisfiable);
+        assert_eq!(parse_byte_range("bytes=0-0", 0), ByteRange::Unsatisfiable);
+        assert_eq!(parse_byte_range("bytes=-0", 1000), ByteRange::Unsatisfiable);
+    }
+
+    #[test]
+    fn anything_else_serves_the_whole_file() {
+        for h in ["bytes=5-2", "bytes=abc-", "items=0-1", "bytes=0-1,5-9", "bytes=-", ""] {
+            assert_eq!(parse_byte_range(h, 1000), ByteRange::Full, "{h:?}");
+        }
+    }
+
+    // ── handler ─────────────────────────────────────────────────────────
+
+    fn file_with(bytes: &[u8]) -> tempfile::NamedTempFile {
+        let f = tempfile::Builder::new().suffix(".webm").tempfile().unwrap();
+        std::fs::write(f.path(), bytes).unwrap();
+        f
+    }
+
+    async fn get(path: &std::path::Path, range: Option<&str>) -> (StatusCode, HeaderMap, Vec<u8>) {
+        let mut headers = HeaderMap::new();
+        if let Some(r) = range {
+            headers.insert(header::RANGE, HeaderValue::from_str(r).unwrap());
+        }
+        let params = LocalFileQueryParams { path: Some(path.to_string_lossy().into_owned()) };
+        let resp = handle_stream_local_file(Query(params), headers).await;
+        let status = resp.status();
+        let hdrs = resp.headers().clone();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
+        (status, hdrs, body)
+    }
+
+    #[tokio::test]
+    async fn no_range_serves_the_whole_file_and_advertises_ranges() {
+        let f = file_with(b"0123456789");
+        let (status, h, body) = get(f.path(), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"0123456789");
+        assert_eq!(h[header::ACCEPT_RANGES], "bytes");
+        assert_eq!(h[header::CONTENT_LENGTH], "10");
+    }
+
+    #[tokio::test]
+    async fn a_range_returns_206_with_just_those_bytes() {
+        let f = file_with(b"0123456789");
+        let (status, h, body) = get(f.path(), Some("bytes=2-5")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"2345");
+        assert_eq!(h[header::CONTENT_RANGE], "bytes 2-5/10");
+        assert_eq!(h[header::CONTENT_LENGTH], "4");
+        assert_eq!(h[header::CONTENT_TYPE], "video/webm");
+    }
+
+    #[tokio::test]
+    async fn an_unsatisfiable_range_is_416_with_the_size() {
+        let f = file_with(b"0123456789");
+        let (status, h, _) = get(f.path(), Some("bytes=50-")).await;
+        assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(h[header::CONTENT_RANGE], "bytes */10");
+    }
 }

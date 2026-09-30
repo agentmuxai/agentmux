@@ -11,6 +11,8 @@
  */
 
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ fetch: vi.fn(), createBlock: vi.fn(async () => "b") }));
@@ -193,5 +195,19 @@ describe("remote media", () => {
         expect(a?.getAttribute("href")).toBe("https://example.com/demo.mp4");
         expect(c.querySelector("video, audio, img, .am-media-chip")).toBeNull();
         expect(h.fetch).not.toHaveBeenCalled();
+    });
+});
+
+describe("Operator Config tells agents about video and audio", () => {
+    const manifest = JSON.parse(
+        readFileSync(join(__dirname, "../../../crates/srv/operator-config-seed.json"), "utf8"),
+    ) as { version: number; entries: { id: string; instructions: string }[] };
+    const entry = manifest.entries.find((e) => e.id === "operator-config-rich-output")!;
+
+    it("describes them, in a newer manifest generation than P3's", () => {
+        expect(manifest.version).toBeGreaterThanOrEqual(5);
+        // WebM in the example: H.264 MP4 needs the proprietary-codec CEF build.
+        expect(entry.instructions).toMatch(/!\[[^\]]*\]\([^)]*\.(mp4|webm)\)/);
+        expect(entry.instructions).toContain(".wav");
     });
 });
