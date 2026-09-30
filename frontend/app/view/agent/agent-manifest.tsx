@@ -4,7 +4,8 @@
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { AgentViewModel } from "./agent-model";
 import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "./agent-pane-tab";
-import { AgentBlockContent, buildAgentPaneChromeModel } from "./agent-view";
+import { AgentBlockContent } from "./agent-block-content";
+import { buildAgentPaneChromeModel } from "./agent-pane-chrome-model";
 
 /**
  * The agent as a native pane tab (Pane Tab contract Phase 2c). In its own

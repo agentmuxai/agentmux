@@ -12,7 +12,11 @@
  * Paths are relative to this directory. The split plan is
  * docs/specs/SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.4.
  */
-export const AGENT_VIEW_SOURCES: readonly string[] = ["agent-view.tsx"];
+export const AGENT_VIEW_SOURCES: readonly string[] = [
+    "agent-view.tsx",
+    "agent-block-content.tsx",
+    "agent-pane-chrome-model.ts",
+];
 
 /**
  * Line cap for `agent-view.tsx` itself (`agent-view-size.test.ts`). The file
@@ -20,4 +24,4 @@ export const AGENT_VIEW_SOURCES: readonly string[] = ["agent-view.tsx"];
  * nothing stopped it. Lower this whenever an extraction shrinks the file;
  * raising it needs a reason in the PR.
  */
-export const AGENT_VIEW_MAX_LINES = 2992;
+export const AGENT_VIEW_MAX_LINES = 2662;

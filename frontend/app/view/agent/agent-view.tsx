@@ -1,7 +1,6 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { revealBlockLocally } from "@/app/util/reveal-block";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import {
     snapshot as layoutSnapshot,
@@ -27,7 +26,6 @@ import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { accountPickerItems, planBind, type BindMode } from "./failure/account-picker";
 import {
-    atoms,
     getApi,
     getBlockMetaKeyAtom,
     getSettingsKeyAtom,
@@ -51,13 +49,7 @@ import {
 } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
-import {
-    setActiveBlockInStack,
-    type NodeModel,
-} from "@/layout/index";
-import { findNode } from "@/layout/lib/layoutNode";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { sleep } from "@/util/util";
@@ -86,7 +78,6 @@ import { quickForkAgent } from "./quick-fork";
 import { isBangCommand } from "./bang-command";
 import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
-import { agentModels } from "./agent-models";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
@@ -98,7 +89,6 @@ import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentAuthPanel, AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
-import { AgentPicker, useOpenDefinitionMap } from "./components/AgentPicker";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentShellSubblock } from "./components/AgentShellSubblock";
@@ -111,8 +101,6 @@ import { AgentStashModal } from "./components/AgentStashModal";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
-import { useForkSet } from "./fork/useForkSet";
-import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
 import { useActivityLog } from "./hooks/useActivityLog";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
@@ -142,8 +130,7 @@ import { liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "./live-fe
 import { userIsInteracting } from "./stream-scheduler";
 import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
 import { useResumePreflight } from "./hooks/useResumePreflight";
-import { closeAgentTab } from "./close-agent-tab";
-import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
+import { openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -152,12 +139,6 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "./open-trace";
-
-// Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
-// the AgentPicker->AgentPresentationView cross-fade (AgentBlockContent,
-// below) reuses the same visual timing so the two fades feel like one brand
-// moment rather than two differently-tuned animations back to back.
-const PICKER_FADE_OUT_MS = 200;
 
 // Shell drawer's height until the user drags it (then `term:shellheight`
 // wins). 80% of the drawers' shared 220px default — the shell opens on its
@@ -195,322 +176,11 @@ const sanitizeLogTextForTerminal = (text: string): string => {
     return withoutAnsi.replace(/\n/g, "\r\n");
 };
 
-/**
- * Content half of the agent pane — becomes `AgentViewModel.viewComponent`.
- * Switches between the agent picker and the live presentation view (or the
- * read-only history reader). Constructed fresh per stack member, exactly
- * like every other `viewComponent` — the "one instance, one immutable
- * blockId for its lifetime" `ViewModel` contract is unchanged here.
- *
- * The pane-scope `<ModalLayer>` wrap lives HERE, not in `AgentPaneChrome`.
- * Chrome does now mount for every agent pane, so this is no longer
- * load-bearing the way it was when chrome was stack-size-gated — but it
- * stays here deliberately: the launch picker (`useModalLayer()`, opened
- * before any agentId exists) belongs to CONTENT, so wrapping at the content
- * root keeps the layer's lifetime tied to the thing that opens modals
- * rather than to chrome. Wrapping here covers both the
- * pre-launch picker AND the post-launch presentation view, and (once
- * `AgentPaneChrome` does mount) sits inside it, so the pane-scope lock
- * still holds across the entire pane lifecycle either way.
- * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
- */
-export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Element => {
-    const block = model.blockAtom;
-    const agentId = () => block()?.meta?.["agentId"];
-    // A block opened as a read-only history reader (openOrFocusHistoryTab)
-    // — takes priority over the live/picker gate below, and never toggles
-    // back: closing this reading posture is closing the tab, not swapping
-    // content in place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
-    const isHistoryTab = () => !!block()?.meta?.[HISTORY_TAB_FOR_META_KEY];
-
-    // Cross-fade AgentPicker -> AgentPresentationView instead of an instant
-    // hard cut when this SAME block gains an agentId in place (launching an
-    // agent from a blank "+" tab's picker — no block-stack mutation, no
-    // node remount, so PR #2761's leaf reveal gate never covers this
-    // transition at all). SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
-    // §2.3/§4 Option B.
-    //
-    // Same stuck-visible race as block.tsx's ready()-gate (see
-    // docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md):
-    // seeding `pickerVisible` from `!agentId()` read once at construction,
-    // then relying on `on(agentId, ..., {defer: true})`'s first (swallowed)
-    // run to treat "agentId already set" as "nothing to do," is two
-    // different reads of `agentId()` taken at two different times. If
-    // `agentId()` resolves in the gap between them, the seed is never
-    // corrected. Fixed the same way: the first observation and the seed
-    // are now the same read, inside the same effect.
-    const [pickerVisible, setPickerVisible] = createSignal(true);
-    const [pickerFadingOut, setPickerFadingOut] = createSignal(false);
-    let pickerFadeRaf: number | undefined;
-    let pickerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
-    let pickerGateInitialized = false;
-    onCleanup(() => {
-        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
-        clearTimeout(pickerFadeTimeout);
-    });
-    createEffect(() => {
-        const id = agentId();
-        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
-        clearTimeout(pickerFadeTimeout);
-        if (!pickerGateInitialized) {
-            // First observation of `agentId()` for this mount: reflect it
-            // directly, no fade — there's nothing painted yet to fade from
-            // either way.
-            pickerGateInitialized = true;
-            setPickerVisible(!id);
-            setPickerFadingOut(false);
-            return;
-        }
-        if (id) {
-            if (!pickerVisible()) return; // already past the transition
-            // One rAF so the picker paints at full opacity at least once
-            // before the fade starts — flipping straight to the
-            // "is-fading" class in this same tick would apply opacity:0
-            // on the very first paint, with nothing to visibly transition
-            // from.
-            pickerFadeRaf = requestAnimationFrame(() => setPickerFadingOut(true));
-            pickerFadeTimeout = setTimeout(() => {
-                setPickerVisible(false);
-                setPickerFadingOut(false);
-            }, PICKER_FADE_OUT_MS);
-        } else {
-            // Lost the agentId (not a normal path, but stay correct) —
-            // show the picker again immediately, no fade needed going
-            // this direction.
-            setPickerFadingOut(false);
-            setPickerVisible(true);
-        }
-    });
-
-    // ReAgent P2 on SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's
-    // PR: owned by the model (one useAgentDefinitions() subscription per
-    // ViewModel instance) instead of a fresh call here, so AgentPaneChrome
-    // can read the SAME list via nodeModel.activeViewModel() instead of
-    // independently subscribing a second time — see AgentViewModel.agentDefinitions'
-    // own doc comment (agent-model.ts).
-    const agentDefinitions = model.agentDefinitions;
-
-    return (
-        <ModalLayer scope="pane">
-            <Show
-                when={isHistoryTab()}
-                fallback={
-                    <>
-                        <Show when={agentId()}>
-                            <AgentPresentationView
-                                model={model}
-                                agentId={agentId()}
-                                agentDefinitions={agentDefinitions}
-                                progressBarMount={model.progressBarMount}
-                            />
-                        </Show>
-                        {/* Cross-fades out on top of AgentPresentationView
-                            once agentId() is set, instead of the two Shows
-                            above hard-swapping instantly — see
-                            pickerVisible/pickerFadingOut above.
-                            SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3. */}
-                        <Show when={pickerVisible()}>
-                            <div
-                                class="agent-picker-host"
-                                classList={{
-                                    // Applied the instant agentId() is set
-                                    // (same render as AgentPresentationView
-                                    // appearing) so this never sits in
-                                    // normal flow alongside it, even for
-                                    // one frame.
-                                    "is-overlay": !!agentId(),
-                                    "is-fading": pickerFadingOut(),
-                                    "is-reduced-motion": atoms.prefersReducedMotionAtom(),
-                                }}
-                            >
-                                <AgentPicker model={model} />
-                            </div>
-                        </Show>
-                    </>
-                }
-            >
-                {/* No progressBarMount here — a history tab is a read-only
-                    reader with no live turn/working state of its own, so
-                    there's nothing for a progress bar to represent. */}
-                <AgentHistoryTabView model={model} />
-            </Show>
-        </ModalLayer>
-    );
-};
-
-AgentBlockContent.displayName = "AgentBlockContent";
-
-/**
- * Chrome half of the agent pane — the header, tab strip and progress-bar
- * slot, rendered by the shared `renderPaneChromeShell` (pane-leaf-chrome.tsx's
- * fallback when a view supplies no `renderPaneChrome`) for EVERY agent pane
- * (see `pane-leaf-chrome.tsx`'s `hoisted` memo for why gating this on stack
- * size was a catch-22), wrapping whichever `AgentBlockContent` instance is
- * currently the active stack member's own switch-scoped `<Block>`
- * (`content` prop, supplied by `pane-leaf-chrome.tsx`). Unlike `AgentBlockContent`, this component is
- * constructed ONCE per leaf and stays mounted across every subsequent
- * switch — that persistence is the entire point of this file's split
- * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`).
- *
- * `anchorBlockId` is the blockId of whichever stack member's `ViewModel`
- * FIRST called `renderPaneChrome` — frozen for this component's entire
- * lifetime, the same "one instance, one immutable blockId" contract every
- * other `ViewModel`/`NodeModel` consumer already follows. It is NOT used to
- * resolve the owning `LayoutNode`, though — ReAgent P0 on #3136:
- * `anchorBlockId` can itself be closed by the user (removed from
- * `blockStack` by `closeBlockInStack`'s `filter`), and chrome never unmounts
- * to recover — a `getNodeByBlockId(anchorBlockId)` lookup that outlives that
- * tab's closure would return `null` forever after, breaking the whole tab
- * strip. Node resolution uses `nodeModel.nodeId` instead
- * (`getOwnNode`, below) — the leaf's own id, stable regardless of which
- * stack members come and go.
- */
-/**
- * Agent's opt-in to the ONE shared pane chrome
- * (`renderPaneChromeShell`) — see `PaneChromeModel` (custom.d.ts).
- * Everything the old `AgentPaneChrome` component rendered around the
- * content (root box, focus ring, header row, ErrorBoundary) is the shared
- * chrome's job now; what stays here is only what is genuinely agent's:
- * its tab model (fork lineage merged with this pane's own stack, rename,
- * per-pane zoom) and the below-header slot its turn-progress bar portals
- * into. That slot is a generic capability — any view type can take it.
- */
-export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
-    // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()` — see that
-    // field's own doc comment (layout/lib/types.ts) and
-    // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md: this pane's
-    // own tab is not necessarily "whichever tab is globally active right
-    // now" at the moment chrome first constructs (e.g. a brand-new tab's
-    // default agent pane, seeded by `applyTabPreset` before `setActiveTab`
-    // ever runs).
-    const layoutModel = nodeModel.layoutModel;
-
-    // ReAgent P0 on this PR: resolving the owning node via
-    // layoutModel.getNodeByBlockId(anchorBlockId) — anchorBlockId's own
-    // originating tab — breaks permanently the moment the user closes THAT
-    // specific tab: closeBlockInStack removes a closed member from
-    // blockStack via filter, so getNodeByBlockId(anchorBlockId) would
-    // return null forever after (chrome never unmounts to recover once
-    // mounted). The leaf's own nodeId
-    // (NodeModel.nodeId) is stable regardless of which stack members come
-    // and go — resolve on that instead, everywhere in this component.
-    const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
-
-    // Reads the SAME reactive field `pane-leaf-chrome.tsx`'s inner `<Key>`
-    // is keyed on — see NodeModel.activeBlockId's own doc comment
-    // (layout/lib/types.ts).
-    const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
-
-    // Block-scoped reads (agentId) must track the
-    // CURRENTLY ACTIVE member, not `anchorBlockId` (frozen to whichever
-    // ViewModel instance first rendered this chrome) — getMuxObjectAtom
-    // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
-    // PR #3134 already established for BlockFrame_Header
-    // (frontend/app/store/mos.ts's own doc comments explain why).
-    const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
-    const agentId = () => activeBlockData()?.meta?.["agentId"];
-
-    // Fork tabs: conversations sharing this one's `parent_id` lineage that
-    // are open in ANOTHER top-level pane, shown as extra pills (PaneChrome
-    // dedupes them against this pane's own stack) so cross-pane
-    // fork-switching keeps working.
-    const [openDefinitions] = useOpenDefinitionMap();
-    // ReAgent P2: reads the active tab's OWN agentDefinitions
-    // (agent-model.ts) instead of calling useAgentDefinitions() again here
-    // — that would be a second, independent RPC + agents:changed
-    // subscription for the same pane, on top of the one AgentBlockContent
-    // already owns. Found by block id (agent-models.ts): the host's view
-    // model is only an adapter once the agent is a native pane tab.
-    const forks = useForkSet({
-        definitions: () => agentModels.get(activeBlockId())?.agentDefinitions() ?? [],
-        openBlockByDef: openDefinitions,
-        activeDefinitionId: () => agentId() ?? "",
-    });
-    // Same "switchable" filter AgentPresentationView used to apply: a fork
-    // with no open blockId anywhere can't be jumped to, so it isn't offered.
-    const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
-
-    // Forks open in ANOTHER pane appear as extra pills after this pane's own
-    // stack members, labeled with their branch/definition title.
-    const extraTabs = () =>
-        switchableForks()
-            .filter((f) => !!f.blockId)
-            .map((f) => ({ blockId: f.blockId!, label: f.title }));
-
-    // Activating a tab has two cases, both "switch," neither "create": (1)
-    // the target block already lives in THIS pane's own block-stack — swap
-    // the active member in place; (2) a fork open as its own separate
-    // top-level pane — reveal it via revealBlockLocally, same as the
-    // picker's "Switch to existing" flow already does.
-    const handleTabSwitch = (targetBlockId: string) => {
-        if (targetBlockId === activeBlockId()) return;
-        const node = getOwnNode();
-        if (!node) return;
-        const stack = node.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
-        if (stack.includes(targetBlockId)) {
-            // No reveal gate: reaching this branch at all requires
-            // node.data.blockStack.length > 1 (otherwise `stack` above is
-            // just [activeBlockId()], and targetBlockId !== activeBlockId()
-            // already ruled out targetBlockId matching it) — the
-            // precondition for a second pill to exist to click at all.
-            // AgentPaneChrome is mounted for the whole pane's life and
-            // never remounts on a switch, so there is nothing for a gate to
-            // hide: only the inner <Block> rebuilds, and that is already
-            // covered by its own ready-gate cross-fade.
-            // See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
-            setActiveBlockInStack(layoutModel, node.id, targetBlockId);
-        } else {
-            // Another pane — switch it to the fork if it's a background tab
-            // there (refocusNode only focused the pane).
-            void revealBlockLocally(targetBlockId);
-        }
-    };
-    // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
-    // closeAgentTab resolves the block's OWNING node — for a stack member
-    // that's this pane, for a cross-pane fork tab it's that other pane — and
-    // closes it like closeBlockInStack does (pop it out and activate the
-    // neighbor; last member closes the pane), with one exception: the last
-    // tab of THIS pane holding a loaded agent is swapped for a fresh My
-    // Agents tab instead of closing the pane
-    // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §2).
-    //
-    // No reveal gate on the ordinary close paths — same reasoning as
-    // handleTabSwitch: that node's own AgentPaneChrome (if it's an agent
-    // pane) is mounted for the pane's whole life and never remounts on a
-    // switch, so a gate would only hide content already covered by its own
-    // ready-gate cross-fade. See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
-    // The picker swap holds its own gate (see close-agent-tab.ts).
-    const handleTabClose = (targetBlockId: string) => {
-        void closeAgentTab({ layoutModel, ownNodeId: nodeModel.nodeId, blockId: targetBlockId });
-    };
-    // No progress-bar slot here: the shared chrome renders it on every pane
-    // and hands it to whichever view model is active (PaneChrome.tsx), so an
-    // agent tab in a pane that started as another view type gets it too.
-    return {
-        extraTabs,
-        // Both return true ("handled"): an agent tab may live in a
-        // DIFFERENT pane (a fork open as its own top-level pane), so
-        // activating/closing it isn't necessarily this pane's own stack
-        // operation — handleTabSwitch/handleTabClose resolve the owning
-        // node themselves.
-        onActivate: (id: string) => {
-            handleTabSwitch(id);
-            return true;
-        },
-        onClose: (id: string) => {
-            handleTabClose(id);
-            return true;
-        },
-        rootClass: "agent-pane-stack",
-        contentClass: "agent-pane-stack-content",
-    };
-}
-
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
 
-const AgentPresentationView = ({
+export const AgentPresentationView = ({
     model,
     agentId,
     agentDefinitions,
