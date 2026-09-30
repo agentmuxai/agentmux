@@ -930,9 +930,20 @@ mod tests {
             .iter()
             .all(|r| r.background));
 
-        // Installed → no longer needed.
-        install_pinned_cli_with(&paths, &claude_req(true), &|_, _| {}, fake_npm(true, true))
-            .unwrap();
+        // Installed → no longer needed. `providers_needing_install` checks
+        // against the LIVE registry pin (`providers::get_provider`), unlike
+        // `claude_req`'s own hardcoded fixture version — install a request
+        // built from that live pin, or this only keeps passing by coincidence
+        // (it did, silently, until the 2.1.280 -> 2.1.285 bump broke it).
+        let live_claude = crate::backend::providers::get_provider("claude").unwrap();
+        let live_req = NpmInstallRequest {
+            provider_id: "claude".into(),
+            npm_package: live_claude.npm_package.into(),
+            pinned_version: live_claude.pinned_version.into(),
+            cli_command: live_claude.cli_command.into(),
+            background: true,
+        };
+        install_pinned_cli_with(&paths, &live_req, &|_, _| {}, fake_npm(true, true)).unwrap();
         let todo: Vec<String> = providers_needing_install(&paths, &ids)
             .into_iter()
             .map(|r| r.provider_id)
