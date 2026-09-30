@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use super::memory_record::sha256_hex;
 
 use agentmux_common::redact::redact_secrets;
 use crate::backend::agent_session::{agent_zone_for_block_meta, global_transcript_store, OUTPUT_FILE};
@@ -200,10 +200,6 @@ fn without_trailing_chatter(text: &str) -> &str {
     text.trim_end()
 }
 
-fn sha256_hex(text: &str) -> String {
-    hex::encode(Sha256::digest(text.as_bytes()))
-}
-
 use agentmux_common::time::now_ms;
 
 /// Agents with an update running. One at a time per agent: a turn that ends
@@ -369,7 +365,7 @@ async fn update(mstore: &Store, block_id: &str) -> Result<Option<StateVersion>, 
         version: latest.as_ref().map_or(1, |v| v.version + 1),
         created_at_ms: now,
         based_on: size,
-        sha256: sha256_hex(&text),
+        sha256: sha256_hex(text.as_bytes()),
         text,
         tokens,
     };
@@ -385,7 +381,7 @@ mod tests {
 
     fn version(n: u64, based_on: i64, created_at_ms: i64) -> StateVersion {
         let text = format!("## Current goal\ngoal {n}\n{REQUIRED_HEADING}\n\"q\" ANSWERED");
-        StateVersion { version: n, created_at_ms, based_on, sha256: sha256_hex(&text), text, tokens: None }
+        StateVersion { version: n, created_at_ms, based_on, sha256: sha256_hex(text.as_bytes()), text, tokens: None }
     }
 
     fn store_with_output(bytes: usize) -> FileStore {

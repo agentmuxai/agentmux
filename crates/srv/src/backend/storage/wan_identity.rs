@@ -40,6 +40,7 @@ use std::time::Duration;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::agent_lan_keys::random_seed_bytes;
 use super::error::StoreError;
 
 /// Bumped only by additive changes (new tables, new nullable columns).
@@ -230,15 +231,6 @@ pub fn sanitize_host_hint(hostname: &str) -> String {
     } else {
         hint
     }
-}
-
-/// 32 bytes from two v4 UUIDs — the CSPRNG source every key table here uses
-/// (`agent_wan_keys::random_seed_bytes`).
-fn random_seed_bytes() -> [u8; 32] {
-    let mut bytes = [0u8; 32];
-    bytes[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes
 }
 
 fn decode_32(b64: &str) -> Option<[u8; 32]> {
