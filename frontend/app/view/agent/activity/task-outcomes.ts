@@ -132,28 +132,40 @@ interface PaneOutcomes {
     publish: (next: ReadonlyMap<string, TaskOutcome>) => void;
 }
 
+/**
+ * One entry per REGISTERED pane. The lifetime is the pane-state slot's, not the
+ * caller's: `agent-pane-registration.ts` opens an entry in `registerPane` and
+ * drops it in `unregisterPane`, like the document and pane-state slots it sits
+ * beside. A re-registered pane starts clean because its history is re-read.
+ * Nothing here creates an entry on its own — a late frame for a closed pane
+ * (an in-flight history page) is ignored instead of leaking one.
+ */
 const panes = new Map<string, PaneOutcomes>();
 
-function paneOutcomes(blockId: string): PaneOutcomes {
-    let p = panes.get(blockId);
-    if (!p) {
-        const tracker = new TaskOutcomeTracker();
-        const [snapshot, setSnapshot] = createSignal<ReadonlyMap<string, TaskOutcome>>(new Map(), { equals: false });
-        p = { tracker, snapshot, publish: (next) => setSnapshot(() => next) };
-        panes.set(blockId, p);
-    }
-    return p;
+const EMPTY: ReadonlyMap<string, TaskOutcome> = new Map();
+const NO_OUTCOMES: Accessor<ReadonlyMap<string, TaskOutcome>> = () => EMPTY;
+
+/** Open (or reset) a pane's outcomes. Called by `registerPane`. */
+export function registerTaskOutcomes(blockId: string): void {
+    const tracker = new TaskOutcomeTracker();
+    const [snapshot, setSnapshot] = createSignal<ReadonlyMap<string, TaskOutcome>>(EMPTY, { equals: false });
+    panes.set(blockId, { tracker, snapshot, publish: (next) => setSnapshot(() => next) });
 }
 
-/** The pane's stream-derived outcomes, reactive. */
+/** Drop a pane's outcomes. Called by `unregisterPane`; idempotent. */
+export function unregisterTaskOutcomes(blockId: string): void {
+    panes.delete(blockId);
+}
+
+/** The pane's stream-derived outcomes, reactive. Empty for a pane that isn't registered. */
 export function taskOutcomesFor(blockId: string): Accessor<ReadonlyMap<string, TaskOutcome>> {
-    return paneOutcomes(blockId).snapshot;
+    return panes.get(blockId)?.snapshot ?? NO_OUTCOMES;
 }
 
 /** Feed a stdout frame for a pane (live or replayed). A new snapshot is
  *  published only when an outcome actually changed, so a burst of unrelated
  *  frames — a whole history page — causes no dock recompute. */
 export function noteTaskFrame(blockId: string, frame: Record<string, unknown> | null | undefined, at: number | undefined): void {
-    const p = paneOutcomes(blockId);
-    if (p.tracker.note(frame, at)) p.publish(new Map(p.tracker.outcomes));
+    const p = panes.get(blockId);
+    if (p?.tracker.note(frame, at)) p.publish(new Map(p.tracker.outcomes));
 }

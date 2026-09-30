@@ -26,6 +26,7 @@ import {
     type AgentPaneModel,
     _createAgentPaneModel,
 } from "./agent-pane-model";
+import { registerTaskOutcomes, unregisterTaskOutcomes } from "../view/agent/activity/task-outcomes";
 
 /**
  * Options bundle for the unified register call.
@@ -131,6 +132,10 @@ export function registerPane(
     const prior = paneModels.get(blockId);
     if (prior) prior._markDisposed();
 
+    // The Activity Dock's stream-derived background-task outcomes live exactly
+    // as long as the slots above; a re-registered pane re-reads its history.
+    registerTaskOutcomes(blockId);
+
     // Both raw registers just succeeded synchronously, so both accessors
     // exist; the `!` would only fail if a store's registerPane stopped
     // populating its slot, which the registration-invariant tests pin.
@@ -190,6 +195,7 @@ export function unregisterPane(blockId: string): void {
     } catch {
         // Best-effort — see above.
     }
+    unregisterTaskOutcomes(blockId);
     notifyLifecycleListeners();
 }
 

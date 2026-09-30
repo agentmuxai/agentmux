@@ -19,7 +19,15 @@
 import { describe, expect, it } from "vitest";
 import { parseHistoryLines } from "../parseHistoryLines";
 import type { ToolNode } from "../types";
-import { applyStreamOutcomes, noteTaskFrame, TaskOutcomeTracker, taskOutcomesFor } from "./task-outcomes";
+import { registerPane, unregisterPane } from "@/app/store/agent-pane-registration";
+import {
+    applyStreamOutcomes,
+    noteTaskFrame,
+    registerTaskOutcomes,
+    TaskOutcomeTracker,
+    taskOutcomesFor,
+    unregisterTaskOutcomes,
+} from "./task-outcomes";
 import { toolActivities } from "./tool-adapter";
 import type { PinnedActivity } from "./types";
 
@@ -144,12 +152,17 @@ describe("applyStreamOutcomes", () => {
 
 describe("taskOutcomesFor (per-pane store)", () => {
     it("fills from frames and keeps panes apart", () => {
+        registerTaskOutcomes("pane-a");
+        registerTaskOutcomes("pane-b");
         noteTaskFrame("pane-a", notified("b1", "toolu_1"), 5000);
         expect(taskOutcomesFor("pane-a")().get("toolu_1")?.status).toBe("done");
         expect(taskOutcomesFor("pane-b")().size).toBe(0);
+        unregisterTaskOutcomes("pane-a");
+        unregisterTaskOutcomes("pane-b");
     });
 
     it("hands out a NEW map only when something changed", () => {
+        registerTaskOutcomes("pane-c");
         noteTaskFrame("pane-c", notified("b1", "toolu_1"), 5000);
         const before = taskOutcomesFor("pane-c")();
         noteTaskFrame("pane-c", { type: "assistant" }, 6000);
@@ -157,6 +170,38 @@ describe("taskOutcomesFor (per-pane store)", () => {
         expect(taskOutcomesFor("pane-c")()).toBe(before);
         noteTaskFrame("pane-c", notified("b2", "toolu_2"), 7000);
         expect(taskOutcomesFor("pane-c")()).not.toBe(before);
+        unregisterTaskOutcomes("pane-c");
+    });
+
+    it("re-registering a pane starts it clean (its history is re-read)", () => {
+        registerTaskOutcomes("pane-d");
+        noteTaskFrame("pane-d", notified("b1", "toolu_1"), 5000);
+        registerTaskOutcomes("pane-d");
+        expect(taskOutcomesFor("pane-d")().size).toBe(0);
+        unregisterTaskOutcomes("pane-d");
+    });
+
+    it("a closed pane keeps nothing, and a late frame for it (an in-flight history page) creates nothing", () => {
+        registerTaskOutcomes("pane-e");
+        noteTaskFrame("pane-e", notified("b1", "toolu_1"), 5000);
+        unregisterTaskOutcomes("pane-e");
+        expect(taskOutcomesFor("pane-e")().size).toBe(0);
+        noteTaskFrame("pane-e", notified("b2", "toolu_2"), 6000);
+        expect(taskOutcomesFor("pane-e")().size).toBe(0);
+        // Still empty after "re-opening" proves the late frame left no entry behind.
+        registerTaskOutcomes("pane-e");
+        expect(taskOutcomesFor("pane-e")().size).toBe(0);
+        unregisterTaskOutcomes("pane-e");
+    });
+
+    it("lives exactly as long as the pane-state slot: opened by registerPane, dropped by unregisterPane", () => {
+        registerPane("pane-f", { agentId: "agentx" });
+        noteTaskFrame("pane-f", notified("b1", "toolu_1"), 5000);
+        expect(taskOutcomesFor("pane-f")().get("toolu_1")?.status).toBe("done");
+        unregisterPane("pane-f");
+        expect(taskOutcomesFor("pane-f")().size).toBe(0);
+        noteTaskFrame("pane-f", notified("b2", "toolu_2"), 6000);
+        expect(taskOutcomesFor("pane-f")().size).toBe(0);
     });
 });
 
