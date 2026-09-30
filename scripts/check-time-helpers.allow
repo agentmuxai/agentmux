@@ -83,7 +83,6 @@ agentmux-srv/src/server/app_api/session.rs
 agentmux-srv/src/server/drone_handlers.rs
 agentmux-srv/src/server/editor_handlers.rs
 agentmux-srv/src/server/identity_auth_persist.rs
-agentmux-srv/src/server/mod.rs
 agentmux-srv/src/server/muxspect_handlers.rs
 agentmux-srv/src/server/reactive.rs
 agentmux-srv/src/server/tests.rs
