@@ -22,6 +22,20 @@ PATTERN="\\b(cef|chromium)(${SEP}${QUAL})*${SEP}v?[0-9]{3}\\b"
 
 violations=$(grep -nEi "$PATTERN" README.md assets/*.svg 2>/dev/null || true)
 
+# Prose wrapping can split the phrase ("CEF version" / "155"), which a
+# line-oriented grep misses. Scan each file again with line breaks folded
+# into spaces; report the matched phrase, since there is no single line.
+for f in README.md assets/*.svg; do
+    [[ -f "$f" ]] || continue
+    wrapped=$(tr '\r\n' '  ' < "$f" | grep -oEi "$PATTERN" || true)
+    if [[ -n "$wrapped" ]]; then
+        while IFS= read -r phrase; do
+            grep -qxF -- "$phrase" <(grep -oEi "$PATTERN" "$f" || true) && continue
+            violations+="${violations:+$'\n'}${f}: ${phrase} (wrapped across lines)"
+        done <<< "$wrapped"
+    fi
+done
+
 if [[ -n "$violations" ]]; then
     echo "check-no-cef-version-in-overview: a CEF/Chromium version is named in the overview:" >&2
     echo "$violations" >&2
