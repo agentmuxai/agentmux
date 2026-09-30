@@ -204,8 +204,8 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         // round domain already.
         const niceY = yvalMeta?.autoMaxY && hardCapY == null;
 
-        // Tight, panel-appropriate margins and origin-aligned axis labels —
-        // see computePlotMargins/buildPlotAxisLabelOptions for the rationale.
+        // Tight, panel-appropriate margins and no axis labels — see
+        // computePlotMargins/buildPlotAxisLabelOptions for the rationale.
         const margins = computePlotMargins(sparkline, title);
         const axisLabels = buildPlotAxisLabelOptions();
 
@@ -214,12 +214,11 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             ...margins,
             x: {
                 grid: true,
-                label: "time",
-                labelAnchor: axisLabels.x.labelAnchor,
+                ...axisLabels.x,
                 tickFormat: (d: number) => dayjs.unix(d / 1000).format("h:mm A"),
                 domain: [minX, maxX],
             },
-            y: { label: labelY, labelAnchor: axisLabels.y.labelAnchor, domain: [minY, maxY], nice: niceY },
+            y: { ...axisLabels.y, domain: [minY, maxY], nice: niceY },
             width: pw,
             height: ph,
             marks: marks,
