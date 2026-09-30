@@ -14,7 +14,7 @@ import clsx from "clsx";
 import { createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import { debounce, throttle } from "throttle-debounce";
-import { setTileDragInFlight } from "./dragInFlight";
+import { endTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 import { FlexDirection } from "./types";
 import { createTileLayout, type ResizeHandleComponentProps, type TileLayoutPlatform } from "./TileLayout.core";
@@ -87,7 +87,7 @@ const win32: TileLayoutPlatform = {
             if (dragState.layoutModel?.activeDrag()) {
                 dragState.nodeId = null;
                 dragState.node = null;
-                setTileDragInFlight(false);
+                endTileDrag("dragend");
                 dragState.layoutModel.activeDrag._set(false);
                 dragState.layoutModel = null;
             }
