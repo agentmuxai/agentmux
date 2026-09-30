@@ -13,6 +13,7 @@
 
 import type { AccountProvider } from "@/app/view/identity/identity-model";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import { jsAsciiSlug } from "../agent-config-builder";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -190,7 +191,7 @@ function buildTemplateVars(opts: StartupPayloadOpts, date: string): Record<strin
     return {
         AGENT: opts.agent.name,
         AGENT_DISPLAY: opts.agent.name,
-        AGENT_SLUG: opts.agent.slug || opts.agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-"),
+        AGENT_SLUG: opts.agent.slug || jsAsciiSlug(opts.agent.name),
         AGENT_ID: opts.agent.id,
         WORKING_DIR: opts.workDir,
         DATE: date,
