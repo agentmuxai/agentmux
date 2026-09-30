@@ -5,6 +5,8 @@
 **Author:** AgentX (narko), at the owner's request
 **Prompted by:** `docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md`.
 The menu read "Sonnet 5.5 · high" while the agent ran Opus 5.5 at medium.
+**Companion:** `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md` lists every binding between the
+menu and the process (§3) and every gap (§4); this report is the design for closing the general case.
 **Goal:** the model and effort shown in the menu are always what the agent is
 actually using. Where the two can differ, the menu says so instead of showing a
 selection.
@@ -194,7 +196,7 @@ selected":
 
 1. **Retro fix 1, small and immediate:** `launchAgentDefinition` builds
    `cmd:args` with `buildRuntimeArgs`. It stops the Opus-by-default leak on
-   continuations today.
+   continuations today. *Done* (`buildPaneArgs`); `agent_open.rs` still needs the srv-side fill-in in step 2's neighbour, tracked as G3 in the bindings report.
 2. **srv controller: readback.** Send `get_settings` after spawn and after
    each `result`, and publish `effective: {model, effort}` in controller
    status, plus `permission_sent` (the last normalized value srv itself sent —

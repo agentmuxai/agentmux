@@ -30,8 +30,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { isAuthFailure, workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
-import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
-import { PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "../launch-args";
+import { buildPaneArgs, getRuntimeConfig } from "../buildRuntimeArgs";
+import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
 import { busyInputFromState, paneBusyForInput } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
@@ -1509,17 +1509,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // fourth copy of this rule, and the one that fires most often).
             const meta = opts.block()?.meta;
             const agentMode = meta?.["agentMode"] as string | undefined;
-            const baseArgs = selectLaunchArgs(prov, agentMode);
             // Reapply the agent's own provider_flags. This rebuild starts from
             // the provider CATALOG, so anything the launch path appended is
             // otherwise dropped here — permanently, on the very first send
             // (#2872). `--fork-session` is intentionally not restored: it is a
             // one-shot launch intent, and reapplying it every turn would fork
             // the session again on each one.
-            const updatedArgs = withProviderFlags(
-                buildRuntimeArgs(baseArgs, runtimeConfig, prov.id),
-                meta?.[PROVIDER_FLAGS_META_KEY],
-            );
+            const updatedArgs = buildPaneArgs(prov, agentMode, runtimeConfig, meta?.[PROVIDER_FLAGS_META_KEY]);
             try {
                 await setBlockMeta(opts.blockId, { "cmd:args": updatedArgs });
             } catch (err) {

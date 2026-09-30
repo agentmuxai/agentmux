@@ -3,7 +3,7 @@
 **Date:** 2026-09-30 (UTC; the evening of 2026-09-29 Pacific)
 **Found by:** the owner, on AgentX's pane in a local v0.58.3 portable build
 **Investigated by:** AgentX (narko)
-**Status:** retro — root cause identified; fix not yet written (see §5)
+**Status:** retro — root cause identified; fix 1 (launch applies the runtime) implemented, fixes 2–5 open (see §5). Every binding and remaining gap: `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`
 
 ## 1. What happened
 
@@ -101,7 +101,7 @@ updated to match.
 
 ## 5. Fix plan
 
-1. **Apply the runtime config at launch.** In `launchAgentDefinition`, build
+1. **Apply the runtime config at launch.** *Done:* `launchAgentDefinition` now resolves `agent:runtime` first and builds `cmd:args` with `buildPaneArgs` — the same function the per-send rebuild and `applyRuntimeChange` use — so the three cannot drift. `agent_open.rs` (the MCP `OpenAgent` path) is **not** fixed; it is gap G3 in the bindings report and needs fix 2. In `launchAgentDefinition`, build
    `cmd:args` with the same helpers the per-send path uses
    (`withProviderFlags(buildRuntimeArgs(base, runtimeConfig, provider.id), flags)`),
    then append the one-shot `--fork-session`. The meta commit then carries
@@ -126,6 +126,8 @@ updated to match.
    on the `sonnet` alias.
 
 ## 6. Verification for the fix
+
+*Unit coverage for fix 1 is in `frontend/app/view/agent/pane-args-parity.test.ts`: every catalog provider, plus a guard that nothing else composes `cmd:args`. The srv and live checks below are still to do.*
 
 - **Unit:** a `launchAgentDefinition` continuation launch (with
   `continueSid`/fork) commits `cmd:args` containing `--model <runtime.model>` and
