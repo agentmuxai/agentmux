@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// absent on any record written before a field was added, so both default
 /// on deserialize rather than failing the whole list over one old entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BrowserBookmark {
     pub id: String,
     pub title: String,

@@ -34,7 +34,7 @@ pub struct UiThreadGate {
     /// creation — the frontend has to load and bootstrap first). The
     /// original design used `windowids[0]` as a stand-in, positionally —
     /// reagent caught that `windowids` gets reordered by `focus_window`
-    /// (`agentmux-srv/.../wcore/window.rs:164`) to put the last-focused
+    /// (`crates/srv/.../wcore/window.rs:164`) to put the last-focused
     /// window at index 0, which is not reliably `"main"`. Consumed (cleared)
     /// by whichever of {`register_backend_window`'s `"main"` branch, a
     /// late-arriving real fast-path snapshot} runs first — see both call

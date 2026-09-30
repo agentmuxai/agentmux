@@ -23,33 +23,33 @@ describe("docs-stale-sweep statusOf", () => {
 describe("docs-stale-sweep extractCitations", () => {
     it("finds backticked and bare paths, strips line refs, dedupes", () => {
         const text = [
-            "See `agentmux-srv/src/server/reactive.rs:540-606` and `runner.rs`.",
-            "Also agentmux-srv/src/server/reactive.rs and (frontend/app/x.tsx).",
+            "See `crates/srv/src/server/reactive.rs:540-606` and `runner.rs`.",
+            "Also crates/srv/src/server/reactive.rs and (frontend/app/x.tsx).",
             "Not a file: `foo`, `Store::open`, `--verify`.",
         ].join("\n");
-        expect(extractCitations(text)).toEqual(["agentmux-srv/src/server/reactive.rs", "runner.rs", "frontend/app/x.tsx"]);
+        expect(extractCitations(text)).toEqual(["crates/srv/src/server/reactive.rs", "runner.rs", "frontend/app/x.tsx"]);
     });
 
     it("drops the shapes that are examples rather than citations", () => {
         expect(plausibleCitation("/path/to/foo.ts")).toBe(false);
         expect(plausibleCitation(".ts/.tsx")).toBe(false);
         expect(plausibleCitation("a/.hidden.rs")).toBe(false);
-        expect(plausibleCitation("agentmux-srv/src/main.rs")).toBe(true);
+        expect(plausibleCitation("crates/srv/src/main.rs")).toBe(true);
         expect(extractCitations("try `/workspace/foo.ts` or `.ts/.tsx` files")).toEqual([]);
     });
 });
 
 describe("docs-stale-sweep resolveCitation", () => {
-    const tracked = new Set(["agentmux-srv/src/migrations/runner.rs", "agentmux-srv/src/server/mod.rs", "agentmux-cef/src/main.rs", "agentmux-srv/src/main.rs"]);
+    const tracked = new Set(["crates/srv/src/migrations/runner.rs", "crates/srv/src/server/mod.rs", "crates/cef/src/main.rs", "crates/srv/src/main.rs"]);
     const byBasename = new Map([
-        ["runner.rs", ["agentmux-srv/src/migrations/runner.rs"]],
-        ["mod.rs", ["agentmux-srv/src/server/mod.rs"]],
-        ["main.rs", ["agentmux-cef/src/main.rs", "agentmux-srv/src/main.rs"]],
+        ["runner.rs", ["crates/srv/src/migrations/runner.rs"]],
+        ["mod.rs", ["crates/srv/src/server/mod.rs"]],
+        ["main.rs", ["crates/cef/src/main.rs", "crates/srv/src/main.rs"]],
     ]);
 
     it("resolves exact paths, unique suffixes, and unique basenames", () => {
-        const want = { kind: "resolved", path: "agentmux-srv/src/migrations/runner.rs" };
-        expect(resolveCitation("agentmux-srv/src/migrations/runner.rs", tracked, byBasename)).toEqual(want);
+        const want = { kind: "resolved", path: "crates/srv/src/migrations/runner.rs" };
+        expect(resolveCitation("crates/srv/src/migrations/runner.rs", tracked, byBasename)).toEqual(want);
         expect(resolveCitation("migrations/runner.rs", tracked, byBasename)).toEqual(want);
         expect(resolveCitation("runner.rs", tracked, byBasename)).toEqual(want);
     });
@@ -57,7 +57,7 @@ describe("docs-stale-sweep resolveCitation", () => {
     it("keeps ambiguous apart from absent — an ambiguous suffix is never 'missing'", () => {
         expect(resolveCitation("main.rs", tracked, byBasename)).toEqual({ kind: "ambiguous" });
         expect(resolveCitation("src/main.rs", tracked, byBasename)).toEqual({ kind: "ambiguous" });
-        expect(resolveCitation("agentmux-srv/src/gone.rs", tracked, byBasename)).toEqual({ kind: "absent" });
+        expect(resolveCitation("crates/srv/src/gone.rs", tracked, byBasename)).toEqual({ kind: "absent" });
     });
 });
 
@@ -163,14 +163,14 @@ describe("docs-stale-sweep renderMarkdown", () => {
 
 describe("docs-stale-sweep reverseCheck (§5.6)", () => {
     const idx = new Map([
-        ["SPEC_SHIPPED_2026_01_01", ["agentmux-srv/src/server/foo.rs"]],
+        ["SPEC_SHIPPED_2026_01_01", ["crates/srv/src/server/foo.rs"]],
         ["SPEC_ALSO_SHIPPED_2026_01_02", ["frontend/app/a.ts", "frontend/app/b.ts"]],
     ]);
 
     it("flags a draft/proposed spec that source code cites by name", () => {
         const r = reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "draft", idx);
         expect(r).not.toBeNull();
-        expect(r.cited).toEqual(["agentmux-srv/src/server/foo.rs"]);
+        expect(r.cited).toEqual(["crates/srv/src/server/foo.rs"]);
 
         const p = reverseCheck("docs/specs/SPEC_ALSO_SHIPPED_2026_01_02.md", "proposed", idx);
         expect(p.cited).toHaveLength(2);
@@ -193,13 +193,13 @@ describe("docs-stale-sweep reverseCheck (§5.6)", () => {
 
 describe("docs-stale-sweep buildCitationIndex (§5.6)", () => {
     const tracked = [
-        "agentmux-srv/src/server/foo.rs",
+        "crates/srv/src/server/foo.rs",
         "frontend/app/b.ts",
         "docs/specs/SPEC_OTHER.md",
         "README.md",
     ];
     const files = {
-        "agentmux-srv/src/server/foo.rs": "// see SPEC_TARGET_2026_01_01 for why",
+        "crates/srv/src/server/foo.rs": "// see SPEC_TARGET_2026_01_01 for why",
         "frontend/app/b.ts": "// unrelated",
         "docs/specs/SPEC_OTHER.md": "cites SPEC_TARGET_2026_01_01 heavily",
     };
@@ -208,7 +208,7 @@ describe("docs-stale-sweep buildCitationIndex (§5.6)", () => {
         // docs/ is excluded on purpose: specs discuss each other constantly,
         // and that says nothing about whether the thing shipped.
         const idx = buildCitationIndex(".", tracked, ["SPEC_TARGET_2026_01_01"], (p) => files[p]);
-        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["agentmux-srv/src/server/foo.rs"]);
+        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["crates/srv/src/server/foo.rs"]);
     });
 
     it("skips unreadable files rather than aborting the sweep", () => {
@@ -216,7 +216,7 @@ describe("docs-stale-sweep buildCitationIndex (§5.6)", () => {
             if (p === "frontend/app/b.ts") throw new Error("unreadable");
             return files[p];
         });
-        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["agentmux-srv/src/server/foo.rs"]);
+        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["crates/srv/src/server/foo.rs"]);
     });
 });
 

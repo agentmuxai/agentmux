@@ -39,14 +39,14 @@ fn main() {
     // (carrying its own correct metadata) is what continues to run.
     //
     // AGENTMUX_CEF_VERSION below reads a file OUTSIDE this package
-    // (../Cargo.lock), which the implicit default does not cover — it only
+    // (../../Cargo.lock), which the implicit default does not cover — it only
     // watches this crate's own directory. So we replicate that default
     // explicitly (`.`) and add the lockfile alongside it: a `cef` version
     // bump that touches only Cargo.lock, with no other agentmux-cef file
     // changed, would otherwise rebuild against the new crate while reusing
     // the stale cached AGENTMUX_CEF_VERSION (codex P2, PR #3266).
     println!("cargo:rerun-if-changed=.");
-    println!("cargo:rerun-if-changed=../Cargo.lock");
+    println!("cargo:rerun-if-changed=../../Cargo.lock");
 
     // Emit the target triple so we can locate sidecar binaries at runtime.
     println!(
@@ -81,7 +81,7 @@ fn main() {
     // rebuild, and a lockfile scan is near-instant where a metadata
     // subprocess is not. Falls back to "unknown" rather than failing the
     // build if the lockfile ever moves or the entry isn't found.
-    let cef_version = std::fs::read_to_string("../Cargo.lock")
+    let cef_version = std::fs::read_to_string("../../Cargo.lock")
         .ok()
         .and_then(|lock| {
             let idx = lock.find("name = \"cef\"")?;

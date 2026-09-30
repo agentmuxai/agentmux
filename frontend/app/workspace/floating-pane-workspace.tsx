@@ -732,7 +732,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // holds still, so dwell fed from mousemove alone cannot advance
             // during exactly the gesture it measures. This is the JS
             // counterpart of the host's DRAG_TICK heartbeat on Windows
-            // (agentmux-cef/src/ui_tasks/drag.rs) — same cadence, same reason.
+            // (crates/cef/src/ui_tasks/drag.rs) — same cadence, same reason.
             // SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.1.
             const HOVER_HEARTBEAT_MS = 100;
             let heartbeatTimer: ReturnType<typeof setInterval> | null = null;

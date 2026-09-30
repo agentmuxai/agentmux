@@ -17,7 +17,7 @@
 // its own spawn_backend path (which is preserved for `task dev`
 // fallback where launcher isn't in the loop).
 //
-// Adapted from `agentmux-cef/src/sidecar.rs::spawn_backend` —
+// Adapted from `crates/cef/src/sidecar.rs::spawn_backend` —
 // kept structurally similar so divergence is auditable. Key
 // differences:
 //   * Tokio process API (not std::process)
@@ -47,7 +47,7 @@ pub struct SrvSpawnResult {
     pub auth_key: String,
     /// Shared secret proving to srv that a `host_ipc.Register` call really
     /// comes from the paired host, not an agent process (agents share
-    /// `auth_key` too — see `agentmux-srv/src/server/service/host_ipc.rs`).
+    /// `auth_key` too — see `crates/srv/src/server/service/host_ipc.rs`).
     /// Minted once per `spawn_srv` call (same lifetime as `auth_key`) and
     /// given to both host and srv's spawn env — see `host_spawn.rs`'s
     /// `AGENTMUX_HOST_REG_SECRET` env line and this file's own

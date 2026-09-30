@@ -34,7 +34,7 @@ pub fn install_linux_window_properties_override(delegate: &cef::WindowDelegate) 
 /// Build-time default channel — same resolution `agentmux_common::DataPaths`
 /// uses for `Installed`/`Portable` modes absent an `AGENTMUX_CHANNEL`
 /// override. Duplicated locally rather than imported (same pattern already
-/// used by `commands/platform.rs` and `agentmux-common/src/data_paths.rs`)
+/// used by `commands/platform.rs` and `crates/common/src/data_paths.rs`)
 /// so this module doesn't need a cross-crate call during window creation.
 #[cfg(target_os = "linux")]
 const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT") {

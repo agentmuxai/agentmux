@@ -423,7 +423,7 @@ describe("muxlog checkLiveness", () => {
         expect(await checkLiveness(logDir)).toBe("live");
     });
 
-    // reagent P2 on PR #2752: agentmux-cef/src/lib.rs writes the bare
+    // reagent P2 on PR #2752: crates/cef/src/lib.rs writes the bare
     // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
     // unset (task dev:standalone, no launcher) — startsWith("ipc-port-")
     // alone misses this exact literal.
@@ -434,7 +434,7 @@ describe("muxlog checkLiveness", () => {
         expect(await checkLiveness(logDir)).toBe("live");
     });
 
-    // reagent P1 on PR #2752: agentmux-cef/src/lib.rs writes the port file
+    // reagent P1 on PR #2752: crates/cef/src/lib.rs writes the port file
     // to the `cef-cache` sibling (not `data`) for `task dev` instances
     // (is_dev_build_exe branch) — checking only `data` always reports '?'
     // for the primary dev workflow, even when it's genuinely live.

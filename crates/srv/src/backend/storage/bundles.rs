@@ -23,7 +23,7 @@ use super::store::Store;
 /// files / MCP servers / skills. Agent definitions shadow-migrate into this
 /// table during the v7 migration.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct Bundle {
     pub id: String,
     pub name: String,
@@ -202,7 +202,7 @@ const SYSTEM_TIER_PREAMBLE: &str = "IMPORTANT: The following AgentMux-controlled
 /// One section of the Global Memory block: one global bundle with
 /// instructions, rendered as the startup file carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GlobalMemorySection {
     /// The Global Memory entry's id (the bundle id).
     pub id: String,

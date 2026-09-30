@@ -332,7 +332,7 @@ pub(crate) fn sign_outgoing_jekt(
 /// above uses for jekt messages; reused rather than inventing a parallel
 /// credential system). Unlike jekt signing, a missing key here is a hard
 /// error, not a silent "send unsigned" — srv has no unverified fallback
-/// path for UI automation (see `agentmux-srv/src/server/ui_handlers.rs`'s
+/// path for UI automation (see `crates/srv/src/server/ui_handlers.rs`'s
 /// module doc comment), so a tool call with no key would just 401 anyway;
 /// failing fast with a clear "respawn to get a key" message is more useful
 /// than a confusing round trip.

@@ -21,7 +21,7 @@ pub(super) async fn health_handler(State(state): State<AppState>) -> Json<serde_
 ///
 /// **Why a JSON HTTP endpoint and not a launcher `--diag sagas`
 /// pipe-IPC client.** The `--diag srv` pipe transport (see
-/// `agentmux-launcher/src/diag.rs`) routes through `Tool` registration
+/// `crates/launcher/src/diag.rs`) routes through `Tool` registration
 /// + a 2 s observation window with `GetSrvSnapshot` + `GetEvents`.
 /// Adding `GetSagaLogSnapshot` to the IPC `Command` enum + an
 /// `Event::SagaLogSnapshot` variant with a Vec of `SagaSnapshot`

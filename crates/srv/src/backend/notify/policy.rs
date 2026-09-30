@@ -19,7 +19,7 @@ use std::collections::HashMap;
 /// treatment — every kind has an app-controlled title template (§9.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub enum NotifyKind {
     InputWaiting,
     TurnCompleted,
@@ -114,7 +114,7 @@ impl NotifyKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NotifyPriority")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NotifyPriority")]
 pub enum Priority {
     Attention,
     Normal,
@@ -254,7 +254,7 @@ impl Family {
 /// One shown Attention item, for the tray's "needs you" submenu. Titles are
 /// app-controlled templates, so they are safe to show in a native menu.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NotifyAttentionItem")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NotifyAttentionItem")]
 pub struct AttentionItem {
     pub id: String,
     pub block_id: String,
@@ -266,7 +266,7 @@ pub struct AttentionItem {
 
 /// Snapshot the tray renders (§4.2).
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NotifyTrayState")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NotifyTrayState")]
 pub struct TrayState {
     pub attention: Vec<AttentionItem>,
     #[ts(type = "number")]
@@ -277,7 +277,7 @@ pub struct TrayState {
 /// router-sanitized. Exported to TS as `OsNotification` so it can't shadow the
 /// DOM's global `Notification`.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "OsNotification")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "OsNotification")]
 pub struct Notification {
     pub id: String,
     pub kind: NotifyKind,

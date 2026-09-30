@@ -32,7 +32,7 @@ use crate::backend::storage::filestore::FileStore;
 const LIST_TTL: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NativeMemoryClaimedFolder")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryClaimedFolder")]
 pub(crate) struct ClaimedFolderView {
     pub index: usize,
     /// The folder, when the claim recorded it.
@@ -44,7 +44,7 @@ pub(crate) struct ClaimedFolderView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NativeMemoryClaimList")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryClaimList")]
 pub(crate) struct ClaimList {
     pub list_id: String,
     pub agent_uid: String,

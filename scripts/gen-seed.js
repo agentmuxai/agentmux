@@ -10,7 +10,7 @@
 //
 // Manifest version 5 (2026-04-23): replaces the AgentX/Y/Z + Agent1/2/3
 // layout with per-CLI definitions. The re-seed engine in
-// `agentmux-srv/src/backend/agent_seed.rs` deletes old seeded rows
+// `crates/srv/src/backend/agent_seed.rs` deletes old seeded rows
 // and inserts the new set on version bump — user customisations to
 // the old rows are lost. This is intentional: the old layout
 // conflated 6 agents into 3 providers, which no longer matches the
@@ -233,7 +233,7 @@ const manifest = {
     memories: SEED_MEMORIES,
 };
 
-// Write the manifest to `agentmux-srv/agent-seed.json` directly
+// Write the manifest to `crates/srv/agent-seed.json` directly
 // rather than emitting it on stdout. Previously this script did
 // `process.stdout.write(...)` and callers redirected via
 // `node gen-seed.js > agent-seed.json`. On Windows PowerShell,
@@ -256,7 +256,7 @@ const json = JSON.stringify(manifest, null, 2) + "\n";
 if (process.argv.includes("--stdout")) {
     process.stdout.write(json);
 } else {
-    const outPath = resolve(__dirname, "..", "agentmux-srv", "agent-seed.json");
+    const outPath = resolve(__dirname, "..", "crates", "srv", "agent-seed.json");
     writeFileSync(outPath, json, { encoding: "utf8" });
     process.stdout.write(`wrote ${outPath}\n`);
 }

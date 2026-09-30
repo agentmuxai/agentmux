@@ -419,8 +419,8 @@ pub(crate) fn capture_window_impl(
 
     let target: &AgentMuxWindowInfo = if let Some(target_pid) = pid {
         // A single host process can own multiple top-level windows sharing
-        // the same pid (agentmux-cef/src/browser_pane/hwnd.rs:200-204,
-        // agentmux-cef/src/commands/window/lifecycle.rs:410-426) — codex P1
+        // the same pid (crates/cef/src/browser_pane/hwnd.rs:200-204,
+        // crates/cef/src/commands/window/lifecycle.rs:410-426) — codex P1
         // on PR #2810: the original `.find()` here silently captured
         // whichever matching window enumerated first, which could be a
         // pool/sub-window rather than the one the caller meant, reintroducing

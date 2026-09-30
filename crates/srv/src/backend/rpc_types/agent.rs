@@ -282,7 +282,7 @@ pub struct AgentKillResult {
 /// default. `include_hidden` only affects templates — user-owned rows
 /// never set `user_hidden`, so the flag is a no-op for them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListAgentDefinitionsData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "number | null")]
@@ -294,7 +294,7 @@ pub struct CommandListAgentDefinitionsData {
 /// Request for `agentdefcreatefromtemplate`. Clones a seeded template
 /// into a new user-owned definition. Phase 1 of the two-tier picker.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentDefCreateFromTemplateData {
     /// id of a seeded definition (must have `is_seeded = 1`).
     pub template_id: String,
@@ -355,7 +355,7 @@ pub struct CommandAgentDefCreateFromTemplateData {
 /// Response for `agentdefcreatefromtemplate`. The frontend uses
 /// `definition_id` to launch the freshly-created agent.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentDefCreateFromTemplateResult {
     pub definition_id: String,
     /// Echoed back so the caller's launch step doesn't need to
@@ -373,7 +373,7 @@ pub struct AgentDefCreateFromTemplateResult {
 /// two-tier picker (Q2 Decision Y). The two RPCs share the same shape
 /// — the action is encoded in the command name, not the payload.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentDefHideData {
     /// id of a seeded definition (must have `is_seeded = 1`).
     pub definition_id: String,
@@ -385,14 +385,14 @@ pub struct CommandAgentDefHideData {
 /// `ok: false` — the caller should never have been able to send that
 /// id from the picker UI.)
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentDefHideResult {
     pub ok: bool,
 }
 
 /// Input for createagent
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandCreateAgentDefinitionData {
     pub name: String,
     #[serde(default = "default_agent_icon")]
@@ -437,7 +437,7 @@ fn default_agent_icon() -> String {
 
 /// Input for updateagent
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandUpdateAgentDefinitionData {
     pub id: String,
     pub name: String,
@@ -505,14 +505,14 @@ pub struct CommandUpdateAgentDefinitionData {
 
 /// Input for deleteagent
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDeleteAgentDefinitionData {
     pub id: String,
 }
 
 /// Input for getagentcontent
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
@@ -520,7 +520,7 @@ pub struct CommandGetAgentContentData {
 
 /// Input for setagentcontent
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandSetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
@@ -529,7 +529,7 @@ pub struct CommandSetAgentContentData {
 
 /// Input for getallagentcontent
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGetAllAgentContentData {
     pub agent_id: String,
 }
@@ -538,14 +538,14 @@ pub struct CommandGetAllAgentContentData {
 
 /// Input for listagentskills
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListAgentSkillsData {
     pub agent_id: String,
 }
 
 /// Input for createagentskill
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandCreateAgentSkillData {
     pub agent_id: String,
     pub name: String,
@@ -579,7 +579,7 @@ fn default_skill_type() -> String {
 /// semantics make every field semantically required, and there is no caller to
 /// break: nothing in the frontend calls `updateagentskill` today.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandUpdateAgentSkillData {
     pub id: String,
     pub name: String,
@@ -595,7 +595,7 @@ pub struct CommandUpdateAgentSkillData {
 
 /// Input for deleteagentskill
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDeleteAgentSkillData {
     pub id: String,
 }
@@ -604,7 +604,7 @@ pub struct CommandDeleteAgentSkillData {
 
 /// Input for appendagenthistory
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAppendAgentHistoryData {
     pub agent_id: String,
     pub entry: String,
@@ -612,7 +612,7 @@ pub struct CommandAppendAgentHistoryData {
 
 /// Input for listagenthistory
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListAgentHistoryData {
     pub agent_id: String,
     #[serde(default)]
@@ -634,7 +634,7 @@ fn default_history_limit() -> i64 {
 
 /// Input for searchagenthistory
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandSearchAgentHistoryData {
     pub agent_id: String,
     pub query: String,
@@ -647,7 +647,7 @@ pub struct CommandSearchAgentHistoryData {
 
 /// Input for importagentfromclaw
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandImportAgentFromClawData {
     pub workspace_path: String,
     pub agent_name: String,
@@ -655,13 +655,13 @@ pub struct CommandImportAgentFromClawData {
 
 /// Input for importagents
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandImportAgentDefinitionsData {
     pub agents: Vec<AgentDefinitionImport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentDefinitionImport {
     pub id: String,
     pub name: String,
@@ -679,7 +679,7 @@ pub struct AgentDefinitionImport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSkillImport {
     pub name: String,
     pub trigger: String,
@@ -689,7 +689,7 @@ pub struct AgentSkillImport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ImportAgentDefinitionsResult {
     pub imported: Vec<String>,
     pub skipped: Vec<String>,
@@ -734,7 +734,7 @@ pub struct AgentSkillExport {
 // ---- Agent definition branching (fork) ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandForkAgentDefinitionData {
     pub source_id: String,
     /// When non-empty this becomes the fork's display name directly.
@@ -744,13 +744,13 @@ pub struct CommandForkAgentDefinitionData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandForkAgentDefinitionSuggestData {
     pub source_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ForkAgentDefinitionSuggestResult {
     pub suggested_label: String,
 }
@@ -758,7 +758,7 @@ pub struct ForkAgentDefinitionSuggestResult {
 /// SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4 — renames
 /// whichever field a fork tab's title actually resolves from.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandRenameAgentDefinitionTitleData {
     pub id: String,
     pub title: String,
@@ -776,21 +776,21 @@ pub struct CommandRenameAgentDefinitionTitleData {
 /// real call while compiling and passing every CI gate (the `bookmarks.list`
 /// bug); a bare struct rejects the older shape. `Option<Self>` takes both.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandContainerRuntimeAvailableData {}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandReseedAgentsData {}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandExportAgentsData {}
 
 /// Result of `containerruntimeavailable`. Was an inline
 /// `json!({ "available": .. })`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ContainerRuntimeAvailableResult {
     pub available: bool,
 }
@@ -803,7 +803,7 @@ pub struct ContainerRuntimeAvailableResult {
 /// than dropping them: whether the UI uses them is a product question, but the
 /// binding should say what the wire carries.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ReseedAgentsResult {
     #[ts(type = "number")]
     pub deleted: usize,
@@ -821,5 +821,5 @@ pub struct ReseedAgentsResult {
 /// `null`), while a client that omits `data` entirely arrives as `null` (a
 /// struct deserializes only from an object). `Option<Self>` takes both.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListHiddenTemplatesData {}

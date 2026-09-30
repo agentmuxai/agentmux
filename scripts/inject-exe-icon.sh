@@ -14,7 +14,7 @@ set -euo pipefail
 
 EXE="${1:?usage: inject-exe-icon.sh <exe>}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ICO="$REPO_ROOT/agentmux-cef/resources/win/agentmux.ico"
+ICO="$REPO_ROOT/crates/cef/resources/win/agentmux.ico"
 
 [ -f "$EXE" ] || { echo "inject-exe-icon: exe not found: $EXE" >&2; exit 1; }
 [ -f "$ICO" ] || { echo "inject-exe-icon: icon not found: $ICO" >&2; exit 1; }

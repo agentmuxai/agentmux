@@ -3,7 +3,7 @@
 
 // Layout doctor — pure invariant validation for the layout tree, plus a
 // compact tree dumper for logs. Mirrored by `validate_layout_invariants` in
-// `agentmux-srv/src/backend/layout/mod.rs`; keep the two check lists in sync.
+// `crates/srv/src/backend/layout/mod.rs`; keep the two check lists in sync.
 //
 // Motivation (issue #2179): pane-minimize corruption kept shipping because
 // nothing ever *observed* an illegal tree — each bug was reconstructed after

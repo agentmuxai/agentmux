@@ -64,7 +64,7 @@ pub fn parent_is_agentmux_launcher() -> Option<bool> {
     // A1 (SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md §4) wires
     // the Unix-socket IPC; the launcher exports its pid in
     // `AGENTMUX_LAUNCHER_PID` for any host child it spawns directly
-    // (`spawn_host_unix` at agentmux-launcher/src/main.rs:411). If our
+    // (`spawn_host_unix` at crates/launcher/src/main.rs:411). If our
     // getppid matches that env-stamped pid, the launcher IS our parent
     // and we should attempt the launcher-IPC connect — even in dev
     // builds where `is_dev_build_exe` would otherwise short-circuit it.

@@ -5,7 +5,7 @@
 // `browserstartpage` field (see config-signals.ts's `browserStartPageAtom`),
 // not a matching Get command here — see
 // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md and
-// agentmux-srv/src/server/app_api/browser_start_page.rs.
+// crates/srv/src/server/app_api/browser_start_page.rs.
 
 import { RpcClient } from "../rpc-client";
 

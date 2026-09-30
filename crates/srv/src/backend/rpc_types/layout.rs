@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Save one window's layout to a `*.agentmux-layout.json` file.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandLayoutSaveData {
     /// The window whose tabs are saved.
     pub window_id: String,
@@ -24,7 +24,7 @@ pub struct CommandLayoutSaveData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LayoutSaveResult {
     /// Where the file was written.
     pub path: String,
@@ -36,14 +36,14 @@ pub struct LayoutSaveResult {
 /// Read a layout file and describe what opening it would do, without
 /// opening anything (spec §3.5 "Trust": the preview).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandLayoutPreviewData {
     /// Absolute path to a `*.agentmux-layout.json` file.
     pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LayoutPreviewTab {
     pub name: String,
     /// One line per pane tab, e.g. "Agent: Reviewer", "Terminal in ~/src".
@@ -51,7 +51,7 @@ pub struct LayoutPreviewTab {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LayoutPreviewResult {
     pub name: String,
     /// Saved by this install and in its layouts folder: its terminal commands
@@ -68,7 +68,7 @@ pub struct LayoutPreviewResult {
 /// (nothing that's open is replaced), or into a new workspace for a new
 /// window to show.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandLayoutOpenData {
     pub path: String,
     /// The window to add the tabs to. Not used with `new_window`.
@@ -86,7 +86,7 @@ pub struct CommandLayoutOpenData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LayoutOpenResult {
     /// The workspace the tabs were added to.
     pub workspace_id: String,

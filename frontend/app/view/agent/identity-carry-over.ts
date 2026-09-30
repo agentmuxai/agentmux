@@ -14,8 +14,8 @@
 // reagentx P2 on #2464 caught the applied instance, but the claim itself
 // was already stale before that.
 //
-// Real account ids ARE always UUID v4 strings (agentmux-srv/src/identity/
-// oauth_client.rs, agentmux-srv/src/server/app_api/identity.rs). Legacy
+// Real account ids ARE always UUID v4 strings (crates/srv/src/identity/
+// oauth_client.rs, crates/srv/src/server/app_api/identity.rs). Legacy
 // rows can carry "", the "blank" singleton, the pre-#1624-PR-C "default"
 // sentinel, or any other now-meaningless literal from an older identity
 // scheme — none of these are ever real account ids. A UUID-shape check

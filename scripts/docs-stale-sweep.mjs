@@ -63,8 +63,8 @@ export function statusOf(text) {
 /**
  * Every file-looking token a doc cites. Two shapes count:
  *  - anything in backticks that ends in a source/config extension
- *    (`agentmux-srv/src/server/reactive.rs`, `runner.rs`)
- *  - a bare slash-containing path ending in one (agentmux-srv/src/x.rs), for
+ *    (`crates/srv/src/server/reactive.rs`, `runner.rs`)
+ *  - a bare slash-containing path ending in one (crates/srv/src/x.rs), for
  *    docs that don't backtick their citations.
  * A trailing `:123` / `:120-140` line reference is stripped. Returned
  * deduplicated, in first-seen order.

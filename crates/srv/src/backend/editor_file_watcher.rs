@@ -219,7 +219,7 @@ impl EditorFileWatcher {
 
 /// Publish `EVENT_EDITOR_FILE_CHANGED`, scoped to every block that has a tab
 /// open on `path`. Mirrors `publish_block_activity`'s per-block scoping
-/// (`agentmux-srv/src/backend/mps.rs`) — not a global broadcast.
+/// (`crates/srv/src/backend/mps.rs`) — not a global broadcast.
 fn publish_editor_file_changed(broker: &Broker, path: &Path, block_ids: &[String]) {
     broker.publish(MuxEvent {
         event: EVENT_EDITOR_FILE_CHANGED.to_string(),

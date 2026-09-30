@@ -53,7 +53,7 @@ export interface UseAgentQuestionsOptions {
 // Deliberately an allowlist, not a blocklist: reagent P2 on the PR that
 // widened this fallback flagged that an RPC-engine-level failure (e.g. the
 // "EC-TIME: timeout" the engine's own `tokio::time::timeout` wrapper can
-// emit under executor saturation — agentmux-srv/src/backend/rpc/engine.rs)
+// emit under executor saturation — crates/srv/src/backend/rpc/engine.rs)
 // does NOT carry the same guarantee: the handler could have completed
 // tx.try_send successfully server-side even though the client sees an
 // error. Falling back unconditionally for THAT case would risk delivering
@@ -79,7 +79,7 @@ export interface UseAgentQuestionsResult {
  *  the SAFE_TO_RETRY_VIA_FOLLOWUP fallback text (a plain follow-up turn when
  *  the control protocol itself is unavailable). The actual protocol-level
  *  decline text is server-owned (ASK_USER_QUESTION_DENY_MESSAGE in
- *  agentmux-srv/src/backend/blockcontroller/persistent.rs) — this is not read
+ *  crates/srv/src/backend/blockcontroller/persistent.rs) — this is not read
  *  from there, just worded identically so the model sees the same
  *  explanation either way.
  *

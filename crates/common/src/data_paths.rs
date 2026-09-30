@@ -879,7 +879,7 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 /// `docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md`
 /// for the incident this closes.
 ///
-/// `CloudSubscriber::init_global` (`agentmux-srv/src/bootstrap.rs`) runs
+/// `CloudSubscriber::init_global` (`crates/srv/src/bootstrap.rs`) runs
 /// unconditionally on every launch and performs a real, synchronous
 /// OS-keychain read of the single global `muxbus:global` credential
 /// almost immediately. On macOS that read requires interactive OS consent
@@ -2257,7 +2257,7 @@ mod tests {
         // parent's channel env and would cross-contaminate.
         //
         // Codex P1 regression test on PR #1027 (dev), extended for the nested
-        // portable case the launcher relies on (agentmux-launcher/src/data_dir.rs).
+        // portable case the launcher relies on (crates/launcher/src/data_dir.rs).
         with_home_override(|root| {
             // Use a NON-default channel value so "ignored" (→ baked default) is
             // distinguishable from "honored" (→ this value). BUILD_CHANNEL_DEFAULT

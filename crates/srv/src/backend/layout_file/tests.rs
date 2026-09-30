@@ -364,7 +364,7 @@ fn the_writer_accepts_only_absolute_layout_paths_and_writes_atomically() {
 /// dependency; this pins the parts a reader keys on.)
 #[test]
 fn the_published_schema_matches_the_envelope() {
-    let schema: Value = serde_json::from_str(include_str!("../../../../schema/agentmux-layout.v1.schema.json")).unwrap();
+    let schema: Value = serde_json::from_str(include_str!("../../../../../schema/agentmux-layout.v1.schema.json")).unwrap();
     assert_eq!(schema["properties"]["format"]["const"], LAYOUT_FORMAT);
     let written = serde_json::to_value(export(false).doc).unwrap();
     for key in schema["required"].as_array().unwrap() {

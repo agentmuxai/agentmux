@@ -3,8 +3,8 @@
 
 //! Pure reducer for the Credential Broker's per-credential coordination
 //! state — fresh / refreshing / failed / needs-reauth. Same shape as every
-//! other reducer in this codebase (`agentmux-launcher/src/reducer/`,
-//! `agentmux-srv/src/reducer.rs`, `agentmux-cef/src/reducer/mod.rs`):
+//! other reducer in this codebase (`crates/launcher/src/reducer/`,
+//! `crates/srv/src/reducer.rs`, `crates/cef/src/reducer/mod.rs`):
 //! `update(&mut State, Command) -> Vec<Event>`, no I/O, no async,
 //! sub-millisecond lock hold when called from `scheduler.rs`'s orchestrator.
 //!

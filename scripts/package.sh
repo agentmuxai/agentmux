@@ -28,7 +28,7 @@
 #                build its own data dir + cef-cache + single-instance pipe, so a
 #                freshly-built binary launches as its own instance instead of
 #                joining a still-running sibling build. Baked at compile time via
-#                AGENTMUX_BUILD_CHANNEL_DEFAULT (see agentmux-common/build.rs).
+#                AGENTMUX_BUILD_CHANNEL_DEFAULT (see crates/common/build.rs).
 #                Safe now that agents + auth are global (#1387-#1393); only pane
 #                layout + memories start fresh. Releases override to "stable".
 #   - AGENTMUX_BUILD_LABEL: the full label (including stamp) baked into the
@@ -141,7 +141,7 @@ echo "────────────────────────�
 
 # Exported for:
 #   - the cargo builds: AGENTMUX_BUILD_CHANNEL_DEFAULT is read via
-#     option_env! in data_paths.rs and baked in. agentmux-common/build.rs
+#     option_env! in data_paths.rs and baked in. crates/common/build.rs
 #     declares rerun-if-env-changed for it so a changed channel actually
 #     recompiles instead of serving a stale cache.
 #   - package-portable.sh: AGENTMUX_BUILD_LABEL names the artifacts.

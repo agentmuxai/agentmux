@@ -182,7 +182,7 @@ pub fn spawn_splash(
 }
 
 /// Signal an existing splash's dismiss event by name, same mechanism the CEF
-/// host uses from `on_load_end` (`agentmux-cef/src/client/navigation.rs`).
+/// host uses from `on_load_end` (`crates/cef/src/client/navigation.rs`).
 /// Used by the crash-restart path (`supervisor/windows.rs`) to tear down the
 /// PREVIOUS restart's splash before spawning a new one — otherwise that
 /// thread stays blocked in `run_splash`'s `WaitForSingleObject` loop forever

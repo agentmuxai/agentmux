@@ -10,9 +10,9 @@
  * Why this exists as its own module: uptime used to be derived entirely
  * from two independent WALL-CLOCK stamps —
  * `backend_started_at` (`chrono::Utc::now()`, stamped once by the host in
- * `agentmux-cef/src/sidecar.rs` when it spawns the sidecar, never
+ * `crates/cef/src/sidecar.rs` when it spawns the sidecar, never
  * re-stamped) and the sysinfo event's `ts` (`SystemTime::now()` on every
- * tick in `agentmux-srv/src/backend/sysinfo.rs`). Subtracting them is only
+ * tick in `crates/srv/src/backend/sysinfo.rs`). Subtracting them is only
  * correct while the system clock is monotonic across the backend's whole
  * lifetime, which it is not: an NTP correction, a manual clock set, or a VM
  * resume steps it, and any BACKWARDS step makes the difference negative for

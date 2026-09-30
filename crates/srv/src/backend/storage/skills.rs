@@ -20,7 +20,7 @@ use super::store::Store;
 
 /// A reusable skill/capability attached to a agent definition.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSkill {
     pub id: String,
     pub agent_id: String,

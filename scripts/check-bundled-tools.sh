@@ -27,7 +27,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
-CONFIG=agentmux-srv/src/backend/agent_config.rs
+CONFIG=crates/srv/src/backend/agent_config.rs
 
 # One release packager per platform: each is where tools/bin gets populated.
 PACKAGERS=(

@@ -4,7 +4,7 @@
 # Why
 # ---
 # Left-click window drag on Linux calls CefWindow::BeginWindowDrag() via raw FFI
-# (agentmux-cef/src/ui_tasks.rs). That struct slot exists ONLY in a libcef.so built
+# (crates/cef/src/ui_tasks.rs). That struct slot exists ONLY in a libcef.so built
 # from the a5af/cef fork (branch agentmux/7680-…). Bundle the upstream prebuilt CEF
 # instead and drag silently no-ops — the runtime ABI guard catches it, but only
 # after the user clicks the title bar and nothing happens. This is the build/

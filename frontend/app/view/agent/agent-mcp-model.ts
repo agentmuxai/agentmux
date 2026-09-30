@@ -4,7 +4,7 @@
 /**
  * AgentMcpModel — view model for the agent pane's MCP Servers tab (part of
  * AgentStashModal). A reactive, read-only view of the standalone MCP
- * Server primitive (`mcp.*` App API, agentmux-srv/src/server/app_api/mcp.rs)
+ * Server primitive (`mcp.*` App API, crates/srv/src/server/app_api/mcp.rs)
  * plus a Bind/Unbind toggle — NOT a create/edit/delete surface. Global
  * servers are authored in the Armory; this tab lets you choose which of
  * them apply to this agent.

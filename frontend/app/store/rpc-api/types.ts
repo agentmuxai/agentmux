@@ -6,7 +6,7 @@
 
 /**
  * Wire shape of an Armory service-OAuth flow status (account.oauth.*).
- * Mirrors `oauth_status_wire()` in agentmux-srv/src/server/agent_handlers.rs.
+ * Mirrors `oauth_status_wire()` in crates/srv/src/server/agent_handlers.rs.
  *   pending       — flow starting up
  *   url-available — PKCE: open `authUrl` in the browser
  *   code-emitted  — device flow: show `userCode` + `verificationUri`

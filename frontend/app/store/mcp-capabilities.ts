@@ -9,7 +9,7 @@
  * Armory catalog row and a future per-agent status pill) never fire
  * duplicate probes or disagree with each other.
  *
- * Backed by `mcp.catalog.probe` (agentmux-srv/src/server/app_api/mcp.rs) —
+ * Backed by `mcp.catalog.probe` (crates/srv/src/server/app_api/mcp.rs) —
  * the window-scoped, agent-independent probe, since the primary consumer is
  * the Armory's MCP Servers catalog, which has no agent context. Keyed by
  * MCP server id, not a fixed catalog of known tool ids (toolchain-catalog.ts

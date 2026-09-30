@@ -9,7 +9,7 @@
  *
  * Owns the per-drone-pane reactive cells that fold the
  * `dronerun:<id>` event stream (backend
- * `agentmux-srv/src/drone/executor/engine.rs::RunEvent`).
+ * `crates/srv/src/drone/executor/engine.rs::RunEvent`).
  * The view (`DroneViewModel`) keeps the canvas-edit cells
  * (draft graph, selection, palette interaction) — those are
  * pure UI editing state, not folded data.

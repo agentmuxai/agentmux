@@ -6,7 +6,7 @@
 //
 // This file used to be the 415-line original (Phase D.2) that srv later
 // mirrored byte-for-byte; the two differed only in which logging sink
-// warnings went to. See `agentmux-common/src/event_log.rs` for the design
+// warnings went to. See `crates/common/src/event_log.rs` for the design
 // and the audit that motivated the lift.
 //
 // Call sites are unchanged: `event_log::EventLog` and

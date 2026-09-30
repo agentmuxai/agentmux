@@ -12,7 +12,7 @@ use crate::server::tests::test_state;
 // the paths reachable without one (tier scoping, no-signature-attempted,
 // no-pubkey-found). The actual verify_lan_jekt crypto — correct sig
 // verifies, wrong sig fails, tampered content/sender fails — is
-// exhaustively covered in agentmux-common/src/jekt_sign.rs; the tier
+// exhaustively covered in crates/common/src/jekt_sign.rs; the tier
 // escalation this feeds into (is_lan_sig_invalid forcing sensitive,
 // TRUST=lan-verified rendering) is covered end-to-end via
 // Handler::inject_message in backend/reactive/tests.rs, driven directly

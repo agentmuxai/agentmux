@@ -88,7 +88,7 @@ pub(super) fn handle_report_pool_window_removed(state: &mut State, label: String
 ///
 /// The actual host emit order is
 /// `ReportPoolWindowRemoved → ReportPoolWindowPromoted →
-/// ReportWindowOpened` (`agentmux-cef/src/commands/window_pool.rs`).
+/// ReportWindowOpened` (`crates/cef/src/commands/window_pool.rs`).
 /// At promote-time the launcher has NO mirror for this label —
 /// `state.pool.contains(label)` is also false (removed by the
 /// preceding `ReportPoolWindowRemoved`), so we can't gate purely on

@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 // Embedded catalog — path is relative to THIS FILE's location.
-// File: agentmux-srv/src/backend/tool_store.rs
-// Catalog: agentmux-srv/src/config/tool-catalog.json
+// File: crates/srv/src/backend/tool_store.rs
+// Catalog: crates/srv/src/config/tool-catalog.json
 const CATALOG_JSON: &str = include_str!("../config/tool-catalog.json");
 
 // ---- Catalog structs ----
@@ -53,7 +53,7 @@ pub struct PlatformSpec {
 // ---- Status types ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatus {
     InstalledSystem,
@@ -64,7 +64,7 @@ pub enum ToolStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ToolStatusEntry {
     pub id: String,
     pub display: String,

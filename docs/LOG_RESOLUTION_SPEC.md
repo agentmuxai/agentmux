@@ -11,7 +11,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  LAUNCHER (agentmux-launcher/src/main.rs)                    │
+│  LAUNCHER (crates/launcher/src/main.rs)                    │
 │  • No logging today — eprintln! only (proposed: file log)    │
 │  • Windows: .status() — STAYS ALIVE for entire app lifetime  │
 │  • Unix: exec() — replaces self with CEF host process        │
@@ -19,7 +19,7 @@
 └────────────────────────┬─────────────────────────────────────┘
                          │ spawn (.status) / exec
 ┌────────────────────────▼─────────────────────────────────────┐
-│  CEF HOST (agentmux-cef/src/main.rs)                         │
+│  CEF HOST (crates/cef/src/main.rs)                         │
 │                                                              │
 │  init_logging() @ line 295                                   │
 │  ├─ Reads AGENTMUX_DATA_HOME (NOT SET YET at this point)    │
@@ -46,7 +46,7 @@
 └────────────────────────┬─────────────────────────────────────┘
                          │ spawns
 ┌────────────────────────▼─────────────────────────────────────┐
-│  SIDECAR (agentmux-srv/src/main.rs)                          │
+│  SIDECAR (crates/srv/src/main.rs)                          │
 │                                                              │
 │  init_logging() @ line 530                                   │
 │  ├─ Reads AGENTMUX_DATA_HOME (SET by CEF host)              │
@@ -131,7 +131,7 @@ An agent running in any mode should resolve any log file with one deterministic 
 
 The sidecar already has `get_wave_data_dir()` in `base.rs:71` which resolves `AGENTMUX_DATA_HOME` → `~/.agentmux`. The issue is that `AGENTMUX_DATA_HOME` is set by the CEF host to the *versioned* AppData dir. The fix:
 
-**Change in `agentmux-srv/src/main.rs` init_logging():**
+**Change in `crates/srv/src/main.rs` init_logging():**
 ```rust
 // Always log to ~/.agentmux/logs/ regardless of AGENTMUX_DATA_HOME,
 // so all logs land in one discoverable directory.
@@ -159,7 +159,7 @@ Best of both worlds — consolidate for simplicity, add env vars for determinist
 
 ### Change 1: Consolidate sidecar logs (P0)
 
-**File:** `agentmux-srv/src/main.rs` — `init_logging()` (~line 533)
+**File:** `crates/srv/src/main.rs` — `init_logging()` (~line 533)
 
 **Before:**
 ```rust
@@ -184,7 +184,7 @@ let log_dir = dirs::home_dir()
 
 ### Change 2: `AGENTMUX_LOG_DIR` env var (P0)
 
-**File:** `agentmux-srv/src/backend/blockcontroller/shell.rs` (~line 486)
+**File:** `crates/srv/src/backend/blockcontroller/shell.rs` (~line 486)
 
 ```rust
 // Inject log directory so agents can find logs without guessing.
@@ -202,7 +202,7 @@ c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
 
 Write a one-line text file containing the current log filename. Pointer files go in the same log dir.
 
-**File:** `agentmux-cef/src/main.rs` — after file appender creation (~line 306)
+**File:** `crates/cef/src/main.rs` — after file appender creation (~line 306)
 
 ```rust
 // Write pointer to current log file for agent discovery.
@@ -212,7 +212,7 @@ let current_filename = format!("{}.{}", log_prefix, today);
 let _ = std::fs::write(log_dir.join("current-host.path"), &current_filename);
 ```
 
-**File:** `agentmux-srv/src/main.rs` — after file appender creation (~line 544)
+**File:** `crates/srv/src/main.rs` — after file appender creation (~line 544)
 
 ```rust
 let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -230,7 +230,7 @@ current-srv.path     → contains: "agentmuxsrv-v0.33.62.log.2026-04-07"
 
 Piggyback on the existing 20s heartbeat loop to update the pointer file on date change.
 
-**File:** `agentmux-cef/src/memory_heartbeat.rs` — in the loop body
+**File:** `crates/cef/src/memory_heartbeat.rs` — in the loop body
 
 ```rust
 // Refresh log pointer in case of midnight rollover.
@@ -250,7 +250,7 @@ The launcher has zero logging today — only `eprintln!` for fatal errors. On Wi
 
 The launcher is intentionally minimal (no `tracing`, no `chrono`, no `dirs` crate — just `std` + `windows-sys`). Adding full tracing would bloat a 325 KB binary. Instead, use lightweight `std::fs` append-logging to the same consolidated log directory.
 
-**File:** `agentmux-launcher/src/main.rs`
+**File:** `crates/launcher/src/main.rs`
 
 ```rust
 use std::io::Write;
@@ -370,7 +370,7 @@ if let Ok(entries) = std::fs::read_dir(&log_dir) {
 
 ### Change 7: `muxlog` shell helper (P2)
 
-**Files:** `agentmux-srv/src/backend/shellintegration/{bash.sh,zsh.sh}`
+**Files:** `crates/srv/src/backend/shellintegration/{bash.sh,zsh.sh}`
 
 ```bash
 muxlog() {
@@ -392,7 +392,7 @@ muxlog() {
 }
 ```
 
-**File:** `agentmux-srv/src/backend/shellintegration/pwsh.ps1`
+**File:** `crates/srv/src/backend/shellintegration/pwsh.ps1`
 
 ```powershell
 function muxlog {
@@ -463,11 +463,11 @@ Never glob for log files. Never guess paths. Use the pointer files.
 
 | # | What | Files | Lines | Priority |
 |---|------|-------|-------|----------|
-| 1 | Consolidate sidecar logs to `~/.agentmux/logs/` | `agentmux-srv/src/main.rs:533` | 3 | P0 |
+| 1 | Consolidate sidecar logs to `~/.agentmux/logs/` | `crates/srv/src/main.rs:533` | 3 | P0 |
 | 2 | Inject `AGENTMUX_LOG_DIR` into shells | `shell.rs:486` | 5 | P0 |
-| 3 | Write `current-host.path` pointer | `agentmux-cef/src/main.rs:306` | 3 | P0 |
-| 4 | Write `current-srv.path` pointer | `agentmux-srv/src/main.rs:544` | 3 | P0 |
-| 5 | Launcher file logging | `agentmux-launcher/src/main.rs` | ~35 | P1 |
+| 3 | Write `current-host.path` pointer | `crates/cef/src/main.rs:306` | 3 | P0 |
+| 4 | Write `current-srv.path` pointer | `crates/srv/src/main.rs:544` | 3 | P0 |
+| 5 | Launcher file logging | `crates/launcher/src/main.rs` | ~35 | P1 |
 | 6 | Heartbeat refreshes host pointer | `memory_heartbeat.rs:16` | 5 | P1 |
 | 7 | 7-day log retention on startup | Both `main.rs` init_logging | 15 | P2 |
 | 8 | `muxlog` shell helper | `shellintegration/{bash,zsh,pwsh,fish}` | ~20/script | P2 |

@@ -13,7 +13,7 @@ reasoning/effort levels, and key settings for **every provider AgentMux ships**
   reference, cache 2026-06-04). **All other providers** are from web sources dated
   2026 — cited at the bottom; **verify before pinning**, model lines move fast.
 - AgentMux's current values are quoted from
-  `agentmux-srv/src/backend/providers.rs`, `frontend/app/view/agent/providers/index.ts`,
+  `crates/srv/src/backend/providers.rs`, `frontend/app/view/agent/providers/index.ts`,
   `frontend/app/view/agent/types.ts`, and `buildRuntimeArgs.ts`.
 
 ---

@@ -20,13 +20,13 @@
 //   node scripts/check-time-helpers.mjs --list     print today's matching files
 //
 // Migrations are exempt on purpose: they freeze copies of live logic
-// (agentmux-srv/src/migrations/mod.rs).
+// (crates/srv/src/migrations/mod.rs).
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const CRATES = ["agentmux-srv", "agentmux-mcp", "agentmux-launcher", "agentmux-bashwrap", "agentmux-cef"];
+const CRATES = ["crates/srv", "crates/mcp", "crates/launcher", "crates/bashwrap", "crates/cef"];
 const INLINE = /SystemTime::now\(\)\s*\.duration_since\(\s*(?:std::time::)?UNIX_EPOCH/;
 const OWN_FN = /\bfn\s+(?:now_ms|now_secs|now_unix_secs|now_millis)\b/;
 const LIST_FILE = join(ROOT, "scripts/check-time-helpers.allow");

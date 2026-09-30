@@ -3,7 +3,7 @@
 
 // Drift guard for the provider-ID alias table duplicated across the frontend
 // and the Rust backend — same idiom as pin-consistency.test.ts. Extracts
-// agentmux-srv/src/backend/providers.rs's `ALIASES` map by regex and asserts
+// crates/srv/src/backend/providers.rs's `ALIASES` map by regex and asserts
 // every entry matches provider-id-aliases.ts's copy, in both directions (so a
 // backend addition that's never mirrored here fails loudly instead of
 // silently reintroducing the alias-mismatch bug this file exists to fix —
@@ -17,9 +17,9 @@ import { _PROVIDER_ID_ALIASES_FOR_TEST as frontendAliases, canonicalProviderId, 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 function readSrvAliases(): Record<string, string> {
-    const source = readFileSync(resolve(repoRoot, "agentmux-srv/src/backend/providers.rs"), "utf8");
+    const source = readFileSync(resolve(repoRoot, "crates/srv/src/backend/providers.rs"), "utf8");
     const match = source.match(/static ALIASES:[\s\S]*?LazyLock::new\(\|\| \{([\s\S]*?)\n\}\);/);
-    if (!match) throw new Error("ALIASES map not found in agentmux-srv/src/backend/providers.rs");
+    if (!match) throw new Error("ALIASES map not found in crates/srv/src/backend/providers.rs");
     const body = match[1];
     const entries: Record<string, string> = {};
     for (const m of body.matchAll(/m\.insert\("([^"]+)",\s*"([^"]+)"\)/g)) {

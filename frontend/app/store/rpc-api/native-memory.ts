@@ -19,7 +19,7 @@ import { RpcClient } from "../rpc-client";
 // has always treated as an OPTIONAL property, and ts-rs refuses
 // `#[ts(optional)]` on anything that is not `Option<T>`, so the shape is not
 // expressible by the generator. See the long note on the Rust struct in
-// agentmux-srv/src/backend/rpc_types/native_memory.rs.
+// crates/srv/src/backend/rpc_types/native_memory.rs.
 export type { NativeMemoryFileMeta } from "@/types/rpc/NativeMemoryFileMeta";
 export type { NativeMemoryVersionMeta } from "@/types/rpc/NativeMemoryVersionMeta";
 export type { NativeMemoryListResult } from "@/types/rpc/NativeMemoryListResult";

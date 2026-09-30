@@ -49,7 +49,7 @@ const CLAUDE_OAUTH_TOKEN_ACCOUNT: &str = "system:claude-code-oauth-token";
 /// CLI accepts (e.g. `claude-sonnet-5`); `display_name` is the label to show
 /// (e.g. "Claude Sonnet 5"), taken verbatim from the API.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CatalogModel {
     pub id: String,
     pub display_name: String,

@@ -2252,7 +2252,7 @@ impl ReactiveHandler {
     }
 
     /// Records an action that isn't a jekt injection (fleet bulk-stop,
-    /// pane-lifecycle close/etc. — `agentmux-srv/src/server/app_api/{fleet,
+    /// pane-lifecycle close/etc. — `crates/srv/src/server/app_api/{fleet,
     /// pane}.rs`) into the SAME audit ring buffer, so it shows up in
     /// Warden's Audit tab exactly like an ordinary injection
     /// (`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md` §6 — fleet actions get

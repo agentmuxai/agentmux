@@ -85,7 +85,7 @@ pub fn commit_total_mb() -> u64 {
 /// omits the disk-aware guidance rather than showing a wrong one).
 /// `SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07` §4: reuses
 /// `agentmux_common::pagefile`, the same implementation
-/// `agentmux-srv/src/backend/sysinfo.rs`'s StatusBar telemetry already
+/// `crates/srv/src/backend/sysinfo.rs`'s StatusBar telemetry already
 /// calls, so the two processes can't independently drift on "system
 /// managed?" the way the commit-ratio classifier and the StatusBar gauge
 /// once did (issue #2218). Registry read is `OnceLock`-cached inside that

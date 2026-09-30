@@ -10,7 +10,7 @@ import { visit } from "unist-util-visit";
  * places must agree with this list, and `markdown-callout.test.tsx` checks all
  * three: the sanitizer allowlist (`markdown.tsx`), the stylesheet
  * (`markdown.scss`), and the Operator Config entry that tells agents about it
- * (`agentmux-srv/operator-config-seed.json`, id `operator-config-rich-output`).
+ * (`crates/srv/operator-config-seed.json`, id `operator-config-rich-output`).
  */
 export const ALERT_KINDS = ["note", "tip", "important", "warning", "caution"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];

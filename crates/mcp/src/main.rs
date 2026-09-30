@@ -1133,7 +1133,7 @@ async fn call_tool(
 
             // `/agentmux/reactive/inject`'s `target_agent` resolves by
             // registered AGENT NAME only (`agent_to_block`,
-            // agentmux-srv/src/backend/reactive/handler.rs) — never by
+            // crates/srv/src/backend/reactive/handler.rs) — never by
             // block_id, even though this tool's own advertised contract
             // (FLEET_BROADCAST_TOOL) is block_id values from FleetList, to
             // stay consistent with FleetBulkStop's targeting scheme. The
@@ -1189,7 +1189,7 @@ async fn call_tool(
             // how many targets fail. Sent in chunks with a pause between
             // them — `/agentmux/reactive/inject` shares ReactiveHandler's
             // global rate limiter (10/sec, hard reset per second, not a
-            // smooth refill — agentmux-srv/src/backend/reactive/mod.rs's
+            // smooth refill — crates/srv/src/backend/reactive/mod.rs's
             // RATE_LIMIT_MAX), and a tight loop past ~10 targets would
             // otherwise deterministically fail the tail of any larger
             // broadcast with "rate limit exceeded" (Codex P1, same review).

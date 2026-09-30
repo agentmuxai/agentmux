@@ -94,7 +94,7 @@ fn result_content_text(content: &serde_json::Value) -> String {
 /// Subscribe to the reducer's `srv_events_tx` broadcast and prune `watcher`'s
 /// per-block state on `Event::BlockDeleted`/`TabDeleted`/`WorkspaceDeleted` —
 /// the robust backstop described on `SubagentWatcher::prune_block`'s doc
-/// comment. Mirrors `agentmux-cef/src/srv_ipc.rs`'s cascaded-block-id
+/// comment. Mirrors `crates/cef/src/srv_ipc.rs`'s cascaded-block-id
 /// extraction (same three-arm match, same rationale: `TabDeleted`/
 /// `WorkspaceDeleted` never emit a per-block event of their own — see
 /// `reducer/tab.rs::handle_delete_tab`'s doc comment — so `block_ids` is the

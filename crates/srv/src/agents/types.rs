@@ -139,7 +139,7 @@ pub enum CompactionTrigger {
 // `rename_all = "camelCase"` gives `cacheCreation`/`cacheRead`, which is what
 // the hand-written copy already says.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct TokenCounts {
     #[serde(default)]

@@ -19,13 +19,13 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use super::AppState;
 
 #[derive(serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ProvidersModelsParams {
     pub provider_id: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ProvidersModelsResult {
     /// `CatalogModel` serializes to `{ id, display_name }`.
     pub models: Vec<CatalogModel>,

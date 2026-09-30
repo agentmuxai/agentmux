@@ -150,7 +150,7 @@ export interface FetchMediaOpts {
 // stream-local-file requires (it lives in `authed_routes`, and the
 // query-string `?authkey=` fallback is deliberately restricted to the
 // `/ws` upgrade route only — see auth_middleware's 2026-05-11 audit
-// comment in agentmux-srv/src/server/mod.rs). Fetch the bytes ourselves
+// comment in crates/srv/src/server/mod.rs). Fetch the bytes ourselves
 // with the header (same pattern as fetchMuxFile in mux-file.ts) and
 // hand the element a blob object URL instead. Caller owns revoking it.
 export async function fetchMediaBlob(path: string, opts: FetchMediaOpts = {}): Promise<Blob> {

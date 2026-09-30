@@ -159,7 +159,7 @@ mod tests {
     /// either the TS name or the serialized form drifts, the other pins it.
     ///
     /// Why this needs guarding at all: ts-rs derives from the STRUCT shape, and
-    /// the `serde-compat` feature (see agentmux-srv/Cargo.toml) only reads
+    /// the `serde-compat` feature (see crates/srv/Cargo.toml) only reads
     /// serde ATTRIBUTES — rename_all, skip_serializing_if and friends. It
     /// cannot see a hand-written `impl Serialize`, which is exactly what ORef
     /// has. Without `#[ts(type = "string")]` the generated type would be

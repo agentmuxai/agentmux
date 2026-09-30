@@ -212,7 +212,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             //
             // The tagged stderr line lets the launcher / CEF host fail fast
             // with the real reason instead of timing out on ESTART 30s later
-            // (agentmux-common/src/srv_stderr.rs). Exit code 1 is what
+            // (crates/common/src/srv_stderr.rs). Exit code 1 is what
             // docs/exe-return-codes.md already documented for this case.
             tracing::error!("startup: migration failed — refusing to start: {}", e);
             eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&e));

@@ -312,7 +312,7 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// block may not have finished mounting its `EditorViewModel` by the time a
 /// second back-to-back `OpenEditor` call reuses it. `persist: N` closes that
 /// race but opens a *worse* one: `Broker::unsubscribe_all` clears a route's
-/// replay marker on disconnect (`agentmux-srv/src/backend/mps.rs:312-323`),
+/// replay marker on disconnect (`crates/srv/src/backend/mps.rs:312-323`),
 /// so any later, unrelated reconnect would replay the *entire* persisted
 /// history again — reopening files the user has since closed. The broker
 /// has no ack/consume concept, so nothing marks a persisted event "already

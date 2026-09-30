@@ -103,7 +103,7 @@ describe("stylesheet: each kind uses its theme colour", () => {
 
 describe("Operator Config tells agents about callouts", () => {
     const manifest = JSON.parse(
-        readFileSync(join(__dirname, "../../../agentmux-srv/operator-config-seed.json"), "utf8")
+        readFileSync(join(__dirname, "../../../crates/srv/operator-config-seed.json"), "utf8")
     ) as { version: number; entries: { id: string; instructions: string }[] };
     const entry = manifest.entries.find((e) => e.id === "operator-config-rich-output")!;
 

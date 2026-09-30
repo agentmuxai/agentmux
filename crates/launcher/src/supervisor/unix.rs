@@ -63,7 +63,7 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
 ///     The launcher-side server uses `tokio::net::UnixListener`; the
 ///     host-side client uses `tokio::net::UnixStream`. See
 ///     `ipc::server::run_ipc_server` (Unix arm) and
-///     `agentmux-cef/src/launcher_ipc.rs::connect_to_launcher` (Unix arm).
+///     `crates/cef/src/launcher_ipc.rs::connect_to_launcher` (Unix arm).
 ///   * srv-side IPC is still skipped on Linux (srv is launched with an
 ///     empty `srv_pipe_path`); follow-up PR will bring srv's Unix
 ///     socket online too.
@@ -382,8 +382,8 @@ pub(crate) async fn run_unix(
     // launcher socket. The env var name `AGENTMUX_LAUNCHER_PIPE` is
     // reused from the Windows side even though the underlying resource
     // is a Unix-domain socket — keeps the 17 `report_*` call sites in
-    // `agentmux-cef/src/launcher_ipc.rs` unchanged and avoids touching
-    // the host's connect-on-startup code in `agentmux-cef/src/app.rs`.
+    // `crates/cef/src/launcher_ipc.rs` unchanged and avoids touching
+    // the host's connect-on-startup code in `crates/cef/src/app.rs`.
     host_env.push((
         "AGENTMUX_LAUNCHER_PIPE",
         std::ffi::OsString::from(&socket_path),
@@ -507,7 +507,7 @@ pub(crate) async fn run_unix(
                     // purpose), so they are NOT members of srv's group and a
                     // signal to srv's group alone never reaches them. Giving
                     // srv a moment to catch SIGTERM lets its own handler
-                    // (`agentmux-srv/src/main.rs` → `shell_sessions.stop_all()`)
+                    // (`crates/srv/src/main.rs` → `shell_sessions.stop_all()`)
                     // run first — `stop_all()` reaches every tracked shell by
                     // its own pid/pgid directly (`shell_node.rs::kill_tree`),
                     // independent of ambient process-group membership, so it
@@ -725,7 +725,7 @@ pub(crate) async fn run_unix(
                         // comment for the PR #2200 process-group caveat: a
                         // terminal Ctrl+C no longer reaches srv directly,
                         // since it now has its own process group). srv's own
-                        // signal handler (agentmux-srv/src/main.rs —
+                        // signal handler (crates/srv/src/main.rs —
                         // SIGINT/SIGTERM → cancel token → clean exit) still
                         // turns an EXPLICIT SIGTERM — e.g. from our own
                         // `terminate_child_gracefully` in the cleanup

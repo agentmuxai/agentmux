@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// Request for `readeditorfile`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandReadEditorFileData {
     pub path: String,
 }
@@ -28,7 +28,7 @@ pub struct CommandReadEditorFileData {
 /// only ever true of a client reading a response from a build that predates
 /// SPEC_EDITOR_FILE_ENCODINGS, which is not a thing the binding describes.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandReadEditorFileResult {
     pub content: String,
     /// Encoding label (WHATWG / `encoding_rs` name, e.g. "windows-1252").
@@ -50,7 +50,7 @@ pub struct CommandReadEditorFileResult {
 /// which is what a caller that never read the file back wants. They are
 /// `Option<T>` in Rust, so ts-rs marks them optional without help.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandWriteEditorFileData {
     pub path: String,
     pub content: String,
@@ -67,7 +67,7 @@ pub struct CommandWriteEditorFileData {
 
 /// Request for `listeditordir`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ListEditorDirReq {
     pub path: String,
 }
@@ -79,7 +79,7 @@ pub struct ListEditorDirReq {
 /// filesystem. Sending `0` would be indistinguishable from a real empty file
 /// or a real epoch timestamp, so they stay omitted.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DirEntry {
     pub name: String,
     /// Follows symlinks, so a symlink to a directory reads as a directory —
@@ -100,7 +100,7 @@ pub struct DirEntry {
 /// is not necessarily the `path` the caller sent — `~` and symlinks are
 /// resolved.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ListEditorDirResult {
     pub path: String,
     pub entries: Vec<DirEntry>,
@@ -112,12 +112,12 @@ pub struct ListEditorDirResult {
 /// `{}` and a client that omits `data` sends `null`, and serde accepts each of
 /// those from only one of `()` and a struct.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct EditorRootsReq {}
 
 /// Response for `geteditorhome`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GetEditorHomeResult {
     pub home: String,
 }
@@ -126,7 +126,7 @@ pub struct GetEditorHomeResult {
 /// Linux mount under /mnt, /media or /Volumes. Empty on macOS, where the
 /// file-tree is scoped to `$HOME` only.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct EditorDrive {
     pub name: String,
     pub path: String,
@@ -134,7 +134,7 @@ pub struct EditorDrive {
 
 /// Response for `geteditorroots`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GetEditorRootsResult {
     pub home: String,
     pub drives: Vec<EditorDrive>,
@@ -148,7 +148,7 @@ pub struct GetEditorRootsResult {
 /// that does not name exactly what the watch named leaks a watcher. Sharing
 /// the type makes that a compile error rather than a leak.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WatchEditorFileReq {
     pub path: String,
     /// Scopes the `editor:file_changed` event to `block:<block_id>`, and is
@@ -159,7 +159,7 @@ pub struct WatchEditorFileReq {
 
 /// Request for `watchmediadir`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WatchMediaDirReq {
     pub path: String,
     pub block_id: String,
@@ -174,7 +174,7 @@ pub struct WatchMediaDirReq {
 /// really does take fewer fields: the registration is keyed on
 /// (path, block_id) and the extension filter is not part of the key.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct UnwatchMediaDirReq {
     pub path: String,
     pub block_id: String,

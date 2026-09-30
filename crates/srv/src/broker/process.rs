@@ -247,7 +247,7 @@ impl ProcessBroker {
         // controller — `list()`'s own callers only ever pass real,
         // discovered block_ids (from `get_all_controllers()`), but this
         // broker is also reachable directly with caller-supplied input via
-        // `muxspect describe` (agentmux-srv/src/server/muxspect_handlers.rs)
+        // `muxspect describe` (crates/srv/src/server/muxspect_handlers.rs)
         // — the first RPC-adjacent surface to call `status()` with an
         // arbitrary string rather than one already known to exist. Without
         // this guard, repeated queries for distinct nonexistent block_ids

@@ -31,7 +31,7 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     // covered; idempotent for the agent-CLI callers (persistent/subprocess/
     // acp) that already set it manually. `tokio::process::Command` exposes
     // `creation_flags` as an inherent method on Windows — no `CommandExt`
-    // import needed (see agentmux-bashwrap/src/bash_wrap.rs's note).
+    // import needed (see crates/bashwrap/src/bash_wrap.rs's note).
     #[cfg(windows)]
     {
         cmd.creation_flags(crate::win32::CREATE_NO_WINDOW);

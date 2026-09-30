@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Request for `lspstart`. The backend resolves the workspace root from
 /// `file_path` rather than trusting the client to send one.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LspStartReq {
     pub language: String,
     pub file_path: String,
@@ -21,7 +21,7 @@ pub struct LspStartReq {
 
 /// Response for `lspstart`. Was an inline `json!({ "server_id": .., ..})`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LspStartResult {
     pub server_id: String,
     /// The root the supervisor actually attached to, which is not necessarily
@@ -32,7 +32,7 @@ pub struct LspStartResult {
 
 /// Request for `lspsend`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LspSendReq {
     pub server_id: String,
     /// An arbitrary LSP JSON-RPC message. The backend is a dumb proxy here —
@@ -47,7 +47,7 @@ pub struct LspSendReq {
 
 /// Request for `lspstop`. Refcount-decrement; the server exits at zero.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LspStopReq {
     pub server_id: String,
 }

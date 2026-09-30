@@ -43,7 +43,7 @@ const INDEX_FILE: &str = "MEMORY.md";
 const LIST_TTL: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NativeMemoryAdoptionFile")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryAdoptionFile")]
 pub(crate) struct CandidateFile {
     pub name: String,
     #[ts(type = "number")]
@@ -56,7 +56,7 @@ pub(crate) struct CandidateFile {
 /// One folder offered for adoption. No path: the client refers to it by
 /// `index` and `dir_hash`.
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NativeMemoryAdoptionCandidate")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryAdoptionCandidate")]
 pub(crate) struct Candidate {
     pub index: usize,
     /// The account the folder belongs to (its identity folder), `default`
@@ -70,7 +70,7 @@ pub(crate) struct Candidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NativeMemoryAdoptionList")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryAdoptionList")]
 pub(crate) struct AdoptionList {
     pub list_id: String,
     pub agent_uid: String,
@@ -78,7 +78,7 @@ pub(crate) struct AdoptionList {
 }
 
 #[derive(Debug, Default, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NativeMemoryAdoptReport")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryAdoptReport")]
 pub(crate) struct AdoptReport {
     /// Files the record didn't have, now adopted.
     pub files_added: usize,

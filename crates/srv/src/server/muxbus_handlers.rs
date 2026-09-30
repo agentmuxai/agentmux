@@ -25,7 +25,7 @@ pub const COMMAND_MUXBUS_DISCONNECT: &str = "muxbus.disconnect";
 pub const COMMAND_MUXBUS_CLOUDCONFIG: &str = "muxbus.cloudconfig";
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct MuxBusLoginReq {
     pub cognito_domain: String,
@@ -33,7 +33,7 @@ pub struct MuxBusLoginReq {
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct MuxBusLoginResp {
     pub success: bool,
@@ -47,7 +47,7 @@ pub struct MuxBusLoginResp {
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct MuxBusLoginCancelResp {
     /// False when there was no in-flight login to cancel (already resolved,
@@ -56,7 +56,7 @@ pub struct MuxBusLoginCancelResp {
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct MuxBusStatusResp {
     pub connected: bool,
@@ -79,33 +79,33 @@ pub struct MuxBusStatusResp {
 /// real call at runtime while compiling and passing every CI gate -- the
 /// `bookmarks.list` bug.
 #[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxBusLoginCancelReq {}
 
 #[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxBusStatusReq {}
 
 #[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxBusDisconnectReq {}
 
 /// Result of `muxbus.disconnect`. Was an inline `json!({})`; the stub already
 /// typed it `Record<string, never>`, which is exactly what an empty struct
 /// generates.
 #[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxBusDisconnectResp {}
 
 /// Empty request for `muxbus.cloudconfig`: a struct rather than `()` so the
 /// stub's `{}` deserializes, like the request shapes above.
 #[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxBusCloudConfigReq {}
 
 /// Where `muxbus.cloudconfig`'s settings came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "lowercase")]
 pub enum MuxBusCloudConfigSource {
     /// The relay's `/.well-known/agentmux-cloud.json` (the last good copy
@@ -119,7 +119,7 @@ pub enum MuxBusCloudConfigSource {
 /// (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.2). A build compiled
 /// without a Cognito client id asks this whether sign-in is possible anyway.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct MuxBusCloudConfigResp {
     pub source: MuxBusCloudConfigSource,
