@@ -14,6 +14,7 @@ import { isWindows } from "@/util/platformutil";
 import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
+import { markEscaped, session } from "@/app/drag/drag-session";
 import { endTileDrag } from "@/layout/lib/tile-drag";
 import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
 import { WorkspaceService } from "../store/services";
@@ -27,8 +28,6 @@ import {
     draggedWindowTabId,
     endWindowTabDrag,
     setHoveredDropTabId,
-    dragEscaped,
-    setDragEscaped,
     decideTabRelease,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -137,7 +136,7 @@ export function useTabDragAndDrop(
         const onDragEscape = (e: KeyboardEvent) => {
             if (draggedWindowTabId() == null) return; // not a tab drag
             if (e.key !== "Escape") return;
-            setDragEscaped(true);
+            markEscaped();
         };
         window.addEventListener("keydown", onDragEscape, true);
         onCleanup(() => window.removeEventListener("keydown", onDragEscape, true));
@@ -157,7 +156,7 @@ export function useTabDragAndDrop(
             onDrop: ({ source, location }) => {
                 // Every window-tab release reaches this monitor, after the
                 // source's onDrop (pragmatic: source, targets, monitors).
-                // Nothing below reads the session.
+                const escaped = session()?.escaped ?? false;
                 endWindowTabDrag("drop");
 
                 const ip = insertionPoint();
@@ -167,7 +166,7 @@ export function useTabDragAndDrop(
                 // (insertion is purely X-driven), so the strip's rect tells
                 // "reorder inside the bar" from "tear-off below it".
                 const release = decideTabRelease({
-                    escaped: dragEscaped,
+                    escaped,
                     ip,
                     input,
                     stripRect: tabBarScrollRef()?.getBoundingClientRect() ?? null,
@@ -182,7 +181,6 @@ export function useTabDragAndDrop(
                 // and the cross-window payload is enough to fully restore
                 // the pre-drag state; nothing to undo.
                 if (release === "abort") {
-                    setDragEscaped(false);
                     setCurrentDragPayload(null);
                     setInsertionPoint(null);
                     Logger.info("dnd", "tab drag aborted via Escape", {

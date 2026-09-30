@@ -23,7 +23,6 @@ import {
     tabWrapperRefs,
     SPRING_SWITCH_MS,
     dragActivatedTabIds,
-    setDragEscaped,
 } from "./tabbar-dnd";
 import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { getLayoutModelForTabById, redockDraggedPane } from "@/layout/index";
@@ -136,7 +135,6 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // works via pragmatic-dnd's own drop targets.
                 if (!isWindows()) preventUnhandled.start();
                 startWindowTabDrag(props.tabId, props.workspaceId, !isLoneTabDrag());
-                setDragEscaped(false);
                 setInsertionPoint(null);
                 // Lone-tab drags carry NO cross-window payload: the HTML5
                 // pipeline's outcomes for a tab (tear-off to a new window,
