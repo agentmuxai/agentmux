@@ -323,14 +323,27 @@ describe("findings only on docs", () => {
         expect(r.description.length).toBeLessThanOrEqual(140);
     });
 
-    it("carries docs-only findings on an earlier commit to a later head", () => {
-        const r = evaluateCodexGate({
-            headSha: HEAD,
-            reviews: [reviewWithId(11, OLD)],
-            reviewComments: [inline(11, "docs/specs/SPEC_X.md")],
-        });
+    const docsFindingsOnOld = { reviews: [reviewWithId(11, OLD)], reviewComments: [inline(11, "docs/specs/SPEC_X.md")] };
+
+    it("carries docs-only findings to a later head when only docs changed since", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, ...docsFindingsOnOld, filesSinceLatest: ["docs/specs/SPEC_X.md"] });
         expect(r.state).toBe("success");
         expect(r.description).toContain(OLD.slice(0, 10));
+    });
+
+    it("waits for Codex when code changed since docs-only findings", () => {
+        // ReAgent re-asks for a non-doc change, so that answer decides the head.
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            ...docsFindingsOnOld,
+            filesSinceLatest: ["docs/specs/SPEC_X.md", "src/lib.rs"],
+        });
+        expect(r.state).toBe("pending");
+    });
+
+    it("waits for Codex when the diff since docs-only findings is unknown", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, ...docsFindingsOnOld, filesSinceLatest: null }).state).toBe("pending");
+        expect(evaluateCodexGate({ headSha: HEAD, ...docsFindingsOnOld }).state).toBe("pending");
     });
 
     it("still fails findings that mix code and docs", () => {
@@ -338,14 +351,14 @@ describe("findings only on docs", () => {
         expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)], reviewComments }).state).toBe(
             "failure",
         );
-        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, OLD)], reviewComments }).state).toBe(
-            "pending",
-        );
+        const carried = { headSha: HEAD, reviews: [reviewWithId(11, OLD)], reviewComments, filesSinceLatest: ["docs/a.md"] };
+        expect(evaluateCodexGate(carried).state).toBe("pending");
     });
 
     it("treats findings with no known files as before (fail safe)", () => {
         expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)] }).state).toBe("failure");
-        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, OLD)] }).state).toBe("pending");
+        const carried = { headSha: HEAD, reviews: [reviewWithId(11, OLD)], filesSinceLatest: ["docs/a.md"] };
+        expect(evaluateCodexGate(carried).state).toBe("pending");
     });
 
     it("only counts inline comments from that review", () => {
@@ -366,6 +379,7 @@ describe("findings only on docs", () => {
                 reviewWithId(11, "aaaaaaaaaa11", "2026-09-23T06:00:00Z"),
             ],
             reviewComments: [inline(10, "docs/a.md"), inline(11, "src/lib.rs")],
+            filesSinceLatest: ["docs/a.md"],
         });
         expect(r.state).toBe("pending");
     });
