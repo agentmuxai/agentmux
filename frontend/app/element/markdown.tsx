@@ -31,6 +31,7 @@ export function __resetMarkdownRenderStats(): void {
     __markdownRenderStats.domSegmentRenders = 0;
 }
 import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
+import remarkGithubAlerts, { ALERT_CLASSES } from "@/app/element/remark-github-alerts";
 import remarkMermaidToTag from "@/app/element/remark-mermaid-to-tag";
 import { TableBlock } from "@/app/element/table-block";
 import { boundNumber, useAtomValueSafe, cn } from "@/util/util";
@@ -442,6 +443,8 @@ const Markdown = (props: MarkdownProps) => {
                                   ...(defaultSchema.attributes?.td || []),
                                   ["className", ALIGN_CLASS_REGEX],
                               ],
+                              // GitHub-style callouts (remark-github-alerts).
+                              div: [...(defaultSchema.attributes?.div || []), ["className", ...ALERT_CLASSES]],
                               waveblock: [["blockkey"]],
                           },
                           tagNames: [
@@ -458,6 +461,7 @@ const Markdown = (props: MarkdownProps) => {
             : [];
 
         const remarkPlugins: any[] = [
+            remarkGithubAlerts,
             remarkMermaidToTag,
             remarkGfm,
             [RemarkFlexibleToc, { tocRef }],

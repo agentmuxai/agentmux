@@ -1,7 +1,7 @@
 # Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video)
 
 **Date:** 2026-09-27
-**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2–P4 not started
+**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2 (callouts, §3) implemented; P3–P4 not started
 **Author:** agent1
 **Scope:**
 - `frontend/app/element/markdown*.ts(x)` (the shared renderer)
@@ -162,6 +162,14 @@ turns a blockquote whose first paragraph starts with `[!KIND]` into
 `<div class="markdown-alert markdown-alert-<kind>">` with a title row. The
 sanitizer allows `div` with exactly those classes. Unknown kinds stay plain
 blockquotes. This works in every `<Markdown>` consumer.
+
+**As built (P2).** `frontend/app/element/remark-github-alerts.ts`. As on
+GitHub, the marker must be alone on the blockquote's first line and is
+case-insensitive; a marker followed by text on the same line, or mid-sentence,
+stays a plain blockquote. While streaming, a callout whose body hasn't arrived
+yet renders as its title alone, never as the literal `[!KIND]`. Each kind sets
+one `--alert-color` in `markdown.scss`, from which the left rule, tint and
+title colour are drawn.
 
 ## 4. Inline images (the agent's own messages)
 
