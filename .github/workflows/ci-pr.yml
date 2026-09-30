@@ -485,6 +485,12 @@ jobs:
       - name: Scrollbar cursor gate
         run: bash scripts/check-scrollbar-cursor.sh
 
+      # A `transition: all` animates the inherited `visibility` that hides
+      # window and pane tabs, so the element pops in a frame late on every
+      # switch (ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
+      - name: No transition-all gate
+        run: bash scripts/check-no-transition-all.sh
+
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
       # a stack that still NAMES a ligature font resolves against a

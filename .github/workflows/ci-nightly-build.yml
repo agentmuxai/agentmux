@@ -286,6 +286,8 @@ jobs:
         run: bash scripts/check-menu-positioning.sh
       - name: Scrollbar cursor gate
         run: bash scripts/check-scrollbar-cursor.sh
+      - name: No transition-all gate
+        run: bash scripts/check-no-transition-all.sh
       - name: Ligature font gate
         run: bash scripts/check-ligature-fonts.sh
       - name: cef-verify self-test
