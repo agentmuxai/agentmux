@@ -40,6 +40,7 @@ import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { Logger } from "@/util/logger";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 /** Block-meta key the non-Claude fallback banner (`ForkProviderFallbackBanner`,
  *  `agent-view.tsx`) reads. Set once, after a fork lands, when the
@@ -249,10 +250,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
                     expiration: Date.now() + 8000,
                 });
             } else if (showNoHistoryFallback) {
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: MOS.makeORef("block", paneOpenResult.block_id),
-                    meta: { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true },
-                }).catch((e: any) =>
+                await setBlockMeta(paneOpenResult.block_id, { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true }).catch((e: any) =>
                     Logger.warn("quick-fork", "failed to set no-history-fallback meta", { error: String(e) }),
                 );
             }

@@ -31,6 +31,7 @@ import { handleShellDrawerKeydown } from "./shell-drawer-keys";
 import { buildShellDrawerClipboardItems, type ShellDrawerMenuDeps } from "./shell-drawer-menu";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
 // is-fading transition duration — keep in sync if either changes.
@@ -437,10 +438,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             const STEP = 0.1;
             const delta = ev.deltaY > 0 ? -STEP : STEP;
             const next = Math.max(0.5, Math.min(2.0, Math.round((termZoom() + delta) * 100) / 100));
-            void RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", id),
-                meta: { "term:zoom": next === 1.0 ? null : next } as any,
-            });
+            void setBlockMeta(id, { "term:zoom": next === 1.0 ? null : next });
         };
         containerRef?.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => containerRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));

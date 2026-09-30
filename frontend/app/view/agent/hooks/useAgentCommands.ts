@@ -27,7 +27,6 @@ import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as MOS from "@/app/store/mos";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { isAuthFailure, workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
@@ -42,6 +41,7 @@ import type { ProviderDefinition } from "../providers";
 import type { DocumentNode } from "../types";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { LogFn } from "./useAgentControllerStatus";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 /**
  * How long a pending message can sit unacknowledged before the reducer
@@ -1521,10 +1521,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 meta?.[PROVIDER_FLAGS_META_KEY],
             );
             try {
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: MOS.makeORef("block", opts.blockId),
-                    meta: { "cmd:args": updatedArgs },
-                });
+                await setBlockMeta(opts.blockId, { "cmd:args": updatedArgs });
             } catch (err) {
                 opts.log("error", `Failed to update runtime args: ${err}`, "error");
             }

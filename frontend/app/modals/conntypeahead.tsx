@@ -19,6 +19,7 @@ import { NodeModel } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
 import * as util from "@/util/util";
 import { createEffect, createSignal, onMount, type Accessor } from "solid-js";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 // newConnList -> connList => filteredList -> remoteItems -> sortedRemoteItems => remoteSuggestion
 // filteredList -> createNew
@@ -370,10 +371,7 @@ const ChangeConnectionBlockModal = ({
         } else {
             newFile = "~";
         }
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: MOS.makeORef("block", blockId),
-            meta: { connection: connName, file: newFile, "cmd:cwd": null },
-        });
+        await setBlockMeta(blockId, { connection: connName, file: newFile, "cmd:cwd": null });
 
         const rtInfo = { "cmd:hascurcwd": null };
         const rtInfoData: CommandSetRTInfoData = {

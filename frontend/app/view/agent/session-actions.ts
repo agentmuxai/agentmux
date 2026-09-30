@@ -14,7 +14,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as MOS from "@/app/store/mos";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 /** Line count at/above which the session is "large" and worth archiving. */
 export const LARGE_SESSION_THRESHOLD = 500_000;
@@ -68,8 +68,5 @@ export async function exportSession(blockId: string): Promise<void> {
 
 /** Clears a one-shot session notice flag (`session:was_interrupted` etc.). */
 export async function clearSessionFlag(blockId: string, key: string): Promise<void> {
-    await RpcApi.SetMetaCommand(TabRpcClient, {
-        oref: MOS.makeORef("block", blockId),
-        meta: { [key]: null } as MetaType,
-    });
+    await setBlockMeta(blockId, { [key]: null } as MetaType);
 }

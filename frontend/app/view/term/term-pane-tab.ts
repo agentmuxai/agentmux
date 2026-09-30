@@ -7,10 +7,8 @@
  * position-based "Terminal N". The icon is the shared default for `term`.
  */
 
-import { MOS } from "@/app/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import type { PaneTabDescriptor } from "@/element/pane-tab-model";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 /** The terminal manifest's `tab` (block-registry.ts). */
 export const termPaneTab: PaneTabDescriptor = {
@@ -18,9 +16,6 @@ export const termPaneTab: PaneTabDescriptor = {
     // when another widget type sits between them in the stack.
     label: ({ meta, ordinal }) => (meta?.["pane-title"] as string | undefined) || `Terminal ${Math.max(ordinal, 1)}`,
     renamer: ({ blockId }) => async (title: string) => {
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: MOS.makeORef("block", blockId),
-            meta: { "pane-title": title } as any,
-        });
+        await setBlockMeta(blockId, { "pane-title": title } as any);
     },
 };

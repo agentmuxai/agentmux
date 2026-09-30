@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { IconButton } from "@/app/element/iconbutton";
-import { atoms, MOS } from "@/store/global";
-import { RpcApi } from "@/store/rpc-api";
-import { TabRpcClient } from "@/store/rpc-util";
+import { atoms } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createSignal, Show } from "solid-js";
 import "./titlebar.scss";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 interface TitleBarProps {
     blockId: string;
@@ -42,10 +41,7 @@ function TitleBar(props: TitleBarProps): JSX.Element {
         const trimmedTitle = localTitle().trim();
         if (trimmedTitle !== props.title) {
             fireAndForget(async () => {
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: MOS.makeORef("block", props.blockId),
-                    meta: { "pane-title": trimmedTitle } as any,
-                });
+                await setBlockMeta(props.blockId, { "pane-title": trimmedTitle } as any);
             });
             props.onTitleChange?.(trimmedTitle);
         }
