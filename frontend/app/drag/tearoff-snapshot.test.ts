@@ -189,6 +189,9 @@ describe("window-tab snapshot", () => {
     it("halves a viewport too large for the request", async () => {
         shots.next = Promise.resolve({ jpeg_base64: "xxxx".repeat(MAX_SNAPSHOT_CHARS / 4 + 1) });
         prewarmWindowTabSnapshot("t1");
+        // Let the re-encode finish first: on a slow machine it can outlast
+        // the take's 60 ms budget, which is the budget working, not this.
+        await vi.waitFor(() => expect(shots.drawn).toHaveLength(1), { timeout: 5000 });
         expect(await takeWindowTabSnapshot("t1")).toBe(btoa("cropped-pane"));
         // Drawn at half the (2x-viewport) image's size.
         expect(shots.drawn).toEqual([[0, 0, window.innerWidth, window.innerHeight]]);
@@ -199,6 +202,7 @@ describe("window-tab snapshot", () => {
         shots.next = Promise.resolve({ jpeg_base64: huge });
         stubImagePipeline(atob(huge));
         prewarmWindowTabSnapshot("t1");
+        await vi.waitFor(() => expect(shots.drawn).toHaveLength(3), { timeout: 5000 });
         expect(await takeWindowTabSnapshot("t1")).toBeUndefined();
         // Tried at every scale: 1/2, 0.35, 1/4 of the (2x-viewport) image.
         expect(shots.drawn.map((d) => d[2])).toEqual([
