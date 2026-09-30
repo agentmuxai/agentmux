@@ -2,8 +2,9 @@ name: Codex review gate
 
 # Sets the `Codex review` commit status on a PR's head commit: success only
 # once Codex has said "Didn't find any major issues" about that commit, or
-# about an earlier one with only docs changed since, or answered the request
-# for that commit with its out-of-quota notice.
+# about an earlier one with only docs changed since, or flagged only docs, or
+# answered the request for that commit with its out-of-quota notice (or
+# ReAgent skipped asking for it while Codex is out of quota).
 # Make it a required check on main to stop merges ahead of Codex (#3513 merged
 # while Codex was still finding bugs; three fixes were orphaned into #3538).
 # Logic and rationale: scripts/ci-codex-review-gate.mjs.
@@ -14,7 +15,9 @@ name: Codex review gate
 #
 # Triggers:
 #   pull_request_target  a push resets the new head to pending
-#   issue_comment        Codex's "no major issues" or out-of-quota comment
+#   issue_comment        Codex's "no major issues" or out-of-quota comment, or
+#                        ReAgent's quota-skip comment (created or edited in
+#                        place for a later head)
 #   pull_request_review  Codex's findings review
 #   workflow_dispatch    re-evaluate one PR by hand (e.g. PRs opened before
 #                        this workflow existed)
@@ -50,6 +53,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
         github.event.comment.user.login == 'chatgpt-codex-connector[bot]') ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        github.event.comment.user.login == 'reagentx-workflow[bot]' &&
+        contains(github.event.comment.body, 'reagent:codex-skipped')) ||
       (github.event_name == 'pull_request_review' &&
         github.event.review.user.login == 'chatgpt-codex-connector[bot]')
     runs-on: ubuntu-latest
