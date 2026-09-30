@@ -31,7 +31,6 @@
 //! changes what a FUTURE seed produces.
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use uuid::Uuid;
@@ -196,10 +195,7 @@ pub(crate) fn seed_starter_skills(mstore: &Arc<Store>) -> Result<SkillSeedReport
         .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
     reject_duplicate_triggers(&manifest)?;
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now = agentmux_common::time::now_ms();
 
     let mut inserted_ids: Vec<String> = Vec::with_capacity(manifest.len());
     for entry in &manifest {
@@ -338,10 +334,7 @@ mod tests {
         // the manifest, and the catalog must end up back at exactly the
         // one pre-existing skill, not a stranded partial starter set.
         let mstore = Arc::new(Store::open_in_memory().unwrap());
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
+        let now = agentmux_common::time::now_ms();
 
         // "Test-Driven Development" is the second entry in the manifest —
         // colliding on it guarantees at least one successful insert

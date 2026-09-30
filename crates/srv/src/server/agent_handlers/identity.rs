@@ -3,7 +3,6 @@
 
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
@@ -223,10 +222,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if account.id.is_empty() {
                     account.id = uuid::Uuid::new_v4().to_string();
                 }
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 if account.created_at == 0 {
                     account.created_at = now;
                 }
@@ -332,10 +328,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     m.insert("masked_tail".to_string(), serde_json::json!(masked_tail));
                 }
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 let created_at = existing
                     .as_ref()
                     .map(|a| a.created_at)

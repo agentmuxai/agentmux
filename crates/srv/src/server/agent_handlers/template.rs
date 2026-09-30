@@ -3,7 +3,6 @@
 
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -146,10 +145,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     ));
                 }
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 // Runtime is the user's instantiation-time choice, not a
                 // template property. When supplied, the clone records it
                 // (and the matching `environment`); empty falls back to
@@ -397,10 +393,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Build a new definition that shares the source's content but
                 // has a fresh id/slug and records the lineage. Seed-bit is
                 // cleared — forks are always user-owned, not built-in.
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
 
                 // branch_label is the fork's full display name when provided.
                 // When empty, auto-generate a flat, lineage-wide "Name #N"

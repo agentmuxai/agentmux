@@ -92,10 +92,7 @@ struct CrashDumpHandler {
 
 impl minidumper::ServerHandler for CrashDumpHandler {
     fn create_minidump_file(&self) -> Result<(std::fs::File, PathBuf), std::io::Error> {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let ts = agentmux_common::time::now_secs_u64();
         // Use the crashing process PID sent via on_message, not std::process::id()
         // (which would give the monitor's own PID — misleading for diagnosis).
         let pid = self.crash_pid.load(Ordering::Relaxed);

@@ -448,8 +448,5 @@ fn handle_dispatch(
 }
 
 fn unix_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    agentmux_common::time::now_secs_u64()
 }

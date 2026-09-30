@@ -471,10 +471,7 @@ fn save_final_state(state: &AppState, block_id: &str) {
 
     match state.mstore.instance_get_by_block_id(block_id) {
         Ok(Some(instance)) => {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as i64;
+            let now_ms = agentmux_common::time::now_ms();
             let upd = crate::backend::storage::agents::InstanceUpdate {
                 status: Some(
                     crate::backend::storage::agents::InstanceStatus::Stopped

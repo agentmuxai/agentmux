@@ -30,12 +30,7 @@ struct AgentMuxTray {
     start_at_login: Option<bool>,
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+use agentmux_common::time::now_ms;
 
 /// SNI menu labels treat `_` as a mnemonic marker (the `&` of muda) —
 /// agent names are user-chosen, so double it. `notify_menu::menu_label`

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::{
@@ -291,10 +290,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
             // Periodic ping
             _ = ping_interval.tick() => {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now = agentmux_common::time::now_ms();
                 let ping = json!({ "type": "ping", "stime": now });
                 let msg = serde_json::to_string(&ping).unwrap_or_default();
                 if socket.send(Message::Text(msg.into())).await.is_err() {
@@ -525,10 +521,7 @@ async fn handle_incoming_text(
     if let Some(ref msg_type) = incoming.msg_type {
         match msg_type.as_str() {
             "ping" => {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now = agentmux_common::time::now_ms();
                 let pong = json!({ "type": "pong", "stime": now });
                 let msg = serde_json::to_string(&pong).unwrap_or_default();
                 if socket.send(Message::Text(msg.into())).await.is_err() {
@@ -1338,10 +1331,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 }
 
                 tokio::spawn(async move {
-                    let generation = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
+                    let generation = agentmux_common::time::now_ms_u64();
                     let Some(text) = crate::server::app_api::session::generate_ambient_narration(
                         &mstore,
                         &cmd.blockid,
@@ -1405,10 +1395,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let pending_pids = pending_pids_dns.clone();
             let broker = broker_dns.clone();
             async move {
-                let observed_at = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let observed_at = agentmux_common::time::now_ms();
 
                 if cmd.run_in_background == Some(true) {
                     match mstore.background_task_observe(
@@ -1492,10 +1479,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let broker = broker_btc.clone();
             async move {
                 let ended_at = cmd.timestamp.unwrap_or_else(|| {
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as i64
+                    agentmux_common::time::now_ms()
                 });
                 let status = crate::backend::storage::background_tasks::BackgroundTaskStatus::from_str(&cmd.status);
                 match mstore.background_task_complete(&cmd.node_id, status, ended_at) {
@@ -1540,10 +1524,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let pending_pids = pending_pids_btp.clone();
             let broker = broker_btp.clone();
             async move {
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64;
+                let now_ms = agentmux_common::time::now_ms();
                 let node_id = cmd.node_id.clone();
                 let mstore_set = mstore.clone();
                 let result = pending_pids.set_or_stash(&cmd.node_id, cmd.pid as i64, now_ms, |pid| {
@@ -1583,10 +1564,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // show a finished row. SPEC_BACKGROUND_TASK_STRUCTURED_FEED_
                 // AND_SWARM_OWNERSHIP_2026_09_27.md §3.
                 let tasks = if cmd.blockid.is_empty() {
-                    let now_ms = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map(|d| d.as_millis() as i64)
-                        .unwrap_or(0);
+                    let now_ms = agentmux_common::time::now_ms();
                     mstore.background_task_list_fleet(now_ms - FLEET_ENDED_WINDOW_MS)
                 } else {
                     mstore.background_task_list_for_block(&cmd.blockid)

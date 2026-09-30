@@ -7,7 +7,6 @@
 //! and broadcast — all over localhost with no cloud dependency.
 
 use std::collections::{HashMap, VecDeque};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -68,10 +67,7 @@ pub struct BusMessage {
 
 impl BusMessage {
     pub fn new(from: &str, to: &str, msg_type: MessageType, payload: &str, priority: Priority) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = agentmux_common::time::now_secs_u64();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             from: from.to_string(),
@@ -91,10 +87,7 @@ impl BusMessage {
     }
 
     fn is_expired(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = agentmux_common::time::now_secs_u64();
         now.saturating_sub(self.timestamp) > MESSAGE_TTL_SECS
     }
 }
@@ -135,10 +128,7 @@ impl MessageBus {
     /// Returns a receiver for messages pushed to this agent.
     pub fn register(&self, agent_id: &str, connection_type: &str) -> mpsc::UnboundedReceiver<BusMessage> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = agentmux_common::time::now_secs_u64();
 
         let conn = AgentConnection {
             info: AgentInfo {
@@ -164,10 +154,7 @@ impl MessageBus {
     /// Messages sent to this agent are queued in the offline queue and
     /// retrieved via `read_messages`.
     pub fn register_http(&self, agent_id: &str) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = agentmux_common::time::now_secs_u64();
 
         let conn = AgentConnection {
             info: AgentInfo {
@@ -194,10 +181,7 @@ impl MessageBus {
     /// Update last_seen timestamp for an agent (called on HTTP polling).
     pub fn touch(&self, agent_id: &str) {
         if let Some(conn) = self.agents.lock().get_mut(agent_id) {
-            conn.info.last_seen = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            conn.info.last_seen = agentmux_common::time::now_secs_u64();
         }
     }
 

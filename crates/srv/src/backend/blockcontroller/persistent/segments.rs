@@ -25,11 +25,7 @@ fn spawn_config_dir(provider: &str, env: &std::collections::HashMap<String, Stri
     crate::backend::providers::all_providers().find_map(|p| env.get(p.auth_config_dir_env_var).cloned())
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64)
-}
+use agentmux_common::time::now_ms;
 
 /// Size of `output` in the global zone, read from the database rather than
 /// this process's cache, so another channel's appends count.
