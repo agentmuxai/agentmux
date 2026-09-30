@@ -1,6 +1,6 @@
 # Spec: Splitting an agent pane opens a fresh agent picker
 
-**Status:** implemented (this PR)
+**Status:** implemented (#4077)
 **Date:** 2026-09-30
 **Author:** Lark
 
