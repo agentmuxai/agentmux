@@ -1,7 +1,7 @@
 # SPEC: Tear-off paint latency: show the torn-off content as fast as the window
 
 **Date:** 2026-09-30
-**Status:** active — phase 1 in the PR that adds this spec (see §4 phase 1 for what shipped and what was dropped); phases 2 and 3 not started. Written against `main` @ `49ad410b8`; spot-verify file:line citations before trusting them.
+**Status:** active — phase 1 in PR #4060 (see §4 phase 1 for what shipped and what was dropped); phases 2 and 3 not started. Written against `main` @ `49ad410b8`; spot-verify file:line citations before trusting them.
 **Author:** Korp@narko
 **Related:** `SPEC_TAB_CONTENT_REVEAL_GATE` (the whole-tab reveal gate and the startup splash this spec shortens), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (pane-tab tear-off, `pane-tab-tearoff.ts`), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (phase 5 cross-window work touches the same monitor code), `SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md` (earlier tear-off paint work).
 
