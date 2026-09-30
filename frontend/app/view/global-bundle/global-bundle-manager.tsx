@@ -27,6 +27,7 @@
 // own still-isolated RPCs.
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { beginDrag, endDrag, session, type DragEndReason } from "@/app/drag/drag-session";
 import type { Bundle } from "@/app/store/rpc-api";
 import { GlobalMemoryImportBanner } from "./GlobalMemoryImportBanner";
 import { formatFileAge, formatFileSize } from "@/app/view/native-memory/MemoryFileCard";
@@ -80,7 +81,14 @@ export const GlobalBundleManager = (): JSX.Element => {
     // ── Drag to reorder (ordinary entries only; system entries never
     // reorder — see the model's move()). HTML5 DnD on the tiles; the full
     // view's ↑/↓ are the keyboard-reachable fallback.
-    const [dragId, setDragId] = createSignal<string | null>(null);
+    // The dragged entry lives on the drag session.
+    const dragId = (): string | null => {
+        const s = session();
+        return s?.kind === "list-item" ? (s.source?.itemId ?? null) : null;
+    };
+    const endListDrag = (reason: DragEndReason) => {
+        if (session()?.kind === "list-item") endDrag(reason);
+    };
     const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
     const dragHandlers = (entry: Bundle) =>
         entry.is_system
@@ -88,7 +96,7 @@ export const GlobalBundleManager = (): JSX.Element => {
             : {
                   draggable: true,
                   onDragStart: (e: DragEvent) => {
-                      setDragId(entry.id);
+                      beginDrag("list-item", { itemId: entry.id });
                       e.dataTransfer?.setData("text/plain", entry.id);
                       if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
                   },
@@ -105,12 +113,12 @@ export const GlobalBundleManager = (): JSX.Element => {
                   onDrop: (e: DragEvent) => {
                       e.preventDefault();
                       const from = dragId() ?? e.dataTransfer?.getData("text/plain") ?? "";
-                      setDragId(null);
+                      endListDrag("drop");
                       setDropTargetId(null);
                       if (from && from !== entry.id) void model.moveTo(from, entry.id);
                   },
                   onDragEnd: () => {
-                      setDragId(null);
+                      endListDrag("dragend");
                       setDropTargetId(null);
                   },
               };
