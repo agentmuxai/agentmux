@@ -18,6 +18,25 @@
 const FADE_MS = 200;
 
 /**
+ * A promoted pool window (tear-off, new window) has its content ready when
+ * the gate lifts; the long fade is for a cold start. Short cross-fade only.
+ * SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 1.
+ */
+const PROMOTED_FADE_MS = 90;
+
+let promotedAt: number | null = null;
+let onPromotedReveal: (() => void) | undefined;
+
+/**
+ * Called when the host promotes this pool window. `onReveal` runs once, when
+ * the content reveals (the pane pool uses it to release its deferred refill).
+ */
+export function markPoolPromoted(onReveal?: () => void): void {
+    promotedAt = performance.now();
+    onPromotedReveal = onReveal;
+}
+
+/**
  * Cross-fade and remove the startup splash. Idempotent and safe to call from
  * every reveal-gate lift: the first call fades it; once it's gone (the normal
  * case after the first window settles, and on every subsequent tab switch)
@@ -28,11 +47,19 @@ export function fadeOutStartupSplash(): void {
     const el = document.getElementById("startup-loading");
     if (!el || el.dataset.amFading === "1") return;
     el.dataset.amFading = "1";
+    let fadeMs = FADE_MS;
+    if (promotedAt != null) {
+        fadeMs = PROMOTED_FADE_MS;
+        el.style.transitionDuration = `${fadeMs}ms`;
+        console.log(`[tearoff-perf] reveal ${Math.round(performance.now() - promotedAt)}ms after promote`);
+        onPromotedReveal?.();
+        onPromotedReveal = undefined;
+    }
     el.classList.add("fading");
     const done = () => el.remove();
     el.addEventListener("transitionend", done, { once: true });
     // Safety net in case `transitionend` never fires (reduced-motion forcing
     // an instant change, a display:none ancestor, etc.) so the splash can't be
     // left stuck on top of a ready window.
-    setTimeout(done, FADE_MS + 120);
+    setTimeout(done, fadeMs + 120);
 }
