@@ -11,11 +11,9 @@
 
 import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import clsx from "clsx";
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { debounce, throttle } from "throttle-debounce";
-import { endTileDrag } from "./tile-drag";
-import { dragState } from "./tilelayout-drag-state";
 import { FlexDirection } from "./types";
 import { createTileLayout, type ResizeHandleComponentProps, type TileLayoutPlatform } from "./TileLayout.core";
 
@@ -76,33 +74,13 @@ const win32: TileLayoutPlatform = {
     // the snap nor the partial paint.
     animateDelayMs: 150,
 
-    onRootMount: () => {
-        // Windows 11 safety net: the browser's dragend event can be swallowed
-        // when snap-layouts or Alt+Tab interrupts a drag, preventing pragmatic-dnd's
-        // onDrop from firing and leaving activeDrag=true permanently (all pane bodies
-        // frozen with pointer-events:none). Listen on window so we catch it even when
-        // it fires on the draggable element after bubbling.
-        // Reset the same state onDrop resets so subsequent drags are not corrupted.
-        const resetDragState = () => {
-            if (dragState.layoutModel?.activeDrag()) {
-                dragState.nodeId = null;
-                dragState.node = null;
-                endTileDrag("dragend");
-                dragState.layoutModel.activeDrag._set(false);
-                dragState.layoutModel = null;
-            }
-        };
-        window.addEventListener("dragend", resetDragState);
-        onCleanup(() => window.removeEventListener("dragend", resetDragState));
-    },
-
     boundsCheckRequiresTileDrag: false,
 
     // Native browser panes read the settle signal to re-sample + SetWindowPos
     // their HWND onto the new rect. See SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
     onLeafGeometryChange: notifyPaneReflow,
 
-    // Handles the Win11 safety-net path above, where onDrop never fires and
+    // Handles a drag the safety net ends (drag-session.ts), where onDrop never fires and
     // setIsDragging(false) is never called directly.
     clearDraggingWhenInactive: true,
 

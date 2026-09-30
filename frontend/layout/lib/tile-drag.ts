@@ -8,7 +8,7 @@
  */
 
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { beginDrag, endDrag, markReleased, session, type DragEndReason } from "@/app/drag/drag-session";
+import { beginDrag, endDrag, markReleased, onSessionEnded, session, type DragEndReason } from "@/app/drag/drag-session";
 import { clearCrossTabDrop } from "./crossTabDrag";
 import type { LayoutModel } from "./layoutModel";
 import { dragState } from "./tilelayout-drag-state";
@@ -41,3 +41,11 @@ export function releaseTileDrag(model: LayoutModel): void {
 export function endTileDrag(reason: DragEndReason): void {
     if (session()?.kind === "tile") endDrag(reason);
 }
+
+// A tile session that ended before its source released it (the safety net,
+// or a new drag replacing a stranded one): do what the source's onDrop would
+// have. A stuck activeDrag freezes every pane of the source window tab.
+onSessionEnded(({ session: s }) => {
+    if (s.kind !== "tile" || s.released || !dragState.layoutModel) return;
+    releaseTileDrag(dragState.layoutModel);
+});

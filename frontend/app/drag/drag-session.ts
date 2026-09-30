@@ -11,7 +11,7 @@
  *   a release outside every target), so the cross-window monitor still sees it;
  * - the cross-window monitor ends a released session once it has handled the
  *   document dragend;
- * - the safety net ends whatever is left.
+ * - the safety net ends whatever is left (installSafetyNet below).
  * Internal sessions have no inactivity timeout: a drag held over another
  * window sends this renderer no events, and that is normal.
  */
@@ -19,7 +19,8 @@
 import { createSignal } from "solid-js";
 
 export type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "drone-kind" | "list-item";
-export type DragEndReason = "drop" | "cancel" | "dragend" | "button-up" | "files-idle";
+/** "unobserved": the safety net saw a pointerdown with the drag still open. */
+export type DragEndReason = "drop" | "cancel" | "dragend" | "button-up" | "files-idle" | "unobserved";
 
 export interface DragSource {
     nodeId?: string;
@@ -69,6 +70,7 @@ function mintId(): string {
 }
 
 export function beginDrag(kind: DragKind, source?: DragSource, payload?: DragPayload): DragSession {
+    installSafetyNet();
     // A new drag means any session still here was stranded (its end was lost).
     endDrag("cancel");
     const s: DragSession = {
@@ -93,6 +95,12 @@ function update(patch: Partial<DragSession>): void {
 export const markReleased = () => update({ released: true });
 
 export const markEscaped = () => update({ escaped: true });
+
+/** Any of `kinds` has started and its source hasn't released it yet. Reactive. */
+export function isAnyUnderway(kinds: readonly DragKind[]): boolean {
+    const s = current();
+    return s != null && kinds.includes(s.kind) && !s.released;
+}
 
 /** A `kind` drag has started and its source hasn't released it yet. */
 export function isUnderway(kind: DragKind): boolean {
@@ -127,4 +135,31 @@ export function endReleasedSession(reason: DragEndReason): DragSession | null {
 export function onSessionEnded(listener: (end: SessionEnd) => void): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
+}
+
+let netInstalled = false;
+
+/**
+ * The one safety net (§5.1): ends a drag whose end this window never saw.
+ * It goes by real events, never inactivity:
+ * - a window `dragend` in the bubble phase, so after pragmatic (window,
+ *   capture), the cross-window monitors (document) and each element's own
+ *   handler;
+ * - a `pointerdown`, which can't happen mid-drag (the button is held), so a
+ *   drag still open then ended unobserved.
+ * On Windows, CrossWindowDragMonitor.win32's button poll also ends a drag
+ * whose dragend was swallowed. "files" sessions are the file-drop
+ * controller's, with its own idle watchdog. Each kind's cleanup subscribes
+ * with onSessionEnded. Installed on the first drag, so importing this module
+ * has no side effects.
+ */
+function installSafetyNet(): void {
+    if (netInstalled || typeof window === "undefined") return;
+    netInstalled = true;
+    const endStranded = (reason: DragEndReason) => {
+        const s = current();
+        if (s && s.kind !== "files") endDrag(reason, s.dragId);
+    };
+    window.addEventListener("dragend", () => endStranded("dragend"));
+    window.addEventListener("pointerdown", () => endStranded("unobserved"), true);
 }
