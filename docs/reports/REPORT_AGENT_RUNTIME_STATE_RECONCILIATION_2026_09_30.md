@@ -113,10 +113,38 @@ selected":
    - whenever `agent:runtime` changes.
 
    Each time it compares desired (`agent:runtime`) with effective (last
-   readback). If they differ, it sends `set_model` / `apply_flag_settings` /
-   `set_permission_mode`, then `get_settings` to confirm. This needs no
+   readback), for **model and effort only** — see the permission-mode
+   exclusion below. If they differ, it sends `set_model` /
+   `apply_flag_settings`, then `get_settings` to confirm. This needs no
    respawn, doesn't interrupt a turn, and works no matter which launch path
    created the process (UI launch, continuation, MCP `OpenAgent`, relocation).
+
+   **Permission mode does not belong in this generic diff-and-correct loop.**
+   `buildRuntimeArgs.ts:127-136` deliberately translates the desired `bypass`
+   into CLI `--permission-mode default` for any control-protocol Claude agent
+   (a persistent agent always is one) — srv's own auto-allow provides the
+   "yolo" UX; the CLI is never told to actually bypass its permission checks.
+   A reconciler that (a) diffs desired `bypass` against a `default` readback
+   verbatim would see every normally-configured pane as permanently
+   mismatched, and worse, (b) "correcting" that apparent mismatch by sending
+   `set_permission_mode: bypass` would put the CLI into REAL bypass mode,
+   undoing the exact protection `buildRuntimeArgs.ts` exists for. Compare and
+   apply the **normalized** value (the same `bypass` → `default` rule
+   `buildRuntimeArgs.ts` already applies) rather than the raw
+   `agent:runtime.permissionMode`; a control-protocol agent's reconciled
+   target is always `default`, never `bypass` itself, and `set_permission_mode`
+   is only ever called with that normalized value. (Codex P2 on this PR.)
+
+   **Permission mode also has no live CLI readback at all in this CLI
+   version.** `get_settings.applied` (confirmed by reading its schema
+   directly, §2.2) carries only `{model, effort, advisor, ultracode}` — no
+   permission field. The only place permission mode appears on the wire is
+   `system`/`init`, a one-time startup snapshot (§2.2's "Also useful" list),
+   not something `get_settings` can re-confirm mid-session the way it can for
+   model and effort. So "effective" permission mode in controller status
+   (item 4 below) is the **last normalized value srv itself sent**, not an
+   independent CLI readback — there's nothing to detect a permission-mode
+   drift against, unlike model/effort.
 2. **Keep spawn flags as a first-pass hint, not the mechanism.** Still pass
    `--model` / `--effort` at spawn (fix bug 1 of the retro) so the first turn
    starts right. Correctness no longer depends on it, though: the reconciler
@@ -124,7 +152,10 @@ selected":
 3. **Generation counter.** Stamp `agent:runtime` with a `generation`, bumped
    on every user change. The controller records `observed_generation` plus the
    `applied` readback in controller status. The frontend compares the two.
-4. **What the strip shows**, driven by the controller's effective state:
+4. **What the strip shows**, driven by the controller's effective state. This
+   table is for **model and effort**, the two fields with a real CLI
+   readback; permission mode always shows the normalized value srv sent
+   (item 1), never a "mismatch" state — there's nothing to diff it against:
 
    | Situation | Strip shows |
    |---|---|
@@ -162,13 +193,16 @@ selected":
    `cmd:args` with `buildRuntimeArgs`. It stops the Opus-by-default leak on
    continuations today.
 2. **srv controller: readback.** Send `get_settings` after spawn and after
-   each `result`, and publish `effective: {model, effort, permissionMode}` in
-   controller status. Show it in the strip in its "requested" / "effective" /
-   "mismatch" states.
-3. **srv controller: reconcile.** Before each delivered message, apply the diff
-   with `set_model` / `apply_flag_settings` / `set_permission_mode`, then read
-   back. `runtime-apply.ts` stops needing a force-restart for model/effort
-   changes.
+   each `result`, and publish `effective: {model, effort}` in controller
+   status, plus `permission_sent` (the last normalized value srv itself sent —
+   not a CLI readback; see §3 item 1). Show it in the strip in its
+   "requested" / "effective" / "mismatch" states.
+3. **srv controller: reconcile.** Before each delivered message, apply the
+   diff for model/effort with `set_model` / `apply_flag_settings`, then read
+   back; apply permission mode with `set_permission_mode` using the
+   normalized (bypass → default for a control-protocol agent) value only,
+   never diffed against a CLI readback. `runtime-apply.ts` stops needing a
+   force-restart for model/effort/permission changes.
 4. **Generation counter** on `agent:runtime` and `observed_generation` in
    status.
 5. **Tests:**
@@ -178,7 +212,12 @@ selected":
    - a continuation spawn → effective equals desired before the first reply;
    - a turn whose `modelUsage` includes a second (subagent) model → no
      warning, confirming §3 item 6's rule is actually followed and not just
-     stated.
+     stated;
+   - a control-protocol Claude pane with `agent:runtime.permissionMode =
+     "bypass"` (the default) → the strip shows it plainly, never a mismatch,
+     and the reconciler never sends `set_permission_mode: bypass` to the CLI
+     (only ever the normalized `default`) — confirming §3 item 1's exclusion,
+     not just documenting it.
 
 ## 5. Sources
 
@@ -186,6 +225,7 @@ selected":
 - Claude Code docs: Agent SDK reference, TypeScript (`setModel`, `applyFlagSettings`, `initializationResult`, `modelUsage`): https://code.claude.com/docs/en/agent-sdk/typescript
 - Control schema strings in the installed CLI (`claude.exe` 2.1.280): `set_model`, `apply_flag_settings`, `get_settings` with `applied: {model, effort}`; the `result` message's own schema (no top-level primary-model field) and its `modelUsage` field's internal description ("Subagents started through the Agent tool in this session, as running totals")
 - `docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md` §6 item 3, flagging `modelUsage`'s multi-model-subagent shape as an open question independently of this report
+- `frontend/app/view/agent/buildRuntimeArgs.ts:127-136`, the existing `bypass` → CLI `--permission-mode default` translation for control-protocol agents this report's reconciler must not undo (Codex P2 on this PR)
 - Kubebuilder book: Good Practices: https://book.kubebuilder.io/reference/good-practices.html
 - Kubernetes status and conditions (observedGeneration, `kubectl wait`): https://www.golinuxcloud.com/kubernetes-status-and-conditions/
 - KEP-5067, Pod generation / observedGeneration: https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/5067-pod-generation
