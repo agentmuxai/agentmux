@@ -14,8 +14,14 @@ import { useActivityLog } from "./useActivityLog";
 // cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
 // rendered state (this text is not our own trusted output; it's shell-command
 // output the user chose to run).
+//
+// OSC is matched first as ESC ] (or its 8-bit form) through the nearest BEL
+// or ST (ESC-backslash or 0x9C), whatever text it carries: the older pattern alone
+// allowed only a narrow character set, so a window title with a space, or an
+// ST terminator, left text behind. Same approach as current ansi-regex.
 const ANSI_SEQUENCE_RE = new RegExp(
-    "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
+    "(?:[\\u001B][\\]]|\\u009D)[\\s\\S]*?(?:\\u0007|\\u001B\\\\|\\u009C)|" +
+        "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
         "[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|" +
         "(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))",
     "g"

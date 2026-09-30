@@ -18,6 +18,23 @@ describe("sanitizeLogTextForTerminal", () => {
         expect(sanitizeLogTextForTerminal("a\x07b\x1b c\rd\te\x7f")).toBe("ab cd\te");
     });
 
+    // An OSC sequence's text can contain anything up to its terminator (BEL or
+    // ST, "ESC \\"). The older pattern only allowed a narrow character set, so a
+    // title with a space, or an ST terminator, left text behind.
+    it("strips an OSC whose text has spaces", () => {
+        expect(sanitizeLogTextForTerminal("\x1b]0;evil title\x07after")).toBe("after");
+    });
+
+    it("strips an OSC terminated by ST (ESC \\) instead of BEL", () => {
+        expect(sanitizeLogTextForTerminal("\x1b]0;t\x1b\\after")).toBe("after");
+    });
+
+    it("strips OSC 8 hyperlinks and keeps the link text", () => {
+        expect(sanitizeLogTextForTerminal("see \x1b]8;;https://example.com/a b\x1b\\docs\x1b]8;;\x1b\\ now")).toBe(
+            "see docs now",
+        );
+    });
+
     it("strips ESC c (full terminal reset) as a sequence, not just its ESC", () => {
         expect(sanitizeLogTextForTerminal("a\x1bcb")).toBe("ab");
     });
