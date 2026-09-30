@@ -77,6 +77,13 @@ export interface HistoryParserOptions {
      * view, where process-restart landmarks are useful context (§4.1).
      */
     includeResumedOutcomes?: boolean;
+    /**
+     * Called for every `system` frame with the line's receive-time stamp
+     * (undefined when unknown). Lets the caller read facts that are not
+     * document nodes — today, background-task ends for the Activity Dock
+     * (activity/task-outcomes.ts).
+     */
+    onTaskFrame?: (frame: Record<string, unknown>, at: number | undefined) => void;
 }
 
 /**
@@ -185,6 +192,13 @@ export class HistoryParser {
 
             // Handle stderr events (unlikely in persisted history, but be safe)
             if (rawEvent.type === "stderr") continue;
+
+            // Observe only — the frame still flows through everything below.
+            // Replay is the path that needs this: the persisted stream is the
+            // one place a finished background task's end is still recorded
+            // when this pane is opened on an instance whose registry never
+            // saw it (activity/task-outcomes.ts).
+            if (rawEvent.type === "system" && opts?.onTaskFrame) opts.onTaskFrame(rawEvent, stampFor(lineIdx));
 
             // Real compaction-boundary completion data. Same raw-frame
             // interception as useAgentStream.ts's live path (shared parsing

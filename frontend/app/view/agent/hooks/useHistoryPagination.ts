@@ -35,6 +35,7 @@ import { batch, createSignal, onCleanup, onMount, type Accessor } from "solid-js
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
+import { noteTaskFrame } from "../activity/task-outcomes";
 import { parseHistoryLines } from "../parseHistoryLines";
 import { lastFreshBoundaryIndex } from "../session-outcome";
 import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
@@ -163,6 +164,11 @@ const DEFAULT_FILTER_STATE: FilterState = {
 };
 
 export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
+    // Every page parsed here — the newest window first, older pages later — also
+    // tells the Activity Dock which background tasks ended (activity/task-outcomes.ts).
+    const parseOpts = {
+        onTaskFrame: (frame: Record<string, unknown>, at: number | undefined) => noteTaskFrame(opts.blockId, frame, at),
+    };
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
@@ -192,7 +198,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 limit: loadLimit,
             }, { timeout: 15000 });
 
-            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.(), resp.stamps);
+            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.(), resp.stamps, parseOpts);
             if (newNodes.length > 0) {
                 // batch() ensures HistoryLoaded's documentAtom write is not a
                 // standalone runUpdates frame that could interleave with a
@@ -376,7 +382,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         // (an older srv ignores the field and returns the window).
                         const readStart = typeof rangeResp.offset === "number" ? rangeResp.offset : windowStart;
                         markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
-                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
+                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOpts);
                         markAgentOpen(opts.blockId, "parsed");
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Right after the dispatch, before anything else can
@@ -529,7 +535,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (!mounted) return;
                 markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
 
-                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
+                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOpts);
                 markAgentOpen(opts.blockId, "parsed");
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
