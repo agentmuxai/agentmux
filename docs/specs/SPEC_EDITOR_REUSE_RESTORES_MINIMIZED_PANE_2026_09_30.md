@@ -111,9 +111,20 @@ In `EditorViewModel`'s `META_PENDING_OPEN_FILES` drain
 pushed by `maybe_reuse_editor_pane` (`agentmux-srv/src/server/app_api/pane.rs:351-409`).
 After it schedules `openFile()` for a non-empty batch:
 
-1. Find the tab holding this block with `reveal-block.ts`'s `findTabHolding`.
-   It reads `Tab.blockids` from this window's workspace, pinned tabs first. The
-   drain has only a block id, and no layout API maps a block to its tab.
+1. Find the tab holding this block with `reveal-block.ts`'s existing
+   `findTabHolding(blockId, hint?)`. It is already on main, where
+   `revealBlockLocally` uses it (`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md`
+   §4.1), and it is unchanged here. The drain has only a block id, and no
+   layout API maps a block to its tab. It scans only
+   `workspace()`, which is **this window's** workspace:
+   `[...pinnedtabids, ...tabids]`, the hint first if given. It reads each
+   `Tab` object (loading it if it isn't cached) and returns the first tab
+   whose `blockids` include the block, or null. A block id belongs to one tab,
+   so there's no tie to break. Other windows' tabs are never scanned. A
+   renderer only has layout models for its own window, and
+   `getLayoutModelForTabById` is keyed by the tab id found here. So the lookup
+   can't reach another window's layout. The Editor running the drain is
+   mounted in this window, so its tab is always found.
    Then get that tab's layout with `getLayoutModelForTabById`. The pane running
    the drain is mounted, so its tab's layout exists. Do **not** call
    `setActiveTab`.
