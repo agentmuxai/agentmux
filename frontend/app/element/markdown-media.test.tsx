@@ -193,6 +193,15 @@ describe("a local image in an agent message", () => {
         }
     });
 
+    it("revokes the blob URL as soon as the image fails to decode (ReAgent P2 on #4064)", async () => {
+        const c = mount("![x](corrupt.png)").container;
+        await waitFor(() => expect(c.querySelector("img")).not.toBeNull());
+        const src = c.querySelector("img")!.getAttribute("src")!;
+        fireEvent.error(c.querySelector("img")!);
+        await waitFor(() => expect(c.querySelector(".am-muted")?.textContent).toBe("[image not found: corrupt.png]"));
+        expect(revoked).toContain(src);
+    });
+
     it("revokes the blob URL on unmount", async () => {
         const r = mount("![x](a.png)");
         await waitFor(() => expect(r.container.querySelector("img")).not.toBeNull());
