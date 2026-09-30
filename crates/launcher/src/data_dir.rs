@@ -5,7 +5,7 @@
 //!
 //! Historically the launcher computed its own paths via the
 //! launcher-local `resolve_paths()` function. After the data-dir
-//! unification (see docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md
+//! unification (see docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md
 //! and PR #695), path resolution is centralized in
 //! `agentmux_common::DataPaths`. This module keeps the launcher's
 //! existing public API surface (`DataPaths` struct with 4 fields,
