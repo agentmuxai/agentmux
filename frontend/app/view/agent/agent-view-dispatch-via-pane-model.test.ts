@@ -23,21 +23,28 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { AGENT_VIEW_SOURCES } from "./agent-view-sources";
 
-const AGENT_VIEW = join(__dirname, "agent-view.tsx");
+// agent-view.tsx and every module split out of it: code moved out of the file
+// must stay under this guard (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.3).
+const SOURCES = AGENT_VIEW_SOURCES.map((rel) => ({ rel, text: readFileSync(join(__dirname, rel), "utf8") }));
 
 describe("agent-view.tsx dispatches only through its AgentPaneModel (A9)", () => {
-    const text = readFileSync(AGENT_VIEW, "utf8");
+    const text = SOURCES.map((s) => s.text).join("\n");
 
     it("does not import the store-level dispatch helpers", () => {
         // Both stores export `dispatch` and `dispatchIfRegistered`; agent-view
         // used to alias them as dispatchPane / dispatchPaneIfRegistered /
         // dispatchDocIfRegistered. Any of those names appearing in an import
         // means the bypass is back.
-        const importBlocks = text.match(/^import[\s\S]*?from\s+"[^"]+";/gm) ?? [];
-        const offending = importBlocks.filter((block) =>
-            /\bdispatch(?:IfRegistered)?\b(?!Doc\b)/.test(block) &&
-            /agent-(?:pane-state|document)-store/.test(block),
+        const offending = SOURCES.flatMap(({ rel, text: source }) =>
+            (source.match(/^import[\s\S]*?from\s+"[^"]+";/gm) ?? [])
+                .filter(
+                    (block) =>
+                        /\bdispatch(?:IfRegistered)?\b(?!Doc\b)/.test(block) &&
+                        /agent-(?:pane-state|document)-store/.test(block),
+                )
+                .map((block) => `${rel}: ${block}`),
         );
         expect(offending).toEqual([]);
     });
@@ -45,7 +52,9 @@ describe("agent-view.tsx dispatches only through its AgentPaneModel (A9)", () =>
     it("has no raw dispatch* call sites — every dispatch goes via paneModel.", () => {
         // A raw call is `dispatchPane(` / `dispatchDoc(` / the *IfRegistered
         // forms NOT preceded by `paneModel.` (or any other member access).
-        const raw = text.match(/(?<![.\w])dispatch(?:Pane|Doc)(?:IfRegistered)?\(/g) ?? [];
+        const raw = SOURCES.flatMap(({ rel, text: source }) =>
+            (source.match(/(?<![.\w])dispatch(?:Pane|Doc)(?:IfRegistered)?\(/g) ?? []).map((m) => `${rel}: ${m}`),
+        );
         expect(raw).toEqual([]);
     });
 
