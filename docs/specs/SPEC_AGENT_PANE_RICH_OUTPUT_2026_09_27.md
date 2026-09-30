@@ -267,6 +267,12 @@ keeps the feature and removes the silent part.
   inline SVG data URI never renders (ReAgent P0 on #4064). `<picture>`/`<source>` came from the default
   allowlist too; they're now filtered out, so a remote `srcset` can't load
   beside a local image.
+- **Network paths are refused** (Codex P1 on #4064): a UNC path (`//host/…`,
+  `\host\…`, `file://host/…`) would make Windows open an SMB connection to
+  that host, with no click, so it renders `[image: … — network paths aren't
+  loaded]` and makes no request.
+- **SVG in the Media pane** (Codex P2): `IMAGE_EXTENSIONS` now includes `svg`,
+  so clicking an inline SVG opens a pane that shows it (still via `<img>`).
 - **Row height.** The placeholder is 16:9 until the natural size is known; the
   swap goes through `withHeightContinuity`. Decoding is awaited for at most
   1.5 s, so a very large image shows without a known ratio rather than never.

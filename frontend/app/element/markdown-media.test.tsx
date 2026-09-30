@@ -130,6 +130,24 @@ describe("a local image in an agent message", () => {
         expect(type).toBe("image/svg+xml");
     });
 
+    // Codex P1 on #4064: Windows resolves `//host/…` and `\\host\…` as a
+    // UNC share, an outbound SMB connection (and credential exposure) with no
+    // click. Network paths never load. (Markdown needs `\\\\` to write `\\`.)
+    it.each([
+        "//attacker.example/share/a.png",
+        String.raw`\\\\attacker.example\share\a.png`,
+        "file:////attacker.example/share/a.png",
+        "file://attacker.example/share/a.png",
+    ])(
+        "makes no request for the network path %s",
+        (src) => {
+            const c = mount(`![x](${src})`).container;
+            expect(h.fetch).not.toHaveBeenCalled();
+            expect(c.querySelector("img")).toBeNull();
+            expect(c.textContent).toContain("network paths aren't loaded");
+        },
+    );
+
     it.each(["tool.exe", "notes.txt"])("makes no request for %s", (file) => {
         const c = mount(`![x](${file})`).container;
         expect(h.fetch).not.toHaveBeenCalled();
