@@ -556,5 +556,3 @@ pub(super) fn with_frontend(router: Router<AppState>, dir: &std::path::Path) -> 
     let index = ServeFile::new(dir.join("index.html"));
     router.fallback_service(ServeDir::new(dir).fallback(index))
 }
-
-// ---- Health ----

@@ -6,6 +6,8 @@
 
 use super::*;
 
+// ---- Health ----
+
 pub(super) async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(json!({
         "status": "ok",

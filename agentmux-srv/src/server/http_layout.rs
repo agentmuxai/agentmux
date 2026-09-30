@@ -116,5 +116,3 @@ pub(super) async fn handle_window_focus(
     };
     finish_name_call(&state, call, json!({ "success": true, "window_id": window_id })).await
 }
-
-// ---- Origin checks ----

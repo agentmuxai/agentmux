@@ -6,6 +6,8 @@
 
 use super::*;
 
+// ---- Origin checks ----
+
 /// A loopback origin ([`is_loopback_origin`]), or one a headless srv was
 /// told to accept with `--allowed-origin` (a reverse proxy's public origin).
 /// Used by CORS and by [`ws_origin_guard`].
