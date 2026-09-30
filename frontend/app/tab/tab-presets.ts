@@ -67,6 +67,8 @@ export const DEFAULT_TAB_PRESET: PresetNode = {
 
 // ─── Applier ────────────────────────────────────────────────────────────────
 
+type PresetLayoutModel = NonNullable<ReturnType<typeof getLayoutModelForTabById>>;
+
 function isLeaf(node: PresetNode): node is LeafNode {
     return (node as LeafNode).widget !== undefined;
 }
@@ -118,10 +120,88 @@ export async function applyTabPreset(tabId: string, preset: PresetNode): Promise
     }
 
     try {
-        await applyNode(tabId, layoutModel, preset, /* parentBlockId */ null);
+        // Every leaf's block is created concurrently: CreateBlock doesn't
+        // depend on the layout, only the tree inserts below do, and those
+        // are synchronous. Serially, the default preset's three round trips
+        // were most of a new window tab's build time
+        // (docs/analysis/ANALYSIS_NEW_WINDOW_TAB_LATENCY_2026_09_30.md §3.3).
+        const leaves = presetLeaves(preset);
+        const created = await Promise.allSettled(
+            leaves.map(async (leaf) => {
+                const blockDef = resolveBlockDef(leaf.widget);
+                if (!blockDef) throw new Error(`unknown widget: ${leaf.widget}`);
+                const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
+                const blockId = await ObjectService.CreateBlock(blockDef, rtOpts, tabId);
+                markBlockRecentlyCreated(blockId);
+                return blockId;
+            })
+        );
+        const blockIds = new Map<LeafNode, string | null>();
+        created.forEach((r, i) => {
+            blockIds.set(leaves[i], r.status === "fulfilled" ? r.value : null);
+            if (r.status === "rejected") {
+                console.error("[tab-presets] block create failed", {
+                    tabId,
+                    widget: leaves[i].widget,
+                    error: String(r.reason),
+                });
+            }
+        });
+        placeNode(layoutModel, preset, blockIds, /* splitTargetId */ null, /* parentSplit */ null);
     } catch (e) {
         console.error("[tab-presets] preset apply failed", { tabId, error: String(e) });
     }
+}
+
+/** A preset's leaves, in the order `placeNode` inserts them. */
+function presetLeaves(node: PresetNode): LeafNode[] {
+    return isLeaf(node) ? [node] : node.children.flatMap(presetLeaves);
+}
+
+// Insert already-created blocks into the tree. Returns the blockId of the
+// FIRST placed leaf in the subtree — callers use that as the split target
+// for subsequent sibling subtrees — or null if nothing in it was created.
+//
+// Each child after the first splits off the PREVIOUS child (not the first)
+// so a split with 3+ children still lands in declared order — splitting
+// every sibling off the first child instead means the 2nd+ insertions all
+// target the same node, and later ones land ahead of earlier ones (Codex
+// finding on SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md's 3-child swarm/
+// armory/sysinfo split, PR #2796). A child whose blocks all failed is
+// skipped and the next one takes its place, so a partly created preset is
+// still a well-formed tree.
+function placeNode(
+    layoutModel: PresetLayoutModel,
+    node: PresetNode,
+    blockIds: ReadonlyMap<LeafNode, string | null>,
+    /** Block to split off when inserting THIS node, or null for the
+     *  root-most insertion. */
+    splitTargetId: string | null,
+    /** Direction of the parent split — whether THIS node's insertion is a
+     *  horizontal or vertical split off splitTargetId. */
+    parentSplit: "horizontal" | "vertical" | null
+): string | null {
+    if (isLeaf(node)) {
+        const blockId = blockIds.get(node) ?? null;
+        if (blockId != null) insertBlockOnModel(layoutModel, blockId, splitTargetId, parentSplit);
+        return blockId;
+    }
+    let firstId: string | null = null;
+    let previousId: string | null = null;
+    for (const child of node.children) {
+        const placed = firstId != null;
+        const id = placeNode(
+            layoutModel,
+            child,
+            blockIds,
+            placed ? previousId : splitTargetId,
+            placed ? node.split : parentSplit
+        );
+        if (id == null) continue;
+        if (firstId == null) firstId = id;
+        previousId = id;
+    }
+    return firstId;
 }
 
 // CreateBlock now takes an explicit `tabId` arg that overrides the
@@ -129,46 +209,6 @@ export async function applyTabPreset(tabId: string, preset: PresetNode): Promise
 // race where the user could click away to another tab between the
 // frontend check and the server-side handler. See backend
 // crates/srv/src/server/service.rs `("object", "CreateBlock")`.
-
-// Recursive walk. Returns the blockId of the FIRST leaf in the subtree —
-// callers use that as the split target for subsequent sibling subtrees.
-async function applyNode(
-    expectedTabId: string,
-    layoutModel: any,
-    node: PresetNode,
-    /** Block to split off when inserting THIS node, or null for the
-     *  root-most insertion. */
-    splitTargetId: string | null,
-    /** Direction of the parent split — determines whether THIS node's
-     *  insertion is a horizontal or vertical split off splitTargetId. */
-    parentSplit: "horizontal" | "vertical" | null = null,
-): Promise<string> {
-    if (isLeaf(node)) {
-        const blockDef = resolveBlockDef(node.widget);
-        if (!blockDef) throw new Error(`unknown widget: ${node.widget}`);
-        return await createBlockOnModel(expectedTabId, layoutModel, blockDef, splitTargetId, parentSplit);
-    }
-
-    // Non-leaf: insert each child in order. The first child takes the
-    // splitTargetId of the parent; each subsequent child splits off the
-    // PREVIOUS child (not the first) so a split with 3+ children still
-    // lands in declared order — splitting every sibling off the first
-    // child instead means the 2nd+ insertions all target the same node,
-    // and later ones land ahead of earlier ones (Codex finding on
-    // SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md's 3-child swarm/armory/
-    // sysinfo split, PR #2796).
-    let firstId: string | null = null;
-    let previousId: string | null = null;
-    for (let i = 0; i < node.children.length; i++) {
-        const child = node.children[i];
-        const target = i === 0 ? splitTargetId : previousId;
-        const dir = i === 0 ? parentSplit : node.split;
-        const id = await applyNode(expectedTabId, layoutModel, child, target, dir);
-        if (firstId === null) firstId = id;
-        previousId = id;
-    }
-    return firstId!;
-}
 
 // Create a block on the explicit target tab. We pass `expectedTabId`
 // to ObjectService.CreateBlock so the server routes it correctly
@@ -201,7 +241,18 @@ export async function createBlockOnModel(
     // path also inserts the fresh block into the local tree ahead of
     // tab.blockids catching up (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR).
     markBlockRecentlyCreated(blockId);
+    insertBlockOnModel(layoutModel, blockId, splitTargetId, splitDir);
+    return blockId;
+}
 
+/** Insert an existing block into `layoutModel`'s tree: at the root, or split
+ *  off `splitTargetId`'s node in `splitDir`, after it. */
+function insertBlockOnModel(
+    layoutModel: PresetLayoutModel,
+    blockId: string,
+    splitTargetId: string | null,
+    splitDir: "horizontal" | "vertical" | null
+): void {
     if (splitTargetId === null) {
         const action: LayoutTreeInsertNodeAction = {
             type: LayoutTreeActionType.InsertNode,
@@ -210,7 +261,7 @@ export async function createBlockOnModel(
             focused: true,
         };
         layoutModel.treeReducer(action);
-        return blockId;
+        return;
     }
 
     const targetNodeId = layoutModel.getNodeByBlockId(splitTargetId)?.id;
@@ -235,7 +286,6 @@ export async function createBlockOnModel(
         };
         layoutModel.treeReducer(action);
     }
-    return blockId;
 }
 
 // ─── Open a single view as a brand-new tab ─────────────────────────────────
