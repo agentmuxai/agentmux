@@ -90,6 +90,12 @@ export const markReleased = () => update({ released: true });
 
 export const markEscaped = () => update({ escaped: true });
 
+/** A `kind` drag has started and its source hasn't released it yet. */
+export function isUnderway(kind: DragKind): boolean {
+    const s = current();
+    return s?.kind === kind && !s.released;
+}
+
 /**
  * End the current session. With `dragId`, only if it is still that drag, so a
  * late end from an old drag can't cut short the next one.

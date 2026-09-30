@@ -3,7 +3,9 @@
 
 import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
-import { isTileDragUnderway } from "./tile-drag";
+// drag-session, not tile-drag: tile-drag imports crossTabDrag, which imports
+// this module.
+import { isUnderway } from "@/app/drag/drag-session";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import { removeBlockFromLeaf, removeLeafEmptiedByMove } from "./layoutMagnify";
@@ -147,7 +149,7 @@ export function pruneDanglingLeaves(model: LayoutModel) {
     // already cleared at drop time) spans the gesture until the source
     // releases it; the tab bar's end-of-drag cleanup re-runs the prune once
     // the drag has settled.
-    if (isTileDragUnderway()) return;
+    if (isUnderway("tile")) return;
     const now = Date.now();
     const owned = new Set(tab.blockids);
     const danglingIds: string[] = [];
