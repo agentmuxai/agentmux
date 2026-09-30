@@ -217,6 +217,45 @@ cef::wrap_task! {
     }
 }
 
+/// Promoted floaters whose pool refill waits for their content to reveal.
+/// Refilling spawns a whole renderer process, which used to compete with the
+/// floater's own bootstrap for the CPU in the half second the user is
+/// watching it. SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 1.
+static REFILL_AFTER_REVEAL: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+/// Refill anyway when the floater never reports its reveal.
+const REFILL_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn pending_refills() -> &'static Mutex<std::collections::HashSet<String>> {
+    REFILL_AFTER_REVEAL.get_or_init(Default::default)
+}
+
+fn defer_pane_pool_refill(state: &Arc<AppState>, promoted_label: &str) {
+    if let Ok(mut pending) = pending_refills().lock() {
+        pending.insert(promoted_label.to_string());
+    }
+    let state = state.clone();
+    let label = promoted_label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(REFILL_MAX_WAIT);
+        let still_pending = pending_refills().lock().map(|mut p| p.remove(&label)).unwrap_or(false);
+        if still_pending {
+            tracing::info!(target: "pool:pane", label = %label, "[pane-pool] refill: no reveal reported, refilling anyway");
+            spawn_pane_pool_window(&state);
+        }
+    });
+}
+
+/// The promoted floater `label` revealed its content: refill its pool now.
+pub fn on_window_revealed(state: &Arc<AppState>, label: &str) {
+    let was_pending = pending_refills().lock().map(|mut p| p.remove(label)).unwrap_or(false);
+    if was_pending {
+        tracing::info!(target: "pool:pane", label = %label, "[pane-pool] refill after reveal");
+        spawn_pane_pool_window(state);
+    }
+}
+
 /// Spawn a single pre-warmed frameless pane window. Follows the same
 /// single-flight + refill chain pattern as `spawn_pool_window`.
 pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
@@ -551,7 +590,7 @@ pub fn promote_pane_pool_window(
             }),
         );
 
-        spawn_pane_pool_window(state);
+        defer_pane_pool_refill(state, &new_label);
 
         return Some(new_label);
     }
@@ -592,7 +631,7 @@ pub fn promote_pane_pool_window(
         crate::ui_tasks::post_promote_pane_pool_window(
             state, &label, pane_id, workspace_id, x, y, width, height,
         );
-        spawn_pane_pool_window(state);
+        defer_pane_pool_refill(state, &label);
 
         Some(label)
     }
