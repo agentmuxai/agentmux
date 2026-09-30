@@ -11,9 +11,11 @@ import {
     createBlockSplitVertically,
     createTab,
     getApi,
+    MOS,
     openOrFocusPaneByView,
     setActiveTab,
 } from "@/app/store/global";
+import { splitBlockDefFor } from "@/app/block/split-block-def";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
@@ -76,8 +78,13 @@ function getFocusedBlockIdForSplit(): string | null {
     return focusedNode?.data?.blockId ?? null;
 }
 
-function getDefaultSplitBlockDef() {
-    return { meta: { view: "term", controller: "shell" } };
+/** What a palette split of `blockId` creates: the view's own `splitBlockDef`
+ *  (an agent pane: a fresh picker), else a terminal.
+ *  SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md. */
+function getSplitBlockDef(blockId: string): BlockDef {
+    return splitBlockDefFor(MOS.getObjectValue<Block>(MOS.makeORef("block", blockId)), () => ({
+        meta: { view: "term", controller: "shell" },
+    }));
 }
 
 function getAllTabs(ws: any): string[] {
@@ -147,7 +154,7 @@ export function registerDefaultCommands(): void {
         icon: "table-columns",
         execute: async () => {
             const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitHorizontally(getDefaultSplitBlockDef(), blockId, "after");
+            if (blockId) await createBlockSplitHorizontally(getSplitBlockDef(blockId), blockId, "after");
         },
     });
     commandRegistry.register({
@@ -157,7 +164,7 @@ export function registerDefaultCommands(): void {
         icon: "table-columns",
         execute: async () => {
             const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitHorizontally(getDefaultSplitBlockDef(), blockId, "before");
+            if (blockId) await createBlockSplitHorizontally(getSplitBlockDef(blockId), blockId, "before");
         },
     });
     commandRegistry.register({
@@ -167,7 +174,7 @@ export function registerDefaultCommands(): void {
         icon: "table-rows",
         execute: async () => {
             const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitVertically(getDefaultSplitBlockDef(), blockId, "after");
+            if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "after");
         },
     });
     commandRegistry.register({
@@ -177,7 +184,7 @@ export function registerDefaultCommands(): void {
         icon: "table-rows",
         execute: async () => {
             const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitVertically(getDefaultSplitBlockDef(), blockId, "before");
+            if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "before");
         },
     });
 

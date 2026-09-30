@@ -1,6 +1,6 @@
 # Spec: Splitting an agent pane opens a fresh agent picker
 
-**Status:** implemented (#4077)
+**Status:** implemented (#4077, every split path: #4096)
 **Date:** 2026-09-30
 **Author:** Lark
 
@@ -49,11 +49,29 @@ A view can say what a split of it creates, instead of what it doesn't copy:
 
 All four directions behave the same. The source pane's session is untouched.
 
+## Every split path (amendment, 2026-09-30)
+
+#4077 covered only the pane menu. The repo owner asked for this to hold
+however the split is asked for. There are three split paths. Each asks the
+same helper, `splitBlockDefFor(source, fallback)`
+(`frontend/app/block/split-block-def.ts`). A view that declares
+`splitBlockDef` gets it, and any other view gets the caller's own default:
+
+| Path | Where | Default for other panes (unchanged) |
+|------|-------|-------------------------------------|
+| Pane menu: Split Up / Down / Left / Right | `pane-actions.ts` | a copy of the pane's meta |
+| Command palette: `split:up/down/left/right` | `command-registry.ts` | a terminal |
+| Shortcuts: Cmd+D, Shift+Cmd+D, Ctrl+Shift+S then an arrow | `keymodel-blockcreate.ts` | the default new block (`app:defaultnewblock`: a terminal in the focused pane's cwd, or the launcher) |
+
+The palette and the shortcuts split the focused pane, so a focused agent pane
+splits into a fresh picker. Not covered:
+
+- **New Block** (Cmd+N). It isn't a split, and still opens the default new
+  block.
+- **`/terminal`**. The agent slash command asks for a terminal by name.
+
 ## Out of scope
 
-- The command palette's and keybindings' `split:*` commands. They split the
-  focused pane into a terminal whatever its view (`getDefaultSplitBlockDef`,
-  `command-registry.ts`). That's a separate choice of default.
 - Which agent the picker suggests. The new pane is a plain, fresh picker.
 
 ## Tests
@@ -68,6 +86,14 @@ All four directions behave the same. The source pane's session is untouched.
 
 `block-registry.test.ts`: `splitBlockDef` is declared by exactly the agent
 view, replacing the `splitDropsMeta` assertion.
+
+`split-block-def.test.ts`: a declaring view gets its block without building
+the fallback. Other views, and no source block, get the fallback.
+
+`keymodel-blockcreate.test.ts`: the split shortcuts split a focused agent pane
+into its picker in all four directions. A terminal still splits into a
+terminal in its cwd. With nothing focused there's no split. Cmd+N on an agent
+pane still opens the default new block.
 
 ## Files
 
