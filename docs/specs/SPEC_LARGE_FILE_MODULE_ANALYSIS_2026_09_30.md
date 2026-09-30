@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** proposed — analysis and a sequenced plan; no code changed by this doc.
+**Status:** active — items 1, 2 and 4 shipped (#4029, #4030, #4032); `agent-view.tsx` split steps 0–1 shipped (#4039, #4042), later steps in progress.
 **Baseline:** `main` @ `4b5814f47` (v0.58.3). Every `path:line` below was read on that commit.
 **Related:**
 [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) (the first agent-view split plan; 7 of 12 steps landed, the file grew anyway),
