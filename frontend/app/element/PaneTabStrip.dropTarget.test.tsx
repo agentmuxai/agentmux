@@ -48,6 +48,10 @@ vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
 
 import { LANDING_BOUNCE_MS, PaneTabStrip } from "./PaneTabStrip";
 import { paneTabItemType } from "@/app/drag/drag-types";
+import { dragEscaped } from "@/app/tab/tabbar-dnd";
+
+/** Whether the monitors would treat the current drag as escaped. */
+const escaped = () => dragEscaped;
 
 afterEach(() => cleanup());
 beforeEach(() => {
@@ -448,6 +452,36 @@ describe("PaneTabStrip — tear-off payload", () => {
             location: { current: { input: { clientX: 0 } } },
         });
         expect(payloadCalls).toContain(null);
+    });
+
+    it("the dragged pill is marked dragging until its own drop", () => {
+        const { container } = renderPane("tab-1");
+        const beta = () => [...container.querySelectorAll<HTMLElement>(".pane-tab")][1];
+        draggableCalls[1].onDragStart();
+        expect(beta().classList.contains("pane-tab--dragging")).toBe(true);
+        draggableCalls[1].onDrop();
+        expect(beta().classList.contains("pane-tab--dragging")).toBe(false);
+    });
+
+    it("Escape during the drag marks it escaped for the monitors; the next drag starts clean", () => {
+        renderPane("tab-1");
+        draggableCalls[1].onDragStart();
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        expect(escaped()).toBe(true);
+        draggableCalls[1].onDrop();
+        draggableCalls[0].onDragStart();
+        expect(escaped()).toBe(false);
+        draggableCalls[0].onDrop();
+    });
+
+    it("other keys don't escape it, and Escape after the drop is ignored", () => {
+        renderPane("tab-1");
+        draggableCalls[1].onDragStart();
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
+        expect(escaped()).toBe(false);
+        draggableCalls[1].onDrop();
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        expect(escaped()).toBe(false);
     });
 
     it("a cross-pane drop clears the payload", () => {
