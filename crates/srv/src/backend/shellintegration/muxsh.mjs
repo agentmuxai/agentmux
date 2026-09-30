@@ -269,7 +269,7 @@ export function parseArgs(argv) {
  * of `split_direction` — so `split_direction` is only meaningful, and is
  * therefore only sent, when a block id is actually known. Mirrors exactly
  * how the `OpenEditor` MCP tool derives this from `AGENTMUX_BLOCKID`
- * (`agentmux-mcp/src/main.rs`). Ignored when floating (`floating` panes are
+ * (`crates/mcp/src/main.rs`). Ignored when floating (`floating` panes are
  * documented as ignoring `split_direction`/`split_reference_block_id`
  * entirely — `rpc_types/block.rs`), so they're omitted rather than sent and
  * silently discarded. Pure, for testability.

@@ -142,7 +142,7 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
     // `phase.hidden` check alone would be here — reagentx P0 (second
     // review round) on PR #3502: NextPromptSuggestionCommand's backend
     // implementation (`read_recent_activity_digest`/`extract_digest_text`,
-    // agentmux-srv/src/server/app_api/session.rs) reads the raw FileStore
+    // crates/srv/src/server/app_api/session.rs) reads the raw FileStore
     // OUTPUT TAIL directly — both the hidden turn's full composed
     // <system-reminder> memory dump AND the model's real reply to it are
     // sitting right there in it, with no concept of "hidden" on the

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// Request for `openinshell`. Reveals a path in the OS file manager.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct OpenInShellReq {
     pub path: String,
 }
@@ -24,7 +24,7 @@ pub struct OpenInShellReq {
 /// — the handler rejects anything containing a separator, so a rename cannot
 /// move a file out of its directory.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RenameEditorFileReq {
     pub old_path: String,
     pub new_name: String,
@@ -34,7 +34,7 @@ pub struct RenameEditorFileReq {
 /// simply `old_path`'s parent joined with `new_name`: `old_path` is
 /// canonicalized first, so symlinks are already resolved here.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RenameEditorFileResult {
     pub new_path: String,
 }
@@ -42,7 +42,7 @@ pub struct RenameEditorFileResult {
 /// Request for `createeditorfile`. `name` is a plain filename (see
 /// `RenameEditorFileReq`).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CreateEditorFileReq {
     pub parent_path: String,
     pub name: String,
@@ -50,7 +50,7 @@ pub struct CreateEditorFileReq {
 
 /// Response for `createeditorfile`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CreateEditorFileResult {
     pub file_path: String,
 }
@@ -60,7 +60,7 @@ pub struct CreateEditorFileResult {
 /// sharing one name would make a future divergence look like a bug in the
 /// binding rather than in the caller.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CreateEditorDirReq {
     pub parent_path: String,
     pub name: String,
@@ -68,7 +68,7 @@ pub struct CreateEditorDirReq {
 
 /// Response for `createeditordir`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CreateEditorDirResult {
     pub dir_path: String,
 }
@@ -80,7 +80,7 @@ pub struct CreateEditorDirResult {
 /// or fail confusingly on a non-empty one. Requiring it keeps the destructive
 /// choice explicit, and the hand-written stub already typed it as required.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DeleteEditorFileReq {
     pub path: String,
     pub recursive: bool,
@@ -89,7 +89,7 @@ pub struct DeleteEditorFileReq {
 /// Request for `createscratchfile`. Both fields are genuinely optional —
 /// `Option<T>` in Rust, so ts-rs can say so without help.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CreateScratchFileReq {
     #[ts(optional)]
     pub display_name: Option<String>,
@@ -101,7 +101,7 @@ pub struct CreateScratchFileReq {
 
 /// Response for `createscratchfile`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CreateScratchFileResult {
     pub scratch_id: String,
     pub file_path: String,
@@ -112,7 +112,7 @@ pub struct CreateScratchFileResult {
 
 /// Request for `movescratchfile` (the editor's "Save As").
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MoveScratchFileReq {
     pub scratch_id: String,
     pub destination_path: String,
@@ -122,7 +122,7 @@ pub struct MoveScratchFileReq {
 /// from the requested `destination_path` whenever that path went through a
 /// symlink or `~`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MoveScratchFileResult {
     pub file_path: String,
 }

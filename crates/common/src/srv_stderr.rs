@@ -1,7 +1,7 @@
 //! The stderr line protocol `agentmux-srv` uses to talk to whichever process
 //! supervises it — the launcher in packaged builds and `task dev`
-//! (`agentmux-launcher/src/srv_spawner.rs`), or the CEF host in
-//! `task dev:standalone` (`agentmux-cef/src/sidecar.rs`).
+//! (`crates/launcher/src/srv_spawner.rs`), or the CEF host in
+//! `task dev:standalone` (`crates/cef/src/sidecar.rs`).
 //!
 //! srv formats these lines; both supervisors parse them. Putting the
 //! vocabulary here means one definition instead of three string literals that

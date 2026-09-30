@@ -55,7 +55,7 @@ pub(crate) fn forward_open_new_window(
 }
 
 /// `forward_host_cmd` with an `args` object — the host's `/ipc` body is
-/// `{"cmd", "args"}` (`agentmux-cef/src/ipc.rs` `IpcRequest`). Used by the
+/// `{"cmd", "args"}` (`crates/cef/src/ipc.rs` `IpcRequest`). Used by the
 /// notification click path (`open_new_window {workspace_id}`,
 /// `focus_window {label}`).
 pub(crate) fn forward_host_cmd_with_args(
@@ -153,7 +153,7 @@ fn forward_host_body(
 /// `CARGO_PKG_VERSION`/`AGENTMUX_BUILD_LABEL` at compile time) — it does
 /// NOT change the CEF profile/data directory, which for dev mode is keyed
 /// on `(branch, clone_id)` — NOT version — via
-/// `agentmux-common/src/data_paths.rs`'s `resolve_channel_and_dir`
+/// `crates/common/src/data_paths.rs`'s `resolve_channel_and_dir`
 /// (`honor_env_channel=false` for dev launches). `clone_id`
 /// (`runtime_mode.rs`'s `derive_clone_id`) is a hash of the CLONE'S OWN
 /// CANONICAL WORKSPACE-ROOT PATH — git-worktree-aware by design, so a

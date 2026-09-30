@@ -149,7 +149,7 @@ export type CreateAgentSkillInput = Pick<CommandCreateAgentSkillData, "agent_id"
     Partial<Omit<CommandCreateAgentSkillData, "agent_id" | "name">>;
 
 // The Drone pane's wire types are GENERATED from their Rust definitions by
-// ts-rs (agentmux-srv/src/drone/types.rs + server/drone_handlers.rs).
+// ts-rs (crates/srv/src/drone/types.rs + server/drone_handlers.rs).
 export type { DroneBlockState } from "@/types/rpc/DroneBlockState";
 export type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 export type { DroneFlowEdge } from "@/types/rpc/DroneFlowEdge";
@@ -610,7 +610,7 @@ export const AgentApi = {
     },
 
     // `/btw <question>` — a one-shot, tool-less side question (see
-    // agentmux-srv/src/server/agent_handlers/side_question.rs). Returns
+    // crates/srv/src/server/agent_handlers/side_question.rs). Returns
     // immediately with a `request_id`; the actual answer streams as
     // `WpsEvent.BtwAnswerChunk` events scoped
     // `block:<block_id>:btw:<request_id>` — see mps-events.ts.

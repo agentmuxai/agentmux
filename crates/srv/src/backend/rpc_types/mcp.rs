@@ -22,14 +22,14 @@ use serde::{Deserialize, Serialize};
 
 /// `mcp.list`, `mcp.catalog.list_for_agent`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpAgentScopeData {
     pub agent_id: String,
 }
 
 /// `mcp.get`, `mcp.delete`, `mcp.probe` — one server row within an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpAgentItemData {
     pub agent_id: String,
     pub id: String,
@@ -38,7 +38,7 @@ pub struct McpAgentItemData {
 /// `mcp.bind`, `mcp.unbind`, `mcp.catalog.bind`, `mcp.catalog.unbind`.
 /// `mcp_id`, not `id`: the row being addressed is the server, not the binding.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpAgentBindingData {
     pub agent_id: String,
     pub mcp_id: String,
@@ -46,7 +46,7 @@ pub struct McpAgentBindingData {
 
 /// `mcp.catalog.bind_to_bundle`, `mcp.catalog.unbind_from_bundle`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpBundleBindingData {
     pub bundle_id: String,
     pub mcp_id: String,
@@ -54,14 +54,14 @@ pub struct McpBundleBindingData {
 
 /// `mcp.catalog.list_for_bundle`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpBundleScopeData {
     pub bundle_id: String,
 }
 
 /// `mcp.catalog.delete`, `mcp.catalog.probe` — window-scoped, so no agent key.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpCatalogItemData {
     pub id: String,
 }
@@ -70,7 +70,7 @@ pub struct McpCatalogItemData {
 /// `()`, because the stub calls it with `{}` and serde deserializes `()` only
 /// from JSON `null`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpCatalogListData {}
 
 fn default_transport() -> String {
@@ -94,7 +94,7 @@ fn default_config() -> String {
 /// `config` is `"{}"`, not `null` — and `config` is parsed as JSON downstream,
 /// so a null would be a different failure.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandMcpUpsertData {
     pub agent_id: String,
     #[serde(default)]
@@ -108,7 +108,7 @@ pub struct CommandMcpUpsertData {
 
 /// `mcp.catalog.upsert` — window-scoped. Same field rules.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandMcpCatalogUpsertData {
     #[serde(default)]
     pub id: String,
@@ -121,7 +121,7 @@ pub struct CommandMcpCatalogUpsertData {
 
 /// `mcp.catalog.upsert_for_bundle` — bundle-scoped. Same field rules.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandMcpCatalogUpsertForBundleData {
     pub bundle_id: String,
     #[serde(default)]
@@ -137,7 +137,7 @@ pub struct CommandMcpCatalogUpsertForBundleData {
 /// `json!({ "deleted": .. })`. False means no row with that id existed — the
 /// delete is idempotent, so this is "was something removed", not an error.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpDeleteResult {
     pub deleted: bool,
 }
@@ -146,7 +146,7 @@ pub struct McpDeleteResult {
 /// — a literal, never computed, because binding is idempotent and any real
 /// failure returns `Err`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpBindResult {
     pub bound: bool,
 }
@@ -154,7 +154,7 @@ pub struct McpBindResult {
 /// Result of the three unbind commands. Unlike `bound`, this one IS computed:
 /// false means there was no binding to remove.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpUnbindResult {
     pub unbound: bool,
 }

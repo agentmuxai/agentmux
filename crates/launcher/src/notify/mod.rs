@@ -34,7 +34,7 @@ mod windows;
 #[cfg(target_os = "linux")]
 mod linux;
 
-/// Mirrors srv's `OsNotification` (`agentmux-srv/src/backend/notify/policy.rs`).
+/// Mirrors srv's `OsNotification` (`crates/srv/src/backend/notify/policy.rs`).
 /// Unknown fields are ignored so srv can grow the payload first.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Notification {

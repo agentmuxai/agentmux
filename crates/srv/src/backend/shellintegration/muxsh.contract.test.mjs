@@ -5,7 +5,7 @@
 // docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §2.8: asserts every
 // field muxsh's buildRequestBody() can ever emit for pane.open is listed in
 // docs/specs/app-api-manifest.json's routes["pane.open"].requestFields — the
-// same manifest a Rust test (agentmux-srv/src/backend/rpc_types/block.rs's
+// same manifest a Rust test (crates/srv/src/backend/rpc_types/block.rs's
 // app_api_manifest_contract_tests module) checks against the real
 // CommandPaneOpenData struct. A field muxsh starts sending that isn't in the
 // manifest (or that the manifest claims but the real Rust struct doesn't
@@ -30,7 +30,7 @@ import {
 } from "./muxsh.mjs";
 
 function loadManifest() {
-    // agentmux-srv/src/backend/shellintegration/ -> repo root is four levels up.
+    // crates/srv/src/backend/shellintegration/ -> repo root is four levels up.
     const here = dirname(fileURLToPath(import.meta.url));
     const manifestPath = join(here, "..", "..", "..", "..", "docs", "specs", "app-api-manifest.json");
     return JSON.parse(readFileSync(manifestPath, "utf8"));

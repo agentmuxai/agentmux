@@ -50,8 +50,8 @@ test/screenshots/
 src-tauri/
 
 # CEF binaries (downloaded at build time by cef-dll-sys)
-agentmux-cef/cef_binary/
-agentmux-cef/resources/
+crates/cef/cef_binary/
+crates/cef/resources/
 
 # Screenshots (development artifacts)
 ss-*.png

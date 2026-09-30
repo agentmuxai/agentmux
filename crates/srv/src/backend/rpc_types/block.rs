@@ -55,7 +55,7 @@ pub struct CommandCreateBlockData {
 
 /// Matches Go's `CommandDeleteBlockData`
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDeleteBlockData {
     pub blockid: String,
 }
@@ -99,7 +99,7 @@ pub struct CommandControllerResyncData {
 
 /// Matches Go's `CommandBlockInputData`
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBlockInputData {
     pub blockid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -158,7 +158,7 @@ pub struct CommandDeleteSubBlockData {
 /// not a hypothetical one). Spec:
 /// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandToolDecisionData {
     pub blockid: String,
     /// The `tool_use_id` of the pending `can_use_tool` control_request —
@@ -197,7 +197,7 @@ pub struct CommandToolDecisionData {
 /// state change on one. If narration is capped, cancelled, or fails, the thing
 /// being narrated still happened and the UI must already show it.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAmbientNarrateData {
     pub blockid: String,
     /// Selects the prompt. Unknown kinds are a deliberate no-op rather than an
@@ -216,7 +216,7 @@ pub struct CommandAmbientNarrateData {
 /// `ToolNode`'s status changes. Spec:
 /// docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDockNodeStatusData {
     pub blockid: String,
     pub node_id: String,
@@ -249,7 +249,7 @@ pub struct CommandDockNodeStatusData {
 /// key back to the `db_background_tasks` row `docknodestatus` created), not
 /// this notification message's own id.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBackgroundTaskCompletionData {
     pub blockid: String,
     pub node_id: String,
@@ -268,7 +268,7 @@ pub struct CommandBackgroundTaskCompletionData {
 /// key as `CommandBackgroundTaskCompletionData` above. See
 /// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBackgroundTaskPidData {
     pub blockid: String,
     pub node_id: String,
@@ -283,7 +283,7 @@ pub struct CommandBackgroundTaskPidData {
 /// plus recently ended ones (Swarm; see
 /// docs/specs/SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md §3).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListBackgroundTasksData {
     pub blockid: String,
 }
@@ -293,7 +293,7 @@ pub struct CommandListBackgroundTasksData {
 /// carrying `updatedInput.answers`). Spec:
 /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentAnswerData {
     pub blockid: String,
     /// The `AskUserQuestion` tool_use id the answer responds to (correlates with
@@ -319,7 +319,7 @@ pub struct CommandAgentAnswerData {
 /// blockcontroller/persistent.rs). Spec:
 /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentCancelData {
     pub blockid: String,
     /// The `AskUserQuestion` tool_use id being declined (correlates with the
@@ -330,7 +330,7 @@ pub struct CommandAgentCancelData {
 /// Data for AgentShutdownKeepCommand — the pending-shutdown banner's "Keep
 /// running" (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentShutdownKeepData {
     pub blockid: String,
     /// From the `agent:shutdown-pending` event being answered.
@@ -339,7 +339,7 @@ pub struct CommandAgentShutdownKeepData {
 
 /// `kept_by_user`, or `too_late` when the shutdown had already begun.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentShutdownKeepResult {
     #[ts(type = "\"kept_by_user\" | \"too_late\"")]
     pub outcome: String,
@@ -349,7 +349,7 @@ pub struct AgentShutdownKeepResult {
 
 /// Data for SubprocessSpawnCommand — spawn agent CLI for a single turn.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandSubprocessSpawnData {
     pub blockid: String,
     pub tabid: String,
@@ -366,7 +366,7 @@ pub struct CommandSubprocessSpawnData {
 
 /// Data for AgentInputCommand — send a follow-up message (re-spawns with --resume).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentInputData {
     pub blockid: String,
     /// The user's JSON message string.
@@ -410,7 +410,7 @@ pub struct CommandAgentInputData {
 /// `--resume`/live session context on this path — see
 /// `server/agent_handlers/side_question.rs`'s module doc comment for why).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAskSideQuestionData {
     pub block_id: String,
     pub question: String,
@@ -422,14 +422,14 @@ pub struct CommandAskSideQuestionData {
 /// caller uses to scope its `EVENT_BTW_ANSWER_CHUNK` subscription:
 /// `block:<block_id>:btw:<request_id>`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AskSideQuestionResult {
     pub request_id: String,
 }
 
 /// Data for AgentStopCommand — stop the running subprocess.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentStopData {
     pub blockid: String,
     #[serde(default)]
@@ -438,7 +438,7 @@ pub struct CommandAgentStopData {
 
 /// Data for ShellExecCommand — run a shell command in the agent's working directory.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandShellExecData {
     pub blockid: String,
     pub command: String,
@@ -448,7 +448,7 @@ pub struct CommandShellExecData {
 
 /// Result of ShellExecCommand.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ShellExecResult {
     pub exit_code: i32,
     pub stdout: String,
@@ -457,7 +457,7 @@ pub struct ShellExecResult {
 
 /// Data for ShellStopCommand — stop a running persistent shell node by id.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandShellStopData {
     pub shell_id: String,
 }
@@ -468,14 +468,14 @@ pub struct CommandShellStopData {
 /// "already exited" and "never existed" -- the caller cannot tell them apart,
 /// and does not need to: either way there is nothing left to stop.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ShellStopResult {
     pub stopped: bool,
 }
 
 /// Data for ShellStatusCommand — query a shell's current running state by id.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandShellStatusData {
     pub shell_id: String,
 }
@@ -488,7 +488,7 @@ pub struct CommandShellStatusData {
 /// misreported live shells as failed (reagent P1 on #2770). Callers must
 /// branch on `known` first.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ShellStatusResult {
     pub known: bool,
     pub running: bool,
@@ -503,7 +503,7 @@ pub struct ShellStatusResult {
 
 /// A file to write as part of agent config.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentConfigFile {
     pub path: String,
     pub content: String,
@@ -511,7 +511,7 @@ pub struct AgentConfigFile {
 
 /// Data for WriteAgentConfigCommand — write config files atomically.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandWriteAgentConfigData {
     /// Agent working directory where files are written.
     pub working_dir: String,
@@ -532,14 +532,14 @@ pub struct CommandWriteAgentConfigData {
 /// `working_dir` and patch `cmd:cwd` (via SetMeta) when they differ
 /// so the controller spawns the CLI in the actually-created dir.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandWriteAgentConfigResult {
     pub working_dir: String,
 }
 
 /// Data for ResolveCliCommand — detect or install a CLI tool.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandResolveCliData {
     /// Provider ID (e.g. "claude", "codex", "gemini")
     pub provider_id: String,
@@ -562,7 +562,7 @@ pub struct CommandResolveCliData {
 
 /// Result from ResolveCliCommand
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ResolveCliResult {
     /// Absolute path to the CLI binary
     pub cli_path: String,
@@ -574,7 +574,7 @@ pub struct ResolveCliResult {
 
 /// Data for CheckCliAuthCommand — check if CLI is authenticated.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandCheckCliAuthData {
     /// Absolute path to CLI binary
     pub cli_path: String,
@@ -589,7 +589,7 @@ pub struct CommandCheckCliAuthData {
 
 /// Result from CheckCliAuthCommand
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CheckCliAuthResult {
     pub authenticated: bool,
     pub email: Option<String>,
@@ -600,7 +600,7 @@ pub struct CheckCliAuthResult {
 
 /// Request for `provider.ensureauthdir`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct EnsureProviderAuthDirReq {
     /// Provider id or alias (e.g. "claude").
     pub provider_id: String,
@@ -608,7 +608,7 @@ pub struct EnsureProviderAuthDirReq {
 
 /// Result of `provider.ensureauthdir`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct EnsureProviderAuthDirResult {
     /// Absolute path of the provider's default auth dir, created and
     /// isolation-prepared (e.g. Claude's CLAUDE.md placeholder).
@@ -617,7 +617,7 @@ pub struct EnsureProviderAuthDirResult {
 
 /// Input for RunCliLoginCommand — spawns the CLI login flow and extracts the OAuth URL
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandRunCliLoginData {
     pub cli_path: String,
     pub login_args: Vec<String>,
@@ -627,7 +627,7 @@ pub struct CommandRunCliLoginData {
 
 /// Result from RunCliLoginCommand
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RunCliLoginResult {
     /// OAuth URL extracted from the CLI's output (open in browser)
     pub auth_url: Option<String>,
@@ -752,7 +752,7 @@ pub struct CommandPaneMoveTabData {
 
 /// Request for blockfile:line_count — count total lines in a blockfile.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileLineCountData {
     pub block_id: String,
@@ -761,7 +761,7 @@ pub struct CommandBlockfileLineCountData {
 
 /// Response from blockfile:line_count.
 #[derive(Debug, Clone, Default, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileLineCountResult {
     #[ts(type = "number")]
@@ -781,7 +781,7 @@ pub struct BlockfileLineCountResult {
 
 /// Request for blockfile:read_range — read a range of lines from a blockfile.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileReadRangeData {
     pub block_id: String,
@@ -809,7 +809,7 @@ pub struct CommandBlockfileReadRangeData {
 
 /// Response from blockfile:read_range.
 #[derive(Debug, Clone, Default, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileReadRangeResult {
     pub lines: Vec<String>,
@@ -848,7 +848,7 @@ pub struct BlockfileReadRangeResult {
 /// (e.g. `output.state.json`) associated with a block.
 /// Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileReadStateData {
     pub block_id: String,
@@ -860,7 +860,7 @@ pub struct CommandBlockfileReadStateData {
 /// Response from blockfile:read_state. `content` is the raw file bytes
 /// as a UTF-8 string, or null if the sidecar does not exist.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileReadStateResult {
     pub content: Option<String>,
@@ -870,7 +870,7 @@ pub struct BlockfileReadStateResult {
 /// file for a block. Uses tmp + fsync + rename to guarantee partial
 /// writes never surface to readers.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileWriteStateData {
     pub block_id: String,
@@ -880,7 +880,7 @@ pub struct CommandBlockfileWriteStateData {
 
 /// Response from blockfile:write_state.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileWriteStateResult {
     #[ts(type = "number")]
@@ -910,7 +910,8 @@ mod app_api_manifest_contract_tests {
     fn repo_root() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .expect("agentmux-srv's parent dir is the repo root")
+            .and_then(Path::parent)
+            .expect("crates/<name> is two levels below the repo root")
             .to_path_buf()
     }
 

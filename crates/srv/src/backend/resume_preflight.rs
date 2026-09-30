@@ -86,7 +86,7 @@ impl Verdict {
 }
 
 /// One line in the pane's progress list while the preflight runs. Mirrors the
-/// launcher splash's `StageRow` shape (`agentmux-launcher/src/splash.rs`) so
+/// launcher splash's `StageRow` shape (`crates/launcher/src/splash.rs`) so
 /// the two read as the same idea in two places.
 #[derive(Debug, Clone)]
 pub struct Step {

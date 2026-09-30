@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// is the single most commonly-cited fleet-ops pitfall means this must never
 /// collapse to a single bool/count.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FleetActionResult {
     pub succeeded: Vec<String>,
     pub failed: Vec<FleetActionFailure>,
@@ -24,7 +24,7 @@ pub struct FleetActionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FleetActionFailure {
     pub id: String,
     pub error: String,
@@ -34,7 +34,7 @@ pub struct FleetActionFailure {
 /// per-agent selection unit) — resolved server-side to each block's
 /// registered agent name before delivery.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandFleetBroadcastData {
     pub targets: Vec<String>,
     pub message: String,
@@ -47,7 +47,7 @@ pub struct CommandFleetBroadcastData {
 /// (spec §3/§5.3) — not the full canary-then-widen ladder, which is more
 /// generality than a first version needs.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct StagePlanInput {
     #[ts(type = "number")]
     pub batch_size: usize,
@@ -56,7 +56,7 @@ pub struct StagePlanInput {
 
 /// Input for fleet.bulk-stop. `targets` are block ids, same as broadcast.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandFleetBulkStopData {
     pub targets: Vec<String>,
     #[serde(default)]
@@ -68,7 +68,7 @@ pub struct CommandFleetBulkStopData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FleetGroup {
     pub id: String,
     pub name: String,
@@ -78,7 +78,7 @@ pub struct FleetGroup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandFleetGroupCreateData {
     pub name: String,
     #[serde(default)]
@@ -86,13 +86,13 @@ pub struct CommandFleetGroupCreateData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FleetGroupListResult {
     pub groups: Vec<FleetGroup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandFleetGroupUpdateData {
     pub id: String,
     #[serde(default)]
@@ -104,7 +104,7 @@ pub struct CommandFleetGroupUpdateData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandFleetGroupDeleteData {
     pub id: String,
 }
@@ -117,14 +117,14 @@ pub struct CommandFleetGroupDeleteData {
 /// An empty struct generates `Record<string, never>`, which is what the
 /// hand-written stub already declared.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandFleetGroupListData {}
 
 /// Result of `fleet.group.delete`. Previously an ad-hoc
 /// `json!({ "ok": deleted })` built inline in the handler — the kind of
 /// untyped literal that cannot be checked against the frontend at all.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FleetGroupDeleteResult {
     /// False when no group with that id existed — the delete is idempotent,
     /// so this is "was something actually removed", not an error flag.

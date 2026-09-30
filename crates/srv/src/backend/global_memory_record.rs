@@ -267,7 +267,7 @@ pub(crate) fn sync_all(fs: &FileStore, store: &Store, scope: &str) -> Result<usi
 // them in from another scope's record — never silently.
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportEntry")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "GlobalMemoryImportEntry")]
 pub(crate) struct ImportEntry {
     pub entry_id: String,
     pub name: String,
@@ -275,7 +275,7 @@ pub(crate) struct ImportEntry {
 
 /// Another scope whose record holds entries this channel lacks.
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportSource")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "GlobalMemoryImportSource")]
 pub(crate) struct ImportSource {
     pub index: usize,
     /// `shared`, or `channel:<id>`.
@@ -285,7 +285,7 @@ pub(crate) struct ImportSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportSources")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "GlobalMemoryImportSources")]
 pub(crate) struct ImportSources {
     pub list_id: String,
     /// This channel's scope. Sources are offered only to an isolated one.
@@ -294,7 +294,7 @@ pub(crate) struct ImportSources {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/", rename = "GlobalMemoryImportReport")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "GlobalMemoryImportReport")]
 pub(crate) struct ImportReport {
     pub added: usize,
     /// Added under a new name: another entry here already had theirs.

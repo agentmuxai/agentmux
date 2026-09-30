@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mirrors `agentmux-srv/src/backend/providers.rs`'s `ALIASES` map — legacy/
+ * Mirrors `crates/srv/src/backend/providers.rs`'s `ALIASES` map — legacy/
  * alternate provider IDs a `db_agent_identity_links` row may still carry
  * (bundle-era migrations, older definitions) that must resolve to the same
  * canonical ID `ProviderDefinition.id` uses today. The backend's own

@@ -7,7 +7,7 @@
 // Mirrors the `launcher-events.ts` pattern from Phase B.7.3.1, but
 // for the srv reducer's broadcast bus (workspace / tab / block / window
 // / saga lifecycle). The host's CEF JS bridge
-// (`agentmux-cef/src/srv_event_bridge.rs`, shipped in Phase E.2c.5a /
+// (`crates/cef/src/srv_event_bridge.rs`, shipped in Phase E.2c.5a /
 // PR #618) calls `window.__agentmux_srv_event(<json>)` once per
 // top-level renderer per srv event.
 //
@@ -38,7 +38,7 @@ import { PerSourceTracker, type EventCallback, type VersionedEvent } from "./eve
  * (`#[serde(tag = "event", rename_all = "snake_case")]`).
  *
  * Discriminator examples (non-exhaustive — see
- * `agentmux-common/src/ipc.rs::Event`):
+ * `crates/common/src/ipc.rs::Event`):
  *   - `workspace_created` / `workspace_deleted` / `workspace_renamed`
  *   - `tab_created` / `tab_deleted` / `tab_renamed` / `tab_moved` / `tab_reordered`
  *   - `block_created` / `block_deleted` / `block_moved`

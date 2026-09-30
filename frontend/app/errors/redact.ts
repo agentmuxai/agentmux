@@ -8,7 +8,7 @@
  * puts error or log text on the clipboard run through this before the text
  * is truncated or written.
  *
- * A faithful, deliberate port of `agentmux-common/src/redact.rs`'s
+ * A faithful, deliberate port of `crates/common/src/redact.rs`'s
  * character-scanning algorithms (not a from-scratch regex rewrite) so the
  * two can't quietly diverge in what they consider a match — both are tested
  * against the same `docs/specs/fixtures/redaction-vectors.json`.

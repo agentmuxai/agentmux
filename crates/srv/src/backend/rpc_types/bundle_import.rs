@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 /// One `*.md` context file offered for selection in the preview.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportContextFilePreview {
     /// 0-based index within this parse — the stable selection key
     /// `include_context_files` uses at commit. Never the display path, which
@@ -31,7 +31,7 @@ pub struct BundleImportContextFilePreview {
 
 /// One skill directory offered for selection.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportSkillPreview {
     /// Stable selection key — never the (possibly truncated) slug.
     pub source_dir: String,
@@ -50,7 +50,7 @@ pub struct BundleImportSkillPreview {
 /// writes an explicit JSON `null` when the key is absent from the config, so
 /// the key is always present on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportMcpServerDisplay {
     pub name: Option<String>,
     pub command: Option<String>,
@@ -59,7 +59,7 @@ pub struct BundleImportMcpServerDisplay {
 /// One MCP server offered for selection. Carries only `display`, never the
 /// full config — a bundle's server config can hold secrets.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportMcpServerPreview {
     /// Stable selection key.
     pub source_path: String,
@@ -70,7 +70,7 @@ pub struct BundleImportMcpServerPreview {
 /// match it. `resolved` is exactly `match_count == 1` — zero means nothing to
 /// bind, more than one means the choice is ambiguous.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportRequirementPreview {
     pub id: String,
     pub provider: String,
@@ -90,7 +90,7 @@ pub struct BundleImportRequirementPreview {
 /// rather than silently dropping it; whether the UI should use it is a
 /// product question, not a refactor one.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportProjectInstructionPreview {
     /// Working-directory-relative path on the SOURCE machine.
     pub path: String,
@@ -109,7 +109,7 @@ pub struct BundleImportProjectInstructionPreview {
 
 /// Response for `bundle.import.preview`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportPreviewResponse {
     pub project_instructions: Vec<BundleImportProjectInstructionPreview>,
     pub name: String,
@@ -135,7 +135,7 @@ pub struct BundleImportPreviewResponse {
 /// A requirement the commit could not bind, with the ambiguity count that
 /// explains why (0 = nothing matched, >1 = ambiguous).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportUnresolvedRequirement {
     pub id: String,
     pub provider: String,
@@ -146,7 +146,7 @@ pub struct BundleImportUnresolvedRequirement {
 
 /// Response for `bundle.import.commit`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportCommitResponse {
     pub bundle_id: String,
     pub imported_skill_ids: Vec<String>,
@@ -159,7 +159,7 @@ pub struct BundleImportCommitResponse {
 
 /// One in-memory file of an unpacked bundle, for the `files` input mode.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportFileEntry {
     pub path: String,
     pub content: String,
@@ -167,7 +167,7 @@ pub struct BundleImportFileEntry {
 
 /// One skill selected for import, optionally renamed to dodge a collision.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportSkillSelection {
     /// Matches `BundleImportSkillPreview::source_dir` — the stable key, not
     /// the slug.
@@ -186,7 +186,7 @@ pub struct BundleImportSkillSelection {
 /// were unreachable through the typed client even though the server has always
 /// supported them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBundleImportPreviewData {
     #[serde(default)]
     #[ts(optional)]
@@ -211,7 +211,7 @@ pub struct CommandBundleImportPreviewData {
 /// staleness check the digest exists to enforce, so callers should be made to
 /// pass it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBundleImportCommitData {
     #[serde(default)]
     #[ts(optional)]

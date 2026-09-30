@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListAgentInstancesData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -18,13 +18,13 @@ pub struct CommandListAgentInstancesData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGetAgentInstanceData {
     pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandCreateAgentInstanceData {
     pub definition_id: String,
     #[serde(default)]
@@ -102,7 +102,7 @@ pub struct NamedAgentRow {
 /// row. Row + working directory remain on disk for audit + recovery
 /// (destructive deletion is a separate, confirm-gated flow).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandHideNamedAgentData {
     pub id: String,
 }
@@ -110,7 +110,7 @@ pub struct CommandHideNamedAgentData {
 /// Response for `hidenamedagent`. Was an anonymous `json!({"hidden": ..})`
 /// before this type existed to name it for the RPC bindings generator.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct HideNamedAgentResult {
     pub hidden: bool,
 }
@@ -233,7 +233,7 @@ pub struct ListRecentSessionsResult {
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is
 /// optional — absent fields preserve their current value.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandUpdateAgentInstanceData {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -256,7 +256,7 @@ pub struct CommandUpdateAgentInstanceData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDeleteAgentInstanceData {
     pub id: String,
 }
@@ -264,7 +264,7 @@ pub struct CommandDeleteAgentInstanceData {
 /// Response for `deleteagentinstance`. Was an anonymous `json!({"deleted": ..})`
 /// before this type existed to name it for the RPC bindings generator.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DeleteAgentInstanceResult {
     pub deleted: bool,
 }

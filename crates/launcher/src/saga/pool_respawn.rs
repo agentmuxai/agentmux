@@ -52,7 +52,7 @@
 // **CPD-3 update.** Step 2's `SagaAction::IssueCmd` is now LIVE: the
 // coordinator dispatches `Command::SpawnPoolWindow { saga_id }`
 // through `HostPipe::send_command()` (see
-// `agentmux-launcher/src/saga/mod.rs::apply_action`). The saga is
+// `crates/launcher/src/saga/mod.rs::apply_action`). The saga is
 // structurally identical — what changed is the coordinator's
 // `IssueCmd::Host` arm. The saga is no longer a passive narrator of
 // the host's implicit refill: it now causally drives it.

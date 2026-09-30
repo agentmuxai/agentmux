@@ -8,7 +8,7 @@
 //!
 //! Diagnostic-only surface: a thin read composition over `ProcessBroker`
 //! (Phase A of the process-tracking consolidation,
-//! `agentmux-srv/src/broker/process.rs`) and its sibling registries — never
+//! `crates/srv/src/broker/process.rs`) and its sibling registries — never
 //! a new independent snapshot of process/turn state (spec §5.1/§3 point 8).
 //! Reached the same way `agentmux-mcp` already reaches every other
 //! `/api/v1/*` route: plain HTTP, `X-AuthKey` header, `$AGENTMUX_LOCAL_URL`/
@@ -593,7 +593,7 @@ pub struct MuxspectBackgroundTasksQuery {
 }
 
 #[derive(serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BackgroundTaskView {
     pub id: String,
     pub block_id: String,

@@ -357,7 +357,7 @@ async fn transcribe_local_whisper(
     // block the HTTP handler forever. kill_on_drop ensures the timed-out child
     // is reaped when the timeout future drops it.
     cmd.kill_on_drop(true);
-    // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
+    // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
     #[cfg(windows)]
     {
         use agentmux_common::win32::CREATE_NO_WINDOW;

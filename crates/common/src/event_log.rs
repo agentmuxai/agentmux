@@ -5,8 +5,8 @@
 //! [`Event`]s for replay, plus an optional append-only JSON-lines disk
 //! stream for crash forensics.
 //!
-//! This module used to exist twice — `agentmux-launcher/src/event_log.rs`
-//! (Phase D.2) and a byte-for-byte mirror in `agentmux-srv/src/event_log.rs`
+//! This module used to exist twice — `crates/launcher/src/event_log.rs`
+//! (Phase D.2) and a byte-for-byte mirror in `crates/srv/src/event_log.rs`
 //! (Phase E.1b), 415 lines each, whose only code-level difference was
 //! *which logging sink* a warning went to. The srv copy's own header
 //! carried the to-do: *"Phase E.7 cleanup: lift the shared parts into

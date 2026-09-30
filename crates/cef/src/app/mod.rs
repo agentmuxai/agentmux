@@ -522,7 +522,7 @@ wrap_app! {
                 // The AGENTMUX_CEF_EXTRA_FLAGS guard further down covers only
                 // that one ingress. This covers the other: the launcher
                 // collects its own argv verbatim
-                // (`agentmux-launcher/src/main.rs:309`) and passes it to the
+                // (`crates/launcher/src/main.rs:309`) and passes it to the
                 // host via `.args(args)` (`host_spawn.rs:41`/`:138`), so
                 // `agentmux.exe --enable-media-stream` reaches CEF without ever
                 // touching the env-var path.

@@ -45,10 +45,10 @@ CSS can animate layer 1. It **cannot** touch layer 2 — the host moves the HWND
 **Key invariant:** the backend stores **relative flex sizes**, never pixel coordinates. Each window computes its own pixels from its own container size — which is how the same tab can render at different sizes in different windows.
 
 ### Backend types & ops
-- `agentmux-common/src/layout_types.rs` — `LayoutNode { id, flex_direction, size, children, data: Option<{block_id}> }`, `FlexDirection {Row,Column}`, `ResizeOp`, `SplitPosition`. Leaf = `data: Some`, no children; group = `data: None`, has children.
-- `agentmux-srv/src/backend/layout/mod.rs` — pure tree mutators: `insert_node`, `insert_node_at_index`, `delete_node` (collapses sole-child parents), `move_node`, `swap_nodes`, `resize_nodes` (atomic, validates all sizes ∈ [0,100] before mutating), `replace_node`, `split_horizontal/vertical`, `ensure_group_node`. **No geometry here.**
-- `agentmux-srv/src/reducer/layout.rs` + `reducer.rs` — command arms (`LayoutInsertNode`, `LayoutDeleteNode`, `LayoutMoveNode`, `LayoutResizeNodes`, `SetFocusedNode`, `SetMagnifiedNode`, …) → mutate `TabRecord` → emit versioned `Event::Layout*` (every event carries a monotonic `version`).
-- Persistence: `agentmux-srv/src/backend/obj.rs` `LayoutState { rootnode, focusednodeid, magnifiednodeid, … }`, one row per `tab_id` in the wstore.
+- `crates/common/src/layout_types.rs` — `LayoutNode { id, flex_direction, size, children, data: Option<{block_id}> }`, `FlexDirection {Row,Column}`, `ResizeOp`, `SplitPosition`. Leaf = `data: Some`, no children; group = `data: None`, has children.
+- `crates/srv/src/backend/layout/mod.rs` — pure tree mutators: `insert_node`, `insert_node_at_index`, `delete_node` (collapses sole-child parents), `move_node`, `swap_nodes`, `resize_nodes` (atomic, validates all sizes ∈ [0,100] before mutating), `replace_node`, `split_horizontal/vertical`, `ensure_group_node`. **No geometry here.**
+- `crates/srv/src/reducer/layout.rs` + `reducer.rs` — command arms (`LayoutInsertNode`, `LayoutDeleteNode`, `LayoutMoveNode`, `LayoutResizeNodes`, `SetFocusedNode`, `SetMagnifiedNode`, …) → mutate `TabRecord` → emit versioned `Event::Layout*` (every event carries a monotonic `version`).
+- Persistence: `crates/srv/src/backend/obj.rs` `LayoutState { rootnode, focusednodeid, magnifiednodeid, … }`, one row per `tab_id` in the wstore.
 
 ### Sync path (backend ↔ frontend)
 ```
@@ -117,7 +117,7 @@ Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeMod
 - **Decision:** rejected a host-side (Rust/tokio) interpolation loop — it runs on a separate clock/easing and would drift against the DOM CSS transition. For browser-pane *resize* cost, the agreed fallback is **smooth position / snap size** if per-frame CEF relayout stutters on heavy pages.
 
 ### 3.3 Native pane positioning (host)
-- IPC `browser_pane_resize {block_id,x,y,width,height}` (device px) → `ipc.rs` → `BrowserPaneManager::resize` → `SetWindowPos(hwnd,…,SWP_NOACTIVATE)` (`agentmux-cef/src/browser_panes.rs`). Thread-safe from the tokio IPC thread; ~1–2ms.
+- IPC `browser_pane_resize {block_id,x,y,width,height}` (device px) → `ipc.rs` → `BrowserPaneManager::resize` → `SetWindowPos(hwnd,…,SWP_NOACTIVATE)` (`crates/cef/src/browser_panes.rs`). Thread-safe from the tokio IPC thread; ~1–2ms.
 - The frontend browser pane reports its rect from `browser-view.tsx syncPosition()` (×devicePixelRatio), today driven by a `ResizeObserver` + 200ms poll; the animation adds the rAF driver above.
 - **Airspace clip:** `browser_panes_set_overlay_clip` → `SetWindowRgn` punches holes in pane HWNDs so DOM overlays/modals show through (`pane-overlay.ts` rAF-coalesces the dispatch; only browser panes register in `pane-rect-registry.ts`). Independent of pane position.
 - **Only browser panes are native.** Terminal (xterm), agent (pty/xterm), editor (CodeMirror), sysinfo, etc. are all DOM.
@@ -146,16 +146,16 @@ A one-shot runtime diagnostic confirmed it (live app, `.tile-node`): `.animate` 
 ## 4. Magnify, ephemeral, multi-window (brief)
 - **Magnify:** `magnifiedNodeId` in tree state. The magnified pane's single `.tile-leaf` is **reparented** (DOM `appendChild`) into a centered `.magnify-pane` overlay; other tiles get `display:none` (`.tile-hidden`) so native browser HWNDs reporting 0×0 are hidden by the host. Block/view/native window survive intact.
 - **Ephemeral (peek):** a node outside the tree, rendered in the overlay sized like a magnified pane; dismissed on Escape/click.
-- **Multi-window / tear-off:** layout is **per-tab** (shared across windows showing the tab); each window keeps its own browser-pane label↔blockId↔HWND map (`agentmux-cef/src/reducer/panes.rs`). Tear-off moves the subtree via layout commands + reassigns the block's tab.
+- **Multi-window / tear-off:** layout is **per-tab** (shared across windows showing the tab); each window keeps its own browser-pane label↔blockId↔HWND map (`crates/cef/src/reducer/panes.rs`). Tear-off moves the subtree via layout commands + reassigns the block's tab.
 
 ---
 
 ## 5. File map
 | Area | Files |
 |---|---|
-| Backend tree + ops | `agentmux-common/src/layout_types.rs`, `agentmux-srv/src/backend/layout/mod.rs` |
-| Backend reducer + persistence | `agentmux-srv/src/reducer/layout.rs`, `reducer.rs`, `state.rs`, `backend/obj.rs` |
-| Host browser-pane lifecycle | `agentmux-cef/src/reducer/panes.rs`, `browser_panes.rs`, `browser_pane/*` |
+| Backend tree + ops | `crates/common/src/layout_types.rs`, `crates/srv/src/backend/layout/mod.rs` |
+| Backend reducer + persistence | `crates/srv/src/reducer/layout.rs`, `reducer.rs`, `state.rs`, `backend/obj.rs` |
+| Host browser-pane lifecycle | `crates/cef/src/reducer/panes.rs`, `browser_panes.rs`, `browser_pane/*` |
 | Frontend model/geometry | `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeModels,layoutModelHooks,layoutResize,layoutPersistence,utils}.ts` |
 | Frontend render + styles | `frontend/layout/lib/TileLayout.win32.tsx` (+ darwin/linux), `tilelayout.scss`; `frontend/app/block/block.tsx`, `block.scss` |
 | Reveal gate | `frontend/app/store/tab-reveal.ts` |

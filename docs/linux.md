@@ -40,7 +40,7 @@ See [`docs/cef-build/build-patched-libcef.md`](cef-build/build-patched-libcef.md
 
 ## Sandbox blocked by system policy
 
-AgentMux uses Chromium/CEF's kernel **user-namespace sandbox** on Linux (`--disable-setuid-sandbox` — see `agentmux-cef/src/app/mod.rs`), not the classic root-owned SUID `chrome-sandbox` binary. This is the right choice for an AppImage, which has no privileged install step to set up a SUID binary — but it depends on the kernel allowing unprivileged processes to create user namespaces at all.
+AgentMux uses Chromium/CEF's kernel **user-namespace sandbox** on Linux (`--disable-setuid-sandbox` — see `crates/cef/src/app/mod.rs`), not the classic root-owned SUID `chrome-sandbox` binary. This is the right choice for an AppImage, which has no privileged install step to set up a SUID binary — but it depends on the kernel allowing unprivileged processes to create user namespaces at all.
 
 **Ubuntu backported an AppArmor restriction on exactly that** (originally landed in 23.10, later security-patched into 22.04/20.04 LTS too, ~early 2024) that blocks this for any Chromium/Electron/CEF-based application system-wide — this is not an AgentMux bug, and it hit Chrome itself, VS Code, Discord, Slack, and others the same way around the same time. A system that picks up this policy via `unattended-upgrades` will see AgentMux (and everything else using this sandboxing approach) stop working with no code change on either side.
 
@@ -58,7 +58,7 @@ If neither `zenity` nor `kdialog` is available (headless / minimal window manage
 # One-time, narrowly-scoped fix (what "Fix it now" does):
 sudo bash install-userns-apparmor-fix.sh <path-to-a-file-containing-the-profile>
 # (the AppImage's Rust code generates the exact profile text — see
-# agentmux-cef/src/linux_sandbox.rs's build_apparmor_profile())
+# crates/cef/src/linux_sandbox.rs's build_apparmor_profile())
 
 # Or, run unsandboxed for one launch:
 AGENTMUX_UNSAFE_NOSANDBOX=1 ./AgentMux_*.AppImage

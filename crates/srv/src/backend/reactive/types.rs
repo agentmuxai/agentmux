@@ -419,7 +419,7 @@ pub struct InjectionResponse {
 /// break every consumer that treats these as JS millisecond timestamps. See
 /// the same annotation on `BrowserBookmark::created_at` (PR #3293).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentRegistration {
     pub agent_id: String,
     pub block_id: String,
@@ -746,7 +746,8 @@ mod app_api_manifest_contract_tests {
     fn load_manifest() -> serde_json::Value {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .expect("agentmux-srv's parent dir is the repo root")
+            .and_then(Path::parent)
+            .expect("crates/<name> is two levels below the repo root")
             .join("docs/specs/app-api-manifest.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));

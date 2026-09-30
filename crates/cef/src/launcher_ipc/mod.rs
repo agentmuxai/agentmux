@@ -358,7 +358,7 @@ pub async fn connect_to_launcher(
 /// underlying resource is a Unix-domain socket. Lets the 17 host-side
 /// `report_*` call sites in this file stay platform-agnostic. The
 /// launcher's `spawn_host_unix` exports the socket path under this
-/// name (see `agentmux-launcher/src/main.rs::run_unix`).
+/// name (see `crates/launcher/src/main.rs::run_unix`).
 #[cfg(unix)]
 pub async fn connect_to_launcher(
     state: std::sync::Arc<crate::state::AppState>,

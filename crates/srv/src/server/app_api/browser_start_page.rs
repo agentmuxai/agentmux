@@ -3,7 +3,7 @@
 
 //! `browser_start_page.set` — the browser pane's configured start page.
 //! Write-only: the read side is `GetFullConfig`'s `browserstartpage` field
-//! (`agentmux-srv/src/backend/wconfig/types.rs`), not a matching `.get`
+//! (`crates/srv/src/backend/wconfig/types.rs`), not a matching `.get`
 //! here — see `docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md` §3.1
 //! for why. Deliberately its own file rather than folded into
 //! `bookmarks.rs`: unlike bookmarks, this handler needs `AppState`'s

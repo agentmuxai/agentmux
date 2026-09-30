@@ -2380,7 +2380,7 @@ pub(super) fn is_self_registration(entry_local_url: &str, this_instances_local_u
 /// deliberately excludes `local_url`/`auth_key`, which are internal
 /// forwarding plumbing, not UI-relevant.
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct RemoteRegistrationEntry {
     channel: String,
     // u32 is < 2^53 so ts-rs maps it to `number` already; only 64-bit
@@ -2394,7 +2394,7 @@ pub(super) struct RemoteRegistrationEntry {
 /// agent_id, if any (see #2695's `Handler::inject_message_inner` check) —
 /// narrowed from `AuditLogEntry` to what the Stash badge needs.
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct MismatchAuditSummary {
     #[ts(type = "number")]
     timestamp: u64,
@@ -2403,7 +2403,7 @@ pub(super) struct MismatchAuditSummary {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct ReactiveRegistrationsResult {
     /// This instance's own registration for the agent, if any — same data
     /// `GET /agentmux/reactive/agent` exposes, reused here so the frontend
@@ -2418,7 +2418,7 @@ pub(super) struct ReactiveRegistrationsResult {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct ReactiveRegistrationsParams {
     pub agent_id: String,
 }

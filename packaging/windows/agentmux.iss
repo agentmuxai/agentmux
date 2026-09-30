@@ -25,7 +25,7 @@
 #define AppPublisher "AgentMux"
 #define AppURL "https://github.com/agentmuxai/agentmux"
 ; Repo-relative icon (this .iss lives in packaging/windows/).
-#define IconFile "..\..\agentmux-cef\resources\win\agentmux.ico"
+#define IconFile "..\..\crates\cef\resources\win\agentmux.ico"
 
 [Setup]
 ; Stable AppId — keep constant across versions so upgrades replace in place.

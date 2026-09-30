@@ -774,7 +774,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // top-level renderer via the JS bridge. Renderer-side handler
     // (`window.__agentmux_srv_event`) lands in E.2c.5b. Non-fatal
     // if absent: `AGENTMUX_SRV_PIPE_PATH` is only set on the srv
-    // child by the launcher (`agentmux-launcher/src/srv_spawner.rs`),
+    // child by the launcher (`crates/launcher/src/srv_spawner.rs`),
     // not on the host spawn — so today the host never has the env
     // var and `connect_to_srv` short-circuits to None at
     // `srv_ipc.rs:62-68`. Path-based dev guard is the right gate

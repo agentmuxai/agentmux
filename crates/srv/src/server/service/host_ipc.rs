@@ -10,7 +10,7 @@
 //!
 //! Backs the `/api/v1/ui/{screenshot,click,query}` proxy routes (agent-
 //! facing UI automation). See `AppState::host_ipc`,
-//! `agentmux-cef/src/client/helpers.rs::register_ipc_with_backend`, and
+//! `crates/cef/src/client/helpers.rs::register_ipc_with_backend`, and
 //! `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`.
 //!
 //! `Register` requires a third argument, a shared secret

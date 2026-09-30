@@ -5,7 +5,7 @@
 // processing, cancel a batch, look up processed attachments, copy one into
 // a container pane's working folder. See
 // docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6 and
-// agentmux-srv/src/server/app_api/attachments.rs. Progress arrives as
+// crates/srv/src/server/app_api/attachments.rs. Progress arrives as
 // `attachment:*` events scoped to the pane's block.
 
 import { RpcClient } from "../rpc-client";

@@ -57,7 +57,7 @@ struct StarterMcpServer {
 
 /// The embedded starter-mcp-servers manifest JSON. Content is authored
 /// externally and must not be edited here — see
-/// `agentmux-srv/src/config/starter-mcp-servers.json`.
+/// `crates/srv/src/config/starter-mcp-servers.json`.
 const STARTER_MCP_SERVERS_JSON: &str = include_str!("../config/starter-mcp-servers.json");
 
 /// Report returned after a seed attempt.

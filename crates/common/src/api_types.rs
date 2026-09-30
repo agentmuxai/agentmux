@@ -489,7 +489,7 @@ pub struct WorkspaceNameRequest {
 // agent's actual current block_id server-side (`ReactiveHandler::get_agent`)
 // — the block_id a UI-automation call actually operates on is never taken
 // from the client at all, so there is nothing left to spoof. See
-// `agentmux-srv/src/server/ui_handlers.rs::verified_block_id` and
+// `crates/srv/src/server/ui_handlers.rs::verified_block_id` and
 // docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md.
 
 /// Identity proof shared by every `/api/v1/ui/*` request. `sig` is
@@ -549,7 +549,7 @@ pub struct UiQueryRequest {
 // `Reload`/`Eval` only succeed when the caller's own pane resolves to a
 // DEDICATED browser-pane CDP target (not a DOM node inside a page shared
 // with other panes / the app's own chrome) — enforced host-side by
-// `agentmux-cef/src/browser_api/routes.rs::reject_if_shared_target`.
+// `crates/cef/src/browser_api/routes.rs::reject_if_shared_target`.
 // See docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md.
 
 /// `POST /api/v1/ui/browser/navigate`
@@ -691,7 +691,7 @@ mod app_api_manifest_contract_tests {
     //! Rust half of the DRY contract check for the `shell.*` routes,
     //! described in docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md
     //! §2.8 — same mechanism and rationale as
-    //! `agentmux-srv/src/backend/rpc_types/block.rs`'s
+    //! `crates/srv/src/backend/rpc_types/block.rs`'s
     //! `app_api_manifest_contract_tests` module for `pane.open`. A Node-side
     //! test (`muxsh.contract.test.mjs`) makes the matching assertion against
     //! the same manifest.
@@ -702,7 +702,8 @@ mod app_api_manifest_contract_tests {
     fn repo_root() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .expect("agentmux-common's parent dir is the repo root")
+            .and_then(Path::parent)
+            .expect("crates/<name> is two levels below the repo root")
             .to_path_buf()
     }
 

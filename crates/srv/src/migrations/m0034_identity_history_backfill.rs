@@ -157,7 +157,7 @@ impl Migration for M0034IdentityHistoryBackfill {
 /// Every `identities/` directory up to 2 levels under `<home>/channels/`
 /// and `<home>/dev/`. Deliberately mirrors
 /// `ClaudeHistoryAdapter::scan_isolated_identities_under`'s bounded
-/// traversal (`agentmux-srv/src/backend/history/claude_adapter.rs`) rather
+/// traversal (`crates/srv/src/backend/history/claude_adapter.rs`) rather
 /// than assuming a fixed one-level shape: `DataPaths::resolve` places a
 /// dev instance at `dev/<branch>/` when there is no clone id, but at
 /// `dev/<branch>/<clone_id>/` whenever one is derived — which

@@ -1025,7 +1025,7 @@ tasks:
                   cp -r dist/cef/* "$DEV_DIR/runtime/"
                   # srv binary — launcher's resolve_srv_binary checks
                   # runtime/agentmux-srv-{ver}-windows.x64.exe first
-                  # (agentmux-launcher/src/srv_spawner.rs:295-307).
+                  # (crates/launcher/src/srv_spawner.rs:295-307).
                   cp dist/bin/agentmux-srv-*-windows.x64.exe "$DEV_DIR/runtime/" 2>/dev/null || true
                   # Streaming bash wrapper — agents resolve `agentmux-bashwrap`
                   # via the bundled tools/bin (agentmux-srv prepends it to the
@@ -1112,7 +1112,7 @@ tasks:
                 # single most common dev workflow (reagent P1 on PR #3323).
                 # This override only affects the WM app_id — dev mode's own
                 # data-dir isolation intentionally ignores AGENTMUX_CHANNEL
-                # (see agentmux-common/src/data_paths.rs), so this has no
+                # (see crates/common/src/data_paths.rs), so this has no
                 # effect on which data dir the dev instance actually uses.
                 if [ "{{OS}}" = "linux" ]; then
                   DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"

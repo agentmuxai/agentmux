@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Armory Bundle Format (ABF) import — Phase 3
-// (agentmux-srv/src/server/app_api/bundle.rs). Window-scoped, no agent_id
+// (crates/srv/src/server/app_api/bundle.rs). Window-scoped, no agent_id
 // gate, same as the rest of `bundle.*`. See
 // docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
@@ -274,7 +274,7 @@ export const BundleImportApi = {
         return client.rpcCall("bundle.import.commit", data, opts);
     },
 
-    // Structural-only check (agentmux-srv/src/backend/bundle_validate.rs) —
+    // Structural-only check (crates/srv/src/backend/bundle_validate.rs) —
     // read-only, no Store write. Takes `BundleValidateInput`, which is
     // `BundleUpsertInput` minus the `id` requirement, so it can validate an
     // unsaved draft (including a brand-new bundle with no id yet), not just

@@ -49,7 +49,7 @@ uuid = { version = "1", features = ["v4"] }
 # Phase B.2: typed Command / Event protocol over named pipes. The
 # wire types live in agentmux-common::ipc so launcher (server) and
 # host (client) share one definition; serde_json is the format.
-agentmux-common = { path = "../agentmux-common" }
+agentmux-common = { path = "../common" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # LSD-1: `#[derive(thiserror::Error)]` on the saga log's `LogError`

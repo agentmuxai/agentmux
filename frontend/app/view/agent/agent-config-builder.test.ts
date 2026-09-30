@@ -237,7 +237,7 @@ describe("buildConfigFiles — skill materialization", () => {
 describe("buildSettingsWithHooks — PreCompact auto-injection", () => {
     // SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2 / Codex P1
     // on PR #2378: this TS mirror originally lagged the Rust builder
-    // (agentmux-srv/src/backend/agent_config.rs) by one hook type, so
+    // (crates/srv/src/backend/agent_config.rs) by one hook type, so
     // agents launched through the standard picker (which calls
     // buildConfigFiles -> buildSettingsWithHooks, not the Rust path)
     // never got PreCompact installed and the live "compaction started"
@@ -325,9 +325,9 @@ describe("buildSettingsWithHooks — SessionStart memory delivery", () => {
 
     it("SESSION_START_HOOK_PARTS equals memory_delivery.rs's HOOK_PARTS", () => {
         const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-        const source = readFileSync(resolve(repoRoot, "agentmux-srv/src/backend/memory_delivery.rs"), "utf8");
+        const source = readFileSync(resolve(repoRoot, "crates/srv/src/backend/memory_delivery.rs"), "utf8");
         const match = /pub const HOOK_PARTS: usize = (\d+);/.exec(source);
-        if (!match) throw new Error("HOOK_PARTS not found in agentmux-srv/src/backend/memory_delivery.rs");
+        if (!match) throw new Error("HOOK_PARTS not found in crates/srv/src/backend/memory_delivery.rs");
         expect(SESSION_START_HOOK_PARTS).toBe(Number(match[1]));
     });
 });

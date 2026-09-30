@@ -42,7 +42,7 @@ describe("docName", () => {
 
 describe("isSourcePath", () => {
     it("accepts the languages that carry spec citations", () => {
-        expect(isSourcePath("agentmux-srv/src/backend/rpc/engine.rs")).toBe(true);
+        expect(isSourcePath("crates/srv/src/backend/rpc/engine.rs")).toBe(true);
         expect(isSourcePath("frontend/app/view/agent/agent-view.tsx")).toBe(true);
         expect(isSourcePath("scripts/check-doc-links.mjs")).toBe(true);
     });

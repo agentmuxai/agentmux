@@ -464,7 +464,7 @@ fn push_stack_member_at(
 /// layout leaf ever references a nonexistent block" an unconditional
 /// invariant of the write path itself, not a property individual callers
 /// have to remember to uphold — the same shape as WRR (Window Reality
-/// Reconciliation, `agentmux-cef/src/wrr/`) enforcing "no window/pool
+/// Reconciliation, `crates/cef/src/wrr/`) enforcing "no window/pool
 /// drift" at the point where reality is observed, rather than trusting
 /// every caller to keep the model in sync.
 ///

@@ -29,13 +29,13 @@
 //! holding that data dir" (`341faa981`'s data-loss incident) — is what
 //! [`quiesce_srv`] exists to guarantee: it returns only once the OS has
 //! genuinely reaped the process (`Child::wait()`'s own contract), replacing
-//! `agentmux-cef/src/commands/backend.rs`'s dev-mode-only 300ms sleep
+//! `crates/cef/src/commands/backend.rs`'s dev-mode-only 300ms sleep
 //! heuristic with a real wait for real exit.
 //!
 //! No snapshot step lives here on purpose: `agentmux-srv migrate`'s own
 //! `apply_pending` (shared with the in-process daemon path) already takes
 //! its own backup under the same cross-process migration lock before
-//! applying anything (`agentmux-srv/src/migrations/runner.rs`'s
+//! applying anything (`crates/srv/src/migrations/runner.rs`'s
 //! `backup_stores` call) — a launcher-side snapshot would be redundant with,
 //! not a replacement for, that one. The spec's §4.3 step 3 was written
 //! assuming the launcher would re-implement what `bootstrap.rs` does for
@@ -77,7 +77,7 @@ pub enum QuiesceOutcome {
 
 /// Stop `child` and return only once it has genuinely exited — never a
 /// fixed sleep. This is the fix for the exact gap
-/// `agentmux-cef/src/commands/backend.rs:223`'s `sleep(300ms)` heuristic
+/// `crates/cef/src/commands/backend.rs:223`'s `sleep(300ms)` heuristic
 /// left open: that comment already says "so the OS releases file locks
 /// before we open the DB," which a sleep can only approximate and a real
 /// `.wait()` guarantees outright.

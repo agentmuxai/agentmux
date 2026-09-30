@@ -496,7 +496,7 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
     // 2026-07-16 fix (reagent P1 on PR #2186, docs/retro/retro-last-window-close-quit-race-2026-07-16.md):
     // report_pool_drain_decision is the ONLY source of Event::PoolDrained /
     // Event::PoolNotLast — the launcher's Phase F.6 window_cleanup saga
-    // (agentmux-launcher/src/saga/window_cleanup.rs) needs one of those to
+    // (crates/launcher/src/saga/window_cleanup.rs) needs one of those to
     // advance past its DrainingPool step. `on_before_close` reports this
     // (lifecycle.rs, same request_drain.is_some() condition), but this
     // function is the ACTUAL executor for every parking close on Windows —

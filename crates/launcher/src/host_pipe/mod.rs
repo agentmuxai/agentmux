@@ -419,7 +419,7 @@ impl HostPipe {
     /// Send an event without a session check — only safe in tests
     /// or single-session contexts.
     /// Writes RAW `Event` JSON (no `HostFrame` envelope) to match the
-    /// host's existing parser (`agentmux-cef/src/launcher_ipc.rs`),
+    /// host's existing parser (`crates/cef/src/launcher_ipc.rs`),
     /// which expects raw Event lines.
     #[cfg(test)]
     pub async fn send_event(&self, event: &Event) -> Result<(), HostPipeError> {

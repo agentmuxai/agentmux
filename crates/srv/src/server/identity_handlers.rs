@@ -57,7 +57,7 @@ pub const COMMAND_AUTH_SUBMIT_API_KEY: &str = "auth.submitapikey";
 pub const COMMAND_ENSURE_ACCOUNT_DIR: &str = "identity.ensureaccountdir";
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct StartProviderAuthReq {
     pub provider_id: String,
@@ -108,14 +108,14 @@ pub struct StartProviderAuthReq {
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct PollProviderAuthReq {
     pub session_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitAuthCallbackReq {
     pub session_id: String,
@@ -125,14 +125,14 @@ pub struct SubmitAuthCallbackReq {
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct CancelProviderAuthReq {
     pub session_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitProviderApiKeyReq {
     pub provider_id: String,
@@ -149,7 +149,7 @@ pub struct SubmitProviderApiKeyReq {
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct AckResp {
     pub success: bool,
@@ -159,7 +159,7 @@ pub struct AckResp {
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct EnsureAccountDirReq {
     pub provider_id: String,
@@ -170,7 +170,7 @@ pub struct EnsureAccountDirReq {
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct EnsureAccountDirResp {
     pub account_id: String,

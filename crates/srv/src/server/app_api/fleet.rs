@@ -45,7 +45,7 @@ use super::agent_io::stop_one_agent_block;
 /// own budget instead of racing it. Not imported directly — `agentmux-mcp`
 /// is a separate process/crate with no dependency on `agentmux-srv`
 /// internals, so its own client-side broadcast loop (`FleetBroadcast`,
-/// `agentmux-mcp/src/main.rs`) mirrors this constant rather than sharing it;
+/// `crates/mcp/src/main.rs`) mirrors this constant rather than sharing it;
 /// keep both in sync if `RATE_LIMIT_MAX` ever changes.
 const BROADCAST_CHUNK_SIZE: usize = 10;
 const BROADCAST_CHUNK_PAUSE: Duration = Duration::from_millis(1100);

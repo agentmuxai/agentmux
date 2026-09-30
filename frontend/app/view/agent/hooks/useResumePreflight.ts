@@ -15,7 +15,7 @@
  *
  * The backend can answer this without spawning anything (a `--resume` fails
  * exactly when the session file isn't under the CLI's config dir), so this is
- * one read-only RPC on mount. See `agentmux-srv/src/backend/resume_preflight.rs`.
+ * one read-only RPC on mount. See `crates/srv/src/backend/resume_preflight.rs`.
  *
  * Deliberately fire-and-forget: no retry, no polling, no refetch on
  * `agent:sessionid` changes. Once the pane has spawned, the retrospective

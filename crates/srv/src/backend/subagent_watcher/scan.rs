@@ -126,7 +126,7 @@ impl SubagentWatcher {
                 // the mechanism a NAME/grouping-dedup bug would leave a trail in).
                 //
                 // reagent (PR #2143 round 1): info!, not debug! — the default
-                // production EnvFilter (agentmux-srv/src/main.rs, "agentmuxsrv=
+                // production EnvFilter (crates/srv/src/main.rs, "agentmuxsrv=
                 // info,info") drops debug-level lines unless RUST_LOG=debug is
                 // already set, which would make this diagnostic invisible in a
                 // normally-running srv, defeating the point of adding it.

@@ -53,7 +53,7 @@ struct StarterSkill {
 
 /// The embedded starter-skills manifest JSON. Content is authored
 /// externally and must not be edited here — see
-/// `agentmux-srv/src/config/starter-skills.json`.
+/// `crates/srv/src/config/starter-skills.json`.
 const STARTER_SKILLS_JSON: &str = include_str!("../config/starter-skills.json");
 
 /// Report returned after a seed attempt.

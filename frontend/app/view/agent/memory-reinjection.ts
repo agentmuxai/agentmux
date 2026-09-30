@@ -96,7 +96,7 @@ const REASON_CLAUSE: Record<ReinjectionReason, string> = {
  * `reason` only changes the second sentence (`REASON_CLAUSE`) — the leading
  * `REINJECTION_SIGNATURE` sentence is identical regardless, since it is what
  * both `isMemoryReinjectionMessage` (TypeScript) and `is_hidden_reinjection_
- * text` (Rust, `agentmux-srv/src/server/app_api/session.rs`) key detection
+ * text` (Rust, `crates/srv/src/server/app_api/session.rs`) key detection
  * on; a per-reason signature would mean two strings to keep in sync on both
  * sides instead of one.
  */

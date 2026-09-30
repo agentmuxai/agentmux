@@ -433,7 +433,7 @@ fn http_client() -> &'static reqwest::Client {
 /// never be treated as such here: it's injected into every agent's own
 /// environment, so gating on it alone let any agent `curl` the plaintext
 /// password straight out of `credential.Fill` (reagent P0 on PR #2824).
-/// See `agentmux-srv/src/server/service/credential.rs`'s module doc.
+/// See `crates/srv/src/server/service/credential.rs`'s module doc.
 ///
 /// Sent as a positional arg rather than a header to match
 /// `host_ipc.Register`'s existing shape (`args[2]` there), keeping both

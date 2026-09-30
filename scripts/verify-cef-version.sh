@@ -23,14 +23,14 @@ if [ ! -f "$dll" ]; then
 fi
 
 # Expected MAJOR = resolved version of agentmux-cef's `cef` dependency
-# (agentmux-cef/Cargo.toml), via `cargo metadata --filter-platform`.
+# (crates/cef/Cargo.toml), via `cargo metadata --filter-platform`.
 #
 # NOT "grep the first 'name = \"cef\"' entry in Cargo.lock" — filter-platform
 # resolves the dependency graph exactly as Windows sees it, which is more
 # robust than a lockfile-ordering assumption even now that there's only one
 # `cef` entry to find (SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md
 # Phase E collapsed the temporary per-platform `cef_win`/`cef_unix` split —
-# see agentmux-cef/Cargo.toml — back to a single dependency named plain
+# see crates/cef/Cargo.toml — back to a single dependency named plain
 # `cef` for every platform; this script's lookup key follows that).
 metadata="$(cargo metadata --filter-platform x86_64-pc-windows-msvc --format-version 1 2>/dev/null)"
 cef_pkg_id="$(printf '%s' "$metadata" | jq -r '

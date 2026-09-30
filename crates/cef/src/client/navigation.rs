@@ -232,7 +232,7 @@ fn signal_gated_reveal_complete(elapsed_ms: u64, reason: &'static str, status: &
     // the signal used to fire unconditionally in `on_load_end` regardless of
     // label resolution; moving it here alone silently dropped that fallback
     // case, leaving the launcher's splash wait (no overall timeout,
-    // `agentmux-launcher/src/splash.rs::run_splash`) to hang forever.
+    // `crates/launcher/src/splash.rs::run_splash`) to hang forever.
     #[cfg(target_os = "windows")]
     signal_windows_splash_dismiss();
 }
@@ -770,7 +770,7 @@ impl AgentMuxHandler {
         // already used, reached only via the non-pool-window path.
 
         // macOS analogue of the Win32 splash signal: the launcher owns the native
-        // splash (see agentmux-launcher/src/splash_mac.rs) and passes a ready-file
+        // splash (see crates/launcher/src/splash_mac.rs) and passes a ready-file
         // path via AGENTMUX_SPLASH_READY_FILE. Creating the file is the
         // cross-process "first frame painted" signal the launcher polls for before
         // tearing the splash down. Fire-and-forget; absent var => no launcher

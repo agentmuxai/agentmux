@@ -9,7 +9,7 @@ import { colord } from "colord";
 // available at all (e.g. a non-browser test environment) — see
 // `tryDeriveTermThemeFromCss` below, which is what actually fires in the
 // steady state today (no `termthemes` table configured — see
-// agentmux-srv/src/backend/wconfig/mod.rs). Without either fallback, every
+// crates/srv/src/backend/wconfig/mod.rs). Without either fallback, every
 // xterm in the app would render with xterm.js's library defaults, which
 // include dim greys for the ANSI palette and a near-white foreground that
 // looks washed out on dark panel backgrounds.

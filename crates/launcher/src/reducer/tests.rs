@@ -1486,7 +1486,7 @@ fn wrr_off_monitor_after_user_foregrounded_does_not_correct() {
 #[test]
 fn tear_off_promote_emit_order_initializes_mirror_with_foregrounded_true() {
     // Drift-storm regression (v0.33.655 smoke). PRODUCTION emit order
-    // (per agentmux-cef/src/commands/window_pool.rs):
+    // (per crates/cef/src/commands/window_pool.rs):
     //
     //   1. ReportPoolWindowAdded   → pool spawn (some time earlier)
     //   2. ReportPoolWindowRemoved → about to promote (no mirror yet)

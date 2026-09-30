@@ -66,7 +66,7 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
         }),
         // ── OAuth class ───────────────────────────────────────────
         // Env-var names come from the CLI provider registry
-        // (`agentmux-srv/src/backend/providers.rs` —
+        // (`crates/srv/src/backend/providers.rs` —
         // `ProviderConfig::auth_config_dir_env_var`) so the resolver
         // can never drift from the launcher spawn path: there is one
         // source of truth per CLI for which env var redirects its

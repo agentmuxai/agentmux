@@ -322,7 +322,7 @@ fn run(
 
 /// Resource ordinal of the brand icon inside this exe.
 ///
-/// `agentmux-launcher/build.rs` hands `agentmux-cef/resources/win/agentmux.ico`
+/// `crates/launcher/build.rs` hands `crates/cef/resources/win/agentmux.ico`
 /// to winres, which emits `1 ICON "..."` — ordinal 1. Kept as a named constant
 /// so the coupling to build.rs is visible from here;
 /// `the_icon_asset_build_rs_embeds_actually_exists`
@@ -398,7 +398,7 @@ fn brand_icon() -> Option<tray_icon::Icon> {
 /// still carry the state).
 fn attention_icon() -> Option<tray_icon::Icon> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON};
-    const PNG: &[u8] = include_bytes!("../../../assets/favicon-150x150.png");
+    const PNG: &[u8] = include_bytes!("../../../../assets/favicon-150x150.png");
     let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.clamp(16, 64) as u32;
     let rgba = badge_rgba(PNG, size)?;
     tray_icon::Icon::from_rgba(rgba, size, size).ok()
@@ -500,7 +500,7 @@ mod brand_icon_tests {
     #[test]
     fn the_icon_asset_build_rs_embeds_actually_exists() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../agentmux-cef/resources/win/agentmux.ico");
+            .join("../cef/resources/win/agentmux.ico");
         assert!(
             path.exists(),
             "build.rs embeds {} only if it exists; it does not, so the tray \
@@ -514,7 +514,7 @@ mod brand_icon_tests {
 mod attention_badge_tests {
     #[test]
     fn badge_decodes_scales_and_paints_the_dot() {
-        let png = include_bytes!("../../../assets/favicon-150x150.png");
+        let png = include_bytes!("../../../../assets/favicon-150x150.png");
         for size in [16u32, 20, 24, 32] {
             let px = super::badge_rgba(png, size).expect("decodes");
             assert_eq!(px.len(), (size * size * 4) as usize);

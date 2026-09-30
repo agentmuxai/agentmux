@@ -9,7 +9,7 @@
 // (docs/specs/SPEC_START_WITH_OS_2026_09_25.md §3.9); this only reports
 // whether an entry is registered, so Settings can show when that failed.
 //
-// The launcher owns auto-start registration (`agentmux-launcher/src/autostart`:
+// The launcher owns auto-start registration (`crates/launcher/src/autostart`:
 // Scheduled Task / LaunchAgent / XDG autostart). Rather than duplicate that
 // platform code in the host, we invoke the launcher binary itself with its
 // existing, already-tested verbs. The launcher handles them before any

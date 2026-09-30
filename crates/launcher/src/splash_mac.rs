@@ -16,12 +16,12 @@
 //! shows it in its own process (no AppKit/CEF runloop conflict); the host owns
 //! its own runloop in the child process.
 //!
-//! Raw Objective-C runtime FFI (same approach as `agentmux-cef/src/main.rs`) so
+//! Raw Objective-C runtime FFI (same approach as `crates/cef/src/main.rs`) so
 //! the launcher pulls in no heavy new deps — `NSImage` decodes the bundled PNG.
 //!
 //! Dismiss protocol: `show()` sets `AGENTMUX_SPLASH_READY_FILE`; the host
 //! inherits it and `write`s the file the moment CEF paints its first frame (see
-//! `agentmux-cef/src/client/mod.rs`). `run_until_dismissed()` pumps a
+//! `crates/cef/src/client/mod.rs`). `run_until_dismissed()` pumps a
 //! CoreFoundation runloop on the main thread, animating the pulse and polling
 //! for that file (with a safety timeout), then fades out and orders the window
 //! away — and keeps the runloop turning afterward so the removal actually

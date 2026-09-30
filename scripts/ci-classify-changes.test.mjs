@@ -82,7 +82,7 @@ describe("isDocsOnlyPath — R3, CI configuration is never documentation", () =>
 
 describe("isDocsOnlyPath — source files are never documentation", () => {
     it("rejects code, config and lockfiles", () => {
-        expect(isDocsOnlyPath("agentmux-srv/src/backend/history/mod.rs")).toBe(false);
+        expect(isDocsOnlyPath("crates/srv/src/backend/history/mod.rs")).toBe(false);
         expect(isDocsOnlyPath("frontend/src/App.tsx")).toBe(false);
         expect(isDocsOnlyPath("Cargo.toml")).toBe(false);
         expect(isDocsOnlyPath("Cargo.lock")).toBe(false);
@@ -91,7 +91,7 @@ describe("isDocsOnlyPath — source files are never documentation", () => {
     });
 
     it("does not treat `.md` appearing mid-path as a markdown suffix", () => {
-        expect(isDocsOnlyPath("agentmux-srv/src/md.rs")).toBe(false);
+        expect(isDocsOnlyPath("crates/srv/src/md.rs")).toBe(false);
         expect(isDocsOnlyPath("frontend/src/markdown/render.ts")).toBe(false);
     });
 
@@ -99,7 +99,7 @@ describe("isDocsOnlyPath — source files are never documentation", () => {
         // Checked 2026-09-21: no `include_str!("*.md")` in any crate and no
         // `.md` import in the frontend. If that ever changes, this expectation
         // is the tripwire — and the residual risk is recorded in the spec.
-        expect(isDocsOnlyPath("agentmux-srv/README.md")).toBe(true);
+        expect(isDocsOnlyPath("crates/srv/README.md")).toBe(true);
     });
 });
 
@@ -132,7 +132,7 @@ describe("classifyChanges — R1, ALL files must be docs, never ANY", () => {
     it("runs everything when a single source file rides along", () => {
         // The case an "ANY file is a doc" filter gets wrong, and the whole
         // reason this is a script rather than a YAML expression.
-        const r = classifyChanges(["docs/specs/A.md", "agentmux-srv/src/lib.rs"]);
+        const r = classifyChanges(["docs/specs/A.md", "crates/srv/src/lib.rs"]);
         expect(r).toMatchObject({ rust: true, frontend: true, docs_only: false });
     });
 
@@ -189,7 +189,7 @@ describe("classifyChanges — the real shapes this repo produces", () => {
 
     it("a Rust fix with a doc update runs the build", () => {
         const r = classifyChanges([
-            "agentmux-srv/src/backend/history/mod.rs",
+            "crates/srv/src/backend/history/mod.rs",
             "docs/specs/SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md",
         ]);
         expect(r).toMatchObject({ rust: true, frontend: true, docs_only: false });
@@ -240,7 +240,7 @@ describe("classifyChanges — docs_index, the cross-platform specs-index job", (
 
     it("does not run for spec-only or unrelated changes (the Linux docs job still asserts specs)", () => {
         expect(classifyChanges(["docs/specs/SPEC_X_2026_09_23.md", "docs/specs/INDEX.md"]).docs_index).toBe(false);
-        expect(classifyChanges(["agentmux-srv/src/lib.rs", "frontend/app/App.tsx"]).docs_index).toBe(false);
+        expect(classifyChanges(["crates/srv/src/lib.rs", "frontend/app/App.tsx"]).docs_index).toBe(false);
         expect(classifyChanges(["scripts/check-doc-status.sh"]).docs_index).toBe(false);
     });
 

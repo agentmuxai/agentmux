@@ -110,7 +110,7 @@ echo "────────────────────────�
 # startup (it can check pipe liveness); `rm -rf` here risks corrupting a live
 # instance. Until then, prune ~/.agentmux/channels/local-* manually.
 
-# Export BEFORE cargo builds — agentmux-common/build.rs reads this via
+# Export BEFORE cargo builds — crates/common/build.rs reads this via
 # option_env! and bakes it in; it declares rerun-if-env-changed so a changed
 # channel forces a recompile rather than serving a stale cache.
 export AGENTMUX_BUILD_CHANNEL_DEFAULT="$CHANNEL"

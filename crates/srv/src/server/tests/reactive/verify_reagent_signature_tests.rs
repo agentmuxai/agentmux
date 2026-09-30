@@ -6,7 +6,7 @@
 
 use super::*;
 
-// Reuses the exact fixture from agentmux-common/src/jekt_sign.rs's own
+// Reuses the exact fixture from crates/common/src/jekt_sign.rs's own
 // `a_correctly_signed_reagent_message_verifies_under_the_production_key`
 // test: a signature produced offline under the production `reagent-v1`
 // key, over signed_material("msg-1", "github-consumer", "agentx", 1000,

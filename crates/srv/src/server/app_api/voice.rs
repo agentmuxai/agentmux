@@ -5,7 +5,7 @@
 //! binary or GGML model file paths configured in Settings -> Recording.
 //!
 //! Exposes the exact same `Path::new(&p).exists()` check
-//! `agentmux-srv/src/server/voice.rs` already performs inline at actual
+//! `crates/srv/src/server/voice.rs` already performs inline at actual
 //! transcription time (`voice.rs`'s `transcribe_local_whisper` /
 //! `ensure_local_model`) -- no new validation logic, just surfacing it
 //! proactively so the Settings UI can show live status instead of only

@@ -38,7 +38,7 @@ pub const COMMAND_INSTALL_CHECK: &str = "install.check";
 pub const COMMAND_RESOLVE_PREREQS: &str = "resolve.prereqs";
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct InstallStartReq {
     pub provider_id: String,
@@ -54,14 +54,14 @@ pub struct InstallStartReq {
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCancelReq {
     pub session_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCheckReq {
     pub provider_id: String,
@@ -77,14 +77,14 @@ pub struct InstallCheckReq {
 
 /// Request for `resolve.prereqs`. Was a function-local anonymous struct.
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ResolvePrereqsReq {
     pub tools: Vec<String>,
 }
 
 /// Result of `install.start`. Was an inline `json!({ "sessionId": .. })`.
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct InstallStartResult {
     pub session_id: String,
@@ -92,7 +92,7 @@ pub struct InstallStartResult {
 
 /// Result of `install.check`.
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCheckResult {
     pub installed: bool,
@@ -116,7 +116,7 @@ pub struct InstallCheckResult {
 /// The hand-written stub declared it `error?: string`, which said the key could
 /// be absent — it never is. Generating the type corrects that.
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCancelResult {
     pub success: bool,
@@ -125,7 +125,7 @@ pub struct InstallCancelResult {
 
 /// One tool's resolution in `resolve.prereqs`.
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct PrereqToolResolution {
     pub tool: String,
     pub found: bool,
@@ -135,7 +135,7 @@ pub struct PrereqToolResolution {
 
 /// Result of `resolve.prereqs`.
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ResolvePrereqsResult {
     pub results: Vec<PrereqToolResolution>,
 }

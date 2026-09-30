@@ -11,7 +11,7 @@ name = "agentmux-mcp"
 path = "src/main.rs"
 
 [dependencies]
-agentmux-common = { path = "../agentmux-common" }
+agentmux-common = { path = "../common" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
@@ -31,7 +31,7 @@ dirs = "5"
 sysinfo = "0.35"
 # Content hash recorded in the capture audit trail, so a leaked screenshot can
 # be traced back to the call that produced it (SPEC_AGENT_UNRESTRICTED_CAPTURE_
-# WITH_ACCOUNTABILITY_2026_08_30.md §6). Same pin as agentmux-common/srv.
+# WITH_ACCOUNTABILITY_2026_08_30.md §6). Same pin as crates/common/srv.
 sha2 = "0.10"
 
 [dev-dependencies]

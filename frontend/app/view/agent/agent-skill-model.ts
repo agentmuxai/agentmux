@@ -6,7 +6,7 @@
  * AgentStashModal). Same shape as AgentMcpModel — see its doc comment for
  * the is_global / bound_to_agent / no-check_s1 details, which apply
  * identically here. A reactive, read-only view of the standalone Skill
- * primitive (`skill.*` App API, agentmux-srv/src/server/app_api/skill.rs)
+ * primitive (`skill.*` App API, crates/srv/src/server/app_api/skill.rs)
  * plus a Bind/Unbind toggle — global skills are authored in the Armory,
  * not here.
  */
