@@ -8,6 +8,7 @@ import {
     formatBytes,
     INLINE_IMAGE_MAX_BYTES,
     inlineMediaKind,
+    isNetworkPath,
     MediaTooLargeError,
     resolveMediaPath,
 } from "@/app/element/local-media";
@@ -280,6 +281,7 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     // A drive path arrives as the file:/// URL rehype-local-image-src made of
     // it; name it the way the agent wrote it.
     const shown = /^file:/i.test(src) ? path : src;
+    if (isNetworkPath(path)) return <span class="am-muted">[image: {shown} — network paths aren't loaded]</span>;
     if (inlineMediaKind(path) === "image") return <LocalImage path={path} src={shown} alt={alt} />;
     return <span class="am-muted">[image: {shown} — unsupported type]</span>;
 };

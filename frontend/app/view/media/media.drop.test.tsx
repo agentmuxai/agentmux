@@ -74,3 +74,12 @@ describe("media pane: a pathless drop", () => {
         expect(ctx.setMeta).toHaveBeenCalledWith({ "media:path": "" });
     });
 });
+
+// Codex P2 on #4064: an inline SVG in an agent message opens here on click.
+describe("media pane: SVG", () => {
+    it("shows an .svg file as an image", async () => {
+        const { container } = mount({ "media:path": "C:/pics/diagram.svg" });
+        await settle();
+        expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:test/1");
+    });
+});

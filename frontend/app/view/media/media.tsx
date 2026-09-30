@@ -44,6 +44,7 @@ const MEDIA_MIME_TYPES = new Set([
     "image/jpeg",
     "image/gif",
     "image/webp",
+    "image/svg+xml",
     "video/webm",
     "video/mp4",
     "video/quicktime",

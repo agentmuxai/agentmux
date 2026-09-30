@@ -11,7 +11,11 @@ import { getApi } from "@/app/store/app-api";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 
-export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
+/**
+ * Includes SVG: both the Media pane and inline media only ever show it through
+ * `<img>` from a blob URL, where its scripts never run.
+ */
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
 export const VIDEO_EXTENSIONS = ["webm", "mp4", "mov"];
 // PCM WAV only — Chromium's <audio> element supports it natively and
 // unconditionally (open format, no codec-licensing gate), unlike MP4/MOV
@@ -22,12 +26,8 @@ export const VIDEO_EXTENSIONS = ["webm", "mp4", "mov"];
 // see the "Post-implementation corrections" note in SPEC_MEDIA_PANE_2026_07_26.md).
 export const AUDIO_EXTENSIONS = ["wav"];
 
-/**
- * Images an agent message may show inline: the Media pane's set plus SVG.
- * SVG is safe here because it's only ever shown through `<img>` from a blob
- * URL, where its scripts never run.
- */
-export const INLINE_IMAGE_EXTENSIONS = [...IMAGE_EXTENSIONS, "svg"];
+/** Images an agent message may show inline: the same set as the Media pane. */
+export const INLINE_IMAGE_EXTENSIONS = IMAGE_EXTENSIONS;
 
 /** Client-side caps for inline media (§4.2, §5); srv's own limit is 500 MB. */
 export const INLINE_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
@@ -81,10 +81,23 @@ export function resolveMediaPath(src: string, baseDir: string): string | null {
     if (/^file:\/\//i.test(path)) {
         path = path.slice("file://".length);
         if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
+        // `file://host/share/…` names a network host: keep it one, so
+        // isNetworkPath refuses it rather than it resolving as a local path.
+        else if (!path.startsWith("/")) path = "//" + path;
     }
     if (ABSOLUTE_PATH.test(path)) return path;
     if (!baseDir) return null;
     return baseDir.replace(/[\\/]+$/, "") + "/" + path.replace(/^\.[\\/]/, "");
+}
+
+/**
+ * A UNC path (`//host/…`, `\\host\…`). Windows opens one as an SMB connection
+ * to that host, which can hand it the user's credentials, so inline media never
+ * loads one (Codex P1 on #4064): a prompt-injected agent could otherwise
+ * trigger that with no click, the thing the remote-image chip exists to stop.
+ */
+export function isNetworkPath(path: string): boolean {
+    return /^[\\/]{2}/.test(path);
 }
 
 // Surfaces the browser's actual MediaError code/message instead of a
