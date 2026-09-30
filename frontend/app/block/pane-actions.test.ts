@@ -172,3 +172,55 @@ describe("split — the floating 'Always on top' tack is not inherited", () => {
         expect(blockDef.meta.view).toBe("term");
     });
 });
+
+// SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md: a view with `splitBlockDef`
+// splits into that block; nothing comes from the source pane.
+describe("split — a view's splitBlockDef replaces copying its meta", () => {
+    const PICKER_META = { view: "agentsplit", controller: "cmd", "cmd:args": [] as string[] };
+    registerPaneTab(
+        stubPaneTab("agentsplit", {
+            capabilities: { splitBlockDef: () => ({ meta: { ...PICKER_META, "cmd:args": [] } }) },
+        })
+    );
+    const historyTab = {
+        oid: "b7",
+        meta: {
+            view: "agentsplit",
+            agentId: "lark",
+            "agent:historyTabFor": "lark",
+            "agent:runtime": { model: "opus" },
+            "agent:sessionid": "sess-1",
+            "pane:floating_ontop": true,
+        },
+    } as unknown as Block;
+
+    it("Split Down creates exactly the declared block below the source", async () => {
+        const { createBlockSplitVertically } = await import("@/app/store/global");
+        buildPaneContextMenu(historyTab, opts())
+            .find((i) => i.label === "Split Down")!
+            .click!();
+        await Promise.resolve();
+        const [blockDef, targetId, position] = (createBlockSplitVertically as any).mock.calls.at(-1);
+        expect(targetId).toBe("b7");
+        expect(position).toBe("after");
+        expect(blockDef).toEqual({ meta: PICKER_META });
+    });
+
+    it("every direction splits into the declared block", async () => {
+        const g = (await import("@/app/store/global")) as any;
+        const expected: Record<string, [any, string]> = {
+            "Split Up": [g.createBlockSplitVertically, "before"],
+            "Split Down": [g.createBlockSplitVertically, "after"],
+            "Split Left": [g.createBlockSplitHorizontally, "before"],
+            "Split Right": [g.createBlockSplitHorizontally, "after"],
+        };
+        for (const [label, [fn, position]] of Object.entries(expected)) {
+            buildPaneContextMenu(historyTab, opts())
+                .find((i) => i.label === label)!
+                .click!();
+            await Promise.resolve();
+            const [blockDef, targetId, pos] = fn.mock.calls.at(-1);
+            expect([label, blockDef, targetId, pos]).toEqual([label, { meta: PICKER_META }, "b7", position]);
+        }
+    });
+});
