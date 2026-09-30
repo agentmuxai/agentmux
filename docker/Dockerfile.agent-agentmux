@@ -21,11 +21,11 @@
 # MCP toolset (no SendMessage, no jekt messaging, nothing) because these two
 # binaries never shipped in the image, even though `.mcp.json` is always
 # configured to launch `agentmux-mcp` with no explicit path (hardcoded in
-# agentmux-srv/src/backend/agent_config.rs's build_mcp_config — it must
+# crates/srv/src/backend/agent_config.rs's build_mcp_config — it must
 # resolve via PATH), and agentmux-bashwrap is the PreToolUse hook helper /
 # streaming bash wrapper agents resolve the same way. See the comment above
 # `AGENTMUX_LOCAL_URL` injection in
-# agentmux-srv/src/server/agent_handlers/input.rs.
+# crates/srv/src/server/agent_handlers/input.rs.
 #
 # Multi-stage: compile in a full `rust` image, then copy only the two
 # release binaries into the final slim runtime image below so the Rust
@@ -112,7 +112,7 @@ RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
 # /usr/local/bin is on PATH for every user by default (Docker's baked-in
 # default PATH, independent of the later USER switch below), matching the
 # bare "agentmux-mcp" command .mcp.json is hardcoded to launch (no explicit
-# path — see agentmux-srv/src/backend/agent_config.rs's build_mcp_config).
+# path — see crates/srv/src/backend/agent_config.rs's build_mcp_config).
 # --chmod=755 belt-and-suspenders on top of the executable bit cargo already
 # sets, since these are invoked by the (non-root) `agent` user.
 COPY --from=mcp-builder --chmod=755 /build/target/release/agentmux-mcp /usr/local/bin/agentmux-mcp

@@ -20,7 +20,7 @@
  *
  * reagentx P1 (PR #2776, round 2): a same-connection pane unmount+remount
  * (switching tabs/panes away and back) does NOT get a fresh replay —
- * `Broker::replay_to_route` (`agentmux-srv/src/backend/mps.rs`) dedupes
+ * `Broker::replay_to_route` (`crates/srv/src/backend/mps.rs`) dedupes
  * replay per `(route_id, event, scope)` and is only cleared on a true
  * route reconnect (`unsubscribe_all`), while `registerPane` resets
  * `AgentPaneState.reconnecting` to `null` on every mount regardless. Relying

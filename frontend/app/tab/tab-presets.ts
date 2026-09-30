@@ -41,7 +41,7 @@ export type PresetNode = LeafNode | SplitNode;
 //
 // agent on the left half; sysinfo (CPU) above swarm on the right half.
 // Matches the window-bootstrap default in
-// agentmux-srv/src/backend/wcore/mod.rs's `default_three_pane_tree` — a
+// crates/srv/src/backend/wcore/mod.rs's `default_three_pane_tree` — a
 // SEPARATE mechanism kept in sync by convention, not shared code, so a
 // change to either one has to be mirrored here by hand. Armory was dropped
 // from the starter set (still one click away in the widget bar),
@@ -128,7 +128,7 @@ export async function applyTabPreset(tabId: string, preset: PresetNode): Promise
 // server-side uicontext.active_tab_id routing — closes the TOCTOU
 // race where the user could click away to another tab between the
 // frontend check and the server-side handler. See backend
-// agentmux-srv/src/server/service.rs `("object", "CreateBlock")`.
+// crates/srv/src/server/service.rs `("object", "CreateBlock")`.
 
 // Recursive walk. Returns the blockId of the FIRST leaf in the subtree —
 // callers use that as the split target for subsequent sibling subtrees.

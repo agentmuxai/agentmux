@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** active — items 1, 2, 4 and 12 shipped (#4029, #4030, #4032, #4048); items 5, 10 and 11 partly shipped (#4052, #4050, #4057); `agent-view.tsx` split through step 9 (#4039–#4055); inline-test moves (#4054, #4056). What is left of each is in §0.1.
+**Status:** active — items 1, 2, 4 and 12 shipped (#4029, #4030, #4032, #4048); items 5, 10 and 11 partly shipped (#4052, #4050, #4057); `agent-view.tsx` split complete (#4039–#4079 and step 6b); the four largest Rust files split (#4061–#4070); inline-test moves (#4054, #4056). What is left of each is in §0.1.
 **Baseline:** `main` @ `4b5814f47` (v0.58.3). Every `path:line` below was read on that commit.
 **Related:**
 [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) (the first agent-view split plan; 7 of 12 steps landed, the file grew anyway),
@@ -40,13 +40,14 @@ Ordered by benefit ÷ risk. Size: S ≈ under a day, M ≈ 1–2 days, L ≈ mul
 |---|---|---|
 | 1. Claude launch args drifted | Shipped; the test now compares every provider's args, found from `providers.rs` | #4029 |
 | 2. `agentmux-mcp`'s root resolver | Shipped; its tests are isolated from the ambient environment | #4030 |
-| 3. Split `agent-view.tsx` | Steps 0–5, 6a and 9 shipped: 3,001 → 2,110 lines, 13 modules, a size ratchet, the A6/A9 guards widened. **Left:** 6b (bottom panels), 7 (live-feed roll-off), 8 (pane reveal), 10 (turn reconciliation) — the steps with cross-hook ordering and the densest review history | #4039, #4042, #4043, #4046, #4047, #4049, #4051, #4053, #4055 |
+| 3. Split `agent-view.tsx` | All steps (0–10) shipped: 3,001 → 1,508 lines, 16 modules, a size ratchet, the A6/A9 guards widened. Step 10 made `turn-confirmation.ts` the one owner of the backend-confirmed turn state and moved the focus re-poll and held-message delivery to `useTurnReconciliation.ts`, each with tests pinning the codex/reagent P1 orderings. Step 6b moved the bottom panels into `components/AgentBottomPanels.tsx`, a fragment so each panel stays a direct flex child. **Left:** nothing from §3.5; the estimate of 1,000–1,200 lines assumed `handleSendMessage` and more of the JSX skeleton would move | #4039, #4042, #4043, #4046, #4047, #4049, #4051, #4053, #4055, #4071, #4075, #4078, #4079, this PR |
 | 4. One builder for the busy predicate's input | Shipped | #4032 |
 | 5. Name → slug rules | **Partly shipped:** the Rust side (`agentmux_common::slug`, four named rules, table + oracle tests). **Left:** pinning the TS mirrors to them | #4052 |
 | 10. Time helpers | **Partly shipped:** the CI ratchet stops new copies; 91 grandfathered files (more than §6.1 counted: it covered helper definitions, not inline uses). **Left:** migrating them to `agentmux_common::time` | #4050 |
 | 11. Small frontend helpers | **Partly shipped:** `isAuthFailure`. **Left:** `isStopping`, `readZoom`/`clampZoom`, `setBlockMeta` | #4057 |
 | 12. Duplicate `@keyframes pulse` | Shipped | #4048 |
 | §4 inline tests | Moved to their own files: `app_api/mod.rs` 4,985 → 2,292, `reactive.rs` 3,839 → 2,598, `native_memory_handlers.rs` 3,339 → 1,674 lines; test counts identical before and after | #4054, #4056 |
+| §4 Rust splits | `bootstrap.rs` 2,440 → `bootstrap/` (9 files, `mod.rs` 58); `server/mod.rs` 3,327 → 110 (state, routes, auth, `http_*` families); `app_api/mod.rs` 2,292 → 439 (each `*_impl` in the submodule that registers it); `agentmux-mcp/src/main.rs` 4,809 → 3,279 (helpers and tests out). Test counts identical before and after each move. **Left:** splitting MCP `call_tool` by tool family, after the crates-directory move lands | #4061, #4068, #4066, #4070 |
 
 Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an OSC sequence with a space (or an ST terminator) through into the shell drawer (#4045); the progress ring's flicker and orphaned background-task rows (retro in `docs/retro/`, #4035, #4040).
 

@@ -26,7 +26,7 @@
  */
 
 /** Mirrors the wire `AuthSessionStatus` from
- *  `agentmux-srv/src/identity/auth_session.rs` (camelCase via
+ *  `crates/srv/src/identity/auth_session.rs` (camelCase via
  *  `rename_all_fields`).
  *
  *  Intentionally duplicates the global `AuthSessionStatus` type in

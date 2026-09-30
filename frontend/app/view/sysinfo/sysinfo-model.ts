@@ -44,7 +44,7 @@ type SampleAction =
  * threshold for both jobs was reagentx's P1 on PR #2832.
  *
  * Sample timestamps are wall-clock (`SystemTime::now()` in
- * `agentmux-srv/src/backend/sysinfo.rs`), so they can jump backwards on an NTP
+ * `crates/srv/src/backend/sysinfo.rs`), so they can jump backwards on an NTP
  * correction, a manual clock set, or a VM resume. Both of this reducer's
  * original trim/gap rules assumed time only moves forward, which made a
  * backwards step permanently corrupt the series — see this module's tests and

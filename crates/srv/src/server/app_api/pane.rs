@@ -1,0 +1,1337 @@
+use super::*;
+
+pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    register_pane_open(engine, state);
+    register_pane_move_tab(engine, state);
+}
+
+fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_handler(
+        COMMAND_PANE_OPEN,
+        Box::new(move |data, _ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                let cmd: CommandPaneOpenData = serde_json::from_value(data)
+                    .map_err(|e| format!("pane.open: {e}"))?;
+                let result = open_pane(&state, cmd).await?;
+                Ok(Some(serde_json::to_value(&result).unwrap()))
+            })
+        }),
+    );
+}
+
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+fn register_pane_move_tab(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_handler(
+        COMMAND_PANE_MOVE_TAB,
+        Box::new(move |data, _ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                let cmd: CommandPaneMoveTabData = serde_json::from_value(data)
+                    .map_err(|e| format!("pane.moveTab: {e}"))?;
+                super::move_tab(&state, cmd).await?;
+                Ok(None)
+            })
+        }),
+    );
+}
+
+/// Floating-pane branch of `open_pane`. The block already exists in
+/// `source_tab_id`'s blockids (created by the caller, with no layout node).
+/// This moves it into a fresh floating workspace via the `tear_off_block`
+/// saga, sets up the new tab's layout, broadcasts the new MuxObjs, and asks
+/// the source window's frontend to materialize the chromeless floating OS
+/// window via the host `open_floating_pane_window` command (srv cannot open
+/// windows itself). See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
+pub(super) async fn open_pane_floating(
+    state: &AppState,
+    mstore: &Store,
+    event_bus: &crate::backend::eventbus::EventBus,
+    view: String,
+    source_tab_id: String,
+    meta: MetaMapType,
+) -> Result<PaneOpenResult, String> {
+    use agentmux_common::ipc::{Command, Event};
+
+    // Source workspace from the reducer's canonical tab→workspace map.
+    let source_ws_id = {
+        let s = state.srv_state.lock().await;
+        s.tabs
+            .get(&source_tab_id)
+            .map(|t| t.workspace_id.clone())
+            .ok_or_else(|| format!("pane.open: floating: tab {source_tab_id} not in reducer state"))?
+    };
+
+    // Create the block through the reducer (NOT wcore-direct) so it lands in
+    // `state.blocks` — the `tear_off_block` saga's pre-condition checks the
+    // reducer-canonical block map. The `BlockCreated` event also carries the
+    // meta, which `persist_subscriber::apply_block_created` writes into the
+    // mstore Block so the editor renders with its file + tree state. We skip
+    // layout placement, so the block never renders docked before the saga
+    // moves it into the floating workspace (no flash).
+    let meta_val = serde_json::to_value(&meta)
+        .map_err(|e| format!("pane.open: floating: meta serialize: {e}"))?;
+    let create_events = crate::server::service::dispatch_to_reducer(
+        state,
+        Command::CreateBlock {
+            tab_id: source_tab_id.clone(),
+            meta: meta_val,
+        },
+    )
+    .await;
+    if let Some(msg) = create_events.iter().find_map(|e| match e {
+        Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.open: floating: CreateBlock: {msg}"));
+    }
+    let block_id = create_events
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "pane.open: floating: CreateBlock emitted no BlockCreated".to_string())?;
+    for ev in &create_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
+            tracing::warn!("pane.open: floating: CreateBlock mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &create_events);
+
+    // Tear the block off into a fresh floating workspace + tab (reuses the
+    // exact saga the drag tear-off uses: CreateWorkspace → CreateTab → MoveBlock).
+    let saga_val = crate::sagas::tear_off_block::run(
+        state,
+        block_id.clone(),
+        source_tab_id.clone(),
+        source_ws_id.clone(),
+    )
+    .await?;
+    let new_ws_id = saga_val
+        .get("new_workspace_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let new_tab_id = saga_val
+        .get("new_tab_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if new_ws_id.is_empty() || new_tab_id.is_empty() {
+        return Err("pane.open: floating: tear_off_block returned empty ids".to_string());
+    }
+
+    // Make the moved block the new tab's single root node so it renders.
+    if let Err(e) =
+        crate::server::service::setup_torn_off_block_layout(state, &new_tab_id, &block_id).await
+    {
+        tracing::warn!(
+            new_tab = %new_tab_id,
+            "pane.open: floating: layout setup failed: {e} (block moved but layout malformed)"
+        );
+    }
+
+    // Broadcast the new workspace + layout + tab + block so any frontend syncs
+    // its MuxObj cache (mirrors the docked path + the tear-off DnD handler).
+    {
+        let mut updates: Vec<obj::MuxObjUpdate> = Vec::new();
+        if let Ok(ws) = mstore.must_get::<Workspace>(&new_ws_id) {
+            updates.push(obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "workspace".into(),
+                oid: new_ws_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&ws)),
+            });
+        }
+        if let Ok(t) = mstore.must_get::<Tab>(&new_tab_id) {
+            if let Ok(layout) = mstore.must_get::<obj::LayoutState>(&t.layoutstate) {
+                updates.push(obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "layout".into(),
+                    oid: t.layoutstate.clone(),
+                    obj: Some(obj::mux_obj_to_value(&layout)),
+                });
+            }
+            updates.push(obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "tab".into(),
+                oid: new_tab_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&t)),
+            });
+        }
+        if let Ok(b) = mstore.must_get::<Block>(&block_id) {
+            updates.push(obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "block".into(),
+                oid: block_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&b)),
+            });
+        }
+        // One batched frame so the renderer applies all of them in a single
+        // reactive flush — see EventBus::broadcast_mux_obj_updates.
+        event_bus.broadcast_mux_obj_updates(&updates);
+    }
+
+    // Ask the source window's frontend to open the floating OS window — scoped
+    // to that window (mirrors the window-scoped `userinput` event) so exactly
+    // one window acts. The frontend handler calls the host
+    // `open_floating_pane_window` command.
+    let window_id = {
+        let s = state.srv_state.lock().await;
+        s.windows
+            .iter()
+            .find(|(_, w)| w.workspace_id == source_ws_id)
+            .map(|(id, _)| id.clone())
+    };
+    match window_id {
+        Some(win) => {
+            state.broker.publish(crate::backend::mps::MuxEvent {
+                event: "openfloatingpane".to_string(),
+                scopes: vec![win],
+                sender: String::new(),
+                persist: 0,
+                data: Some(json!({
+                    "block_id": block_id,
+                    "workspace_id": new_ws_id,
+                })),
+            });
+        }
+        None => {
+            tracing::warn!(
+                source_ws = %source_ws_id,
+                "pane.open: floating: no window mapped to source workspace — floater not opened"
+            );
+        }
+    }
+
+    Ok(PaneOpenResult {
+        block_id,
+        tab_id: new_tab_id,
+        view,
+        created: true,
+    })
+}
+
+/// Build the metadata map for a pane.open request, validating required args.
+pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
+    let mut meta = MetaMapType::new();
+
+    match cmd.view.as_str() {
+        "editor" => {
+            let file = cmd.file.as_deref().filter(|s| !s.is_empty())
+                .ok_or_else(|| "MISSING_ARG: view=editor requires 'file'".to_string())?;
+            meta.insert("view".to_string(), json!("editor"));
+            meta.insert("file".to_string(), json!(file));
+
+            let is_markdown = file.to_ascii_lowercase().ends_with(".md");
+
+            // Tree state: explicit caller value wins; for markdown default to
+            // collapsed so the rendered preview gets full horizontal width.
+            if let Some(expanded) = cmd.tree_expanded {
+                meta.insert("editor:tree_expanded".to_string(), json!(expanded));
+            } else if is_markdown {
+                meta.insert("editor:tree_expanded".to_string(), json!(false));
+            }
+        }
+        "term" => {
+            meta.insert("view".to_string(), json!("term"));
+            meta.insert("controller".to_string(), json!("shell"));
+            if let Some(cwd) = cmd.cwd.as_deref().filter(|s| !s.is_empty()) {
+                meta.insert("cmd:cwd".to_string(), json!(cwd));
+            }
+        }
+        "browser" => {
+            let url = cmd.url.as_deref().filter(|s| !s.is_empty())
+                .ok_or_else(|| "MISSING_ARG: view=browser requires 'url'".to_string())?;
+            meta.insert("view".to_string(), json!("browser"));
+            meta.insert("url".to_string(), json!(url));
+        }
+        "sysinfo" => {
+            meta.insert("view".to_string(), json!("sysinfo"));
+        }
+        "help" => {
+            meta.insert("view".to_string(), json!("help"));
+        }
+        "media" => {
+            let file = cmd.file.as_deref().filter(|s| !s.is_empty())
+                .ok_or_else(|| "MISSING_ARG: view=media requires 'file'".to_string())?;
+            meta.insert("view".to_string(), json!("media"));
+            meta.insert("media:path".to_string(), json!(file));
+        }
+        other => {
+            return Err(format!(
+                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help/media)"
+            ));
+        }
+    }
+
+    if let Some(title) = cmd.title.as_deref().filter(|s| !s.is_empty()) {
+        meta.insert("frame:title".to_string(), json!(title));
+    }
+
+    Ok(meta)
+}
+
+/// Block-meta key carrying an ARRAY of files the reused pane should open —
+/// the sole delivery path (see below for why an earlier version's second,
+/// "live MPS event" path was removed). Drained (all entries, in order)
+/// reactively by `EditorViewModel`'s `createEffect` over its own block meta,
+/// then cleared immediately after — covers both "not yet mounted when this
+/// was written" and "already mounted, reacts as soon as the write lands"
+/// uniformly through the same MuxObj sync path the pane already depends on
+/// for everything else.
+///
+/// **Array, not a single scalar** (codex P1 on PR #2404): if 2+ `OpenEditor`
+/// reuse calls arrive before the target pane ever mounts, a single-value key
+/// would have each call overwrite the last, silently losing every request
+/// but the final one. Appending to an array and draining all of them at
+/// once fixes that.
+///
+/// **Sole delivery path — no separate live MPS event** (codex P1 on PR
+/// #2404, found twice): an earlier version ALSO fired a direct MPS event
+/// (`persist: 0`) alongside this meta write, for immediate delivery when the
+/// pane was already mounted. First finding: the frontend's live handler
+/// didn't clear its own entry from this array, so it could be reprocessed
+/// on a later, unrelated remount. Second, deeper finding after fixing that:
+/// the MPS event is a direct WS push and arrives essentially synchronously,
+/// while THIS meta write only reaches the frontend's `blockAtom` after an
+/// async MuxObj DB-refetch — so the live handler's own dequeue attempt
+/// could run and read stale data (this exact write not yet reflected)
+/// before it landed, no-op, and strand the entry anyway. Removing the
+/// separate live path entirely (rather than patching a second-order race in
+/// its own race-fix) leaves one delivery mechanism and one reactive
+/// consumer — nothing to race. Trades a small amount of latency for the
+/// already-mounted case (a real MuxObj round-trip instead of a direct
+/// push) for not being racy.
+///
+/// **Superseded relying on MPS `persist > 0` for durability** (codex P1 on
+/// PR #2404, earliest finding on this function): a just-created Editor
+/// block may not have finished mounting its `EditorViewModel` by the time a
+/// second back-to-back `OpenEditor` call reuses it. `persist: N` closes that
+/// race but opens a *worse* one: `Broker::unsubscribe_all` clears a route's
+/// replay marker on disconnect (`crates/srv/src/backend/mps.rs:312-323`),
+/// so any later, unrelated reconnect would replay the *entire* persisted
+/// history again — reopening files the user has since closed. The broker
+/// has no ack/consume concept, so nothing marks a persisted event "already
+/// delivered." Block meta does have exactly that shape (write once, drain
+/// once, clear after reading) — reusing it avoids inventing new broker
+/// machinery.
+const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
+
+/// If the calling agent (identified by its own block id, `caller_block_id`)
+/// already has an Editor pane open in its own tab, push `file` into that
+/// pane as a new tab instead of creating another Editor pane. Returns
+/// `Ok(None)` when there's no existing Editor pane to reuse (or the caller's
+/// tab can't be resolved) — the normal create-new-block path handles that
+/// case unchanged.
+///
+/// **Known, accepted limitation: does not apply layout focus.** An earlier
+/// version of this function resolved the reused block's layout leaf id and
+/// dispatched `Command::SetFocusedNode` — reagent (PR #2404) confirmed the
+/// leaf-id resolution itself was correct, then found a deeper problem:
+/// the frontend's `onBackendUpdate` (`frontend/layout/lib/layoutPersistence.ts:59-82`)
+/// only re-derives `focusedNodeId` at initial model construction or via a
+/// `pendingBackendActions`-driven tree action — a bare `focusednodeid`
+/// MuxObj push to an ALREADY-MOUNTED `LayoutModel` (confirmed by reading
+/// the function directly: no branch reads `muxObj.focusednodeid` outside
+/// those two triggers) is silently never applied to the live `treeState`.
+/// Making that work would mean changing `onBackendUpdate`'s reactivity —
+/// shared code this file's own comments show has deliberately been kept
+/// narrow/non-reactive before (see the dangling-leaf-prune history right
+/// above it) — a real, separate piece of work, not a one-line fix. Shipping
+/// a backend dispatch that compiles and passes a reducer-internal test but
+/// has no visible frontend effect would be worse than not attempting it: it
+/// would look done without being done. The reused pane's new tab still
+/// becomes its *own* active tab via `openFile()`; only the cross-pane
+/// layout-focus indicator is unaffected, same as before this feature
+/// existed.
+pub(super) async fn maybe_reuse_editor_pane(
+    state: &AppState,
+    caller_block_id: &str,
+    file: &str,
+) -> Result<Option<PaneOpenResult>, String> {
+    let mstore = &state.mstore;
+    let tab_id = match super::resolve_tab_id_for_block(mstore, caller_block_id) {
+        Ok(id) => id,
+        Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
+    };
+
+    let existing = match super::find_editor_block(mstore, &tab_id)? {
+        Some(block) => block,
+        None => return Ok(None),
+    };
+
+    // Durable delivery path: append to any already-pending queue (read then
+    // write — a small race window under truly concurrent reuse calls is
+    // accepted, matching this codebase's general best-effort meta-patch
+    // posture elsewhere) so a not-yet-mounted (or remounting)
+    // EditorViewModel drains every pending file once at construction, then
+    // clears the queue — see META_PENDING_OPEN_FILES's doc comment for why
+    // this replaces relying on MPS persist/replay for correctness.
+    let mut pending: Vec<String> = existing
+        .meta
+        .get(META_PENDING_OPEN_FILES)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    pending.push(file.to_string());
+
+    let meta_events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::UpdateBlockMeta {
+            block_id: existing.oid.clone(),
+            meta_patch: json!({ META_PENDING_OPEN_FILES: pending }),
+        },
+    )
+    .await;
+    for ev in &meta_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
+            tracing::warn!("pane.open: reuse: UpdateBlockMeta mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &meta_events);
+
+    tracing::info!(
+        block_id = %existing.oid,
+        tab_id = %tab_id,
+        "pane.open: reused existing editor pane instead of creating a new one"
+    );
+
+    Ok(Some(PaneOpenResult {
+        block_id: existing.oid,
+        tab_id,
+        view: "editor".to_string(),
+        created: false,
+    }))
+}
+
+/// Translate `split_direction` + `split_reference_block_id` into the backend
+/// layout action triple. Returns `(actiontype, targetblockid, position)`.
+/// Falls back to a plain `insert` if direction/reference are missing.
+pub(super) fn resolve_placement(
+    direction: Option<&str>,
+    reference: Option<&str>,
+) -> (String, String, String) {
+    let reference = match reference.filter(|s| !s.is_empty()) {
+        Some(r) => r,
+        None => return ("insert".to_string(), String::new(), String::new()),
+    };
+
+    let (actiontype, position) = match direction {
+        Some("right") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "after"),
+        Some("left") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "before"),
+        Some("down") | Some("below") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "after"),
+        Some("up") | Some("above") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "before"),
+        _ => return ("insert".to_string(), String::new(), String::new()),
+    };
+
+    (actiontype.to_string(), reference.to_string(), position.to_string())
+}
+
+/// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
+/// See docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md.
+///
+/// Identity is always verified first via the same `verified_block_id`
+/// mechanism `UIClick`/`UIQuery`/`UIScreenshot` use (§5.0 of that spec) —
+/// this both resolves the caller's OWN pane when `req.block_id` is absent,
+/// and supplies a real, checked `source_agent` for the audit log when
+/// `req.block_id` targets another agent's pane (fleet tier, §5.1/§5.2): no
+/// ownership check on the TARGET (closing another agent's stuck pane without
+/// needing its cooperation is this spec's whole motivation), but the CALLER
+/// is never anonymous the way `FleetBulkStop`'s existing calls are today.
+/// `POST /api/v1/agent/self/quit` — the `QuitSelf` tool
+/// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6). Always the caller's
+/// own block (from the signed `auth`); there is no target. Proceeds only
+/// when the user started the current turn, nothing else got in, and the
+/// quote is theirs (§6.3). The quit then waits for the turn to end (§4.2):
+/// 202 now, the tab closes after. Anything else is an external shutdown: 202
+/// `pending_user_override`, and the user has 15 s to keep the agent (§6.5).
+pub(crate) async fn handle_quit_self(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    axum::Json(req): axum::Json<agentmux_common::api_types::QuitSelfRequest>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+
+    let block_id = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
+    quit_self(&state, &block_id, &req.auth.agent_id, "QuitSelf", req.reason.trim(), &req.user_instruction)
+}
+
+/// An agent ending its own session — `QuitSelf`, or `ClosePane` with no
+/// arguments (§7), which has no quote and so always asks the user. A
+/// user-started, untainted turn with the user's quote quits when the turn
+/// ends; anything else waits 15 s for the user to keep it (§6.5).
+fn quit_self(
+    state: &AppState,
+    block_id: &str,
+    agent: &str,
+    via: &str,
+    reason: &str,
+    user_instruction: &str,
+) -> axum::response::Response {
+    use crate::sagas::self_quit;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+
+    let detail = format!("{reason} | user said: {user_instruction:?}");
+    // Scheduled, closing, or a user-override window that already ran out.
+    let under_way = crate::sagas::pending_shutdown::active_for(block_id).is_some_and(|v| v.status == "proceeding");
+    if self_quit::is_quitting(block_id) || under_way {
+        return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
+    }
+    let provenance = crate::backend::blockcontroller::get_controller(block_id).and_then(|c| c.turn_provenance());
+    if let Err(refusal) = self_quit::gate(provenance.as_ref(), user_instruction) {
+        // Not the user's own ask: the user decides, within 15 s (§6.5). Audited
+        // with why the gate didn't pass (§4.4); the outcome is audited too.
+        let pending = crate::sagas::pending_shutdown::request(
+            state,
+            block_id,
+            agent,
+            via,
+            reason,
+            crate::sagas::pending_shutdown::Action::SelfQuit { detail: detail.clone() },
+        );
+        state.reactive_handler.log_fleet_action_audit(
+            Some(agent),
+            agent,
+            block_id,
+            "agent.quit_self",
+            true,
+            Some(refusal.as_str()),
+            &pending.request_id,
+            Some(&format!("{} ({via}): {detail}", crate::sagas::pending_shutdown::audit_note(&pending, agent, via))),
+        );
+        return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
+    }
+    if !self_quit::schedule_after_turn(state, block_id, detail) {
+        return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
+    }
+    (StatusCode::ACCEPTED, Json(json!({ "status": "scheduled" }))).into_response()
+}
+
+/// The 202 answer for a shutdown waiting on the user (§6.5).
+pub(crate) fn pending_body(p: &crate::sagas::pending_shutdown::PendingView) -> serde_json::Value {
+    json!({
+        "status": "pending_user_override",
+        "request_id": p.request_id,
+        // Whose request this is: a caller who finds someone else here joined it.
+        "by": p.by,
+        "via": p.via,
+        "deadline_ms": p.deadline_ms,
+        "wait_at_least_ms": crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64,
+    })
+}
+
+/// `GET /api/v1/agent/shutdown/{request_id}` — where a shutdown waiting on the
+/// user's override stands (§6.5): `pending`, `kept_by_user`, `proceeding`,
+/// `shut_down`, `superseded` or `failed`.
+pub(crate) async fn handle_shutdown_status(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Path(request_id): axum::extract::Path<String>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+    if let Some(v) = crate::sagas::pending_shutdown::status(&request_id) {
+        return (StatusCode::OK, Json(serde_json::to_value(v).unwrap_or_default())).into_response();
+    }
+    // Asked on another instance on this machine (a cross-channel
+    // FleetBulkStop target): that instance holds the answer.
+    if let Some(remote) = crate::sagas::pending_shutdown::remote_for(&request_id) {
+        let url = format!("{}/api/v1/agent/shutdown/{request_id}", remote.local_url.trim_end_matches('/'));
+        let mut req = state.http_client.get(&url);
+        if !remote.auth_key.is_empty() {
+            req = req.header("X-AuthKey", &remote.auth_key);
+        }
+        return match req.send().await {
+            Ok(r) => {
+                let code = StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                let body: serde_json::Value = r.json().await.unwrap_or_default();
+                (code, Json(body)).into_response()
+            }
+            Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("its AgentMux instance: {e}") }))).into_response(),
+        };
+    }
+    (StatusCode::NOT_FOUND, Json(json!({ "error": "no such shutdown request" }))).into_response()
+}
+
+pub(crate) async fn handle_close_pane(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    axum::Json(req): axum::Json<agentmux_common::api_types::ClosePaneRequest>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+
+    let caller_agent_id = req.auth.agent_id.clone();
+    let verified_own_block_id = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
+
+    // No arguments: the agent closing itself. That is `QuitSelf` without its
+    // quote (§7): its own tab only, siblings keep running, and only after the
+    // user's 15 s window. Closing the whole pane takes an explicit block_id.
+    if req.block_id.is_none() {
+        let reason = req.reason.clone().unwrap_or_default();
+        return quit_self(&state, &verified_own_block_id, &caller_agent_id, "ClosePane", reason.trim(), "");
+    }
+
+    let target_block_id = req.block_id.clone().unwrap_or_else(|| verified_own_block_id.clone());
+    let is_cross_pane = req.block_id.is_some();
+
+    // codex P2 on PR #3193: resolve the target's agent name BEFORE deleting
+    // the block, not after. `delete_block::run` stops the block's
+    // controller, and a running agent's own exit-triggered
+    // `unregister_block` can race ahead of this lookup once it does — a
+    // post-delete lookup would then fall back to the bare block UUID
+    // instead of the real agent name, making attribution timing-dependent.
+    let target_agent = state
+        .reactive_handler
+        .get_agent_by_block(&target_block_id)
+        .map(|a| a.agent_id)
+        .unwrap_or_else(|| target_block_id.clone());
+
+    // The whole pane the target lives in — every member of its tab stack, not
+    // just the target (#3202; SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.1).
+    let pane_block_ids = {
+        let s = state.srv_state.lock().await;
+        match s.blocks.get(&target_block_id) {
+            Some(b) => s
+                .tabs
+                .get(&b.tab_id)
+                .and_then(|t| t.rootnode.as_ref())
+                .and_then(|root| {
+                    crate::backend::layout::find_leaf_containing_block(root, &target_block_id)
+                })
+                .and_then(|leaf| leaf.data.as_ref())
+                .map(crate::backend::layout::leaf_members)
+                .unwrap_or_else(|| vec![target_block_id.clone()]),
+            None => {
+                let err = format!("block not found: {target_block_id}");
+                if is_cross_pane {
+                    let request_id = uuid::Uuid::new_v4().to_string();
+                    state.reactive_handler.log_fleet_action_audit(
+                        Some(&caller_agent_id), &target_agent, &target_block_id,
+                        "pane.close", false, Some(&err), &request_id, req.reason.as_deref(),
+                    );
+                }
+                return (StatusCode::NOT_FOUND, Json(json!({ "error": err }))).into_response();
+            }
+        }
+    };
+
+    // Another agent's pane: its user has 15 s to keep it (§6.5). Closing a
+    // pane you are in yourself is your own business.
+    if is_cross_pane && !pane_block_ids.contains(&verified_own_block_id) {
+        let reason = req.reason.clone().unwrap_or_default();
+        let pending = crate::sagas::pending_shutdown::request(
+            &state,
+            &target_block_id,
+            &caller_agent_id,
+            "ClosePane",
+            &reason,
+            crate::sagas::pending_shutdown::Action::ClosePane { block_ids: pane_block_ids },
+        );
+        state.reactive_handler.log_fleet_action_audit(
+            Some(&caller_agent_id),
+            &target_agent,
+            &target_block_id,
+            "pane.close",
+            true,
+            None,
+            &pending.request_id,
+            Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(&pending, &caller_agent_id, "ClosePane"))),
+        );
+        return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
+    }
+
+    let result = crate::sagas::close_pane::run(&state, pane_block_ids).await;
+
+    if is_cross_pane {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        match &result {
+            Ok(_) => state.reactive_handler.log_fleet_action_audit(
+                Some(&caller_agent_id), &target_agent, &target_block_id,
+                "pane.close", true, None, &request_id, req.reason.as_deref(),
+            ),
+            Err(e) => state.reactive_handler.log_fleet_action_audit(
+                Some(&caller_agent_id), &target_agent, &target_block_id,
+                "pane.close", false, Some(e), &request_id, req.reason.as_deref(),
+            ),
+        }
+    }
+
+    match result {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod close_pane_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+    use crate::server::tests::test_state;
+    use agentmux_common::api_types::{ClosePaneRequest, UiAutomationAuth};
+    use agentmux_common::ipc::{Command, Event};
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        for ev in &evs {
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
+        }
+        evs
+    }
+
+    /// Seed a workspace + tab + block, same shape as
+    /// `sagas::delete_block::tests::seed` — duplicated rather than shared
+    /// across modules (both are small, private `#[cfg(test)]` helpers).
+    async fn seed(state: &AppState) -> (String, String) {
+        let ws_evs = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            state,
+            Command::CreateTab { workspace_id: ws_id, name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let blk_evs = dispatch_apply(
+            state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+        )
+        .await;
+        let block_id = blk_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        (tab_id, block_id)
+    }
+
+    /// Mint a real signing key for `agent_id` (same store call
+    /// `agent_open`/spawn use) and sign a fresh `UiAutomationAuth` for it —
+    /// the exact mechanism `agentmux-mcp`'s `sign_ui_automation_auth` uses,
+    /// reproduced here since this is a different crate.
+    fn sign_auth(state: &AppState, agent_id: &str) -> UiAutomationAuth {
+        let key = state.mstore.agent_jekt_key_ensure(agent_id).unwrap();
+        let ts_secs = agentmux_common::time::now_secs();
+        let sig = agentmux_common::jekt_sign::sign_jekt(
+            &key, "ui-automation-identity", agent_id, "__srv__", ts_secs, "",
+        );
+        UiAutomationAuth { agent_id: agent_id.to_string(), ts_secs, sig }
+    }
+
+    /// §7: with no arguments, ClosePane is the agent quitting itself — no
+    /// quote, so always the user's 15 s window, then its own tab only.
+    #[tokio::test]
+    async fn no_argument_close_is_a_self_quit_behind_the_user_s_window() {
+        let state = test_state();
+        let (tab_id, block_id) = seed(&state).await;
+        let sibling = dispatch_apply(&state, Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let agent_id = format!("close-own-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent_id, &block_id, Some(&tab_id)).unwrap();
+        let auth = sign_auth(&state, &agent_id);
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            None,
+            axum::Json(ClosePaneRequest { auth, block_id: None, reason: Some("done".into()) }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+        let body = body_json(resp).await;
+        assert_eq!(body["status"], "pending_user_override", "no quote: the user is asked");
+        let request_id = body["request_id"].as_str().unwrap().to_string();
+        let pending = crate::sagas::pending_shutdown::status(&request_id).unwrap();
+        assert_eq!((pending.via.as_str(), pending.by.as_str()), ("ClosePane", agent_id.as_str()));
+        assert!(state.srv_state.lock().await.blocks.contains_key(&block_id), "still running during the window");
+
+        crate::sagas::pending_shutdown::expire_now(&request_id);
+        assert_eq!(crate::sagas::pending_shutdown::settled(&request_id).await.status, "shut_down");
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&block_id), "its own tab is gone");
+        assert!(s.blocks.contains_key(&sibling), "a sibling tab keeps running");
+    }
+
+    #[tokio::test]
+    async fn cross_pane_close_removes_the_target_and_logs_the_verified_caller() {
+        let state = test_state();
+        // Caller: registered with its OWN pane, but acts on someone else's.
+        let (caller_tab, caller_block) = seed(&state).await;
+        let caller_id = format!("close-caller-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
+        let auth = sign_auth(&state, &caller_id);
+
+        // Target: a different agent's pane, entirely unrelated to the caller.
+        let (target_tab, target_block) = seed(&state).await;
+        let target_id = format!("close-target-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&target_id, &target_block, Some(&target_tab)).unwrap();
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            None,
+            axum::Json(ClosePaneRequest {
+                auth,
+                block_id: Some(target_block.clone()),
+                reason: Some("verifying the fix".to_string()),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED, "another agent's pane waits for its user");
+        let request_id = body_json(resp).await["request_id"].as_str().unwrap().to_string();
+        assert!(state.srv_state.lock().await.blocks.contains_key(&target_block), "still running during the window");
+        crate::sagas::pending_shutdown::expire_now(&request_id);
+        assert_eq!(crate::sagas::pending_shutdown::settled(&request_id).await.status, "shut_down");
+
+        // Target pane gone; caller's own pane untouched.
+        {
+            let s = state.srv_state.lock().await;
+            assert!(!s.blocks.contains_key(&target_block), "target pane must be closed");
+            assert!(s.blocks.contains_key(&caller_block), "caller's own pane must be untouched");
+        }
+
+        // Audit entry carries the CALLER's verified identity as source_agent —
+        // not None, the gap this spec's §5.2 fixed (FleetBulkStop still has
+        // it; this new call site must not repeat it).
+        // get_audit_log returns most-recent-first (its own doc comment) — no
+        // extra .rev() needed; the closed-block entry is naturally first.
+        let entries = state.reactive_handler.get_audit_log(50);
+        let entry = entries
+            .iter()
+            .find(|e| e.block_id == target_block)
+            .expect("expected an audit entry for the closed target block");
+        assert_eq!(entry.source_agent.as_deref(), Some(caller_id.as_str()));
+        assert_eq!(entry.target_agent, target_id);
+        assert!(entry.success);
+        let reason = entry.reason.as_deref().unwrap_or_default();
+        assert!(reason.starts_with("shut_down") && reason.contains("verifying the fix"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn keep_running_leaves_another_agent_s_pane_open() {
+        let state = test_state();
+        let (caller_tab, caller_block) = seed(&state).await;
+        let caller_id = format!("close-keep-caller-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
+        let (_, target_block) = seed(&state).await;
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            None,
+            axum::Json(ClosePaneRequest {
+                auth: sign_auth(&state, &caller_id),
+                block_id: Some(target_block.clone()),
+                reason: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+        let body = body_json(resp).await;
+        assert_eq!(body["status"], "pending_user_override");
+        assert_eq!(body["wait_at_least_ms"], 15_000);
+        let request_id = body["request_id"].as_str().unwrap().to_string();
+
+        assert_eq!(crate::sagas::pending_shutdown::keep(&state, &target_block, &request_id), "kept_by_user");
+        assert_eq!(crate::sagas::pending_shutdown::settled(&request_id).await.status, "kept_by_user");
+        assert!(state.srv_state.lock().await.blocks.contains_key(&target_block), "the user kept it");
+    }
+
+    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// #3202: closing a pane through the MCP tool closes every tab in it, not
+    /// just the targeted block — even when the target is a background tab.
+    #[tokio::test]
+    async fn close_closes_every_tab_in_the_target_s_pane() {
+        let state = test_state();
+        let (caller_tab, caller_block) = seed(&state).await;
+        let caller_id = format!("close-stack-caller-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
+        let auth = sign_auth(&state, &caller_id);
+
+        let (tab_id, visible) = seed(&state).await;
+        let background = dispatch_apply(
+            &state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        dispatch_apply(
+            &state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "leaf".into(),
+                    data: Some(agentmux_common::LayoutNodeData {
+                        block_id: visible.clone(),
+                        block_stack: vec![visible.clone(), background.clone()],
+                        active_block_id: visible.clone(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            None,
+            axum::Json(ClosePaneRequest { auth, block_id: Some(background.clone()), reason: None }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+        let request_id = body_json(resp).await["request_id"].as_str().unwrap().to_string();
+        crate::sagas::pending_shutdown::expire_now(&request_id);
+        crate::sagas::pending_shutdown::settled(&request_id).await;
+
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&visible), "visible tab closed with its pane");
+        assert!(!s.blocks.contains_key(&background), "background tab closed with its pane");
+        assert!(s.tabs[&tab_id].block_ids.is_empty());
+        assert!(s.tabs[&tab_id].rootnode.is_none(), "pane removed");
+        assert!(s.blocks.contains_key(&caller_block), "caller untouched");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_invalid_signature() {
+        let state = test_state();
+        let (tab_id, block_id) = seed(&state).await;
+        let agent_id = format!("close-bad-sig-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent_id, &block_id, Some(&tab_id)).unwrap();
+        // A signature signed with the WRONG key — this agent's real key was
+        // never used, simulating a forged/corrupted signature.
+        let bogus_key = vec![0u8; 32];
+        let ts_secs = agentmux_common::time::now_secs();
+        let sig = agentmux_common::jekt_sign::sign_jekt(
+            &bogus_key, "ui-automation-identity", &agent_id, "__srv__", ts_secs, "",
+        );
+        let auth = UiAutomationAuth { agent_id, ts_secs, sig };
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            None,
+            axum::Json(ClosePaneRequest { auth, block_id: None, reason: None }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+        // Nothing was touched.
+        let s = state.srv_state.lock().await;
+        assert!(s.blocks.contains_key(&block_id));
+    }
+}
+
+/// Core `pane.open` logic, shared by the WebSocket RPC handler
+/// (`register_pane_open`) and the HTTP route `POST /api/v1/pane/open`
+/// (`agentmux-mcp`'s `OpenEditor` tool). Creates a block for the requested
+/// view, enqueues a layout action (split or insert), and broadcasts the
+/// block/tab/layout updates so the frontend renders the new pane.
+pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
+    let mstore = state.mstore.clone();
+    let event_bus = state.event_bus.clone();
+
+    tracing::info!(view = %cmd.view, "pane.open");
+
+    // Use caller-supplied meta when present (widget bar path: full blockdef.meta
+    // already known); otherwise derive from view + args via build_pane_meta.
+    let meta = match cmd.meta {
+        Some(m) => m,
+        None => pane::build_pane_meta(&cmd)?,
+    };
+
+    // Editor-pane reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+    // Part 2): if the calling agent already has an Editor pane open in its own
+    // tab, add the requested file as a new tab in that pane instead of always
+    // spawning another Editor pane. Gated on the explicit `reuse_editor_pane`
+    // opt-in only — NOT inferred from `meta`/`split_reference_block_id` being
+    // present, since `EditorViewModel.openToTheSide`/`openInTerminal` also set
+    // `split_reference_block_id` to their OWN block id for split placement and
+    // must not trigger reuse (reagent P1 on PR #2404 caught an earlier version
+    // of this check incorrectly reusing the calling pane itself for
+    // `openToTheSide`). Also excludes `floating` requests — those always get
+    // their own new window (codex P1 on PR #2404: this branch previously ran
+    // before the floating check below and silently swallowed floating
+    // requests into a reused docked pane). Also excludes an explicit
+    // `tree_expanded` request (`OpenEditor`'s `collapse_tree` option) —
+    // reagent P2 on PR #2404: a reused pane keeps ITS OWN existing tree
+    // state, with no live mechanism to apply a new one (same class of
+    // construction-time-only limitation as focus, see
+    // `maybe_reuse_editor_pane`'s doc comment) — bypassing reuse for this
+    // specific request and falling through to the create path (which
+    // already honors `tree_expanded` correctly) is far simpler than
+    // building live meta-application, and was the reviewer's own suggested
+    // alternative.
+    if cmd.view == "editor"
+        && cmd.reuse_editor_pane == Some(true)
+        && cmd.floating != Some(true)
+        && cmd.tree_expanded.is_none()
+    {
+        if let (Some(caller_block_id), Some(file)) =
+            (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
+        {
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file).await? {
+                return Ok(result);
+            }
+        }
+    }
+
+    // Resolve tab: explicit tab_id wins; otherwise, if the caller told us
+    // which block to place this pane relative to (split_reference_block_id),
+    // resolve THAT block's own tab rather than falling back to "whichever
+    // tab happens to be globally active" — a caller specifying a relative
+    // block virtually always means "my own tab" (codex P2 on PR #2404: the
+    // editor-reuse check above already resolves this correctly-scoped tab
+    // for its own lookup, but previously discarded it whenever reuse didn't
+    // apply — e.g. a floating request, or no existing Editor pane yet —
+    // silently falling through to the flakier "first workspace's active
+    // tab" heuristic for the actual block creation/placement below, which
+    // can place a pane in the wrong tab entirely in a multi-tab setup).
+    let tab_id = if let Some(explicit) = cmd.tab_id.as_deref() {
+        explicit.to_string()
+    } else if let Some(derived) = cmd
+        .split_reference_block_id
+        .as_deref()
+        .and_then(|id| resolve_tab_id_for_block(&mstore, id).ok())
+    {
+        derived
+    } else {
+        resolve_tab_id(&mstore, None)?
+    };
+
+    // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
+    // create the block in a fresh floating workspace (via reducer CreateBlock +
+    // the existing tear_off_block saga) and signal the source window's frontend
+    // to materialize the chromeless OS window — srv can't open windows itself.
+    if cmd.floating == Some(true) {
+        return pane::open_pane_floating(state, &mstore, &event_bus, cmd.view, tab_id, meta).await;
+    }
+
+    // Stack path (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3): create
+    // the block directly as a new tab of the pane holding
+    // `stack_onto_block_id`, in one reducer step, then tell the frontend with
+    // a queued `stackpush` action. Replaces `skip_placement` + a frontend
+    // push, whose gap could leave the block in no pane.
+    if let Some(target) = cmd.stack_onto_block_id.clone().filter(|t| !t.is_empty()) {
+        let tab_id = resolve_tab_id_for_block(&mstore, &target)
+            .map_err(|e| format!("pane.open: stack_onto_block_id: {e}"))?;
+        let meta_val = serde_json::to_value(&meta)
+            .map_err(|e| format!("pane.open: stack_onto_block_id: meta serialize: {e}"))?;
+        let events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::CreateBlockInStack {
+                tab_id: tab_id.clone(),
+                target_block_id: target.clone(),
+                meta: meta_val,
+                activate: true,
+            },
+        )
+        .await;
+        if let Some(msg) = events.iter().find_map(|e| match e {
+            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        }) {
+            return Err(format!("pane.open: {msg}"));
+        }
+        let block_id = events
+            .iter()
+            .find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "pane.open: CreateBlockInStack emitted no BlockCreated".to_string())?;
+        for ev in &events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                tracing::warn!("pane.open: stack_onto_block_id: mstore apply failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &events);
+        if let Err(e) =
+            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target).await
+        {
+            tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
+        }
+        tracing::info!(block_id = %block_id, target = %target, view = %cmd.view, "pane.open: block created as a pane tab");
+        return Ok(PaneOpenResult {
+            block_id,
+            tab_id,
+            view: cmd.view,
+            created: true,
+        });
+    }
+
+    // Skip-placement path (in-pane tabs — SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
+    // §4.2): create the block through the reducer, same as the docked path
+    // below, but return immediately — no layout action, no tear_off_block
+    // saga. The caller attaches it to an existing pane's block-stack instead
+    // (`pushBlockOntoStack`), so it must never render docked or floating
+    // first.
+    if cmd.skip_placement == Some(true) {
+        let meta_val = serde_json::to_value(&meta)
+            .map_err(|e| format!("pane.open: skip_placement: meta serialize: {e}"))?;
+        let create_events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::CreateBlock {
+                tab_id: tab_id.clone(),
+                meta: meta_val,
+            },
+        )
+        .await;
+        if let Some(msg) = create_events.iter().find_map(|e| match e {
+            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        }) {
+            return Err(format!("pane.open: skip_placement: CreateBlock: {msg}"));
+        }
+        let block_id = create_events
+            .iter()
+            .find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "pane.open: skip_placement: CreateBlock emitted no BlockCreated".to_string())?;
+        for ev in &create_events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                tracing::warn!("pane.open: skip_placement: CreateBlock mstore apply failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &create_events);
+        tracing::info!(block_id = %block_id, view = %cmd.view, "pane.open: block created, placement skipped");
+        return Ok(PaneOpenResult {
+            block_id,
+            tab_id,
+            view: cmd.view,
+            created: true,
+        });
+    }
+
+    // Create block (docked path) THROUGH THE REDUCER (#1681), not wcore-direct.
+    // A store-only `create_block` lands the block in SQLite but never in the
+    // reducer-canonical `state.blocks` map — and this RPC runs after bootstrap,
+    // which is the only time `srv_state` is hydrated from SQLite. The pane then
+    // renders fine (frontend reads SQLite) but a later TearOffBlock /
+    // RedockFloatingPane is rejected "block not found" because the saga
+    // pre-conditions check the reducer. The BlockCreated event carries meta,
+    // which apply_block_created writes to the mstore Block. Mirrors the
+    // already-correct open_pane_floating path.
+    let meta_val = serde_json::to_value(&meta)
+        .map_err(|e| format!("pane.open: meta serialize: {e}"))?;
+    let create_events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::CreateBlock {
+            tab_id: tab_id.clone(),
+            meta: meta_val,
+        },
+    )
+    .await;
+    if let Some(msg) = create_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.open: CreateBlock: {msg}"));
+    }
+    let block_id = create_events
+        .iter()
+        .find_map(|e| match e {
+            agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "pane.open: CreateBlock emitted no BlockCreated".to_string())?;
+    for ev in &create_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+            tracing::warn!("pane.open: CreateBlock mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &create_events);
+
+    // Enqueue layout action — split if requested, else append
+    let (actiontype, targetblockid, position) = pane::resolve_placement(
+        cmd.split_direction.as_deref(),
+        cmd.split_reference_block_id.as_deref(),
+    );
+    let focused = cmd.focus.unwrap_or(true);
+
+    // SPEC_864 Phase 4 — append through the reducer (single writer of
+    // db_layout). Best-effort like the store-direct write it replaces:
+    // a failure leaves the block created but not laid out.
+    {
+        let action = obj::LayoutActionData {
+            actiontype,
+            actionid: uuid::Uuid::new_v4().to_string(),
+            blockid: block_id.clone(),
+            nodesize: None,
+            nodesizefraction: None,
+            indexarr: None,
+            focused,
+            magnified: false,
+            ephemeral: false,
+            targetblockid,
+            position,
+        };
+        if let Err(e) = crate::server::service::queue_layout_actions_via_reducer(
+            state,
+            &tab_id,
+            vec![action],
+        )
+        .await
+        {
+            tracing::warn!("pane.open: layout action enqueue failed: {e}");
+        }
+    }
+
+    tracing::info!(
+        block_id = %block_id,
+        view = %cmd.view,
+        "pane.open: block created + layout updated"
+    );
+
+    // Broadcast block + tab + layout updates
+    {
+        let mut updates = Vec::new();
+        if let Ok(updated_block) = mstore.must_get::<Block>(&block_id) {
+            updates.push(obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "block".into(),
+                oid: block_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&updated_block)),
+            });
+        }
+        if let Ok(updated_tab) = mstore.must_get::<Tab>(&tab_id) {
+            updates.push(obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "tab".into(),
+                oid: tab_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&updated_tab)),
+            });
+            if let Ok(updated_layout) = mstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
+                updates.push(obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "layout".into(),
+                    oid: updated_tab.layoutstate.clone(),
+                    obj: Some(obj::mux_obj_to_value(&updated_layout)),
+                });
+            }
+        }
+        // One batched frame so the renderer applies all of them in a single
+        // reactive flush — see EventBus::broadcast_mux_obj_updates.
+        event_bus.broadcast_mux_obj_updates(&updates);
+    }
+
+    Ok(PaneOpenResult {
+        block_id,
+        tab_id,
+        view: cmd.view,
+        created: true,
+    })
+}
+
+/// Core `pane.moveTab` logic — reorder `cmd.block_id` within its own pane, or
+/// move it into a different pane (`Command::LayoutStackMove`). Queues a
+/// `stackmove` layout action so any OTHER window/tab viewing the same
+/// `db_layout` sees the change (mirrors `stack_onto_block_id`'s `stackpush`
+/// queue above); the calling frontend applies its own optimistic local edit
+/// directly and does not wait on the queue for itself.
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> Result<(), String> {
+    let mstore = &state.mstore;
+    let position = match cmd.position.as_str() {
+        "before" => agentmux_common::StackMovePosition::Before,
+        "after" => agentmux_common::StackMovePosition::After,
+        "end" => agentmux_common::StackMovePosition::End,
+        other => return Err(format!("pane.moveTab: invalid position '{other}' (expected before/after/end)")),
+    };
+    let tab_id = resolve_tab_id_for_block(mstore, &cmd.block_id)
+        .map_err(|e| format!("pane.moveTab: {e}"))?;
+    // Cross-pane moves (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.4) were rejected here through Phase 3 (Codex P2 on PR #3444) —
+    // the frontend's pending-action handler didn't yet mirror a cross-leaf
+    // "stackmove" to other windows/tabs watching this layout. That gap is
+    // now closed (layoutPersistence.ts's StackMove case, via
+    // moveMemberAcrossStacks), so both same-pane and cross-pane targets are
+    // accepted here — Command::LayoutStackMove already validates everything
+    // else (existence, non-empty source, etc.) via move_stack_member.
+    let events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::LayoutStackMove {
+            tab_id: tab_id.clone(),
+            block_id: cmd.block_id.clone(),
+            target_block_id: cmd.target_block_id.clone(),
+            position,
+            activate: cmd.activate,
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    if let Some(msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.moveTab: {msg}"));
+    }
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
+            tracing::warn!("pane.moveTab: mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &events);
+    if let Err(e) = crate::server::service::layout_helpers::queue_target_stack_move(
+        state,
+        &tab_id,
+        &cmd.block_id,
+        &cmd.target_block_id,
+        &cmd.position,
+        cmd.activate,
+    )
+    .await
+    {
+        tracing::warn!(block_id = %cmd.block_id, "pane.moveTab: stackmove queue failed: {e}");
+    }
+    tracing::info!(block_id = %cmd.block_id, target = %cmd.target_block_id, position = %cmd.position, "pane.moveTab");
+    Ok(())
+}

@@ -436,7 +436,7 @@ working throughout through a legacy adapter.
        import cycle is gone: the manifest builds the view directly.
      - **Agent (implemented, part 2b-3):** `agentPaneTabManifest`
        (agent-manifest.tsx, keeping the `forge` alias) — keep-alive,
-       full-bleed, `header: "surface"`, `paneZoom`, `splitDropsMeta`. Its
+       full-bleed, `header: "surface"`, `paneZoom`, `splitBlockDef`. Its
        model is built from `ctx`: the `blockAtom` its components read is a
        memo over `ctx.meta` (they only ever read the meta), and its own-block
        writes — rename, back to the picker, quick launch — go through
@@ -570,9 +570,12 @@ working throughout through a legacy adapter.
      needs no capability — only the terminal implements `isBasicTerm`. The
      terminal's env-derived header name moved into the terminal itself
      (`termViewName`, termutil.ts, used by `TermViewModel.viewName`).
-     `splitDropsMeta` (agent: `AGENT_SPLIT_DROPPED_META`) lists the meta a
-     split must not copy — the split rule applied that blocklist only when
-     `view === "agent"`. No view-name check remains in shared header, frame, zoom, key or
+     `splitDropsMeta` (agent: `AGENT_SPLIT_DROPPED_META`) listed the meta a
+     split must not copy. That replaced a blocklist the split rule applied
+     only when `view === "agent"`. Since 2026-09-30 `splitBlockDef` replaces
+     it: the block a split creates, which for the agent is a fresh picker
+     (`SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md`). No view-name check
+     remains in shared header, frame, zoom, key or
      pane-menu code; `command-registry.ts`/`keymodel-blockcreate.ts` still
      *create* terminals by name, which is a choice of default, not a check.
    - **5c (dropped, 2026-09-25):** backend `defaultMeta` from the manifest.

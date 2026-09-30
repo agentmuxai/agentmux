@@ -88,7 +88,7 @@ check_version() {
 # (Rust's `target_arch` convention), NOT `cef_macos_arm64` (Apple's
 # ecosystem convention). The script HAS to match that directory layout
 # or the cargo-cache fallback silently misses every candidate. The fact
-# that `agentmux-cef/src/sidecar.rs:386` separately maps `aarch64 →
+# that `crates/cef/src/sidecar.rs:386` separately maps `aarch64 →
 # arm64` is for the agentmux-srv binary FILENAME, not directory naming
 # — different concern. Don't "fix" this to arm64; verified empirically:
 #   $ ls target/release/build/cef-dll-sys-*/out/ | grep cef_macos

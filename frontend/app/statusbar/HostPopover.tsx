@@ -83,14 +83,14 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     // mDNS TXT record" — true when this shipped (PR #2243, 2026-07-20), and
     // false since PR #2572 (2026-08-14, <removed-spec>.md
     // LAN P0-1) narrowed the mDNS/UDP-broadcast credential to a separate,
-    // scoped `lan_key` (`Config::lan_key`, `agentmux-srv/src/config.rs`) —
+    // scoped `lan_key` (`Config::lan_key`, `crates/srv/src/config.rs`) —
     // see that field's own doc comment for what it's now limited to. QR
     // pairing was never updated to match, so it grants strictly more than
     // its own original rationale claimed it did.
     //
     // Left as the full key for now, not narrowed to `lan_key`, because
     // `lan_key` cannot reach `GET /agentmux/discovery`
-    // (`lan_or_full_auth_middleware` in `agentmux-srv/src/server/mod.rs`
+    // (`lan_or_full_auth_middleware` in `crates/srv/src/server/mod.rs`
     // grants exactly three routes, none of them that one) — swapping it in
     // here would silently break the one thing QR pairing exists for (the
     // mobile app's Agents list actually populating). Fixing this properly

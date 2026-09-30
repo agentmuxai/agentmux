@@ -3,6 +3,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, type Accessor } from "solid-js";
+import { readZoom } from "@/app/store/zoom-factor";
 
 // Section ids are internal and stay stable across renames (they're
 // persisted in block.meta["armory:section"] — changing an id would strand
@@ -81,11 +82,7 @@ export class ArmoryViewModel {
         this.blockId = ctx.blockId;
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
-        this.zoomAtom = createMemo<number>(() => {
-            const z = meta()?.["term:zoom"];
-            if (typeof z !== "number" || isNaN(z)) return 1.0;
-            return Math.max(0.5, Math.min(2.0, z));
-        });
+        this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<ArmorySection>(() => {
             const s = meta()?.["armory:section"] as LegacyArmorySection | undefined;
             if (s === "native_memory") return "memory";

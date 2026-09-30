@@ -1,0 +1,811 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Canonical HTTP request/response DTOs shared between agentmux-srv,
+//! agentmux-mcp, and agentmux-bashwrap.  Every struct here is the single
+//! source of truth for the corresponding wire shape; the three crates all
+//! import rather than redeclare these types.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+// ── MPS publish ───────────────────────────────────────────────────────────────
+
+/// `POST /agentmux/wps/publish` — shared client/server envelope.
+///
+/// Sent by `agentmux-bashwrap` and received by `agentmux-srv`.
+/// Mirrors `MuxEvent` but omits the server-populated `sender` field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WpsPublishRequest {
+    pub event: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub persist: usize,
+    pub data: serde_json::Value,
+}
+
+// ── Shell ─────────────────────────────────────────────────────────────────────
+
+/// `POST /api/v1/shell/create`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellCreateRequest {
+    pub agent_block_id: String,
+    pub cmd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    /// If true, pipe the child's stdin so ShellInput() can write to it.
+    /// Default false (stdin is /dev/null) — avoids blocking programs that
+    /// read stdin to EOF (e.g. `cat` with no args).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_stdin: Option<bool>,
+}
+
+/// Response from `POST /api/v1/shell/create`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellCreateResponse {
+    pub shell_id: String,
+}
+
+/// `POST /api/v1/shell/stop`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStopRequest {
+    pub shell_id: String,
+}
+
+/// Response from `POST /api/v1/shell/stop`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStopResponse {
+    pub stopped: bool,
+}
+
+/// `POST /api/v1/shell/input` — write text to a running shell's stdin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellInputRequest {
+    pub shell_id: String,
+    /// Text to write. A newline is appended automatically so single answers
+    /// like "y" work without the caller knowing the line discipline.
+    pub text: String,
+}
+
+/// Response from `POST /api/v1/shell/input`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellInputResponse {
+    /// false if the shell is not running, has no captured stdin, or the write failed.
+    pub written: bool,
+    /// Why the write did not happen (None when `written` is true). Lets callers
+    /// distinguish "shell exited" from "shell is running but was created without
+    /// capture_stdin=true", which are otherwise indistinguishable from `written`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ShellInputFailure>,
+}
+
+/// Reason a `ShellInput` write did not happen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellInputFailure {
+    /// The shell id is unknown or the process has already exited.
+    NotRunning,
+    /// The shell is running but was created without `capture_stdin=true`, so its
+    /// stdin is `/dev/null` — recreate it with capture_stdin to send input.
+    StdinNotCaptured,
+    /// The stdin relay is gone / the write channel is closed (process closed stdin).
+    WriteFailed,
+}
+
+/// `POST /api/v1/shell/status` — query whether a shell is still running.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStatusRequest {
+    pub shell_id: String,
+}
+
+/// Response from `POST /api/v1/shell/status`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStatusResponse {
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub line_count: u64,
+}
+
+// ── PTY Shell ─────────────────────────────────────────────────────────────────
+//
+// A REAL PTY-backed shell (not the piped subprocess `Shell` above) — for
+// driving genuinely interactive programs that check for a real terminal
+// (Sharprompt-style wizards, `sudo`, `ssh`, REPLs). Reuses the same backend
+// `blockcontroller::shell` already uses for the `term` widget and
+// `AgentShellSubblock.tsx`; this is a new agent-facing entry point onto
+// existing PTY plumbing, not a new implementation. See
+// docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md.
+//
+// Deliberately NOT UI-driven: every one of these is a plain backend RPC
+// (agent -> agentmux-mcp -> agentmux-srv), with no dependency on any window
+// being open, focused, or even rendering the shell's `term` sub-block — the
+// same posture the existing `Shell`/`ShellInput` family already has.
+//
+// `create` attaches to (creating if needed) the SAME shell a human's
+// composer-drawer session uses, not an independent, invisible one —
+// whichever side gets there first, the other joins. While the agent is
+// actively writing (`input`/`resize`), the human's own keyboard input to
+// that shell is locked out, for a short, self-expiring window
+// (`AGENT_LOCK_WINDOW_MS`) rather than an explicit lock/unlock the agent
+// could fail to release — "bound to the shell only when necessary," per
+// the repo owner's own framing of the requirement.
+
+/// `POST /api/v1/ptyshell/create`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellCreateRequest {
+    pub agent_block_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u16>,
+}
+
+/// Response from `POST /api/v1/ptyshell/create`. `shell_id` is the new
+/// sub-block's id — the same value every other `PtyShell*` call takes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellCreateResponse {
+    pub shell_id: String,
+}
+
+/// `POST /api/v1/ptyshell/input` — write raw text to the PTY, as if typed.
+///
+/// `agent_block_id` is filled in by `agentmux-mcp` from its own trusted
+/// env (`AGENTMUX_AGENT_BUS_ID`/`AGENTMUX_BLOCKID`), never a model-facing
+/// tool parameter — same non-forgeable guarantee `agent_slug()` documents.
+/// It's what lets the backend verify `shell_id` is actually a sub-block of
+/// THIS caller's own pane before acting on it (see
+/// `is_owned_by_agent` in `agentmux-srv`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellInputRequest {
+    pub shell_id: String,
+    pub agent_block_id: String,
+    pub text: String,
+}
+
+/// Response from `POST /api/v1/ptyshell/input`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellInputResponse {
+    pub written: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `POST /api/v1/ptyshell/resize` — resize the PTY. Some TUIs render
+/// differently or wrap badly at the fallback geometry (25x200).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellResizeRequest {
+    pub shell_id: String,
+    pub agent_block_id: String,
+    pub rows: u16,
+    pub cols: u16,
+}
+
+/// Response from `POST /api/v1/ptyshell/resize`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellResizeResponse {
+    pub resized: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `POST /api/v1/ptyshell/read` — read back the shell's raw output tail.
+///
+/// This is a raw byte/line log, not a rendered-screen snapshot — a
+/// full-screen TUI that redraws in place (cursor movement, `\r`-only
+/// updates) will not read back the way it visually renders. Sufficient for
+/// line-oriented wizards (the common case); see the spec's §5 for the
+/// rendered-snapshot follow-up this deliberately does not attempt yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellReadRequest {
+    pub shell_id: String,
+    pub agent_block_id: String,
+    /// Number of trailing lines to return. Defaults to 200.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail_lines: Option<u32>,
+}
+
+/// Response from `POST /api/v1/ptyshell/read`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellReadResponse {
+    pub content: String,
+    /// True if the shell's output has more lines than `tail_lines` returned.
+    pub truncated: bool,
+}
+
+/// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStatusRequest {
+    pub shell_id: String,
+    pub agent_block_id: String,
+}
+
+/// Response from `POST /api/v1/ptyshell/status`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStatusResponse {
+    /// False both for "still initializing" and "exited" — callers that need
+    /// to distinguish those should check `exit_code` (`None` for the former).
+    pub running: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+}
+
+/// `POST /api/v1/ptyshell/stop` — release the agent's lock on the shell
+/// *now*, without waiting for `AGENT_LOCK_WINDOW_MS` to lapse.
+///
+/// Does **not** kill the process or delete the block. The shell this API
+/// drives is, by default, the same one a human's composer-drawer session
+/// uses (see `META_KEY_SHELL_SUBBLOCK_ID`) — it's a shared, pane-scoped
+/// resource with the pane's own lifetime ("only killed when the pane
+/// closes," `AgentShellSubblock.tsx`'s own doc comment), not a private,
+/// disposable one this tool owns outright. An earlier version of this API
+/// (PR #3177) did delete on stop, which was correct for that version's
+/// model (an agent's own throwaway shell) but would destroy a human's live
+/// terminal session under this one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStopRequest {
+    pub shell_id: String,
+    pub agent_block_id: String,
+}
+
+/// Response from `POST /api/v1/ptyshell/stop`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStopResponse {
+    /// False if the id was unrecognized, wasn't owned by the caller, or
+    /// simply had no active lock to release.
+    pub released: bool,
+}
+
+// ── Inject (SendMessage + Loop) ───────────────────────────────────────────────
+
+/// `POST /agentmux/reactive/inject` — deliver a message to an agent.
+///
+/// Used by the `SendMessage` and `Loop` MCP tools.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InjectRequest {
+    pub target_agent: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_agent: Option<String>,
+    /// Message id this jekt was signed under — required for `jekt_sig` to be
+    /// verifiable (the signed material binds msgid, sender, target, and
+    /// timestamp together). `None` when unsigned (e.g. `AGENTMUX_JEKT_KEY`
+    /// wasn't available — legacy/unverified, same as omitting `jekt_sig`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    /// Unix seconds this jekt was signed at — part of the signed material,
+    /// not just a display timestamp. See `agentmux_common::jekt_sign`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts_secs: Option<i64>,
+    /// Base64 HMAC-SHA256 over (msgid, source_agent, target_agent, ts_secs,
+    /// message), signed with the sender's own `AGENTMUX_JEKT_KEY`. Absent
+    /// when the sending agent has no key yet (first-ever send before one is
+    /// provisioned) — srv treats an absent/invalid signature as unverified,
+    /// not as an error, and downgrades trust accordingly rather than
+    /// rejecting the message outright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jekt_sig: Option<String>,
+    /// Base64 Ed25519 signature over the same signed material as `jekt_sig`,
+    /// produced with the sender's own `AGENTMUX_LAN_KEY`
+    /// (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.3). Sent unconditionally
+    /// alongside `jekt_sig` regardless of the message's actual destination
+    /// — this process can't know in advance whether delivery will end up
+    /// LAN, host, or WAN (that's a server-side routing decision); srv only
+    /// ever consults this field when it has independently determined
+    /// `delivery_tier == "lan"`, so it's simply ignored otherwise. Absent
+    /// under the same "no key yet" conditions as `jekt_sig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_sig: Option<String>,
+    /// The sending instance's channel id (`AGENTMUX_CHANNEL`, injected into
+    /// the MCP env at spawn alongside the keys). Bound into `channel_sig`'s
+    /// signed material (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5) so
+    /// a signature minted in one channel can't be replayed as the same agent
+    /// speaking from another. Absent whenever `channel_sig` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_channel: Option<String>,
+    /// Base64 Ed25519 signature for the same-machine, different-instance
+    /// (cross-channel) tier, produced with the sender's own `AGENTMUX_LAN_KEY`
+    /// over a domain-separated payload that also binds `source_channel`
+    /// (`agentmux_common::jekt_sign::sign_channel_jekt`). Sent unconditionally
+    /// for the same reason `lan_sig` is: srv only consults it once it has
+    /// itself labelled the delivery `channel`. Absent under the same "no key
+    /// yet" conditions as `lan_sig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_sig: Option<String>,
+    /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
+    /// produced with the sender's own `AGENTMUX_WAN_KEY` — a *different* key
+    /// from `AGENTMUX_LAN_KEY` — over a domain-separated payload
+    /// (`agentmux_common::jekt_sign::sign_wan_jekt`,
+    /// <removed-spec>.md §3.1/§3.3). Sent
+    /// unconditionally for the same reason `lan_sig` and `channel_sig` are:
+    /// the sending process cannot know which tier srv will route the message
+    /// over.
+    ///
+    /// **Nothing verifies this yet.** Verification requires resolving
+    /// `(sender_account, source_agent)` to exactly one published key, which is
+    /// ambiguous until muxbus's injection storage is tenant-scoped (that
+    /// spec's §2.1, phase W2). The field is carried now so that keys are
+    /// minted and propagating by the time a verifier exists — an agent only
+    /// gets a key when it is spawned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wan_sig: Option<String>,
+    /// The sending machine's host label (`AGENTMUX_HOST_LABEL`, injected at
+    /// spawn). With `source_channel` this identifies which AgentMux *instance*
+    /// under the sending account owns the keypair `wan_sig` was made with —
+    /// one account can run the same agent name on several machines, and on
+    /// several build channels of one machine, each with its own database and
+    /// therefore its own key (<removed-spec>.md
+    /// §2.1.2). Bound into the signed material, so a wrong value selects a key
+    /// the signature cannot verify under rather than granting anything.
+    /// Absent whenever `wan_sig` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wan_source_host: Option<String>,
+}
+
+// ── Pane ──────────────────────────────────────────────────────────────────────
+
+/// `POST /api/v1/pane/open` — open a new pane.
+///
+/// Structurally equivalent to `rpc_types::CommandPaneOpenData` (same wire
+/// fields) so the two are interchangeable on the wire; srv deserializes into
+/// `CommandPaneOpenData`, mcp serializes from this type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneOpenRequest {
+    pub view: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_direction: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_reference_block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_expanded: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating: Option<bool>,
+    /// `Some(true)`, `view: "editor"` only: explicit opt-in to reuse an
+    /// already-open Editor pane in the caller's own tab (identified via
+    /// `split_reference_block_id`) instead of always creating a new one.
+    /// Set only by the `OpenEditor` MCP tool — NOT inferred from other
+    /// fields, since other legitimate `pane.open` callers also set
+    /// `split_reference_block_id` for split placement without wanting
+    /// reuse (`EditorViewModel.openToTheSide`/`openInTerminal`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse_editor_pane: Option<bool>,
+}
+
+/// Response from `POST /api/v1/pane/open`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneOpenResponse {
+    pub block_id: String,
+}
+
+/// `POST /api/v1/pane/title` — set a pane's display title.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneTitleRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    pub title: String,
+}
+
+// ── Tab ───────────────────────────────────────────────────────────────────────
+
+/// `POST /api/v1/tab/activate` — switch the active tab.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabActivateRequest {
+    pub tab_id: String,
+}
+
+/// `POST /api/v1/tab/new` — create a new tab in a workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabNewRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// `POST /api/v1/tab/name` — rename a tab.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabNameRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+    pub name: String,
+}
+
+// ── Window ────────────────────────────────────────────────────────────────────
+
+/// `POST /api/v1/window/focus` — bring a window to the foreground.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowFocusRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+}
+
+/// `POST /api/v1/window/name` — set a window's display name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowNameRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+}
+
+// ── Workspace ─────────────────────────────────────────────────────────────────
+
+/// `POST /api/v1/workspace/name` — rename a workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceNameRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    pub name: String,
+}
+
+// ── UI automation ───────────────────────────────────────────────────────────
+//
+// `block_id` is NOT a field on any of these requests, on purpose (2026-08-19,
+// reagent + Codex review, PR #2662 — a client-supplied `block_id` here was a
+// real cross-agent content-disclosure vulnerability: /api/v1/ui/* shares the
+// same instance-wide X-AuthKey every App-API route trusts, and any agent can
+// read that key from its own environment, so a bare `block_id` field could
+// never be trusted from the request body no matter which layer stamped it).
+//
+// Instead, every request here carries `UiAutomationAuth`: the calling
+// agent's own slug, a timestamp, and an HMAC-SHA256 signature over them
+// using that agent's own `AGENTMUX_JEKT_KEY` (the SAME per-agent signing key
+// already used for jekt sender authentication — reused rather than inventing
+// a parallel credential system; see `agentmux_common::jekt_sign`). srv
+// verifies the signature against the claimed agent_id's key on file
+// (`Store::agent_jekt_key_load`) and, ONLY once that succeeds, looks up that
+// agent's actual current block_id server-side (`ReactiveHandler::get_agent`)
+// — the block_id a UI-automation call actually operates on is never taken
+// from the client at all, so there is nothing left to spoof. See
+// `crates/srv/src/server/ui_handlers.rs::verified_block_id` and
+// docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md.
+
+/// Identity proof shared by every `/api/v1/ui/*` request. `sig` is
+/// `jekt_sign::sign_jekt(key, "ui-automation-identity", agent_id,
+/// "__srv__", ts_secs, "")` — the fixed msgid/target_agent/message values
+/// exist purely for domain separation from real jekt message signatures
+/// (no genuine jekt uses this literal msgid, and "__srv__" is not a
+/// spawnable agent name), not because those fields carry meaning here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiAutomationAuth {
+    pub agent_id: String,
+    pub ts_secs: i64,
+    pub sig: String,
+}
+
+/// `POST /api/v1/ui/screenshot`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiScreenshotRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+}
+
+/// Response for `POST /api/v1/ui/screenshot`. `path` is a file already
+/// written to disk (openable via the `OpenMedia` tool); `png_base64` is the
+/// same image inline, for a caller that can render an MCP `ImageContent`
+/// block directly without a second round trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiScreenshotResponse {
+    pub path: String,
+    pub png_base64: String,
+}
+
+/// `POST /api/v1/ui/click`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiClickRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub selector: String,
+}
+
+/// `POST /api/v1/ui/query`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiQueryRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub selector: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+// ── Browser-pane deep control (Navigate/Back/Forward/Reload/Eval/
+//    DispatchKey/FocusElement/FocusInfo) ─────────────────────────────────
+//
+// Same `UiAutomationAuth`-derived own-pane scoping as the UI-automation
+// section above (block_id is never a client field, always server-derived
+// via `verified_block_id`). Additionally, `Navigate`/`Back`/`Forward`/
+// `Reload`/`Eval` only succeed when the caller's own pane resolves to a
+// DEDICATED browser-pane CDP target (not a DOM node inside a page shared
+// with other panes / the app's own chrome) — enforced host-side by
+// `crates/cef/src/browser_api/routes.rs::reject_if_shared_target`.
+// See docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md.
+
+/// `POST /api/v1/ui/browser/navigate`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserNavigateRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub url: String,
+}
+
+/// `POST /api/v1/ui/browser/back`, `/forward`, `/reload` — all three only
+/// need the target block id; `ignore_cache` is meaningful for `/reload`
+/// only (ignored by back/forward, mirrors `browser_api::types::HistoryReq`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserHistoryRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_cache: Option<bool>,
+}
+
+/// `POST /api/v1/ui/browser/eval`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserEvalRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub script: String,
+    /// If true and the script returns a Promise, wait for it to resolve
+    /// before returning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub await_promise: Option<bool>,
+}
+
+/// `POST /api/v1/ui/browser/dispatch_key`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserDispatchKeyRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Optional CSS selector: focus this element before dispatching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    /// Exactly one of `text`/`key` must be set. Sent via `Input.insertText`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Named key (`Enter`, `Tab`, `Escape`, `Backspace`, arrow keys,
+    /// `Space`) sent as a `keyDown`+`keyUp` pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// `POST /api/v1/ui/browser/focus_element`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserFocusElementRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub selector: String,
+}
+
+/// `POST /api/v1/ui/browser/focus_info`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserFocusInfoRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+}
+
+/// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
+/// See docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md.
+///
+/// `auth` is reused unchanged from `UiAutomationAuth` (the same signed
+/// per-agent identity `verified_block_id` already checks for UI automation)
+/// — it is what resolves the caller's OWN pane when `block_id` is omitted,
+/// and what supplies a verified `source_agent` for the audit log when
+/// `block_id` targets another agent's pane (§5.2 of that spec).
+/// `QuitSelf` — an agent ends its own session on the user's direct
+/// instruction (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6). There is
+/// no target field: the caller's own block, from `auth`, is the only one it
+/// can name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuitSelfRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// One line: why. Shown to the user and audited.
+    pub reason: String,
+    /// The user's own words telling the agent to quit, verbatim. Checked
+    /// against the message that started the current turn (§6.3).
+    pub user_instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClosePaneRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target pane to close. Omitted = the caller's own pane (self-only,
+    /// no ownership check needed — it's already the caller's). Present =
+    /// fleet tier: close ANY pane by block_id, no ownership check on the
+    /// TARGET either, by design (§5.1) — this is the capability that
+    /// motivated the whole spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    /// Optional human-readable reason, threaded into the audit log entry
+    /// when closing another agent's pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// `POST /api/v1/agent/dev_server/register` — backs the `RegisterDevServer`
+/// MCP tool. See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+///
+/// `auth` is reused unchanged from `UiAutomationAuth`, same as
+/// `ClosePaneRequest` above — the calling agent proves it IS `auth.agent_id`
+/// via its own `AGENTMUX_JEKT_KEY` signature; there is no client-supplied
+/// agent id to spoof. The backend address the routing table actually
+/// stores is resolved server-side from THAT agent's own container (never a
+/// client-supplied address) — this request only ever supplies the PORT the
+/// caller's own dev server is listening on inside its own container.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDevServerRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Project name — becomes part of the routing hostname,
+    /// `<project>-<agent_id>.localhost`. Lowercased server-side before use;
+    /// should be a short, hostname-safe slug.
+    pub project: String,
+    /// Port the dev server is listening on INSIDE the caller's own
+    /// container (container-internal — never a host-published port).
+    pub port: u16,
+}
+
+/// Response for `POST /api/v1/agent/dev_server/register`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDevServerResponse {
+    /// The full routable URL, e.g. `"http://pulse-korp.localhost:8090"` —
+    /// what to actually browse to.
+    pub url: String,
+}
+
+#[cfg(test)]
+mod app_api_manifest_contract_tests {
+    //! Rust half of the DRY contract check for the `shell.*` routes,
+    //! described in docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md
+    //! §2.8 — same mechanism and rationale as
+    //! `crates/srv/src/backend/rpc_types/block.rs`'s
+    //! `app_api_manifest_contract_tests` module for `pane.open`. A Node-side
+    //! test (`muxsh.contract.test.mjs`) makes the matching assertion against
+    //! the same manifest.
+    use super::*;
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    fn repo_root() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("crates/<name> is two levels below the repo root")
+            .to_path_buf()
+    }
+
+    fn load_manifest() -> serde_json::Value {
+        let path = repo_root().join("docs/specs/app-api-manifest.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        serde_json::from_str(&raw).expect("app-api-manifest.json must be valid JSON")
+    }
+
+    fn manifest_fields(manifest: &serde_json::Value, route: &str, key: &str) -> HashSet<String> {
+        manifest["routes"][route][key]
+            .as_array()
+            .unwrap_or_else(|| panic!("routes.{route}.{key} must be an array"))
+            .iter()
+            .map(|v| v.as_str().expect("field name must be a string").to_string())
+            .collect()
+    }
+
+    fn assert_exact_match(manifest_fields: &HashSet<String>, struct_fields: &HashSet<String>, route: &str) {
+        let manifest_only: Vec<_> = manifest_fields.difference(struct_fields).collect();
+        let struct_only: Vec<_> = struct_fields.difference(manifest_fields).collect();
+        assert!(
+            manifest_only.is_empty() && struct_only.is_empty(),
+            "app-api-manifest.json's {route} has drifted from the real struct — \
+             in manifest but not the struct: {manifest_only:?}; \
+             in the struct but not the manifest: {struct_only:?}"
+        );
+    }
+
+    #[test]
+    fn shell_create_request_fields_match_the_real_struct() {
+        let manifest = load_manifest();
+        let instance = ShellCreateRequest {
+            agent_block_id: "b".to_string(),
+            cmd: "echo hi".to_string(),
+            cwd: Some("/tmp".to_string()),
+            title: Some("t".to_string()),
+            env: Some(Default::default()),
+            capture_stdin: Some(true),
+        };
+        let value = serde_json::to_value(&instance).expect("must serialize");
+        let struct_fields: HashSet<String> =
+            value.as_object().expect("must be an object").keys().cloned().collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.create", "requestFields"), &struct_fields, "shell.create.requestFields");
+    }
+
+    #[test]
+    fn shell_create_response_fields_match_the_real_struct() {
+        let manifest = load_manifest();
+        let instance = ShellCreateResponse { shell_id: "s".to_string() };
+        let value = serde_json::to_value(&instance).expect("must serialize");
+        let struct_fields: HashSet<String> =
+            value.as_object().expect("must be an object").keys().cloned().collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.create", "responseFields"), &struct_fields, "shell.create.responseFields");
+    }
+
+    #[test]
+    fn shell_status_fields_match_the_real_structs() {
+        let manifest = load_manifest();
+        let req = ShellStatusRequest { shell_id: "s".to_string() };
+        let req_fields: HashSet<String> = serde_json::to_value(&req)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.status", "requestFields"), &req_fields, "shell.status.requestFields");
+
+        let resp = ShellStatusResponse { running: true, exit_code: Some(0), line_count: 1 };
+        let resp_fields: HashSet<String> = serde_json::to_value(&resp)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.status", "responseFields"), &resp_fields, "shell.status.responseFields");
+    }
+
+    #[test]
+    fn shell_stop_fields_match_the_real_structs() {
+        let manifest = load_manifest();
+        let req = ShellStopRequest { shell_id: "s".to_string() };
+        let req_fields: HashSet<String> = serde_json::to_value(&req)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.stop", "requestFields"), &req_fields, "shell.stop.requestFields");
+
+        let resp = ShellStopResponse { stopped: true };
+        let resp_fields: HashSet<String> = serde_json::to_value(&resp)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.stop", "responseFields"), &resp_fields, "shell.stop.responseFields");
+    }
+}

@@ -305,7 +305,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
         case LayoutTreeActionType.StackMove: {
             // Mirrors StackPush's leaf resolution above; `activate` rides on
             // `action.focused` (see `queue_target_stack_move`'s doc comment,
-            // agentmux-srv/src/server/service/layout_helpers.rs).
+            // crates/srv/src/server/service/layout_helpers.rs).
             let leaf = model?.getNodeByBlockId(action.blockid);
             if (!leaf && model.treeState.rootNode) {
                 leaf = findNodeByBlockId(model.treeState.rootNode, action.blockid);

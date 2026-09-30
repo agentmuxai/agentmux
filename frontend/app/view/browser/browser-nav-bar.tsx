@@ -131,7 +131,7 @@ export function BrowserNavBar(props: {
     };
 
     // Ctrl+L (Cmd+L on macOS) is dead by default in a browser pane — CEF
-    // intercepts it at the pre-key stage (agentmux-cef/src/client/handlers.rs)
+    // intercepts it at the pre-key stage (crates/cef/src/client/handlers.rs)
     // since a pane's keystrokes go to the CEF child browser, not this webview,
     // and emits `browser-pane-shortcut` instead of forwarding to the (possibly
     // untrusted) page. See issue #1190.
@@ -250,7 +250,7 @@ export function BrowserNavBar(props: {
 
     // Start page — unlike bookmarks, no local signal/rollback needed: the
     // RPC handler updates the live config and broadcasts it BEFORE
-    // responding (agentmux-srv/src/server/app_api/browser_start_page.rs
+    // responding (crates/srv/src/server/app_api/browser_start_page.rs
     // step 2/3), so by the time this await resolves, fullConfigAtom() — and
     // therefore browserStartPageAtom() — is already current in THIS window
     // and every other open one. See

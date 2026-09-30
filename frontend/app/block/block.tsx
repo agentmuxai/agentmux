@@ -369,7 +369,7 @@ function Block(props: BlockProps): JSX.Element {
     // that are owned by the effect when unrelated meta fields change.
     const viewType = createMemo(() => blockData()?.meta?.view);
     // Whether this block has a persisted session id (`agent:sessionid`) --
-    // i.e. whether `scan_session_subagents` (agentmux-srv/src/server/reactive.rs)
+    // i.e. whether `scan_session_subagents` (crates/srv/src/server/reactive.rs)
     // WILL definitely run for this block, not just whether it happens to have
     // run yet. `useSubagentBackfillGate` needs this precise distinction — see
     // its own doc comment (reagentx P0, PR #2781 round 4) for why inferring it

@@ -5,7 +5,7 @@
 // Phase E.6 — multi-source dispatcher with version tracking + saga buffering.
 //
 // Mirrors `agentmux_common::ipc::Event` on the wire. The host's CEF
-// JS bridge (`agentmux-cef/src/launcher_event_bridge.rs`) calls
+// JS bridge (`crates/cef/src/launcher_event_bridge.rs`) calls
 // `window.__agentmux_launcher_event(<json>)` once per top-level
 // renderer per launcher event.
 //
@@ -119,7 +119,7 @@ function dedupKey(evt: LauncherEvent): string {
  *
  * **Launcher restart pass-through (codex P1, this PR round 2):** when
  * the launcher process restarts, its `event_version` resets to 1
- * (`agentmux-launcher/src/state.rs::default`). `PerSourceTracker.deliver`
+ * (`crates/launcher/src/state.rs::default`). `PerSourceTracker.deliver`
  * has explicit handling for the v=1 sentinel — it resets `lastVersion`
  * so post-restart events aren't dropped as stale. This bridge-level
  * dedup runs BEFORE the tracker, so without an equivalent reset the

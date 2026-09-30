@@ -195,7 +195,7 @@ Rust changes are **not** auto-rebuilt — run `task build:backend` (or `task bui
 
 ### Backend Rebuild
 
-If you modify Rust backend code (`agentmux-srv/src/`):
+If you modify Rust backend code (`crates/srv/src/`):
 
 ```bash
 # Rebuild Rust binary
@@ -264,8 +264,8 @@ task dev
 
 # 4. Make changes to code
 # - Frontend (frontend/): Auto-reloads
-# - Rust backend (agentmux-srv/src/): Run `task build:backend`, restart dev
-# - Host (agentmux-cef/src/): Run `task build:host`, restart dev
+# - Rust backend (crates/srv/src/): Run `task build:backend`, restart dev
+# - Host (crates/cef/src/): Run `task build:host`, restart dev
 
 # 5. Test changes in running app
 

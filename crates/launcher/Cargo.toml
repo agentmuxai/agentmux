@@ -1,0 +1,181 @@
+[package]
+name = "agentmux-launcher"
+version.workspace = true
+description = "AgentMux Launcher — Job Object + IPC + saga coordinator + srv lifecycle"
+authors = ["AgentMux Corp"]
+edition = "2021"
+
+[[bin]]
+name = "agentmux-launcher"
+path = "src/main.rs"
+
+[dependencies]
+# Phase B foundation: launcher gains a Tokio runtime so it can
+# manage srv + host concurrently and (in later sub-PRs) host the
+# named-pipe IPC server. Prior to Phase B the launcher was a tiny
+# sync DLL-path-fixup + spawner; now it's the privileged owner per
+# docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "process",
+    "io-util",
+    "time",
+    "sync",
+    # Phase 1 macOS/Linux dev integration: tokio::signal::unix (SIGINT /
+    # SIGTERM handlers in run_unix's supervise loop).
+    "signal",
+    # Phase B.2: tokio::net::windows::named_pipe lives in this feature.
+    "net",
+    # Phase D.2: tokio::fs (OpenOptions, File, rename) for the event-log
+    # disk-persistence writer.
+    "fs",
+] }
+# Platform-default data_dir / config_dir resolution. Host already
+# uses this; launcher must compute the SAME paths so both processes
+# agree on the data dir for CEF cache, srv DB, etc.
+dirs = "5"
+# RFC3339 timestamps for backend_started_at logs, kept stable for
+# log-format compatibility with the host's existing format.
+# LSD-1: also used by the launcher saga log for RFC3339 started_at /
+# ended_at columns; `serde` feature lets DateTime<Utc> participate in
+# serde_json round-trips for the vacuum cutoff parameter and for any
+# future structured-log integration.
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+# UUID v4 for the shared auth key launcher generates and gives to
+# both srv (env var) and host (env var). Same generation method the
+# host uses today (uuid::Uuid::new_v4) so the format is identical.
+uuid = { version = "1", features = ["v4"] }
+# Phase B.2: typed Command / Event protocol over named pipes. The
+# wire types live in agentmux-common::ipc so launcher (server) and
+# host (client) share one definition; serde_json is the format.
+agentmux-common = { path = "../common" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# LSD-1: `#[derive(thiserror::Error)]` on the saga log's `LogError`
+# enum keeps the SQLite + serde_json + io error wrapping clean. Same
+# pin as srv so any cross-crate refactor stays trivial.
+thiserror = "1"
+# OS notification presenter (src/notify/): the launcher's WebSocket client to
+# srv's /ws event bus. Same versions srv/cef already use — no new crates in the
+# graph. Plain ws:// to 127.0.0.1, so no TLS features.
+tokio-tungstenite = "0.24"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_System_LibraryLoader",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    # GlobalMemoryStatusEx / MEMORYSTATUSEX — the launcher's commit-free probe
+    # for memory-aware host relaunch (mem_supervisor.rs;
+    # SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16).
+    "Win32_System_SystemInformation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_ErrorReporting",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Foundation",
+    # CreateJobObjectW takes SECURITY_ATTRIBUTES* — guarded by this
+    # feature in windows-sys 0.59 even though the function lives in
+    # Win32_System_JobObjects. Without it, CreateJobObjectW is absent.
+    "Win32_Security",
+    # Phase B.6: MessageBoxW for the user-facing "AgentMux is already
+    # running" dialog when the named-pipe single-instance bind fails.
+    "Win32_UI_WindowsAndMessaging",
+    # Pre-splash: BeginPaint/EndPaint, CreateSolidBrush, FillRect,
+    # DeleteObject, GetClientRect for the layered popup window.
+    "Win32_Graphics_Gdi",
+    # HKCU AppUserModelId registration for OS toasts (src/notify/windows.rs).
+    "Win32_System_Registry",
+    # MiniDumpWriteDump (Win32_System_Diagnostics_Debug) is gated on these
+    # three in windows-sys 0.59 — external hang dump of a wedged host
+    # (src/host_hang_dump.rs; SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14).
+    "Win32_Storage_FileSystem",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
+] }
+# WinRT toast notifications (src/notify/windows.rs). 0.61 is already in the
+# lockfile via sysinfo; windows-sys has no WinRT projections.
+windows = { version = "0.61", features = [
+    "UI_Notifications",
+    "Data_Xml_Dom",
+    "Foundation",
+    "Win32_System_WinRT",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+# Optional tray / menu-bar icon (issue #2977 Workstream 1). Scoped to the two
+# platforms with a backend (`src/tray/windows.rs`, `src/tray/macos.rs`) —
+# declaring these for a platform with no consumer would pull the objc2/AppKit
+# or GTK stack into a build for nothing (ReAgent P2 on PR #2996).
+#
+# Linux will add `ksni` instead — NOT the same crate — because tray-icon's
+# Linux path needs a GTK3 main loop running alongside CEF's own GLib loop
+# (SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md §2), while `ksni` is
+# pure D-Bus StatusNotifierItem with no toolkit loop.
+#
+# `default-features = false` keeps the crates' own `gtk`/`libxdo` defaults
+# off; those are Linux-only concerns and would drag GTK in.
+tray-icon = { version = "0.24", default-features = false }
+muda = { version = "0.19", default-features = false }
+# Decodes embedded PNGs into the RGBA buffer `tray_icon::Icon::from_rgba`
+# wants: the macOS menu-bar template glyph (`resources/menubar-template.png`),
+# and on Windows the brand mark behind the tray's attention badge
+# (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §4.2). Already in the graph via
+# tray-icon, so this adds nothing new.
+png = "0.18"
+
+
+[target.'cfg(unix)'.dependencies]
+# Phase 1 macOS/Linux dev integration (SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_
+# 2026_05_30): the Unix supervisor sends SIGTERM to its children on
+# shutdown so the CEF host can reap its render subprocesses gracefully
+# (a tokio start_kill SIGKILL would orphan them). `kill(2)` is the only
+# libc surface we need; tokio's process_group handles the spawn side.
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux notification presenter + tray (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24
+# Phase 3): freedesktop Desktop Notifications spoken directly over async zbus
+# (pure Rust, no libdbus/libnotify; tokio flavour, same as ksni's), and a
+# StatusNotifierItem tray via `ksni` rather than tray-icon's GTK path
+# (SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE §2). Both share zbus 5.
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+ksni = { version = "0.3", features = ["blocking"] }
+# Brand pixmap for the SNI tray icon.
+png = "0.18"
+# Session-aware Linux startup splash (SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20).
+# X11 backend: a software-drawn override-redirect splash window (pixmap blit,
+# no GPU). Pure-Rust RustConnection over libxcb; present on every X11 stack.
+# `randr` → primary-monitor centering.
+x11rb = { version = "0.13", features = ["randr"] }
+# Wayland backend: a software-drawn (wl_shm) xdg_toplevel splash for native-
+# Wayland sessions (the default since #1611). No GPU/EGL. wayland-client is used
+# via sctk's reexport so the protocol versions can't skew.
+smithay-client-toolkit = "0.19"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"
+# Decode the splash brain logo at compile time. The PNG (RGBA, transparent
+# background) lives at `resources/brain.png`; build.rs decodes it to raw
+# BGRA bytes that splash.rs `include_bytes!`-s — no runtime PNG decoder
+# in the launcher binary.
+png = "0.17"
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
+# Same compile-time brain.png decode as Windows, but emitting straight RGBA8
+# (brain_rgba.bin) for the Linux X11/Wayland splash backends. Keeps a PNG
+# decoder out of the launcher runtime binary.
+png = "0.17"
+
+[dev-dependencies]
+# Phase B.3: property-based testing for the reducer. Generates
+# arbitrary command sequences and asserts the reducer's invariants
+# hold across all of them — catches edge cases unit tests miss.
+# Dev-only: zero impact on release binary size.
+proptest = "1"
+# LSD-1: NamedTempFile lets the saga log tests round-trip via a real
+# on-disk SQLite file (in addition to the `open_in_memory()` path) so
+# WAL-mode + busy-timeout pragmas exercise their real code paths.
+tempfile = "3"

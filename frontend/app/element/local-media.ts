@@ -150,7 +150,7 @@ export interface FetchMediaOpts {
 // stream-local-file requires (it lives in `authed_routes`, and the
 // query-string `?authkey=` fallback is deliberately restricted to the
 // `/ws` upgrade route only — see auth_middleware's 2026-05-11 audit
-// comment in agentmux-srv/src/server/mod.rs). Fetch the bytes ourselves
+// comment in crates/srv/src/server/mod.rs). Fetch the bytes ourselves
 // with the header (same pattern as fetchMuxFile in mux-file.ts) and
 // hand the element a blob object URL instead. Caller owns revoking it.
 export async function fetchMediaBlob(path: string, opts: FetchMediaOpts = {}): Promise<Blob> {
@@ -173,6 +173,40 @@ export async function fetchMediaBlob(path: string, opts: FetchMediaOpts = {}): P
     const blob = await resp.blob();
     if (opts.maxBytes != null && blob.size > opts.maxBytes) throw new MediaTooLargeError(blob.size);
     return opts.type && blob.type !== opts.type ? new Blob([blob], { type: opts.type }) : blob;
+}
+
+export interface MediaRange {
+    /** The requested bytes, or `null` if srv ignored the Range (then nothing was read). */
+    blob: Blob | null;
+    /** The whole file's size. */
+    total: number;
+}
+
+/**
+ * Reads bytes `start..=end` of a local file (srv answers `206`), and the whole
+ * file's size from `Content-Range`: a poster frame or a size, without
+ * downloading the file (§5).
+ */
+export async function fetchMediaRange(
+    path: string,
+    start: number,
+    end: number,
+    opts: { signal?: AbortSignal; type?: string } = {},
+): Promise<MediaRange> {
+    const headers: Record<string, string> = { Range: `bytes=${start}-${end}` };
+    if (globalThis.window != null) {
+        const authKey = getApi()?.getAuthKey?.();
+        if (authKey) headers["X-AuthKey"] = authKey;
+    }
+    const resp = await fetch(streamUrl(path), { headers, signal: opts.signal });
+    if (!resp.ok) throw new MediaFetchError(resp.status, resp.statusText);
+    if (resp.status !== 206) {
+        void resp.body?.cancel().catch(() => {});
+        return { blob: null, total: Number(resp.headers.get("Content-Length")) || 0 };
+    }
+    const total = Number(/\/(\d+)\s*$/.exec(resp.headers.get("Content-Range") ?? "")?.[1] ?? 0);
+    const blob = await resp.blob();
+    return { blob: opts.type && blob.type !== opts.type ? new Blob([blob], { type: opts.type }) : blob, total };
 }
 
 /** "31.2 MB", "840 KB": for a file card. */
