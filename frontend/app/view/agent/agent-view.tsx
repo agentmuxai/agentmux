@@ -24,7 +24,6 @@ import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { accountPickerItems, planBind, type BindMode } from "./failure/account-picker";
 import {
     getApi,
     getBlockMetaKeyAtom,
@@ -41,10 +40,7 @@ import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import {
     accountLabel,
-    boundAccountEmail,
     loadAccounts,
-    subscribeAccountChanges,
-    type Account,
 } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
@@ -102,7 +98,7 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
-import { computeAccountBindCandidates } from "./failure/bind-account-candidates";
+import { useAccountBinding } from "./failure/useAccountBinding";
 import { retryRecheckAfterBind } from "./failure/recheck-after-bind";
 import { decideSyntheticRow } from "./failure/synthetic-row";
 import { requestAgentTakeover } from "./failure/takeover";
@@ -125,7 +121,6 @@ import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume
 import { useResumePreflight } from "./hooks/useResumePreflight";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
-import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { sendStartupSequence } from "./startup/sendStartupSequence";
 import { createAgentAtoms } from "./state";
 import type { DocumentNode } from "./types";
@@ -1474,84 +1469,12 @@ export const AgentPresentationView = ({
         }
     });
 
-    // ---- Bind-account (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2/§3) ----
-    //
-    // Cross-pane/cross-tab live account cache — same subscription pattern
-    // `AgentLaunchModal.tsx` already uses. Seeded synchronously (no network
-    // round trip; the app-wide cache is already warm) then kept live.
-    const [accountCache, setAccountCache] = createSignal<Account[]>(loadAccounts());
-    createEffect(() => {
-        const unsub = subscribeAccountChanges((list) => setAccountCache(list));
-        onCleanup(unsub);
+    // Bind/switch account for this agent (failure/useAccountBinding.ts).
+    const { authEmail, bindCandidates, onBindAccount, onSwitchAccount, refreshLinkedAccountId } = useAccountBinding({
+        agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
+        providerId: () => provider()?.id,
+        bindExistingAccount: status.bindExistingAccount,
     });
-
-    // This agent's own currently-linked account for its provider, if any —
-    // excluded from bind candidates (nothing to adopt). Refreshed on mount
-    // and whenever this agent's identity links change (below) — the same
-    // event that also drives the auto-unblock check, since both concerns
-    // become stale for the identical reason.
-    const [linkedAccountId, setLinkedAccountId] = createSignal<string | undefined>(undefined);
-    const refreshLinkedAccountId = async () => {
-        const agentDefinitionId = getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined;
-        const prov = provider();
-        if (!agentDefinitionId || !prov) {
-            setLinkedAccountId(undefined);
-            return;
-        }
-        try {
-            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
-            setLinkedAccountId(lastLinkedAccountId(links, prov.id));
-        } catch {
-            setLinkedAccountId(undefined);
-        }
-    };
-    // Re-resolve whenever the agent id or provider resolves or changes — both
-    // come from block meta, which may not have loaded on the first run, and a
-    // one-shot mount-time call left the link (and the chip's email) unset.
-    createEffect(
-        on(
-            () => [getBlockMetaKeyAtom(model.blockId, "agentId")(), provider()?.id] as const,
-            () => void refreshLinkedAccountId()
-        )
-    );
-
-    // The bound account's login email for the composer's sign-in chip
-    // (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) — live across logins and
-    // rebinds via accountCache + linkedAccountId.
-    const authEmail = createMemo(() => boundAccountEmail(accountCache(), linkedAccountId()));
-
-    const bindCandidates = createMemo(() => {
-        const prov = provider();
-        if (!prov) return [];
-        return computeAccountBindCandidates(prov.id, accountCache(), linkedAccountId());
-    });
-
-    // A flat picker of accounts to bind, anchored at the click — same
-    // ContextMenuModel primitive the Armory's Bind-to-Agent menu uses
-    // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md), just a flat
-    // list here (the trigger IS the button — no outer submenu to nest under).
-    // What to do for a given candidate list is `planBind` (failure/account-picker.ts,
-    // unit-tested): the failure row's "adopt" binds a lone candidate at once; the
-    // composer chip's "switch" never does — the agent works and a switch restarts
-    // it, so the user picks a named destination
-    // (SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A).
-    const runBind = (mode: BindMode, e: MouseEvent | undefined, labelPrefix = "") => {
-        const plan = planBind(mode, bindCandidates());
-        if (plan.kind === "none") return;
-        if (plan.kind === "bind") {
-            void status.bindExistingAccount(plan.account);
-            return;
-        }
-        // No event to anchor on (shouldn't happen — PaneRow's render call site
-        // always passes one) → no-op rather than guessing a position.
-        if (!e) return;
-        ContextMenuModel.showContextMenu(
-            accountPickerItems(plan.candidates, (acct) => void status.bindExistingAccount(acct), labelPrefix),
-            e,
-        );
-    };
-    const onBindAccount = (e?: MouseEvent) => runBind("adopt", e);
-    const onSwitchAccount = (e: MouseEvent) => runBind("switch", e, "Switch to ");
 
     // Declare the auth-blocking state resolved: clears canRetry/authNotice
     // (notifyControllerHealthy) and, ONLY when the live failure is actually
