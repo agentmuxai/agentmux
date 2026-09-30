@@ -137,9 +137,11 @@ const windowTabKey = (tabId: string) => `window-tab:${tabId}`;
 export function prewarmWindowTabSnapshot(tabId: string): void {
     // A native browser pane on screen would be a grey placeholder in the
     // window's capture (see above): no picture beats a wrong one. Hidden
-    // (background-tab) panes have no client rects.
+    // window tabs (workspace.tsx) and inactive pane tabs (pane-leaf-chrome)
+    // stay laid out, so their rects are real; they are `visibility: hidden`,
+    // which the placeholder inherits.
     const browserOnScreen = Array.from(document.querySelectorAll(".browser-placeholder")).some(
-        (el) => el.getClientRects().length > 0
+        (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible"
     );
     if (browserOnScreen) {
         held = null;

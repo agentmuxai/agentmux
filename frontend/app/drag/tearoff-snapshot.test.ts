@@ -218,10 +218,22 @@ describe("window-tab snapshot", () => {
         expect(await takeWindowTabSnapshot("t1")).toBeUndefined();
     });
 
-    it("a browser pane in a background tab (not on screen) doesn't prevent it", async () => {
+    it("a browser pane in a hidden window tab or inactive pane tab (laid out, visibility:hidden) doesn't prevent it", async () => {
+        const hidden = document.createElement("div");
+        hidden.style.visibility = "hidden";
         const el = document.createElement("div");
         el.className = "browser-placeholder";
-        document.body.appendChild(el); // jsdom: no client rects, like display:none
+        el.getClientRects = () => [{}] as unknown as DOMRectList; // still laid out
+        hidden.appendChild(el);
+        document.body.appendChild(hidden);
+        prewarmWindowTabSnapshot("t1");
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+    });
+
+    it("a browser pane not laid out at all (display:none) doesn't prevent it", async () => {
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        document.body.appendChild(el); // jsdom: no client rects
         prewarmWindowTabSnapshot("t1");
         expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
     });
