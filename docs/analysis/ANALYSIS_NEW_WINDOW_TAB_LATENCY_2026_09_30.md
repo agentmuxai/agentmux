@@ -1,7 +1,7 @@
 # Opening a new window tab: where the ~650 ms goes
 
 **Date:** 2026-09-30
-**Status:** analysis. Findings are in §2 and recommendations in §3. Recommendation 1 (the install-check storm) is implemented in #4106; 2 and 3 are not yet.
+**Status:** analysis. Findings are in §2 and recommendations in §3. Recommendation 1 (the install-check storm) is implemented in #4106. Recommendations 2 and 3 are implemented in the PR that adds §5, which builds on #4107's switch intent. 4 is not needed.
 **Author:** korp
 **Trigger:** Repo owner, 2026-09-30: *"opening a new tab is still quite slow ... any ideas regarding how we can make that faster?"*
 **Related:** `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` (switching between existing window tabs, same method), `SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md` (why `createTab` builds the tab inactive and activates it afterwards), `SPEC_TAB_CONTENT_REVEAL_GATE.md`.
@@ -102,3 +102,20 @@ That is roughly **100 ms instead of about 650 ms**, to be confirmed by re-runnin
 The DevTools tooling is the same as `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` §6, plus:
 - `Network.enable` with `webSocketFrameSent/Received`, grouped by `message.command` and the first 70 characters of its data;
 - per-thread idle gaps (`CrBrowserMain`, `Chrome_IOThread`, `CrRendererMain`) from the trace, to tell a blocked host from a busy page.
+
+## 5. Implemented and measured
+
+**What shipped:**
+- **#4106 (recommendation 1):** one `install.check` per provider CLI, shared across pickers.
+- **Recommendation 2:** once the preset is built, `createTab` marks the new tab shown when inactive tabs are kept laid out. It was built hidden and laid out, so it is in the same state as a tab already shown, and `setActiveTab` gives it #4107's warm path: no reveal gate, no cross-fade, and displayed from the switch intent without waiting for the round trip. With the setting off, its first reveal stays gated.
+- **Recommendation 3 (the concurrent half):** `applyTabPreset` creates every leaf's block concurrently, then places them in declared order. A block that fails is skipped and the next sibling takes its place. The server-side "create tab with preset" was not needed: the three concurrent `CreateBlock`s take about as long as one.
+
+**Measured.** Same dev instance, 3 new window tabs each via Alt+T, frame times from trace screenshots, measured from the keypress:
+
+| | `main` before #4106 | `main` with #4106 | + this change |
+|---|---|---|---|
+| Pill on screen | ~20–30 ms | 16–33 ms | 18–31 ms |
+| **New tab's content on screen** | ~470–670 ms (log, §2) | **320–370 ms**, over 3 frames of cross-fade | **105–134 ms**, one frame |
+| Frames after that | fade | 2 more fade frames | none, apart from a small title/focus repaint |
+
+Opening a new window tab went from about 650 ms to about 120 ms.
