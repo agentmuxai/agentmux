@@ -736,10 +736,7 @@ fn signed_ui_auth(state: &AppState, block_id_hint: &str) -> (String, serde_json:
     crate::backend::reactive::handler::get_global_handler()
         .register_agent(&agent_id, &block_id, None)
         .unwrap();
-    let ts_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
+    let ts_secs = agentmux_common::time::now_secs();
     let sig = agentmux_common::jekt_sign::sign_jekt(
         &key,
         "ui-automation-identity",

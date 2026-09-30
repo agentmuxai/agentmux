@@ -537,9 +537,7 @@ pub(super) fn read_journal_counts(path: &Path, offset: u64) -> Result<(usize, us
     Ok((started, results, current_offset))
 }
 
-pub(super) fn now_millis() -> u64 {
-    agentmux_common::time::now_ms_u64()
-}
+pub(super) use agentmux_common::time::now_ms_u64 as now_millis;
 
 /// Derive the Claude Code config directory for a host agent. Only matches
 /// reality for an agent with an explicit per-identity bundle override —

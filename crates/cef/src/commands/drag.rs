@@ -35,10 +35,7 @@ pub fn start_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Resu
     ).unwrap_or(DragPayload { block_id: None, tab_id: None });
 
     let drag_id = uuid::Uuid::new_v4().to_string();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now = agentmux_common::time::now_ms_u64();
 
     tracing::info!(drag_id = %drag_id, drag_type = ?drag_type, source_window = %source_window, "[dnd:cef] start_cross_drag");
 

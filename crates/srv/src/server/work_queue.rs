@@ -43,9 +43,7 @@ const DEFAULT_LEASE_MS: i64 = 120_000;
 /// polling. Named alongside the existing `EVENT_CRON_CHANGED` convention.
 const EVENT_WORK_QUEUE_CHANGED: &str = "workqueue:changed";
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 pub(crate) fn publish_changed(state: &AppState) {
     state.broker.publish(MuxEvent {

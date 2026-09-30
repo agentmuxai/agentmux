@@ -144,9 +144,7 @@ impl ProcessStatus {
     }
 }
 
-fn now_ms() -> u64 {
-    agentmux_common::time::now_ms_u64()
-}
+use agentmux_common::time::now_ms_u64 as now_ms;
 
 /// Pure reducer over one block's raw controller status: decides
 /// `Lifecycle` via explicit per-case rules, not a bare field copy. Isolated

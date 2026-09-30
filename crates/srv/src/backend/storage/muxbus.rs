@@ -568,16 +568,12 @@ fn read_split_tokens() -> Result<Option<(MuxBusTokens, String)>, StoreError> {
 }
 
 impl MuxBusCredentials {
-    fn now_secs() -> i64 {
-        agentmux_common::time::now_secs()
-    }
-
     pub fn is_valid(&self) -> bool {
-        !self.access_token.is_empty() && self.expires_at > Self::now_secs()
+        !self.access_token.is_empty() && self.expires_at > agentmux_common::time::now_secs()
     }
 
     pub fn nearly_expired(&self) -> bool {
-        !self.access_token.is_empty() && self.expires_at - Self::now_secs() < 300
+        !self.access_token.is_empty() && self.expires_at - agentmux_common::time::now_secs() < 300
     }
 }
 

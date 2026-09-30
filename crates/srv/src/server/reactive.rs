@@ -313,9 +313,7 @@ async fn forward_inject_to_peer(
 /// indefinite reuse.
 const JEKT_SIG_MAX_AGE_SECS: i64 = 300;
 
-fn now_unix_secs() -> i64 {
-    agentmux_common::time::now_secs()
-}
+use agentmux_common::time::now_secs as now_unix_secs;
 
 /// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
 /// §2.2). Mutates `req.sig_verified` in place based on whether the claimed

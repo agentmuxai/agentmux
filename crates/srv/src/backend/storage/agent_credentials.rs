@@ -26,15 +26,11 @@ pub struct AgentCredential {
 }
 
 impl AgentCredential {
-    fn now_secs() -> i64 {
-        agentmux_common::time::now_secs()
-    }
-
     /// client_credentials tokens carry no refresh token (per the design in
     /// agentmux-cloud#2) — "valid" just means "not expired yet," with the
     /// same 300s early-refresh margin used by MuxBusCredentials.
     pub fn is_valid(&self) -> bool {
-        !self.access_token.is_empty() && self.expires_at - Self::now_secs() > 300
+        !self.access_token.is_empty() && self.expires_at - agentmux_common::time::now_secs() > 300
     }
 }
 
@@ -81,7 +77,7 @@ impl Store {
                  client_id = excluded.client_id,
                  client_secret = excluded.client_secret,
                  token_endpoint = excluded.token_endpoint",
-            params![key, client_id, client_secret, token_endpoint, AgentCredential::now_secs()],
+            params![key, client_id, client_secret, token_endpoint, agentmux_common::time::now_secs()],
         )?;
         Ok(())
     }
@@ -201,7 +197,7 @@ mod tests {
         let store = shared_store();
         store.agent_credential_save("agentx", "client-1", "secret-1", "endpoint-1").unwrap();
 
-        let future = AgentCredential::now_secs() + 3600;
+        let future = agentmux_common::time::now_secs() + 3600;
         store.agent_credential_save_token("agentx", "tok-abc", future).unwrap();
 
         let loaded = store.agent_credential_load("agentx").unwrap().unwrap();
@@ -214,7 +210,7 @@ mod tests {
     fn save_token_is_a_noop_when_not_provisioned() {
         let store = shared_store();
         // No agent_credential_save call first -- row doesn't exist.
-        store.agent_credential_save_token("agentx", "tok-abc", AgentCredential::now_secs() + 3600).unwrap();
+        store.agent_credential_save_token("agentx", "tok-abc", agentmux_common::time::now_secs() + 3600).unwrap();
         assert!(store.agent_credential_load("agentx").unwrap().is_none());
     }
 
@@ -223,7 +219,7 @@ mod tests {
         let store = shared_store();
         store.agent_credential_save("agentx", "client-1", "secret-1", "endpoint-1").unwrap();
         store
-            .agent_credential_save_token("agentx", "tok-abc", AgentCredential::now_secs() + 3600)
+            .agent_credential_save_token("agentx", "tok-abc", agentmux_common::time::now_secs() + 3600)
             .unwrap();
 
         store.agent_credential_invalidate_token("agentx").unwrap();
@@ -284,18 +280,18 @@ mod tests {
             client_secret: "s".to_string(),
             token_endpoint: "e".to_string(),
             access_token: "tok".to_string(),
-            expires_at: AgentCredential::now_secs() + 301,
+            expires_at: agentmux_common::time::now_secs() + 301,
         };
         assert!(cred.is_valid());
 
-        cred.expires_at = AgentCredential::now_secs() + 299;
+        cred.expires_at = agentmux_common::time::now_secs() + 299;
         assert!(!cred.is_valid());
     }
 
     #[test]
     fn is_valid_false_with_no_access_token() {
         let cred = AgentCredential {
-            expires_at: AgentCredential::now_secs() + 3600,
+            expires_at: agentmux_common::time::now_secs() + 3600,
             ..Default::default()
         };
         assert!(!cred.is_valid());

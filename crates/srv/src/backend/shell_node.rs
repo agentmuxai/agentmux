@@ -23,9 +23,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::backend::mps::{Broker, MuxEvent, EVENT_SHELL_CHUNK};
 use agentmux_common::api_types::ShellInputFailure;
 
-fn now_ms() -> u64 {
-    agentmux_common::time::now_ms_u64()
-}
+use agentmux_common::time::now_ms_u64 as now_ms;
 
 /// Live status of a running (or recently exited) shell. Updated by
 /// `ShellNodeRunner` as output arrives and on exit.

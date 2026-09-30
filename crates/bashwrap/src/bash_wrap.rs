@@ -648,9 +648,7 @@ fn decode_command(b64: &str) -> Result<String> {
     Ok(String::from_utf8(bytes).context("--b64-cmd is not valid UTF-8")?)
 }
 
-fn now_ms() -> u64 {
-    agentmux_common::time::now_ms_u64()
-}
+use agentmux_common::time::now_ms_u64 as now_ms;
 
 /// Log which streaming-relevant env vars the wrapper actually received,
 /// so the sidecar log tells us at a glance whether the env-propagation

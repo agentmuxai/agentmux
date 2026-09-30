@@ -187,9 +187,7 @@ impl Lease {
     }
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 /// The lease file as found on disk.
 enum OnDisk {

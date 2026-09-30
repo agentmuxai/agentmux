@@ -421,7 +421,7 @@ fn migration_backfills_archives_and_seeds_current() {
         r#"{"nodes":[{"type":"user_message","message":"old"}]}"#,
     );
     // Sleep briefly so the second block's snapshot has a strictly
-    // greater modts. FileStore stamps `Self::now_ms()` per write.
+    // greater modts. FileStore stamps `now_ms()` per write.
     std::thread::sleep(std::time::Duration::from_millis(5));
     let block2 = insert_agent_block(&mstore, "def-maks");
     seed_block_snapshot(

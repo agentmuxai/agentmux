@@ -37,9 +37,7 @@ pub struct NativeMemoryMirrorRow {
     pub last_seen_mtime_ms: i64,
 }
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+use agentmux_common::time::now_ms;
 
 /// One `db_agent_native_memory` row, with its `agent_id` — the shape
 /// `agent_native_memory_list_all_rows` returns for the (not agent-scoped)

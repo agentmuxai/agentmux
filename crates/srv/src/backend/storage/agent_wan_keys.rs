@@ -42,9 +42,7 @@ use rusqlite::params;
 use super::error::StoreError;
 use super::store::Store;
 
-fn now_secs() -> i64 {
-    agentmux_common::time::now_secs()
-}
+use agentmux_common::time::now_secs;
 
 /// 32 bytes of randomness via two v4 UUIDs — same rationale as
 /// `agent_lan_keys::random_seed_bytes` and `agent_jekt_keys::random_key_bytes`:
