@@ -1,6 +1,6 @@
 # Spec: An agent opening a file shows the Editor pane it lands in
 
-**Status:** proposed — not implemented
+**Status:** implemented (#4063)
 **Date:** 2026-09-30
 **Author:** Lark
 
