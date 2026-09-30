@@ -2955,11 +2955,14 @@ describe("useAgentCommands — turnAttempted survives the guard's re-dispatch (c
  * working-indicator.ts exists to prevent (see that module's §3.1 history).
  */
 describe("useAgentCommands — §2.3a: background-only turns don't hold messages", () => {
-    const streamingWithBackgroundTask = (model: AgentPaneModel) => {
+    const streamingWithBackgroundTask = (model: AgentPaneModel, modelEndedTurn = true) => {
         model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
         // Submitting -> Streaming; the carve-out is Streaming-only by design.
         model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
         model.dispatchPane({ type: "AttachedTaskObserved", at: Date.now() }, "system");
+        // The carve-out applies only once the model has ended its turn; before
+        // that it is still working (the ring-flicker retro, 2026-09-30).
+        if (modelEndedTurn) model.dispatchPane({ type: "ModelEndedTurn" }, "system");
     };
 
     it("flushes immediately when nothing else is blocking", async () => {
@@ -2998,6 +3001,46 @@ describe("useAgentCommands — §2.3a: background-only turns don't hold messages
 
             expect(commands.hasHeldMessages()).toBe(false);
             expect(hub.agentInput).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
+
+    it("still holds while the model is generating, even with background work attached", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+
+            hub.agentInput.mockResolvedValue(undefined);
+            streamingWithBackgroundTask(model, false);
+            hub.agentInput.mockClear();
+
+            await commands.sendMessage("typed while the model is mid-reply", true);
+
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(hub.agentInput).not.toHaveBeenCalled();
             dispose();
         });
     });
