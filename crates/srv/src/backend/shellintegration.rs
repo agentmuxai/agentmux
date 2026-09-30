@@ -304,7 +304,7 @@ pub fn get_shell_startup(
             Some(ShellStartup {
                 extra_args: vec![
                     "-C".to_string(),
-                    format!("source {}", shell_quote(&script.to_string_lossy())),
+                    format!("source {}", agentmux_common::shell_quote::posix_single_quote(&script.to_string_lossy())),
                 ],
                 env_vars: vec![],
             })
@@ -317,11 +317,6 @@ pub fn get_shell_startup(
 // The `AGENTMUX` env var is now a plain "1" sentinel, not a path.
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Single-quote a path for POSIX shell usage.
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

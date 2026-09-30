@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::agent_config::{is_agentmux_managed_instructions, AGENTMUX_MEMORY_FILENAME};
+use super::memory_record::sha256_hex;
 use super::providers;
 
 /// Per-file read ceiling.
@@ -74,13 +75,6 @@ pub struct ProjectInstructionFile {
     /// silently reporting "no instructions" for a file that exists would be
     /// the same class of lie this feature exists to remove.
     pub error: Option<String>,
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
 }
 
 /// Every path this provider reads, plus AgentMux's own side file.
