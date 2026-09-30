@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
+import { splitBlockDefFor } from "@/app/block/split-block-def";
 import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically, getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
@@ -39,6 +40,10 @@ function getDefaultNewBlockDef(): BlockDef {
     return termBlockDef;
 }
 
+function focusedBlock(blockId: string): Block | undefined {
+    return MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))();
+}
+
 export async function handleCmdN() {
     const blockDef = getDefaultNewBlockDef();
     await createBlock(blockDef);
@@ -50,7 +55,7 @@ export async function handleSplitHorizontal(position: "before" | "after") {
     if (focusedNode == null) {
         return;
     }
-    const blockDef = getDefaultNewBlockDef();
+    const blockDef = splitBlockDefFor(focusedBlock(focusedNode.data.blockId), getDefaultNewBlockDef);
     await createBlockSplitHorizontally(blockDef, focusedNode.data.blockId, position);
 }
 
@@ -60,6 +65,6 @@ export async function handleSplitVertical(position: "before" | "after") {
     if (focusedNode == null) {
         return;
     }
-    const blockDef = getDefaultNewBlockDef();
+    const blockDef = splitBlockDefFor(focusedBlock(focusedNode.data.blockId), getDefaultNewBlockDef);
     await createBlockSplitVertically(blockDef, focusedNode.data.blockId, position);
 }
