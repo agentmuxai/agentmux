@@ -139,6 +139,16 @@ export class LayoutModel {
      */
     persistDebounceTimer: NodeJS.Timeout | null;
     /**
+     * The one-shot startup dangling-leaf prune (layoutPersistence.ts).
+     * @internal
+     */
+    startupPruneTimer: ReturnType<typeof setTimeout> | null = null;
+    /**
+     * Set by dispose(). A disposed model must not write its tree again: its
+     * tab has left this window or closed, and another model may own it now.
+     */
+    disposed = false;
+    /**
      * Set of action IDs that have been processed (prevents duplicate processing)
      * @internal
      */
@@ -368,6 +378,13 @@ export class LayoutModel {
      * Dispose the model's reactive root and all memos created under it.
      */
     dispose() {
+        // Stop every pending write first: a delayed persist or prune from a
+        // model whose tab has left could overwrite the tab's new owner.
+        this.disposed = true;
+        if (this.persistDebounceTimer) clearTimeout(this.persistDebounceTimer);
+        this.persistDebounceTimer = null;
+        if (this.startupPruneTimer) clearTimeout(this.startupPruneTimer);
+        this.startupPruneTimer = null;
         if (this._disposeRoot) {
             // reagent P1 on #3091: `createRoot` is DELIBERATELY detached
             // from whatever owner is ambient when it's called — that's the
