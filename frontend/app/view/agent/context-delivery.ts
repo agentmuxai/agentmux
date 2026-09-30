@@ -28,6 +28,13 @@ export const COMPACTION_SUMMARY_PREFIX = "This session is being continued from a
 
 const EXCERPT_MAX = 160;
 
+/** A raw stdout frame, before the translator. Fields are read defensively. */
+type RawFrame = Record<string, unknown>;
+
+function asFrame(value: unknown): RawFrame | null {
+    return value && typeof value === "object" ? (value as RawFrame) : null;
+}
+
 const REASON_LABEL: Record<ContextDeliveryNode["reason"], string> = {
     startup: "new session",
     clear: "after /clear",
@@ -51,10 +58,11 @@ export function contextDeliveryTitle(node: ContextDeliveryNode): string {
  * live copy and every replayed copy (whichever history page it lands on) share
  * it; otherwise derived from its boundary, or its own timestamp and size.
  */
-export function compactionSummaryNodeId(rawEvent: any, boundary: CompactBoundaryData | null, text: string): string {
-    if (typeof rawEvent?.uuid === "string" && rawEvent.uuid) return `context-delivery-compaction-${rawEvent.uuid}`;
+export function compactionSummaryNodeId(rawEvent: unknown, boundary: CompactBoundaryData | null, text: string): string {
+    const frame = asFrame(rawEvent);
+    if (typeof frame?.uuid === "string" && frame.uuid) return `context-delivery-compaction-${frame.uuid}`;
     if (boundary) return `context-delivery-compaction-${contextCompactedNodeId(boundary)}`;
-    const ts = typeof rawEvent?.timestamp === "string" ? rawEvent.timestamp : "notime";
+    const ts = typeof frame?.timestamp === "string" ? frame.timestamp : "notime";
     return `context-delivery-compaction-${ts}-${text.length}`;
 }
 
@@ -79,9 +87,9 @@ export function compactionSummaryExcerpt(text: string): string {
     return plain.length <= EXCERPT_MAX ? plain : `${plain.slice(0, EXCERPT_MAX - 1).trimEnd()}…`;
 }
 
-function stringContent(rawEvent: any): string | null {
-    if (rawEvent?.type !== "user") return null;
-    const content = rawEvent.message?.content;
+function stringContent(frame: RawFrame): string | null {
+    if (frame.type !== "user") return null;
+    const content = asFrame(frame.message)?.content;
     return typeof content === "string" ? content : null;
 }
 
@@ -92,8 +100,8 @@ function stringContent(rawEvent: any): string | null {
  * parsed separately, newest first, so a summary at the top of a page can't
  * see the boundary that ends the page before it.
  */
-function isSummaryFrame(rawEvent: any, text: string, afterBoundary: boolean): boolean {
-    const flagged = rawEvent.isSynthetic === true;
+function isSummaryFrame(frame: RawFrame, text: string, afterBoundary: boolean): boolean {
+    const flagged = frame.isSynthetic === true;
     const worded = text.startsWith(COMPACTION_SUMMARY_PREFIX);
     return afterBoundary ? flagged || worded : flagged && worded;
 }
@@ -117,20 +125,21 @@ export class CompactionSummaryTracker {
     }
 
     /** `now` stamps a frame when neither it nor its boundary has a timestamp. */
-    take(rawEvent: any, now: number): ContextDeliveryNode | null {
-        if (!rawEvent || typeof rawEvent !== "object") return null;
-        if (rawEvent.type === "assistant") {
+    take(rawEvent: unknown, now: number): ContextDeliveryNode | null {
+        const frame = asFrame(rawEvent);
+        if (!frame) return null;
+        if (frame.type === "assistant") {
             this.pending = null;
             return null;
         }
-        const text = stringContent(rawEvent);
+        const text = stringContent(frame);
         // Tool results (array content) and system frames don't end the wait.
         if (text == null) return null;
         const boundary = this.pending;
         this.pending = null;
-        if (!isSummaryFrame(rawEvent, text, boundary != null)) return null;
+        if (!isSummaryFrame(frame, text, boundary != null)) return null;
 
-        const own = parseTime(rawEvent.timestamp);
+        const own = parseTime(frame.timestamp);
         const fromBoundary = parseTime(boundary?.frameTimestamp);
         return {
             type: "context_delivery",
