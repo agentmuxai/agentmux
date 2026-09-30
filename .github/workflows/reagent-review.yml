@@ -23,20 +23,16 @@ name: ReAgent review (GitHub Actions)
 # If a future need arises to read the diff from a workflow step directly,
 # use the GitHub API (gh pr diff), not a checkout of untrusted code.
 #
-# Image: pulled from the same container image build ReAgent's Lambda
-# (claude-reviewer) uses -- one Dockerfile, one build, two invocation
-# paths, not a second implementation to maintain. The URI below is the
-# digest CDK resolved for the a5af/reagent#279 deploy (2026-09-30,
-# v5.27.6, carrying the fixes from #274, #276 and #278) and is hardcoded,
-# not a repo variable: setting an Actions variable via the API
-# needs a GitHub App permission this installation doesn't have (`gh-agent
-# sudo`'s Administration: write doesn't cover it, and escalating further
-# isn't the right move for a permission gap, not a token-scope shortfall --
-# see a5af/shared-infrastructure's AGENT_GITHUB_AUTH.md standards doc (a
-# different repo; this path is not in this tree, deliberately not written
-# as a docs/*.md-shaped citation so this repo's own check-spec-citations.sh
-# doesn't flag it as a same-repo dangling reference). When a reagent deploy
-# changes the digest, update the REVIEWER_IMAGE env value below in a PR.
+# Image: the same container image ReAgent's Lambda (claude-reviewer) runs --
+# one Dockerfile, one build, two invocation paths, not a second
+# implementation to maintain. It's pulled from the `reagent-reviewer-image` ECR
+# repository's `:prod` tag, which every ReAgent prod deploy moves to the
+# image it just shipped (a5af/reagent's versioning spec, §3). So a deploy
+# needs no PR here. The run logs the digest it actually pulled, and the
+# review header shows the build's <version>+g<sha>, so a review can still be
+# traced to an exact build. Other tags in that repository are immutable
+# commit SHAs; to pin a known build (for example during a rollback), set
+# REVIEWER_IMAGE below to `...reagent-reviewer-image:<40-char sha>`.
 
 on:
   pull_request_target:
@@ -83,9 +79,8 @@ jobs:
 
       - name: Run ReAgent reviewer
         env:
-          # See this file's header comment for why this is hardcoded rather
-          # than a repo variable.
-          REVIEWER_IMAGE: "050544946291.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-050544946291-us-east-1:7d7b761ac8ae260e668d243285776dea3d7d64df4108671d28db5f8cd3da09cb"
+          # See this file's header comment: `:prod` follows ReAgent's deploys.
+          REVIEWER_IMAGE: "050544946291.dkr.ecr.us-east-1.amazonaws.com/reagent-reviewer-image:prod"
         # --user: the image runs as root under plain `docker run`, and the
         # Claude CLI refuses --dangerously-skip-permissions as root (Lambda
         # runs it as a non-root sandbox user, so this never came up there).
@@ -95,6 +90,8 @@ jobs:
         # Without it review_claims.py fails open, so a push and the
         # "please re-review" right after it get two independent reviews.
         run: |
+          docker pull --quiet "$REVIEWER_IMAGE"
+          echo "ReAgent reviewer image: $(docker image inspect --format '{{index .RepoDigests 0}}' "$REVIEWER_IMAGE")"
           docker run --rm \
             --user 1000:1000 \
             -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
