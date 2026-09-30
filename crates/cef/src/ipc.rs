@@ -264,7 +264,18 @@ async fn route_command(
             // CEF Views window with ?floatingPaneId= in the URL.
             // Specs: SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md +
             // SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md.
-            commands::floating_pane::open_floating_pane_window(state, args)
+            //
+            // spawn_blocking: with a tear-off snapshot, the Windows pool
+            // promote waits up to 80 ms for the floater's "snapshot-shown"
+            // ack before showing it (pane_pool.rs), and that ack arrives as
+            // another IPC request.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || {
+                commands::floating_pane::open_floating_pane_window(&state_clone, &args_clone)
+            })
+            .await
+            .map_err(|e| format!("open_floating_pane_window join error: {}", e))?
         }
         "get_pane_debug_state" => {
             // Diagnostic snapshot: active floaters, pane-closing gate, pool
