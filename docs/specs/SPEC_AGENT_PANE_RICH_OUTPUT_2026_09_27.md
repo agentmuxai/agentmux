@@ -1,7 +1,7 @@
 # Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video)
 
 **Date:** 2026-09-27
-**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2 (callouts, §3) in #4036; P3 (inline images, §4) implemented; P4 not started
+**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2 (callouts, §3) in #4036; P3 (inline images, §4) in #4064; P4 (video and audio, §5) frontend implemented, srv `Range` + Operator Config entry pending the crates-move merge freeze
 **Author:** agent1
 **Scope:**
 - `frontend/app/element/markdown*.ts(x)` (the shared renderer)
@@ -314,6 +314,25 @@ not copied.
 On GitHub, `![repro](recording.mp4)` shows as a broken image with alt text
 "repro". That's acceptable degradation. Agents are told (§6) not to use this in
 PR bodies.
+
+### 5.1 As built (P4)
+
+Split in two by the 2026-09-30 crates-reorganization merge freeze
+(`SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30.md`), which blocks changes
+under `agentmux-*/`:
+
+- **Frontend (this part).** `LocalAV` in `markdown-media.tsx`: before play a
+  video reads its first 2 MB (`fetchMediaRange`, `local-media.ts`) for a poster
+  (`preload="auto"`, `#t=0.1` to step past a black first frame) and an audio
+  file reads one byte for its size; play fetches the whole file under the
+  200 MB cap. The 16:9 stage never changes height. A srv that ignores `Range`
+  answers `200`: the body is cancelled unread and the video shows its name and
+  size instead of a poster, which is today's behaviour until the srv half lands.
+- **After the freeze.** `handle_stream_local_file` honours a single `Range`
+  (`206`/`416`, `Accept-Ranges`), and the Operator Config entry gains the
+  video/audio section (manifest v5). Agents aren't told about the syntax until
+  then, per §6 ("not before it renders" is satisfied either way; this only
+  delays telling them).
 
 ## 6. Telling agents: an Operator Config entry
 
