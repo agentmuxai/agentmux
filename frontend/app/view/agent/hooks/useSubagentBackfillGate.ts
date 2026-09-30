@@ -29,7 +29,7 @@
  * reagentx P0 (PR #2781, round 4): that fix was still unsound for the
  * COMMON case — an agent block WITH a persisted session id (i.e. every
  * ordinary reopen of a previously-used agent). On a genuine first mount,
- * `scan_session_subagents` (agentmux-srv/src/server/reactive.rs) hasn't
+ * `scan_session_subagents` (crates/srv/src/server/reactive.rs) hasn't
  * necessarily started broadcasting yet by the time this hook's
  * mount-time history read resolves, so the read comes back EMPTY — the
  * previous version treated "empty history" as "nothing will ever happen

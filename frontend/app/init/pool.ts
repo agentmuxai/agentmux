@@ -4,7 +4,7 @@
 // Tear-off Phase 6 — frontend pool-mode helpers.
 //
 // A "pool window" is a hidden, fully-painted CEF window that the
-// host pre-spawns (see agentmux-cef/src/commands/window_pool.rs) so
+// host pre-spawns (see crates/cef/src/commands/window_pool.rs) so
 // tear-off can promote it instantly with no first-paint flash. The
 // pool window's URL carries `?pool=1`; the frontend detects this
 // flag and skips the standard initHostNewWindow flow at startup.

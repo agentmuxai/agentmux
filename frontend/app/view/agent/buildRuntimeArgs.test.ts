@@ -17,7 +17,7 @@ const CLAUDE_BASE = [
 ];
 
 // Claude's real persistentLaunchArgs (providers/catalog.ts, kept in sync with
-// `static CLAUDE` in agentmux-srv/src/backend/providers.rs). Note the control-
+// `static CLAUDE` in crates/srv/src/backend/providers.rs). Note the control-
 // protocol pair at the end — this is what runtime-apply.ts rebuilds on every
 // /model, /effort or permission-mode change to a running persistent agent.
 const CLAUDE_PERSISTENT_BASE = [

@@ -359,7 +359,7 @@ pub(crate) fn prefix_user_message(line: &str, packet: &str) -> Option<String> {
 // shared with every other formatter that puts error/log text on the
 // clipboard. `redact_secrets` blanks all of that before history is replayed
 // into a model (§4.7). Its own tests, and the shared vectors it's checked
-// against, live with the implementation in `agentmux-common/src/redact.rs`.
+// against, live with the implementation in `crates/common/src/redact.rs`.
 
 #[cfg(test)]
 mod tests {
@@ -555,7 +555,7 @@ mod tests {
     /// A secret straddling that cut must not survive as a fragment too short
     /// to recognize, so redaction runs before the cut. (The redactor's own
     /// unit tests, including this same straddling case in isolation, moved
-    /// to `agentmux-common/src/redact.rs`; this one stays because it tests
+    /// to `crates/common/src/redact.rs`; this one stays because it tests
     /// *this module's* cap-after-redact ordering, not the redactor itself.)
     #[test]
     fn a_secret_straddling_a_turn_cut_is_still_redacted() {

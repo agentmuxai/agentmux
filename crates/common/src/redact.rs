@@ -4,7 +4,7 @@
 //! Shape-based, best-effort secret redaction — the one Rust implementation
 //! `SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md` §4.5 asks every formatter that
 //! puts error/log text on the clipboard to share, instead of each inventing
-//! its own. Moved here from `agentmux-srv/src/backend/continuity.rs`, which
+//! its own. Moved here from `crates/srv/src/backend/continuity.rs`, which
 //! only recognized credential-prefixed tokens and PEM private keys — enough
 //! for a continuation packet, not enough for raw stderr and request details
 //! (Codex P1 on #3689).
@@ -417,7 +417,8 @@ mod tests {
     fn shared_redaction_vectors() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .expect("agentmux-common has a parent dir")
+            .and_then(std::path::Path::parent)
+            .expect("crates/common is two levels below the repo root")
             .join("docs/specs/fixtures/redaction-vectors.json");
         let raw = std::fs::read_to_string(&root).unwrap_or_else(|e| panic!("reading {root:?}: {e}"));
         let vectors: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("valid JSON");

@@ -86,7 +86,7 @@ jobs:
 
       # GH-hosted Windows runners scan every new/exec'd file with Defender
       # real-time protection by default; node.exe invoked from a Rust test
-      # (agentmux-srv/tests/subprocess_io.rs::create_no_window_flag_set) has
+      # (crates/srv/tests/subprocess_io.rs::create_no_window_flag_set) has
       # hit slow-enough cold starts to flake past a 15s read timeout twice
       # (2026-06-28, 2026-08-13) — see
       # docs/specs/PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md.

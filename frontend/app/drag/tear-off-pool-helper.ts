@@ -51,7 +51,7 @@ const MIN_FLOATER_HEIGHT = 120;
  * `window.devicePixelRatio` here. On Windows the floater may spawn on a
  * DIFFERENT monitor (different DPI), so cross-monitor physical scaling
  * MUST happen on the host using `GetDpiForMonitor(MonitorFromPoint(x, y))`
- * against the destination (see `agentmux-cef/src/commands/floating_pane.rs`).
+ * against the destination (see `crates/cef/src/commands/floating_pane.rs`).
  * On macOS / Linux CEF Views positions in DIP directly, so the host passes
  * these through unscaled.
  *

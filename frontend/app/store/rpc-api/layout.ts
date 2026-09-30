@@ -3,7 +3,7 @@
 
 // Layout files — save a window as `*.agentmux-layout.json`, and open one
 // back as new tabs. See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md and
-// agentmux-srv/src/server/app_api/layout.rs.
+// crates/srv/src/server/app_api/layout.rs.
 
 import { RpcClient } from "../rpc-client";
 import type { CommandLayoutOpenData } from "@/types/rpc/CommandLayoutOpenData";

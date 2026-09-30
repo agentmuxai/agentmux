@@ -115,8 +115,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Claude. The flag itself remains in ProviderDefinition as a
         // behavior-gate for providers whose CLI genuinely never prints one.
         npmPackage: "@anthropic-ai/claude-code",
-        // Keep in sync with agentmux-srv/src/backend/providers.rs `pinned_version`,
-        // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
+        // Keep in sync with crates/srv/src/backend/providers.rs `pinned_version`,
+        // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
         // .github/workflows/container-image.yml `claude_version` default — enforced by
         // ./pin-consistency.test.ts.
         pinnedVersion: "2.1.285",
@@ -129,7 +129,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authDirName: "claude",
         // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
         // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
-        // Mirrors agentmux-srv/src/backend/providers.rs `base_url_env_var`.
+        // Mirrors crates/srv/src/backend/providers.rs `base_url_env_var`.
         baseUrlEnvVar: "ANTHROPIC_BASE_URL",
         supportedVendors: ["anthropic"],
         startupInstructionsFilename: "CLAUDE.md",
@@ -147,7 +147,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // DISABLES that routing, so it must NOT be here. The persistent controller's
         // ControlChannel auto-allows ordinary tools to preserve today's yolo UX and
         // surfaces only AskUserQuestion to the user. Keep in sync with `static CLAUDE`
-        // in agentmux-srv/providers.rs. controllerType selects persistentLaunchArgs
+        // in crates/srv/providers.rs. controllerType selects persistentLaunchArgs
         // over launchArgs in useAgentCommands.ts.
         // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
         controllerType: "persistent",
@@ -491,7 +491,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the
     // same stream-json NDJSON envelope as Gemini CLI (its sibling
     // harness), so it reuses the gemini translator (styledOutputFormat
-    // "gemini-json"). Mirrors agentmux-srv/src/backend/providers.rs
+    // "gemini-json"). Mirrors crates/srv/src/backend/providers.rs
     // `static ANTIGRAVITY`.
     antigravity: {
         id: "antigravity",

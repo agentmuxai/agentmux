@@ -6,7 +6,7 @@
 // Why this exists
 // ---------------
 // Tools used to hardcode the CDP port: "9223 dev / 9222 release". Those are
-// only PREFERRED values. `agentmux-cef/src/lib.rs` binds the preferred port if
+// only PREFERRED values. `crates/cef/src/lib.rs` binds the preferred port if
 // it is free and otherwise takes an OS-assigned one, because several instances
 // run in parallel by design (isolation I1-I6). So on any machine with more than
 // one instance up, the constant identifies whichever instance won the race —

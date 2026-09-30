@@ -11,7 +11,7 @@ name = "agentmux-bashwrap"
 path = "src/main.rs"
 
 [dependencies]
-agentmux-common = { path = "../agentmux-common" }
+agentmux-common = { path = "../common" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
@@ -22,7 +22,7 @@ which = "6"
 anyhow = "1"
 # RFC3339 timestamps for the `PreCompact` hook's compaction_started
 # payload (`precompact.rs`). Matches the version already pinned by
-# agentmux-srv/agentmux-cef.
+# crates/srv/agentmux-cef.
 chrono = "0.4"
 # PTY-backed bash invocation — required so external commands (grep, npm,
 # cargo, ...) see isatty=1 on stdout and stay line-buffered. Plain pipes

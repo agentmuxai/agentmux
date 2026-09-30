@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // v1 composable model — standalone Skill primitive
-// (agentmux-srv/src/server/app_api/skill.rs). Agent-scoped: every command is
+// (crates/srv/src/server/app_api/skill.rs). Agent-scoped: every command is
 // `check_s1`-gated (ctx.agent_id must equal the request's agent_id), so
 // these only work from an authenticated agent connection. Distinct from the
 // legacy agent-scoped AgentSkill (`agent_skill_*` / `db_agent_skills`,

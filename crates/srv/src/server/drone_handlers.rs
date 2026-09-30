@@ -40,29 +40,29 @@ use crate::drone::types::{RunStatus, DroneDefinition, DroneRun};
 /// `data` sends `null`, and serde accepts each of those from only one of
 /// `()` and a struct. `Option<Self>` takes both.
 #[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ListDronesReq {}
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GetDroneReq {
     pub id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DeleteDroneReq {
     pub id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RunDroneReq {
     pub drone_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ListRunsReq {
     pub drone_id: String,
     /// `serde(default)`, so a caller may omit it -- which ts-rs cannot express
@@ -86,14 +86,14 @@ const MAX_LIST_LIMIT: i64 = 200;
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
 #[ts(rename = "DeleteDroneResp")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DeleteResp {
     pub deleted: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
 #[ts(rename = "RunDroneResp")]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RunResp {
     pub run_id: String,
 }

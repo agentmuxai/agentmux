@@ -18,7 +18,7 @@
  * -----------------------------------------------------------
  * Every AgentMux process runs exactly one `agentmux-srv`; every window's
  * renderer holds a WebSocket to it. The srv's MPS broker
- * (`agentmux-srv/src/backend/mps.rs`) is therefore a *process-wide* event
+ * (`crates/srv/src/backend/mps.rs`) is therefore a *process-wide* event
  * bus already shared by all windows. We ride it:
  *
  *   1. **Registry + broadcast.** A claim is a MPS event of type

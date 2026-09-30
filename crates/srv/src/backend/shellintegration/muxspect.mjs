@@ -19,7 +19,7 @@
 // function) — but only from within a pane whose environment already carries
 // $AGENTMUX_LOCAL_URL/$AGENTMUX_AUTH_KEY (an agent pane, or any shell pane for
 // the URL — the auth key specifically is only injected for agent-CLI-type
-// controllers today, see agentmux-srv/src/server/agent_handlers/input.rs).
+// controllers today, see crates/srv/src/server/agent_handlers/input.rs).
 
 import { pathToFileURL } from "node:url";
 
@@ -235,7 +235,7 @@ function renderList(data) {
     // "pane_type" reflects static pane classification, NOT live turn
     // activity — that's what `lifecycle` is for (`lifecycle_from` maps
     // turn_active=true straight to Lifecycle::Running; see
-    // agentmux-srv/src/broker/process.rs). A column literally named "turn"
+    // crates/srv/src/broker/process.rs). A column literally named "turn"
     // showing pane-type instead of turn state was reviewed as misleading
     // (codex P2 on PR #2380) — `list`'s ProcessStatus rows don't carry
     // BlockControllerRuntimeStatus::turn_active at all (that needs

@@ -16,14 +16,14 @@ use serde::{Deserialize, Serialize};
 /// `data` sends `null`, and serde accepts each of those from only one of `()`
 /// and a struct.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ToolchainEnvReq {}
 
 /// Response for `toolchain.env` — the environment srv resolves tools in.
 /// Powers the Toolchain modal's Environment section, so PATH problems are
 /// diagnosable without shelling into the app.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ToolchainEnvResult {
     pub path: String,
     /// camelCase on the wire, unlike every other field in this module. It was
@@ -42,7 +42,7 @@ pub struct ToolchainEnvResult {
 
 /// One entry in `toolchain.versions`' request.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ToolchainPackage {
     /// Caller-chosen key. The response is keyed by this, not by `package`, so
     /// a caller asking about the same npm package under two ids gets two
@@ -54,7 +54,7 @@ pub struct ToolchainPackage {
 
 /// Request for `toolchain.versions`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ToolchainVersionsReq {
     /// An unparseable entry drops out silently rather than failing the whole
     /// request, which is why this is `serde(default)` and why the handler
@@ -77,7 +77,7 @@ pub struct ToolchainVersionsReq {
 /// type keeps that tolerance exactly while still recording this response type —
 /// which `register_handler` could not do.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetHealthResult {
     pub healthy: bool,
     /// Null when the exchange never produced one (refused, timed out, or the
@@ -92,7 +92,7 @@ pub struct WidgetHealthResult {
 /// 500 is `ok: true` with `status_code: 500`. `ok: false` means transport
 /// failure or a rejected port/path, and then `error` is set.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetApiResult {
     pub ok: bool,
     #[ts(type = "number | null")]

@@ -6,7 +6,7 @@
 //! Routes `http://<project>-<agent_id>.localhost:{DEV_PROXY_PORT}/...` to
 //! whatever internal `ip:port` that agent's dev server registered via the
 //! `RegisterDevServer` MCP tool (the HTTP endpoint backing that tool lives
-//! in `agentmux-srv/src/server/app_api/dev_server.rs`; this module owns the
+//! in `crates/srv/src/server/app_api/dev_server.rs`; this module owns the
 //! routing table and the proxy server itself). See
 //! `docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md`.
 //!

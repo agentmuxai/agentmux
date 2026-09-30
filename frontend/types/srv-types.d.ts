@@ -202,17 +202,17 @@ declare global {
     // ── v7 — Bundles ────────────────────────────────────────────
 
     // ── Browser pane bookmarks ───────────────────────────────────────────
-    // agentmux-srv/src/backend/bookmarks_store.rs — a global (shared_dir,
+    // crates/srv/src/backend/bookmarks_store.rs — a global (shared_dir,
     // NOT settings.json — see the spec for why) flat list, not per-agent
     // or per-channel. See
     // docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md.
 
     // ── Armory Bundle Format (ABF) import, Phase 3 ──────────────────────
-    // agentmux-srv/src/server/app_api/bundle.rs — bundle.import.preview /
+    // crates/srv/src/server/app_api/bundle.rs — bundle.import.preview /
     // bundle.import.commit. See docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
     // ── v1 composable model — standalone MCP Server + Skill primitives ─────
-    // Mirrors agentmux-srv/src/backend/storage/mcp_servers.rs::McpServer and
+    // Mirrors crates/srv/src/backend/storage/mcp_servers.rs::McpServer and
     // skills.rs::Skill (the v1 struct, not the legacy agent-scoped AgentSkill).
 
     /** A standalone MCP Server primitive. `config` is a JSON-encoded object
@@ -296,7 +296,7 @@ declare global {
     // ────────────────────────────────────────────────────────────────
     // Unified agent types (Drone Phase 1.5). Shared between the agent
     // pane and the drone Agent block. Mirror of
-    // agentmux-srv/src/agents/types.rs — camelCase via serde
+    // crates/srv/src/agents/types.rs — camelCase via serde
     // rename_all so the field shapes match without translation.
     // ────────────────────────────────────────────────────────────────
 
@@ -337,7 +337,7 @@ declare global {
         /**
          * Context compaction completed. Sourced from the CLI's own
          * `system`/`compact_boundary` stream-json frame — real counts, not
-         * inferred. Mirror of `agentmux-srv/src/agents/types.rs`'s
+         * inferred. Mirror of `crates/srv/src/agents/types.rs`'s
          * `AgentEvent::CompactionBoundary` (`CompactionTrigger` is
          * `#[serde(rename_all = "snake_case")]`). See
          * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md
@@ -356,7 +356,7 @@ declare global {
 
     /**
      * Wire shape of one pre-launch OAuth session's current status.
-     * Mirror of `agentmux-srv/src/identity/auth_session.rs::AuthSessionStatus`
+     * Mirror of `crates/srv/src/identity/auth_session.rs::AuthSessionStatus`
      * (`#[serde(tag = "status", rename_all = "kebab-case",
      * rename_all_fields = "camelCase")]`). Spec:
      * `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §7.
@@ -1632,7 +1632,7 @@ declare global {
     // app/store/rpc-api/native-memory.ts. This one cannot be generated: `detail`
     // is a `serde_json::Value` the frontend treats as an optional property, and
     // ts-rs rejects `#[ts(optional)]` on non-`Option<T>` fields. Keep it in sync
-    // with agentmux-srv/src/backend/rpc_types/native_memory.rs by hand.
+    // with crates/srv/src/backend/rpc_types/native_memory.rs by hand.
     // wshrpc.NativeMemoryWriteProvenance — optional caller-supplied context
     // for a memory write, see SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.1.
     type NativeMemoryWriteProvenance = {

@@ -172,5 +172,5 @@ always pin a specific one with `-i`.
 - **Fallback:** if `node` isn't on `PATH`, `muxlog` degrades to the legacy
   pointer-based `tail`/`cat`/`grep` so logs are never wholly inaccessible.
 
-Implementation: `agentmux-srv/src/backend/shellintegration/muxlog.mjs` (core) and
+Implementation: `crates/srv/src/backend/shellintegration/muxlog.mjs` (core) and
 the per-shell `muxlog` delegators in the same directory.

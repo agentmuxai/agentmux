@@ -77,7 +77,7 @@ rmdir "$PKGROOT/opt/agentmux/usr"
 #         placing the script there (not the AppImage's AppDir-root
 #         convention) is what makes that fallback actually resolve.
 #         build_apparmor_profile() now includes a stanza for
-#         /opt/agentmux/bin/agentmux-cef (agentmux-cef/src/linux_sandbox.rs)
+#         /opt/agentmux/bin/agentmux-cef (crates/cef/src/linux_sandbox.rs)
 #         so "Fix it now" actually grants userns at this install's real path
 #         instead of silently succeeding without doing so. ---
 cp scripts/install-userns-apparmor-fix.sh "$PKGROOT/opt/agentmux/bin/install-userns-apparmor-fix.sh"

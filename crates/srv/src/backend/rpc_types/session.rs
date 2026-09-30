@@ -20,7 +20,7 @@ use crate::agents::TokenCounts;
 /// docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md and
 /// docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandActivitySummaryData {
     pub block_id: String,
@@ -47,7 +47,7 @@ pub struct CommandActivitySummaryData {
 /// was rejected as stale-on-arrival or the underlying call failed/was
 /// cancelled — callers should only record usage when it's `Some`.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct ActivitySummaryResult {
     pub summary: String,
@@ -63,7 +63,7 @@ pub struct ActivitySummaryResult {
 /// (same shape as CommandActivitySummaryData). See
 /// docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandNextPromptSuggestionData {
     pub block_id: String,
@@ -80,7 +80,7 @@ pub struct CommandNextPromptSuggestionData {
 /// at its call site in `register_session_activity_summary`). `tokens` is
 /// `None` under the same conditions as ActivitySummaryResult.tokens.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct NextPromptSuggestionResult {
     pub suggestion: String,
@@ -94,7 +94,7 @@ pub struct NextPromptSuggestionResult {
 /// Request for session:resume_preflight — asks, before any spawn, whether this
 /// pane's next turn will continue its conversation or start a new one.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandSessionResumePreflightData {
     pub block_id: String,
@@ -103,7 +103,7 @@ pub struct CommandSessionResumePreflightData {
 /// One row of the pane's progress list while the preflight runs — same shape as
 /// the launcher splash's stage rows.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct ResumePreflightStep {
     pub id: String,
@@ -117,7 +117,7 @@ pub struct ResumePreflightStep {
 
 /// Response from session:resume_preflight.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct SessionResumePreflightResult {
     pub block_id: String,
@@ -143,7 +143,7 @@ pub struct SessionResumePreflightResult {
 
 /// Request for session:archive — compress and archive a session's FileStore output.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandSessionArchiveData {
     pub block_id: String,
@@ -151,7 +151,7 @@ pub struct CommandSessionArchiveData {
 
 /// Response from session:archive.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct SessionArchiveResult {
     pub block_id: String,
@@ -163,7 +163,7 @@ pub struct SessionArchiveResult {
 
 /// Request for session:restore — decompress archive back into FileStore.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandSessionRestoreData {
     pub block_id: String,
@@ -171,7 +171,7 @@ pub struct CommandSessionRestoreData {
 
 /// Response from session:restore.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct SessionRestoreResult {
     pub block_id: String,
@@ -181,7 +181,7 @@ pub struct SessionRestoreResult {
 
 /// Request for session:export — read session output and return as base64 JSONL.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandSessionExportData {
     pub block_id: String,
@@ -189,7 +189,7 @@ pub struct CommandSessionExportData {
 
 /// Response from session:export.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct SessionExportResult {
     /// base64-encoded JSONL content (the raw output file bytes).
@@ -204,7 +204,7 @@ pub struct SessionExportResult {
 
 /// Request for `agent:session:read`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentSessionReadData {
     pub definition_id: String,
 }
@@ -212,7 +212,7 @@ pub struct CommandAgentSessionReadData {
 /// Response for `agent:session:read`. `content == None` means no zone /
 /// snapshot exists for this definition (NOT an error — fresh agent).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSessionReadResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -227,14 +227,14 @@ pub struct AgentSessionReadResult {
 /// Request for `agent:session:write_state`. Writes `output.state.json`
 /// into `agent:<definition_id>:current` (creates the zone if missing).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentSessionWriteStateData {
     pub definition_id: String,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSessionWriteStateResult {
     #[ts(type = "number")]
     pub bytes_written: u64,
@@ -243,14 +243,14 @@ pub struct AgentSessionWriteStateResult {
 /// Request for `agent:session:append_output`. Appends a single
 /// NDJSON line to `output` in `agent:<definition_id>:current`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentSessionAppendOutputData {
     pub definition_id: String,
     pub line: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSessionAppendOutputResult {
     #[ts(type = "number")]
     pub bytes_written: u64,
@@ -260,13 +260,13 @@ pub struct AgentSessionAppendOutputResult {
 /// into `agent:<defId>:archive:<now_ms>` then clears the current zone.
 /// Returns the archive zoneid (empty if no-op).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentSessionArchiveData {
     pub definition_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSessionArchiveResult {
     /// Empty string when nothing was archived (current zone was empty).
     pub archive_zoneid: String,
@@ -276,7 +276,7 @@ pub struct AgentSessionArchiveResult {
 
 /// Request for `agent:session:list_archives`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandAgentSessionListArchivesData {
     pub definition_id: String,
     // Generated as a REQUIRED `limit: number`, where the hand-written type said
@@ -294,7 +294,7 @@ pub struct CommandAgentSessionListArchivesData {
 /// One row of the agent's archive list. Mirrors `RecentSessionRow`
 /// preview shape so the frontend can reuse the same row component.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentArchiveRow {
     pub archive_zoneid: String,
     #[ts(type = "number")]

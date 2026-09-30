@@ -289,7 +289,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     unset_env: &["CLAUDECODE"],
     npm_package: "@anthropic-ai/claude-code",
     // Keep in sync with frontend/app/view/agent/providers/index.ts `pinnedVersion`,
-    // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
+    // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
     pinned_version: "2.1.285",

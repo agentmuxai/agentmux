@@ -119,7 +119,7 @@ pub struct FileOpts {
 
 /// Matches Go's `CommandEventReadHistoryData`
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandEventReadHistoryData {
     pub event: String,
     pub scope: String,
@@ -285,26 +285,26 @@ pub struct RemoteInfo {
 // ---- Tool store command data types ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandInstallToolData {
     pub tool_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GetToolStatusResult {
     pub tools: Vec<crate::backend::tool_store::ToolStatusEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct InstallToolResult {
     pub installed: Vec<String>,
     pub failed: Vec<InstallFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct InstallFailure {
     pub id: String,
     pub error: String,
@@ -317,7 +317,7 @@ pub struct InstallFailure {
 /// handler) so the RPC bindings generator can emit it — see
 /// `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` §3.1.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandVoiceCheckPathData {
     pub path: String,
 }
@@ -325,7 +325,7 @@ pub struct CommandVoiceCheckPathData {
 /// `voice.checkPath` response. Was an anonymous `json!({"exists": ..})`
 /// before this type existed to name it for the generator.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct VoiceCheckPathResult {
     pub exists: bool,
 }
@@ -334,14 +334,14 @@ pub struct VoiceCheckPathResult {
 /// list, so they share one type. Was an anonymous `json!({"bookmarks": ..})`
 /// before this existed to name it for the RPC bindings generator.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BookmarksResult {
     pub bookmarks: Vec<crate::backend::bookmarks_store::BrowserBookmark>,
 }
 
 /// `bookmarks.set` request — wholesale replace of the saved list.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBookmarksSetData {
     pub bookmarks: Vec<crate::backend::bookmarks_store::BrowserBookmark>,
 }
@@ -354,12 +354,12 @@ pub struct CommandBookmarksSetData {
 /// empty struct accepts `{}` and ignores unknown keys, matching the previous
 /// untyped handler's behaviour of ignoring `data` entirely.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBookmarksListData {}
 
 /// Request for `gettoolstatus`. The handler ignores its payload, but this must
 /// be a struct rather than `()`: the stub calls it with no argument, which the
 /// RPC client sends as `{}`, and serde deserializes `()` only from JSON `null`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGetToolStatusData {}

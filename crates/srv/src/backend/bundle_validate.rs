@@ -24,7 +24,7 @@ use super::providers;
 use super::storage::store::Bundle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "lowercase")]
 pub enum IssueSeverity {
     Error,
@@ -32,7 +32,7 @@ pub enum IssueSeverity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ValidationIssue {
     pub severity: IssueSeverity,
     /// Which bundle field/component this issue is about — one of
@@ -42,7 +42,7 @@ pub struct ValidationIssue {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ValidationReport {
     /// True when `issues` contains no `Error`-severity entries. Warnings
     /// alone do not affect this — they're surfaced but non-blocking.

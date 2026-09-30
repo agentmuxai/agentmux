@@ -5,7 +5,7 @@
 // SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md §6.
 //
 // The host records what happened while AgentMux was running with no window
-// open (see agentmux-cef/src/background_audit.rs). §6 requires that record be
+// open (see crates/cef/src/background_audit.rs). §6 requires that record be
 // "surfaced the next time a window (or the tray panel) opens" — an audit log
 // nobody is shown is not an audit log, which is the whole point of the Zoom
 // 2019 / Recall 2024 precedents the spec cites.

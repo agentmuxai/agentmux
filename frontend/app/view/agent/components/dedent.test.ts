@@ -210,7 +210,7 @@ describe("formatReadPreview", () => {
 
 describe("formatReadPreview — real transcript sample", () => {
     // Lifted verbatim from a stored `Read` tool_result
-    // (agentmux-srv/src/server/identity_handlers.rs), so this asserts against
+    // (crates/srv/src/server/identity_handlers.rs), so this asserts against
     // the shape the CLI actually emits rather than an invented one. Note the
     // 1-digit and 3-digit line numbers in the same body — that mix is what
     // made the raw `<N>\t` gutter step sideways.

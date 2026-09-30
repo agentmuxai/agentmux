@@ -31,7 +31,7 @@ const AGENTMUX = path.join(HOME, ".agentmux");
 //   ~/.agentmux/dev/<branch>/<hash>/logs/              (task dev, keyed on branch)
 //   ~/.agentmux/channels/<channel>/versions/<v>/logs/  (portable/per-build; both
 //                                                        host AND srv as of
-//                                                        agentmux-srv/src/bootstrap.rs
+//                                                        crates/srv/src/bootstrap.rs
 //                                                        honoring AGENTMUX_LOG_DIR —
 //                                                        see REPORT_MUXSPECT_MUXLOG_
 //                                                        CROSS_CHANNEL_INSPECTION_2026_08_22.md)
@@ -490,17 +490,17 @@ function follow(file, opt) {
 // A log's mtime says "something was written recently," not "this instance is
 // running right now" — the two look identical for a process that just died.
 // agentmux-cef already writes a real, checkable liveness signal per instance:
-// `<port-file-dir>/ipc-port-<hash>` (agentmux-cef/src/lib.rs), containing
+// `<port-file-dir>/ipc-port-<hash>` (crates/cef/src/lib.rs), containing
 // `port:token` for the host's IPC HTTP server. We don't replicate the exact
 // hash to compute the filename — glob for any `ipc-port*` file instead,
 // cheaper and forward-compatible if the hash scheme ever changes.
 //
 // Reagent P1 on PR #2752: `port_file_dir` is NOT always the `data` sibling.
-// agentmux-cef/src/lib.rs writes it to `p.cef_cache_dir` for `task dev`
+// crates/cef/src/lib.rs writes it to `p.cef_cache_dir` for `task dev`
 // instances (`is_dev_build_exe` branch) and to `AGENTMUX_DATA_DIR` (==
 // `DataPaths.data_dir`, the `data` sibling) for portable/installed builds.
 // `logs`/`data`/`cef-cache` are always siblings under the same version dir
-// (agentmux-common/src/data_paths.rs) regardless of build type, so check
+// (crates/common/src/data_paths.rs) regardless of build type, so check
 // both siblings rather than trying to infer dev-vs-portable from the path.
 //
 // Exported (pure logic split from the fs/net I/O) for muxlog.test.mjs.
@@ -514,7 +514,7 @@ export function siblingCandidateDirs(logDir) {
 // listening, not that it's AgentMux — if the OS reassigns a dead instance's
 // ephemeral port to an unrelated local service before this probe runs, a
 // bare connect would false-positive "live". The host's IPC server
-// (agentmux-cef/src/ipc.rs) exposes a genuine unauthenticated
+// (crates/cef/src/ipc.rs) exposes a genuine unauthenticated
 // `GET /health` on this exact port returning `{"status":"ok","version":...}`
 // — verify that shape specifically, not just a successful connection.
 async function probePort(port, timeoutMs = 300) {
@@ -542,14 +542,14 @@ export async function checkLiveness(logDir) {
     if (candidateDirs.length === 0) return "?";
     // Reagent P1 on PR #2742: a dev-mode data dir is keyed by BRANCH, not
     // version, and a crashed (non-graceful-exit) process's port file is
-    // never cleaned up (agentmux-cef/src/lib.rs writes it once at startup;
+    // never cleaned up (crates/cef/src/lib.rs writes it once at startup;
     // nothing removes it on a crash, only on the graceful-shutdown path).
     // So a stale port file from a PRIOR crashed run and a live one from the
     // CURRENT run can coexist in the same dir — taking only the first
     // readdirSync result (unspecified ordering) could probe the dead one
     // and report "dead" for a genuinely live instance. Probe every
     // candidate concurrently instead; "live" if ANY of them answers.
-    // Reagent P2 on PR #2752: agentmux-cef/src/lib.rs writes the bare
+    // Reagent P2 on PR #2752: crates/cef/src/lib.rs writes the bare
     // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
     // unset (the task dev:standalone no-launcher path) — startsWith
     // "ipc-port-" alone misses that exact literal.
@@ -608,7 +608,7 @@ function human(b) { return b < 1024 ? b + "B" : b < 1048576 ? (b / 1024).toFixed
 // the multi-instance cause is visible BEFORE the cliff.
 // See SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.G + Discussion #943.
 
-// Keep in lockstep with the host thresholds (agentmux-cef/src/memory_pressure.rs).
+// Keep in lockstep with the host thresholds (crates/cef/src/memory_pressure.rs).
 const WARN_FLOOR_MB = 1024;
 const CRITICAL_FLOOR_MB = 512;
 
@@ -1117,7 +1117,7 @@ function collectPhaseLines(file, opt, matcher) {
 const PHASE_SOURCE_COLOR = { fe: "\x1b[36m", srv: "\x1b[35m" }; // cyan / magenta
 
 // [health] turn_active flip's own useful payload lives in structured fields
-// (agentmux-srv/src/backend/blockcontroller/health.rs: `active`, `was_active`,
+// (crates/srv/src/backend/blockcontroller/health.rs: `active`, `was_active`,
 // `exit_code`), NOT in the message text — which is the same static string
 // "[health] turn_active flip" every time. Surfacing only `entry.msg` (as an
 // earlier version of this recipe did) made every non-`--raw` srv line in the

@@ -134,7 +134,7 @@ pub struct AppState {
     /// `host_ipc.Register` once at its own startup (there is no way to
     /// know these values before then — the host generates `ipc_token`
     /// for itself and is the sole source of truth, see
-    /// `agentmux-cef/src/client/helpers.rs::register_ipc_with_backend`).
+    /// `crates/cef/src/client/helpers.rs::register_ipc_with_backend`).
     /// Backs the `/api/v1/ui/{screenshot,click,query}` proxy routes.
     /// See `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`.
     pub host_ipc: Arc<tokio::sync::Mutex<Option<HostIpc>>>,

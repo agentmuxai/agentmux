@@ -16,7 +16,7 @@
 //! exists alongside this dynamic check, not instead of it.
 //!
 //! Deliberately hand-rolled rather than pulling in an MCP client SDK crate
-//! (e.g. `rmcp`): `agentmux-mcp/src/main.rs` already hand-rolls the *server*
+//! (e.g. `rmcp`): `crates/mcp/src/main.rs` already hand-rolls the *server*
 //! side of this exact newline-delimited JSON-RPC 2.0 wire format, so a
 //! probe-only client follows the same house style instead of adding a new
 //! dependency for a handshake this small.
@@ -137,7 +137,7 @@ async fn probe_stdio(config: &Value) -> ProbeResult {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
+    // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
     #[cfg(windows)]
     {
         use agentmux_common::win32::CREATE_NO_WINDOW;

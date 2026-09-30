@@ -975,7 +975,7 @@ mod recent_sessions_tests {
     // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2 — every
     // freshly-created agent definition gets its own dedicated bundle
     // (not a shared/inherited one), with provider/model derived from the
-    // agent's own harness. m0021 (agentmux-srv/src/migrations/
+    // agent's own harness. m0021 (crates/srv/src/migrations/
     // m0021_backfill_agent_bundles.rs) covers the backfill half for
     // agents that already existed before this shipped; these tests cover
     // the forward-going creation paths.

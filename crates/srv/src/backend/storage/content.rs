@@ -19,7 +19,7 @@ use super::store::Store;
 
 /// A content blob attached to a agent definition (e.g. "instructions").
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentContent {
     pub agent_id: String,
     pub content_type: String,

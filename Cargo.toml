@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["agentmux-srv", "agentmux-cef", "agentmux-launcher", "agentmux-common", "agentmux-bashwrap", "agentmux-mcp"]
+members = ["crates/srv", "crates/cef", "crates/launcher", "crates/common", "crates/bashwrap", "crates/mcp"]
 
 # Shared workspace metadata — members inherit `version` via
 # `version.workspace = true` so a single bump touches one Cargo.toml.
@@ -32,7 +32,7 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 # agentmuxai/cef-rs#1). Without
 # the binding-side field, our `--features patched-libcef` flag fails to
 # compile against CEF on Linux (`error[E0609]: no field begin_window_drag
-# on type _cef_window_t` at `agentmux-cef/src/ui_tasks.rs:215`).
+# on type _cef_window_t` at `crates/cef/src/ui_tasks.rs:215`).
 #
 # The fork at `agentmuxai/cef-rs@agentmux/154` appends the
 # `begin_window_drag` slot to the linux_x86_64 binding — same mechanical

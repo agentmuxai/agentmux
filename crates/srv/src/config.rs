@@ -115,7 +115,7 @@ pub struct Config {
     /// launcher (`agentmux-launcher::srv_spawner::SrvSpawnResult::host_reg_secret`,
     /// minted once and reused across host-only crash-restarts, exactly
     /// like `auth_key`) or, in host-owned-spawn/dev mode, from the host
-    /// itself (`agentmux-cef/src/sidecar.rs::spawn_backend`, which
+    /// itself (`crates/cef/src/sidecar.rs::spawn_backend`, which
     /// generates it alongside its own `auth_key`).
     pub host_reg_secret: Option<String>,
     /// Empty when unset. Paths stay `PathBuf` (read with `var_os`) so a home

@@ -229,7 +229,7 @@ pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, win
 ///
 /// `rect` is Win32 screen-coordinate `left/top/right/bottom`
 /// (`agentmux_common::ipc::Rect`); converted here to srv's `pos: {x, y}` /
-/// `size: {width, height}` shape (`agentmux-srv/src/backend/obj.rs`'s
+/// `size: {width, height}` shape (`crates/srv/src/backend/obj.rs`'s
 /// `Point`/`WinSize`) since the two crates don't share these types directly
 /// — the wire format is plain JSON either way.
 pub(crate) fn backend_set_window_pos_and_size(web_endpoint: &str, auth_key: &str, window_id: &str, rect: agentmux_common::ipc::Rect) {
@@ -539,7 +539,7 @@ pub(crate) fn backend_update_block_meta(web_endpoint: &str, auth_key: &str, bloc
 }
 
 /// One-time push of this host process's own CDP-automation credentials
-/// (`ipc_port`, `ipc_token` — see `agentmux-cef/src/browser_api/mod.rs`)
+/// (`ipc_port`, `ipc_token` — see `crates/cef/src/browser_api/mod.rs`)
 /// to srv, so srv can proxy `/api/v1/ui/*` (agent-facing screenshot/click/
 /// query tools) through to `/agentmux/browser/*` on this host's IPC server.
 /// srv never generates or otherwise learns these values itself — the host

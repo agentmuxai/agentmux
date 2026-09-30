@@ -15,7 +15,7 @@
 //! needs an armed state machine because it must not fire during legitimate
 //! zero-window states. Neither applies here — srv already exposes a
 //! synchronous, unauthenticated HTTP health endpoint
-//! (`agentmux-srv/src/server/mod.rs::health_handler`, mounted outside
+//! (`crates/srv/src/server/mod.rs::health_handler`, mounted outside
 //! `auth_middleware`), so a single bounded round-trip per tick gives a
 //! pass/fail answer within that same tick. No cross-tick reply matching, no
 //! "is zero absence legitimate" guard — srv is expected to answer whenever
@@ -50,7 +50,7 @@ use std::time::{Duration, Instant};
 ///
 /// Success = a response starting with `HTTP/1.1 200`. `web_endpoint` is
 /// `srv_result.web_endpoint` — a bare `host:port` (e.g. `127.0.0.1:54321`),
-/// NOT a URL: `emit_estart` (`agentmux-srv/src/bootstrap.rs`) writes
+/// NOT a URL: `emit_estart` (`crates/srv/src/bootstrap.rs`) writes
 /// `web:127.0.0.1:{port}` with no scheme, and `parse_estart`
 /// (`srv_spawner.rs`) carries that through verbatim — the same convention
 /// `host_spawn.rs` relies on when it passes this value straight through as

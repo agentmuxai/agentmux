@@ -170,7 +170,7 @@ impl MuxEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SubscriptionRequest {
     pub event: String,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]

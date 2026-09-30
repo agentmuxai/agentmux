@@ -106,7 +106,7 @@ struct OAuthStartReq {
 }
 
 #[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthSessionReq {
     pub session_id: String,

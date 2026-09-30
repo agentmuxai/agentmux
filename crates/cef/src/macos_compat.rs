@@ -651,7 +651,7 @@ pub(crate) unsafe fn set_macos_dock_icon() {
     // The normal AgentMux logo (panel layout, not the brain-alternate),
     // matching the Linux taskbar source.
     const ICON_PNG: &[u8] =
-        include_bytes!("../../assets/linux/icons/hicolor/512x512/apps/agentmux.png");
+        include_bytes!("../../../assets/linux/icons/hicolor/512x512/apps/agentmux.png");
 
     extern "C" {
         fn objc_getClass(name: *const c_char) -> Class;

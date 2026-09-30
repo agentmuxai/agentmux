@@ -48,7 +48,7 @@ patched-libcef = []
 resources_path = "resources"
 
 [dependencies]
-agentmux-common = { path = "../agentmux-common" }
+agentmux-common = { path = "../common" }
 # CEF 154, all platforms (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md);
 # one milestone everywhere since 152's Phase E collapsed the temporary
 # cef_win/cef_unix staged-rollout split. Still goes through [patch.crates-io] below

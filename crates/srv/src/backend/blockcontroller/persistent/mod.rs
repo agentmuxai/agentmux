@@ -1073,7 +1073,7 @@ fn build_deny_resume_message(message: &str) -> String {
 ///
 /// `--permission-mode default` is the mode baked into every persistent
 /// Claude agent's launch args today (`static CLAUDE` in
-/// `agentmux-srv/src/backend/providers.rs`), and it routes most non-trivial
+/// `crates/srv/src/backend/providers.rs`), and it routes most non-trivial
 /// tool calls through this control_request. Flipping this function to
 /// unconditionally `true` would turn every persistent Claude agent into a
 /// prompt-per-tool-call experience the instant it ships — a real regression,

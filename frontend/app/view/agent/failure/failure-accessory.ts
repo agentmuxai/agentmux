@@ -157,7 +157,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
     };
     const openArmory: PaneRowAction = {
         // Same "vault" FontAwesome icon as the widget bar's Armory entry
-        // (agentmux-srv/src/config/widgets.json) and the hamburger menu's
+        // (crates/srv/src/config/widgets.json) and the hamburger menu's
         // Armory item, instead of a generic gear emoji.
         icon: "vault", label: "Armory → Accounts", title: "Open Armory → Accounts", onClick: on.openArmory,
     };

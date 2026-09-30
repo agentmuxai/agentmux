@@ -282,7 +282,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // launched windowless, so without the flag every shellexec
                     // pops a console window. This is the highest-frequency
                     // console-flash site (fires on every MCP Shell tool call).
-                    // See agentmux-common/src/cli.rs.
+                    // See crates/common/src/cli.rs.
                     #[cfg(windows)]
                     {
                         use agentmux_common::win32::CREATE_NO_WINDOW;
