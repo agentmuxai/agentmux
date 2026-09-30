@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-27
-**Status:** active — Day 1 shipped: prerequisite PR #3987, agentmuxai/cef#10, agentmuxai/cef-rs#1. Remaining: the three runtime builds (running), the consumer PR, publishing. Verified 2026-09-29.
+**Status:** implemented — shipped 2026-09-30: consumer PR #3992 merged 06:51:13 UTC and the three runtimes were published 06:51:19–22 UTC (tags on agentmuxai/cef 660112374b79). Also #3987 (prerequisite), #3989 (spec), #3991 (Linux args), agentmuxai/cef#10, agentmuxai/cef-rs#1; `agentmuxai/cef` default branch is now `8037`.
 **Executes:** `docs/cef-build/CEF_FORK_MAINTENANCE.md` §6 (upgrade runbook), §5 (carry-set gate),
 §7 (artifact verification), §8 (release pinning), §9 (checklists). This spec does not restate them;
 it adds what is specific to 154, the schedule, and the traps 148 → 152 already hit.
@@ -179,7 +179,7 @@ repository access covers it (org settings → GitHub Apps) before Day 1 — its 
 |---|---|---|---|---|
 | Windows x86_64 | Korp | narko | `args-windows.gn` | `use_static_angle=false`, tracer off, exclude `installer_tests`. **Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs** (open question 2). The 152 checkout at `C:\Users\asafe\cef-build` can be synced forward instead of recloned, which may need less — confirm before starting |
 | macOS arm64 | Clare | Clare's Mac | `args-darwin.gn` | keep ANGLE static (no override), `dcheck_always_on=false`, hermetic Xcode pin |
-| Linux x86_64 | Opaz | charlie | `args.gn` | `use_static_angle=false`, strip `libcef.so`, `-codecs` |
+| Linux x86_64 | Opaz | charlie | `args.gn` | `use_static_angle=false`, keep `libcef.so` **unstripped** (verify-cef-patch reads `.symtab`; corrected 2026-09-29), `-codecs` |
 
 Before starting, each owner confirms ≥120 GB free and ≥32 GB RAM (a build that dies at hour five
 for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tweak are 5–30 min.
@@ -249,6 +249,30 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
 
 Release tags are immutable: revert the consumer PR to restore the 152.0.7977.83 pins (and the
 `-r2` Windows tag). Keep the 152 releases permanently.
+
+## 4a. Outcome (2026-09-30)
+
+Two days, as planned. Windows (Korp), macOS (Clare) and Linux (Opaz) built one commit,
+`agentmuxai/cef` `8037` @ `660112374b79`, and all three passed §7 and the step 4
+packaged-app checks on the consumer branch before the merge. The operator did the
+hands-on checks on macOS and Linux. Publishing followed the merge by about 8 seconds.
+
+What cost time, none of it source or patch work (the lessons are now in
+`CEF_FORK_MAINTENANCE.md` §6.1):
+- **Linux:** the fontconfig bindgen `-Dwarnings` failure (#3991); stale Dawn Go files from
+  syncing the 152 tree in place; the charlie VM halting at 09:48 UTC when gamerlove's
+  NVIDIA driver crashed (about 3 h); and a packaged-app window that stayed invisible with
+  the VM's 3D off (a GPU-tier bug, `docs/retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md`,
+  fixed by #3995).
+- **Windows:** a `subst` drive broke a TypeScript step; `-j 20` exceeded narko's commit limit.
+- **macOS:** the first §7.3 pass used `main`'s 152 binding; it was repeated on #3992.
+- **Coordination:** Korp sat unreachable for an hour after a deferred config restart left
+  it with no process (`docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md`,
+  fixed by #3990), and the relay briefly stopped delivering to Opaz.
+
+**Known issue carried forward:** Linux window transparency fails, identically on the
+152-based 0.58.2, so it is an earlier regression, not 154. The operator chose to fix it
+after 154.
 
 ## 5. Risks to the two-day estimate
 

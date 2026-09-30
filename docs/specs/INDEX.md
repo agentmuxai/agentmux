@@ -277,6 +277,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_START_PAGE_2026_09_16`](SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md) | SPEC — Browser pane: "Set as Start Page" in the bookmarks menu |
 | [`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) | SPEC — Browser pane: replace Chromium's native right-click menu with the app's own |
 | [`SPEC_CEF_CDP_IN_PROCESS_AND_DEBUG_PORT_OPT_IN_2026_09_25`](SPEC_CEF_CDP_IN_PROCESS_AND_DEBUG_PORT_OPT_IN_2026_09_25.md) | SPEC: Browser API over in-process CDP; the CEF debug port is opt-in in release builds |
+| [`SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27`](SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md) | CEF milestone upgrade: 152 (7977) → 154 (8037), all three platforms — in two days |
 | [`SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) | Spec: CEF proprietary codec support (H.264/AAC) across Windows/macOS/Linux |
 | [`SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27`](SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md) | Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF) |
 | [`SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22`](SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md) | SPEC — Own the `cef-dll-sys` binding fork: `agentmuxai/cef-rs` |
@@ -506,7 +507,6 @@ partial list.
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
-| [`SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27`](SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md) | CEF milestone upgrade: 152 (7977) → 154 (8037), all three platforms — in two days |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
