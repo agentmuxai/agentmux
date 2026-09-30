@@ -35,11 +35,8 @@ name: ReAgent review (GitHub Actions)
 # see a5af/shared-infrastructure's AGENT_GITHUB_AUTH.md standards doc (a
 # different repo; this path is not in this tree, deliberately not written
 # as a docs/*.md-shaped citation so this repo's own check-spec-citations.sh
-# doesn't flag it as a same-repo dangling reference). A PR to this line is
-# a normal, auditable way to point at a new image after a
-# future reagent deploy
-# changes the digest -- update the REVIEWER_IMAGE env value below when that
-# happens.
+# doesn't flag it as a same-repo dangling reference). When a reagent deploy
+# changes the digest, update the REVIEWER_IMAGE env value below in a PR.
 
 on:
   pull_request_target:
@@ -89,8 +86,14 @@ jobs:
           # See this file's header comment for why this is hardcoded rather
           # than a repo variable.
           REVIEWER_IMAGE: "050544946291.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-050544946291-us-east-1:7d7b761ac8ae260e668d243285776dea3d7d64df4108671d28db5f8cd3da09cb"
+        # --user: the image runs as root under plain `docker run`, and the
+        # Claude CLI refuses --dangerously-skip-permissions as root (Lambda
+        # runs it as a non-root sandbox user, so this never came up there).
+        # HOME=/tmp in the image, which is world-writable, so a non-root user
+        # can still write its credentials and clones.
         run: |
           docker run --rm \
+            --user 1000:1000 \
             -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
             -e GITHUB_RUN_ID="$GITHUB_RUN_ID" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
