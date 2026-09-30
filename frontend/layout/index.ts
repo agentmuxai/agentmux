@@ -4,6 +4,7 @@
 import { TileLayout } from "./lib/TileLayout.platform";
 import {
     deleteLayoutModelForTab,
+    installLayoutModelEviction,
     getLayoutModelForStaticTab,
     getLayoutModelForTabById,
     useDebouncedNodeInnerRect,
@@ -35,6 +36,7 @@ export {
     clearCrossTabDrop,
     closeBlockInStack,
     deleteLayoutModelForTab,
+    installLayoutModelEviction,
     getLayoutModelForStaticTab,
     getLayoutModelForTabById,
     installWindowEdgeResizeListener,

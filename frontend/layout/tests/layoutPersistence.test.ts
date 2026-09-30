@@ -720,3 +720,38 @@ describe("processPendingBackendActions — StackMove of a pane's only tab", () =
         expect(beforeNodeDelete).not.toHaveBeenCalled();
     });
 });
+
+// A tab's model is disposed when the window tab leaves this window
+// (installLayoutModelEviction). Its tree is stale from then on: a debounced
+// persist or the startup prune still pending must not write it over the
+// layout the tab's new window owns.
+describe("a disposed model", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("drops its pending persist and startup prune", () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        model.persistToBackend();
+        const setter = vi.spyOn(model, "setter");
+        model.dispose();
+        vi.advanceTimersByTime(5000);
+        expect(setter).not.toHaveBeenCalled();
+        expect(model.persistDebounceTimer).toBeNull();
+        expect(model.startupPruneTimer).toBeNull();
+    });
+
+    it("ignores backend updates", () => {
+        const model = createLayoutModel();
+        model.dispose();
+        const getter = vi.spyOn(model, "getter");
+        model.onBackendUpdate();
+        expect(getter).not.toHaveBeenCalled();
+    });
+});
