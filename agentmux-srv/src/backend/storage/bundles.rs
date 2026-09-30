@@ -204,6 +204,8 @@ const SYSTEM_TIER_PREAMBLE: &str = "IMPORTANT: The following AgentMux-controlled
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct GlobalMemorySection {
+    /// The Global Memory entry's id (the bundle id).
+    pub id: String,
     pub name: String,
     pub is_system: bool,
     /// `# [AgentMux System] <name>` or `# [Workspace] <name>`, a blank line,
@@ -222,6 +224,7 @@ pub fn global_bundle_sections(bundles: &[Bundle]) -> Vec<GlobalMemorySection> {
     let non_empty = bundles.iter().filter(|b| !b.instructions.trim().is_empty());
     let (system, ordinary): (Vec<&Bundle>, Vec<&Bundle>) = non_empty.partition(|b| b.is_system);
     let section = |b: &Bundle, text: String| GlobalMemorySection {
+        id: b.id.clone(),
         name: b.name.clone(),
         is_system: b.is_system,
         size_bytes: text.len() as u64,

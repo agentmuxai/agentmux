@@ -94,6 +94,14 @@ pub struct Entry {
     pub tier: Tier,
     /// The full text sent to the model.
     pub text: String,
+    /// The entry's own name: the Global Memory entry's name, or the file name.
+    pub name: String,
+    /// Global Memory only: AgentMux's own system tier, not the workspace's.
+    pub system: bool,
+    /// Global Memory only: the entry's id.
+    pub bundle_id: Option<String>,
+    /// Personal Memory only: the file it was read from.
+    pub path: Option<String>,
 }
 
 impl Entry {
@@ -116,34 +124,123 @@ impl Entry {
 ///
 /// `None` when there is nothing to deliver.
 pub fn compose(entries: &[Entry], reason: Reason, running_summary: Option<&str>) -> Option<String> {
-    let global: Vec<&Entry> = entries.iter().filter(|e| e.tier == Tier::Global).collect();
-    let personal: Vec<&Entry> = entries.iter().filter(|e| e.tier == Tier::Personal).collect();
+    compose_items(entries, reason, running_summary).map(|c| c.text)
+}
+
+/// Where one item sits in a composed delivery, in characters
+/// (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.4 step 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemSpan {
+    /// The item's index in `entries`, or `None` for the running summary.
+    pub entry: Option<usize>,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// A composed delivery and where each item sits in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Composed {
+    pub text: String,
+    /// In delivery order: Global Memory, Personal Memory, then the summary.
+    pub spans: Vec<ItemSpan>,
+}
+
+/// A string being built, with its length in characters kept alongside.
+struct Tracked {
+    out: String,
+    chars: usize,
+}
+
+impl Tracked {
+    /// Appends `s` and returns the character range it now occupies.
+    fn push(&mut self, s: &str) -> (usize, usize) {
+        let start = self.chars;
+        self.out.push_str(s);
+        self.chars += s.chars().count();
+        (start, self.chars)
+    }
+}
+
+/// [`compose`], also recording where each item landed so the notice can say
+/// which items a cut delivery carried whole, in part, or not at all.
+pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<&str>) -> Option<Composed> {
+    let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
+    let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
     let summary = running_summary.filter(|s| !s.trim().is_empty() && reason == Reason::Compact);
     if global.is_empty() && personal.is_empty() && summary.is_none() {
         return None;
     }
 
-    let section = |heading: &str, list: &[&Entry], separator: &str| -> Option<String> {
-        if list.is_empty() {
-            return None;
-        }
-        let noun = if list.len() == 1 { "entry" } else { "entries" };
-        let body = list.iter().map(|e| e.text.as_str()).collect::<Vec<_>>().join(separator);
-        Some(format!("# {heading} ({} {noun})\n{body}\n", list.len()))
-    };
-
-    let mut out = format!(
+    let mut b = Tracked { out: String::new(), chars: 0 };
+    b.push(&format!(
         "AgentMux memory for this agent. {} Read all of it now — it is your complete Global \
          Memory and Personal Memory, not just the index.\n\n",
         reason.clause()
-    );
-    let parts = [
-        section("Global Memory", &global, crate::backend::storage::bundles::GLOBAL_SECTION_SEPARATOR),
-        section("Personal Memory", &personal, "\n---\n"),
-        summary.map(str::to_string),
+    ));
+    let mut spans = Vec::new();
+    let mut wrote_section = false;
+    let sections = [
+        ("Global Memory", &global, crate::backend::storage::bundles::GLOBAL_SECTION_SEPARATOR),
+        ("Personal Memory", &personal, "\n---\n"),
     ];
-    out.push_str(&parts.into_iter().flatten().collect::<Vec<_>>().join("\n"));
-    Some(out)
+    for (heading, list, separator) in sections {
+        if list.is_empty() {
+            continue;
+        }
+        if wrote_section {
+            b.push("\n");
+        }
+        let noun = if list.len() == 1 { "entry" } else { "entries" };
+        b.push(&format!("# {heading} ({} {noun})\n", list.len()));
+        for (k, &i) in list.iter().enumerate() {
+            if k > 0 {
+                b.push(separator);
+            }
+            let (start, end) = b.push(&entries[i].text);
+            spans.push(ItemSpan { entry: Some(i), start, end });
+        }
+        b.push("\n");
+        wrote_section = true;
+    }
+    if let Some(summary) = summary {
+        if wrote_section {
+            b.push("\n");
+        }
+        let (start, end) = b.push(summary);
+        spans.push(ItemSpan { entry: None, start, end });
+    }
+    Some(Composed { text: b.out, spans })
+}
+
+/// How much of one item a delivery carried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivered {
+    Full,
+    /// Cut by the part cap: this many of its characters went out.
+    Partial(usize),
+    Omitted,
+}
+
+impl Delivered {
+    /// Where `span` falls against the first `delivered_chars` characters of
+    /// the composed text, which is all a cut delivery carries.
+    pub fn of(span: &ItemSpan, delivered_chars: usize) -> Delivered {
+        if span.end <= delivered_chars {
+            Delivered::Full
+        } else if span.start >= delivered_chars {
+            Delivered::Omitted
+        } else {
+            Delivered::Partial(delivered_chars - span.start)
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Delivered::Full => "full",
+            Delivered::Partial(_) => "partial",
+            Delivered::Omitted => "omitted",
+        }
+    }
 }
 
 /// `text` split into parts of at most `max_chars` characters each, label
@@ -153,6 +250,12 @@ pub fn compose(entries: &[Entry], reason: Reason, running_summary: Option<&str>)
 /// `max_parts` parts: the text is cut, and the last part ends with a note
 /// giving how much was left out.
 pub fn split_into_parts(text: &str, max_chars: usize, max_parts: usize) -> Vec<String> {
+    split_into_parts_counted(text, max_chars, max_parts).0
+}
+
+/// [`split_into_parts`], plus how many of `text`'s characters the parts carry:
+/// all of them unless the text was cut.
+pub fn split_into_parts_counted(text: &str, max_chars: usize, max_parts: usize) -> (Vec<String>, usize) {
     // The label is at most "[AgentMux memory — part 99 of 99]\n".
     const LABEL_ROOM: usize = 40;
     const CUT_NOTE_ROOM: usize = 120;
@@ -173,6 +276,7 @@ pub fn split_into_parts(text: &str, max_chars: usize, max_parts: usize) -> Vec<S
         at = cut;
     }
 
+    let mut delivered = chars.len();
     if chunks.len() > max_parts {
         let kept: usize = chunks[..max_parts].iter().map(|c| c.chars().count()).sum();
         let omitted = chars.len() - kept;
@@ -186,14 +290,16 @@ pub fn split_into_parts(text: &str, max_chars: usize, max_parts: usize) -> Vec<S
             "\n\n[AgentMux: memory cut here — {} more characters did not fit in one delivery.]",
             omitted + dropped
         ));
+        delivered = kept - dropped;
     }
 
     let of = chunks.len();
-    chunks
+    let parts = chunks
         .into_iter()
         .enumerate()
         .map(|(i, c)| format!("[AgentMux memory — part {} of {of}]\n{c}", i + 1))
-        .collect()
+        .collect();
+    (parts, delivered)
 }
 
 #[cfg(test)]
@@ -201,7 +307,63 @@ mod tests {
     use super::*;
 
     fn entry(label: &str, tier: Tier, text: &str) -> Entry {
-        Entry { label: label.into(), tier, text: text.into() }
+        Entry { label: label.into(), tier, text: text.into(), name: label.into(), system: false, bundle_id: None, path: None }
+    }
+
+    #[test]
+    fn spans_point_at_each_item_in_the_composed_text() {
+        let entries = [
+            entry("A", Tier::Global, "alpha"),
+            entry("n.md", Tier::Personal, "notes"),
+            entry("B", Tier::Global, "beta"),
+        ];
+        let c = compose_items(&entries, Reason::Compact, Some("summary")).unwrap();
+        assert_eq!(c.text, compose(&entries, Reason::Compact, Some("summary")).unwrap(), "same text as compose");
+        let chars: Vec<char> = c.text.chars().collect();
+        let at = |s: &ItemSpan| chars[s.start..s.end].iter().collect::<String>();
+        // Global first (in entry order), then Personal, then the summary.
+        let order: Vec<Option<usize>> = c.spans.iter().map(|s| s.entry).collect();
+        assert_eq!(order, vec![Some(0), Some(2), Some(1), None]);
+        assert_eq!(c.spans.iter().map(at).collect::<Vec<_>>(), vec!["alpha", "beta", "notes", "summary"]);
+    }
+
+    #[test]
+    fn spans_are_counted_in_characters_not_bytes() {
+        let entries = [entry("é", Tier::Global, "ééé"), entry("x", Tier::Personal, "xyz")];
+        let c = compose_items(&entries, Reason::Startup, None).unwrap();
+        let chars: Vec<char> = c.text.chars().collect();
+        assert_eq!(chars[c.spans[1].start..c.spans[1].end].iter().collect::<String>(), "xyz");
+    }
+
+    #[test]
+    fn delivered_status_follows_the_cut() {
+        let span = ItemSpan { entry: Some(0), start: 100, end: 200 };
+        assert_eq!(Delivered::of(&span, 200), Delivered::Full);
+        assert_eq!(Delivered::of(&span, 5_000), Delivered::Full);
+        assert_eq!(Delivered::of(&span, 150), Delivered::Partial(50));
+        assert_eq!(Delivered::of(&span, 100), Delivered::Omitted);
+        assert_eq!(Delivered::of(&span, 10), Delivered::Omitted);
+    }
+
+    #[test]
+    fn counted_split_reports_everything_when_uncut() {
+        let text = "z".repeat(20_000);
+        let (parts, delivered) = split_into_parts_counted(&text, MAX_PART_CHARS, HOOK_PARTS);
+        assert_eq!(delivered, text.chars().count());
+        assert_eq!(parts, split_into_parts(&text, MAX_PART_CHARS, HOOK_PARTS));
+    }
+
+    #[test]
+    fn counted_split_reports_exactly_the_delivered_prefix_when_cut() {
+        let text = (0..200_000).map(|i| char::from(b'a' + (i % 26) as u8)).collect::<String>();
+        let (parts, delivered) = split_into_parts_counted(&text, MAX_PART_CHARS, HOOK_PARTS);
+        assert!(delivered < text.chars().count());
+        let carried: String = parts
+            .iter()
+            .map(|p| p.split_once('\n').unwrap().1.split("\n\n[AgentMux: memory cut here").next().unwrap())
+            .collect();
+        assert_eq!(carried.chars().count(), delivered);
+        assert!(text.starts_with(&carried), "the parts carry a prefix of the text");
     }
 
     #[test]
