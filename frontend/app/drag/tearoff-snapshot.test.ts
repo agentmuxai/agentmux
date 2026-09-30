@@ -230,6 +230,18 @@ describe("window-tab snapshot", () => {
         expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
     });
 
+    it("uses checkVisibility() where available, e.g. content-visibility:hidden tabs", async () => {
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        el.getClientRects = () => [{}] as unknown as DOMRectList; // laid out
+        const check = vi.fn(() => false); // but not rendered
+        (el as unknown as { checkVisibility: typeof check }).checkVisibility = check;
+        document.body.appendChild(el);
+        prewarmWindowTabSnapshot("t1");
+        expect(check).toHaveBeenCalledWith(expect.objectContaining({ contentVisibilityAuto: true, visibilityProperty: true }));
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+    });
+
     it("a browser pane not laid out at all (display:none) doesn't prevent it", async () => {
         const el = document.createElement("div");
         el.className = "browser-placeholder";
