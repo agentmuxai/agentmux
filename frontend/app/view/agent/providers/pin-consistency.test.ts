@@ -50,6 +50,23 @@ function srvPin(source: string, staticName: string): string {
     return m[1];
 }
 
+/**
+ * The string literals of `field: &[ … ]` or `field: Some(&[ … ])` in a named
+ * `static NAME: ProviderConfig` block, comments stripped. `null` for
+ * `field: None`.
+ */
+function srvArgs(source: string, staticName: string, field: string): string[] | null {
+    const block = source.match(new RegExp(`static ${staticName}: ProviderConfig = ProviderConfig \\{[\\s\\S]*?\\n\\};`));
+    if (!block) throw new Error(`static ${staticName} not found in agentmux-srv providers.rs`);
+    // Top-level fields only (4-space indent): codex nests its own
+    // `launch_args` inside `app_server: Some(AppServerConfig { … })`.
+    const m = block[0].match(new RegExp(`\\n {4}${field}: (None|Some\\(&\\[([\\s\\S]*?)\\]\\)|&\\[([\\s\\S]*?)\\])`));
+    if (!m) throw new Error(`${field} not found for static ${staticName} in agentmux-srv providers.rs`);
+    if (m[1] === "None") return null;
+    const body = (m[2] ?? m[3]).replace(/\/\/[^\n]*/g, "");
+    return [...body.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((s) => s[1]);
+}
+
 describe("CLI pin consistency across registries", () => {
     const srvSource = read("agentmux-srv/src/backend/providers.rs");
 
@@ -85,6 +102,39 @@ describe("CLI pin consistency across registries", () => {
         if (!m) throw new Error("ARG CLAUDE_VERSION not found in docker/Dockerfile.agent-agentmux");
         expect(m[1]).toBe(PROVIDERS.claude.pinnedVersion);
     });
+
+    // Launch argv is duplicated the same way: srv's `launch_args` /
+    // `persistent_launch_args` are what `agent.open` writes into `cmd:args`,
+    // and the catalog's `launchArgs` / `persistentLaunchArgs` are what a pane
+    // launched from the UI writes. Nothing compared them, and claude's drifted:
+    // #1964 added `--exclude-dynamic-system-prompt-sections` to srv only, so the
+    // flag depended on how the pane was created
+    // (docs/specs/SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §5.1 #4).
+    // Every provider srv defines, found from the source rather than listed by
+    // hand, so a new provider can't be missed (ReAgent P1 on #4029: an earlier
+    // hand-written list skipped pi, muxcode, copilot and antigravity).
+    const argRegistries: Array<[keyof typeof PROVIDERS & string, string]> = [
+        ...srvSource.matchAll(/static ([A-Z_]+): ProviderConfig = ProviderConfig \{\n\s+id: "([^"]+)"/g),
+    ].map((m) => [m[2] as keyof typeof PROVIDERS & string, m[1]]);
+
+    it("both registries define the same providers", () => {
+        expect(argRegistries.length, "no ProviderConfig statics found in providers.rs").toBeGreaterThan(0);
+        expect(argRegistries.map(([key]) => key).sort()).toEqual(Object.keys(PROVIDERS).sort());
+    });
+
+    for (const [key, srvStatic] of argRegistries) {
+        it(`${key}: frontend and srv launch args agree`, () => {
+            expect(PROVIDERS[key].launchArgs ?? [], `launchArgs for ${key}`).toEqual(
+                srvArgs(srvSource, srvStatic, "launch_args") ?? []
+            );
+        });
+
+        it(`${key}: frontend and srv persistent launch args agree`, () => {
+            expect(PROVIDERS[key].persistentLaunchArgs ?? null, `persistentLaunchArgs for ${key}`).toEqual(
+                srvArgs(srvSource, srvStatic, "persistent_launch_args")
+            );
+        });
+    }
 
     it("pins are concrete versions, not 'latest' (repeatable-install invariant)", () => {
         for (const [key] of registries) {
