@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-30
-**Status:** active — spec #4072; the move is PR #4076 (operator go-ahead 2026-09-30; freeze started 16:43 UTC, announcement only, frontend-only and docs-only PRs exempt).
+**Status:** implemented — spec #4072; the move is PR #4076, rebase-merged 2026-09-30 17:57 UTC (pure-move commit 3f1dd8ce0, path fixes a100543bb). Freeze 16:43–17:57 UTC. Follow-ups: agentmux-docs#140 (site source links, submodule), a5af/shared-infrastructure#548 (drift reporter read agentmux-cef/Cargo.toml, not listed in §4.3), a5af/reagent#294 (triage glob for launcher paths, also not listed).
 **Scope:** folder layout of `agentmux-*` crates in this repo, and every path that points at them. Package names, binary names and Rust module paths do not change.
 
 ## 1. What changes
