@@ -55,7 +55,7 @@ WORKDIR /build
 COPY . .
 
 # Same package set Taskfile.yml's build:host:{linux,darwin} tasks build
-# (minus crates/cef/agentmux-launcher, which the container image has no
+# (minus agentmux-cef/agentmux-launcher, which the container image has no
 # use for — this is a headless CLI-driven sandbox agent, not a GUI host).
 RUN cargo build --release -p agentmux-mcp -p agentmux-bashwrap
 
