@@ -771,7 +771,7 @@ fn label_for_top_level(
         if label.starts_with("window-pool-")
             && ctx.state.backend_window_id(&label).is_none()
             && browsers.contains_key("main")
-            && !ctx.state.window_hwnds.lock().contains_key("main")
+            && !main_has_live_window(ctx)
         {
             return Some("main".to_string());
         }
@@ -788,6 +788,16 @@ fn label_for_top_level(
         }
     }
     None
+}
+
+/// "main" has its own live top-level window in `window_hwnds`, so a pool
+/// window can't be the one serving it. An entry left by a recreated Views
+/// window is dead and doesn't count.
+#[cfg(target_os = "windows")]
+fn main_has_live_window(ctx: &HookContext) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+    let main = ctx.state.window_hwnds.lock().get("main").copied();
+    main.is_some_and(|h| h != 0 && unsafe { IsWindow(h as _) } != 0)
 }
 
 #[cfg(target_os = "windows")]
