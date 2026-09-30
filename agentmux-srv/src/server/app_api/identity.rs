@@ -315,3 +315,126 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 }
+
+pub(crate) async fn identity_self_accounts_impl<'o>(
+    state: &AppState,
+    owner: impl Into<SelfOwner<'o>>,
+) -> Result<serde_json::Value, String> {
+    // Link rows are keyed by definition id, not the S1 slug callers
+    // authenticate with — see resolve_agent_definition_id. Identity M4c-2c:
+    // an attributed caller's is its own row's (`SelfOwner`).
+    let def_id = owner.into().owner_id(&state.mstore)
+        .map_err(|e| format!("identity.self.accounts: {e}"))?;
+    let links = state.identity_store.agent_identity_list_for_agent(&def_id)
+        .map_err(|e| format!("identity.self.accounts: {e}"))?;
+    let mut accounts = Vec::new();
+    for link in &links {
+        // A malformed `secret_ref` on ONE linked account must not hide this
+        // agent's other, perfectly readable accounts — the same "one bad row
+        // hides everything" bug class `identity_list` was fixed for
+        // (ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md),
+        // just reachable through this separate per-agent lookup too (reagent
+        // P1 on PR #2419 review). Skip and log rather than `?`-propagate.
+        // resolve_account (WITH the global-mirror fallback), not
+        // resolve_account_for_spawn. Originally reagentx P1 on PR #2632: without
+        // the fallback a migrated/continuing account showed as "missing" here.
+        //
+        // CAVEAT since 2026-08-31 (reagent P2 on PR #2878): this is NO LONGER
+        // consistent with the spawn path. `inject.rs` now uses
+        // `resolve_account_for_spawn`, which deliberately has no fallback, so an
+        // oauth-class account resolvable ONLY via the mirror is listed here yet
+        // refused at spawn with `MissingCredentials` (an api-key-class one is
+        // silently skipped instead). That divergence is deliberate — a listing
+        // should describe what exists rather than silently hide it, and hiding
+        // it would reproduce exactly the "my account vanished" confusion #2632
+        // fixed — but it is a real UX gap: nothing in this payload tells the
+        // caller the account can't satisfy a spawn in THIS channel. Logged
+        // below so it is at least observable; surfacing it in the payload (and
+        // in Armory) is tracked as follow-up, not silently assumed fine. See
+        // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md §6.
+        match crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, &link.account_id) {
+            Ok(Some((acct, account_store))) => {
+                // Observability for the divergence documented above: this
+                // account exists only in the always-global mirror, so a spawn in
+                // this channel will not accept it.
+                if !std::sync::Arc::ptr_eq(&account_store, &state.id_store) {
+                    tracing::warn!(
+                        target: "identity",
+                        account_id = %acct.id,
+                        agent_id = %def_id,
+                        provider = %acct.provider,
+                        "identity.self.accounts: account resolved only via the global mirror; it will NOT satisfy a spawn in this channel (per-channel auth enforcement)"
+                    );
+                }
+                let masked_tail = acct.context.get("masked_tail")
+                    .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                accounts.push(json!({
+                    "account_id": acct.id, "provider": acct.provider, "name": acct.name,
+                    "kind": acct.kind, "status": acct.status, "masked_tail": masked_tail,
+                    "updated_at": acct.updated_at,
+                }));
+            }
+            Ok(None) => {
+                // Link points at a since-deleted account — skip silently.
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "identity",
+                    account_id = %link.account_id,
+                    agent_id = %def_id,
+                    error = %e,
+                    "identity.self.accounts: skipping unreadable linked account",
+                );
+            }
+        }
+    }
+    Ok(json!({ "accounts": accounts }))
+}
+
+/// Validate one of the agent's own linked accounts by probing the provider with
+/// the stored keychain secret. Ownership is verified (the account must be linked
+/// to `agent_id`) before the secret is read.
+pub(crate) async fn identity_account_validate_stored_impl<'o>(
+    state: &AppState,
+    owner: impl Into<SelfOwner<'o>>,
+    account_id: &str,
+) -> Result<serde_json::Value, String> {
+    // Link rows are keyed by definition id, not the S1 slug — without the
+    // resolution this ownership check always saw zero links and rejected.
+    // Identity M4c-2c: an attributed caller's is its own row's, so it can
+    // no longer live-probe a same-named agent's stored secret.
+    let def_id = owner.into().owner_id(&state.mstore)
+        .map_err(|e| format!("identity.account.validate: {e}"))?;
+    let links = state.identity_store.agent_identity_list_for_agent(&def_id)
+        .map_err(|e| format!("identity.account.validate: {e}"))?;
+    if !links.iter().any(|l| l.account_id == account_id) {
+        return Err("FORBIDDEN: account not linked to this agent".to_string());
+    }
+    // resolve_account (WITH the global-mirror fallback) — same reagentx P1
+    // review as identity_self_accounts_impl above.
+    //
+    // CAVEAT since 2026-08-31 (reagent P2 on PR #2878): "consistently with the
+    // spawn path" is no longer true — the spawn path dropped this fallback. What
+    // this RPC answers is narrower than it looks: it validates the CREDENTIAL
+    // (is the key live at the provider), not whether a spawn in this channel
+    // would accept the account. A cross-channel-only account can therefore come
+    // back `valid: true` and still be refused at spawn. Kept as-is because the
+    // credential-validity answer is genuinely correct and callers use it to
+    // check a key, not to predict a spawn — but do not read `valid` as
+    // "this agent can launch". See the note in identity_self_accounts_impl.
+    let (acct, _account_store) = crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, account_id)
+        .map_err(|e| format!("identity.account.validate: {e}"))?
+        .ok_or_else(|| format!("identity.account.validate: account {account_id} not found"))?;
+    let aid = account_id.to_string();
+    let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))
+        .await.map_err(|e| format!("identity.account.validate: keychain task: {e}"))?
+        .map_err(|e| format!("identity.account.validate: keychain: {e}"))?;
+    let tail = crate::identity::key_validator::masked_tail(&plaintext);
+    let outcome = crate::identity::key_validator::validate(&acct.provider, &plaintext).await;
+    Ok(json!({
+        "valid": outcome.valid,
+        "status": if outcome.valid { "valid" } else { "invalid" },
+        "masked_tail": tail,
+        "error": outcome.error,
+    }))
+}
