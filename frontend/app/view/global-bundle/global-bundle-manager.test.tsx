@@ -220,6 +220,40 @@ describe("GlobalBundleManager — tiles first", () => {
         await waitFor(() => expect(reorderMock).toHaveBeenCalledWith(undefined, { ids: ["g-c", "g-a", "g-b"] }));
     });
 
+    test("the dragged tile and the tile under it are marked until the drag ends", async () => {
+        listMemoriesMock.mockResolvedValue([
+            bundle("g-a", "Alpha", "a", { sort_order: 0 }),
+            bundle("g-b", "Beta", "b", { sort_order: 1 }),
+        ]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles()).toContain("Beta"));
+
+        const tile = (id: string) => document.querySelector<HTMLElement>(`[data-id="${id}"]`)!;
+        const has = (id: string, cls: string) => tile(id).classList.contains(cls);
+        fireEvent.dragStart(tile("g-b"));
+        expect(has("g-b", "memory-file-card--dragging")).toBe(true);
+        fireEvent.dragOver(tile("g-b")); // over itself: not a target
+        expect(has("g-b", "memory-file-card--drop-target")).toBe(false);
+        fireEvent.dragOver(tile("g-a"));
+        expect(has("g-a", "memory-file-card--drop-target")).toBe(true);
+        fireEvent.dragLeave(tile("g-a"));
+        expect(has("g-a", "memory-file-card--drop-target")).toBe(false);
+        fireEvent.dragEnd(tile("g-b"));
+        expect(has("g-b", "memory-file-card--dragging")).toBe(false);
+        expect(reorderMock).not.toHaveBeenCalled();
+    });
+
+    test("a tile drag over a tile only claims it while a tile is being dragged", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "a", { sort_order: 0 })]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles()).toContain("Alpha"));
+        const a = document.querySelector<HTMLElement>('[data-id="g-a"]')!;
+        const over = new Event("dragover", { bubbles: true, cancelable: true });
+        a.dispatchEvent(over);
+        expect(over.defaultPrevented).toBe(false);
+        expect(a.classList.contains("memory-file-card--drop-target")).toBe(false);
+    });
+
     test("system entries are not draggable (they never reorder)", async () => {
         listMemoriesMock.mockResolvedValue([bundle("sys-1", "Policy", "p", { is_system: true })]);
         render(() => <GlobalBundleManager />);
