@@ -176,7 +176,6 @@ function CrossWindowDragMonitor(): JSX.Element {
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
             getApi().releaseDragCapture().catch(() => {});
 
-            await sleep(50);
             await handleCrossWindowDragEnd(payload, windowLabelRef, grabOffsetSnapshot);
         };
 
@@ -204,14 +203,6 @@ async function handleCrossWindowDragEnd(
         cursorPoint = await getApi().windows.getCursorScreenPoint();
     } catch (e) {
         Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
-        return;
-    }
-
-    let windows: string[];
-    try {
-        windows = await getApi().listWindows();
-    } catch (e) {
-        Logger.error("dnd:cross", "failed to list windows", { error: String(e) });
         return;
     }
 
@@ -253,6 +244,11 @@ async function handleCrossWindowDragEnd(
         const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
 
         if (targetWindow && targetWindow !== src) {
+            // Brief delay to allow native drop handlers to run first. Only a
+            // drop on another window can have any; a tear-off (no window under
+            // the cursor) doesn't wait. SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md
+            // phase 1.
+            await sleep(50);
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
         } else if (!targetWindow) {

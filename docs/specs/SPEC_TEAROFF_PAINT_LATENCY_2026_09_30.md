@@ -1,7 +1,7 @@
 # SPEC: Tear-off paint latency: show the torn-off content as fast as the window
 
 **Date:** 2026-09-30
-**Status:** proposed — nothing here is implemented. Written against `main` @ `49ad410b8`; spot-verify file:line citations before trusting them.
+**Status:** active — phase 1 in the PR that adds this spec (see §4 phase 1 for what shipped and what was dropped); phases 2 and 3 not started. Written against `main` @ `49ad410b8`; spot-verify file:line citations before trusting them.
 **Author:** Korp@narko
 **Related:** `SPEC_TAB_CONTENT_REVEAL_GATE` (the whole-tab reveal gate and the startup splash this spec shortens), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (pane-tab tear-off, `pane-tab-tearoff.ts`), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (phase 5 cross-window work touches the same monitor code), `SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md` (earlier tear-off paint work).
 
@@ -98,16 +98,20 @@ Ordered by payoff per risk. Phases can ship independently; each ends with a meas
 
 ### Phase 1 — take the free time back (small, low risk)
 
-1. **Post-render imports stop gating the reveal.** Start the four imports (§2.3) as fire-and-forget, or better, import them during pool pre-warm so they're already loaded. `initMux` returns right after `render(App)`, so the reveal clock starts ~190 ms (dev) earlier. Check each service tolerates starting a few ms after the first paint (they subscribe to events; none paints).
-2. **Remove the dead `listWindows` IPC** (`CrossWindowDragMonitor.win32.tsx:212`).
-3. **`getPaneDebugState` becomes fire-and-forget** (`:344`).
-4. **Revisit the 50 ms `sleep`** (`:179`). Find why it's there (the comment history / blame) before touching it; if it exists to let the source's drop handlers run first, a microtask or the drag session's `released` state (phase 4 of the DnD consolidation) can replace a fixed delay.
-5. **Defer the pool refill** (`pane_pool.rs:554`, `window_pool.rs:1860`) until the promoted window reports its reveal (`set_window_init_status("wave-ready")` or the gate's settle), with a timeout so the pool still refills if the reveal never comes.
-6. **Drop the duplicate `registerBackendWindow`** at the end of `initMux` (`app-init.ts:1241-1250`) for new windows; the real registration already ran after `CreateWindow` (`:518-521`). Keep it for the main-window path if that one needs it.
-7. **`TearOffBlock` responds before the source clean-up** (srv `service/tear_off.rs:85-137`): the prune, queued delete and auto-close run after the floater's workspace/tab/layout are committed. Keep the saga's ordering guarantees; only the response moves earlier.
-8. **Shorter splash fade on tear-off.** The 200 ms fade exists to hide a cold start; on a tear-off the content is ready when the gate lifts, so cross-fade in ~80–100 ms.
+**Shipped** (with this spec):
 
-Expected: reveal at roughly 200–250 ms instead of 420–450 ms for a pane (dev), less on a packaged build. To be measured.
+1. **Post-render imports stop gating the reveal.** The four services (§2.3) start loading alongside `render(App)` and install when loaded (`fireAndForget`); `initMux` no longer awaits them, so the reveal gate's clock starts right after the render. None of them paints; each subscribes to events or observes the DOM.
+2. **The dead `listWindows` IPC is removed** from the Windows cross-window monitor.
+3. **The 50 ms wait only applies to a drop on another window.** Its original comment (`f03066108`, the SolidJS migration) reads "Brief delay to allow native drop handlers to run first"; only a release over another AgentMux window can have any. A tear-off (no window under the cursor) no longer waits. The pane-tab path never needed it: a drop on another window is a cancel there.
+4. **The pane pool refills after the floater reveals**, not at promotion: the floater reports `set_window_init_status("revealed")` when its splash starts fading, and the host spawns the replacement then (or after 2 s if no reveal is reported).
+5. **A promoted pool window's splash fades in 90 ms** instead of 200 ms; the long fade stays for a cold start.
+6. **Measurement:** the floater logs `[tearoff-perf] reveal Nms after promote`.
+
+**Dropped, with reasons:**
+- *`getPaneDebugState` fire-and-forget:* it's awaited on purpose, to capture state before the IPC starts; it cost ~6 ms in the measurements.
+- *The duplicate `registerBackendWindow`:* it's fire-and-forget (not on the critical path), documented as idempotent, and the main-window path relies on it.
+- *`TearOffBlock` responding before the source clean-up:* the whole RPC took 13–26 ms, and its response carries the source tab and workspace *after* the clean-up, which the source window applies. Not worth the ordering risk.
+- *Deferring the window pool's refill:* the launcher's pool reducer also refills it (`SpawnPoolWindow` saga), so deferring it means changing the launcher's reconciliation; a separate change.
 
 ### Phase 2 — pre-bootstrap the pools (medium)
 
@@ -151,11 +155,11 @@ Before and after each phase, on **both** `task dev` and a packaged portable (the
 - **Stale warm state** (phase 2): config or connection status cached in a pool renderer before promotion. Mitigation: live subscriptions plus a cheap re-check on promotion.
 - **Snapshot mismatch** (phase 3.1): the picture shows a state the live content no longer has (a terminal that printed more in between). Acceptable for ≤ a few hundred ms; the cross-fade must be quick and the snapshot never shown longer than the gate cap.
 - **Skipping the launch flow** (phase 3.3) for a block that isn't really running would leave an agent pane without its auth checks. Gate strictly on the block's own running state, not on the tear-off alone.
-- **Removing the 50 ms sleep** (phase 1.4) without knowing its reason could reintroduce whatever race it was added for.
+- **Skipping the 50 ms wait** (phase 1.3) on a tear-off: its stated reason (another window's drop handlers) only applies to a drop on another window, where it still runs.
 
 ## 8. Open questions
 
-1. Why the 50 ms `sleep` after `dragend` exists (blame it before phase 1.4).
+1. ~~Why the 50 ms `sleep` after `dragend` exists.~~ Answered in phase 1: for drops on another window only.
 2. How much of §2.3 remains on a packaged build.
 3. Whether the four post-render services can start after the first paint without missing events (e.g. the OS-notification bridge missing a toast emitted during mount).
 4. For phase 3.1 on Windows: capture via the renderer (`html-to-image`, already a dependency of `TileLayout.core.tsx`) or via the host (`CaptureWindow`/`PrintWindow` on the source HWND region). The host path is faster and exact for GPU-composited content; the renderer path can't see native browser-pane pixels.
