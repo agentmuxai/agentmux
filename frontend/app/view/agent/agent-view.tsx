@@ -66,14 +66,11 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
-import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
+import { createPromotionClock } from "./activity/promotion-clock";
 import { allSubagentsAtom } from "./activity/subagent-source";
-import {
-    hasRunningPromotedTool,
-    nextToolPromotionAt,
-} from "./activity/tool-adapter";
-import { busyInputFromState, paneBusyForInput } from "./working-indicator";
+import { AgentProgressBar } from "./components/AgentProgressBar";
+import { useWorkingIndicator } from "./hooks/useWorkingIndicator";
 import { quickForkAgent } from "./quick-fork";
 import { isBangCommand } from "./bang-command";
 import { askSideQuestion } from "./btw";
@@ -1269,63 +1266,17 @@ export const AgentPresentationView = ({
     // mounts via scrollToBottomRef.
     let scrollToBottomFn: ((reason?: string) => void) | null = null;
 
-    // True once the pane's in-flight Bash tool call has been promoted to a
-    // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
-    // its own "tool · arg" text once this flips, so the dock and the working
-    // row never repeat the same information (report §4.3: "the dock takes
-    // over, AgentWorkingRow goes calm/neutral"). Deliberately uses
-    // hasRunningPromotedTool, not toolActivities — a *finished* call still
-    // lingering in the dock during its retention window must not suppress a
-    // different, newly-started tool call's own working-row text.
-    //
-    // Scheduled the same way as ActivityDock's own hasExpiring/
-    // toolPromotionNonce: one setTimeout for the exact instant promotion
-    // becomes due, not a continuous tick. The effect re-reads its own nonce
-    // so that after that timer fires it reschedules for the next-earliest
-    // still-pending promotion, instead of only ever handling one.
-    const [hasPromotedTool, setHasPromotedTool] = createSignal(false);
-    const [toolPromotionCheckNonce, setToolPromotionCheckNonce] = createSignal(0);
-    createEffect(() => {
-        toolPromotionCheckNonce();
-        const nodes = paneModel.document();
-        const now = Date.now();
-        setHasPromotedTool(hasRunningPromotedTool(nodes, now));
-        const at = nextToolPromotionAt(nodes, now);
-        if (at == null) return;
-        const timer = setTimeout(() => setToolPromotionCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
-        onCleanup(() => clearTimeout(timer));
+    // The wall-clock instant a running Bash call is promoted to the dock, for
+    // everything that depends on promotion (activity/promotion-clock.ts).
+    const promotionTick = createPromotionClock(paneModel.document);
+
+    // The busy predicate and its renderings (hooks/useWorkingIndicator.ts).
+    const { paneBusy, workingRowVisible, hasPromotedTool } = useWorkingIndicator({
+        paneModel,
+        showingLaunchActivity,
+        promotionTick,
     });
-
-    // THE busy predicate — one meaning, three renderings: this row, the top
-    // progress bar, and the composer strip. All three read this memo and
-    // nothing else, so they cannot disagree. Definition and the reasoning for
-    // collapsing them live in working-indicator.ts.
-    //
-    // This used to subtract workingRowSupersededByDock() here, standing the row
-    // down once a tool call was promoted to the ActivityDock. That was wrong:
-    // promotion is a DISPLAY change at TOOL_PROMOTION_MS, not the harness
-    // backgrounding the call, so the turn is still blocked and input still
-    // queues — the row was hiding a gate that was still closed, while the bar
-    // (which never had the term) kept running. See
-    // docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md
-    // §3.1 (still valid: mere dock PROMOTION never relaxes busy-ness).
-    //
-    // §2.3a (2026-09-17, supersedes §2.3) DOES relax busy-ness, but only for
-    // genuinely accepted background work (isAcceptedBackgroundLaunch), not
-    // mere promotion — see hasBlockingForegroundToolCall's doc comment in
-    // ./activity/tool-adapter for exactly how those two are told apart.
-    const paneBusy = createMemo(() =>
-        paneBusyForInput(busyInputFromState(paneModel.state, paneModel.document(), showingLaunchActivity()))
-    );
-
     const workingRowLoading = paneBusy;
-    const workingRowVisible = createMemo(
-        () =>
-            workingRowLoading() ||
-            paneModel.state.sessionStats != null ||
-            paneModel.state.compacting != null ||
-            paneModel.state.reconnecting != null,
-    );
 
     // Attached-task axis dispatch — the deferred §6.1 call site of
     // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md. Derives "≥1 live
@@ -1335,10 +1286,9 @@ export const AgentPresentationView = ({
     // Both commands are idempotent in the reducer, so re-running this effect
     // while the level is unchanged is harmless. Wall-clock re-check timer:
     // a running Bash call crosses TOOL_PROMOTION_MS on a timer, not on a
-    // document event (same discipline as the promotion effect above).
-    const [attachedCheckNonce, setAttachedCheckNonce] = createSignal(0);
+    // document event, so this re-runs on the shared promotion clock.
     createEffect(() => {
-        attachedCheckNonce();
+        promotionTick();
         const nodes = paneModel.document();
         const subs = allSubagentsAtom();
         const now = Date.now();
@@ -1374,10 +1324,6 @@ export const AgentPresentationView = ({
                 "system"
             );
         }
-        const at = nextToolPromotionAt(nodes, now);
-        if (at == null) return;
-        const timer = setTimeout(() => setAttachedCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
-        onCleanup(() => clearTimeout(timer));
     });
 
     // User-message send + /login /clear slash intercepts + back-to-picker.
@@ -2099,43 +2045,12 @@ export const AgentPresentationView = ({
                 </ResizableDetailsDrawer>
             </Show>
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
-            {/* Gradient progress bar — marching-ants shimmer traced around
-                the full pane perimeter while working, hidden at rest.
-                Color matches the pane's own selection-ring color (not a
-                fixed --accent-color) via --progress-bar-color, set on
-                .agent-pane-stack (agent-view.scss). Portaled into a
-                slot AgentPaneChrome owns, between the tab strip and the
-                content (its own row, never overlapping either), bridged
-                through this AgentViewModel instance's progressBarMount
-                signal — see that field's own doc comment (agent-model.ts)
-                for why chrome and content, now separate component trees,
-                need that indirection. This component's state (turnPhase,
-                launch activity) is what drives the bar, but .agent-view
-                (this component's own root, nested inside .agent-pane-stack-content,
-                itself BELOW the tab strip in DOM order) can't reach a
-                position above the tab strip through CSS alone; every
-                ancestor between here and there clips overflow before an
-                absolutely-positioned escape could ever become visible. See
-                SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §4 and
-                SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md.
-                Renders nothing until the slot ref is assigned (one frame,
-                first mount only). */}
-            <Show when={progressBarMount()}>
-                <Portal mount={progressBarMount()!}>
-                    <div
-                        class="agent-pane-progress-bar"
-                        classList={{
-                            "agent-pane-progress-bar--active": paneBusy(),
-                            "agent-pane-progress-bar--stopping":
-                                paneModel.state.turnPhase.kind === "Interrupting",
-                        }}
-                        role="progressbar"
-                        aria-label="Agent working"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                    />
-                </Portal>
-            </Show>
+            {/* Portaled above the tab strip; see components/AgentProgressBar.tsx. */}
+            <AgentProgressBar
+                mount={progressBarMount}
+                active={paneBusy()}
+                stopping={paneModel.state.turnPhase.kind === "Interrupting"}
+            />
             {/* /btw side-question overlay — ephemeral, floats over the whole
                 pane (position: absolute against .agent-view, styles/_btw.scss),
                 NOT part of the persisted layout tree and NOT gated on the
