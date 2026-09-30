@@ -110,13 +110,18 @@ describe("CLI pin consistency across registries", () => {
     // #1964 added `--exclude-dynamic-system-prompt-sections` to srv only, so the
     // flag depended on how the pane was created
     // (docs/specs/SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §5.1 #4).
-    // Every provider both registries define, not just the pinned three.
+    // Every provider srv defines, found from the source rather than listed by
+    // hand, so a new provider can't be missed (ReAgent P1 on #4029: an earlier
+    // hand-written list skipped pi, muxcode, copilot and antigravity).
     const argRegistries: Array<[keyof typeof PROVIDERS & string, string]> = [
-        ...registries,
-        ["qwen", "QWEN"],
-        ["kimi", "KIMI"],
-        ["openclaw", "OPENCLAW"],
-    ];
+        ...srvSource.matchAll(/static ([A-Z_]+): ProviderConfig = ProviderConfig \{\n\s+id: "([^"]+)"/g),
+    ].map((m) => [m[2] as keyof typeof PROVIDERS & string, m[1]]);
+
+    it("both registries define the same providers", () => {
+        expect(argRegistries.length, "no ProviderConfig statics found in providers.rs").toBeGreaterThan(0);
+        expect(argRegistries.map(([key]) => key).sort()).toEqual(Object.keys(PROVIDERS).sort());
+    });
+
     for (const [key, srvStatic] of argRegistries) {
         it(`${key}: frontend and srv launch args agree`, () => {
             expect(PROVIDERS[key].launchArgs ?? [], `launchArgs for ${key}`).toEqual(
