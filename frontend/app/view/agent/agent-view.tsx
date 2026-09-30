@@ -14,7 +14,7 @@ import {
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { isAuthFailure, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
@@ -1001,7 +1001,7 @@ export const AgentPresentationView = ({
     // overrides the tag to "unauthenticated" the instant it appears, instead
     // of waiting for the user to click "Login Again" first.
     const loginStatus = createMemo((): "authenticated" | "unauthenticated" | "unknown" => {
-        if (paneModel.state.failure?.data.code === "auth") return "unauthenticated";
+        if (isAuthFailure(paneModel.state.failure)) return "unauthenticated";
         return status.authStatus();
     });
 
@@ -1366,7 +1366,7 @@ export const AgentPresentationView = ({
         // pre-launch "Log in" row into "Login Again" (+ retryAfterLogin true,
         // i.e. an old message resent on an agent that never ran a turn).
         // Found independently by codex and manoz on PR #2951.
-        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure : null;
+        const authFailureToPreserve = isAuthFailure(liveFailure) ? liveFailure : null;
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
         // while a turn is already running regresses Streaming → Submitting,
         // which would flicker the busy indicator back to its "Submitting"

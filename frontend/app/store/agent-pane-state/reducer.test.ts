@@ -14,6 +14,8 @@ import {
     STUCK_THRESHOLD_MS,
     SUBMIT_TIMEOUT_MS,
     TurnPhase,
+    isAuthFailure,
+    type PaneFailure,
 } from "./types";
 
 /** Bring a fresh state into a live `Streaming` turn (toolsActive 0). */
@@ -3502,5 +3504,15 @@ describe("ModelEndedTurn / ModelMessageStarted", () => {
             at: 200,
         }).state;
         expect(flag(next)).toBeFalsy();
+    });
+});
+
+describe("isAuthFailure", () => {
+    const f = (code: string) => ({ data: { code } }) as unknown as Pick<PaneFailure, "data">;
+    it("is true only for an auth failure", () => {
+        expect(isAuthFailure(f("auth"))).toBe(true);
+        expect(isAuthFailure(f("rate_limited"))).toBe(false);
+        expect(isAuthFailure(null)).toBe(false);
+        expect(isAuthFailure(undefined)).toBe(false);
     });
 });
