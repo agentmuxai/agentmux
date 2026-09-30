@@ -28,22 +28,11 @@ import {
     setHoveredDropTabId,
     dragEscaped,
     setDragEscaped,
+    decideTabRelease,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import type { TearOffTabAtReleaseFn } from "./tab-tearoff-rpc";
 import { Logger } from "@/util/logger";
-
-// Pixels past the tab strip's bottom edge before a drag becomes a
-// tear-off (Chrome uses a similar small threshold). 24 px is enough
-// to filter out brief excursions while the user is still hunting for
-// the drop position; small enough that the tear feels intentional.
-// See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.1.
-// Pixels past the tab bar's bottom edge before tear-off triggers. Was
-// 24px historically, which left a ~24-pixel zone where the user saw
-// only the OS drag image with no real window. Lowered to 5 to match
-// Chrome's perceived-instant tear-off (just enough to filter trembles).
-// Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.2.
-const TEAR_PAST_PX = 5;
 
 /**
  * Execute the reorder described by the insertion point.
@@ -166,13 +155,28 @@ export function useTabDragAndDrop(
             },
 
             onDrop: ({ source, location }) => {
+                const ip = insertionPoint();
+                const draggedTabId = source.data.tabId as string;
+                const input = location.current.input;
+                // Pragmatic-dnd registers no drop target for the bar
+                // (insertion is purely X-driven), so the strip's rect tells
+                // "reorder inside the bar" from "tear-off below it".
+                const release = decideTabRelease({
+                    escaped: dragEscaped,
+                    ip,
+                    input,
+                    stripRect: tabBarScrollRef()?.getBoundingClientRect() ?? null,
+                    tabCount: tabIds().length,
+                    draggedTabId,
+                });
+
                 // Escape was pressed at some point during this drag (see
                 // the keydown listener above) — abort the WHOLE operation:
                 // no reorder, no tear-off. The tab was never actually moved
                 // (only the insertion-point preview did), so clearing that
                 // and the cross-window payload is enough to fully restore
                 // the pre-drag state; nothing to undo.
-                if (dragEscaped) {
+                if (release === "abort") {
                     setDragEscaped(false);
                     setCurrentDragPayload(null);
                     setInsertionPoint(null);
@@ -182,38 +186,12 @@ export function useTabDragAndDrop(
                     return;
                 }
 
-                const ip = insertionPoint();
-                const draggedTabId = source.data.tabId as string;
-
-                // `insertionPoint` reflects the last cursor X, so it can be
-                // non-null even when the user has dragged BELOW the tab bar
-                // for a tear-off. Pragmatic-dnd registers no drop target for
-                // the bar (insertion is purely X-driven), so we hit-test the
-                // cursor against the strip's bounding rect ourselves to tell
-                // "reorder inside the bar" from "tear-off below it".
-                const input = location.current.input;
-                const rect = tabBarScrollRef()?.getBoundingClientRect();
-                const dropInsideBar =
-                    rect != null &&
-                    input.clientY >= rect.top && input.clientY <= rect.bottom &&
-                    input.clientX >= rect.left && input.clientX <= rect.right;
-
                 // Commit-on-release tear-off: the tab was released BELOW the
                 // strip (dragged down into the window body) and let go.
                 // Spawn the new window at the release point NOW — deliberately
                 // not mid-drag, so nothing detaches until the user releases
-                // (the behaviour they expect). Lone tabs never tear (tearing
-                // the only tab would just trade one single-tab window for
-                // another and strand the source); their cross-window exit is
-                // the host mouse-hook remount.
-                const releasedBelowStrip =
-                    rect != null && input.clientY > rect.bottom + TEAR_PAST_PX;
-                if (
-                    !dropInsideBar &&
-                    releasedBelowStrip &&
-                    draggedTabId != null &&
-                    tabIds().length > 1
-                ) {
+                // (the behaviour they expect).
+                if (release === "tear-off") {
                     // Clear the payload SYNCHRONOUSLY (before the async
                     // tear-off) so CrossWindowDragMonitor's dragend handler —
                     // which may fire for the same gesture — sees no payload
@@ -224,13 +202,13 @@ export function useTabDragAndDrop(
                     return;
                 }
 
-                const willReorder = dropInsideBar && ip != null && draggedTabId != null;
+                const willReorder = release === "reorder";
 
                 if (willReorder || location.current.dropTargets.length > 0) {
                     setCurrentDragPayload(null);
                 }
 
-                if (willReorder) {
+                if (willReorder && ip != null) {
                     const tabs = tabIds();
                     const wsId = workspace()?.oid;
 

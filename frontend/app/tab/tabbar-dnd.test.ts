@@ -11,6 +11,8 @@ import {
     wasTabRecentlyMerged,
     tabWrapperRefs,
     setGlobalDragTabId,
+    decideTabRelease,
+    TEAR_PAST_PX,
 } from "./tabbar-dnd";
 
 // ── computeInsertIndex ────────────────────────────────────────────────────────
@@ -373,5 +375,51 @@ describe("markTabMerged / wasTabRecentlyMerged", () => {
         expect(wasTabRecentlyMerged("t2", 1_006_000)).toBe(false);
         // Pruned on the expired read — a later in-window read stays false.
         expect(wasTabRecentlyMerged("t2", 1_000_100)).toBe(false);
+    });
+});
+
+// ── decideTabRelease ──────────────────────────────────────────────────────────
+//
+// Strip: x 0-500, y 0-30. Tear-off needs a release more than TEAR_PAST_PX
+// below it.
+
+describe("decideTabRelease", () => {
+    const strip = { left: 0, right: 500, top: 0, bottom: 30 };
+    const ip = { beforeTabId: "tab-a", afterTabId: "tab-b" };
+    const base = { escaped: false, ip, stripRect: strip, tabCount: 3, draggedTabId: "tab-c" };
+    const at = (clientX: number, clientY: number) => ({ clientX, clientY });
+
+    test("a release inside the strip with an insertion point reorders", () => {
+        expect(decideTabRelease({ ...base, input: at(200, 15) })).toBe("reorder");
+    });
+
+    test("inside the strip without an insertion point does nothing", () => {
+        expect(decideTabRelease({ ...base, ip: null, input: at(200, 15) })).toBe("none");
+    });
+
+    test("a release below the strip tears off, even with an insertion point", () => {
+        expect(decideTabRelease({ ...base, input: at(200, 30 + TEAR_PAST_PX + 1) })).toBe("tear-off");
+    });
+
+    test("within TEAR_PAST_PX below the strip does nothing", () => {
+        expect(decideTabRelease({ ...base, input: at(200, 30 + TEAR_PAST_PX) })).toBe("none");
+    });
+
+    test("beside or above the strip does nothing", () => {
+        expect(decideTabRelease({ ...base, input: at(600, 15) })).toBe("none");
+        expect(decideTabRelease({ ...base, input: at(200, -20) })).toBe("none");
+    });
+
+    test("a lone tab never tears off", () => {
+        expect(decideTabRelease({ ...base, tabCount: 1, input: at(200, 200) })).toBe("none");
+    });
+
+    test("Escape aborts, wherever the release is", () => {
+        expect(decideTabRelease({ ...base, escaped: true, input: at(200, 15) })).toBe("abort");
+        expect(decideTabRelease({ ...base, escaped: true, input: at(200, 200) })).toBe("abort");
+    });
+
+    test("with no strip rect nothing happens", () => {
+        expect(decideTabRelease({ ...base, stripRect: null, input: at(200, 200) })).toBe("none");
     });
 });
