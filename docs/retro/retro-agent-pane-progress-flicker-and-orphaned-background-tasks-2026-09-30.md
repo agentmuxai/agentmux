@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** retro — root causes found; fixes proposed in §5, not yet implemented
+**Status:** retro — root causes found; §5 fixes 1 and 2 shipped (#4035, #4040), 3–5 open
 **Severity:** Medium. The ring is the main "the agent is still working" signal, and
 it now goes dark while the agent is busy. The stale rows mislead anyone reading the
 Activity Dock or Swarm, and they keep the ring flickering.
@@ -145,14 +145,14 @@ ring flickered on every turn for the rest of the day.
 
 In priority order. Each is small and independently shippable.
 
-1. **Busy while the model is generating.** Add a `modelGenerating` input to
+1. ✅ **Done in #4035.** **Busy while the model is generating.** Add a `modelGenerating` input to
    `WorkingIndicatorInput`, true from the stream's first `status: requesting` /
    `message_start` of a turn step until that step's assistant message completes.
    `turnHeldOnlyByBackgroundWork` returns false while it is true. The carve-out
    then applies only in the real case: the model has stopped and is waiting on
    background work. Tests: "Streaming, backgrounded, model generating → busy",
    plus the existing "model idle → not busy" case.
-2. **Reconcile the registry against `background_tasks_changed`.** In
+2. ✅ **Done in #4040.** **Reconcile the registry against `background_tasks_changed`.** In
    `background_task_feed.rs`, treat each snapshot as the CLI's full set of live
    tasks for that stream. A `running` row this reader has seen start, whose
    `task_id` is missing from a later snapshot, becomes `stopped` with the
@@ -168,6 +168,12 @@ In priority order. Each is small and independently shippable.
    that.
 5. **Clean up the two existing orphans** once fix 2 or 3 ships, or by hand
    (`status = 'stopped'`) if the pane needs relief sooner.
+
+### 5.1 As built
+
+- **Fix 1 (#4035)** is a flag on the `Streaming` phase, `modelEndedTurn`, rather than a separate input: set by the main agent's `message_delta` with `stop_reason: end_turn`, cleared by its next `message_start`. Measured on 87 real turns in two agents, the CLI sends `result` 2–3 lines after that `end_turn`, so a Claude turn now stays busy until it ends.
+- **Fix 2 (#4040)** doesn't end a task when it leaves the snapshot: every task that ended normally (36 of 36) left the snapshot one line **before** its end event. A task that leaves is marked vanished, and settled as `stopped` only if its end event hasn't come by the next snapshot or turn boundary (`result`, or `init`).
+- **Fix 5 still applies to Opaz's two rows.** Fix 2 needs the feed's in-memory record of a task, which a row created before the fix (or before an srv restart) doesn't have. Those rows need fix 3, or a manual `stopped`.
 
 ## 6. Lessons
 

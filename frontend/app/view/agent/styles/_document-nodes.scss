@@ -1151,8 +1151,125 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
     }
 
+    // What the agent was given without the user typing it
+    // (ContextDeliveryCard, SPEC_CONTEXT_DELIVERY_2026_09_30 §3.2). Quieter
+    // than a jekt: it's context, not a message.
+    .agent-context-delivery {
+        border-left: 2px solid var(--secondary-text-color);
+        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        cursor: default;
+
+        .agent-context-delivery-summary {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0 var(--space-1-5);
+            padding: 3px var(--space-1);
+            user-select: none;
+            color: var(--secondary-text-color);
+
+            .agent-context-delivery-chevron {
+                @include message-chevron;
+            }
+
+            .agent-context-delivery-title {
+                flex: 1;
+                font-weight: 600;
+                color: var(--main-text-color);
+            }
+
+            .agent-context-delivery-size {
+                font-size: 11px;
+                white-space: nowrap;
+            }
+
+            // Its own line under the title, one line tall.
+            .agent-context-delivery-excerpt {
+                flex-basis: 100%;
+                padding-left: var(--space-4);
+                font-size: 12px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+        }
+
+        // A card with nothing to open has no chevron; keep its title aligned
+        // with the ones that do.
+        &.no-body .agent-context-delivery-summary {
+            padding-left: var(--space-4);
+        }
+
+        // Memory items, one row each, under the title (always shown).
+        .agent-context-delivery-rows {
+            flex-basis: 100%;
+            padding-left: var(--space-4);
+        }
+
+        .agent-context-delivery-item-chip {
+            font-size: 11px;
+            padding: 0 var(--space-1);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+
+        // An item the part cap cut: say so, and dim what never went out.
+        .agent-context-delivery-item-cut {
+            font-size: 11px;
+            color: var(--warning-color);
+            white-space: nowrap;
+        }
+
+        .delivered-omitted .agent-context-delivery-item-name {
+            opacity: 0.6;
+            text-decoration: line-through;
+        }
+
+        .agent-context-delivery-advice {
+            flex-basis: 100%;
+            padding: var(--space-1) 0 0 var(--space-4);
+            font-size: 12px;
+            color: var(--warning-color);
+        }
+
+        .agent-context-delivery-content {
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
+            cursor: default;
+        }
+
+        .agent-context-delivery-item-head {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1-5);
+            padding: 2px 0;
+
+            .agent-context-delivery-item-name {
+                flex: 1;
+            }
+
+            .agent-context-delivery-item-size {
+                font-size: 11px;
+                color: var(--secondary-text-color);
+                white-space: nowrap;
+            }
+        }
+
+        .agent-context-delivery-body {
+            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            padding: var(--space-1) var(--space-1-5);
+            margin: 0 0 var(--space-1) 0;
+            white-space: pre-wrap;
+            // Same cap and scroll hand-off as a jekt body.
+            max-height: $transcript-preview-max-height;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+    }
+
     // Linkified URLs in plain-text and markdown blocks
     .agent-message-body,
+    .agent-context-delivery-body,
     .agent-jekt-body,
     .agent-user-message-content pre,
     .agent-tool-log-line {

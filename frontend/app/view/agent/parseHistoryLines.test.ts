@@ -628,3 +628,68 @@ describe("parseHistoryLines — jekt arriving mid-block", () => {
         expect(nodes.map((n) => n.type)).toEqual(["markdown", "jekt_message"]);
     });
 });
+
+describe("parseHistoryLines — Claude Code's compaction summary (SPEC_CONTEXT_DELIVERY_2026_09_30 §3.3)", () => {
+    const SUMMARY = [
+        "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.",
+        "",
+        "Summary:",
+        "1. Primary Request and Intent:",
+        "   Fix the console sign-in.",
+    ].join("\n");
+    const boundaryLine = JSON.stringify({
+        type: "system",
+        subtype: "compact_boundary",
+        compactMetadata: { trigger: "manual", preTokens: 120_000, postTokens: 8_000, durationMs: 30_000 },
+        timestamp: "2026-09-30T08:00:00.000Z",
+    });
+    const summaryLine = JSON.stringify({
+        type: "user",
+        message: { role: "user", content: SUMMARY },
+        isSynthetic: true,
+        uuid: "summary-uuid-1",
+        timestamp: "2026-09-30T08:00:01.000Z",
+    });
+
+    it("renders the summary as a context delivery, not a user message", () => {
+        const { nodes } = parseHistoryLines(
+            [line({ type: "text", content: "before" }), boundaryLine, summaryLine],
+            "claude-stream-json",
+        );
+        expect(nodes.map((n) => n.type)).toEqual(["markdown", "context_compacted", "context_delivery"]);
+        const card = nodes[2] as any;
+        expect(card.reason).toBe("compaction");
+        expect(card.trigger).toBe("manual");
+        expect(card.items[0]).toMatchObject({ kind: "compaction_summary", body: SUMMARY, excerpt: "Fix the console sign-in." });
+    });
+
+    it("recognises a summary at the top of a page whose boundary is on the older page", () => {
+        // useHistoryPagination parses each page separately, newest first.
+        const newer = parseHistoryLines([summaryLine], "claude-stream-json").nodes;
+        const older = parseHistoryLines([boundaryLine], "claude-stream-json").nodes;
+        expect(newer.map((n) => n.type)).toEqual(["context_delivery"]);
+        expect(older.map((n) => n.type)).toEqual(["context_compacted"]);
+        // Same id as when both are on one page, so the document store dedupes.
+        const together = parseHistoryLines([boundaryLine, summaryLine], "claude-stream-json").nodes;
+        expect(newer[0].id).toBe(together[1].id);
+    });
+
+    it("leaves the same text a user message when it's neither flagged nor after a boundary", () => {
+        const unflagged = JSON.stringify({ type: "user", message: { role: "user", content: SUMMARY } });
+        const { nodes } = parseHistoryLines([unflagged], "claude-stream-json");
+        expect(nodes.map((n) => n.type)).toEqual(["user_message"]);
+    });
+
+    it("keeps one card when the same lines replay twice", () => {
+        const { nodes } = parseHistoryLines([boundaryLine, summaryLine, boundaryLine, summaryLine], "claude-stream-json");
+        expect(nodes.filter((n) => n.type === "context_delivery")).toHaveLength(1);
+        expect(nodes.filter((n) => n.type === "user_message")).toHaveLength(0);
+    });
+
+    it("pairs a boundary and summary that land in different history pages", () => {
+        const parser = new HistoryParser("claude-stream-json", "me");
+        parser.feed([boundaryLine]);
+        parser.feed([summaryLine]);
+        expect(parser.nodes.map((n) => n.type)).toEqual(["context_compacted", "context_delivery"]);
+    });
+});

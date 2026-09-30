@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveSubagent } from "../../swarm/swarm-model";
 import type { DocumentNode, ShellNode, ToolNode } from "../types";
-import { earliestLiveAttachedStartMs, hasLiveAttachedActivity } from "./attached-task";
+import { earliestLiveAttachedStartMs, hasLiveAttachedActivity, mergeAttachedStartMs } from "./attached-task";
 import { TOOL_PROMOTION_MS } from "./tool-adapter";
 
 function mkShell(overrides: Partial<ShellNode> = {}): ShellNode {
@@ -136,5 +136,31 @@ describe("backgrounded Bash calls (issue #2490)", () => {
             timestamp: 900_000,
         };
         expect(hasLiveAttachedActivity([bg, notification], [], "block-1", 950_000)).toBe(false);
+    });
+});
+
+// The two sources of "background work is attached" — the transcript
+// (earliestLiveAttachedStartMs) and the durable registry
+// (registryAttachedTaskSince) — combined: attached if either says so, earliest
+// start wins. Split out of agent-view.tsx's attached-task effect
+// (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.4).
+describe("mergeAttachedStartMs", () => {
+    it("is null when neither source reports work", () => {
+        expect(mergeAttachedStartMs(null, null)).toBeNull();
+    });
+
+    it("takes whichever source reports work", () => {
+        expect(mergeAttachedStartMs(100, null)).toBe(100);
+        expect(mergeAttachedStartMs(null, 200)).toBe(200);
+    });
+
+    it("takes the earlier start when both do", () => {
+        expect(mergeAttachedStartMs(300, 200)).toBe(200);
+        expect(mergeAttachedStartMs(100, 200)).toBe(100);
+    });
+
+    it("keeps a start of 0 rather than treating it as absent", () => {
+        expect(mergeAttachedStartMs(0, null)).toBe(0);
+        expect(mergeAttachedStartMs(null, 0)).toBe(0);
     });
 });

@@ -14,6 +14,7 @@
 
 import type {
     AgentMessageNode,
+    ContextDeliveryNode,
     DocumentNode,
     DocumentState,
     JektMessageNode,
@@ -157,6 +158,30 @@ export function estimateExpandedJekt(message: string): number {
 }
 
 const SHELL_COLLAPSED_PX = 32;
+
+const CONTEXT_DELIVERY_TITLE_PX = 30;
+const CONTEXT_DELIVERY_EXCERPT_PX = 22;
+const CONTEXT_DELIVERY_ITEM_HEAD_PX = 24;
+const CONTEXT_DELIVERY_ADVICE_PX = 40;
+
+/**
+ * A compaction summary card: title plus excerpt. A memory card: title plus a
+ * row per item (always shown), plus the size advice when Personal Memory is large.
+ */
+function estimateCollapsedContextDelivery(node: ContextDeliveryNode): number {
+    const summaryCard = node.items.length === 1 && node.items[0].kind === "compaction_summary";
+    const rows = summaryCard ? CONTEXT_DELIVERY_EXCERPT_PX : node.items.length * CONTEXT_DELIVERY_ITEM_HEAD_PX;
+    const advice = node.sizeBand === "high" || node.sizeBand === "critical" ? CONTEXT_DELIVERY_ADVICE_PX : 0;
+    return CONTEXT_DELIVERY_TITLE_PX + rows + advice;
+}
+
+/** Collapsed, then each item with text: its head row and its body, capped like a jekt's. */
+function estimateExpandedContextDelivery(node: ContextDeliveryNode): number {
+    return node.items.reduce(
+        (sum, item) => sum + (item.body ? CONTEXT_DELIVERY_ITEM_HEAD_PX + estimateExpandedJekt(item.body) : 0),
+        estimateCollapsedContextDelivery(node),
+    );
+}
 const SHELL_EXPANDED_PX = 200;
 
 /** Per-kind streaming capability — straightforward map. */
@@ -172,6 +197,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     compaction_started: false,
     // One-shot label built from a completed compact_boundary — never chunked, and never carries content to stream in the first place (§3.2 of its spec).
     memory_reinjection: false,
+    // Built whole from one frame (the compaction summary) — never chunked.
+    context_delivery: false,
     // Arrives as a single complete user_message event, not chunk-by-chunk.
     jekt_message: false,
     // One-shot marker, same as context_compacted — not chunked.
@@ -239,6 +266,7 @@ export function estimateNodeForState(
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
             case "ambient_narration": return estimateTextHeight(node.text);
+            case "context_delivery":  return estimateCollapsedContextDelivery(node);
         }
     }
     // expanded
@@ -259,5 +287,6 @@ export function estimateNodeForState(
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
         case "ambient_narration": return estimateTextHeight(node.text);
+        case "context_delivery":  return estimateExpandedContextDelivery(node);
     }
 }

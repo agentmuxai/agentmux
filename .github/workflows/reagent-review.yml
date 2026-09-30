@@ -91,6 +91,9 @@ jobs:
         # runs it as a non-root sandbox user, so this never came up there).
         # HOME=/tmp in the image, which is world-writable, so a non-root user
         # can still write its credentials and clones.
+        # STATE_TABLE_NAME: CDK sets it on the Lambdas, not in the image.
+        # Without it review_claims.py fails open, so a push and the
+        # "please re-review" right after it get two independent reviews.
         run: |
           docker run --rm \
             --user 1000:1000 \
@@ -98,6 +101,7 @@ jobs:
             -e GITHUB_RUN_ID="$GITHUB_RUN_ID" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
             -e AWS_DEFAULT_REGION=us-east-1 \
+            -e STATE_TABLE_NAME=reagent-state \
             -e GITHUB_EVENT_PATH=/tmp/event.json \
             -v "$GITHUB_EVENT_PATH:/tmp/event.json:ro" \
             --entrypoint python \

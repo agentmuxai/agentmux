@@ -24,11 +24,12 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { callBackendService } from "@/app/store/mos";
 import { recordTurn } from "@/app/store/token-usage";
 import { ActivityRow } from "./ActivityRow";
+import { createPromotionClock } from "../activity/promotion-clock";
 import { applyRegistryOutcomes, backgroundTaskActivities } from "../activity/background-adapter";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
-import { nextToolPromotionAt, toolActivities } from "../activity/tool-adapter";
+import { toolActivities } from "../activity/tool-adapter";
 import { EXIT_FLASH_MS, RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
 import type { DocumentNode } from "../types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
@@ -73,25 +74,9 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
 
     // Tool-call promotion crosses its duration threshold on a plain wall-clock
     // timer, not a document event — nodes() alone won't re-run allActivities
-    // at the moment a still-running Bash call turns 30s old. Same one-shot
-    // discipline as hasExpiring below: compute the next promotion instant,
-    // schedule exactly one setTimeout for it, and bump a nonce allActivities
-    // subscribes to so it recomputes right then (and only then), instead of a
-    // continuous tick.
-    const [toolPromotionNonce, setToolPromotionNonce] = createSignal(0);
-    createEffect(() => {
-        // Read (subscribe to) the nonce itself so that when the scheduled
-        // timer below fires and bumps it, this effect re-runs and schedules
-        // the *next*-earliest pending promotion — without this, two running
-        // Bash calls at different promotion instants would only ever
-        // promote the earlier one (the effect ran once, scheduled once, and
-        // nothing re-triggered it once that single timer fired).
-        toolPromotionNonce();
-        const at = nextToolPromotionAt(nodes(), Date.now());
-        if (at == null) return;
-        const timer = setTimeout(() => setToolPromotionNonce((n) => n + 1), Math.max(0, at - Date.now()) + 50);
-        onCleanup(() => clearTimeout(timer));
-    });
+    // at the moment a still-running Bash call turns 30s old. allActivities
+    // reads this clock so it recomputes right then (activity/promotion-clock.ts).
+    const toolPromotionNonce = createPromotionClock(nodes);
 
     const allActivities = createMemo(() => {
         toolPromotionNonce();

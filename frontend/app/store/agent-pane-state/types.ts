@@ -178,6 +178,16 @@ export interface PaneFailure {
 }
 
 /**
+ * True when the pane's failure is an auth failure: the agent isn't signed in
+ * to its provider, or its sign-in stopped working. The one spelling of the
+ * check the send path, the relogin flow and the controller-status handling
+ * each wrote out by hand (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §5.2).
+ */
+export function isAuthFailure(failure: Pick<PaneFailure, "data"> | null | undefined): boolean {
+    return failure?.data.code === "auth";
+}
+
+/**
  * Single source of truth for the turn lifecycle. Since PR G this is the
  * only place where "is the agent working", "is a stop in flight", and
  * "did the stream drop" are encoded — the legacy `turnActive` /

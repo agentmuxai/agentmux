@@ -649,7 +649,7 @@ export class LayoutModel {
                 break;
             case LayoutTreeActionType.MagnifyNodeToggle:
                 magnifyNodeToggle(this.treeState, action as LayoutTreeMagnifyNodeToggleAction);
-                shouldRequestFocus = true;
+                shouldRequestFocus = (action as LayoutTreeMagnifyNodeToggleAction).focused !== false;
                 break;
             case LayoutTreeActionType.ClearTree:
                 clearTree(this.treeState);
@@ -844,8 +844,8 @@ export class LayoutModel {
         return getFirstBlockIdImpl(this);
     }
 
-    magnifyNodeToggle(nodeId: string, setState = true) {
-        magnifyNodeToggleImpl(this, nodeId, setState);
+    magnifyNodeToggle(nodeId: string, setState = true, focused = true) {
+        magnifyNodeToggleImpl(this, nodeId, setState, focused);
     }
 
     minimizeNodeToggle(nodeId: string) {
