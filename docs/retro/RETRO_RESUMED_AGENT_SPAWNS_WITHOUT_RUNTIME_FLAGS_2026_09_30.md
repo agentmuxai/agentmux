@@ -84,13 +84,18 @@ a mismatch, and it happens silently.
   curated row with the newest model in its family. Anthropic shipped Sonnet 5.5
   on 2026-09-28, so the row reads "Sonnet 5.5".
 - The value it passes is still the alias `sonnet`, which the Claude Code CLI
-  resolves itself. Whether CLI 2.1.280 resolves `sonnet` to Sonnet 5.5 or to
-  Sonnet 5 hasn't been checked.
-- So the label can advertise a model the pinned CLI doesn't select. This is the
+  resolves itself. **Checked after this retro was first written:** once this
+  pane's own selection was correctly applied (`--model sonnet --effort xhigh`
+  confirmed in the spawned process's command line), the harness's own live
+  model self-report read `claude-sonnet-5` — CLI `2.1.280`'s `sonnet` alias
+  resolved to Sonnet 5, not Sonnet 5.5.
+- So the label advertised a model the pinned CLI didn't select. This is the
   same kind of mismatch the overlay's own comment warns about for concrete-id rows.
 
-We want Sonnet 5.5 as the default, so this needs a deliberate catalog and CLI
-update, not just the live label.
+We want Sonnet 5.5 as the default. Fixed in
+`docs/spec-claude-code-versioning.md`'s `2.1.285` bump: that CLI's embedded
+model catalog lists `claude-sonnet-5-5`, and the curated `sonnet` label was
+updated to match.
 
 ## 5. Fix plan
 
