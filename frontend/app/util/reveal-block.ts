@@ -22,7 +22,9 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { setActiveBlockInStack } from "@/layout/index";
+import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
+import type { LayoutNode } from "@/layout/lib/types";
 
 export interface RevealOptions {
     /** The tab holding the block, when the caller already knows it. */
@@ -54,6 +56,43 @@ async function findTabHolding(blockId: string, hint?: string): Promise<string | 
 }
 
 /**
+ * Make `blockId` visible within its layout without switching the window tab,
+ * moving layout focus or the caret: restore its pane if minimized, un-magnify
+ * another pane that would hide it, and switch its pane to it when it's a
+ * background member of a multi-tab pane. `node` is `getNodeByBlockId`'s
+ * result (the shared pane node for a stack member).
+ * SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md.
+ */
+export function showBlockInPane(model: LayoutModel, node: LayoutNode, blockId: string): void {
+    // minimizeNodeToggle is a toggle, so only call it on a minimized pane.
+    // focusNode doesn't restore one either, which is why reveal needed this.
+    if (node.minimized) model.minimizeNodeToggle(node.id);
+
+    // Another pane magnified would keep the target hidden behind it.
+    const magnified = model.magnifiedNodeId;
+    if (magnified && magnified !== node.id) model.magnifyNodeToggle(magnified);
+
+    // A no-op for a single-block pane or the already-active tab.
+    setActiveBlockInStack(model, node.id, blockId);
+}
+
+/**
+ * `showBlockInPane` for a block in THIS window, found by id, WITHOUT switching
+ * to its tab. For an agent opening a file into an existing Editor pane: show it,
+ * but don't pull the user off the tab they're on or take their caret. Returns
+ * false when the block isn't in a built layout in this window.
+ */
+export async function showBlockWithoutFocus(blockId: string, opts: { tabId?: string } = {}): Promise<boolean> {
+    const tabId = await findTabHolding(blockId, opts.tabId);
+    if (!tabId) return false;
+    const model = getLayoutModelForTabById(tabId);
+    const node = model?.getNodeByBlockId(blockId);
+    if (!model || node?.id == null) return false;
+    showBlockInPane(model, node, blockId);
+    return true;
+}
+
+/**
  * Reveal `blockId` in THIS window. Returns false when the block isn't in this
  * window's workspace (the caller may then look in other windows).
  */
@@ -74,14 +113,7 @@ export async function revealBlockLocally(blockId: string, opts: RevealOptions = 
     }
     if (!model || node?.id == null) return false;
 
-    // Another pane magnified would keep the target hidden behind it, and
-    // focusNode doesn't un-magnify.
-    const magnified = model.magnifiedNodeId;
-    if (magnified && magnified !== node.id) model.magnifyNodeToggle(magnified);
-
-    // The missing step: show this block in its pane. A no-op for a
-    // single-block pane or the already-active tab.
-    setActiveBlockInStack(model, node.id, blockId);
+    showBlockInPane(model, node, blockId);
 
     model.focusNode(node.id);
 
