@@ -43,7 +43,10 @@ From the Model configuration docs:
   value we pass can be overridden by something higher, and a missing value
   falls through to a default that depends on the model.
 - **In stream-json the remap warning is suppressed.** The docs say: "read the
-  actual model from the `modelUsage` field of the result message instead."
+  actual model from the `modelUsage` field of the result message instead." Take
+  this narrowly — it's Anthropic's advice for that one suppressed-warning case,
+  not a general "diff `modelUsage` against the effective model" recipe; see
+  §3 item 6 for why the general version false-positives on subagents.
 
 ### 2.2 The CLI can be changed and read back live, without a respawn
 From the Agent SDK TypeScript reference, and confirmed by reading the control
@@ -63,8 +66,10 @@ control protocol to persistent agents (`--permission-prompt-tool stdio`).
 
 Also useful:
 - The `system`/`init` event carries `model` and `permissionMode`.
-- Every `result` carries `modelUsage` keyed by model id. That's ground truth for
-  what a finished turn actually used.
+- Every `result` carries `modelUsage`, a per-model cost/usage breakdown — the
+  CLI's own internal description of the field is "subagents started through
+  the Agent tool in this session, as running totals". It is not evidence of
+  which model the *session itself* ran on; see §3 item 6.
 - Per a project testing against 2.1.283, `init` is emitted only after the first
   user message, so it can't be the only source.
 
@@ -130,17 +135,26 @@ selected":
    | Non-Claude providers with no readback | "requested" styling, per #8213's principle |
 
 5. **Label from the CLI, not the catalog.** Take the display model from
-   `get_settings.applied.model`, or `init.model`, and then `result.modelUsage`
-   as each turn completes. The alias-derived label from the Models API overlay
-   becomes the *picker's* option text only. That also settles "does `sonnet`
-   mean 5.5 on this CLI": the readback answers it.
-6. **Detect drift after the fact too.** If a turn's `modelUsage` names a
-   model other than the effective one (for example a remap or fallback), show
-   it in the strip and log it. That's the last line of defence, and it costs
-   nothing.
+   `get_settings.applied.model`, or `init.model` when that isn't available.
+   The alias-derived label from the Models API overlay becomes the *picker's*
+   option text only. That also settles "does `sonnet` mean 5.5 on this CLI":
+   the readback answers it.
+6. **`modelUsage` is not drift evidence, and don't use it as such.** Its own
+   description in the CLI (`result.modelUsage`) is "subagents started through
+   the Agent tool in this session, as running totals" — it is a per-model
+   cost/usage breakdown, not an identity of "the model this turn ran on".
+   An ordinary turn that delegates to a subagent legitimately reports more
+   than one model in it (`docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`
+   §6 item 3 already flags this as unresolved), and the `result` message's
+   own schema has no separate field naming the primary/session model — so a
+   rule like "warn if `modelUsage` contains a model other than the effective
+   one" would fire on every delegated turn, not just a real remap. **Drop
+   this as a detection source entirely.** `get_settings.applied.model` (or
+   `init.model`) is the only reliable ground truth this report found; treat
+   `modelUsage` as cost/usage telemetry only, never as evidence of drift.
 7. **Old CLIs.** If `get_settings` isn't supported (an error reply, or no
-   `applied` in it), fall back to `init.model` plus `modelUsage` for the model,
-   and show effort as requested only.
+   `applied` in it), fall back to `init.model` for the model, and show effort
+   as requested only.
 
 ## 4. Suggested order of work
 
@@ -162,13 +176,16 @@ selected":
      strip goes from mismatch to match;
    - a CLI that never answers `get_settings` → the strip shows "requested";
    - a continuation spawn → effective equals desired before the first reply;
-   - `modelUsage` drift → a warning.
+   - a turn whose `modelUsage` includes a second (subagent) model → no
+     warning, confirming §3 item 6's rule is actually followed and not just
+     stated.
 
 ## 5. Sources
 
 - Claude Code docs: Model configuration: https://code.claude.com/docs/en/model-config
 - Claude Code docs: Agent SDK reference, TypeScript (`setModel`, `applyFlagSettings`, `initializationResult`, `modelUsage`): https://code.claude.com/docs/en/agent-sdk/typescript
-- Control schema strings in the installed CLI (`claude.exe` 2.1.280): `set_model`, `apply_flag_settings`, `get_settings` with `applied: {model, effort}`
+- Control schema strings in the installed CLI (`claude.exe` 2.1.280): `set_model`, `apply_flag_settings`, `get_settings` with `applied: {model, effort}`; the `result` message's own schema (no top-level primary-model field) and its `modelUsage` field's internal description ("Subagents started through the Agent tool in this session, as running totals")
+- `docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md` §6 item 3, flagging `modelUsage`'s multi-model-subagent shape as an open question independently of this report
 - Kubebuilder book: Good Practices: https://book.kubebuilder.io/reference/good-practices.html
 - Kubernetes status and conditions (observedGeneration, `kubectl wait`): https://www.golinuxcloud.com/kubernetes-status-and-conditions/
 - KEP-5067, Pod generation / observedGeneration: https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/5067-pod-generation
