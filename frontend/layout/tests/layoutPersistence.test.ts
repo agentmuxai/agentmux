@@ -11,6 +11,7 @@ import { LayoutModel } from "@/layout/lib/layoutModel";
 import { findNodeByBlockId, newLayoutNode } from "@/layout/lib/layoutNode";
 import { LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import { processPendingBackendActions, pruneDanglingLeaves, markBlockRecentlyCreated } from "@/layout/lib/layoutPersistence";
+import { beginDrag, endDrag, markReleased } from "@/app/drag/drag-session";
 import type { SignalAtom } from "@/util/util";
 
 // -- Mock store (mirrors layoutModel.test.ts) ----------------------------------
@@ -567,6 +568,33 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
 // it) and must be removed; owned leaves are untouched.
 
 describe("pruneDanglingLeaves", () => {
+    // How a tile drag looks to the prune gate: under way, then released by
+    // its source's onDrop (SPEC_DRAG_AND_DROP_CONSOLIDATION §5.1).
+    const tileDragStarts = () => beginDrag("tile", { nodeId: "n1" });
+    const tileDragReleased = () => markReleased();
+
+    it("keeps a dangling leaf while a tile drag is under way, and prunes it once the drag is released", () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        const ghost = newLayoutNode(undefined, undefined, undefined, { blockId: "drag-source-leaf" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: ghost,
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        tileDragStarts();
+        try {
+            pruneDanglingLeaves(model);
+            expect(findBlock(model, "drag-source-leaf")).toBeTruthy();
+        } finally {
+            tileDragReleased();
+        }
+        pruneDanglingLeaves(model);
+        expect(findBlock(model, "drag-source-leaf")).toBeFalsy();
+        endDrag("drop");
+    });
+
     it("removes leaves for blocks the tab does not own, keeps owned ones", () => {
         const model = createLayoutModel();
         insertBlock(model, "existing"); // in the stub tab's blockids

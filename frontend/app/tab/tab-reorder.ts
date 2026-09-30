@@ -14,7 +14,7 @@ import { isWindows } from "@/util/platformutil";
 import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
-import { setTileDragInFlight } from "@/layout/lib/dragInFlight";
+import { endTileDrag } from "@/layout/lib/tile-drag";
 import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
 import { WorkspaceService } from "../store/services";
 import {
@@ -313,7 +313,7 @@ export function useTabDragAndDrop(
         const cleanupTileDragState = () => {
             setHoveredDropTabId(null);
             clearCrossTabDrop();
-            setTileDragInFlight(false);
+            endTileDrag("drop");
             // Reset EVERY tab's overlay, not just the spring-activated
             // set: the SOURCE tab's activeDrag is normally reset by its
             // own draggable's onDrop, but that dispatch is skipped
