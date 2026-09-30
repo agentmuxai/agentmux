@@ -81,10 +81,13 @@ async function blobToBase64(blob: Blob): Promise<string> {
     return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
+function ownWindowLabel(): string {
+    return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+}
+
 /** The window's viewport, cropped to `rect`, as a base64 JPEG. */
 async function capturePane(rect: CssRect): Promise<string | null> {
-    const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
-    const { jpeg_base64 } = await getApi().windows.captureViewport(label, 80);
+    const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
         const crop = cropRectInImage(rect, window.innerWidth, full);
@@ -95,6 +98,54 @@ async function capturePane(rect: CssRect): Promise<string | null> {
     } finally {
         full.close();
     }
+}
+
+/**
+ * The whole viewport, for a window-tab tear-off: the new window is the source
+ * window's size, so the picture fills it as is. Halved if it wouldn't fit the
+ * request that carries it.
+ */
+async function captureWindow(): Promise<string | null> {
+    const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
+    if (jpeg_base64.length <= MAX_SNAPSHOT_CHARS) return jpeg_base64;
+    const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
+    try {
+        const w = Math.max(1, Math.round(full.width / 2));
+        const h = Math.max(1, Math.round(full.height / 2));
+        const canvas = new OffscreenCanvas(w, h);
+        canvas.getContext("2d")?.drawImage(full, 0, 0, w, h);
+        return await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }));
+    } finally {
+        full.close();
+    }
+}
+
+/** The key a window tab's picture is held under (panes use their block id). */
+const windowTabKey = (tabId: string) => `window-tab:${tabId}`;
+
+/**
+ * Start capturing the window for a tear-off of window tab `tabId`. Only for
+ * the active tab: an inactive one's content isn't on screen.
+ */
+export function prewarmWindowTabSnapshot(tabId: string): void {
+    const at = Date.now();
+    const key = windowTabKey(tabId);
+    const picture = captureWindow().then(
+        (b64) => {
+            Logger.debug("dnd", "tear-off window snapshot captured", { tabId, ms: Date.now() - at });
+            return b64;
+        },
+        (e) => {
+            Logger.debug("dnd", "tear-off window snapshot failed", { tabId, error: String(e) });
+            return null;
+        }
+    );
+    held = { blockId: key, at, picture };
+}
+
+/** The picture taken for tearing off window tab `tabId`, if ready in time. */
+export function takeWindowTabSnapshot(tabId: string): Promise<string | undefined> {
+    return takeTearOffSnapshot(windowTabKey(tabId));
 }
 
 /** Start capturing `blockId` (a base64 JPEG), replacing any earlier picture. */

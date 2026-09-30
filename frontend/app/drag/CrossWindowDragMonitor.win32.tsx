@@ -33,7 +33,7 @@ import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
-import { paneDragCandidate, prewarmTearOffSnapshot, takeTearOffSnapshot } from "./tearoff-snapshot";
+import { paneDragCandidate, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
@@ -463,6 +463,9 @@ async function performTearOff(
             removeMovedBlock(layoutModel, payload.blockId);
         }
     } else if (dragType === "tab" && payload.tabId) {
+        // The window's picture, taken before the drag; any wait overlaps
+        // TearOffTab. SPEC_TEAROFF_PAINT_LATENCY §4 3.1.
+        const snapshotTaken = takeWindowTabSnapshot(payload.tabId);
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
             // Tab anchor: convert grab-offset-in-tab to a screen point
@@ -502,6 +505,7 @@ async function performTearOff(
                 window.outerHeight,
                 tabAnchorX,
                 tabAnchorY,
+                await snapshotTaken,
             );
         }
     }

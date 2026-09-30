@@ -143,6 +143,7 @@ export async function openTearOffWindow(
     height?: number,
     tabAnchorX?: number,
     tabAnchorY?: number,
+    snapshot?: string,
 ): Promise<void> {
     try {
         await api.tearOffPoolPromote(
@@ -153,6 +154,7 @@ export async function openTearOffWindow(
             height,
             tabAnchorX,
             tabAnchorY,
+            snapshot,
         );
     } catch (poolErr) {
         Logger.warn("dnd:cross", "pool promote failed, cold-pathing", {

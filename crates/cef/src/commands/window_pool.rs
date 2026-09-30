@@ -1425,6 +1425,10 @@ pub fn promote_pool_window(
     // never confirms is recovered as a panel rather than as an ordinary
     // full-size window.
     is_panel: bool,
+    // The source's picture of the torn-off window tab (base64 JPEG), shown
+    // from the window's first on-screen frame. SPEC_TEAROFF_PAINT_LATENCY
+    // §4 phase 3.1. Windows only for now.
+    snapshot: Option<&str>,
 ) -> Option<String> {
     // PR #5 H.4 — atomic pop+remove via reducer. The dispatch pops
     // the front of the pool queue, removes the label from
@@ -1737,6 +1741,29 @@ pub fn promote_pool_window(
     // SWP_NOZORDER is intentionally *not* set on the placement move — tear-off
     // needs the window at the top of the Z-order for the SC_MOVE mouse-capture
     // handshake.
+    // The promote event, with the snapshot when there is one.
+    let emit_promote = |snapshot: Option<&str>| {
+        crate::events::emit_event_to_window(
+            state,
+            &label,
+            "pool:promote",
+            &serde_json::json!({
+                "workspaceId": workspace_id,
+                "initialView": initial_view,
+                "initialMeta": initial_meta,
+                "snapshot": snapshot,
+            }),
+        );
+    };
+    // With a snapshot, tell the renderer first and wait (bounded) for it to
+    // put the picture up. The pool window is parked off-screen but live, so
+    // its first on-screen frame below is then the picture, not the splash.
+    let promoted_early = snapshot.map(|snap| {
+        let shown = crate::commands::pane_pool::expect_snapshot_shown(&label);
+        emit_promote(Some(snap));
+        let acked = crate::commands::pane_pool::wait_snapshot_shown(&label, shown);
+        tracing::info!(target: "dnd:tearoff:pool", label = %label, acked, "[pool] moving window on-screen after its snapshot");
+    });
     unsafe {
         use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -1844,17 +1871,11 @@ pub fn promote_pool_window(
         },
     );
 
-    // Now tell the pool window's renderer to bootstrap the workspace.
-    crate::events::emit_event_to_window(
-        state,
-        &label,
-        "pool:promote",
-        &serde_json::json!({
-            "workspaceId": workspace_id,
-            "initialView": initial_view,
-            "initialMeta": initial_meta,
-        }),
-    );
+    // Now tell the pool window's renderer to bootstrap the workspace
+    // (already told, above, when it had a snapshot to show first).
+    if promoted_early.is_none() {
+        emit_promote(None);
+    }
 
     // Refill the pool in the background.
     spawn_pool_window(state);
@@ -1962,7 +1983,12 @@ pub fn promote_pool_window(
     // never confirms is recovered as a panel rather than as an ordinary
     // full-size window.
     is_panel: bool,
+    // The source's picture of the torn-off window tab (base64 JPEG), shown
+    // from the window's first on-screen frame. SPEC_TEAROFF_PAINT_LATENCY
+    // §4 phase 3.1. Windows only for now.
+    snapshot: Option<&str>,
 ) -> Option<String> {
+    let _ = snapshot; // Windows only for now (phase 3.1)
     // Atomic pop from the pool queue via reducer. Returns None if empty
     // — caller falls back to cold path.
     let dispatch = state.host_dispatch(
@@ -2104,6 +2130,7 @@ pub fn promote_pool_window_for_new_window(
             initial_view,
             initial_meta,
             false, // ordinary new window, not a panel
+            None,
         );
     }
 
@@ -2125,6 +2152,7 @@ pub fn promote_pool_window_for_new_window(
                 initial_view,
                 initial_meta,
                 false,
+                None,
             );
         }
         let dispatch = state.host_dispatch(

@@ -392,7 +392,16 @@ async fn route_command(
         "release_drag_capture" => commands::drag::release_drag_capture(state),
         "set_js_drag_active" => commands::drag::set_js_drag_active(args),
         "open_window_at_position" => commands::drag::open_window_at_position(state, args),
-        "tear_off_pool_promote" => commands::drag::tear_off_pool_promote(state, args),
+        "tear_off_pool_promote" => {
+            // spawn_blocking: with a tear-off snapshot, the Windows promote
+            // waits up to 80 ms for the window's "snapshot-shown" ack before
+            // moving it on-screen, and that ack is another IPC request.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || commands::drag::tear_off_pool_promote(&state_clone, &args_clone))
+                .await
+                .map_err(|e| format!("tear_off_pool_promote join error: {}", e))?
+        }
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
         "start_tab_drag_tracking" => {
             // spawn_blocking — blocks briefly (~ms) on the hook thread's

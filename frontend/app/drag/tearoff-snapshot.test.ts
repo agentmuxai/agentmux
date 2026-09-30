@@ -44,8 +44,10 @@ import {
     MAX_SNAPSHOT_CHARS,
     paneDragCandidate,
     prewarmTearOffSnapshot,
+    prewarmWindowTabSnapshot,
     resetTearOffSnapshotForTests,
     takeTearOffSnapshot,
+    takeWindowTabSnapshot,
 } from "./tearoff-snapshot";
 
 /** jsdom decodes no images: a 2x viewport image and a canvas that records its crop. */
@@ -174,6 +176,30 @@ describe("tear-off snapshot", () => {
         mountPane("b1");
         prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b1")).toBeUndefined();
+    });
+});
+
+describe("window-tab snapshot", () => {
+    it("hands over the whole viewport, uncropped", async () => {
+        prewarmWindowTabSnapshot("t1");
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+        expect(shots.drawn).toEqual([]);
+    });
+
+    it("halves a viewport too large for the request", async () => {
+        shots.next = Promise.resolve({ jpeg_base64: "xxxx".repeat(MAX_SNAPSHOT_CHARS / 4 + 1) });
+        prewarmWindowTabSnapshot("t1");
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("cropped-pane"));
+        // Drawn at half the (2x-viewport) image's size.
+        expect(shots.drawn).toEqual([[0, 0, window.innerWidth, window.innerHeight]]);
+    });
+
+    it("a window tab's picture is never handed to a pane with the same id, or vice versa", async () => {
+        prewarmWindowTabSnapshot("x1");
+        expect(await takeTearOffSnapshot("x1")).toBeUndefined();
+        mountPane("x1");
+        prewarmTearOffSnapshot("x1");
+        expect(await takeWindowTabSnapshot("x1")).toBeUndefined();
     });
 });
 

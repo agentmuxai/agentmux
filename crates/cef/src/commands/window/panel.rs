@@ -127,6 +127,7 @@ pub fn open_panel(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
         None,
         None,
         true, // this IS a panel — the liveness fallback must recover it as one
+        None,
     ) {
         tracing::info!(target: "tray:panel", label = %label, "[panel] served from the warm pool");
         crate::ui_tasks::post_set_always_on_top(state, &label);
