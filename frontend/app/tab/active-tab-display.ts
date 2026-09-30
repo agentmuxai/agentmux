@@ -8,9 +8,12 @@
  * `activeTabId` (`store/window-identity.ts`) is backend-authoritative: it
  * reads `ws.activetabid`, so it only moves once an RPC has round-tripped and
  * the `Workspace` object push has been applied. That is correct for anything
- * that must agree with the backend — notably `workspace.tsx`'s
- * `display:none → flex` reveal of the destination tab's content, which
- * deliberately still reads the raw atom.
+ * that must agree with the backend. `workspace.tsx`'s reveal of the
+ * destination tab's content follows it too, except for a warm destination
+ * (already shown, kept laid out), which it shows from `setActiveTab`'s own
+ * switch intent (tab-actions.ts `switchIntentTabId`) in the same frame as
+ * this optimistic pill
+ * (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.2).
  *
  * It is the wrong thing for the tab pill. Two separate delays sit between
  * the click and the pill lighting up, and the second one is why the report

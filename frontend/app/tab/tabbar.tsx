@@ -89,8 +89,10 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     // What the strip highlights — see active-tab-display.ts for the full
     // precedence (optimistic select, then the close-flow neighbor promotion).
-    // Deliberately NOT used by workspace.tsx's content reveal, which keeps
-    // reading the raw backend-authoritative atom.
+    // Not used by workspace.tsx's content reveal: that follows the committed
+    // atom, or, for a warm destination, `setActiveTab`'s own switch intent
+    // (tab-actions.ts `switchIntentTabId`), which lands in the same frame as
+    // this pill.
     const displayActiveTabId = () =>
         resolveDisplayActiveTabId({
             realActiveTabId: activeTabId(),
