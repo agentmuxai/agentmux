@@ -26,7 +26,8 @@ name: ReAgent review (GitHub Actions)
 # Image: pulled from the same container image build ReAgent's Lambda
 # (claude-reviewer) uses -- one Dockerfile, one build, two invocation
 # paths, not a second implementation to maintain. The URI below is the
-# digest CDK resolved for the a5af/reagent#274 deploy (2026-09-30) and is
+# digest CDK resolved for the a5af/reagent#275 deploy (2026-09-30, fixing
+# the crash from #274) and is
 # hardcoded, not a repo variable: setting an Actions variable via the API
 # needs a GitHub App permission this installation doesn't have (`gh-agent
 # sudo`'s Administration: write doesn't cover it, and escalating further
