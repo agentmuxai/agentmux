@@ -30,6 +30,7 @@ import { installHintFor, isLspSupportedLanguage } from "./lsp/install-hints";
 import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -127,10 +128,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             const STEP = 0.1;
             const current = model.zoomAtom();
             const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
-            void RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: `block:${model.blockId}`,
-                meta: { "term:zoom": next === 1.0 ? null : next },
-            });
+            void setBlockMeta(model.blockId, { "term:zoom": next === 1.0 ? null : next });
         };
         rootRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => rootRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));

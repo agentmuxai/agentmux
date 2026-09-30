@@ -8,12 +8,12 @@
  * agent definition on double-click.
  */
 
-import { MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { PaneTabDescriptor, PaneTabIcon } from "@/element/pane-tab-model";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
+import { setBlockMeta } from "@/app/store/block-meta";
 
 /** Same precedence as AgentViewModel.viewIcon; undefined falls through to
  *  the shared default (frame:icon, then the "agent" view icon). */
@@ -55,10 +55,7 @@ export const agentPaneTab: PaneTabDescriptor = {
             await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: definitionId, title });
             // Denormalized copy the pill and pane title read; it also catches
             // up on the agent's next launch, so a failure here is harmless.
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", blockId),
-                meta: { agentName: title } as any,
-            }).catch(() => {});
+            await setBlockMeta(blockId, { agentName: title }).catch(() => {});
         };
     },
 };
