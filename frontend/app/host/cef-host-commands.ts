@@ -103,6 +103,8 @@ export const cefWindows: WindowHostApi = {
     },
     getCursorScreenPoint: () => invokeCommand<{ x: number; y: number }>("get_cursor_point"),
     getPaneDebugState: () => invokeCommand<Record<string, unknown>>("get_pane_debug_state", {}),
+    captureViewport: (windowLabel, quality) =>
+        invokeCommand<{ jpeg_base64: string }>("capture_window_viewport", { label: windowLabel, quality }),
     openFloatingPane: (args) => invokeCommand<{ window_label: string }>("open_floating_pane_window", args),
     toggleFloatingMaximize: async (windowLabel, blockId) => {
         await invokeCommand("toggle_floating_maximize", { label: windowLabel, block_id: blockId });
