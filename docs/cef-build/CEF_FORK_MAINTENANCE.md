@@ -402,11 +402,40 @@ ancestry test could not have said anything.
    keeps pointing at whatever was default before — currently `master`,
    which tracks upstream's own trunk and has never been the branch this
    fork's builds actually come from (confirmed 2026-09-15: zero references
-   to it anywhere in this repo's build docs or CI). Repo Settings → General
-   → Default branch. **Needs repo admin, not just write access** — an
-   agent with only `WRITE` permission on `agentmuxai/cef` will get a 404
-   attempting this via the API (confirmed the same day); a human with
-   admin needs to do it.
+   to it anywhere in this repo's build docs or CI). **Needs repo admin, not
+   just write access.** An agent escalates for that one command with
+   `gh-agent sudo --reason "<why>" --repo agentmuxai/cef -- api -X PATCH
+   repos/agentmuxai/cef -f default_branch=<new-ms>` (done this way for `8037`
+   on 2026-09-30; `shared-infrastructure` `AGENT_GITHUB_AUTH.md` §5.1). A
+   plain agent token gets a 404.
+
+### 6.1 Build-machine lessons (152 → 154, 2026-09-29)
+
+None of these were source or patch problems. Each cost a build restart.
+
+- **Upgrading a checkout in place leaves stale files.** CIPD-managed toolchains can
+  keep files from the old package: Dawn's bundled Go (`third_party/dawn/tools/golang/<os>`)
+  kept 152-era `map_swiss.go`/`map_noswiss.go` next to Go 1.26's `map.go`, and the build
+  failed with `ctrlEmpty redeclared`. Delete the directory and re-run `gclient sync`.
+  Also reset CEF's patches out of `v8`, `angle`, `dawn` and `depot_tools` first, and move
+  aside any dependency that became in-tree (`third_party/aria-practices/src` in 154).
+- **Windows: never build through a `subst` drive.** A TypeScript step
+  (`validate_tsconfig.py`) calls `relpath` across `C:` and `W:` and fails. `subst` only
+  helps `gclient` with a long path the build never reads.
+- **Windows (narko): mind the commit limit, not just RAM.** 74 GB commit with about 30 GB
+  used by other workloads: `-j 20` ran out of memory in Blink's generators; `-j 14 -l 24`
+  finished, including the `libcef` ThinLTO link.
+- **Linux: fontconfig's bindgen crate trips `-Dwarnings`** (`unnecessary_transmutes`);
+  `scripts/cef-build/args.gn` sets `treat_warnings_as_errors=false` (#3991).
+- **Linux: keep `libcef.so` unstripped in the release.** `verify-cef-patch` reads
+  `.symtab`, which strip removes (`build-patched-libcef.md` §8); the 152 release shipped
+  it unstripped too.
+- **A crashed build VM leaves truncated objects with valid timestamps.** `ninja -t
+  restat`/`cleandead` won't catch them. Delete the outputs written in the crash window
+  and let ninja rebuild them.
+- **The packaged-app check must use the consumer branch's binding.** macOS's first
+  §7.3 pass ran on `main`'s 152 binding against the 154 framework and nothing stopped it:
+  macOS has no binding/runtime version guard. Build the app from the consumer PR.
 
 ---
 
