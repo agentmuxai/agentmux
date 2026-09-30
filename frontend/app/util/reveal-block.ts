@@ -68,9 +68,10 @@ export function showBlockInPane(model: LayoutModel, node: LayoutNode, blockId: s
     // focusNode doesn't restore one either, which is why reveal needed this.
     if (node.minimized) model.minimizeNodeToggle(node.id);
 
-    // Another pane magnified would keep the target hidden behind it.
+    // Another pane magnified would keep the target hidden behind it. A plain
+    // toggle requests node focus once committed; this one must not.
     const magnified = model.magnifiedNodeId;
-    if (magnified && magnified !== node.id) model.magnifyNodeToggle(magnified);
+    if (magnified && magnified !== node.id) model.magnifyNodeToggle(magnified, true, false);
 
     // A no-op for a single-block pane or the already-active tab.
     setActiveBlockInStack(model, node.id, blockId);

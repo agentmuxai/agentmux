@@ -196,6 +196,43 @@ describe("LayoutModel", () => {
         expect(requestNodeFocusCaptures[0].focusedNodeDataId).toBe(second.id);
     });
 
+    // SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md: an agent's
+    // file-open un-magnifies a pane hiding the Editor, but must not take the
+    // user's focus. A plain MagnifyNodeToggle always requests it.
+    it("magnifyNodeToggle(id, true, false) commits and persists the un-magnify without requesting focus", () => {
+        const model = createLayoutModel();
+        const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: first,
+            magnified: false,
+            focused: true,
+        } as LayoutTreeInsertNodeAction);
+        const second = newLayoutNode(undefined, undefined, undefined, { blockId: "right" });
+        model.treeReducer(
+            {
+                type: LayoutTreeActionType.SplitHorizontal,
+                targetNodeId: model.treeState.rootNode!.id,
+                newNode: second,
+                position: "after",
+                focused: false,
+            } as LayoutTreeSplitHorizontalAction,
+            false
+        );
+        model.magnifyNodeToggle(second.id);
+        expect(model.magnifiedNodeId).toBe(second.id);
+        expect(requestNodeFocusCaptures.length).toBeGreaterThan(0); // the default still focuses
+
+        requestNodeFocusCaptures.length = 0;
+        const persist = vi.spyOn(model, "persistToBackend");
+        model.magnifyNodeToggle(second.id, true, false);
+
+        expect(model.magnifiedNodeId).toBeUndefined();
+        expect(model.localTreeStateAtom().magnifiedNodeId).toBeUndefined();
+        expect(persist).toHaveBeenCalled();
+        expect(requestNodeFocusCaptures).toHaveLength(0);
+    });
+
     it("creates a root node and focuses it when inserting the first block", () => {
         const model = createLayoutModel();
         const node = newLayoutNode(undefined, undefined, undefined, { blockId: "block-1" });
