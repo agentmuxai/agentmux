@@ -409,6 +409,11 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
         crate::commands::pane_pool::on_window_revealed(state, &label);
         return serde_json::Value::Null;
     }
+    // A promoted floater put its tear-off snapshot up; the host shows it.
+    if status == "snapshot-shown" {
+        crate::commands::pane_pool::on_snapshot_shown(&label);
+        return serde_json::Value::Null;
+    }
     *state.window_init_status.lock() = status.to_string();
     // Capture HWND once the window is fully shown (CEF Views returns NULL at
     // on_after_created time; the renderer-ready callback is the earliest safe moment).

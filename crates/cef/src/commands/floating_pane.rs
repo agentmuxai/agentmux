@@ -83,6 +83,12 @@ pub struct OpenFloatingPaneArgs {
     /// See `SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md`.
     #[serde(default)]
     pub mother_resize_to_width: Option<i32>,
+    /// The torn-off pane's picture, base64 JPEG, captured by the source.
+    /// Passed to the promoted pool window, which shows it until its live
+    /// content reveals. Pool fast path only; the cold path ignores it.
+    /// SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 3.1.
+    #[serde(default)]
+    pub snapshot: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -225,6 +231,7 @@ pub fn open_floating_pane_window(
             parsed.width,
             parsed.height,
             parent_main_hwnd,
+            parsed.snapshot.as_deref(),
         ) {
             // Pool fast path — apply mother resize before returning (same gate
             // as the cold path below: direct label resolution only).
@@ -278,6 +285,7 @@ pub fn open_floating_pane_window(
             parsed.width,
             parsed.height,
             0, // parent_hwnd: unused on non-Windows
+            parsed.snapshot.as_deref(),
         ) {
             // Pool fast path — apply mother resize before returning (same gate
             // as the cold path below: both fields must be Some).
