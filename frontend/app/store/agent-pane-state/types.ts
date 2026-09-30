@@ -517,6 +517,11 @@ export function workingFromPhase(phase: TurnPhase): boolean {
     return k === "Submitting" || k === "Streaming" || k === "Interrupting";
 }
 
+/** A stop is in flight (`Interrupting`). Still counts as working. */
+export function isStopping(phase: TurnPhase): boolean {
+    return phase.kind === "Interrupting";
+}
+
 /**
  * Selector — `true` iff the pane is in the `Disconnected` phase. PR F:
  * drives the {@link AgentDisconnectedBanner} visibility, replacing any
