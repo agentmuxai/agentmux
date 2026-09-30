@@ -1741,6 +1741,25 @@ pub fn promote_pool_window(
     // SWP_NOZORDER is intentionally *not* set on the placement move — tear-off
     // needs the window at the top of the Z-order for the SC_MOVE mouse-capture
     // handshake.
+    // Armed before any promote event goes out: the renderer's liveness
+    // confirmation (registerBackendWindow) can arrive as soon as it has one,
+    // including during the snapshot wait below, and an unarmed watch drops
+    // it, then fires a duplicate fallback window 10 s later.
+    arm_promote_liveness(
+        state,
+        &label,
+        PromoteFallback {
+            workspace_id: workspace_id.to_string(),
+            initial_view: initial_view.clone(),
+            initial_meta: initial_meta.clone(),
+            pos_x,
+            pos_y,
+            width: win_w,
+            height: win_h,
+            panel: is_panel,
+        },
+    );
+
     // The promote event, with the snapshot when there is one.
     let emit_promote = |snapshot: Option<&str>| {
         crate::events::emit_event_to_window(
@@ -1856,20 +1875,6 @@ pub fn promote_pool_window(
     // HWND exists, not that the renderer we are about to hand the workspace
     // to is alive to receive it. Armed BEFORE the emit so a fast
     // confirmation can't race past an unarmed watch (see the fn's doc).
-    arm_promote_liveness(
-        state,
-        &label,
-        PromoteFallback {
-            workspace_id: workspace_id.to_string(),
-            initial_view: initial_view.clone(),
-            initial_meta: initial_meta.clone(),
-            pos_x,
-            pos_y,
-            width: win_w,
-            height: win_h,
-            panel: is_panel,
-        },
-    );
 
     // Now tell the pool window's renderer to bootstrap the workspace
     // (already told, above, when it had a snapshot to show first).
