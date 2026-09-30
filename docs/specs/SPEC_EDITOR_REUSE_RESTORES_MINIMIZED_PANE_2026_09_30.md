@@ -84,7 +84,20 @@ A plain `magnifyNodeToggle` is not focus-free: `LayoutModel.treeReducer` sets
 `focused?: boolean`. With `focused: false`, the un-magnify still commits and
 persists, but it doesn't request focus. `LayoutModel.magnifyNodeToggle(nodeId,
 setState = true, focused = true)` passes it through. Every existing caller
-keeps the default.
+keeps the default. In the reducer:
+
+```ts
+case LayoutTreeActionType.MagnifyNodeToggle:
+    magnifyNodeToggle(this.treeState, action as LayoutTreeMagnifyNodeToggleAction);
+    shouldRequestFocus = (action as LayoutTreeMagnifyNodeToggleAction).focused !== false;
+    break;
+```
+
+For a minimized Editor that is a background member of a pane stack, the order
+matters. `node` is the stack's shared pane node, so the restore expands the
+pane. Then `setActiveBlockInStack` makes the Editor its active member.
+Restoring alone would leave `activeBlockId` on the other member, and the file
+would stay hidden.
 
 `revealBlockLocally` calls it in place of its current un-magnify and stack
 lines, then keeps its own `focusNode` and caret steps. Reveal therefore gains
