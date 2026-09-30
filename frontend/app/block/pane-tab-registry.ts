@@ -60,9 +60,10 @@ export interface PaneTabCapabilities {
     /** A new block created while this one is focused starts in its
      *  `cmd:cwd`. */
     sharesCwd?: boolean;
-    /** Meta keys a split of this pane does NOT copy into the new pane (agent:
-     *  its agent-specific fields, so the new pane opens the picker). */
-    splitDropsMeta?: string[];
+    /** The block a split of this pane creates, instead of a copy of the
+     *  pane's meta (agent: a fresh picker, the block "+" → Agent opens).
+     *  SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md. */
+    splitBlockDef?: () => BlockDef;
     /** The pane runs against a connection (`meta.connection`) and its header
      *  shows the connection button (sysinfo, term). */
     connection?: boolean;
