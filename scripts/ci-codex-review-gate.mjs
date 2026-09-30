@@ -40,10 +40,11 @@
 // OK it does NOT re-ask for a docs-only diff, so this gate carries an OK
 // across exactly that diff. After findings it does NOT re-ask when only doc
 // files Codex flagged changed, so findings whose inline comments (matched to
-// the review by pull_request_review_id) are all on docs pass, on the head or
-// carried to a later head while they are Codex's latest word. Findings on
-// any non-doc file, or on files unknown, fail or wait as before. This gate
-// only reads.
+// the review by pull_request_review_id) are all on docs pass on the head, and
+// carry to a later head like an OK: only while they are Codex's latest word
+// and only docs changed since (a code change makes ReAgent re-ask). Findings
+// on any non-doc file, or on files unknown, fail or wait as before. This
+// gate only reads.
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
@@ -204,8 +205,8 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
  * head wins, so a spontaneous findings review after an OK takes the OK back.
  *
  * With nothing on the head, Codex's latest verdict carries over when it is
- * an OK and `filesSinceLatest` (the diff from its commit to the head, null
- * if unknown) is docs-only, or when it is findings only on docs.
+ * an OK or findings only on docs, and `filesSinceLatest` (the diff from its
+ * commit to the head, null if unknown) is docs-only.
  */
 export function evaluateCodexGate({ headSha, comments = [], reviews = [], reviewComments = [], filesSinceLatest = null }) {
     const head = headSha.toLowerCase();
@@ -233,10 +234,13 @@ export function evaluateCodexGate({ headSha, comments = [], reviews = [], review
     }
 
     const latest = all.at(-1);
-    if (latest?.kind === "ok" && Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath)) {
+    // ReAgent re-asks for any non-doc change after either verdict, so both
+    // carry only across a docs-only diff; a code change waits for Codex.
+    const onlyDocsSince = Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath);
+    if (latest?.kind === "ok" && onlyDocsSince) {
         return { state: "success", description: `Codex OK on ${latest.sha}; only docs changed since` };
     }
-    if (isDocsOnlyFindings(latest)) {
+    if (isDocsOnlyFindings(latest) && onlyDocsSince) {
         return { state: "success", description: `Codex only flagged docs in ${latest.sha}; see its comments` };
     }
     return {
@@ -300,10 +304,11 @@ async function main() {
         // Inline comments: the files each findings review flagged.
         ghAll(`/repos/${repo}/pulls/${pr}/comments`, token),
     ]);
-    // Only an OK on an earlier commit can carry, so only then is the diff worth fetching.
-    const latest = latestCodexOutput({ comments, reviews });
+    // Only an OK or docs-only findings on an earlier commit can carry, so
+    // only then is the diff worth fetching.
+    const latest = latestCodexOutput({ comments, reviews, reviewComments });
     const filesSinceLatest =
-        latest?.kind === "ok" && !headSha.toLowerCase().startsWith(latest.sha)
+        (latest?.kind === "ok" || isDocsOnlyFindings(latest)) && !headSha.toLowerCase().startsWith(latest.sha)
             ? await changedFiles(repo, latest.sha, headSha, token)
             : null;
     const result = evaluateCodexGate({ headSha, comments, reviews, reviewComments, filesSinceLatest });
