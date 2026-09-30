@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-30
-**Status:** active — operator go-ahead 2026-09-30; freeze started 16:43 UTC (announcement only, frontend-only and docs-only PRs exempt). The move PR is in progress on branch `agenty/crates-reorg`.
+**Status:** active — spec #4072; the move is PR #4076 (operator go-ahead 2026-09-30; freeze started 16:43 UTC, announcement only, frontend-only and docs-only PRs exempt).
 **Scope:** folder layout of `agentmux-*` crates in this repo, and every path that points at them. Package names, binary names and Rust module paths do not change.
 
 ## 1. What changes
