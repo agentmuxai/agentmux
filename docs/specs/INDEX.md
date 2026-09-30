@@ -17,6 +17,7 @@ See also:
 |---|---|
 | [**TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17**](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | **CANONICAL tracking doc** (issue #3338) for the dock / working-indicator / input-gate / auto-backgrounding family — read this before any of the ~22 docs it indexes |
 | [SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21](SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md) | Per-pane progressive tab-switch reveal — replaces the global long-task-quiet signal (breaks down with several busy panes) with a per-pane structural readiness milestone |
+| [SPEC_CONTEXT_DELIVERY_2026_09_30](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | Context deliveries: everything the agent is given without the user typing it (memory, the compaction summary, the continuation packet) shown as one card with an expandable row per item; "ambient" kept for model calls only |
 | [SPEC_AGENT_ARCHITECTURE_2026_05_27](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | Overall agent-pane component + state machine |
 | [SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | ACP wire protocol (initialize / session_create / tool_result) |
 | [SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | Pane lifecycle states and transitions |
@@ -530,6 +531,7 @@ partial list.
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13`](SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md) | Spec: Securing LAN and WAN tier jekt delivery — closing cross-tenant and cross-network trust gaps |
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
+| [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
 | [`SPEC_LAYOUT_FILES_2026_09_25`](SPEC_LAYOUT_FILES_2026_09_25.md) | SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
@@ -610,8 +612,10 @@ partial list.
 | [`SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12`](SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md) | SPEC — Balanced PR and nightly test lanes |
 | [`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18`](SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md) | SPEC: Port `CLAUDE.md` content to durable homes before deleting it |
 | [`SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12`](SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md) | Codex App Server as a First-Class AgentMux Provider |
+| [`SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30`](SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md) | SPEC: Code comment density and condensing |
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
+| [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) | SPEC: Continuous session persistence + trustworthy shutdown |
 | [`SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20`](SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md) | Spec: Cross-Instance Global Memory Sync |
 | [`SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02`](SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02.md) | Spec: default tab names — "Tab N", not "tabN" |
@@ -640,7 +644,6 @@ partial list.
 | [`SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15`](SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md) | SPEC: Narrow TIER=sensitive to real red flags only |
 | [`SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md) | SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender |
 | [`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17`](SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md) | SPEC: general agent-to-agent WAN-tier jekt signing |
-| [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05`](SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md) | SPEC: Launcher + reducer/saga parity on Linux + Linux splash |
 | [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30`](SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) | SPEC: Integrating `agentmux-launcher` into macOS / Linux `task dev` |
 | [`SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31`](SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31.md) | SPEC: Launcher in packaged macOS builds + restore the splash + tear-off crash |

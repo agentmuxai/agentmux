@@ -12,6 +12,8 @@ import {
     isDocsOnlyPath,
     latestCodexOutput,
     reviewedCommit,
+    SKIP_AUTHOR,
+    skippedHead,
     TRIGGER_AUTHOR,
 } from "./ci-codex-review-gate.mjs";
 
@@ -300,5 +302,171 @@ describe("carrying an OK across a docs-only diff", () => {
             filesSinceLatest: ["docs/notes.md"],
         });
         expect(r.state).toBe("pending");
+    });
+});
+
+// ReAgent no longer re-asks Codex when only doc files it flagged changed
+// (a5af/reagent spec codex-efficiency-2026-09-30 §3), so findings that only
+// touch docs must not leave the PR failing or waiting.
+const reviewWithId = (id, sha, at) => ({ ...findingsReview(sha, at), id });
+const inline = (reviewId, path) => ({ pull_request_review_id: reviewId, path, user: { login: CODEX_LOGIN } });
+
+describe("findings only on docs", () => {
+    it("passes docs-only findings on the head", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [reviewWithId(11, HEAD)],
+            reviewComments: [inline(11, "docs/specs/SPEC_X.md"), inline(11, "README.md")],
+        });
+        expect(r.state).toBe("success");
+        expect(r.description).toBe(`Codex only flagged docs in ${HEAD.slice(0, 10)}; see its comments`);
+        expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    const docsFindingsOnOld = { reviews: [reviewWithId(11, OLD)], reviewComments: [inline(11, "docs/specs/SPEC_X.md")] };
+
+    it("carries docs-only findings to a later head when only docs changed since", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, ...docsFindingsOnOld, filesSinceLatest: ["docs/specs/SPEC_X.md"] });
+        expect(r.state).toBe("success");
+        expect(r.description).toContain(OLD.slice(0, 10));
+    });
+
+    it("waits for Codex when code changed since docs-only findings", () => {
+        // ReAgent re-asks for a non-doc change, so that answer decides the head.
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            ...docsFindingsOnOld,
+            filesSinceLatest: ["docs/specs/SPEC_X.md", "src/lib.rs"],
+        });
+        expect(r.state).toBe("pending");
+    });
+
+    it("waits for Codex when the diff since docs-only findings is unknown", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, ...docsFindingsOnOld, filesSinceLatest: null }).state).toBe("pending");
+        expect(evaluateCodexGate({ headSha: HEAD, ...docsFindingsOnOld }).state).toBe("pending");
+    });
+
+    it("still fails findings that mix code and docs", () => {
+        const reviewComments = [inline(11, "docs/specs/SPEC_X.md"), inline(11, "src/lib.rs")];
+        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)], reviewComments }).state).toBe(
+            "failure",
+        );
+        const carried = { headSha: HEAD, reviews: [reviewWithId(11, OLD)], reviewComments, filesSinceLatest: ["docs/a.md"] };
+        expect(evaluateCodexGate(carried).state).toBe("pending");
+    });
+
+    it("treats findings with no known files as before (fail safe)", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)] }).state).toBe("failure");
+        const carried = { headSha: HEAD, reviews: [reviewWithId(11, OLD)], filesSinceLatest: ["docs/a.md"] };
+        expect(evaluateCodexGate(carried).state).toBe("pending");
+    });
+
+    it("only counts inline comments from that review", () => {
+        // Docs-only comments from an older review don't clear a code finding.
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [reviewWithId(10, OLD, "2026-09-23T05:00:00Z"), reviewWithId(11, HEAD, "2026-09-23T06:00:00Z")],
+            reviewComments: [inline(10, "docs/a.md"), inline(11, "src/lib.rs")],
+        });
+        expect(r.state).toBe("failure");
+    });
+
+    it("does not carry docs-only findings past a later code finding", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [
+                reviewWithId(10, OLD, "2026-09-23T05:00:00Z"),
+                reviewWithId(11, "aaaaaaaaaa11", "2026-09-23T06:00:00Z"),
+            ],
+            reviewComments: [inline(10, "docs/a.md"), inline(11, "src/lib.rs")],
+            filesSinceLatest: ["docs/a.md"],
+        });
+        expect(r.state).toBe("pending");
+    });
+});
+
+// While Codex's quota is exhausted ReAgent doesn't ask; it keeps one comment
+// per PR naming the head it skipped (spec §2).
+const skipComment = (sha, { login = SKIP_AUTHOR, created = "2026-09-30T10:00:00Z", updated } = {}) => ({
+    user: { login },
+    created_at: created,
+    ...(updated ? { updated_at: updated } : {}),
+    body:
+        `Codex not asked about \`${sha.slice(0, 10)}\`: out of review quota until 11:00 UTC. Comment ` +
+        "`@reagentx-workflow codex re-review` to try sooner.\n" +
+        `<!-- reagent:codex-skipped reason=quota head=${sha} -->`,
+});
+
+describe("ReAgent quota skip marker", () => {
+    it("passes the head ReAgent skipped", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD)] });
+        expect(r.state).toBe("success");
+        expect(r.description).toBe(`Codex is out of review quota; ${HEAD.slice(0, 10)} passes without it`);
+    });
+
+    it("ignores the same marker from anyone else", () => {
+        for (const login of ["someone", "a5af", CODEX_LOGIN, "reagentx-workflow"]) {
+            const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD, { login })] });
+            expect(r.state).toBe("pending");
+        }
+    });
+
+    it("follows the comment when ReAgent edits it to a newer head", () => {
+        const edited = skipComment(HEAD, { created: "2026-09-30T10:00:00Z", updated: "2026-09-30T10:30:00Z" });
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [edited] }).state).toBe("success");
+        // The edit replaced OLD's marker, so OLD is no longer passed by it.
+        expect(evaluateCodexGate({ headSha: OLD, comments: [edited] }).state).toBe("pending");
+    });
+
+    // a5af/reagent#282: ReAgent writes the note before reading Codex's
+    // answers, so a skip can name, and post-date, a head Codex answered.
+    it("never overrides Codex findings on the head, even when the skip is newer", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [findingsReview(HEAD, "2026-09-30T10:10:00Z")],
+            comments: [skipComment(HEAD, { created: "2026-09-30T10:00:00Z", updated: "2026-09-30T10:30:00Z" })],
+        });
+        expect(r.state).toBe("failure");
+    });
+
+    it("leaves a Codex OK on the head as the reason it passes", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [okComment(HEAD, "2026-09-30T10:10:00Z"), skipComment(HEAD, { updated: "2026-09-30T10:30:00Z" })],
+        });
+        expect(r.state).toBe("success");
+        expect(r.description).toBe(`Codex found no major issues in ${HEAD.slice(0, 10)}`);
+    });
+
+    it("is not a verdict to carry forward", () => {
+        // An OK on OLD, then a skip for OLD: the OK still carries across docs.
+        const comments = [okComment(OLD, "2026-09-30T10:00:00Z"), skipComment(OLD, { updated: "2026-09-30T10:30:00Z" })];
+        expect(latestCodexOutput({ comments })).toMatchObject({ kind: "ok" });
+        const r = evaluateCodexGate({ headSha: HEAD, comments, filesSinceLatest: ["docs/a.md"] });
+        expect(r.description).toBe(`Codex OK on ${OLD.slice(0, 10)}; only docs changed since`);
+        // A skip alone on OLD passes nothing on HEAD.
+        expect(
+            evaluateCodexGate({ headSha: HEAD, comments: [skipComment(OLD)], filesSinceLatest: ["docs/a.md"] }).state,
+        ).toBe("pending");
+    });
+
+    it("lets a later real review of the head win", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [skipComment(HEAD)],
+            reviews: [findingsReview(HEAD, "2026-09-30T12:00:00Z")],
+        });
+        expect(r.state).toBe("failure");
+    });
+
+    it("does not pass a head other than the one named", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [skipComment(OLD)] }).state).toBe("pending");
+    });
+
+    it("reads a short or upper-case sha and rejects a malformed one", () => {
+        const c = skipComment(HEAD);
+        expect(skippedHead({ ...c, body: c.body.replace(HEAD, HEAD.slice(0, 7).toUpperCase()) })).toBe(HEAD.slice(0, 7));
+        expect(skippedHead({ ...c, body: c.body.replace(HEAD, "abc12") })).toBeNull();
+        expect(skippedHead({ ...c, body: c.body.replace("reason=quota", "reason=other") })).toBeNull();
     });
 });

@@ -4,7 +4,11 @@
  * One section of the Global Memory block: one global bundle with
  * instructions, rendered as the startup file carries it.
  */
-export type GlobalMemorySection = { name: string, is_system: boolean, 
+export type GlobalMemorySection = { 
+/**
+ * The Global Memory entry's id (the bundle id).
+ */
+id: string, name: string, is_system: boolean, 
 /**
  * `# [AgentMux System] <name>` or `# [Workspace] <name>`, a blank line,
  * then the instructions. The first system section also opens with the

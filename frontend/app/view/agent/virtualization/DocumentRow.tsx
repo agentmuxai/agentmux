@@ -24,10 +24,11 @@ import { PeekOverlay } from "../components/PeekOverlay";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { rowDisclosureIn } from "./disclosure";
+import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
-import type { DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
+import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
@@ -250,6 +251,13 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
                     collapsed={props.documentState().collapsedNodes.has(props.node().id)}
                     onToggle={() => props.onToggleCollapse(props.node().id)}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "context_delivery"}>
+                <ContextDeliveryCard
+                    node={props.node() as ContextDeliveryNode}
+                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                    onTogglePin={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "user_message"}>

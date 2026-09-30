@@ -1,7 +1,6 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { revealBlockLocally } from "@/app/util/reveal-block";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import {
     snapshot as layoutSnapshot,
@@ -15,7 +14,7 @@ import {
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
+import { isAuthFailure, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
@@ -26,9 +25,7 @@ import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { accountPickerItems, planBind, type BindMode } from "./failure/account-picker";
 import {
-    atoms,
     getApi,
     getBlockMetaKeyAtom,
     getSettingsKeyAtom,
@@ -38,30 +35,18 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService } from "@/app/store/services";
-import { muxEventSubscribe } from "@/app/store/mps";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import {
     accountLabel,
-    boundAccountEmail,
     loadAccounts,
-    subscribeAccountChanges,
-    type Account,
-    type AgentAccounts,
 } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
-import {
-    setActiveBlockInStack,
-    type NodeModel,
-} from "@/layout/index";
-import { findNode } from "@/layout/lib/layoutNode";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { sleep } from "@/util/util";
 import {
     batch,
     createEffect,
@@ -75,46 +60,36 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
-import { Portal } from "solid-js/web";
-import { earliestLiveAttachedStartMs } from "./activity/attached-task";
-import { allSubagentsAtom } from "./activity/subagent-source";
-import {
-    hasRunningPromotedTool,
-    nextToolPromotionAt,
-} from "./activity/tool-adapter";
-import { busyInputFromState, paneBusyForInput } from "./working-indicator";
+import { createPromotionClock } from "./activity/promotion-clock";
+import { useAttachedTaskAxis } from "./activity/useAttachedTaskAxis";
+import { AgentProgressBar } from "./components/AgentProgressBar";
+import { useWorkingIndicator } from "./hooks/useWorkingIndicator";
 import { quickForkAgent } from "./quick-fork";
 import { isBangCommand } from "./bang-command";
 import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
-import { agentModels } from "./agent-models";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentSessionNotices } from "./components/AgentSessionNotices";
-import { AgentShellInfoPanel } from "./components/AgentShellInfoPanel";
+import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
 import { ShutdownPendingBanner } from "./shutdown/ShutdownPendingBanner";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentAuthPanel, AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
-import { AgentPicker, useOpenDefinitionMap } from "./components/AgentPicker";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentSearchBar } from "./components/AgentSearchBar";
-import { AgentShellSubblock } from "./components/AgentShellSubblock";
 import { collapseDrawerOnShellExit } from "./shell-exit-collapse";
 import { ForkProviderFallbackBanner } from "./components/ForkProviderFallbackBanner";
 import { PaneRow } from "./components/PaneRow";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
-import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
-import { AgentStashModal } from "./components/AgentStashModal";
+import { AgentStashDrawer } from "./components/AgentStashDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
-import { useForkSet } from "./fork/useForkSet";
-import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
-import { useActivityLog } from "./hooks/useActivityLog";
+import { useShellLogBridge } from "./hooks/useShellLogBridge";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -122,9 +97,8 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
-import { computeAccountBindCandidates } from "./failure/bind-account-candidates";
-import { retryRecheckAfterBind } from "./failure/recheck-after-bind";
-import { decideSyntheticRow } from "./failure/synthetic-row";
+import { useAccountBinding } from "./failure/useAccountBinding";
+import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
 import { requestAgentTakeover } from "./failure/takeover";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
@@ -143,375 +117,19 @@ import { liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "./live-fe
 import { userIsInteracting } from "./stream-scheduler";
 import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
 import { useResumePreflight } from "./hooks/useResumePreflight";
-import { closeAgentTab } from "./close-agent-tab";
-import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
+import { openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
-import { lastLinkedAccountId } from "./providers/provider-id-aliases";
-import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
+import { sendStartupSequence } from "./startup/sendStartupSequence";
 import { createAgentAtoms } from "./state";
 import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "./open-trace";
 
-// Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
-// pattern). Used by sanitizeLogTextForTerminal below to strip escape sequences
-// out of arbitrary text (e.g. a bang command's subprocess stdout/stderr) before
-// it's wrapped in formatLogLine's own SGR color codes and written into the live
-// shell Terminal — otherwise embedded sequences in that text could move the
-// cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
-// rendered state (this text is not our own trusted output; it's shell-command
-// output the user chose to run).
-// Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
-// the AgentPicker->AgentPresentationView cross-fade (AgentBlockContent,
-// below) reuses the same visual timing so the two fades feel like one brand
-// moment rather than two differently-tuned animations back to back.
-const PICKER_FADE_OUT_MS = 200;
-
-// Shell drawer's height until the user drags it (then `term:shellheight`
-// wins). 80% of the drawers' shared 220px default — the shell opens on its
-// own for every `!cmd`, so it should take less of the transcript by default.
-const SHELL_DRAWER_DEFAULT_HEIGHT = 176;
-
-const ANSI_SEQUENCE_RE = new RegExp(
-    "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
-        "[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|" +
-        "(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))",
-    "g"
-);
-
-/**
- * Strips ANSI escape sequences and other terminal control bytes from `text`,
- * then converts bare `\n` to `\r\n` so multi-line text renders as separate
- * lines instead of a cursor staircase (xterm.js, like a real terminal,
- * treats `\n` as line-feed-only — it doesn't imply carriage return).
- */
-const sanitizeLogTextForTerminal = (text: string): string => {
-    const withoutAnsi = text
-        .replace(ANSI_SEQUENCE_RE, "")
-        // Any stray control byte not part of a matched sequence above
-        // (malformed/truncated escapes, bare ESC, BEL, CR, etc.) — \t and \n
-        // are kept; \n is converted to \r\n next.
-        .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
-    return withoutAnsi.replace(/\n/g, "\r\n");
-};
-
-/**
- * Content half of the agent pane — becomes `AgentViewModel.viewComponent`.
- * Switches between the agent picker and the live presentation view (or the
- * read-only history reader). Constructed fresh per stack member, exactly
- * like every other `viewComponent` — the "one instance, one immutable
- * blockId for its lifetime" `ViewModel` contract is unchanged here.
- *
- * The pane-scope `<ModalLayer>` wrap lives HERE, not in `AgentPaneChrome`.
- * Chrome does now mount for every agent pane, so this is no longer
- * load-bearing the way it was when chrome was stack-size-gated — but it
- * stays here deliberately: the launch picker (`useModalLayer()`, opened
- * before any agentId exists) belongs to CONTENT, so wrapping at the content
- * root keeps the layer's lifetime tied to the thing that opens modals
- * rather than to chrome. Wrapping here covers both the
- * pre-launch picker AND the post-launch presentation view, and (once
- * `AgentPaneChrome` does mount) sits inside it, so the pane-scope lock
- * still holds across the entire pane lifecycle either way.
- * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
- */
-export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Element => {
-    const block = model.blockAtom;
-    const agentId = () => block()?.meta?.["agentId"];
-    // A block opened as a read-only history reader (openOrFocusHistoryTab)
-    // — takes priority over the live/picker gate below, and never toggles
-    // back: closing this reading posture is closing the tab, not swapping
-    // content in place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
-    const isHistoryTab = () => !!block()?.meta?.[HISTORY_TAB_FOR_META_KEY];
-
-    // Cross-fade AgentPicker -> AgentPresentationView instead of an instant
-    // hard cut when this SAME block gains an agentId in place (launching an
-    // agent from a blank "+" tab's picker — no block-stack mutation, no
-    // node remount, so PR #2761's leaf reveal gate never covers this
-    // transition at all). SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
-    // §2.3/§4 Option B.
-    //
-    // Same stuck-visible race as block.tsx's ready()-gate (see
-    // docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md):
-    // seeding `pickerVisible` from `!agentId()` read once at construction,
-    // then relying on `on(agentId, ..., {defer: true})`'s first (swallowed)
-    // run to treat "agentId already set" as "nothing to do," is two
-    // different reads of `agentId()` taken at two different times. If
-    // `agentId()` resolves in the gap between them, the seed is never
-    // corrected. Fixed the same way: the first observation and the seed
-    // are now the same read, inside the same effect.
-    const [pickerVisible, setPickerVisible] = createSignal(true);
-    const [pickerFadingOut, setPickerFadingOut] = createSignal(false);
-    let pickerFadeRaf: number | undefined;
-    let pickerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
-    let pickerGateInitialized = false;
-    onCleanup(() => {
-        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
-        clearTimeout(pickerFadeTimeout);
-    });
-    createEffect(() => {
-        const id = agentId();
-        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
-        clearTimeout(pickerFadeTimeout);
-        if (!pickerGateInitialized) {
-            // First observation of `agentId()` for this mount: reflect it
-            // directly, no fade — there's nothing painted yet to fade from
-            // either way.
-            pickerGateInitialized = true;
-            setPickerVisible(!id);
-            setPickerFadingOut(false);
-            return;
-        }
-        if (id) {
-            if (!pickerVisible()) return; // already past the transition
-            // One rAF so the picker paints at full opacity at least once
-            // before the fade starts — flipping straight to the
-            // "is-fading" class in this same tick would apply opacity:0
-            // on the very first paint, with nothing to visibly transition
-            // from.
-            pickerFadeRaf = requestAnimationFrame(() => setPickerFadingOut(true));
-            pickerFadeTimeout = setTimeout(() => {
-                setPickerVisible(false);
-                setPickerFadingOut(false);
-            }, PICKER_FADE_OUT_MS);
-        } else {
-            // Lost the agentId (not a normal path, but stay correct) —
-            // show the picker again immediately, no fade needed going
-            // this direction.
-            setPickerFadingOut(false);
-            setPickerVisible(true);
-        }
-    });
-
-    // ReAgent P2 on SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's
-    // PR: owned by the model (one useAgentDefinitions() subscription per
-    // ViewModel instance) instead of a fresh call here, so AgentPaneChrome
-    // can read the SAME list via nodeModel.activeViewModel() instead of
-    // independently subscribing a second time — see AgentViewModel.agentDefinitions'
-    // own doc comment (agent-model.ts).
-    const agentDefinitions = model.agentDefinitions;
-
-    return (
-        <ModalLayer scope="pane">
-            <Show
-                when={isHistoryTab()}
-                fallback={
-                    <>
-                        <Show when={agentId()}>
-                            <AgentPresentationView
-                                model={model}
-                                agentId={agentId()}
-                                agentDefinitions={agentDefinitions}
-                                progressBarMount={model.progressBarMount}
-                            />
-                        </Show>
-                        {/* Cross-fades out on top of AgentPresentationView
-                            once agentId() is set, instead of the two Shows
-                            above hard-swapping instantly — see
-                            pickerVisible/pickerFadingOut above.
-                            SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3. */}
-                        <Show when={pickerVisible()}>
-                            <div
-                                class="agent-picker-host"
-                                classList={{
-                                    // Applied the instant agentId() is set
-                                    // (same render as AgentPresentationView
-                                    // appearing) so this never sits in
-                                    // normal flow alongside it, even for
-                                    // one frame.
-                                    "is-overlay": !!agentId(),
-                                    "is-fading": pickerFadingOut(),
-                                    "is-reduced-motion": atoms.prefersReducedMotionAtom(),
-                                }}
-                            >
-                                <AgentPicker model={model} />
-                            </div>
-                        </Show>
-                    </>
-                }
-            >
-                {/* No progressBarMount here — a history tab is a read-only
-                    reader with no live turn/working state of its own, so
-                    there's nothing for a progress bar to represent. */}
-                <AgentHistoryTabView model={model} />
-            </Show>
-        </ModalLayer>
-    );
-};
-
-AgentBlockContent.displayName = "AgentBlockContent";
-
-/**
- * Chrome half of the agent pane — the header, tab strip and progress-bar
- * slot, rendered by the shared `renderPaneChromeShell` (pane-leaf-chrome.tsx's
- * fallback when a view supplies no `renderPaneChrome`) for EVERY agent pane
- * (see `pane-leaf-chrome.tsx`'s `hoisted` memo for why gating this on stack
- * size was a catch-22), wrapping whichever `AgentBlockContent` instance is
- * currently the active stack member's own switch-scoped `<Block>`
- * (`content` prop, supplied by `pane-leaf-chrome.tsx`). Unlike `AgentBlockContent`, this component is
- * constructed ONCE per leaf and stays mounted across every subsequent
- * switch — that persistence is the entire point of this file's split
- * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`).
- *
- * `anchorBlockId` is the blockId of whichever stack member's `ViewModel`
- * FIRST called `renderPaneChrome` — frozen for this component's entire
- * lifetime, the same "one instance, one immutable blockId" contract every
- * other `ViewModel`/`NodeModel` consumer already follows. It is NOT used to
- * resolve the owning `LayoutNode`, though — ReAgent P0 on #3136:
- * `anchorBlockId` can itself be closed by the user (removed from
- * `blockStack` by `closeBlockInStack`'s `filter`), and chrome never unmounts
- * to recover — a `getNodeByBlockId(anchorBlockId)` lookup that outlives that
- * tab's closure would return `null` forever after, breaking the whole tab
- * strip. Node resolution uses `nodeModel.nodeId` instead
- * (`getOwnNode`, below) — the leaf's own id, stable regardless of which
- * stack members come and go.
- */
-/**
- * Agent's opt-in to the ONE shared pane chrome
- * (`renderPaneChromeShell`) — see `PaneChromeModel` (custom.d.ts).
- * Everything the old `AgentPaneChrome` component rendered around the
- * content (root box, focus ring, header row, ErrorBoundary) is the shared
- * chrome's job now; what stays here is only what is genuinely agent's:
- * its tab model (fork lineage merged with this pane's own stack, rename,
- * per-pane zoom) and the below-header slot its turn-progress bar portals
- * into. That slot is a generic capability — any view type can take it.
- */
-export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
-    // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()` — see that
-    // field's own doc comment (layout/lib/types.ts) and
-    // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md: this pane's
-    // own tab is not necessarily "whichever tab is globally active right
-    // now" at the moment chrome first constructs (e.g. a brand-new tab's
-    // default agent pane, seeded by `applyTabPreset` before `setActiveTab`
-    // ever runs).
-    const layoutModel = nodeModel.layoutModel;
-
-    // ReAgent P0 on this PR: resolving the owning node via
-    // layoutModel.getNodeByBlockId(anchorBlockId) — anchorBlockId's own
-    // originating tab — breaks permanently the moment the user closes THAT
-    // specific tab: closeBlockInStack removes a closed member from
-    // blockStack via filter, so getNodeByBlockId(anchorBlockId) would
-    // return null forever after (chrome never unmounts to recover once
-    // mounted). The leaf's own nodeId
-    // (NodeModel.nodeId) is stable regardless of which stack members come
-    // and go — resolve on that instead, everywhere in this component.
-    const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
-
-    // Reads the SAME reactive field `pane-leaf-chrome.tsx`'s inner `<Key>`
-    // is keyed on — see NodeModel.activeBlockId's own doc comment
-    // (layout/lib/types.ts).
-    const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
-
-    // Block-scoped reads (agentId) must track the
-    // CURRENTLY ACTIVE member, not `anchorBlockId` (frozen to whichever
-    // ViewModel instance first rendered this chrome) — getMuxObjectAtom
-    // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
-    // PR #3134 already established for BlockFrame_Header
-    // (frontend/app/store/mos.ts's own doc comments explain why).
-    const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
-    const agentId = () => activeBlockData()?.meta?.["agentId"];
-
-    // Fork tabs: conversations sharing this one's `parent_id` lineage that
-    // are open in ANOTHER top-level pane, shown as extra pills (PaneChrome
-    // dedupes them against this pane's own stack) so cross-pane
-    // fork-switching keeps working.
-    const [openDefinitions] = useOpenDefinitionMap();
-    // ReAgent P2: reads the active tab's OWN agentDefinitions
-    // (agent-model.ts) instead of calling useAgentDefinitions() again here
-    // — that would be a second, independent RPC + agents:changed
-    // subscription for the same pane, on top of the one AgentBlockContent
-    // already owns. Found by block id (agent-models.ts): the host's view
-    // model is only an adapter once the agent is a native pane tab.
-    const forks = useForkSet({
-        definitions: () => agentModels.get(activeBlockId())?.agentDefinitions() ?? [],
-        openBlockByDef: openDefinitions,
-        activeDefinitionId: () => agentId() ?? "",
-    });
-    // Same "switchable" filter AgentPresentationView used to apply: a fork
-    // with no open blockId anywhere can't be jumped to, so it isn't offered.
-    const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
-
-    // Forks open in ANOTHER pane appear as extra pills after this pane's own
-    // stack members, labeled with their branch/definition title.
-    const extraTabs = () =>
-        switchableForks()
-            .filter((f) => !!f.blockId)
-            .map((f) => ({ blockId: f.blockId!, label: f.title }));
-
-    // Activating a tab has two cases, both "switch," neither "create": (1)
-    // the target block already lives in THIS pane's own block-stack — swap
-    // the active member in place; (2) a fork open as its own separate
-    // top-level pane — reveal it via revealBlockLocally, same as the
-    // picker's "Switch to existing" flow already does.
-    const handleTabSwitch = (targetBlockId: string) => {
-        if (targetBlockId === activeBlockId()) return;
-        const node = getOwnNode();
-        if (!node) return;
-        const stack = node.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
-        if (stack.includes(targetBlockId)) {
-            // No reveal gate: reaching this branch at all requires
-            // node.data.blockStack.length > 1 (otherwise `stack` above is
-            // just [activeBlockId()], and targetBlockId !== activeBlockId()
-            // already ruled out targetBlockId matching it) — the
-            // precondition for a second pill to exist to click at all.
-            // AgentPaneChrome is mounted for the whole pane's life and
-            // never remounts on a switch, so there is nothing for a gate to
-            // hide: only the inner <Block> rebuilds, and that is already
-            // covered by its own ready-gate cross-fade.
-            // See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
-            setActiveBlockInStack(layoutModel, node.id, targetBlockId);
-        } else {
-            // Another pane — switch it to the fork if it's a background tab
-            // there (refocusNode only focused the pane).
-            void revealBlockLocally(targetBlockId);
-        }
-    };
-    // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
-    // closeAgentTab resolves the block's OWNING node — for a stack member
-    // that's this pane, for a cross-pane fork tab it's that other pane — and
-    // closes it like closeBlockInStack does (pop it out and activate the
-    // neighbor; last member closes the pane), with one exception: the last
-    // tab of THIS pane holding a loaded agent is swapped for a fresh My
-    // Agents tab instead of closing the pane
-    // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §2).
-    //
-    // No reveal gate on the ordinary close paths — same reasoning as
-    // handleTabSwitch: that node's own AgentPaneChrome (if it's an agent
-    // pane) is mounted for the pane's whole life and never remounts on a
-    // switch, so a gate would only hide content already covered by its own
-    // ready-gate cross-fade. See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
-    // The picker swap holds its own gate (see close-agent-tab.ts).
-    const handleTabClose = (targetBlockId: string) => {
-        void closeAgentTab({ layoutModel, ownNodeId: nodeModel.nodeId, blockId: targetBlockId });
-    };
-    // No progress-bar slot here: the shared chrome renders it on every pane
-    // and hands it to whichever view model is active (PaneChrome.tsx), so an
-    // agent tab in a pane that started as another view type gets it too.
-    return {
-        extraTabs,
-        // Both return true ("handled"): an agent tab may live in a
-        // DIFFERENT pane (a fork open as its own top-level pane), so
-        // activating/closing it isn't necessarily this pane's own stack
-        // operation — handleTabSwitch/handleTabClose resolve the owning
-        // node themselves.
-        onActivate: (id: string) => {
-            handleTabSwitch(id);
-            return true;
-        },
-        onClose: (id: string) => {
-            handleTabClose(id);
-            return true;
-        },
-        rootClass: "agent-pane-stack",
-        contentClass: "agent-pane-stack-content",
-    };
-}
-
-
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
 
-const AgentPresentationView = ({
+export const AgentPresentationView = ({
     model,
     agentId,
     agentDefinitions,
@@ -727,61 +345,14 @@ const AgentPresentationView = ({
         (window as unknown as { __agentLayout?: () => unknown }).__agentLayout = () => layoutSnapshot(model.blockId);
     }
 
-    // Activity log — collects per-session diagnostic entries from launch
-    // flow, subprocess lifecycle, slash commands, errors, etc. `log` is
-    // passed down to every hook whose signature takes a `LogFn`, but only
-    // "system"-tagged entries (bang-command output, `useAgentCommands.ts`'s
-    // `dispatchBangCommand`; slash-command results, `commands/dispatch.ts`)
-    // are genuinely user-initiated console-style interactions written into
-    // the shell terminal (AgentShellSubblock's `onTermReady`) — everything
-    // else (launch-flow status, auth prompts, CLI resolution, etc.) is
-    // passive app-internal noise the shell should stay clean of. First cut
-    // redirected every tag, which made the shell open with a wall of
-    // "[cli] checking for claude...", "[auth] ..." etc. sitting above the
-    // real prompt — reported live after removing the separate log panel.
-    // `logLines` stays as a backlog (system-tagged entries only) so a bang
-    // command's output logged while the drawer is closed still shows once
-    // it reopens. `logFlushedCount` tracks how many of `logLines()` have
-    // already been written into *some* terminal instance (live or
-    // replayed) — every write, whether live or catch-up, advances it.
-    // Without this, each drawer close/reopen replayed the entire backlog
-    // again on top of whatever real PTY content the terminal (now durably)
-    // restored (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md).
-    const { lines: logLines, append: appendLog } = useActivityLog();
-    const [termWrite, setTermWrite] = createSignal<((text: string) => void) | null>(null);
-    let logFlushedCount = 0;
-
-    const formatLogLine = (tag: string, text: string, level?: "info" | "error" | "warn"): string => {
-        const body = `[${tag}] ${sanitizeLogTextForTerminal(text)}`;
-        if (level === "error") return `\x1b[31m${body}\x1b[0m`;
-        if (level === "warn") return `\x1b[33m${body}\x1b[0m`;
-        return `\x1b[90m${body}\x1b[0m`;
-    };
-
-    const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
-        if (tag !== "system") return;
-        appendLog(tag, text, level);
-        const write = termWrite();
-        if (write) {
-            write(formatLogLine(tag, text, level));
-            logFlushedCount = logLines().length;
-        }
-    };
-
-    // Fired once per terminal mount (drawer open) — replays only the log
-    // lines added since the last flush (whether that flush was this same
-    // catch-up on a prior mount, or a live write while the drawer was open),
-    // then keeps the write function around so `log` above writes live from
-    // here on.
-    const handleShellTermReady = (write: (text: string) => void) => {
-        const all = logLines();
-        for (let i = logFlushedCount; i < all.length; i++) {
-            write(formatLogLine(all[i].tag, all[i].text, all[i].level));
-        }
-        logFlushedCount = all.length;
-        setTermWrite(() => write);
-    };
-    const handleShellTermDispose = () => setTermWrite(null);
+    // The shell drawer's log bridge: which log lines reach the shell terminal,
+    // and the backlog replayed when it mounts (hooks/useShellLogBridge.ts).
+    const {
+        log,
+        onTermReady: handleShellTermReady,
+        onTermDispose: handleShellTermDispose,
+        clearTermWrite,
+    } = useShellLogBridge();
 
     /**
      * The drawer's shell process exited cleanly — the human typed `exit`.
@@ -800,7 +371,7 @@ const AgentPresentationView = ({
         void collapseDrawerOnShellExit({
             parentBlockId: model.blockId,
             exitedSubBlockId: exitedId,
-            clearTermWrite: () => setTermWrite(null),
+            clearTermWrite,
             collapseDrawer: () => paneModel.dispatchPane({ type: "DetailsCollapse" }, "system"),
             setMeta: (args) =>
                 RpcApi.SetMetaCommand(TabRpcClient, { oref: args.oref, meta: args.meta as any }),
@@ -1431,7 +1002,7 @@ const AgentPresentationView = ({
     // overrides the tag to "unauthenticated" the instant it appears, instead
     // of waiting for the user to click "Login Again" first.
     const loginStatus = createMemo((): "authenticated" | "unauthenticated" | "unknown" => {
-        if (paneModel.state.failure?.data.code === "auth") return "unauthenticated";
+        if (isAuthFailure(paneModel.state.failure)) return "unauthenticated";
         return status.authStatus();
     });
 
@@ -1679,116 +1250,20 @@ const AgentPresentationView = ({
     // mounts via scrollToBottomRef.
     let scrollToBottomFn: ((reason?: string) => void) | null = null;
 
-    // True once the pane's in-flight Bash tool call has been promoted to a
-    // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
-    // its own "tool · arg" text once this flips, so the dock and the working
-    // row never repeat the same information (report §4.3: "the dock takes
-    // over, AgentWorkingRow goes calm/neutral"). Deliberately uses
-    // hasRunningPromotedTool, not toolActivities — a *finished* call still
-    // lingering in the dock during its retention window must not suppress a
-    // different, newly-started tool call's own working-row text.
-    //
-    // Scheduled the same way as ActivityDock's own hasExpiring/
-    // toolPromotionNonce: one setTimeout for the exact instant promotion
-    // becomes due, not a continuous tick. The effect re-reads its own nonce
-    // so that after that timer fires it reschedules for the next-earliest
-    // still-pending promotion, instead of only ever handling one.
-    const [hasPromotedTool, setHasPromotedTool] = createSignal(false);
-    const [toolPromotionCheckNonce, setToolPromotionCheckNonce] = createSignal(0);
-    createEffect(() => {
-        toolPromotionCheckNonce();
-        const nodes = paneModel.document();
-        const now = Date.now();
-        setHasPromotedTool(hasRunningPromotedTool(nodes, now));
-        const at = nextToolPromotionAt(nodes, now);
-        if (at == null) return;
-        const timer = setTimeout(() => setToolPromotionCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
-        onCleanup(() => clearTimeout(timer));
+    // The wall-clock instant a running Bash call is promoted to the dock, for
+    // everything that depends on promotion (activity/promotion-clock.ts).
+    const promotionTick = createPromotionClock(paneModel.document);
+
+    // The busy predicate and its renderings (hooks/useWorkingIndicator.ts).
+    const { paneBusy, workingRowVisible, hasPromotedTool } = useWorkingIndicator({
+        paneModel,
+        showingLaunchActivity,
+        promotionTick,
     });
-
-    // THE busy predicate — one meaning, three renderings: this row, the top
-    // progress bar, and the composer strip. All three read this memo and
-    // nothing else, so they cannot disagree. Definition and the reasoning for
-    // collapsing them live in working-indicator.ts.
-    //
-    // This used to subtract workingRowSupersededByDock() here, standing the row
-    // down once a tool call was promoted to the ActivityDock. That was wrong:
-    // promotion is a DISPLAY change at TOOL_PROMOTION_MS, not the harness
-    // backgrounding the call, so the turn is still blocked and input still
-    // queues — the row was hiding a gate that was still closed, while the bar
-    // (which never had the term) kept running. See
-    // docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md
-    // §3.1 (still valid: mere dock PROMOTION never relaxes busy-ness).
-    //
-    // §2.3a (2026-09-17, supersedes §2.3) DOES relax busy-ness, but only for
-    // genuinely accepted background work (isAcceptedBackgroundLaunch), not
-    // mere promotion — see hasBlockingForegroundToolCall's doc comment in
-    // ./activity/tool-adapter for exactly how those two are told apart.
-    const paneBusy = createMemo(() =>
-        paneBusyForInput(busyInputFromState(paneModel.state, paneModel.document(), showingLaunchActivity()))
-    );
-
     const workingRowLoading = paneBusy;
-    const workingRowVisible = createMemo(
-        () =>
-            workingRowLoading() ||
-            paneModel.state.sessionStats != null ||
-            paneModel.state.compacting != null ||
-            paneModel.state.reconnecting != null,
-    );
 
-    // Attached-task axis dispatch — the deferred §6.1 call site of
-    // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md. Derives "≥1 live
-    // agent-declared long-running activity" from the same shell + subagent +
-    // tool aggregate the ActivityDock renders, and dispatches the reducer's
-    // AttachedTaskObserved / AttachedTaskCleared on the 0→1 / 1→0 edges.
-    // Both commands are idempotent in the reducer, so re-running this effect
-    // while the level is unchanged is harmless. Wall-clock re-check timer:
-    // a running Bash call crosses TOOL_PROMOTION_MS on a timer, not on a
-    // document event (same discipline as the promotion effect above).
-    const [attachedCheckNonce, setAttachedCheckNonce] = createSignal(0);
-    createEffect(() => {
-        attachedCheckNonce();
-        const nodes = paneModel.document();
-        const subs = allSubagentsAtom();
-        const now = Date.now();
-        // `at` carries the earliest running activity's REAL start time, not
-        // the observation time — a promoted Bash call has already been
-        // running ≥30s when this first fires, and a pane reopened over an
-        // already-running shell must not restart the elapsed counter at 0
-        // (reagent P1 on PR #2489; matches AttachedTaskState.since's
-        // "when this episode began" contract).
-        const transcriptStartMs = earliestLiveAttachedStartMs(nodes, subs, model.blockId, now);
-        // Combine with the registry-derived floor (Phase C of
-        // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) —
-        // attached if EITHER source says so, earliest start wins when both
-        // do. Reading this atom here makes it a tracked dependency of this
-        // effect too, same as documentAtom/allSubagentsAtom above, so a
-        // registry-only update (no transcript change) still re-triggers
-        // this recompute. Codex P1 on PR #2685: an earlier version had
-        // useBackgroundTaskRegistry dispatch AttachedTaskObserved directly
-        // into the SAME state this effect independently recomputes and
-        // clears from transcript alone — that dispatch was immediately
-        // undone the next time this effect ran and saw no transcript
-        // evidence. Routing the registry signal through its own axis
-        // instead of the shared one this effect owns fixes that.
-        const registryStartMs = paneModel.state.registryAttachedTaskSince;
-        const startMs =
-            transcriptStartMs != null && registryStartMs != null
-                ? Math.min(transcriptStartMs, registryStartMs)
-                : (transcriptStartMs ?? registryStartMs);
-        const current = paneModel.state.attachedTask != null;
-        if ((startMs != null) !== current) {
-            paneModel.dispatchPane(
-                startMs != null ? { type: "AttachedTaskObserved", at: startMs } : { type: "AttachedTaskCleared" },
-                "system"
-            );
-        }
-        const at = nextToolPromotionAt(nodes, now);
-        if (at == null) return;
-        const timer = setTimeout(() => setAttachedCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
-        onCleanup(() => clearTimeout(timer));
-    });
+    // Attached-task axis dispatch (activity/useAttachedTaskAxis.ts).
+    useAttachedTaskAxis({ blockId: model.blockId, paneModel, promotionTick });
 
     // User-message send + /login /clear slash intercepts + back-to-picker.
     // See hooks/useAgentCommands.ts.
@@ -1892,7 +1367,7 @@ const AgentPresentationView = ({
         // pre-launch "Log in" row into "Login Again" (+ retryAfterLogin true,
         // i.e. an old message resent on an agent that never ran a turn).
         // Found independently by codex and manoz on PR #2951.
-        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure : null;
+        const authFailureToPreserve = isAuthFailure(liveFailure) ? liveFailure : null;
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
         // while a turn is already running regresses Streaming → Submitting,
         // which would flicker the busy indicator back to its "Submitting"
@@ -1938,200 +1413,25 @@ const AgentPresentationView = ({
             void status.startLaunchFlow();
         }
     };
-    // Pre-launch auth failure → the SAME failure row every other auth failure
-    // uses, instead of the separate blue "Log in" bar this replaced
-    // (docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md).
-    //
-    // The DECISION lives in decideSyntheticRow (failure/synthetic-row.ts) and
-    // is unit-tested there; this is wiring only. It was extracted after this
-    // effect produced several P1s across PR #2951 — it sits inline in the pane
-    // component and no existing harness can reach it, so the logic was
-    // unassertable while it lived here.
-    //
-    // Tracks BOTH canRetry and the failure signal. Tracking the failure is
-    // what lets a dismissed REAL failure fall back to this row while the agent
-    // is still unauthenticated (reagent P1) — without it the pane kept no login
-    // affordance at all, strictly worse than the undismissable bar it replaced.
-    // Dismissing THIS row still sticks; decideSyntheticRow tells the two apart
-    // from the previous value, which is why that state is threaded here.
-    let prevFailure: PaneFailure | null = null;
-    let syntheticDismissed = false;
-    createEffect(() => {
-        const decision = decideSyntheticRow({
-            canRetry: status.canRetry(),
-            current: paneModel.state.failure,
-            previous: prevFailure,
-            syntheticDismissed,
-        });
-        prevFailure = untrack(() => paneModel.state.failure);
-        syntheticDismissed = decision.syntheticDismissed;
-        if (decision.action === "raise") {
-            paneModel.dispatchPane(
-                {
-                    type: "FailureObserved",
-                    at: Date.now(),
-                    turnAttempted: false,
-                    failure: {
-                        code: "auth",
-                        title: "Not signed in",
-                        detail:
-                            "This agent hasn't been signed in to its provider yet, so it never started. " +
-                            "Sign in to launch it — nothing has run, so there's no turn to retry.",
-                        retryable: true,
-                    },
-                },
-                "system",
-            );
-            // Keep prevFailure in step with what we just dispatched, so the
-            // re-run this write triggers sees "our row is showing" rather than
-            // "a row just appeared from nowhere".
-            prevFailure = untrack(() => paneModel.state.failure);
-        } else if (decision.action === "retract") {
-            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
-            prevFailure = null;
-        }
+    // Pre-launch auth failure → the "Not signed in" failure row
+    // (failure/useAuthHealth.ts).
+    useSyntheticAuthRow({ canRetry: status.canRetry, paneModel });
+
+    // Bind/switch account for this agent (failure/useAccountBinding.ts).
+    const { authEmail, bindCandidates, onBindAccount, onSwitchAccount, refreshLinkedAccountId } = useAccountBinding({
+        agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
+        providerId: () => provider()?.id,
+        bindExistingAccount: status.bindExistingAccount,
     });
 
-    // ---- Bind-account (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2/§3) ----
-    //
-    // Cross-pane/cross-tab live account cache — same subscription pattern
-    // `AgentLaunchModal.tsx` already uses. Seeded synchronously (no network
-    // round trip; the app-wide cache is already warm) then kept live.
-    const [accountCache, setAccountCache] = createSignal<Account[]>(loadAccounts());
-    createEffect(() => {
-        const unsub = subscribeAccountChanges((list) => setAccountCache(list));
-        onCleanup(unsub);
-    });
-
-    // This agent's own currently-linked account for its provider, if any —
-    // excluded from bind candidates (nothing to adopt). Refreshed on mount
-    // and whenever this agent's identity links change (below) — the same
-    // event that also drives the auto-unblock check, since both concerns
-    // become stale for the identical reason.
-    const [linkedAccountId, setLinkedAccountId] = createSignal<string | undefined>(undefined);
-    const refreshLinkedAccountId = async () => {
-        const agentDefinitionId = getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined;
-        const prov = provider();
-        if (!agentDefinitionId || !prov) {
-            setLinkedAccountId(undefined);
-            return;
-        }
-        try {
-            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
-            setLinkedAccountId(lastLinkedAccountId(links, prov.id));
-        } catch {
-            setLinkedAccountId(undefined);
-        }
-    };
-    // Re-resolve whenever the agent id or provider resolves or changes — both
-    // come from block meta, which may not have loaded on the first run, and a
-    // one-shot mount-time call left the link (and the chip's email) unset.
-    createEffect(
-        on(
-            () => [getBlockMetaKeyAtom(model.blockId, "agentId")(), provider()?.id] as const,
-            () => void refreshLinkedAccountId()
-        )
-    );
-
-    // The bound account's login email for the composer's sign-in chip
-    // (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) — live across logins and
-    // rebinds via accountCache + linkedAccountId.
-    const authEmail = createMemo(() => boundAccountEmail(accountCache(), linkedAccountId()));
-
-    const bindCandidates = createMemo(() => {
-        const prov = provider();
-        if (!prov) return [];
-        return computeAccountBindCandidates(prov.id, accountCache(), linkedAccountId());
-    });
-
-    // A flat picker of accounts to bind, anchored at the click — same
-    // ContextMenuModel primitive the Armory's Bind-to-Agent menu uses
-    // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md), just a flat
-    // list here (the trigger IS the button — no outer submenu to nest under).
-    // What to do for a given candidate list is `planBind` (failure/account-picker.ts,
-    // unit-tested): the failure row's "adopt" binds a lone candidate at once; the
-    // composer chip's "switch" never does — the agent works and a switch restarts
-    // it, so the user picks a named destination
-    // (SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A).
-    const runBind = (mode: BindMode, e: MouseEvent | undefined, labelPrefix = "") => {
-        const plan = planBind(mode, bindCandidates());
-        if (plan.kind === "none") return;
-        if (plan.kind === "bind") {
-            void status.bindExistingAccount(plan.account);
-            return;
-        }
-        // No event to anchor on (shouldn't happen — PaneRow's render call site
-        // always passes one) → no-op rather than guessing a position.
-        if (!e) return;
-        ContextMenuModel.showContextMenu(
-            accountPickerItems(plan.candidates, (acct) => void status.bindExistingAccount(acct), labelPrefix),
-            e,
-        );
-    };
-    const onBindAccount = (e?: MouseEvent) => runBind("adopt", e);
-    const onSwitchAccount = (e: MouseEvent) => runBind("switch", e, "Switch to ");
-
-    // Declare the auth-blocking state resolved: clears canRetry/authNotice
-    // (notifyControllerHealthy) and, ONLY when the live failure is actually
-    // an auth failure, clears it too — never unconditionally, so an
-    // unrelated concurrent failure (rate_limited, context_exceeded, …) that
-    // happens to be showing isn't silently wiped. Shared by two independent
-    // proofs of health: a live controllerstatus event showing an active turn
-    // (below), and a verified auth re-check after an external bind (below).
-    const declareAuthHealthy = () => {
-        status.notifyControllerHealthy();
-        if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
-            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
-        }
-    };
-
-    // Bounded retry around recheckAuthAfterBind — NOT a stylistic choice, a
-    // correctness fix. `agentidentities:changed` is published by the
-    // backend SYNCHRONOUSLY inside the `LinkAgentIdentityCommand` handler,
-    // before it even responds to the RPC (agent_handlers/identity.rs:590-611);
-    // RPC responses and WS events share one in-order connection, so this
-    // pane's subscription below fires before `bindAccountToAgent`'s own
-    // `SetMetaCommand` — which only runs AFTER that same Link RPC resolves
-    // client-side — has refreshed `cmd:env` to the newly-bound account's
-    // dir. The very first recheck therefore reads STALE env and fails on
-    // essentially every bind, not as an edge case but as the common case —
-    // reagentx P1 on PR #2969. Retry ladder lives in recheck-after-bind.ts,
-    // unit-tested there (dependency-injected, no DOM/RPC mocking needed) —
-    // kept out of this file for the same reason
-    // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md's retrospective
-    // extracted decideSyntheticRow out of here after several P1s: inline
-    // logic in this component is unassertable by any existing harness.
-    const recheckAuthAfterBindWithRetry = () =>
-        retryRecheckAfterBind({
-            recheck: status.recheckAuthAfterBind,
-            stillBlocked: () => status.canRetry() || paneSnapshot(model.blockId)?.failure?.data.code === "auth",
-            sleep,
-            onHealthy: declareAuthHealthy,
-        });
-
-    // Auto-unblock: a bind can happen from ANYWHERE (the Armory's
-    // Bind-to-Agent menu, the per-agent Identity tab, or this pane's own
-    // "Bind account" above) — this pane must notice regardless of source.
-    // `agentidentities:changed:<agentId>` already fires on every one of
-    // those; nothing previously listened for it here.
-    //
-    // Re-verifies via CheckCliAuth before declaring healthy (a bind event is
-    // not itself proof the new credential works) and NEVER auto-retries a
-    // turn — see recheckAuthAfterBind's and declareAuthHealthy's own doc
-    // comments. SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2.
-    createEffect(() => {
-        const agentDefinitionId = getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined;
-        if (!agentDefinitionId) return;
-        const unsub = muxEventSubscribe({
-            eventType: `agentidentities:changed:${agentDefinitionId}`,
-            handler: () => {
-                void refreshLinkedAccountId();
-                const blocked = status.canRetry() || paneSnapshot(model.blockId)?.failure?.data.code === "auth";
-                if (!blocked) return;
-                void recheckAuthAfterBindWithRetry();
-            },
-        });
-        onCleanup(unsub);
+    // Declaring auth healthy, and the auto-unblock after a bind from anywhere
+    // (failure/useAuthHealth.ts).
+    const { declareAuthHealthy } = useAuthHealth({
+        blockId: model.blockId,
+        agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
+        paneModel,
+        status,
+        refreshLinkedAccountId,
     });
 
     const failureUI = useAgentFailure({
@@ -2233,75 +1533,24 @@ const AgentPresentationView = ({
         }
     });
 
-    // On first connect (no existing session), assemble a structured startup
-    // payload from agent-definition + Identity data and send it as the opening turn.
-    // See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md
-    onReadyFn = async () => {
-        // Skip if this is a resumed session
-        if (block()?.meta?.["agent:sessionid"]) return;
-
-        try {
-            const agent = currentAgent();
-            if (!agent) return;
-
-            // Gather inputs in parallel where possible
-            const [startupContentResult, startupBundleIdResult, version, identityLinks] = await Promise.all([
-                RpcApi.GetAgentContentCommand(TabRpcClient, {
-                    agent_id: agentId,
-                    content_type: "startup",
-                }).catch(() => null),
-                RpcApi.GetAgentContentCommand(TabRpcClient, {
-                    agent_id: agentId,
-                    content_type: "startup_bundle_id",
-                }).catch(() => null),
-                Promise.resolve(getApi().getAboutModalDetails().version),
-                RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }).catch(() => []),
-            ]);
-
-            // If this agent has a Bundle selected as its startup source
-            // (AgentStartupModal, Armory → Bundles content), its
-            // `instructions` take precedence over the legacy freeform
-            // "startup" blob — which has no live authoring UI anywhere, see
-            // docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §5. Falls back to
-            // the freeform blob when no bundle is selected (or it no longer
-            // resolves, e.g. deleted), preserving any seed-manifest content.
-            const startupBundleId = startupBundleIdResult?.content?.trim() || null;
-            const startupBundle = startupBundleId
-                ? await RpcApi.GetBundleCommand(TabRpcClient, { id: startupBundleId }).catch(() => null)
-                : null;
-            const startupContent = startupBundle?.instructions?.trim()
-                ? startupBundle.instructions
-                : (startupContentResult?.content ?? null);
-
-            // Resolve assigned accounts from the same db_agent_identity_links
-            // rows spawn-time credential resolution and the agent pane's own
-            // Identity tab already use — NOT the legacy AgentDefinition.accounts
-            // JSON blob, which can silently diverge from what the agent
-            // actually launches with (see docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §1).
-            const agentAccounts: AgentAccounts = {};
-            for (const link of identityLinks) {
-                agentAccounts[link.provider as keyof AgentAccounts] = link.account_id;
-            }
-            const accounts = resolveAccounts(agentAccounts, loadAccounts());
-
-            const payload = buildStartupPayload({
-                agent,
-                providerDisplayName: provider()?.displayName ?? providerKey(),
-                workDir: block()?.meta?.["cmd:cwd"] ?? "",
-                version,
-                accounts,
-                peerAgents: agentDefinitions(),
-                startupContent,
-            });
-
-            if (payload) {
-                log("agent", "sending startup sequence");
-                await handleSendMessage(payload);
-            }
-        } catch (err) {
-            log("warn", `startup sequence failed: ${err}`, "warn");
-        }
-    };
+    // On first connect (no existing session), send the startup sequence as the
+    // opening turn (startup/sendStartupSequence.ts).
+    onReadyFn = () =>
+        sendStartupSequence({
+            sessionId: () => block()?.meta?.["agent:sessionid"],
+            agent: currentAgent,
+            providerDisplayName: () => provider()?.displayName ?? providerKey(),
+            workDir: () => block()?.meta?.["cmd:cwd"] ?? "",
+            version: () => getApi().getAboutModalDetails().version,
+            peerAgents: agentDefinitions,
+            getAgentContent: (contentType) =>
+                RpcApi.GetAgentContentCommand(TabRpcClient, { agent_id: agentId, content_type: contentType }),
+            getBundle: (id) => RpcApi.GetBundleCommand(TabRpcClient, { id }),
+            listIdentities: () => RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }),
+            loadAccounts,
+            send: handleSendMessage,
+            log,
+        });
 
     // Signal-based jump command. AgentDocumentView reacts via a
     // createEffect and scrolls inside its own container — no mutable
@@ -2446,112 +1695,24 @@ const AgentPresentationView = ({
             <PaneLoadingCover phase={readiness.phase} />
             {/* Shutdown log while the pane closes in place (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5). */}
             <ShutdownOverlay blockId={model.blockId} agentName={agentName()} />
-            {/* Stash drawer — top-anchored, directly under the pane header
-                where its own backpack toggle lives
-                (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.1).
-                Replaced the former `agent-stash` MODAL; the header icon
-                (agent-model.ts's endIconButtons) drives `stashOpen` through
-                the three callbacks wired in onMount above.
-
-                Deliberately OUTSIDE `.agent-view-zoomed`, exactly like the
-                Shell drawer below, for two reasons beyond symmetry: the
-                drag-to-resize math reads `ev.clientY` (visual px) and writes
-                a `height` (layout px), which CSS `zoom` makes disagree —
-                the same coordinate-space trap
-                SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md
-                records for the shell — and §3.2a's composer-scale density
-                values are already tuned small, so compounding them with a
-                per-pane zoom would read as either unusable or enormous
-                rather than merely scaled. It stays a flex child of
-                `.agent-view` so the transcript below still shrinks to make
-                room for it. */}
-            <Show when={paneModel.state.stashOpen}>
-                {/* Rendered as a DIRECT flex child of `.agent-view`, with no
-                    wrapper div, and that placement is load-bearing rather
-                    than incidental (reagentx P1 on PR #3540). The 50% height
-                    cap lives on `.agent-stash-drawer-resizable` — the same
-                    element that holds BOTH the content body and the resize
-                    handle — and a percentage `max-height` only resolves
-                    against a containing block whose height is definite.
-                    `.agent-view` is `height: 100%` (agent-view.scss), so it
-                    qualifies; an intermediate auto-height wrapper would NOT,
-                    and the percentage would compute to `none`. The first cut
-                    had exactly that wrapper, which let the inner element
-                    render at its full dragged height while the wrapper
-                    clipped it — carrying the bottom-edge handle into the
-                    clipped-away region, where it was invisible and
-                    unreachable, so a drawer dragged past 50% could never be
-                    shrunk again. See _stash-drawer.scss for the flex
-                    compression that keeps the handle on screen instead. */}
-                <ResizableDetailsDrawer
-                    blockId={model.blockId}
-                    anchor="top"
-                    classPrefix="agent-stash-drawer"
-                    persistMetaKey="agent:stashheight"
-                    persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
-                >
-                    <AgentStashModal
-                        agentId={agentId}
-                        agentName={agentName()}
-                        // Prefer cmd:cwd (the actual launch cwd, set by
-                        // launchAgentDefinition) over
-                        // AgentDefinition.working_directory, which is often
-                        // empty or a stale default for template-launched and
-                        // continuation agents.
-                        workingDirectory={
-                            (block()?.meta?.["cmd:cwd"] as string) ||
-                            currentAgent()?.working_directory ||
-                            ""
-                        }
-                        // No loadable definition (quick-launch pane) → default
-                        // to the Memory tab; the Accounts tab works from
-                        // agentId alone but Memory is the more useful default
-                        // for a pane with no saved definition yet.
-                        initialTab={currentAgent() ? "accounts" : "memory"}
-                        // No `onClose` — closing is the header icon's job, so
-                        // the Memory tab hides its footer Close button rather
-                        // than rendering a dead one (§3.4).
-                    />
-                </ResizableDetailsDrawer>
-            </Show>
+            {/* Stash drawer: a DIRECT flex child of `.agent-view`, outside
+                `.agent-view-zoomed` (components/AgentStashDrawer.tsx). */}
+            <AgentStashDrawer
+                open={paneModel.state.stashOpen}
+                blockId={model.blockId}
+                persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
+                agentId={agentId}
+                agentName={agentName()}
+                workingDirectory={(block()?.meta?.["cmd:cwd"] as string) || currentAgent()?.working_directory || ""}
+                hasDefinition={currentAgent() != null}
+            />
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
-            {/* Gradient progress bar — marching-ants shimmer traced around
-                the full pane perimeter while working, hidden at rest.
-                Color matches the pane's own selection-ring color (not a
-                fixed --accent-color) via --progress-bar-color, set on
-                .agent-pane-stack (agent-view.scss). Portaled into a
-                slot AgentPaneChrome owns, between the tab strip and the
-                content (its own row, never overlapping either), bridged
-                through this AgentViewModel instance's progressBarMount
-                signal — see that field's own doc comment (agent-model.ts)
-                for why chrome and content, now separate component trees,
-                need that indirection. This component's state (turnPhase,
-                launch activity) is what drives the bar, but .agent-view
-                (this component's own root, nested inside .agent-pane-stack-content,
-                itself BELOW the tab strip in DOM order) can't reach a
-                position above the tab strip through CSS alone; every
-                ancestor between here and there clips overflow before an
-                absolutely-positioned escape could ever become visible. See
-                SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §4 and
-                SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md.
-                Renders nothing until the slot ref is assigned (one frame,
-                first mount only). */}
-            <Show when={progressBarMount()}>
-                <Portal mount={progressBarMount()!}>
-                    <div
-                        class="agent-pane-progress-bar"
-                        classList={{
-                            "agent-pane-progress-bar--active": paneBusy(),
-                            "agent-pane-progress-bar--stopping":
-                                paneModel.state.turnPhase.kind === "Interrupting",
-                        }}
-                        role="progressbar"
-                        aria-label="Agent working"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                    />
-                </Portal>
-            </Show>
+            {/* Portaled above the tab strip; see components/AgentProgressBar.tsx. */}
+            <AgentProgressBar
+                mount={progressBarMount}
+                active={paneBusy()}
+                stopping={paneModel.state.turnPhase.kind === "Interrupting"}
+            />
             {/* /btw side-question overlay — ephemeral, floats over the whole
                 pane (position: absolute against .agent-view, styles/_btw.scss),
                 NOT part of the persisted layout tree and NOT gated on the
@@ -2936,61 +2097,18 @@ const AgentPresentationView = ({
                 />
             </div>
             </div>
-            {/* Details panel — just the shell + control bar now. Activity-log
-                lines write directly into the terminal (handleShellTermReady)
-                instead of a separate panel here. Docked BELOW the composer
-                (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md): the shell
-                stacks under the text input (which shifts up to make room,
-                since this region hugs the pane bottom).
-
-                Deliberately OUTSIDE `.agent-view-zoomed` — see the note on the root
-                element. The terminal has to render at a 1:1 device-pixel ratio, so it
-                must not be inside the per-pane `zoom`. It stays a flex child of
-                `.agent-view` so the composer still shifts up to make room for it.
-                Same move `agent-view.scss:350` records for the progress bar, and the
-                same cure as SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md. */}
-            <Show when={paneModel.state.detailsOpen}>
-                    <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
-                        {/* One line: what this shell is, and what the agent
-                            has left running. Takes the slot AgentControlBar
-                            used to occupy with session UI — see
-                            SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §4. */}
-                        <AgentShellInfoPanel
-                            blockId={model.blockId}
-                            shellSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
-                            cwd={block()?.meta?.["cmd:cwd"] as string | undefined}
-                        />
-                        {/* Drag-to-height drawer wrapping the terminal — the actual
-                            scrollable/resizable content. */}
-                        <ResizableDetailsDrawer
-                            blockId={model.blockId}
-                            persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
-                            defaultHeight={SHELL_DRAWER_DEFAULT_HEIGHT}
-                        >
-                            {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
-                                real xterm+PTY terminal, spawned lazily on first
-                                drawer open via a headless term sub-block. */}
-                            <AgentShellSubblock
-                                parentBlockId={model.blockId}
-                                cwd={block()?.meta?.["cmd:cwd"] ?? ""}
-                                existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
-                                // No `agentPaneZoom` prop any more. The shell used to
-                                // divide the pane's zoom out of its own font-size math
-                                // to fake independence; now it genuinely IS independent,
-                                // because it renders outside `.agent-view-zoomed`.
-                                onSubBlockCreated={(subBlockId) => {
-                                    void RpcApi.SetMetaCommand(TabRpcClient, {
-                                        oref: MOS.makeORef("block", model.blockId),
-                                        meta: { "term:shellsubblockid": subBlockId } as any,
-                                    });
-                                }}
-                                onTermReady={handleShellTermReady}
-                                onTermDispose={handleShellTermDispose}
-                                onShellExited={handleShellExited}
-                            />
-                        </ResizableDetailsDrawer>
-                    </div>
-            </Show>
+            {/* Shell drawer: outside `.agent-view-zoomed`, a flex child of
+                `.agent-view` (components/AgentShellDrawer.tsx). */}
+            <AgentShellDrawer
+                open={paneModel.state.detailsOpen}
+                blockId={model.blockId}
+                shellSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                cwd={block()?.meta?.["cmd:cwd"] as string | undefined}
+                persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
+                onTermReady={handleShellTermReady}
+                onTermDispose={handleShellTermDispose}
+                onShellExited={handleShellExited}
+            />
         </div>
         </AgentMediaProvider>
         </AgentDormancyProvider>

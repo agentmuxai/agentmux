@@ -10,6 +10,7 @@
  */
 
 import { contextCompactedNodeId, parseCompactBoundaryFrame } from "./compact-boundary";
+import { CompactionSummaryTracker } from "./context-delivery";
 import { createTranslator } from "./providers/translator-factory";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcome";
 import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
@@ -94,6 +95,9 @@ export class HistoryParser {
     // ClaudeCodeStreamParser's isReplay doc comment.
     private readonly translator: ReturnType<typeof createTranslator>;
     private readonly parser = new ClaudeCodeStreamParser({ isReplay: true });
+    /** Pairs each compact_boundary with Claude Code's summary frame after it.
+     *  A field, not a local: the two can straddle a history page. */
+    private readonly compactionSummaries = new CompactionSummaryTracker();
     /** Ordered, deduped by id. Same-id events replace in place. */
     readonly nodes: DocumentNode[] = [];
     // Same-id events update IN PLACE rather than first-wins.
@@ -207,6 +211,7 @@ export class HistoryParser {
                 putReleased();
                 const data = parseCompactBoundaryFrame(rawEvent);
                 if (data) {
+                    this.compactionSummaries.noteBoundary(data);
                     const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
                     const node: ContextCompactedNode = {
                         type: "context_compacted",
@@ -289,6 +294,19 @@ export class HistoryParser {
                     put(node, indexById.get(node.id));
                 }
                 continue;
+            }
+
+            // Claude Code's compaction summary: a card, not a user message
+            // (context-delivery.ts, shared with useAgentStream.ts).
+            // SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.3.
+            {
+                const summaryNode = this.compactionSummaries.take(rawEvent, stampFor(lineIdx) ?? 0);
+                if (summaryNode) {
+                    parser.flushPending();
+                    putReleased();
+                    put(summaryNode, indexById.get(summaryNode.id));
+                    continue;
+                }
             }
 
             // The notice for memory the `SessionStart` hook delivered — same

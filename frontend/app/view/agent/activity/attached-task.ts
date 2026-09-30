@@ -55,3 +55,17 @@ export function hasLiveAttachedActivity(
 ): boolean {
     return earliestLiveAttachedStartMs(nodes, allSubagents, blockId, now) != null;
 }
+
+/**
+ * Combine the transcript's and the registry's answers to "since when has
+ * background work been attached?": attached if EITHER source says so, and the
+ * earliest start wins when both do. The registry covers a task that survived a
+ * session restart with no transcript record of its launch (Phase C of
+ * SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md). `null` = nothing
+ * attached.
+ */
+export function mergeAttachedStartMs(transcriptStartMs: number | null, registryStartMs: number | null): number | null {
+    return transcriptStartMs != null && registryStartMs != null
+        ? Math.min(transcriptStartMs, registryStartMs)
+        : (transcriptStartMs ?? registryStartMs);
+}
