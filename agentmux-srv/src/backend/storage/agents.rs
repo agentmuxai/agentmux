@@ -216,41 +216,13 @@ pub fn default_conversation_visibility() -> String {
 /// DIFFERENT directory than the one the agent is really running in for any
 /// non-ASCII or dash-heavy name. This mirrors the real behaviour exactly.
 pub fn default_agent_working_dir(agent_name: &str) -> String {
-    let slug: String = agent_name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-        .collect();
-    format!("~/.agentmux/agents/{slug}")
+    format!("~/.agentmux/agents/{}", agentmux_common::slug::path_slug(agent_name))
 }
 
-/// Derive a filesystem-safe slug from a display name. Lowercase,
-/// ASCII alphanumeric + dash/underscore, consecutive dashes collapsed,
-/// trimmed to 64 chars. Returns `"agent"` if the input has no valid
-/// characters (defensive fallback).
+/// Derive a filesystem-safe slug from a display name
+/// (`agentmux_common::slug::definition_slug`).
 pub fn derive_slug(name: &str) -> String {
-    let filtered: String = name
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let collapsed: String = filtered
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    let trimmed: String = collapsed.chars().take(64).collect();
-    if trimmed.is_empty() {
-        "agent".to_string()
-    } else {
-        trimmed
-    }
+    agentmux_common::slug::definition_slug(name)
 }
 
 fn default_agent_type() -> String {
@@ -2856,29 +2828,14 @@ fn key_names_of(slug: &str, name: &str, instance_name: &str) -> Vec<String> {
 
 /// `agent.open`'s id for a definition with no slug (`agent_open.rs`).
 fn agent_open_fallback_id(name: &str) -> String {
-    name.to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-        .collect()
+    agentmux_common::slug::path_slug(name)
 }
 
 /// The frontend's id for a launch with no slug — a template-created agent's
-/// first session (`agent-config-builder.ts`: `/[^a-z0-9-_]/g` → `-`, ASCII
-/// only, unlike `agent.open`'s).
-///
-/// JavaScript's non-`u` regex replaces each UTF-16 **code unit**, so a
-/// character outside the BMP becomes two dashes (`Agent 🚀` → `agent---`),
-/// not one (Codex P1 on #3633).
+/// first session. ASCII only, one dash per UTF-16 code unit
+/// (`agentmux_common::slug::js_ascii_slug`, Codex P1 on #3633).
 fn frontend_fallback_id(name: &str) -> String {
-    let mut id = String::new();
-    for c in name.to_lowercase().chars() {
-        if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' {
-            id.push(c);
-        } else {
-            id.extend(std::iter::repeat('-').take(c.len_utf16()));
-        }
-    }
-    id
+    agentmux_common::slug::js_ascii_slug(name)
 }
 
 /// Every display / instance name `id` has had before its current ones

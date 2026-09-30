@@ -171,11 +171,7 @@ fn agent_path(data_dir: &Path, agent_id: &str) -> PathBuf {
     // land on the same file, not two different ones (reagent P1 on #2350,
     // caught in Tier 2b but pre-existing here for Tier 2a too).
     // Sanitize: only allow alphanumeric, dash, underscore to prevent path traversal.
-    let safe: String = agent_id
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect();
+    let safe = agentmux_common::slug::file_stem(agent_id);
     agents_dir(data_dir).join(format!("{}.json", safe))
 }
 
@@ -330,10 +326,7 @@ pub fn cleanup_stale(data_dir: &Path, max_age_ms: u64) {
 /// id) to alphanumeric/dash/underscore only, preventing path traversal
 /// and matching `ReactiveHandler`'s lowercase key convention.
 fn sanitize_path_component(raw: &str) -> String {
-    raw.to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect()
+    agentmux_common::slug::file_stem(raw)
 }
 
 /// Directory holding one file per channel currently registering
