@@ -111,6 +111,7 @@ mod global_memory_version_impl_tests;
 #[cfg(test)]
 #[path = "tests/memory_version_impl_tests.rs"]
 mod memory_version_impl_tests;
+
 // ---------------------------------------------------------------------------
 // Shared helpers used by submodules (via `use super::*`)
 // ---------------------------------------------------------------------------
