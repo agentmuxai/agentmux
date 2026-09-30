@@ -68,7 +68,9 @@
  * See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md §2.3a.
  */
 
-import { workingFromPhase, type TurnPhase } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase, type AgentPaneState, type TurnPhase } from "@/app/store/agent-pane-state/types";
+import { hasBlockingForegroundToolCall } from "./activity/tool-adapter";
+import type { DocumentNode } from "./types";
 
 export interface WorkingIndicatorInput {
     /**
@@ -135,4 +137,34 @@ export function paneBusyForInput(input: WorkingIndicatorInput): boolean {
         input.compacting != null ||
         input.reconnecting != null
     );
+}
+
+/** The pane-state fields `busyInputFromState` reads. */
+export type BusyInputState = Pick<
+    AgentPaneState,
+    "turnPhase" | "compacting" | "reconnecting" | "attachedTask" | "registryAttachedTaskSince"
+>;
+
+/**
+ * The one way to build `paneBusyForInput`'s input from a pane's state and
+ * document. The indicator (`agent-view.tsx`) and the send gate
+ * (`useAgentCommands.ts`) must feed the predicate identically; when each built
+ * the input by hand the two drifted twice (#3143, ReAgent P1 on #3340). A new
+ * input goes here, and both callers get it.
+ *
+ * `state` is `undefined` for a pane with no snapshot yet, read as idle.
+ */
+export function busyInputFromState(
+    state: BusyInputState | undefined,
+    nodes: ReadonlyArray<DocumentNode>,
+    showingLaunchActivity: boolean,
+): WorkingIndicatorInput {
+    return {
+        showingLaunchActivity,
+        turnPhase: state?.turnPhase ?? { kind: "Idle" },
+        compacting: state?.compacting ?? null,
+        reconnecting: state?.reconnecting ?? null,
+        hasAttachedBackgroundWork: state?.attachedTask != null || state?.registryAttachedTaskSince != null,
+        hasBlockingForegroundToolCall: hasBlockingForegroundToolCall(nodes),
+    };
 }

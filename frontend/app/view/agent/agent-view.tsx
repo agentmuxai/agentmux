@@ -78,11 +78,10 @@ import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
 import {
-    hasBlockingForegroundToolCall,
     hasRunningPromotedTool,
     nextToolPromotionAt,
 } from "./activity/tool-adapter";
-import { paneBusyForInput } from "./working-indicator";
+import { busyInputFromState, paneBusyForInput } from "./working-indicator";
 import { quickForkAgent } from "./quick-fork";
 import { isBangCommand } from "./bang-command";
 import { askSideQuestion } from "./btw";
@@ -1725,15 +1724,7 @@ const AgentPresentationView = ({
     // mere promotion — see hasBlockingForegroundToolCall's doc comment in
     // ./activity/tool-adapter for exactly how those two are told apart.
     const paneBusy = createMemo(() =>
-        paneBusyForInput({
-            showingLaunchActivity: showingLaunchActivity(),
-            turnPhase: paneModel.state.turnPhase,
-            compacting: paneModel.state.compacting,
-            reconnecting: paneModel.state.reconnecting,
-            hasAttachedBackgroundWork:
-                paneModel.state.attachedTask != null || paneModel.state.registryAttachedTaskSince != null,
-            hasBlockingForegroundToolCall: hasBlockingForegroundToolCall(paneModel.document()),
-        })
+        paneBusyForInput(busyInputFromState(paneModel.state, paneModel.document(), showingLaunchActivity()))
     );
 
     const workingRowLoading = paneBusy;
