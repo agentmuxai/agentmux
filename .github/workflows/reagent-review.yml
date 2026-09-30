@@ -45,19 +45,29 @@ permissions:
   id-token: write # aws-actions/configure-aws-credentials (OIDC, no static keys)
   contents: read
 
-concurrency:
-  # One running review per PR/comment thread at a time. cancel-in-progress
-  # is false: a synchronize mid-review shouldn't cancel a review still in
-  # flight for the prior head -- reviewer_handler.py's stale-event
-  # short-circuit already handles "message head != current head" safely,
-  # and review_claims.py's DynamoDB claim prevents any duplicate post.
-  group: reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   review:
+    # reagentx caught this on PR #4009: without this gate, EVERY comment on
+    # ANY issue in the repo (not just a PR) spun up AWS OIDC credential
+    # exchange, ECR login, and a docker pull before build_task()'s own
+    # "not a PR" filter ever ran downstream. Same gate shape as this repo's
+    # own codex-review-gate.yml uses for the identical problem.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Job-level, not workflow-level -- same reasoning as codex-review-gate.yml's
+    # identical comment: a run the `if:` above skips (a non-PR issue comment)
+    # must not occupy this group, or it can cancel/block an actually-running
+    # review a second earlier. cancel-in-progress is false: a synchronize
+    # mid-review shouldn't cancel a review still in flight for the prior
+    # head -- reviewer_handler.py's stale-event short-circuit already
+    # handles "message head != current head" safely, and
+    # review_claims.py's DynamoDB claim prevents any duplicate post.
+    concurrency:
+      group: reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
