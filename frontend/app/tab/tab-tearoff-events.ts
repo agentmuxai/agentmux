@@ -17,9 +17,9 @@ import {
     markTabMerged,
     setBouncingTabId,
     setInsertionPoint,
-    setDragEscaped,
 } from "./tabbar-dnd";
 import { Logger } from "@/util/logger";
+import { markEscaped } from "@/app/drag/drag-session";
 
 /**
  * Phase 4 — listen for the host's tear-off events. Each AgentMux
@@ -209,14 +209,14 @@ export function useTabTearOffEvents(
             // page for the drag's duration), so the host's global mouse/
             // keyboard hook — which sees the raw OS-level keystroke,
             // outside the renderer's own event pipeline — tells us
-            // directly instead. Setting the flag here is enough:
+            // directly instead. Marking the session here is enough:
             // tab-reorder.ts's onDrop checks it before deciding tear-off
             // vs. reorder, so this fires (or not) well before that check
             // runs. No-op on Windows/Linux today (their hooks don't emit
             // this event), which is fine — the flag just stays false.
             trackOrDispose(
                 await listenEvent<{ tabId: string }>("tabdrag:escape-pressed", () => {
-                    setDragEscaped(true);
+                    markEscaped();
                 }),
             );
 
