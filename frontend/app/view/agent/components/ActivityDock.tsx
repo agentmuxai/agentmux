@@ -26,6 +26,7 @@ import { recordTurn } from "@/app/store/token-usage";
 import { ActivityRow } from "./ActivityRow";
 import { createPromotionClock } from "../activity/promotion-clock";
 import { applyRegistryOutcomes, backgroundTaskActivities } from "../activity/background-adapter";
+import { applyStreamOutcomes, taskOutcomesFor } from "../activity/task-outcomes";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
@@ -78,6 +79,7 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     // reads this clock so it recomputes right then (activity/promotion-clock.ts).
     const toolPromotionNonce = createPromotionClock(nodes);
 
+    const streamOutcomes = taskOutcomesFor(props.blockId);
     const allActivities = createMemo(() => {
         toolPromotionNonce();
         const transcriptDerived = [
@@ -95,7 +97,13 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         // A task srv has seen end (the CLI's own task feed) closes its
         // transcript row too, even when no <task-notification> ever reaches
         // this pane — the case for every task a subagent launched.
-        return [...applyRegistryOutcomes(transcriptDerived, tasks), ...backgroundTaskActivities(tasks, knownIds)];
+        //
+        // So does the stream itself: the same end is on the persisted stdout
+        // (`system/task_notification`), which survives into an instance whose
+        // registry never saw the task — the case the registry alone left
+        // running forever (activity/task-outcomes.ts).
+        const closed = applyStreamOutcomes(transcriptDerived, streamOutcomes());
+        return [...applyRegistryOutcomes(closed, tasks), ...backgroundTaskActivities(tasks, knownIds)];
     });
 
     const activityById = createMemo(() => {
