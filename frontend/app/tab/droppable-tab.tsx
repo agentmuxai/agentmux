@@ -29,6 +29,7 @@ import { getLayoutModelForTabById, redockDraggedPane } from "@/layout/index";
 import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { setTabGrabOffset } from "./tab-grab-offset";
+import { prewarmWindowTabSnapshot } from "@/app/drag/tearoff-snapshot";
 
 export interface DroppableTabProps {
     tabId: string;
@@ -84,6 +85,15 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
         if (!tabWrapRef) return;
 
         tabWrapperRefs.set(props.tabId, tabWrapRef);
+
+        // Pressing the active tab may start a tear-off: picture the window
+        // now, before the drag starts (tearoff-snapshot.ts). An inactive
+        // tab's content isn't on screen to picture.
+        const onPointerDown = (e: PointerEvent) => {
+            if (e.button === 0 && props.isActive && isWindows()) prewarmWindowTabSnapshot(props.tabId);
+        };
+        tabWrapRef.addEventListener("pointerdown", onPointerDown);
+        onCleanup(() => tabWrapRef.removeEventListener("pointerdown", onPointerDown));
 
         const cleanupDraggable = draggable({
             element: tabWrapRef,

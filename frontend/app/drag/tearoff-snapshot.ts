@@ -81,10 +81,13 @@ async function blobToBase64(blob: Blob): Promise<string> {
     return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
+function ownWindowLabel(): string {
+    return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+}
+
 /** The window's viewport, cropped to `rect`, as a base64 JPEG. */
 async function capturePane(rect: CssRect): Promise<string | null> {
-    const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
-    const { jpeg_base64 } = await getApi().windows.captureViewport(label, 80);
+    const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
         const crop = cropRectInImage(rect, window.innerWidth, full);
@@ -95,6 +98,89 @@ async function capturePane(rect: CssRect): Promise<string | null> {
     } finally {
         full.close();
     }
+}
+
+/** Scales tried, in order, for a viewport picture too large for the request. */
+const SHRINK_SCALES = [0.5, 0.35, 0.25];
+
+/**
+ * The whole viewport, for a window-tab tear-off: the new window is the source
+ * window's size, so the picture fills it as is. Shrunk step by step if it
+ * wouldn't fit the request that carries it; null if nothing fits.
+ */
+async function captureWindow(): Promise<string | null> {
+    const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
+    if (jpeg_base64.length <= MAX_SNAPSHOT_CHARS) return jpeg_base64;
+    const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
+    try {
+        for (const scale of SHRINK_SCALES) {
+            const w = Math.max(1, Math.round(full.width * scale));
+            const h = Math.max(1, Math.round(full.height * scale));
+            const canvas = new OffscreenCanvas(w, h);
+            canvas.getContext("2d")?.drawImage(full, 0, 0, w, h);
+            const small = await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }));
+            if (small.length <= MAX_SNAPSHOT_CHARS) return small;
+        }
+        return null;
+    } finally {
+        full.close();
+    }
+}
+
+/**
+ * Whether `el` is actually drawn. Hidden window tabs and inactive pane tabs
+ * stay laid out (real client rects) and are hidden by `visibility: hidden`
+ * (workspace.tsx, pane-leaf-chrome.tsx), `content-visibility: hidden`
+ * (window:keepinactivetabslaidout=false) or opacity; checkVisibility()
+ * covers all of them. Without it, rects plus computed visibility.
+ */
+function isRendered(el: Element): boolean {
+    if (typeof el.checkVisibility === "function") {
+        return el.checkVisibility({
+            contentVisibilityAuto: true,
+            opacityProperty: true,
+            visibilityProperty: true,
+            // Pre-121 names for the same checks.
+            checkOpacity: true,
+            checkVisibilityCSS: true,
+        } as CheckVisibilityOptions);
+    }
+    return el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
+}
+
+/** The key a window tab's picture is held under (panes use their block id). */
+const windowTabKey = (tabId: string) => `window-tab:${tabId}`;
+
+/**
+ * Start capturing the window for a tear-off of window tab `tabId`. Only for
+ * the active tab: an inactive one's content isn't on screen.
+ */
+export function prewarmWindowTabSnapshot(tabId: string): void {
+    // A native browser pane on screen would be a grey placeholder in the
+    // window's capture (see above): no picture beats a wrong one.
+    const browserOnScreen = Array.from(document.querySelectorAll(".browser-placeholder")).some(isRendered);
+    if (browserOnScreen) {
+        held = null;
+        return;
+    }
+    const at = Date.now();
+    const key = windowTabKey(tabId);
+    const picture = captureWindow().then(
+        (b64) => {
+            Logger.debug("dnd", "tear-off window snapshot captured", { tabId, ms: Date.now() - at });
+            return b64;
+        },
+        (e) => {
+            Logger.debug("dnd", "tear-off window snapshot failed", { tabId, error: String(e) });
+            return null;
+        }
+    );
+    held = { blockId: key, at, picture };
+}
+
+/** The picture taken for tearing off window tab `tabId`, if ready in time. */
+export function takeWindowTabSnapshot(tabId: string): Promise<string | undefined> {
+    return takeTearOffSnapshot(windowTabKey(tabId));
 }
 
 /** Start capturing `blockId` (a base64 JPEG), replacing any earlier picture. */
