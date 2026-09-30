@@ -744,12 +744,12 @@ fn candidate_label_under_cursor_locked(
 /// window under the cursor back to its owner. `BrowserHost::window_handle()`
 /// alone can't answer this: in CEF Views mode it is often null, and
 /// otherwise a child of the top-level window, so comparing it with the root
-/// never matched and every release reported no target.
+/// never matched and every release reported no target. Only window labels
+/// count: a browser pane's browser sits inside its window, so its host
+/// handle has the same root.
 ///
 /// A cached HWND can be stale, and Windows reuses a destroyed window's HWND
 /// value, so a stale entry can equal a live window. Each step guards that:
-/// Only window labels count: a browser pane's browser sits inside its
-/// window, so its host handle has the same root.
 /// 1. `root` must be a visible CEF Views top-level window of this process,
 ///    so not another app's window, a menu or a tooltip a reused value could
 ///    land on.
