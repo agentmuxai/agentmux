@@ -53,7 +53,7 @@ export function initializeFromMuxObject(model: LayoutModel) {
     // session's races once Tab + LayoutState have both settled. Deliberately
     // a delayed single pass, not a reactive subscription — see the
     // onBackendUpdate note below and SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5.
-    setTimeout(() => pruneDanglingLeaves(model), 2000);
+    model.startupPruneTimer = setTimeout(() => pruneDanglingLeaves(model), 2000);
 }
 
 /**
@@ -61,6 +61,7 @@ export function initializeFromMuxObject(model: LayoutModel) {
  * @param model The LayoutModel instance.
  */
 export function onBackendUpdate(model: LayoutModel) {
+    if (model.disposed) return;
     const muxObj = model.getter(model.muxObjectAtom);
     if (!muxObj) return;
 
@@ -136,6 +137,7 @@ function isRecentlyCreated(blockId: string, now: number): boolean {
  * post-drag settle pass, and the redock failure path. NOT reactive.
  */
 export function pruneDanglingLeaves(model: LayoutModel) {
+    if (model.disposed) return;
     const rootNode = model.treeState?.rootNode;
     const tab = model.tabAtom?.();
     if (!rootNode || !tab?.blockids) return;
@@ -183,6 +185,7 @@ export function pruneDanglingLeaves(model: LayoutModel) {
  * @param model The LayoutModel instance.
  */
 export async function processPendingBackendActions(model: LayoutModel) {
+    if (model.disposed) return;
     const muxObj = model.getter(model.muxObjectAtom);
     const actions = muxObj?.pendingbackendactions;
     if (!actions?.length) return;
@@ -446,6 +449,7 @@ export function persistToBackend(model: LayoutModel) {
     }
 
     model.persistDebounceTimer = setTimeout(() => {
+        if (model.disposed) return;
         const muxObj = model.getter(model.muxObjectAtom);
         if (!muxObj) return;
 
