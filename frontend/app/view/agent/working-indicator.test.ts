@@ -96,7 +96,24 @@ describe("working indicator — §2.3a: backgrounding releases the gate, but onl
     // §2.3a. The whole point of promoting work to the dock is to free the
     // pane up; these cases are what actually proves that now.
 
-    it("is NOT busy: Streaming, backgrounded, and nothing else blocking", () => {
+    it("is NOT busy: Streaming, backgrounded, nothing else blocking, and the model has ended its turn", () => {
+        expect(
+            paneBusyForInput({
+                showingLaunchActivity: false,
+                compacting: null,
+                reconnecting: null,
+                turnPhase: phase("Streaming", { modelEndedTurn: true }),
+                hasAttachedBackgroundWork: true,
+                hasBlockingForegroundToolCall: false,
+            }),
+        ).toBe(false);
+    });
+
+    // The ring flicker (docs/retro/retro-agent-pane-progress-flicker-and-
+    // orphaned-background-tasks-2026-09-30.md): with background work attached,
+    // "no tool call running" is also true every time the model is generating
+    // between tool calls. Until the model has ended its turn, it is working.
+    it("stays busy: Streaming, backgrounded, nothing blocking, but the model is still generating", () => {
         expect(
             paneBusyForInput({
                 showingLaunchActivity: false,
@@ -106,7 +123,7 @@ describe("working indicator — §2.3a: backgrounding releases the gate, but onl
                 hasAttachedBackgroundWork: true,
                 hasBlockingForegroundToolCall: false,
             }),
-        ).toBe(false);
+        ).toBe(true);
     });
 
     it("stays busy: Streaming, backgrounded, but a genuine second tool call is still running", () => {

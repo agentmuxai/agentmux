@@ -65,6 +65,13 @@
  * that blocks a new message" is no longer treated as busy. Submitting and
  * Interrupting are NOT covered by this carve-out — see paneBusyForInput.
  *
+ * "Nothing left that blocks" also requires the model to have ended its turn
+ * (`modelEndedTurn` on the Streaming phase). Without that, the carve-out also
+ * fired every time the model was generating between tool calls, and the ring
+ * flickered mid-turn. For Claude the CLI sends `result` right after the
+ * model's final `end_turn`, so in practice a Claude turn stays busy until it
+ * ends (docs/retro/retro-agent-pane-progress-flicker-and-orphaned-background-tasks-2026-09-30.md).
+ *
  * See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md §2.3a.
  */
 
@@ -121,6 +128,11 @@ export function turnHeldOnlyByBackgroundWork(input: {
     // tool-call bookkeeping yet to consult, and Interrupting is already
     // mid-stop (steering a new message in there would race the interrupt).
     if (input.turnPhase.kind !== "Streaming") return false;
+    // Until the model has ended its turn it is working, even when no tool call
+    // is running: "no foreground tool call" is also true every time it is
+    // generating between tool calls, which is what made the ring flicker
+    // (docs/retro/retro-agent-pane-progress-flicker-and-orphaned-background-tasks-2026-09-30.md).
+    if (input.turnPhase.modelEndedTurn !== true) return false;
     if (!input.hasAttachedBackgroundWork) return false;
     return !input.hasBlockingForegroundToolCall;
 }

@@ -204,6 +204,15 @@ export type TurnPhase =
           waitingReason?: "rate_limited";
           /** Milliseconds until the next retry, from the provider's Retry-After header. */
           retryAfterMs?: number | null;
+          /**
+           * The model has ended its turn (`stop_reason: end_turn`) but the turn
+           * is still open. Absent/false means the model is still working:
+           * generating, or waiting on a tool result. Set by `ModelEndedTurn`,
+           * cleared by `ModelMessageStarted`; a new turn starts without it.
+           * The busy predicate's background-work carve-out applies only when
+           * this is true (working-indicator.ts `turnHeldOnlyByBackgroundWork`).
+           */
+          modelEndedTurn?: boolean;
       }
     | {
           kind: "Interrupting";
@@ -675,6 +684,10 @@ export type AgentPaneCommand =
     // this is the same split, just on the dispatched command.
     | { type: "TokensIn"; input: number; model?: string; freshInput?: number; cacheCreation?: number; cacheRead?: number }
     | { type: "TokensOut"; output: number }
+    /** The main agent's model sent `stop_reason: end_turn`; see `modelEndedTurn` on the Streaming phase. */
+    | { type: "ModelEndedTurn" }
+    /** The main agent's model began a new message; it is working again. */
+    | { type: "ModelMessageStarted" }
 
     /** User pressed Esc / clicked Stop. */
     | { type: "RequestStop"; at: number }

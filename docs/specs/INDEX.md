@@ -17,6 +17,7 @@ See also:
 |---|---|
 | [**TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17**](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | **CANONICAL tracking doc** (issue #3338) for the dock / working-indicator / input-gate / auto-backgrounding family — read this before any of the ~22 docs it indexes |
 | [SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21](SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md) | Per-pane progressive tab-switch reveal — replaces the global long-task-quiet signal (breaks down with several busy panes) with a per-pane structural readiness milestone |
+| [SPEC_CONTEXT_DELIVERY_2026_09_30](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | Context deliveries: everything the agent is given without the user typing it (memory, the compaction summary, the continuation packet) shown as one card with an expandable row per item; "ambient" kept for model calls only |
 | [SPEC_AGENT_ARCHITECTURE_2026_05_27](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | Overall agent-pane component + state machine |
 | [SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | ACP wire protocol (initialize / session_create / tool_result) |
 | [SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | Pane lifecycle states and transitions |
@@ -612,6 +613,7 @@ partial list.
 | [`SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12`](SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md) | Codex App Server as a First-Class AgentMux Provider |
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
+| [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) | SPEC: Continuous session persistence + trustworthy shutdown |
 | [`SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20`](SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md) | Spec: Cross-Instance Global Memory Sync |
 | [`SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02`](SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02.md) | Spec: default tab names — "Tab N", not "tabN" |
