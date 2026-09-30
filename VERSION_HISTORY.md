@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.59.1 — 2026-09-30
+
+- fix(dnd): on Windows, dragging a torn-off window's only tab onto another window's tab bar moves it there again (it did nothing before)
+- fix(agent): UI-launched Claude panes get --exclude-dynamic-system-prompt-sections too, like agent.open ones; a test now keeps the two launch-arg registries equal
+- fix(mcp): CaptureWindow finds the AgentMux root through the shared resolver, so it honours AGENTMUX_HOME_OVERRIDE and no longer falls back to /
+- feat(markdown): GitHub-style callouts (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]) render as coloured boxes in agent replies
+- fix(agent-pane): the progress ring stays on while the model is working, instead of flickering off between tool calls whenever background work is attached
+- Agent pane: Claude Code's compaction summary shows as a collapsed 'Agent given a summary of the conversation' card with an excerpt, instead of as a message you typed
+- fix(srv): a background task the CLI stops tracking without an end event no longer shows as running forever
+- Agent pane: the memory delivery notice is a card with one row per item (name, AgentMux system / workspace / personal, file, size), and marks items cut when memory exceeded one delivery
+- fix(agent-pane): shell-drawer log lines no longer leak the text of OSC sequences (window titles with spaces, ST-terminated sequences)
+- fix(identity): the status dot's 'checking' pulse uses its own keyframes, no longer an unused duplicate from the agent control bar
+- perf(tear-off): a torn-off pane or window tab shows its content sooner: startup no longer waits for background services, the splash fades faster, and the next pre-warmed pane window starts only after the torn-off one has painted
+- fix(editor): an agent opening a file into an existing Editor pane now shows it: restored if minimized, brought to the front of its pane stack, and not hidden by another magnified pane. Revealing a minimized pane from Swarm or a notification now restores it too.
+- feat(markdown): agents can show local images inline in their replies (click to open in a Media pane; remote images wait for a click)
+- feat(markdown): local video and audio play inline in agent replies (poster frame, press to play, 200 MB cap)
+
 ## 0.59.0 — 2026-09-30
 
 - feat(cef): move all three platforms to CEF 154 (Chromium 154.0.8037.58)
