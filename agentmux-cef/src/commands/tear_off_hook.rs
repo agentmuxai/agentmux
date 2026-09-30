@@ -751,10 +751,15 @@ fn candidate_label_under_cursor_locked(
 /// 1. `root` must belong to this process; if it doesn't, any cached match
 ///    is a reused value.
 /// 2. A browser's own host handle, when CEF gives one, says for certain.
-/// 3. Otherwise `window_hwnds`, bound at Views window creation (app/mod.rs),
-///    trusted only when exactly one label is cached for `root` and that
-///    label's browser doesn't place itself in another window. Two labels on
-///    one HWND means one is stale and nothing says which: no target.
+/// 3. Otherwise `window_hwnds`, bound at Views window creation (app/mod.rs)
+///    and evicted on close (client/lifecycle.rs), trusted only when `root`
+///    is a visible CEF Views top-level window (so not a menu, tooltip or
+///    other window a reused value could land on), exactly one label is
+///    cached for it, and that label's browser doesn't place itself in
+///    another window. Two labels on one HWND means one is stale and nothing
+///    says which: no target. Past that there is no identity to check off
+///    the UI thread (a Views window's own handle is only reachable there);
+///    the rest of the host trusts `window_hwnds` the same way.
 ///    A promoted pool window serving the primary keeps its `window-pool-*`
 ///    entry, while its renderer registered "main" and has no backend window
 ///    of its own under the pool label; that is "main", the same rule the
@@ -780,6 +785,9 @@ fn label_for_top_level(
         }
     }
 
+    if !is_views_top_level(root) {
+        return None;
+    }
     let cached: Vec<String> = ctx
         .state
         .window_hwnds
@@ -806,6 +814,18 @@ fn label_for_top_level(
         return Some("main".to_string());
     }
     None
+}
+
+/// A visible CEF Views top-level window (class `Chrome_WidgetWin_*`).
+#[cfg(target_os = "windows")]
+fn is_views_top_level(hwnd: *mut std::ffi::c_void) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, IsWindowVisible};
+    if unsafe { IsWindowVisible(hwnd as _) } == 0 {
+        return false;
+    }
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetClassNameW(hwnd as _, buf.as_mut_ptr(), buf.len() as i32) };
+    n > 0 && String::from_utf16_lossy(&buf[..n as usize]).starts_with("Chrome_WidgetWin_")
 }
 
 /// The top-level window of the browser's host handle, when CEF gives one.
