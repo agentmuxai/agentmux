@@ -15,6 +15,7 @@ import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-d
 import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import { markEscaped, onSessionEnded, session } from "@/app/drag/drag-session";
+import { onWindowDrag } from "@/app/drag/window-drag-events";
 import { endTileDrag } from "@/layout/lib/tile-drag";
 import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
 import { WorkspaceService } from "../store/services";
@@ -118,8 +119,7 @@ export function useTabDragAndDrop(
                 e.preventDefault();
                 if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
             };
-            window.addEventListener("dragover", onTearOffDragOver);
-            onCleanup(() => window.removeEventListener("dragover", onTearOffDragOver));
+            onCleanup(onWindowDrag({ kinds: ["window-tab"], over: onTearOffDragOver }));
         }
 
         // Escape-to-abort (cross-platform): pragmatic-drag-and-drop's HTML5

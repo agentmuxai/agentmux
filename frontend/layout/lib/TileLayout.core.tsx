@@ -29,6 +29,7 @@ import clsx from "clsx";
 import { toPng } from "html-to-image";
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
+import { onWindowDrag } from "@/app/drag/window-drag-events";
 import { Key } from "@solid-primitives/keyed";
 import { debounce } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
@@ -242,16 +243,11 @@ export function createTileLayout(platform: TileLayoutPlatform) {
             }
         });
 
-        // Global dragover handler to detect when cursor leaves tile layout
-        const onWindowDragOver = (e: DragEvent) => {
-            checkForCursorBounds(e.clientX, e.clientY);
-        };
-
+        // Clear a pending drop when the cursor leaves the tile layout. Only a
+        // tile drag stages one (a resize is pointer-driven, no dragover).
         onMount(() => {
-            window.addEventListener("dragover", onWindowDragOver);
-        });
-        onCleanup(() => {
-            window.removeEventListener("dragover", onWindowDragOver);
+            const stop = onWindowDrag({ kinds: ["tile"], over: (e) => checkForCursorBounds(e.clientX, e.clientY) });
+            onCleanup(stop);
         });
 
         return (
