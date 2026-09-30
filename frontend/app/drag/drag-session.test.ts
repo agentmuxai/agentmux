@@ -7,7 +7,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { beginDrag, endDrag, markEscaped, markReleased, onSessionEnded, session } from "./drag-session";
+import { beginDrag, endDrag, isUnderway, markEscaped, markReleased, onSessionEnded, session } from "./drag-session";
 import { isPaneTabSource, isTabSource, isTileSource, paneTabItemType, tabItemType, tileItemType } from "./drag-types";
 
 afterEach(() => {
@@ -44,6 +44,15 @@ describe("drag session", () => {
         markReleased();
         expect(session()?.dragId).toBe(s.dragId);
         expect(session()?.released).toBe(true);
+    });
+
+    it("a drag is underway from its start until its source releases it, and only for its own kind", () => {
+        expect(isUnderway("tile")).toBe(false);
+        beginDrag("tile", { nodeId: "n1" });
+        expect(isUnderway("tile")).toBe(true);
+        expect(isUnderway("pane-tab")).toBe(false);
+        markReleased();
+        expect(isUnderway("tile")).toBe(false);
     });
 
     it("escape is recorded on the session", () => {
