@@ -60,6 +60,23 @@ describe("tile drag", () => {
         expect(session()).toBeNull();
     });
 
+    it("a tile drag whose drop never fired is reset when the safety net ends it (swallowed dragend)", () => {
+        const model = fakeModel();
+        startTileDrag(node, model);
+        window.dispatchEvent(new Event("dragend"));
+        expect(session()).toBeNull();
+        expect(model.activeDrag()).toBe(false);
+        expect(dragState).toMatchObject({ nodeId: null, layoutModel: null, node: null });
+    });
+
+    it("a new drag replacing a stranded tile drag resets it too", () => {
+        const model = fakeModel();
+        startTileDrag(node, model);
+        beginDrag("window-tab", { tabId: "t2" });
+        expect(model.activeDrag()).toBe(false);
+        expect(dragState.layoutModel).toBeNull();
+    });
+
     it("never ends another kind of drag", () => {
         beginDrag("pane-tab", { blockId: "b9" });
         endTileDrag("dragend");
