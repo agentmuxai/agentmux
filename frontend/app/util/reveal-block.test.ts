@@ -66,7 +66,8 @@ function modelWithPane(nodeId: string, members: string[], magnified?: string, mi
         getNodeByBlockId: (b: string) =>
             members.includes(b) ? { id: nodeId, ...(minimized ? { minimized: true } : {}) } : null,
         focusNode: (id: string) => calls.push(`focusNode:${id}`),
-        magnifyNodeToggle: (id: string) => calls.push(`unmagnify:${id}`),
+        magnifyNodeToggle: (id: string, setState = true, focused = true) =>
+            calls.push(`unmagnify:${id}${setState ? "" : ":nocommit"}${focused ? ":focus" : ""}`),
         minimizeNodeToggle: (id: string) => calls.push(`restore:${id}`),
     };
 }
@@ -166,6 +167,12 @@ describe("showBlockInPane — visible in its layout, no focus", () => {
     it("minimized behind a magnified sibling: both undone", () => {
         showBlockInPane(modelWithPane("pane", ["a"], "other") as any, node("pane", true), "a");
         expect(calls).toEqual(["restore:pane", "unmagnify:other", "stack:pane:a"]);
+    });
+
+    it("un-magnifies with a committed, focus-free toggle (a plain toggle requests focus)", () => {
+        showBlockInPane(modelWithPane("pane", ["a"], "other") as any, node("pane"), "a");
+        expect(calls).toContain("unmagnify:other");
+        expect(calls.some((c) => c.endsWith(":focus") || c.endsWith(":nocommit"))).toBe(false);
     });
 
     it("never focuses, moves the caret or switches the window tab", () => {
