@@ -65,9 +65,8 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
-import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { createPromotionClock } from "./activity/promotion-clock";
-import { allSubagentsAtom } from "./activity/subagent-source";
+import { useAttachedTaskAxis } from "./activity/useAttachedTaskAxis";
 import { AgentProgressBar } from "./components/AgentProgressBar";
 import { useWorkingIndicator } from "./hooks/useWorkingIndicator";
 import { quickForkAgent } from "./quick-fork";
@@ -1277,53 +1276,8 @@ export const AgentPresentationView = ({
     });
     const workingRowLoading = paneBusy;
 
-    // Attached-task axis dispatch — the deferred §6.1 call site of
-    // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md. Derives "≥1 live
-    // agent-declared long-running activity" from the same shell + subagent +
-    // tool aggregate the ActivityDock renders, and dispatches the reducer's
-    // AttachedTaskObserved / AttachedTaskCleared on the 0→1 / 1→0 edges.
-    // Both commands are idempotent in the reducer, so re-running this effect
-    // while the level is unchanged is harmless. Wall-clock re-check timer:
-    // a running Bash call crosses TOOL_PROMOTION_MS on a timer, not on a
-    // document event, so this re-runs on the shared promotion clock.
-    createEffect(() => {
-        promotionTick();
-        const nodes = paneModel.document();
-        const subs = allSubagentsAtom();
-        const now = Date.now();
-        // `at` carries the earliest running activity's REAL start time, not
-        // the observation time — a promoted Bash call has already been
-        // running ≥30s when this first fires, and a pane reopened over an
-        // already-running shell must not restart the elapsed counter at 0
-        // (reagent P1 on PR #2489; matches AttachedTaskState.since's
-        // "when this episode began" contract).
-        const transcriptStartMs = earliestLiveAttachedStartMs(nodes, subs, model.blockId, now);
-        // Combine with the registry-derived floor (Phase C of
-        // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) —
-        // attached if EITHER source says so, earliest start wins when both
-        // do. Reading this atom here makes it a tracked dependency of this
-        // effect too, same as documentAtom/allSubagentsAtom above, so a
-        // registry-only update (no transcript change) still re-triggers
-        // this recompute. Codex P1 on PR #2685: an earlier version had
-        // useBackgroundTaskRegistry dispatch AttachedTaskObserved directly
-        // into the SAME state this effect independently recomputes and
-        // clears from transcript alone — that dispatch was immediately
-        // undone the next time this effect ran and saw no transcript
-        // evidence. Routing the registry signal through its own axis
-        // instead of the shared one this effect owns fixes that.
-        const registryStartMs = paneModel.state.registryAttachedTaskSince;
-        const startMs =
-            transcriptStartMs != null && registryStartMs != null
-                ? Math.min(transcriptStartMs, registryStartMs)
-                : (transcriptStartMs ?? registryStartMs);
-        const current = paneModel.state.attachedTask != null;
-        if ((startMs != null) !== current) {
-            paneModel.dispatchPane(
-                startMs != null ? { type: "AttachedTaskObserved", at: startMs } : { type: "AttachedTaskCleared" },
-                "system"
-            );
-        }
-    });
+    // Attached-task axis dispatch (activity/useAttachedTaskAxis.ts).
+    useAttachedTaskAxis({ blockId: model.blockId, paneModel, promotionTick });
 
     // User-message send + /login /clear slash intercepts + back-to-picker.
     // See hooks/useAgentCommands.ts.
