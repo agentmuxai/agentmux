@@ -1,5 +1,19 @@
 # AgentMux Version History
 
+## 0.58.3 — 2026-09-29
+
+- Dragging files over AgentMux now shows where they can go: panes that accept files get a faint dashed outline, the pane under the cursor is tinted with a prompt saying what the drop will do (attach, or copy to the working folder), and a pane that can't take them says why. Works for agent and terminal panes, including drops whose files have no local path.
+- feat(swarm): each agent in the Swarm shows its background commands, and a subagent's background commands appear under that subagent, with a description and a real running/done/failed status instead of staying 'running' forever
+- fix(tray): the tray icon is on by default (new app:showtray) but closing the last window quits again; keeping AgentMux running after it closes (app:runinbackground) is opt-in. The tray tooltip is just the name and version
+- fix(agents): an agent restarted for a config change mid-turn comes straight back up, so messages from other agents reach it instead of queuing until someone types in its pane
+- Jekts sent from this install keep arriving as verified after the cloud relay or the signed-in account changes. Agent signing keys are now recorded as published per relay and account, so the install publishes them again to a key directory that has never seen them (including once, automatically, after this update). Before, keys were only ever published once, so after such a change they arrived unverified.
+- fix(linux): AgentMux no longer launches with an invisible window on a VM or GPU without working 3D; it checks the GPU really renders before forcing hardware GL, and falls back to software otherwise
+- fix(security): container agents no longer receive the app's full API key; they get a per-agent token that reaches only agent routes (messaging, work queue, their own memory) and is refused host commands and host files
+- fix(dnd): dropped and pasted files use one copy routine: `.env` keeps its name (a second copy is `.env_1`, not `_1.env`), two drops of the same name no longer race, folder copies run off the UI thread, and container-pane paste gives the same notices and @mentions as a drop
+- fix(dnd): every drop highlight uses the theme accent: the green in the tab-drop pulse and the cross-window drop overlay is gone, and tile, floater-redock, pane-tab and memory-card drops share the file-drop colours
+- perf(layout): each pane no longer re-checks its drag handle every 100 ms for as long as it is open; it rebinds only when its header actually changes
+- feat(dnd): drop a file onto a media pane to show it, or text files onto an editor pane to open them as tabs; unsupported files are refused while you hover, with the reason
+
 ## 0.58.2 — 2026-09-28
 
 - Claude agents now get their Global Memory, Operator Config and Personal Memory at every new session, /clear and compaction through Claude Code's SessionStart hook, with a notice listing each part's size.
