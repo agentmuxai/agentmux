@@ -44,9 +44,9 @@ describe("tabContainerVisibility", () => {
     // ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §7: the tab just switched
     // away from hides by opacity alone, under the displayed one, so the switch's
     // frame doesn't also restyle everything in it.
-    it("hides a tab that is leaving by opacity alone, under the displayed tab", () => {
+    it("skips a leaving tab's rendering with content-visibility, under the displayed tab", () => {
         expect(tabContainerVisibility(false, true, false, true)).toEqual({
-            "content-visibility": "visible",
+            "content-visibility": "hidden",
             visibility: null,
             opacity: "0",
             "pointer-events": "auto",

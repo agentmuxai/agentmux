@@ -99,9 +99,10 @@ function WorkspaceElem(): JSX.Element {
             keepLaidOut: keepInactiveTabsLaidOut(),
             wasShown: tabWasShown,
         });
-    // The tab displayed until a moment ago, while it hides by opacity alone
-    // (window-tab-visibility.ts `leaving`). Cleared two frames on: a single
-    // rAF would run before the switch's own frame is rendered.
+    // The tab displayed until a moment ago, while it skips rendering instead
+    // of restyling everything in it (window-tab-visibility.ts `leaving`).
+    // Cleared two frames on: a single rAF would run before the switch's own
+    // frame is rendered.
     const [leavingTabId, setLeavingTabId] = createSignal<string | null>(null);
     let leavingSeq = 0;
     createEffect(() => {
@@ -319,7 +320,7 @@ function WorkspaceElem(): JSX.Element {
                                         // (window-tab-visibility.ts).
                                         opacity: shown().opacity ?? undefined,
                                         // The displayed tab sits above one still leaving
-                                        // (opacity 0, not yet pointer-events: none).
+                                        // (content-visibility: hidden, not yet pointer-events: none).
                                         "z-index": shown()["z-index"] ?? undefined,
                                         // Reveal gate (issue #774): hide the active tab while
                                         // it's still settling so the piecemeal mount cascade
