@@ -285,6 +285,29 @@ pub async fn eval(
     }))
 }
 
+/// A window's whole viewport as a base64 JPEG, unclipped, for the frontend's
+/// tear-off snapshot (SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md §4 phase 3.1).
+/// A *clipped* `Page.captureScreenshot` in a visible browser renders the clip
+/// by briefly changing the page's viewport, which flickers the window; the
+/// whole viewport is a plain copy of what's on screen. The caller crops.
+/// Only for the caller's own window: `screenshot` above stays the one
+/// block-scoped route agents use.
+pub async fn capture_window_viewport(state: &Arc<AppState>, label: &str, quality: u8) -> Result<String, String> {
+    let mut cdp = CdpSession::attach(state, label);
+    let cap = cdp
+        .call(
+            "Page.captureScreenshot",
+            json!({ "format": "jpeg", "quality": quality.min(100), "fromSurface": true }),
+        )
+        .await;
+    let _ = cdp.close().await;
+    let cap = cap.map_err(|e| format!("CDP Page.captureScreenshot: {e}"))?;
+    cap.get("data")
+        .and_then(|d| d.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "Page.captureScreenshot returned no `data` field".to_string())
+}
+
 /// `POST /agentmux/browser/screenshot` — capture the pane's rendered
 /// viewport (PNG by default, JPEG on request). Uses CDP
 /// `Page.captureScreenshot`.

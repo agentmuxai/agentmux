@@ -199,6 +199,8 @@ declare global {
         getCursorScreenPoint(): Promise<{ x: number; y: number }>;
         /** Host-side pane state, for tear-off diagnostics. */
         getPaneDebugState(): Promise<Record<string, unknown>>;
+        /** This window's whole viewport as a base64 JPEG, unclipped (a tear-off snapshot's source). */
+        captureViewport(windowLabel: string, quality?: number): Promise<{ jpeg_base64: string }>;
         /** Tear a pane off into its own floating window (payload: pane_id, workspace_id, x, y, …). */
         openFloatingPane(args: Record<string, unknown>): Promise<{ window_label: string }>;
         toggleFloatingMaximize(windowLabel: string, blockId: string): Promise<void>;
