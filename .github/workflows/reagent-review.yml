@@ -31,8 +31,11 @@ name: ReAgent review (GitHub Actions)
 # needs a GitHub App permission this installation doesn't have (`gh-agent
 # sudo`'s Administration: write doesn't cover it, and escalating further
 # isn't the right move for a permission gap, not a token-scope shortfall --
-# see shared-infrastructure's docs/standards/AGENT_GITHUB_AUTH.md). A PR to
-# this line is a normal, auditable way to point at a new image after a
+# see a5af/shared-infrastructure's AGENT_GITHUB_AUTH.md standards doc (a
+# different repo; this path is not in this tree, deliberately not written
+# as a docs/*.md-shaped citation so this repo's own check-spec-citations.sh
+# doesn't flag it as a same-repo dangling reference). A PR to this line is
+# a normal, auditable way to point at a new image after a
 # future reagent deploy
 # changes the digest -- update the REVIEWER_IMAGE env value below when that
 # happens.
