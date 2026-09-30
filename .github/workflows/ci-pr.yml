@@ -393,6 +393,8 @@ jobs:
         run: bash scripts/check-doc-status.sh
       - name: Name-resolver callers (identity M3, spec §9.3)
         run: bash scripts/check-name-resolver-callers.sh
+      - name: No new hand-rolled epoch time (use agentmux_common::time)
+        run: node scripts/check-time-helpers.mjs
       - name: No CEF/Chromium version in the README or overview diagrams
         run: bash scripts/check-no-cef-version-in-overview.sh
 
