@@ -13,6 +13,7 @@ import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } fro
 import { useTick } from "@/app/hook/useTick";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { useAgentDormant } from "../agent-dormancy";
+import { useAgentMedia } from "../agent-media";
 import type { MarkdownNode } from "../types";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
@@ -86,6 +87,8 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     // keeps it a dependency, so becoming visible re-runs this and commits
     // whatever arrived meanwhile without needing a further update.
     const dormant = useAgentDormant();
+    // The agent's own text: local images may show inline (agent-media.tsx).
+    const media = useAgentMedia();
 
     createEffect(() => {
         const text = props.node.content; // dep: re-runs on each streamed update
@@ -173,7 +176,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                             on a node it has moved → the long-standing replaceChild crash
                             (#1326). Per-block scroll is also wrong inside the virtualized
                             document, which owns the scroll. */}
-                        <Markdown text={view().text} streaming={view().streaming} scrollable={false} />
+                        <Markdown text={view().text} streaming={view().streaming} scrollable={false} media={media()} />
                     </div>
                     {/* Peek overlay — see ToolBlock.tsx's identical pattern
                         and PeekOverlay.tsx. */}
@@ -203,7 +206,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                 </button>
                 <Show when={expanded()}>
                     <div class="markdown-canceled-body">
-                        <Markdown text={props.node.content} scrollable={false} />
+                        <Markdown text={props.node.content} scrollable={false} media={media()} />
                     </div>
                 </Show>
             </div>

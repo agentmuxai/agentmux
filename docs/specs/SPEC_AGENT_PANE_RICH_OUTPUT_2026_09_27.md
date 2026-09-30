@@ -1,7 +1,7 @@
 # Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video)
 
 **Date:** 2026-09-27
-**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2 (callouts, §3) implemented; P3–P4 not started
+**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2 (callouts, §3) in #4036; P3 (inline images, §4) implemented; P4 not started
 **Author:** agent1
 **Scope:**
 - `frontend/app/element/markdown*.ts(x)` (the shared renderer)
@@ -248,6 +248,38 @@ This is a well-known attack on chat UIs that render Markdown. Click-to-load
 keeps the feature and removes the silent part.
 
 `data:image/*` URIs keep rendering directly, as today; they make no request.
+
+### 4.4 As built (P3)
+
+- `frontend/app/element/local-media.ts` holds what the Media pane and inline
+  media share: the extension lists, `fetchMediaBlob` (now with `maxBytes`,
+  checked against `Content-Length` before the body is read), `describeMediaError`,
+  and `resolveMediaPath`. `markdown-media.tsx` renders images; the agent pane
+  provides the working directory through `agent-media.tsx` (a context, like
+  `agent-dormancy.tsx`), which `MarkdownBlock` turns into `<Markdown media>`.
+- **Sanitizer findings.** hast-util-sanitize allows only `http`/`https` in an
+  image `src`, so `C:/…` (read as a `C:` scheme) and `data:` were both stripped
+  before any component saw them; `data:` images had never rendered, despite
+  §4.3's "as today". `rehype-local-image-src.ts` rewrites a drive path to
+  `file:///…`, and `src` now also allows `file` and `data` (only `MarkdownImg`
+  decides what's fetched). A `data:` image renders only where `media` is on,
+  and only as a raster type: an SVG can reference remote resources, so an
+  inline SVG data URI never renders (ReAgent P0 on #4064). `<picture>`/`<source>` came from the default
+  allowlist too; they're now filtered out, so a remote `srcset` can't load
+  beside a local image.
+- **Network paths are refused** (Codex P1 on #4064): a UNC path (`//host/…`,
+  `\host\…`, `file://host/…`) would make Windows open an SMB connection to
+  that host, with no click, so it renders `[image: … — network paths aren't
+  loaded]` and makes no request.
+- **SVG in the Media pane** (Codex P2): `IMAGE_EXTENSIONS` now includes `svg`,
+  so clicking an inline SVG opens a pane that shows it (still via `<img>`).
+- **Row height.** The placeholder is 16:9 until the natural size is known; the
+  swap goes through `withHeightContinuity`. Decoding is awaited for at most
+  1.5 s, so a very large image shows without a known ratio rather than never.
+  Known ratios are cached by path, so a remounted row reserves the right height.
+  `estimateMarkdown` reserves 360 px per local image (up to three).
+- The `parse-srcset` dependency is now unused; removing it (a lockfile change)
+  is left to a separate cleanup.
 
 ## 5. Inline video and audio (the agent's own messages)
 

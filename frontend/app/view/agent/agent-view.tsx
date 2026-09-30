@@ -19,7 +19,7 @@ import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
-import { AgentDormancyProvider } from "./agent-dormancy";
+import { AgentPaneProviders } from "./agent-media";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
@@ -1646,8 +1646,8 @@ export const AgentPresentationView = ({
         // gated.
         // `hidden` covers a dormant pane-stack member and a hidden window tab
         // alike; this provider gates only rendering (the timers read `hidden`
-        // directly).
-        <AgentDormancyProvider dormant={hidden}>
+        // directly). The same providers carry the cwd for inline media.
+        <AgentPaneProviders dormant={hidden} block={block} agent={currentAgent}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls
@@ -2103,7 +2103,7 @@ export const AgentPresentationView = ({
                 onShellExited={handleShellExited}
             />
         </div>
-        </AgentDormancyProvider>
+        </AgentPaneProviders>
     );
 };
 

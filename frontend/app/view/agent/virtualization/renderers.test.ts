@@ -15,6 +15,7 @@ import {
     jektExpandedMaxEstimatePx,
     estimateMarkdown,
     estimateNode,
+    INLINE_MEDIA_ESTIMATE_PX,
     estimateNodeForState,
     estimateTextHeight,
     estimateUnwrappedTextHeight,
@@ -111,6 +112,31 @@ describe("per-kind estimators", () => {
         it("uses estimateTextHeight on the content", () => {
             const node: MarkdownNode = { type: "markdown", id: "m1", content: "a".repeat(160) };
             expect(estimateMarkdown(node)).toBe(48);
+        });
+
+        // SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27 §4.2: a local image renders a
+        // reserved placeholder, so its row is far taller than its text.
+        it("reserves room for each local image", () => {
+            const content = "The toolbar now: ![after](shots/after.png)";
+            const node: MarkdownNode = { type: "markdown", id: "m2", content };
+            expect(estimateMarkdown(node)).toBe(estimateTextHeight(content) + INLINE_MEDIA_ESTIMATE_PX);
+        });
+
+        it("doesn't for a remote or data: image (a chip or tiny inline)", () => {
+            const content = "![a](https://example.com/a.png) ![b](data:image/png;base64,AA==)";
+            const node: MarkdownNode = { type: "markdown", id: "m3", content };
+            expect(estimateMarkdown(node)).toBe(estimateTextHeight(content));
+        });
+
+        it("caps the reservation at three images", () => {
+            const content = Array.from({ length: 6 }, (_, i) => `![${i}](s${i}.png)`).join("\n\n");
+            const node: MarkdownNode = { type: "markdown", id: "m4", content };
+            expect(estimateMarkdown(node)).toBe(estimateTextHeight(content) + 3 * INLINE_MEDIA_ESTIMATE_PX);
+        });
+
+        it("is what an expanded markdown row estimates", () => {
+            const node: MarkdownNode = { type: "markdown", id: "m5", content: "![x](a.png)" };
+            expect(estimateNodeForState(node, "expanded", baseDocState())).toBe(estimateMarkdown(node));
         });
     });
 
