@@ -247,14 +247,29 @@ describe("remote images wait for a click", () => {
         expect(c.querySelector(".am-media-chip")!.textContent).toContain("not encrypted");
     });
 
-    it("still renders a data: image directly", () => {
+    it("renders a raster data: image directly", () => {
         const c = mount("![x](data:image/png;base64,iVBORw0KGgo=)").container;
         expect(c.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
+    });
+
+    // ReAgent P0 on #4064: an SVG can reference remote resources, so an inline
+    // SVG data URI never renders; a local .svg file is shown the same way the
+    // user's own files are, from a blob through <img>.
+    it("doesn't render an SVG data: URI", () => {
+        const c = mount("![x](data:image/svg+xml;base64,PHN2Zy8+)").container;
+        expect(c.querySelector("img")).toBeNull();
+        expect(c.textContent).toContain("unsupported type");
     });
 });
 
 describe("nothing loads where media isn't enabled (tool results, file previews)", () => {
-    it.each(["![x](a.png)", "![x](C:/pics/a.png)", "![x](https://example.com/p.png)"])("%s", (md) => {
+    it.each([
+        "![x](a.png)",
+        "![x](C:/pics/a.png)",
+        "![x](https://example.com/p.png)",
+        "![x](data:image/png;base64,iVBORw0KGgo=)",
+        "![x](data:image/svg+xml;base64,PHN2Zy8+)",
+    ])("%s", (md) => {
         const c = mount(md, null).container;
         expect(c.querySelector("img")).toBeNull();
         expect(c.querySelector(".am-media-chip")).toBeNull();
