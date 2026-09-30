@@ -28,10 +28,18 @@ function getLayoutModelForTab(tabAtom: () => Tab): LayoutModel {
     // This must run for ALL tabs, not just the active one — tear-off windows
     // create a LayoutModel before atoms.activeTabId() is synced, so gating
     // on activeTabId would skip the subscription and leave rootNode undefined.
-    const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom);
-    createEffect(() => {
-        layoutStateAtom();
-        layoutModel.onBackendUpdate();
+    //
+    // Owned by the model's own root, not whoever asked first: the first
+    // caller is often the tab's view, and a window tab torn off and dropped
+    // back unmounts that view while the model stays cached here. An effect
+    // owned by the view died with it, so the reused model stopped hearing
+    // backend layout updates and a pane redocked into the tab never drew.
+    layoutModel.runInModelRoot(() => {
+        const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom);
+        createEffect(() => {
+            layoutStateAtom();
+            layoutModel.onBackendUpdate();
+        });
     });
 
     layoutModelMap.set(tabId, layoutModel);
