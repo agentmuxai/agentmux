@@ -737,12 +737,47 @@ fn candidate_label_under_cursor_locked(
         if !is_instance_label(label) {
             continue;
         }
-        use cef::{ImplBrowser, ImplBrowserHost};
-        if let Some(host) = browser.host() {
-            let h = host.window_handle();
-            if !h.0.is_null() && h.0 as *mut std::ffi::c_void == root {
-                return Some(label.clone());
-            }
+        if top_level_hwnd_for(ctx, label, browser) == Some(root) {
+            return Some(label.clone());
+        }
+    }
+    None
+}
+
+/// The top-level window of `label`'s browser, to compare with the root
+/// under the cursor. `BrowserHost::window_handle()` alone can't be used: in
+/// CEF Views mode it is often null, and otherwise a child of the top-level
+/// window, so comparing it with the root never matched and every release
+/// reported no target. In order: the `window_hwnds` entry bound at Views
+/// window creation (app/mod.rs), the root of the host's handle, and for
+/// "main" the on-screen main frame, which the redock resolver
+/// (commands/window/motion.rs) also falls back to when a promoted pool
+/// window serves main and `window_hwnds` has no "main" entry.
+#[cfg(target_os = "windows")]
+fn top_level_hwnd_for(
+    ctx: &HookContext,
+    label: &str,
+    browser: &cef::Browser,
+) -> Option<*mut std::ffi::c_void> {
+    use cef::{ImplBrowser, ImplBrowserHost};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+
+    if let Some(&h) = ctx.state.window_hwnds.lock().get(label) {
+        if h != 0 {
+            return Some(h as *mut std::ffi::c_void);
+        }
+    }
+    if let Some(host) = browser.host() {
+        let h = host.window_handle().0 as *mut std::ffi::c_void;
+        if !h.is_null() {
+            let root = unsafe { GetAncestor(h as _, GA_ROOT) } as *mut std::ffi::c_void;
+            return Some(if root.is_null() { h } else { root });
+        }
+    }
+    if label == "main" {
+        let main = unsafe { crate::commands::window::find_main_window() };
+        if !main.is_null() {
+            return Some(main);
         }
     }
     None
