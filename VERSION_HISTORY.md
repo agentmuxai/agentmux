@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.59.0 — 2026-09-30
+
+- feat(cef): move all three platforms to CEF 154 (Chromium 154.0.8037.58)
+- fix(statusbar): the version panel shows CEF above build time, and labels that row "Build Time" instead of "Time"
+
 ## 0.58.3 — 2026-09-29
 
 - Dragging files over AgentMux now shows where they can go: panes that accept files get a faint dashed outline, the pane under the cursor is tinted with a prompt saying what the drop will do (attach, or copy to the working folder), and a pane that can't take them says why. Works for agent and terminal panes, including drops whose files have no local path.
