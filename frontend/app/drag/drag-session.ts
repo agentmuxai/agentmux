@@ -107,6 +107,19 @@ export function endDrag(reason: DragEndReason, dragId?: string): void {
     for (const listener of listeners) listener({ session: s, reason });
 }
 
+/**
+ * The cross-window monitor's document dragend: ends the session if its source
+ * has released it, and returns the session as it was, so the caller can still
+ * read `escaped`. The tab bar ends tile and window-tab sessions before this
+ * runs; what is left is a pane-tab session, or any drag in a window without a
+ * tab bar.
+ */
+export function endReleasedSession(reason: DragEndReason): DragSession | null {
+    const s = current();
+    if (s?.released) endDrag(reason, s.dragId);
+    return s;
+}
+
 export function onSessionEnded(listener: (end: SessionEnd) => void): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
