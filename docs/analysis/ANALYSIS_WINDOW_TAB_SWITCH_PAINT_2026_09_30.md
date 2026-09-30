@@ -20,7 +20,7 @@ What is left is not slowness on the main thread. **Each switch now paints in thr
 2. **About 46 ms:** the content swaps. It waits for the `SetActiveTab` round trip.
 3. **About 65 ms:** part of the new tab pops in one frame late. On the traced tabs, these are the agent picker's cards and recent-session rows.
 
-Step 3 is a bug. **Any element with `transition: all` animates the inherited `visibility` flip that hides and shows window tabs.** Going from hidden to visible, the first frame of that transition is still hidden, so the element appears a frame after the rest of the tab. Going from visible to hidden, it stays visible for the whole transition (150–300 ms) as the tab leaves. Removing `visibility` from those transitions made step 3 disappear on all 12 switches (§3).
+Step 3 is a bug. **Any element with `transition: all` animates the inherited `visibility` flip that hides and shows window tabs.** Going from hidden to visible, the first frame of that transition is still hidden, so the element appears a frame after the rest of the tab. Going from visible to hidden, it stays `visible` for the whole transition (150–300 ms), but the leaving tab's `opacity: 0` keeps that from showing. Removing `visibility` from those transitions made step 3 disappear on all 12 switches (§3).
 
 Step 2 is the round trip. The pill already switches without waiting for it, and the content could too, now that a warm tab swaps in one frame.
 
