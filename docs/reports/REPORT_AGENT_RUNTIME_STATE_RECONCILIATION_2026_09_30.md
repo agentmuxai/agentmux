@@ -1,6 +1,7 @@
 # REPORT: making the model/effort menu match what the agent actually runs
 
 **Date:** 2026-09-30
+**Status:** analysis — recommendations for a follow-up fix; not yet implemented
 **Author:** AgentX (narko), at the owner's request
 **Prompted by:** `docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md`.
 The menu read "Sonnet 5.5 · high" while the agent ran Opus 5.5 at medium.

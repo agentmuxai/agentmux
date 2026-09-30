@@ -3,7 +3,7 @@
 **Date:** 2026-09-30 (UTC; the evening of 2026-09-29 Pacific)
 **Found by:** the owner, on AgentX's pane in a local v0.58.3 portable build
 **Investigated by:** AgentX (narko)
-**Status:** root cause identified; fix not yet written
+**Status:** retro — root cause identified; fix not yet written (see §5)
 
 ## 1. What happened
 
