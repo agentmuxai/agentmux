@@ -133,7 +133,11 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         baseUrlEnvVar: "ANTHROPIC_BASE_URL",
         supportedVendors: ["anthropic"],
         startupInstructionsFilename: "CLAUDE.md",
-        launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
+        // `--exclude-dynamic-system-prompt-sections`: keeps the system prompt
+        // byte-identical across agents so the prompt cache holds (#1964). Same
+        // argv as `static CLAUDE` in agentmux-srv providers.rs, which
+        // pin-consistency.test.ts now enforces.
+        launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions", "--exclude-dynamic-system-prompt-sections"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
         // Persistent (bidirectional stream-json) + the Agent SDK CONTROL PROTOCOL
@@ -147,7 +151,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // over launchArgs in useAgentCommands.ts.
         // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
         controllerType: "persistent",
-        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"],
+        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--exclude-dynamic-system-prompt-sections", "--permission-prompt-tool", "stdio", "--permission-mode", "default"],
         // Claude Code calls `git` at session-start (issue
         // anthropics/claude-code#29898). Without git the CLI fails
         // with `Error: Git is required but was not found.`.
