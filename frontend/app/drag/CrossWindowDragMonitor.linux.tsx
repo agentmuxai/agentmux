@@ -20,7 +20,7 @@ import { getLayoutModelForStaticTab } from "@/layout/index";
 import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import type { LayoutNode } from "@/layout/lib/types";
-import { dragEscaped, setDragEscaped } from "@/app/tab/tabbar-dnd";
+import { endReleasedSession } from "./drag-session";
 
 export type DragItemPayload =
     // sourceTabId: the tab the tile drag originated in — consumed by the
@@ -50,6 +50,7 @@ function CrossWindowDragMonitor(): JSX.Element {
         Logger.debug("dnd:cross", "CrossWindowDragMonitor mounted (linux)", { windowLabel: windowLabelRef });
 
         const handleDragEnd = async (e: DragEvent) => {
+            const dragSession = endReleasedSession("dragend");
             const payload = _currentDragPayload;
             _currentDragPayload = null;
 
@@ -63,8 +64,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             // macOS-only so far), but the DOM keydown fallback in
             // tab-reorder.ts still sets this flag, so honoring it here costs
             // nothing and closes the same gap if/when it applies.
-            if (dragEscaped) {
-                setDragEscaped(false);
+            if (dragSession?.escaped) {
                 Logger.info("dnd:cross", "cross-window drag aborted via Escape");
                 return;
             }

@@ -48,13 +48,14 @@ vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
 
 import { LANDING_BOUNCE_MS, PaneTabStrip } from "./PaneTabStrip";
 import { paneTabItemType } from "@/app/drag/drag-types";
-import { dragEscaped } from "@/app/tab/tabbar-dnd";
+import { endDrag, session } from "@/app/drag/drag-session";
 
 /** Whether the monitors would treat the current drag as escaped. */
-const escaped = () => dragEscaped;
+const escaped = () => session()?.escaped ?? false;
 
 afterEach(() => cleanup());
 beforeEach(() => {
+    endDrag("cancel");
     dropTargetCalls.length = 0;
     draggableCalls.length = 0;
     payloadCalls.length = 0;

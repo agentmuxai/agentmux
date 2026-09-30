@@ -32,7 +32,7 @@ import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
-import { dragEscaped, setDragEscaped } from "@/app/tab/tabbar-dnd";
+import { endDrag, endReleasedSession, session } from "./drag-session";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
@@ -76,6 +76,12 @@ function CrossWindowDragMonitor(): JSX.Element {
             fallbackTimer = null;
             const payload = _currentDragPayload;
             if (!payload) return;
+            // dragend never reached this window, so the source never
+            // released its session; end it here once the fallback decides.
+            const dragSession = session();
+            const endSession = () => {
+                if (dragSession) endDrag("button-up", dragSession.dragId);
+            };
 
             // Escape was pressed during this drag — abort the fallback path
             // too (reagent PR #2310 P1: this file's genuine cross-window
@@ -83,8 +89,8 @@ function CrossWindowDragMonitor(): JSX.Element {
             // still spawn a tear-off window via the OLE-dragend-missed
             // fallback even though the in-window onDrop path correctly
             // no-ops).
-            if (dragEscaped) {
-                setDragEscaped(false);
+            if (dragSession?.escaped) {
+                endSession();
                 _currentDragPayload = null;
                 Logger.info("dnd:cross", "cross-window drag fallback aborted via Escape");
                 return;
@@ -111,6 +117,7 @@ function CrossWindowDragMonitor(): JSX.Element {
 
             // Button released outside our window — OLE didn't deliver dragend.
             _currentDragPayload = null;
+            endSession();
             Logger.info("dnd:cross", "drag fallback fired: button released outside window (OLE dragend not received)");
             getApi().releaseDragCapture().catch(() => {});
             await handleCrossWindowDragEnd(payload, windowLabelRef);
@@ -137,6 +144,7 @@ function CrossWindowDragMonitor(): JSX.Element {
 
         const handleDragEnd = async (e: DragEvent) => {
             clearFallback();
+            const dragSession = endReleasedSession("dragend");
             const payload = _currentDragPayload;
             _currentDragPayload = null;
 
@@ -158,8 +166,7 @@ function CrossWindowDragMonitor(): JSX.Element {
 
             // Escape was pressed during this drag — abort here too, same
             // reasoning as checkAndFireFallback above (reagent PR #2310 P1).
-            if (dragEscaped) {
-                setDragEscaped(false);
+            if (dragSession?.escaped) {
                 getApi().releaseDragCapture().catch(() => {});
                 Logger.info("dnd:cross", "cross-window drag aborted via Escape");
                 return;

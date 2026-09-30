@@ -26,7 +26,8 @@ import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type Acc
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { setDragEscaped } from "@/app/tab/tabbar-dnd";
+import { markEscaped } from "@/app/drag/drag-session";
+import { isDraggedPaneTab, releasePaneTabDrag, startPaneTabDrag } from "@/app/drag/pane-tab-drag";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { atoms } from "@/store/global";
 import { isWindows } from "@/util/platformutil";
@@ -598,7 +599,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const id = () => props.getId(props.tab);
     const attention = () => props.getAttention?.(props.tab) ?? false;
     let pillRef: HTMLDivElement | undefined;
-    const [isDragging, setIsDragging] = createSignal(false);
+    const isDragging = () => isDraggedPaneTab(id(), props.paneKey);
     const [dropSide, setDropSide] = createSignal<"before" | "after" | null>(null);
 
     // Activity flash: click this pill on every tone from its own block,
@@ -622,14 +623,13 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     // after — same as whole-pane (tile) drags.
     const onEscape = (e: KeyboardEvent) => {
         // keydown still reaches the page during an HTML5 drag; an escaped
-        // drag never tears off (the monitors check this flag).
-        if (e.key === "Escape") setDragEscaped(true);
+        // drag never tears off (the monitors read it off the session).
+        if (e.key === "Escape") markEscaped();
     };
     let tracking = false;
     const startTearOffTracking = () => {
         if (!props.paneKey || !props.sourceTabId || !pillRef) return;
         const paneRect = pillRef.closest<HTMLElement>('[data-role="pane"]')?.getBoundingClientRect();
-        setDragEscaped(false);
         setCurrentDragPayload({
             kind: "pane-tab",
             blockId: id(),
@@ -673,11 +673,11 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 sourceNodeId: props.paneKey,
             }),
             onDragStart: () => {
-                setIsDragging(true);
+                startPaneTabDrag(id(), props.paneKey, props.sourceTabId);
                 startTearOffTracking();
             },
             onDrop: () => {
-                setIsDragging(false);
+                releasePaneTabDrag();
                 stopTearOffTracking();
             },
         });
