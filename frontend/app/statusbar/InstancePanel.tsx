@@ -485,7 +485,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                 </Show>
                 <Show when={about().buildTime}>
                     <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">Time</span>
+                        <span class="instance-panel-label">Build Time</span>
                         <span class="instance-panel-value instance-panel-mono">
                             {formatBuildTime(about().buildTime!)}
                         </span>
