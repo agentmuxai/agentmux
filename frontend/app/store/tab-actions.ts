@@ -21,20 +21,28 @@ import { activeTabId, workspace } from "./window-identity";
 import { createEffect, createRoot, createSignal } from "solid-js";
 
 // The window tab `setActiveTab` is switching to, from before its RPC until
-// the committed `activeTabId` catches up (or the RPC fails, or a newer
-// switch replaces it). `workspace.tsx` shows a warm destination (already
-// shown, kept laid out) from this in the same frame as the optimistic pill,
-// instead of after the round trip
+// the committed `activeTabId` settles. `workspace.tsx` shows a warm
+// destination (already shown, kept laid out) from this in the same frame as
+// the optimistic pill, instead of after the round trip
 // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.2).
-// Cleared on catch-up, not when the RPC resolves: the Workspace push can
-// land after the RPC's reply, and dropping the intent first would show the
-// source tab again for a frame.
+//
+// Cleared when the committed tab reaches the intent, or moves to a tab
+// outside this switch chain (the tab the chain started from plus every tab
+// asked for since): e.g. the source tab was closed mid-switch and the
+// backend promoted a neighbor instead (ReAgent P1 on #4107). A tab earlier
+// in the chain keeps it, so a quick B-then-C doesn't flash B on its way to
+// C. Also cleared when the RPC fails. Never merely because the RPC
+// resolved: the Workspace push can land after the reply, and dropping the
+// intent first would show the source tab again for a frame.
 const [switchIntentTabId, setSwitchIntentTabId] = createSignal<string | null>(null);
+let switchChain = new Set<string>();
 export { switchIntentTabId };
 createRoot(() =>
     createEffect(() => {
         const intent = switchIntentTabId();
-        if (intent != null && activeTabId() === intent) setSwitchIntentTabId(null);
+        if (intent == null) return;
+        const committed = activeTabId();
+        if (committed === intent || !switchChain.has(committed)) setSwitchIntentTabId(null);
     })
 );
 
@@ -150,6 +158,8 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) holdRevealGate(tabId);
+    if (switchIntentTabId() == null) switchChain = new Set([fromTabId]);
+    switchChain.add(tabId);
     setSwitchIntentTabId(tabId);
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);

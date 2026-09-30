@@ -90,4 +90,27 @@ describe("setActiveTab switch intent", () => {
         committed.set("tab-c");
         expect(switchIntentTabId()).toBeNull();
     });
+
+    // ReAgent P1 on #4107: the source tab closed mid-switch and the backend
+    // promoted a neighbor instead of the destination.
+    it("is dropped when the committed tab moves to a tab outside the switch", async () => {
+        const done = setActiveTab("tab-b");
+        expect(switchIntentTabId()).toBe("tab-b");
+        committed.set("tab-x");
+        expect(switchIntentTabId()).toBeNull();
+        rpc.calls[0].resolve();
+        await done;
+    });
+
+    it("survives the committed tab passing through an earlier tab of the same switch", async () => {
+        const first = setActiveTab("tab-b");
+        const second = setActiveTab("tab-c");
+        committed.set("tab-b");
+        expect(switchIntentTabId()).toBe("tab-c");
+        rpc.calls[0].resolve();
+        rpc.calls[1].resolve();
+        await Promise.all([first, second]);
+        committed.set("tab-c");
+        expect(switchIntentTabId()).toBeNull();
+    });
 });
