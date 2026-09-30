@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { beginDrag, endDrag, session, type DragEndReason } from "@/app/drag/drag-session";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -13,10 +14,15 @@ import type { BlockKind, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
 
-// Transient global: which node-kind is being dragged from the top bar.
-// Read by the Canvas's drop handler. Drag is inherently app-global, so a
-// module-level signal is fine even with multiple drone panes open.
-const [dragKind, setDragKind] = createSignal<BlockKind | null>(null);
+// The node kind this window is dragging from a top bar, read by the canvas's
+// drop handler. On the drag session, so every drone pane in the window sees it.
+const dragKind = (): BlockKind | null => {
+    const s = session();
+    return s?.kind === "drone-kind" ? ((s.payload?.droneKind as BlockKind | undefined) ?? null) : null;
+};
+const endChipDrag = (reason: DragEndReason) => {
+    if (session()?.kind === "drone-kind") endDrag(reason);
+};
 
 export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
     const m = props.model;
@@ -110,14 +116,14 @@ const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element =>
             title={meta.description}
             aria-label={`${meta.label} node — drag onto the canvas, or click to add`}
             onDragStart={(e) => {
-                setDragKind(p.kind);
+                beginDrag("drone-kind", undefined, { droneKind: p.kind });
                 if (e.dataTransfer) {
                     e.dataTransfer.effectAllowed = "copy";
                     // Fallback channel in case the signal is cleared.
                     e.dataTransfer.setData("application/x-drone-kind", p.kind);
                 }
             }}
-            onDragEnd={() => setDragKind(null)}
+            onDragEnd={() => endChipDrag("dragend")}
             onClick={() => p.model.addNodeAtCenter(p.kind)}
         >
             <span class="drone-chip-emoji">{meta.emoji}</span>
@@ -307,7 +313,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         const p0 = screenToFlow(e.clientX, e.clientY);
         // Center the node body roughly under the cursor.
         m.addNode(kind, { x: p0.x - NODE_W / 2, y: p0.y - 20 });
-        setDragKind(null);
+        endChipDrag("drop");
     };
 
     // Keep the model's canvas pixel size current so a chip-click can
