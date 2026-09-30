@@ -418,13 +418,36 @@ describe("ReAgent quota skip marker", () => {
         expect(evaluateCodexGate({ headSha: OLD, comments: [edited] }).state).toBe("pending");
     });
 
-    it("dates an edited marker by its edit, so it beats older findings on that head", () => {
+    // a5af/reagent#282: ReAgent writes the note before reading Codex's
+    // answers, so a skip can name, and post-date, a head Codex answered.
+    it("never overrides Codex findings on the head, even when the skip is newer", () => {
         const r = evaluateCodexGate({
             headSha: HEAD,
             reviews: [findingsReview(HEAD, "2026-09-30T10:10:00Z")],
             comments: [skipComment(HEAD, { created: "2026-09-30T10:00:00Z", updated: "2026-09-30T10:30:00Z" })],
         });
+        expect(r.state).toBe("failure");
+    });
+
+    it("leaves a Codex OK on the head as the reason it passes", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [okComment(HEAD, "2026-09-30T10:10:00Z"), skipComment(HEAD, { updated: "2026-09-30T10:30:00Z" })],
+        });
         expect(r.state).toBe("success");
+        expect(r.description).toBe(`Codex found no major issues in ${HEAD.slice(0, 10)}`);
+    });
+
+    it("is not a verdict to carry forward", () => {
+        // An OK on OLD, then a skip for OLD: the OK still carries across docs.
+        const comments = [okComment(OLD, "2026-09-30T10:00:00Z"), skipComment(OLD, { updated: "2026-09-30T10:30:00Z" })];
+        expect(latestCodexOutput({ comments })).toMatchObject({ kind: "ok" });
+        const r = evaluateCodexGate({ headSha: HEAD, comments, filesSinceLatest: ["docs/a.md"] });
+        expect(r.description).toBe(`Codex OK on ${OLD.slice(0, 10)}; only docs changed since`);
+        // A skip alone on OLD passes nothing on HEAD.
+        expect(
+            evaluateCodexGate({ headSha: HEAD, comments: [skipComment(OLD)], filesSinceLatest: ["docs/a.md"] }).state,
+        ).toBe("pending");
     });
 
     it("lets a later real review of the head win", () => {
