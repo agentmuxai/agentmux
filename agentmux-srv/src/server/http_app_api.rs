@@ -6,6 +6,15 @@
 
 use super::*;
 
+// ---------------------------------------------------------------------------
+// Agent App API REST handlers (identity / preset / memory).
+//
+// `agent_id` is the agent slug, supplied by agentmux-mcp from its trusted
+// AGENTMUX_AGENT_ID env. Each handler maps a 4xx for caller/validation errors
+// (FORBIDDEN, "not found", "provide …", "not a regular file") and 5xx otherwise,
+// then delegates to the shared `app_api::*_impl`.
+// ---------------------------------------------------------------------------
+
 /// Classify an app-API impl error string into an HTTP status. FORBIDDEN and
 /// argument/not-found errors are the caller's fault (4xx); the rest are 5xx.
 pub(super) fn app_api_error_status(e: &str) -> StatusCode {

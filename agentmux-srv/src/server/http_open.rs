@@ -64,12 +64,3 @@ pub(super) async fn handle_agent_open(
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Agent App API REST handlers (identity / preset / memory).
-//
-// `agent_id` is the agent slug, supplied by agentmux-mcp from its trusted
-// AGENTMUX_AGENT_ID env. Each handler maps a 4xx for caller/validation errors
-// (FORBIDDEN, "not found", "provide …", "not a regular file") and 5xx otherwise,
-// then delegates to the shared `app_api::*_impl`.
-// ---------------------------------------------------------------------------
