@@ -35,10 +35,14 @@ vi.mock("@/layout/lib/layoutPersistence", () => ({
 vi.mock("@/layout/lib/crossTabDrag", () => ({ clearCrossTabDrop: () => {} }));
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({ setCurrentDragPayload: () => {} }));
 vi.mock("../store/services", () => ({ WorkspaceService: { ReorderTab: () => Promise.resolve() } }));
+vi.mock("@/util/platformutil", async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    isWindows: () => true,
+}));
 
-import { beginDrag, endDrag } from "@/app/drag/drag-session";
+import { beginDrag, endDrag, markReleased } from "@/app/drag/drag-session";
 import { tileItemType } from "@/app/drag/drag-types";
-import { dragActivatedTabIds } from "./tabbar-dnd";
+import { dragActivatedTabIds, startWindowTabDrag } from "./tabbar-dnd";
 import { useTabDragAndDrop } from "./tab-reorder";
 
 function fakeModel(id: string) {
@@ -48,11 +52,15 @@ function fakeModel(id: string) {
     return model;
 }
 
+/** The tab strip's rect: x 0-500, y 0-30. */
+const STRIP_RECT = { left: 0, right: 500, top: 0, bottom: 30, x: 0, y: 0, width: 500, height: 30 };
+
 function mount() {
     const tabIds = ["tab-1", "tab-2"];
     const models = tabIds.map(fakeModel);
     render(() => {
         let strip!: HTMLDivElement;
+        queueMicrotask(() => (strip.getBoundingClientRect = () => STRIP_RECT as DOMRect));
         useTabDragAndDrop(
             { tabBarScrollRef: () => strip },
             () => ({ oid: "ws-1" }) as any,
@@ -114,5 +122,43 @@ describe("tab bar end-of-drag cleanup (tile drags)", () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+/** A window dragover at (x, y), with a DataTransfer to read the cursor off. */
+function dragOverAt(clientX: number, clientY: number) {
+    const e = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.assign(e, { clientX, clientY });
+    Object.defineProperty(e, "dataTransfer", { value: { dropEffect: "none" } });
+    document.body.dispatchEvent(e);
+    return e as Event & { dataTransfer: { dropEffect: string } };
+}
+
+describe("tab bar tear-off cursor (Windows)", () => {
+    it("below the strip during a window-tab drag: the plus cursor, since releasing there tears off", async () => {
+        mount();
+        await Promise.resolve();
+        startWindowTabDrag("tab-1", "ws-1", true);
+        const e = dragOverAt(200, 200);
+        expect(e.defaultPrevented).toBe(true);
+        expect(e.dataTransfer.dropEffect).toBe("copy");
+    });
+
+    it("over the strip: left to the strip's own drop target", async () => {
+        mount();
+        await Promise.resolve();
+        startWindowTabDrag("tab-1", "ws-1", true);
+        const e = dragOverAt(200, 15);
+        expect(e.defaultPrevented).toBe(false);
+    });
+
+    it("not for other drags, or once the tab's source has released it", async () => {
+        mount();
+        await Promise.resolve();
+        beginDrag("tile", { nodeId: "n1" });
+        expect(dragOverAt(200, 200).defaultPrevented).toBe(false);
+        startWindowTabDrag("tab-1", "ws-1", true);
+        markReleased();
+        expect(dragOverAt(200, 200).defaultPrevented).toBe(false);
     });
 });
