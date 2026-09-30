@@ -9,13 +9,16 @@
 # app's version panel shows it; the overview says "Chromium via CEF".
 #
 # Fails if README.md or any assets/*.svg names a three-digit CEF or Chromium
-# version, including wordings like "CEF version 155", "Chromium M155" and
-# "cef-155.0.x". Dated records (specs, retros, VERSION_HISTORY.md) are not
-# checked.
+# version, including wordings like "CEF version: 155", "Chromium release v155",
+# "Chromium (M155)", "CEF/155" and "cef-155.0.x": any run of separators and
+# qualifier words between the name and the number. Dated records (specs,
+# retros, VERSION_HISTORY.md) are not checked.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PATTERN='\b(cef|chromium)[ -]*(v|m|version|milestone|release|runtime)?[ -]*[0-9]{3}\b'
+SEP='[ :/(_-]*'
+QUAL='(v|m|version|milestone|release|runtime|build)'
+PATTERN="\\b(cef|chromium)(${SEP}${QUAL})*${SEP}v?[0-9]{3}\\b"
 
 violations=$(grep -nEi "$PATTERN" README.md assets/*.svg 2>/dev/null || true)
 
