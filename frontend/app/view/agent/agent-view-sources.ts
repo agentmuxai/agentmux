@@ -16,6 +16,7 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "agent-view.tsx",
     "agent-block-content.tsx",
     "agent-pane-chrome-model.ts",
+    "hooks/useShellLogBridge.ts",
 ];
 
 /**
@@ -24,4 +25,4 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
  * nothing stopped it. Lower this whenever an extraction shrinks the file;
  * raising it needs a reason in the PR.
  */
-export const AGENT_VIEW_MAX_LINES = 2662;
+export const AGENT_VIEW_MAX_LINES = 2583;
