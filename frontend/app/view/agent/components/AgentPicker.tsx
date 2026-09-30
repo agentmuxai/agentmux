@@ -45,8 +45,9 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
 import { getPlatform } from "@/util/platformutil";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
+import { checkProviderInstalled, invalidateInstallCheck } from "../install-check-cache";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { openOrFocusHistoryTab } from "../open-history-tab";
@@ -307,7 +308,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             return;
         }
         try {
-            const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
+            // One check per provider CLI, shared across agents and pickers.
+            const r = await checkProviderInstalled({
                 providerId: prov.id,
                 cliCommand: prov.cliCommand,
                 // Lets the same round-trip answer "which version", so the card
@@ -888,6 +890,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // (now fixed too), never a wrong CLI/credential outcome.
             const canonicalId = await resolveEffectiveLaunchProvider(agent);
             const canonical = getProvider(canonicalId)?.id ?? canonicalId;
+            // Other pickers must not keep serving the pre-install answer.
+            invalidateInstallCheck(canonical);
             setInstallState((s) => {
                 const next = { ...s };
                 for (const a of agents()) {
@@ -967,11 +971,18 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // (reagent P2 on #1011) — templates carry `hasCurrentSession={false}`
     // by invariant and my-agent rows source from `MyAgentsList` which
     // doesn't need per-row session probes.
+    //
+    // Tracks `agents()` only. It used to track `installState()` as well,
+    // and an agent's entry is only written once its check returns, so
+    // every returning check re-ran this and re-issued the check for every
+    // agent still pending: ~n²/2 calls, ~700 with ~37 agents
+    // (docs/analysis/ANALYSIS_NEW_WINDOW_TAB_LATENCY_2026_09_30.md).
+    const installCheckRequested = new Set<string>();
     createEffect(() => {
         for (const agent of agents()) {
-            if (!(agent.id in installState())) {
-                void checkInstalled(agent);
-            }
+            if (installCheckRequested.has(agent.id)) continue;
+            installCheckRequested.add(agent.id);
+            if (!(agent.id in untrack(installState))) void checkInstalled(agent);
         }
     });
 

@@ -202,6 +202,7 @@ vi.mock("./MyAgentsList", () => {
 });
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { invalidateInstallCheck } from "../install-check-cache";
 import { AgentPicker } from "./AgentPicker";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
@@ -259,6 +260,8 @@ beforeEach(async () => {
     modalLayerReplace.mockClear();
     modalLayerClose.mockClear();
     contextMenuShow.mockClear();
+    // The install-check cache is module-level; each test starts cold.
+    invalidateInstallCheck();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
     vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([claudeTemplate, userAgent]);
 });
@@ -615,6 +618,41 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
             await waitFor(() => expect(modalLayerOpen).toHaveBeenCalledTimes(3));
             expect(RpcApi.InstallCheckCommand).not.toHaveBeenCalled();
         });
+    });
+});
+
+// docs/analysis/ANALYSIS_NEW_WINDOW_TAB_LATENCY_2026_09_30.md: the mount-time
+// install check used to re-run for every still-pending agent each time one
+// answer came back, ~700 calls for ~37 agents on every new window tab.
+describe("AgentPicker — install check on mount", () => {
+    it("checks each agent once and each provider CLI once, whatever order the answers arrive in", async () => {
+        const agents = Array.from({ length: 40 }, (_, i) =>
+            baseDef({ id: `tpl-${i}`, slug: `t${i}`, name: `T${i}`, is_seeded: 1, memory_id: `mem-${i}` })
+        );
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue(agents);
+        // Every agent's bundle resolves to the npm-installable provider, one
+        // answer at a time, so the effect sees 40 separate state changes.
+        const pendingBundles: (() => void)[] = [];
+        vi.mocked(RpcApi.GetBundleCommand).mockImplementation(
+            () =>
+                new Promise((resolve) =>
+                    pendingBundles.push(() =>
+                        resolve({ provider: "codex" } as Awaited<ReturnType<typeof RpcApi.GetBundleCommand>>)
+                    )
+                )
+        );
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: true, version: null });
+
+        render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
+        await screen.findByTestId("agent-card-tpl-39");
+        await waitFor(() => expect(pendingBundles.length).toBeGreaterThan(0));
+        while (pendingBundles.length > 0) {
+            pendingBundles.shift()!();
+            await new Promise((r) => setTimeout(r, 0));
+        }
+
+        expect(RpcApi.GetBundleCommand).toHaveBeenCalledTimes(40);
+        expect(RpcApi.InstallCheckCommand).toHaveBeenCalledTimes(1);
     });
 });
 
