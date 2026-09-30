@@ -127,6 +127,27 @@ async function captureWindow(): Promise<string | null> {
     }
 }
 
+/**
+ * Whether `el` is actually drawn. Hidden window tabs and inactive pane tabs
+ * stay laid out (real client rects) and are hidden by `visibility: hidden`
+ * (workspace.tsx, pane-leaf-chrome.tsx), `content-visibility: hidden`
+ * (window:keepinactivetabslaidout=false) or opacity; checkVisibility()
+ * covers all of them. Without it, rects plus computed visibility.
+ */
+function isRendered(el: Element): boolean {
+    if (typeof el.checkVisibility === "function") {
+        return el.checkVisibility({
+            contentVisibilityAuto: true,
+            opacityProperty: true,
+            visibilityProperty: true,
+            // Pre-121 names for the same checks.
+            checkOpacity: true,
+            checkVisibilityCSS: true,
+        } as CheckVisibilityOptions);
+    }
+    return el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
+}
+
 /** The key a window tab's picture is held under (panes use their block id). */
 const windowTabKey = (tabId: string) => `window-tab:${tabId}`;
 
@@ -136,13 +157,8 @@ const windowTabKey = (tabId: string) => `window-tab:${tabId}`;
  */
 export function prewarmWindowTabSnapshot(tabId: string): void {
     // A native browser pane on screen would be a grey placeholder in the
-    // window's capture (see above): no picture beats a wrong one. Hidden
-    // window tabs (workspace.tsx) and inactive pane tabs (pane-leaf-chrome)
-    // stay laid out, so their rects are real; they are `visibility: hidden`,
-    // which the placeholder inherits.
-    const browserOnScreen = Array.from(document.querySelectorAll(".browser-placeholder")).some(
-        (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible"
-    );
+    // window's capture (see above): no picture beats a wrong one.
+    const browserOnScreen = Array.from(document.querySelectorAll(".browser-placeholder")).some(isRendered);
     if (browserOnScreen) {
         held = null;
         return;
