@@ -16,7 +16,7 @@ import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
 import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
-import { holdRevealGate, logUngatedReveal, scheduleRevealLift, tabWasShown } from "./tab-reveal";
+import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabWasShown } from "./tab-reveal";
 import { activeTabId, workspace } from "./window-identity";
 import { createEffect, createRoot, createSignal } from "solid-js";
 
@@ -101,6 +101,13 @@ export function createTab() {
             // it via the tab bar whenever they actually want it, same as
             // any other background tab.
             if (activeTabId() === startingActiveTabId) {
+                // Built while hidden, and kept laid out: the same state as a
+                // tab already shown, so it takes the same one-frame switch —
+                // no reveal gate, no cross-fade, no wait for the round trip
+                // (docs/analysis/ANALYSIS_NEW_WINDOW_TAB_LATENCY_2026_09_30.md
+                // §3.2). With the setting off it's content-visibility: hidden
+                // and not laid out, so its first reveal stays gated.
+                if (keepInactiveTabsLaidOut()) markTabShown(tabId);
                 await setActiveTab(tabId);
             }
         } catch (e) {
