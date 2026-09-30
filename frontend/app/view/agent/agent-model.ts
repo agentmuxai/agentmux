@@ -24,10 +24,11 @@ import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
+import { buildLaunchCmdArgs } from "./launch-runtime-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
-import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
+import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "./launch-args";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 
@@ -514,10 +515,15 @@ export class AgentViewModel {
         // that rule, in the path the UI actually launches through.
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
         const isPersistent = isPersistentLaunch(provider, agentMode);
-        const cliArgs = selectLaunchArgs(provider, agentMode);
-        if (agent.provider_flags) {
-            cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
-        }
+        // The selected model / effort / permission mode, seeded here (not where
+        // it is persisted below) because `cmd:args` must already carry it: a
+        // CONTINUATION spawns its persistent CLI at launch, before any send can
+        // rebuild the args, and a spawn without `--model`/`--effort` runs on the
+        // CLI's own defaults while the strip shows this selection
+        // (docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
+        // See resolveInitialRuntimeConfig's own doc comment for why this key is
+        // seeded at launch at all.
+        const runtimeConfig = resolveInitialRuntimeConfig(overrides?.model, provider.models);
         // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
         // comment, and fork-session-args.ts's doc comment for the two real
         // bugs (reagent + Codex, PR #2725) this resolution now guards
@@ -526,9 +532,16 @@ export class AgentViewModel {
         // §6.4's empirical gate) — every other provider falls back to a
         // true fresh start (no session id at all, not a plain resume).
         const forkSessionArgs = resolveForkSessionArgs(overrides, provider.id);
-        if (forkSessionArgs.appendForkFlag) {
-            cliArgs.push("--fork-session");
-        }
+        // Base args + runtime flags + the agent's provider_flags, then the
+        // one-shot --fork-session — the same composition the per-send rebuild
+        // uses, so launch and first send cannot disagree (launch-runtime-args.ts).
+        const cliArgs = buildLaunchCmdArgs({
+            provider,
+            agentMode,
+            runtime: runtimeConfig,
+            providerFlags: agent.provider_flags,
+            appendForkFlag: forkSessionArgs.appendForkFlag,
+        });
 
         // Build env vars from provider unsetEnv + agent env content + per-agent isolation
         const envVars: Record<string, string> = {};
@@ -787,11 +800,8 @@ export class AgentViewModel {
                     parent_instance_id: overrides?.continueOfInstanceId,
                 });
 
-            // Seed the initial runtime config (permission mode / model /
-            // effort — see resolveInitialRuntimeConfig's own doc comment
-            // for why launchAgentDefinition never set this key at all
-            // before now).
-            const runtimeConfig = resolveInitialRuntimeConfig(overrides?.model, provider.models);
+            // `runtimeConfig` (permission mode / model / effort) was seeded above,
+            // where `cmd:args` is built; it is persisted below as `agent:runtime`.
             const meta: Record<string, unknown> = {
                 agentId: agent.id,
                 agentProvider: effectiveProvider,
