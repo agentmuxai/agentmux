@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { tabContainerVisibility } from "./window-tab-visibility";
+import { resolveDisplayedTabId, tabContainerVisibility } from "./window-tab-visibility";
 
 describe("tabContainerVisibility", () => {
     it("by default skips an inactive tab's layout with content-visibility", () => {
@@ -44,5 +44,38 @@ describe("tabContainerVisibility", () => {
             expect(v.visibility).toBe("hidden");
             expect(v.hiddenLaidOut).toBe(false);
         }
+    });
+});
+
+// ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.2: a warm destination
+// shows from the switch intent, before the round trip; anything else waits.
+describe("resolveDisplayedTabId", () => {
+    const base = {
+        committed: "a",
+        intent: "b" as string | null,
+        tabIds: ["a", "b", "c"],
+        keepLaidOut: true,
+        wasShown: (id: string) => id !== "c",
+    };
+
+    it("shows a warm destination before the backend commits it", () => {
+        expect(resolveDisplayedTabId(base)).toBe("b");
+    });
+
+    it("waits for the backend with no switch in flight, or once it has caught up", () => {
+        expect(resolveDisplayedTabId({ ...base, intent: null })).toBe("a");
+        expect(resolveDisplayedTabId({ ...base, committed: "b" })).toBe("b");
+    });
+
+    it("waits for a tab not shown yet: its first reveal stays gated", () => {
+        expect(resolveDisplayedTabId({ ...base, intent: "c" })).toBe("a");
+    });
+
+    it("waits with the setting off: hidden tabs are not kept laid out", () => {
+        expect(resolveDisplayedTabId({ ...base, keepLaidOut: false })).toBe("a");
+    });
+
+    it("ignores an intent for a tab this window no longer has", () => {
+        expect(resolveDisplayedTabId({ ...base, intent: "gone", wasShown: () => true })).toBe("a");
     });
 });

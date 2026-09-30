@@ -13,6 +13,7 @@ import { atoms } from "@/store/global";
 import {
     WindowTabDisplayedProvider,
     keepInactiveTabsLaidOut,
+    resolveDisplayedTabId,
     tabContainerVisibility,
 } from "./window-tab-visibility";
 import {
@@ -24,6 +25,7 @@ import {
     tabSwitching,
     tabWasShown,
 } from "@/store/tab-reveal";
+import { switchIntentTabId } from "@/store/tab-actions";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -84,8 +86,21 @@ function WorkspaceElem(): JSX.Element {
     // nothing else decided to gate (e.g. backend-driven switches that
     // bypass setActiveTab entirely, per that file's own comment).
     const [displayTabId, setDisplayTabId] = createSignal(tabId());
+    // A warm destination (already shown, kept laid out) is shown from the
+    // switch intent, before the SetActiveTab round trip, so it swaps in the
+    // same frame as the optimistic pill — as a pane tab does
+    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.2).
+    // Anything else waits for the committed `tabId()`, as before.
+    const targetTabId = (): string =>
+        resolveDisplayedTabId({
+            committed: tabId(),
+            intent: switchIntentTabId(),
+            tabIds: [...(ws()?.pinnedtabids ?? []), ...(ws()?.tabids ?? [])],
+            keepLaidOut: keepInactiveTabsLaidOut(),
+            wasShown: tabWasShown,
+        });
     createEffect(() => {
-        const next = tabId();
+        const next = targetTabId();
         if (next === displayTabId()) return;
         const apply = () => {
             setDisplayTabId(next);
