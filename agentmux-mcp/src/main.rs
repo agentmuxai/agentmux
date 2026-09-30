@@ -4133,11 +4133,37 @@ mod tests {
         // — cargo runs tests in parallel by default, so this isn't optional).
         let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/custom-agentmux-home") };
-        let dir = capture_window_dir();
+        let dir = capture_window_dir().unwrap();
         unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
         assert_eq!(
             dir,
             std::path::PathBuf::from("/tmp/custom-agentmux-home/tmp/capture-window")
+        );
+    }
+
+    /// The capture dir comes from the one AgentMux root resolver
+    /// (`agentmux_common::data_paths::agentmux_root`), so it honours
+    /// `AGENTMUX_HOME_OVERRIDE` ahead of `AGENTMUX_DATA_HOME`, exactly like
+    /// srv. This module's earlier private copy read only `AGENTMUX_DATA_HOME`
+    /// and fell back to `/` with no home dir, the behaviour #3372 removed from
+    /// srv (docs/specs/SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §5.1 #5).
+    #[test]
+    fn capture_window_dir_uses_the_shared_root_resolver() {
+        // SAFETY: test-only; DATA_HOME_ENV_LOCK serializes every test that
+        // touches either root env var (see the lock's doc comment).
+        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/override-root");
+            std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/data-home-root");
+        }
+        let dir = capture_window_dir();
+        unsafe {
+            std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+            std::env::remove_var("AGENTMUX_DATA_HOME");
+        }
+        assert_eq!(
+            dir.unwrap(),
+            std::path::PathBuf::from("/tmp/override-root/tmp/capture-window")
         );
     }
 

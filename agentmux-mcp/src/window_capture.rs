@@ -21,26 +21,18 @@ use serde_json::{json, Value};
 
 use crate::agent_slug;
 
-/// Where `CaptureWindow` writes its PNGs. Mirrors `agentmux-srv`'s own
-/// `get_mux_data_dir()` (`AGENTMUX_DATA_HOME` env var, else `~/.agentmux`)
-/// rather than the shared OS temp dir — reagent P2 on this tool's own PR
-/// (#2709 round 1): `std::env::temp_dir()` is world-readable on a
-/// multi-user host, and CaptureWindow can capture arbitrary OS windows
-/// (not just AgentMux's own pane), so a captured image could leak to other
-/// local users. `agentmux-mcp` can't import `agentmux-srv`'s function
-/// directly (separate crate/process), so this replicates its exact logic
-/// instead of inventing a new convention.
-pub(crate) fn capture_window_dir() -> std::path::PathBuf {
-    let base = std::env::var("AGENTMUX_DATA_HOME")
-        .ok()
-        .filter(|d| !d.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("/"))
-                .join(".agentmux")
-        });
-    base.join("tmp/capture-window")
+/// Where `CaptureWindow` writes its PNGs: `<AgentMux root>/tmp/capture-window`,
+/// not the shared OS temp dir — reagent P2 on this tool's own PR (#2709
+/// round 1): `std::env::temp_dir()` is world-readable on a multi-user host,
+/// and CaptureWindow can capture arbitrary OS windows (not just AgentMux's own
+/// pane), so a captured image could leak to other local users.
+///
+/// The root comes from `agentmux_common::data_paths::agentmux_root()`, the one
+/// resolver srv uses too (#3372). This used to be a private copy that read only
+/// `AGENTMUX_DATA_HOME` and fell back to `/` with no home dir; it now honours
+/// `AGENTMUX_HOME_OVERRIDE` first and errors instead.
+pub(crate) fn capture_window_dir() -> Result<std::path::PathBuf, String> {
+    Ok(agentmux_common::data_paths::agentmux_root()?.join("tmp/capture-window"))
 }
 
 pub(crate) const CAPTURE_RETENTION: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -611,7 +603,8 @@ pub(crate) fn capture_window_impl(
         attempts += 1;
     }
 
-    let dir = capture_window_dir();
+    let dir = capture_window_dir()
+        .map_err(|e| anyhow::anyhow!("cannot resolve the AgentMux root for captures: {e}"))?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| anyhow::anyhow!("failed to create capture dir {}: {e}", dir.display()))?;
     let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
@@ -807,7 +800,9 @@ pub(crate) fn audit_log_discover_windows(include_self: bool, include_foreign: bo
 /// PNG-only extension filter already leaves a `.log` file in that same
 /// directory untouched, so this doesn't need (or want) its own directory.
 pub(crate) fn append_window_audit_log_entry(entry: &Value) {
-    let dir = capture_window_dir();
+    let Ok(dir) = capture_window_dir() else {
+        return;
+    };
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
