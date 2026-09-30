@@ -22,7 +22,7 @@
  * so no flicker).
  */
 
-import { getApi } from "@/app/store/global";
+import { getApi, MOS } from "@/app/store/global";
 import { Logger } from "@/util/logger";
 
 /** A picture older than this is stale: the pane may have changed since. */
@@ -107,7 +107,10 @@ export function prewarmTearOffSnapshot(blockId: string): void {
         return;
     }
     const r = el.getBoundingClientRect();
-    const capture = el.querySelector(".browser-placeholder")
+    // The block's own view, not the DOM: a pane keeps its inactive tabs
+    // mounted, so a background browser tab would match a DOM query.
+    const isBrowser = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.view === "browser";
+    const capture = isBrowser
         ? getApi()
               .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
               .then((shot) => shot?.png_base64 || null)
