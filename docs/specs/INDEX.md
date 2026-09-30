@@ -612,6 +612,7 @@ partial list.
 | [`SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12`](SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md) | SPEC — Balanced PR and nightly test lanes |
 | [`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18`](SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md) | SPEC: Port `CLAUDE.md` content to durable homes before deleting it |
 | [`SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12`](SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md) | Codex App Server as a First-Class AgentMux Provider |
+| [`SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30`](SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md) | SPEC: Code comment density and condensing |
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
