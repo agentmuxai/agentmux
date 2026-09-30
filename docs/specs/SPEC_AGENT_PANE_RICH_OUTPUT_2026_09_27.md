@@ -1,7 +1,7 @@
 # Spec: Rich output in the agent pane (semantic colour, callouts, inline images and video)
 
 **Date:** 2026-09-27
-**Status:** active — P1 (semantic colour, §2 and §6) implemented in #3978; P2 (callouts, §3) in #4036; P3 (inline images, §4) in #4064; P4 (video and audio, §5) frontend implemented, srv `Range` + Operator Config entry pending the crates-move merge freeze
+**Status:** implemented — P1 (semantic colour, §2 and §6) in #3978; P2 (callouts, §3) in #4036; P3 (inline images, §4) in #4064; P4 (video and audio, §5) frontend in #4073, srv `Range` + Operator Config entry in the follow-up
 **Author:** agent1
 **Scope:**
 - `frontend/app/element/markdown*.ts(x)` (the shared renderer)
@@ -328,11 +328,14 @@ under `agentmux-*/`:
   200 MB cap. The 16:9 stage never changes height. A srv that ignores `Range`
   answers `200`: the body is cancelled unread and the video shows its name and
   size instead of a poster, which is today's behaviour until the srv half lands.
-- **After the freeze.** `handle_stream_local_file` honours a single `Range`
-  (`206`/`416`, `Accept-Ranges`), and the Operator Config entry gains the
-  video/audio section (manifest v5). Agents aren't told about the syntax until
-  then, per §6 ("not before it renders" is satisfied either way; this only
-  delays telling them).
+- **srv (the follow-up, after the freeze).** `handle_stream_local_file`
+  honours a single `Range` (`206`/`416`, `Accept-Ranges`; `parse_byte_range`
+  ignores anything but one `bytes=` range, as RFC 9110 §14.2 allows). CORS:
+  `Range` is an allowed request header (the request also carries X-AuthKey,
+  so it's preflighted; without this the browser refuses it), and
+  `Content-Range` is exposed so the frontend can read the total size (Codex P2
+  on #4073). The Operator Config entry gains the video/audio section
+  (manifest v5).
 
 ## 6. Telling agents: an Operator Config entry
 
