@@ -79,6 +79,10 @@ pub(crate) struct EntrySize {
     pub path: Option<String>,
     /// `full`, `partial` or `omitted` (§3.4 step 3).
     pub delivered: &'static str,
+    /// The whole entry's size, whatever was delivered: what the Personal
+    /// Memory size band measures, so a cut delivery still warns.
+    pub source_size_bytes: usize,
+    pub source_tokens: usize,
 }
 
 /// How long a claim on one event (a session start, a compaction) holds: the
@@ -416,6 +420,8 @@ fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, deliv
             let delivered = memory_delivery::Delivered::of(span, delivered_chars);
             let slice: String = chars[span.start..span.end.min(delivered_chars).max(span.start)].iter().collect();
             let (size_bytes, tokens) = (slice.len(), slice.chars().count().div_ceil(4));
+            let whole: String = chars[span.start..span.end].iter().collect();
+            let (source_size_bytes, source_tokens) = (whole.len(), (span.end - span.start).div_ceil(4));
             match span.entry.map(|i| &entries[i]) {
                 Some(e) => EntrySize {
                     label: e.label.clone(),
@@ -431,6 +437,8 @@ fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, deliv
                     bundle_id: e.bundle_id.clone(),
                     path: e.path.clone(),
                     delivered: delivered.as_str(),
+                    source_size_bytes,
+                    source_tokens,
                 },
                 None => EntrySize {
                     label: "Running summary".into(),
@@ -443,6 +451,8 @@ fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, deliv
                     bundle_id: None,
                     path: None,
                     delivered: delivered.as_str(),
+                    source_size_bytes,
+                    source_tokens,
                 },
             }
         })
@@ -503,6 +513,8 @@ mod tests {
                 bundle_id: None,
                 path: None,
                 delivered: "full",
+                source_size_bytes: 5,
+                source_tokens: 2,
             }],
             summary_bytes: 0,
             acked: vec![false; parts],
@@ -653,6 +665,9 @@ mod tests {
         assert_eq!(items[0].bundle_id.as_deref(), Some("id-sys-api"));
         assert_eq!((items[1].tier, items[1].delivered, items[1].size_bytes), (Some("workspace"), "partial", 40));
         assert_eq!((items[2].kind, items[2].delivered, items[2].size_bytes), ("personal_memory", "omitted", 0));
+        // The whole entry's size survives the cut, for the size band.
+        assert_eq!((items[2].source_size_bytes, items[2].source_tokens), (100, 25));
+        assert_eq!((items[1].source_size_bytes, items[1].size_bytes), (100, 40));
         assert_eq!(items[2].path.as_deref(), Some("/mem/notes.md"));
         assert_eq!((items[3].kind, items[3].source, items[3].delivered), ("running_summary", "summary", "omitted"));
     }

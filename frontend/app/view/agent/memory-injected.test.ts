@@ -104,6 +104,20 @@ describe("buildMemoryInjectedNode", () => {
         expect(buildMemoryInjectedNode(big, { contextWindow: 200_000, now: 0 })!.sizeBand).not.toBe("low");
     });
 
+    it("bands on the whole of Personal Memory, even when the delivery cut it", () => {
+        // An omitted file reports 0 delivered tokens; its source size still counts.
+        const cut = {
+            ...frame,
+            entries: [
+                { label: "huge.md", source: "personal", kind: "personal_memory", name: "huge.md", delivered: "omitted", size_bytes: 0, tokens: 0, source_size_bytes: 400_000, source_tokens: 100_000 },
+            ],
+        };
+        const node = buildMemoryInjectedNode(cut, { contextWindow: 200_000, now: 0 })!;
+        expect(node.items[0].tokens).toBe(0);
+        expect(node.items[0].sourceTokens).toBe(100_000);
+        expect(node.sizeBand).not.toBe("low");
+    });
+
     it("tolerates a frame with missing or malformed fields", () => {
         const node = buildMemoryInjectedNode({ type: "system", subtype: "agentmux_memory_injected", entries: [null, 7] }, { now: 42 })!;
         expect(node.items).toEqual([]);

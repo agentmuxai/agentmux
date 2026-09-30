@@ -522,6 +522,8 @@ export interface ContextItem {
     delivered?: "full" | "partial" | "omitted";
     /** Of what was delivered: a partial item's slice, 0 when omitted. */
     sizeBytes: number;
+    /** The whole entry's estimated tokens, whatever was delivered (memory items). */
+    sourceTokens?: number;
     /** Estimated — labelled "(est.)" wherever shown. */
     tokens: number;
     /** ≤160 chars, shown while the card is collapsed. */
