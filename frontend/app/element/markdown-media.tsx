@@ -316,8 +316,16 @@ function LocalAV(props: { path: string; src: string; kind: "video" | "audio" }):
         for (const url of urls) URL.revokeObjectURL(url);
     });
 
-    const onMediaError = (e: Event & { currentTarget: HTMLMediaElement }) =>
-        setState({ kind: "error", message: describeMediaError(e.currentTarget) });
+    const onMediaError = (e: Event & { currentTarget: HTMLMediaElement }) => {
+        const message = describeMediaError(e.currentTarget);
+        // Free the played file (up to 200 MB) now, not when the row unmounts.
+        const s = state();
+        if (s.kind === "playing") {
+            URL.revokeObjectURL(s.url);
+            urls.splice(urls.indexOf(s.url), 1);
+        }
+        setState({ kind: "error", message });
+    };
     const total = () => {
         const s = state();
         return s.kind === "ready" || s.kind === "loading" ? s.total : 0;
