@@ -153,14 +153,6 @@ import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "./open-trace";
 
-// Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
-// pattern). Used by sanitizeLogTextForTerminal below to strip escape sequences
-// out of arbitrary text (e.g. a bang command's subprocess stdout/stderr) before
-// it's wrapped in formatLogLine's own SGR color codes and written into the live
-// shell Terminal — otherwise embedded sequences in that text could move the
-// cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
-// rendered state (this text is not our own trusted output; it's shell-command
-// output the user chose to run).
 // Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
 // the AgentPicker->AgentPresentationView cross-fade (AgentBlockContent,
 // below) reuses the same visual timing so the two fades feel like one brand
@@ -172,6 +164,14 @@ const PICKER_FADE_OUT_MS = 200;
 // own for every `!cmd`, so it should take less of the transcript by default.
 const SHELL_DRAWER_DEFAULT_HEIGHT = 176;
 
+// Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
+// pattern). Used by sanitizeLogTextForTerminal below to strip escape sequences
+// out of arbitrary text (e.g. a bang command's subprocess stdout/stderr) before
+// it's wrapped in formatLogLine's own SGR color codes and written into the live
+// shell Terminal — otherwise embedded sequences in that text could move the
+// cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
+// rendered state (this text is not our own trusted output; it's shell-command
+// output the user chose to run).
 const ANSI_SEQUENCE_RE = new RegExp(
     "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
         "[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|" +
