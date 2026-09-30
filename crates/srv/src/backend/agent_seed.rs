@@ -7,7 +7,6 @@
 //! user-configurable via the Agent settings UI after seeding.
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
@@ -147,10 +146,7 @@ pub fn seed_agents(mstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
     let existing_ids: std::collections::HashSet<String> =
         existing.iter().map(|a| a.id.clone()).collect();
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now = agentmux_common::time::now_ms();
 
     let mut created = 0usize;
     let mut skipped = 0usize;
@@ -252,10 +248,7 @@ fn seed_memories(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
     let existing_ids: std::collections::HashSet<String> =
         existing.iter().map(|m| m.id.clone()).collect();
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now = agentmux_common::time::now_ms();
 
     let mut created = 0usize;
     for (idx, mem_def) in manifest.memories.iter().enumerate() {
@@ -404,10 +397,7 @@ fn reseed_if_needed(
         return Ok(None);
     }
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now = agentmux_common::time::now_ms();
 
     let mut created = 0usize;
     let mut updated = 0usize;

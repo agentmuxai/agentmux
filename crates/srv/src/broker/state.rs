@@ -20,7 +20,6 @@
 //! filter regex (`\bauth\.\w+|...`) with zero changes needed there.
 
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// After this many consecutive TRANSIENT refresh failures, a credential is
 /// considered permanently broken rather than retried forever — the sweep
@@ -143,10 +142,7 @@ pub enum Event {
 }
 
 fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    agentmux_common::time::now_secs_u64()
 }
 
 /// `states` is the orchestrator's whole coordination table; `generations`

@@ -204,11 +204,7 @@ fn sha256_hex(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64)
-}
+use agentmux_common::time::now_ms;
 
 /// Agents with an update running. One at a time per agent: a turn that ends
 /// mid-update is picked up by the next turn's check, not by a second call.

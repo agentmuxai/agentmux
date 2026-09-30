@@ -314,10 +314,7 @@ async fn forward_inject_to_peer(
 const JEKT_SIG_MAX_AGE_SECS: i64 = 300;
 
 fn now_unix_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    agentmux_common::time::now_secs()
 }
 
 /// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md

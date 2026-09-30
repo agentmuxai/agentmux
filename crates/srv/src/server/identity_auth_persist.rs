@@ -9,7 +9,6 @@
 //! (`spawn_auth_cli` + `spawn_auth_cli_pty`, two call sites each).
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 use crate::backend::mps::Broker;
@@ -53,10 +52,7 @@ fn persist_oauth_direct_account(
             return None;
         }
     };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now = agentmux_common::time::now_ms();
     let account = IdentityAccount {
         id: account_id.to_string(),
         name: format!("{provider_id}-oauth"),

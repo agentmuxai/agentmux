@@ -784,10 +784,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let scratch_dir = home.join(".agentmux").join("cache").join("scratch");
                 std::fs::create_dir_all(&scratch_dir)
                     .map_err(|e| format!("createscratchfile: create dir: {e}"))?;
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
+                let now_ms = agentmux_common::time::now_ms_u64();
                 const THIRTY_DAYS_MS: u64 = 30 * 24 * 60 * 60 * 1000;
                 let session_token = scratch_session_token();
 

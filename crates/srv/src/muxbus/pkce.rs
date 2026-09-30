@@ -303,10 +303,7 @@ async fn run_pkce_login_inner(
         .to_string();
     let id_token = token_json["id_token"].as_str().unwrap_or("").to_string();
     let expires_in = token_json["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64)
+    let expires_at = (agentmux_common::time::now_secs())
         + expires_in;
 
     // 9. Extract email + sub from id_token payload (no re-verification needed)
@@ -390,10 +387,7 @@ pub async fn refresh_token(
 
     let access_token = json["access_token"].as_str().unwrap_or("").to_string();
     let expires_in = json["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64)
+    let expires_at = (agentmux_common::time::now_secs())
         + expires_in;
     // Cognito doesn't rotate refresh_token on refresh — keep existing
     let new_id_token = json["id_token"]

@@ -1181,10 +1181,7 @@ impl Store {
     /// `agent.updated_at`, so the caller's struct (e.g. an RPC response body)
     /// reflects exactly what landed in the database.
     pub fn agent_def_update(&self, agent: &mut AgentDefinition) -> Result<bool, StoreError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
+        let now = agentmux_common::time::now_ms();
         let rows = {
             let conn = self.conn.lock().unwrap();
             conn.execute(

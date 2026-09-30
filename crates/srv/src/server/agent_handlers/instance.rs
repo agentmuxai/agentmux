@@ -3,7 +3,6 @@
 
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
@@ -72,10 +71,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 let inst = AgentInstance {
                     id: uuid::Uuid::new_v4().to_string(),
                     definition_id: cmd.definition_id,

@@ -3,7 +3,6 @@
 
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
@@ -83,10 +82,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
                 }
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 if memory.created_at == 0 {
                     memory.created_at = now;
                 }
@@ -206,10 +202,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
                 }
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now = agentmux_common::time::now_ms();
                 if memory.created_at == 0 {
                     memory.created_at = now;
                 }
@@ -625,7 +618,7 @@ mod delete_memory_tests {
     use crate::server::tests::test_state;
 
     fn seed_memory(state: &AppState, id: &str, is_system: bool) {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let now = agentmux_common::time::now_ms();
         let memory = Bundle {
             id: id.to_string(),
             name: "Test Bundle".to_string(),

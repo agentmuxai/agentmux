@@ -12,7 +12,7 @@
 //! Both limits default to 0 (disabled) so the watchdog is opt-in.
 
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::time::interval;
 
 use crate::backend::wconfig::ConfigState;
@@ -35,10 +35,7 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>) {
             continue;
         }
 
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+        let now_ms = agentmux_common::time::now_ms();
 
         for (block_id, ctrl) in get_all_controllers() {
             let status = ctrl.get_runtime_status();

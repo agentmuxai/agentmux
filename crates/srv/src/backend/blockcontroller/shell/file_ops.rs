@@ -13,10 +13,7 @@ use crate::backend::mps;
 /// Current unix time in ms, or 0 if the clock is before the epoch (never in
 /// practice; 0 reads as "unknown" on the consumer side, same as no stamp).
 fn unix_ms_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms()
 }
 
 /// Append one receive-time record to a zone's `output.tsidx` sidecar:

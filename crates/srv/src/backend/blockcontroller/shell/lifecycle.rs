@@ -9,7 +9,7 @@
 use std::io::Read as _;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 #[cfg(unix)]
 use libc;
@@ -853,10 +853,7 @@ impl Controller for ShellController {
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
 
         // Register PID and record spawn metadata.
-        let spawn_ts_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+        let spawn_ts_ms = agentmux_common::time::now_ms();
         {
             let mut inner = self.inner.lock().unwrap();
             if let Some(pid) = child.process_id() {

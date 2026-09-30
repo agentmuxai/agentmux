@@ -19,7 +19,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::providers::resolve_provider_alias;
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
@@ -893,10 +892,7 @@ pub fn inject_identity_env_with_broker(
                 // per-binding "log + skip" pattern). The probe runs at
                 // every spawn but is a single `fs::read_to_string` +
                 // JSON parse — negligible overhead.
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now_ms = agentmux_common::time::now_ms();
                 // Canonicalized (codex P2 on PR #2377): probe_oauth_status
                 // only recognizes the canonical "claude"/"codex"/"openclaw"
                 // strings — passing a raw alias like "claude-code" always
@@ -3105,10 +3101,7 @@ mod tests {
         store.agent_def_insert(&mut def).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
+        let now_ms = agentmux_common::time::now_ms();
         write_claude_creds(tmp.path(), now_ms + 3_600_000, true);
 
         let claude = IdentityAccount {

@@ -39,10 +39,7 @@ impl Store {
         agent_id: &str,
         entry: &str,
     ) -> Result<AgentHistory, StoreError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
+        let now = agentmux_common::time::now_ms();
         // session_date as YYYY-MM-DD
         let secs = (now / 1000) as u64;
         let days = secs / 86400;

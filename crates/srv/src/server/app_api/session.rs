@@ -552,10 +552,7 @@ pub(crate) async fn generate_definition_activity_summary(
         return None;
     }
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now = agentmux_common::time::now_ms();
     match mstore.agent_activity_summary_set(definition_id, &summary, now) {
         Ok(()) => {
             broker.publish(crate::backend::mps::MuxEvent {

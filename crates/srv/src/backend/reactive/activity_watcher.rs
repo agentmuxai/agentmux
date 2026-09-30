@@ -30,7 +30,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use tokio::sync::Semaphore;
 use tokio::time::interval;
@@ -147,10 +147,7 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                 };
                 last_seen_size.lock().unwrap().insert(block_id.clone(), current_size);
 
-                let ts = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
+                let ts = agentmux_common::time::now_ms_u64();
 
                 broker.publish(MuxEvent {
                     event: EVENT_AGENT_SUMMARY.to_string(),
