@@ -30,8 +30,9 @@
 //     instead keeps one ISSUE COMMENT per PR, edited in place for each head
 //     it skips, carrying `<!-- reagent:codex-skipped reason=quota
 //     head=<sha> -->`. From reagentx-workflow[bot] only (anyone can type the
-//     marker), it counts as a quota answer for that head, dated by the
-//     comment's last edit.
+//     marker), it counts as a quota answer for that head, but only when
+//     Codex itself has said nothing about the head: ReAgent may write it
+//     before reading Codex's answers. It is never carried to a later head.
 //
 // Codex only reviews when asked by a5af, not a bot. ReAgent decides when
 // to ask (a5af/reagent lambdas/codex_policy.py): after it approves a head,
@@ -155,9 +156,21 @@ function isDocsOnlyFindings(o) {
 }
 
 /**
- * Every Codex verdict that names a commit, plus ReAgent's quota skips (as
- * `quota`), oldest first. Findings carry `files`, the paths of their inline
- * comments (empty when `reviewComments` has none for them).
+ * ReAgent's quota skips, as `quota` outputs, oldest first. ReAgent edits one
+ * comment in place per outage, so its last edit dates the skip of the head
+ * it now names. Not Codex verdicts: see evaluateCodexGate for precedence.
+ */
+function reagentSkips(comments = []) {
+    return comments
+        .filter((c) => skippedHead(c))
+        .map((c) => ({ kind: "quota", at: c.updated_at ?? c.created_at, sha: skippedHead(c) }))
+        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
+/**
+ * Every Codex verdict that names a commit, oldest first. Findings carry
+ * `files`, the paths of their inline comments (empty when `reviewComments`
+ * has none for them).
  */
 function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
     const quotaHeads = quotaAttribution({ comments, reviews });
@@ -174,11 +187,6 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
                           sha: reviewedCommit(c.body),
                       },
             ),
-        // ReAgent edits one comment in place per outage, so its last edit
-        // dates the skip of the head it now names.
-        ...comments
-            .filter((c) => skippedHead(c))
-            .map((c) => ({ kind: "quota", at: c.updated_at ?? c.created_at, sha: skippedHead(c) })),
         // A dismissed findings review no longer counts against a commit. It
         // does not count for it either: only a Codex OK passes.
         ...reviews
@@ -203,16 +211,20 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
  * Decide the status for `headSha` from the PR's issue comments, reviews and
  * review comments (GitHub REST shapes). The latest Codex output naming this
  * head wins, so a spontaneous findings review after an OK takes the OK back.
+ * A ReAgent quota skip counts only when Codex has said nothing about the
+ * head: ReAgent can post or edit it before reading Codex's answers, so its
+ * date can trail a real verdict it must not override.
  *
- * With nothing on the head, Codex's latest verdict carries over when it is
- * an OK or findings only on docs, and `filesSinceLatest` (the diff from its
- * commit to the head, null if unknown) is docs-only.
+ * With nothing on the head, Codex's latest verdict (never a skip) carries
+ * over when it is an OK or findings only on docs, and `filesSinceLatest`
+ * (the diff from its commit to the head, null if unknown) is docs-only.
  */
 export function evaluateCodexGate({ headSha, comments = [], reviews = [], reviewComments = [], filesSinceLatest = null }) {
     const head = headSha.toLowerCase();
     const short = head.slice(0, 10);
     const all = codexOutputs({ comments, reviews, reviewComments });
-    const onHead = all.filter((o) => head.startsWith(o.sha)).at(-1);
+    const namesHead = (o) => head.startsWith(o.sha);
+    const onHead = all.filter(namesHead).at(-1) ?? reagentSkips(comments).filter(namesHead).at(-1);
 
     if (onHead?.kind === "ok") {
         return { state: "success", description: `Codex found no major issues in ${short}` };
