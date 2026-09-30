@@ -1,7 +1,7 @@
 # Opening a new window tab: where the ~650 ms goes
 
 **Date:** 2026-09-30
-**Status:** analysis. Findings are in §2 and recommendations in §3. Recommendation 1 (the install-check storm) is implemented in the PR that adds this doc; 2 and 3 are not yet.
+**Status:** analysis. Findings are in §2 and recommendations in §3. Recommendation 1 (the install-check storm) is implemented in #4106; 2 and 3 are not yet.
 **Author:** korp
 **Trigger:** Repo owner, 2026-09-30: *"opening a new tab is still quite slow ... any ideas regarding how we can make that faster?"*
 **Related:** `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` (switching between existing window tabs, same method), `SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md` (why `createTab` builds the tab inactive and activates it afterwards), `SPEC_TAB_CONTENT_REVEAL_GATE.md`.
