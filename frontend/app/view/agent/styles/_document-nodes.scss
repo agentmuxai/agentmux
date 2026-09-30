@@ -1194,6 +1194,45 @@ $transcript-preview-max-height: calc(50vh / 3);
             }
         }
 
+        // A card with nothing to open has no chevron; keep its title aligned
+        // with the ones that do.
+        &.no-body .agent-context-delivery-summary {
+            padding-left: var(--space-4);
+        }
+
+        // Memory items, one row each, under the title (always shown).
+        .agent-context-delivery-rows {
+            flex-basis: 100%;
+            padding-left: var(--space-4);
+        }
+
+        .agent-context-delivery-item-chip {
+            font-size: 11px;
+            padding: 0 var(--space-1);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+
+        // An item the part cap cut: say so, and dim what never went out.
+        .agent-context-delivery-item-cut {
+            font-size: 11px;
+            color: var(--warning-color);
+            white-space: nowrap;
+        }
+
+        .delivered-omitted .agent-context-delivery-item-name {
+            opacity: 0.6;
+            text-decoration: line-through;
+        }
+
+        .agent-context-delivery-advice {
+            flex-basis: 100%;
+            padding: var(--space-1) 0 0 var(--space-4);
+            font-size: 12px;
+            color: var(--warning-color);
+        }
+
         .agent-context-delivery-content {
             padding: 0 var(--space-1) var(--space-1) var(--space-4);
             cursor: default;

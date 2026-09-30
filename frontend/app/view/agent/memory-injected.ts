@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The notice for memory delivered through Claude Code's `SessionStart` hook
+ * The card for memory delivered through Claude Code's `SessionStart` hook
  * (docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2). The sidecar
  * writes one persisted `agentmux_memory_injected` frame into the pane's
  * output once every part of a delivery reached the CLI
- * (`server/memory_delivery_handlers.rs`); it names each entry and its size
- * (owner decision D11). The model already has the content — the frame is
- * only the label, rendered as the same `MemoryReinjectionNode` the hidden
- * reinjection produces.
+ * (`server/memory_delivery_handlers.rs`). The model already has the content;
+ * the frame says what it was given, one item per entry, and this turns it
+ * into a context delivery card with a row per item
+ * (docs/specs/SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.4, CD2a).
+ *
+ * Frames written before CD2a carry only `label` and `source`; their names and
+ * tiers are recovered from the label (spec §4).
  *
  * Shared by the live stream (`useAgentStream.ts`) and history replay
  * (`parseHistoryLines.ts`): the node id is the frame's own `id`, stable for
@@ -17,56 +20,95 @@
  */
 
 import { FALLBACK_CONTEXT_WINDOW, memorySizeBand } from "./memory-reinjection";
-import type { MemoryReinjectionNode } from "./types";
+import type { ContextDeliveryNode, ContextItem } from "./types";
 
 export const MEMORY_INJECTED_SUBTYPE = "agentmux_memory_injected";
 
+type RawFrame = Record<string, unknown>;
+
 export function isMemoryInjectedFrame(rawEvent: unknown): boolean {
     if (!rawEvent || typeof rawEvent !== "object") return false;
-    const e = rawEvent as Record<string, unknown>;
+    const e = rawEvent as RawFrame;
     return e.type === "system" && e.subtype === MEMORY_INJECTED_SUBTYPE;
 }
 
+const REASON: Record<string, ContextDeliveryNode["reason"]> = {
+    startup: "startup",
+    clear: "clear",
+    compact: "compaction",
+};
+
+const KINDS: ReadonlyArray<ContextItem["kind"]> = ["global_memory", "personal_memory", "running_summary"];
+
+const SYSTEM_PREFIX = "[AgentMux System] ";
+const WORKSPACE_PREFIX = "[Workspace] ";
+
+const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+/** One notice entry as a card item. Old frames: name and tier from the label. */
+function toItem(x: RawFrame): ContextItem {
+    const label = str(x.label) ?? "";
+    const kind: ContextItem["kind"] = KINDS.includes(x.kind as ContextItem["kind"])
+        ? (x.kind as ContextItem["kind"])
+        : x.source === "personal"
+          ? "personal_memory"
+          : x.source === "summary"
+            ? "running_summary"
+            : "global_memory";
+
+    let name = str(x.name);
+    let tier: ContextItem["tier"] = x.tier === "system" || x.tier === "workspace" ? x.tier : undefined;
+    if (kind === "global_memory" && (!name || !tier)) {
+        if (label.startsWith(SYSTEM_PREFIX)) {
+            name ??= label.slice(SYSTEM_PREFIX.length);
+            tier ??= "system";
+        } else if (label.startsWith(WORKSPACE_PREFIX)) {
+            name ??= label.slice(WORKSPACE_PREFIX.length);
+            tier ??= "workspace";
+        }
+    }
+    const delivered = x.delivered === "partial" || x.delivered === "omitted" ? x.delivered : undefined;
+
+    return {
+        kind,
+        name: name ?? label,
+        ...(tier ? { tier } : {}),
+        ...(str(x.path) ? { path: str(x.path) } : {}),
+        ...(str(x.bundle_id) ? { bundleId: str(x.bundle_id) } : {}),
+        ...(delivered ? { delivered } : {}),
+        sizeBytes: num(x.size_bytes),
+        tokens: num(x.tokens),
+    };
+}
+
 /**
- * The notice node for an `agentmux_memory_injected` frame, or `null` when
- * `rawEvent` isn't one. `contextWindow` bands Personal Memory's size the way
- * the hidden reinjection's notice does; replay passes the fallback window.
- * `now` stands in when the frame carries no parseable `timestamp`.
+ * The card for an `agentmux_memory_injected` frame, or `null` when `rawEvent`
+ * isn't one. `contextWindow` bands Personal Memory's size; replay passes the
+ * fallback window. `now` stands in when the frame carries no parseable
+ * `timestamp`.
  */
 export function buildMemoryInjectedNode(
     rawEvent: unknown,
     opts: { contextWindow?: number; now: number },
-): MemoryReinjectionNode | null {
+): ContextDeliveryNode | null {
     if (!isMemoryInjectedFrame(rawEvent)) return null;
-    const e = rawEvent as Record<string, unknown>;
+    const e = rawEvent as RawFrame;
 
-    const perEntryTokens: MemoryReinjectionNode["perEntryTokens"] = (Array.isArray(e.entries) ? e.entries : [])
-        .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
-        .map((x) => ({
-            label: typeof x.label === "string" ? x.label : "",
-            source: x.source === "personal" ? ("personal" as const) : ("global" as const),
-            tokens: typeof x.tokens === "number" ? x.tokens : 0,
-            sizeBytes: typeof x.size_bytes === "number" ? x.size_bytes : 0,
-        }));
+    const items = (Array.isArray(e.entries) ? e.entries : [])
+        .filter((x): x is RawFrame => !!x && typeof x === "object")
+        .map(toItem);
 
-    const of = (source: "global" | "personal") => perEntryTokens.filter((p) => p.source === source);
-    const sum = (list: typeof perEntryTokens, pick: (p: (typeof perEntryTokens)[number]) => number) =>
-        list.reduce((total, p) => total + pick(p), 0);
-    const [global, personal] = [of("global"), of("personal")];
-
-    const timestamp = typeof e.timestamp === "string" ? e.timestamp : null;
+    const timestamp = str(e.timestamp) ?? null;
     const parsed = timestamp != null ? Date.parse(timestamp) : NaN;
-    const at = Number.isNaN(parsed) ? opts.now : parsed;
+    const personalTokens = items.filter((i) => i.kind === "personal_memory").reduce((sum, i) => sum + i.tokens, 0);
 
     return {
-        type: "memory_reinjection",
-        id: typeof e.id === "string" && e.id.length > 0 ? e.id : `memory-injected-${timestamp ?? "notime"}`,
-        globalMemoryCount: global.length,
-        personalMemoryCount: personal.length,
-        estimatedTokens: sum(perEntryTokens, (p) => p.tokens),
-        perEntryTokens,
-        totalSizeBytes: { global: sum(global, (p) => p.sizeBytes), personal: sum(personal, (p) => p.sizeBytes) },
-        sizeBand: memorySizeBand(sum(personal, (p) => p.tokens), opts.contextWindow ?? FALLBACK_CONTEXT_WINDOW),
-        at,
+        type: "context_delivery",
+        id: str(e.id) ?? `memory-injected-${timestamp ?? "notime"}`,
+        reason: REASON[str(e.reason) ?? ""] ?? "startup",
+        items,
+        timestamp: Number.isNaN(parsed) ? opts.now : parsed,
+        sizeBand: memorySizeBand(personalTokens, opts.contextWindow ?? FALLBACK_CONTEXT_WINDOW),
     };
 }
