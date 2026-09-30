@@ -42,6 +42,7 @@ import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { CompactionSummaryTracker } from "./context-delivery";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
 import { workingFromPhase, type AgentPaneEvent, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
@@ -236,6 +237,9 @@ export function useAgentStream({
     // via the hasNodeId/addNodeId closures passed to them.
     let lineBuffer = "";
     let translator = createTranslator(outputFormat);
+    // Pairs each compact_boundary with Claude Code's summary frame, which
+    // becomes a card instead of a user message (context-delivery.ts).
+    let compactionSummaries = new CompactionSummaryTracker();
     let parser = new ClaudeCodeStreamParser();
     if (agentName) parser.setAgentId(agentName);
     // nodeIdSet remains for fast in-batch dedup (the reducer also dedups,
@@ -349,6 +353,7 @@ export function useAgentStream({
         // Reset state on new subscription
         lineBuffer = "";
         translator = createTranslator(outputFormat);
+        compactionSummaries = new CompactionSummaryTracker();
         parser = new ClaudeCodeStreamParser();
         if (agentName) parser.setAgentId(agentName);
         nodeIdSet = new Set();
@@ -545,6 +550,7 @@ export function useAgentStream({
                     pushReleasedJekts();
                     const compactBoundary = parseCompactBoundaryFrame(rawEvent);
                     if (compactBoundary) {
+                        compactionSummaries.noteBoundary(compactBoundary);
                         const paneEvents = model.dispatchPane({
                             type: "CompactionBoundary",
                             trigger: compactBoundary.trigger,
@@ -624,6 +630,23 @@ export function useAgentStream({
                         }
                     }
                     continue;
+                }
+
+                // Claude Code's compaction summary: a card, not a user message
+                // (context-delivery.ts, shared with parseHistoryLines.ts).
+                // SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.3.
+                {
+                    const summaryNode = compactionSummaries.take(rawEvent, Date.now());
+                    if (summaryNode) {
+                        parser.flushPending();
+                        pushReleasedJekts();
+                        if (!hasNodeId(summaryNode.id)) {
+                            addNodeId(summaryNode.id);
+                            queue.pushNewNode(summaryNode);
+                            queue.scheduleFlush();
+                        }
+                        continue;
+                    }
                 }
 
                 // The notice for memory the `SessionStart` hook delivered

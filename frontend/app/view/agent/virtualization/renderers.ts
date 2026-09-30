@@ -14,6 +14,7 @@
 
 import type {
     AgentMessageNode,
+    ContextDeliveryNode,
     DocumentNode,
     DocumentState,
     JektMessageNode,
@@ -142,6 +143,18 @@ export function estimateExpandedJekt(message: string): number {
 }
 
 const SHELL_COLLAPSED_PX = 32;
+
+// Title row plus a one-line excerpt.
+const CONTEXT_DELIVERY_COLLAPSED_PX = 52;
+const CONTEXT_DELIVERY_ITEM_HEAD_PX = 28;
+
+/** Title, then per item a head row and its body, capped like a jekt's. */
+function estimateExpandedContextDelivery(node: ContextDeliveryNode): number {
+    return node.items.reduce(
+        (sum, item) => sum + CONTEXT_DELIVERY_ITEM_HEAD_PX + (item.body ? estimateExpandedJekt(item.body) : 0),
+        CONTEXT_DELIVERY_COLLAPSED_PX,
+    );
+}
 const SHELL_EXPANDED_PX = 200;
 
 /** Per-kind streaming capability — straightforward map. */
@@ -157,6 +170,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     compaction_started: false,
     // One-shot label built from a completed compact_boundary — never chunked, and never carries content to stream in the first place (§3.2 of its spec).
     memory_reinjection: false,
+    // Built whole from one frame (the compaction summary) — never chunked.
+    context_delivery: false,
     // Arrives as a single complete user_message event, not chunk-by-chunk.
     jekt_message: false,
     // One-shot marker, same as context_compacted — not chunked.
@@ -224,6 +239,7 @@ export function estimateNodeForState(
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
             case "ambient_narration": return estimateTextHeight(node.text);
+            case "context_delivery":  return CONTEXT_DELIVERY_COLLAPSED_PX;
         }
     }
     // expanded
@@ -244,5 +260,6 @@ export function estimateNodeForState(
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
         case "ambient_narration": return estimateTextHeight(node.text);
+        case "context_delivery":  return estimateExpandedContextDelivery(node);
     }
 }
