@@ -719,65 +719,72 @@ fn candidate_label_under_cursor_locked(
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
     let root = if root.is_null() { hwnd } else { root };
 
-    for (label, browser) in browsers.iter() {
-        if label == &ctx.dragged_label {
-            continue;
-        }
-        // TabDrag mode: the source window is NOT a candidate. Its own
-        // pragmatic-dnd reorder owns the strip while the cursor is over
-        // it — emitting tearoff:hover-changed at it on every mouse move
-        // would race that (two writers, differently-timed and
-        // differently-converted, on one insertionPoint signal), and
-        // button-up over the source is owned by the in-window reorder
-        // anyway. TearOff mode keeps the source as a candidate: that's
-        // the cancel-back drop target. (reagent PR #2086 P1)
-        if matches!(ctx.mode, HookMode::TabDrag { .. }) && label == &ctx.source_label {
-            continue;
-        }
-        if !is_instance_label(label) {
-            continue;
-        }
-        if top_level_hwnd_for(ctx, label, browser) == Some(root) {
-            return Some(label.clone());
-        }
+    let label = label_for_top_level(ctx, browsers, root)?;
+    if label == ctx.dragged_label {
+        return None;
     }
-    None
+    // TabDrag mode: the source window is NOT a candidate. Its own
+    // pragmatic-dnd reorder owns the strip while the cursor is over
+    // it — emitting tearoff:hover-changed at it on every mouse move
+    // would race that (two writers, differently-timed and
+    // differently-converted, on one insertionPoint signal), and
+    // button-up over the source is owned by the in-window reorder
+    // anyway. TearOff mode keeps the source as a candidate: that's
+    // the cancel-back drop target. (reagent PR #2086 P1)
+    if matches!(ctx.mode, HookMode::TabDrag { .. }) && label == ctx.source_label {
+        return None;
+    }
+    if !is_instance_label(&label) {
+        return None;
+    }
+    Some(label)
 }
 
-/// The top-level window of `label`'s browser, to compare with the root
-/// under the cursor. `BrowserHost::window_handle()` alone can't be used: in
-/// CEF Views mode it is often null, and otherwise a child of the top-level
-/// window, so comparing it with the root never matched and every release
-/// reported no target. In order: the `window_hwnds` entry bound at Views
-/// window creation (app/mod.rs), the root of the host's handle, and for
-/// "main" the on-screen main frame, which the redock resolver
-/// (commands/window/motion.rs) also falls back to when a promoted pool
-/// window serves main and `window_hwnds` has no "main" entry.
+/// The label of the browser whose top-level window is `root`, from the live
+/// window under the cursor back to its owner. `BrowserHost::window_handle()`
+/// alone can't answer this: in CEF Views mode it is often null, and
+/// otherwise a child of the top-level window, so comparing it with the root
+/// never matched and every release reported no target.
+///
+/// 1. `window_hwnds`, bound at Views window creation (app/mod.rs). A stale
+///    entry holds a dead HWND, which can't equal the live root, so it never
+///    matches wrongly or hides the fallback below.
+///    A promoted pool window serving the primary keeps its `window-pool-*`
+///    entry, while its renderer registered "main" and has no backend window
+///    of its own under the pool label; that is "main", the same rule the
+///    redock resolver uses (commands/window/motion.rs).
+/// 2. Otherwise the browser whose host handle has this root.
 #[cfg(target_os = "windows")]
-fn top_level_hwnd_for(
+fn label_for_top_level(
     ctx: &HookContext,
-    label: &str,
-    browser: &cef::Browser,
-) -> Option<*mut std::ffi::c_void> {
+    browsers: &std::collections::HashMap<String, cef::Browser>,
+    root: *mut std::ffi::c_void,
+) -> Option<String> {
     use cef::{ImplBrowser, ImplBrowserHost};
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
 
-    if let Some(&h) = ctx.state.window_hwnds.lock().get(label) {
-        if h != 0 {
-            return Some(h as *mut std::ffi::c_void);
+    let cached = ctx.state.label_for_hwnd(root as _);
+    if let Some(label) = cached {
+        if browsers.contains_key(&label) {
+            return Some(label);
+        }
+        if label.starts_with("window-pool-")
+            && ctx.state.backend_window_id(&label).is_none()
+            && browsers.contains_key("main")
+            && !ctx.state.window_hwnds.lock().contains_key("main")
+        {
+            return Some("main".to_string());
         }
     }
-    if let Some(host) = browser.host() {
+    for (label, browser) in browsers.iter() {
+        let Some(host) = browser.host() else { continue };
         let h = host.window_handle().0 as *mut std::ffi::c_void;
-        if !h.is_null() {
-            let root = unsafe { GetAncestor(h as _, GA_ROOT) } as *mut std::ffi::c_void;
-            return Some(if root.is_null() { h } else { root });
+        if h.is_null() {
+            continue;
         }
-    }
-    if label == "main" {
-        let main = unsafe { crate::commands::window::find_main_window() };
-        if !main.is_null() {
-            return Some(main);
+        let top = unsafe { GetAncestor(h as _, GA_ROOT) } as *mut std::ffi::c_void;
+        if (if top.is_null() { h } else { top }) == root {
+            return Some(label.clone());
         }
     }
     None
