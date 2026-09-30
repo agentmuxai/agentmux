@@ -37,6 +37,26 @@ export function markPoolPromoted(onReveal?: () => void): void {
 }
 
 /**
+ * Cover the splash with a picture of the torn-off pane, so the floater shows
+ * the pane from its first frame, and cross-fades to the live pane when the
+ * gate lifts. SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 3.1.
+ */
+export function showTearOffSnapshot(base64Jpeg: string): void {
+    if (typeof document === "undefined") return;
+    const el = document.getElementById("startup-loading");
+    if (!el || el.dataset.amFading === "1") return;
+    const img = document.createElement("img");
+    img.alt = "";
+    img.decoding = "sync";
+    img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:fill;";
+    img.src = `data:image/jpeg;base64,${base64Jpeg}`;
+    el.appendChild(img);
+    if (promotedAt != null) {
+        console.log(`[tearoff-perf] snapshot shown ${Math.round(performance.now() - promotedAt)}ms after promote`);
+    }
+}
+
+/**
  * Cross-fade and remove the startup splash. Idempotent and safe to call from
  * every reveal-gate lift: the first call fades it; once it's gone (the normal
  * case after the first window settles, and on every subsequent tab switch)
