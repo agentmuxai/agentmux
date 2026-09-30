@@ -106,3 +106,57 @@ describe("applyTabPreset sibling ordering (Codex P2 on PR #2796)", () => {
         expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent-1" });
     });
 });
+
+// ANALYSIS_NEW_WINDOW_TAB_LATENCY_2026_09_30.md §3.3: the preset's blocks are
+// created concurrently, then placed in declared order whatever order their
+// round trips finish in.
+describe("applyTabPreset concurrent creation", () => {
+    const preset: PresetNode = {
+        split: "horizontal",
+        children: [
+            { widget: "defwidget@agent" },
+            {
+                split: "vertical",
+                children: [{ widget: "defwidget@swarm" }, { widget: "defwidget@armory" }, { widget: "defwidget@sysinfo" }],
+            },
+        ],
+    };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        dispatched.length = 0;
+        nextBlockId = 0;
+    });
+
+    it("issues every CreateBlock before any returns, and still places them in declared order", async () => {
+        const pending = new Map<string, (id: string) => void>();
+        createBlock.mockImplementation(
+            (blockDef: { meta: { view: string } }) => new Promise<string>((resolve) => pending.set(blockDef.meta.view, resolve))
+        );
+        const done = applyTabPreset("tab-1", preset);
+        await vi.waitFor(() => expect(createBlock).toHaveBeenCalledTimes(4));
+        expect(dispatched).toHaveLength(0);
+        for (const view of ["sysinfo", "swarm", "agent", "armory"]) pending.get(view)!(`block-${view}`);
+        await done;
+
+        expect(dispatched[0]).toMatchObject({ type: "insert" });
+        expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent" });
+        expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-swarm" });
+        expect(dispatched[3]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-armory" });
+        expect(markBlockRecentlyCreated).toHaveBeenCalledTimes(4);
+    });
+
+    it("skips a block that failed and lets the next sibling take its place", async () => {
+        createBlock.mockImplementation(async (blockDef: { meta: { view: string } }) => {
+            if (blockDef.meta.view === "swarm") throw new Error("boom");
+            return `block-${blockDef.meta.view}`;
+        });
+        await applyTabPreset("tab-1", preset);
+
+        expect(dispatched).toHaveLength(3);
+        expect(dispatched[0]).toMatchObject({ type: "insert" });
+        // armory is now the column's first child: it splits off agent, as swarm would have.
+        expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent" });
+        expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-armory" });
+    });
+});

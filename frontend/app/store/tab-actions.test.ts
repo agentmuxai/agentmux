@@ -66,7 +66,11 @@ vi.mock("@/app/tab/tab-presets", () => ({
     DEFAULT_TAB_PRESET: {},
 }));
 
+let keepLaidOut = true;
+vi.mock("@/app/workspace/window-tab-visibility", () => ({ keepInactiveTabsLaidOut: () => keepLaidOut }));
+
 import { createTab } from "./tab-actions";
+import { forgetTabShown, tabWasShown } from "./tab-reveal";
 
 const flushMicrotasks = () => new Promise((r) => setTimeout(r, 0));
 
@@ -77,6 +81,28 @@ describe("createTab", () => {
         setActiveTabRpc.mockClear();
         applyTabPreset.mockClear();
         resolveApplyTabPreset = null;
+        keepLaidOut = true;
+        forgetTabShown("tab-new");
+    });
+
+    // ANALYSIS_NEW_WINDOW_TAB_LATENCY_2026_09_30.md §3.2: built while hidden
+    // and kept laid out, the new tab takes the warm one-frame switch.
+    it("switches to the built tab as a warm one when inactive tabs are kept laid out", async () => {
+        createTab();
+        await vi.waitFor(() => expect(applyTabPreset).toHaveBeenCalled());
+        expect(tabWasShown("tab-new")).toBe(false);
+        resolveApplyTabPreset!();
+        await vi.waitFor(() => expect(setActiveTabRpc).toHaveBeenCalled());
+        expect(tabWasShown("tab-new")).toBe(true);
+    });
+
+    it("keeps the built tab's first reveal gated with the setting off", async () => {
+        keepLaidOut = false;
+        createTab();
+        await vi.waitFor(() => expect(applyTabPreset).toHaveBeenCalled());
+        resolveApplyTabPreset!();
+        await vi.waitFor(() => expect(setActiveTabRpc).toHaveBeenCalled());
+        expect(tabWasShown("tab-new")).toBe(false);
     });
 
     it("creates the tab inactive (activate: false)", async () => {
