@@ -57,13 +57,28 @@ different ways, so each class has its own check.
 | What | Count | Failure if missed | How it's caught |
 |---|---|---|---|
 | ts-rs `#[ts(export, export_to = "../../frontend/types/rpc/")]` in `agentmux-srv` | 374 in 48 files | **Silent:** bindings are written to `crates/frontend/types/rpc/` instead of `frontend/types/rpc/` | `scripts/check-rpc-bindings.sh` (committed bindings must equal generated), plus an explicit check that `crates/frontend/` does not exist after `cargo test` |
-| `include_str!` / `include_bytes!` climbing to repo-root files (`assets/…`, `settings-template.jsonc`) | 12 | Loud: compile error | CI build on all three OSes |
+| `include_str!` / `include_bytes!` climbing to repo-root files | 8, listed below | Loud: compile error | CI build on all three OSes |
 | `env!("CARGO_MANIFEST_DIR")` joins to repo-root paths | 9 uses, review each | Test or runtime path wrong | Tests; review every hit by hand |
 | `path = "../agentmux-common"` in each crate's `Cargo.toml` | 5 | Loud: cargo error | Any build |
 | `agentmux-launcher/build.rs` and `src/tray/windows.rs` pointing at `../agentmux-cef/resources/win/agentmux.ico` | 2 | Wrong or missing exe icon (build.rs); tray icon falls back (runtime) | Windows packaging run; check the exe icon by eye |
 
-Paths *inside* one crate (`../../resources/…` from `src/tray/`) don't change, because the crate's
-internal layout doesn't change.
+The 8 `include_*` sites that leave their crate, each of which gains one `../`:
+
+| Site | Resolves to |
+|---|---|
+| `agentmux-cef/src/commands/platform.rs:12` | `settings-template.jsonc` |
+| `agentmux-cef/src/macos_compat.rs:654` | `assets/linux/icons/hicolor/512x512/apps/agentmux.png` |
+| `agentmux-launcher/src/notify/windows.rs:69` | `assets/favicon-150x150.png` |
+| `agentmux-launcher/src/tray/linux.rs:138` | `assets/favicon-71x71.png` |
+| `agentmux-launcher/src/tray/windows.rs:401` | `assets/favicon-150x150.png` |
+| `agentmux-launcher/src/tray/windows.rs:517` | `assets/favicon-150x150.png` |
+| `agentmux-srv/src/backend/layout_file/tests.rs:367` | `schema/agentmux-layout.v1.schema.json` |
+| `agentmux-srv/src/backend/wconfig/mod.rs:30` | `settings-template.jsonc` |
+
+The other `include_*` calls with `../` resolve inside their own crate (`../../resources/…` from
+`src/tray/`) and don't change, because a crate's internal layout doesn't change. Recompute the
+list at implementation time rather than trusting this table: resolve each `include_*` path
+against its file's folder and keep the ones that land outside the crate.
 
 ### 4.2 Build, CI, packaging and tooling
 
