@@ -373,3 +373,20 @@ rather than the next one. P3 remains a separate, unstarted change.
   while stationary. Expected negligible, but worth confirming against the
   `[redock-resolve]` diagnostic already present at
   `agentmux-cef/src/commands/window/motion.rs:299-301`.
+
+## 10. Two-stage ghost (2026-09-30)
+
+**Ask (operator):** "there is a delay when dragging a floating pane over the window to show the ghost" — the whole 300 ms dwell passed with nothing on screen.
+
+**Convention:** the delays in §4 gate an *action*. A drop *preview* is shown at once everywhere: Chrome previews a tab's slot in another window's strip immediately, and Visual Studio / JetBrains / Qt / Dockview show their dock guides and the translucent docked-area preview as soon as the dragged window is over a target, committing only on release over a guide.
+
+**Design:** the ghost has two stages, both driven by the same `createRedockArming` samples the floater uses (§5.4), so both sides still agree exactly:
+
+| Stage | When | Look | On release |
+|---|---|---|---|
+| Preview | first sample over this window, until armed | the landing slot, dashed `--drop-zone-armed-border`, no fill (`.floating-redock-drop-placeholder--preview`) | stays floating: the host holds no drop target |
+| Armed | after `REDOCK_DWELL_MS` of confirmed stillness (§5.1), velocity gate unchanged | solid, as before | redocks into the slot |
+
+- The drop target (`setFloatingRedockTarget`) is stored only while armed and cleared the moment the drag falls back to the preview (the velocity gate trips) or leaves the window. So the §5.2 invariant, "no dock without the armed ghost having been shown", is unchanged.
+- The threshold is unchanged (300 ms); only what the user sees during it changed. Preview → armed is a 100 ms fade (`app.scss`).
+- The listener moved from `app-init.ts` to `frontend/app/workspace/redock-ghost.ts` (unchanged), with tests in `redock-ghost.test.ts`.

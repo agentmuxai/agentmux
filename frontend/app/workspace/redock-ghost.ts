@@ -47,25 +47,27 @@ export function installFloatingRedockHoverListener(): void {
         }
         return placeholderEl;
     };
-    const clearPlaceholder = () => {
-        const hadGhost = placeholderEl !== null;
-        if (placeholderEl) {
-            placeholderEl.remove();
-            placeholderEl = null;
-        }
-        // Nothing was showing, so there is no stored ghost state to clear —
-        // the backend entry is written on the same path that mounts the
-        // placeholder. Bailing here matters now that this runs on every
-        // not-yet-armed hover sample: without it, the whole dwell would fire
-        // an IPC per heartbeat just to clear state that was never set.
-        // (Deliberately does not name the threshold — REDOCK_DWELL_MS is the
-        // single source of truth and has already moved twice.)
-        if (!hadGhost) return;
+    // Whether the host holds a drop target for this window: only while the
+    // drag is armed (see the two stages below).
+    let targetStored = false;
+    const forgetTarget = () => {
+        // Nothing stored, nothing to clear: this runs on every preview
+        // sample, and an IPC per heartbeat to clear state that was never set
+        // would be pure waste.
+        if (!targetStored) return;
+        targetStored = false;
         // Phase 4b — clear the stored ghost state for this window so a stale
         // direction cannot bleed into the next drop event.
         fireAndForget(async () => {
             await getApi().windows.setFloatingRedockTarget(myLabel, null, null);
         });
+    };
+    const clearPlaceholder = () => {
+        if (placeholderEl) {
+            placeholderEl.remove();
+            placeholderEl = null;
+        }
+        forgetTarget();
     };
 
     // Map a DropDirection to a sub-rect (top, left, width, height in
@@ -141,7 +143,7 @@ export function installFloatingRedockHoverListener(): void {
                 y: typeof cursorY === "number" ? cursorY / invScale : undefined,
                 t: performance.now(),
             });
-            if (!payload || newTarget !== myLabel || !armed) {
+            if (!payload || newTarget !== myLabel) {
                 clearPlaceholder();
                 return;
             }
@@ -178,12 +180,25 @@ export function installFloatingRedockHoverListener(): void {
             ph.style.width = `${slot.width}px`;
             ph.style.height = `${slot.height}px`;
 
+            // Two stages (SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §10):
+            // from the first sample over this window, a faint preview of where
+            // the pane would land, so the drag answers at once; solid, and a
+            // real drop target, only once the dwell arms it. A release on the
+            // preview doesn't dock: the host holds no target for it, and the
+            // floater runs the same arming over the same samples.
+            ph.classList.toggle("floating-redock-drop-placeholder--preview", !armed);
+            if (!armed) {
+                forgetTarget();
+                return;
+            }
+
             // Phase 4b — store the computed direction and target block so
             // the floater can pass them to RedockFloatingPane at drop time.
             // Fire-and-forget: the set is best-effort and must not stall the
             // event handler (ghost rendering happens synchronously above).
             const targetBlockId = leafEl.dataset.blockid;
             if (targetBlockId) {
+                targetStored = true;
                 void getApi().windows.setFloatingRedockTarget(myLabel, targetBlockId, dir);
             }
         });
