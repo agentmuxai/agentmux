@@ -35,9 +35,7 @@ import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
 import "./tilelayout.scss";
 import { LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
-import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { setTileDragInFlight } from "./dragInFlight";
-import { clearCrossTabDrop } from "./crossTabDrag";
+import { releaseTileDrag, startTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 import { createTileDragRegistrar } from "./tile-drag-registrar";
 import {
@@ -460,31 +458,17 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                     },
                     onDragStart: () => {
                         platform.beforeDragStart?.();
-                        dragState.nodeId = props.node.id;
-                        dragState.layoutModel = props.layoutModel;
-                        dragState.node = props.node;
-                        setTileDragInFlight(true);
-                        clearCrossTabDrop();
-                        props.layoutModel.activeDrag._set(true);
+                        startTileDrag(props.node, props.layoutModel);
                         setIsDragging(true);
-                        setCurrentDragPayload({
-                            kind: "tile",
-                            node: props.node,
-                            sourceTabId: props.layoutModel.tabAtom()?.oid,
-                        });
                         platform.afterDragStart?.();
                     },
                     onDrop: () => {
                         platform.beforeDrop?.();
-                        dragState.nodeId = null;
-                        dragState.layoutModel = null;
-                        dragState.node = null;
-                        setTileDragInFlight(false);
-                        props.layoutModel.activeDrag._set(false);
+                        // Fires for every release, in or out of the window: the
+                        // payload stays for the cross-window monitor (tile-drag.ts).
+                        releaseTileDrag(props.layoutModel);
                         setIsDragging(false);
                         platform.afterDrop?.();
-                        // Do NOT clear currentDragPayload here — fires for ALL drops including
-                        // out-of-window. Cleared in dropTargetForElements.onDrop instead.
                     },
                 });
 
