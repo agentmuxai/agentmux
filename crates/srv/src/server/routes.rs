@@ -60,6 +60,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             "X-AuthKey".parse().unwrap(),
             "X-Requested-With".parse().unwrap(),
             "x-vercel-ai-ui-message-stream".parse().unwrap(),
+            // A video poster reads a file's first bytes (stream-local-file,
+            // SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §5). The request also
+            // carries X-AuthKey, so it's preflighted and Range must be listed.
+            header::RANGE,
         ])
         // Custom response headers are invisible to cross-origin `fetch()`
         // callers (Response.headers.get(...) silently returns null) unless
@@ -76,7 +80,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // follow-up). Not dev-only — the CEF frontend's own origin is
         // cross-origin from this server in production too (see the
         // allow_origin comment above).
-        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap()]);
+        // `Content-Range` carries a ranged stream-local-file response's
+        // total size, which inline video/audio read before play (Codex P2 on
+        // #4073).
+        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), header::CONTENT_RANGE]);
 
     // The routes an LAN peer actually calls when forwarding a jekt or
     // looking up which agents this instance hosts
