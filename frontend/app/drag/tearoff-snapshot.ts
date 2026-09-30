@@ -135,6 +135,16 @@ const windowTabKey = (tabId: string) => `window-tab:${tabId}`;
  * the active tab: an inactive one's content isn't on screen.
  */
 export function prewarmWindowTabSnapshot(tabId: string): void {
+    // A native browser pane on screen would be a grey placeholder in the
+    // window's capture (see above): no picture beats a wrong one. Hidden
+    // (background-tab) panes have no client rects.
+    const browserOnScreen = Array.from(document.querySelectorAll(".browser-placeholder")).some(
+        (el) => el.getClientRects().length > 0
+    );
+    if (browserOnScreen) {
+        held = null;
+        return;
+    }
     const at = Date.now();
     const key = windowTabKey(tabId);
     const picture = captureWindow().then(
