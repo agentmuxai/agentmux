@@ -24,8 +24,10 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not `.pathname`: on Windows the latter is "/C:/…" and every read fails.
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CRATES = ["crates/srv", "crates/mcp", "crates/launcher", "crates/bashwrap", "crates/cef"];
 const INLINE = /SystemTime::now\(\)\s*\.duration_since\(\s*(?:std::time::)?UNIX_EPOCH/;
 const OWN_FN = /\bfn\s+(?:now_ms|now_secs|now_unix_secs|now_millis)\b/;
