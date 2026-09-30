@@ -10,11 +10,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const shots = vi.hoisted(() => ({
+    views: {} as Record<string, string>,
     calls: [] as string[],
     next: null as null | Promise<{ jpeg_base64: string }>,
     drawn: [] as number[][],
 }));
 vi.mock("@/app/store/global", () => ({
+    MOS: {
+        makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
+        getObjectValue: (oref: string) => {
+            const view = shots.views[oref.slice("block:".length)];
+            return view ? { meta: { view } } : undefined;
+        },
+    },
     getApi: () => ({
         browserPanes: {
             screenshot: (blockId: string) => {
@@ -73,6 +81,7 @@ function mountPane(blockId: string, rect = { left: 10, top: 20, width: 300, heig
 
 beforeEach(() => {
     shots.calls = [];
+    shots.views = {};
     shots.next = null;
     shots.drawn = [];
     resetTearOffSnapshotForTests();
@@ -95,10 +104,19 @@ describe("tear-off snapshot", () => {
 
     it("a native browser pane is captured from its own page, not the window's", async () => {
         mountPane("b1");
-        document.querySelector('[data-blockid="b1"]')!.innerHTML = `<div class="browser-view"><div class="browser-placeholder"></div></div>`;
+        shots.views.b1 = "browser";
         prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b1")).toBe("browser-page");
         expect(shots.calls).toEqual(["browser:b1"]);
+    });
+
+    it("a background browser tab mounted in the same pane doesn't make the active tab a browser", async () => {
+        mountPane("b1");
+        shots.views.b1 = "term";
+        document.querySelector('[data-blockid="b1"]')!.innerHTML = `<div class="browser-view"><div class="browser-placeholder"></div></div>`;
+        prewarmTearOffSnapshot("b1");
+        expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
+        expect(shots.calls).toEqual(["main"]);
     });
 
     it("a pane with no element on screen (a background pane tab) captures nothing", async () => {
