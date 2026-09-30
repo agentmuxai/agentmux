@@ -44,6 +44,8 @@ export interface TabContainerVisibility {
     /** `"0"` for a tab kept laid out and not shown — see below. */
     opacity: "0" | null;
     "pointer-events": "auto" | "none";
+    /** `"1"` for the displayed tab, so it is on top of a tab still leaving. */
+    "z-index": "1" | null;
     /** The tab is kept laid out and not shown; its agents pause rendering. */
     hiddenLaidOut: boolean;
 }
@@ -60,9 +62,28 @@ export interface TabContainerVisibility {
 export function tabContainerVisibility(
     displayed: boolean,
     keepLaidOut: boolean,
-    gated: boolean
+    gated: boolean,
+    /**
+     * The tab was displayed until this frame (kept laid out only). It hides
+     * with `opacity: 0` alone, under the displayed tab, and takes its
+     * inherited `visibility: hidden` / `pointer-events: none` a couple of
+     * frames later: those restyle every element in the tab, which on a
+     * large tab cost as much as showing the new one, all in the switch's
+     * own frame (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §7).
+     */
+    leaving = false
 ): TabContainerVisibility {
     const hiddenLaidOut = keepLaidOut && !displayed;
+    if (hiddenLaidOut && leaving) {
+        return {
+            "content-visibility": "visible",
+            visibility: null,
+            opacity: "0",
+            "pointer-events": "auto",
+            "z-index": null,
+            hiddenLaidOut,
+        };
+    }
     return {
         "content-visibility": keepLaidOut || displayed ? "visible" : "hidden",
         visibility: gated || hiddenLaidOut ? "hidden" : null,
@@ -73,6 +94,7 @@ export function tabContainerVisibility(
         // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §1.
         opacity: hiddenLaidOut ? "0" : null,
         "pointer-events": displayed ? "auto" : "none",
+        "z-index": displayed ? "1" : null,
         hiddenLaidOut,
     };
 }
