@@ -442,7 +442,9 @@ declare global {
             width?: number,
             height?: number,
             tabAnchorX?: number,
-            tabAnchorY?: number
+            tabAnchorY?: number,
+            /** The source's picture of the tab (base64 JPEG), shown from the new window's first frame. */
+            snapshot?: string
         ) => Promise<string>;
         /** Tear-off Phase 2 Win32 SC_MOVE handshake. Call AFTER
          *  TearOffTab + openWindowAtPosition; this hands cursor capture

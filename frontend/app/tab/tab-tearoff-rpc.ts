@@ -11,6 +11,8 @@ import { getTabGrabOffset } from "./tab-grab-offset";
 import { WorkspaceService } from "../store/services";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
+import { isWindows } from "@/util/platformutil";
+import { takeWindowTabSnapshot } from "@/app/drag/tearoff-snapshot";
 
 /**
  * Phase 2 — orchestrates the Chrome-faithful tear-off when the cursor
@@ -89,6 +91,9 @@ async function requestTearOff(
         const sourceWindowLabel = await getApi().getWindowLabel();
         // Step 1 — sidecar transfers the tab into a new workspace.
         // Returns the new workspace's ID.
+        // The window's picture (Windows), taken before the drag; any wait
+        // overlaps TearOffTab. SPEC_TEAROFF_PAINT_LATENCY §4 3.1.
+        const snapshotTaken = isWindows() ? takeWindowTabSnapshot(tabId) : Promise.resolve(undefined);
         newWsId = await WorkspaceService.TearOffTab(tabId, workspaceId);
         // Step 2 — get the destination window. Phase 6 prefers the
         // pre-warmed pool (0 ms first-paint flash). On pool exhaustion
@@ -106,6 +111,7 @@ async function requestTearOff(
                 sourceHeight,
                 tabAnchorX,
                 tabAnchorY,
+                await snapshotTaken,
             );
             Logger.info("dnd", "tear-off used warm pool", { destWindowLabel });
         } catch (poolErr) {

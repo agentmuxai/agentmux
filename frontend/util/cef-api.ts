@@ -899,6 +899,7 @@ export function buildCefApi(): AppApi {
             height?: number,
             tabAnchorX?: number,
             tabAnchorY?: number,
+            snapshot?: string,
         ) => {
             return await invokeCommand<string>("tear_off_pool_promote", {
                 workspaceId,
@@ -908,6 +909,7 @@ export function buildCefApi(): AppApi {
                 height,
                 tabAnchorX,
                 tabAnchorY,
+                snapshot,
             });
         },
         tearOffSCMoveHandshake: async (args) => {

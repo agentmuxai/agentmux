@@ -44,8 +44,10 @@ import {
     MAX_SNAPSHOT_CHARS,
     paneDragCandidate,
     prewarmTearOffSnapshot,
+    prewarmWindowTabSnapshot,
     resetTearOffSnapshotForTests,
     takeTearOffSnapshot,
+    takeWindowTabSnapshot,
 } from "./tearoff-snapshot";
 
 /** jsdom decodes no images: a 2x viewport image and a canvas that records its crop. */
@@ -174,6 +176,90 @@ describe("tear-off snapshot", () => {
         mountPane("b1");
         prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b1")).toBeUndefined();
+    });
+});
+
+describe("window-tab snapshot", () => {
+    it("hands over the whole viewport, uncropped", async () => {
+        prewarmWindowTabSnapshot("t1");
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+        expect(shots.drawn).toEqual([]);
+    });
+
+    it("halves a viewport too large for the request", async () => {
+        shots.next = Promise.resolve({ jpeg_base64: "xxxx".repeat(MAX_SNAPSHOT_CHARS / 4 + 1) });
+        prewarmWindowTabSnapshot("t1");
+        // Let the re-encode finish first: on a slow machine it can outlast
+        // the take's 60 ms budget, which is the budget working, not this.
+        await vi.waitFor(() => expect(shots.drawn).toHaveLength(1), { timeout: 5000 });
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("cropped-pane"));
+        // Drawn at half the (2x-viewport) image's size.
+        expect(shots.drawn).toEqual([[0, 0, window.innerWidth, window.innerHeight]]);
+    });
+
+    it("keeps shrinking until the picture fits, and gives up if it never does", async () => {
+        const huge = "xxxx".repeat(MAX_SNAPSHOT_CHARS / 4 + 1);
+        shots.next = Promise.resolve({ jpeg_base64: huge });
+        stubImagePipeline(atob(huge));
+        prewarmWindowTabSnapshot("t1");
+        await vi.waitFor(() => expect(shots.drawn).toHaveLength(3), { timeout: 5000 });
+        expect(await takeWindowTabSnapshot("t1")).toBeUndefined();
+        // Tried at every scale: 1/2, 0.35, 1/4 of the (2x-viewport) image.
+        expect(shots.drawn.map((d) => d[2])).toEqual([
+            Math.round(window.innerWidth * 2 * 0.5),
+            Math.round(window.innerWidth * 2 * 0.35),
+            Math.round(window.innerWidth * 2 * 0.25),
+        ]);
+    });
+
+    it("no picture of a window showing a browser pane: it would be a grey placeholder", async () => {
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        el.getClientRects = () => [{}] as unknown as DOMRectList;
+        document.body.appendChild(el);
+        prewarmWindowTabSnapshot("t1");
+        expect(shots.calls).toEqual([]);
+        expect(await takeWindowTabSnapshot("t1")).toBeUndefined();
+    });
+
+    it("a browser pane in a hidden window tab or inactive pane tab (laid out, visibility:hidden) doesn't prevent it", async () => {
+        const hidden = document.createElement("div");
+        hidden.style.visibility = "hidden";
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        el.getClientRects = () => [{}] as unknown as DOMRectList; // still laid out
+        hidden.appendChild(el);
+        document.body.appendChild(hidden);
+        prewarmWindowTabSnapshot("t1");
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+    });
+
+    it("uses checkVisibility() where available, e.g. content-visibility:hidden tabs", async () => {
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        el.getClientRects = () => [{}] as unknown as DOMRectList; // laid out
+        const check = vi.fn(() => false); // but not rendered
+        (el as unknown as { checkVisibility: typeof check }).checkVisibility = check;
+        document.body.appendChild(el);
+        prewarmWindowTabSnapshot("t1");
+        expect(check).toHaveBeenCalledWith(expect.objectContaining({ contentVisibilityAuto: true, visibilityProperty: true }));
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+    });
+
+    it("a browser pane not laid out at all (display:none) doesn't prevent it", async () => {
+        const el = document.createElement("div");
+        el.className = "browser-placeholder";
+        document.body.appendChild(el); // jsdom: no client rects
+        prewarmWindowTabSnapshot("t1");
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+    });
+
+    it("a window tab's picture is never handed to a pane with the same id, or vice versa", async () => {
+        prewarmWindowTabSnapshot("x1");
+        expect(await takeTearOffSnapshot("x1")).toBeUndefined();
+        mountPane("x1");
+        prewarmTearOffSnapshot("x1");
+        expect(await takeWindowTabSnapshot("x1")).toBeUndefined();
     });
 });
 
