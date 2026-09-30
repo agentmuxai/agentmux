@@ -967,3 +967,371 @@ mod close_pane_tests {
         assert!(s.blocks.contains_key(&block_id));
     }
 }
+
+/// Core `pane.open` logic, shared by the WebSocket RPC handler
+/// (`register_pane_open`) and the HTTP route `POST /api/v1/pane/open`
+/// (`agentmux-mcp`'s `OpenEditor` tool). Creates a block for the requested
+/// view, enqueues a layout action (split or insert), and broadcasts the
+/// block/tab/layout updates so the frontend renders the new pane.
+pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
+    let mstore = state.mstore.clone();
+    let event_bus = state.event_bus.clone();
+
+    tracing::info!(view = %cmd.view, "pane.open");
+
+    // Use caller-supplied meta when present (widget bar path: full blockdef.meta
+    // already known); otherwise derive from view + args via build_pane_meta.
+    let meta = match cmd.meta {
+        Some(m) => m,
+        None => pane::build_pane_meta(&cmd)?,
+    };
+
+    // Editor-pane reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+    // Part 2): if the calling agent already has an Editor pane open in its own
+    // tab, add the requested file as a new tab in that pane instead of always
+    // spawning another Editor pane. Gated on the explicit `reuse_editor_pane`
+    // opt-in only — NOT inferred from `meta`/`split_reference_block_id` being
+    // present, since `EditorViewModel.openToTheSide`/`openInTerminal` also set
+    // `split_reference_block_id` to their OWN block id for split placement and
+    // must not trigger reuse (reagent P1 on PR #2404 caught an earlier version
+    // of this check incorrectly reusing the calling pane itself for
+    // `openToTheSide`). Also excludes `floating` requests — those always get
+    // their own new window (codex P1 on PR #2404: this branch previously ran
+    // before the floating check below and silently swallowed floating
+    // requests into a reused docked pane). Also excludes an explicit
+    // `tree_expanded` request (`OpenEditor`'s `collapse_tree` option) —
+    // reagent P2 on PR #2404: a reused pane keeps ITS OWN existing tree
+    // state, with no live mechanism to apply a new one (same class of
+    // construction-time-only limitation as focus, see
+    // `maybe_reuse_editor_pane`'s doc comment) — bypassing reuse for this
+    // specific request and falling through to the create path (which
+    // already honors `tree_expanded` correctly) is far simpler than
+    // building live meta-application, and was the reviewer's own suggested
+    // alternative.
+    if cmd.view == "editor"
+        && cmd.reuse_editor_pane == Some(true)
+        && cmd.floating != Some(true)
+        && cmd.tree_expanded.is_none()
+    {
+        if let (Some(caller_block_id), Some(file)) =
+            (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
+        {
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file).await? {
+                return Ok(result);
+            }
+        }
+    }
+
+    // Resolve tab: explicit tab_id wins; otherwise, if the caller told us
+    // which block to place this pane relative to (split_reference_block_id),
+    // resolve THAT block's own tab rather than falling back to "whichever
+    // tab happens to be globally active" — a caller specifying a relative
+    // block virtually always means "my own tab" (codex P2 on PR #2404: the
+    // editor-reuse check above already resolves this correctly-scoped tab
+    // for its own lookup, but previously discarded it whenever reuse didn't
+    // apply — e.g. a floating request, or no existing Editor pane yet —
+    // silently falling through to the flakier "first workspace's active
+    // tab" heuristic for the actual block creation/placement below, which
+    // can place a pane in the wrong tab entirely in a multi-tab setup).
+    let tab_id = if let Some(explicit) = cmd.tab_id.as_deref() {
+        explicit.to_string()
+    } else if let Some(derived) = cmd
+        .split_reference_block_id
+        .as_deref()
+        .and_then(|id| resolve_tab_id_for_block(&mstore, id).ok())
+    {
+        derived
+    } else {
+        resolve_tab_id(&mstore, None)?
+    };
+
+    // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
+    // create the block in a fresh floating workspace (via reducer CreateBlock +
+    // the existing tear_off_block saga) and signal the source window's frontend
+    // to materialize the chromeless OS window — srv can't open windows itself.
+    if cmd.floating == Some(true) {
+        return pane::open_pane_floating(state, &mstore, &event_bus, cmd.view, tab_id, meta).await;
+    }
+
+    // Stack path (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3): create
+    // the block directly as a new tab of the pane holding
+    // `stack_onto_block_id`, in one reducer step, then tell the frontend with
+    // a queued `stackpush` action. Replaces `skip_placement` + a frontend
+    // push, whose gap could leave the block in no pane.
+    if let Some(target) = cmd.stack_onto_block_id.clone().filter(|t| !t.is_empty()) {
+        let tab_id = resolve_tab_id_for_block(&mstore, &target)
+            .map_err(|e| format!("pane.open: stack_onto_block_id: {e}"))?;
+        let meta_val = serde_json::to_value(&meta)
+            .map_err(|e| format!("pane.open: stack_onto_block_id: meta serialize: {e}"))?;
+        let events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::CreateBlockInStack {
+                tab_id: tab_id.clone(),
+                target_block_id: target.clone(),
+                meta: meta_val,
+                activate: true,
+            },
+        )
+        .await;
+        if let Some(msg) = events.iter().find_map(|e| match e {
+            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        }) {
+            return Err(format!("pane.open: {msg}"));
+        }
+        let block_id = events
+            .iter()
+            .find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "pane.open: CreateBlockInStack emitted no BlockCreated".to_string())?;
+        for ev in &events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                tracing::warn!("pane.open: stack_onto_block_id: mstore apply failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &events);
+        if let Err(e) =
+            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target).await
+        {
+            tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
+        }
+        tracing::info!(block_id = %block_id, target = %target, view = %cmd.view, "pane.open: block created as a pane tab");
+        return Ok(PaneOpenResult {
+            block_id,
+            tab_id,
+            view: cmd.view,
+            created: true,
+        });
+    }
+
+    // Skip-placement path (in-pane tabs — SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
+    // §4.2): create the block through the reducer, same as the docked path
+    // below, but return immediately — no layout action, no tear_off_block
+    // saga. The caller attaches it to an existing pane's block-stack instead
+    // (`pushBlockOntoStack`), so it must never render docked or floating
+    // first.
+    if cmd.skip_placement == Some(true) {
+        let meta_val = serde_json::to_value(&meta)
+            .map_err(|e| format!("pane.open: skip_placement: meta serialize: {e}"))?;
+        let create_events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::CreateBlock {
+                tab_id: tab_id.clone(),
+                meta: meta_val,
+            },
+        )
+        .await;
+        if let Some(msg) = create_events.iter().find_map(|e| match e {
+            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        }) {
+            return Err(format!("pane.open: skip_placement: CreateBlock: {msg}"));
+        }
+        let block_id = create_events
+            .iter()
+            .find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "pane.open: skip_placement: CreateBlock emitted no BlockCreated".to_string())?;
+        for ev in &create_events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                tracing::warn!("pane.open: skip_placement: CreateBlock mstore apply failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &create_events);
+        tracing::info!(block_id = %block_id, view = %cmd.view, "pane.open: block created, placement skipped");
+        return Ok(PaneOpenResult {
+            block_id,
+            tab_id,
+            view: cmd.view,
+            created: true,
+        });
+    }
+
+    // Create block (docked path) THROUGH THE REDUCER (#1681), not wcore-direct.
+    // A store-only `create_block` lands the block in SQLite but never in the
+    // reducer-canonical `state.blocks` map — and this RPC runs after bootstrap,
+    // which is the only time `srv_state` is hydrated from SQLite. The pane then
+    // renders fine (frontend reads SQLite) but a later TearOffBlock /
+    // RedockFloatingPane is rejected "block not found" because the saga
+    // pre-conditions check the reducer. The BlockCreated event carries meta,
+    // which apply_block_created writes to the mstore Block. Mirrors the
+    // already-correct open_pane_floating path.
+    let meta_val = serde_json::to_value(&meta)
+        .map_err(|e| format!("pane.open: meta serialize: {e}"))?;
+    let create_events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::CreateBlock {
+            tab_id: tab_id.clone(),
+            meta: meta_val,
+        },
+    )
+    .await;
+    if let Some(msg) = create_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.open: CreateBlock: {msg}"));
+    }
+    let block_id = create_events
+        .iter()
+        .find_map(|e| match e {
+            agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "pane.open: CreateBlock emitted no BlockCreated".to_string())?;
+    for ev in &create_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+            tracing::warn!("pane.open: CreateBlock mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &create_events);
+
+    // Enqueue layout action — split if requested, else append
+    let (actiontype, targetblockid, position) = pane::resolve_placement(
+        cmd.split_direction.as_deref(),
+        cmd.split_reference_block_id.as_deref(),
+    );
+    let focused = cmd.focus.unwrap_or(true);
+
+    // SPEC_864 Phase 4 — append through the reducer (single writer of
+    // db_layout). Best-effort like the store-direct write it replaces:
+    // a failure leaves the block created but not laid out.
+    {
+        let action = obj::LayoutActionData {
+            actiontype,
+            actionid: uuid::Uuid::new_v4().to_string(),
+            blockid: block_id.clone(),
+            nodesize: None,
+            nodesizefraction: None,
+            indexarr: None,
+            focused,
+            magnified: false,
+            ephemeral: false,
+            targetblockid,
+            position,
+        };
+        if let Err(e) = crate::server::service::queue_layout_actions_via_reducer(
+            state,
+            &tab_id,
+            vec![action],
+        )
+        .await
+        {
+            tracing::warn!("pane.open: layout action enqueue failed: {e}");
+        }
+    }
+
+    tracing::info!(
+        block_id = %block_id,
+        view = %cmd.view,
+        "pane.open: block created + layout updated"
+    );
+
+    // Broadcast block + tab + layout updates
+    {
+        let mut updates = Vec::new();
+        if let Ok(updated_block) = mstore.must_get::<Block>(&block_id) {
+            updates.push(obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "block".into(),
+                oid: block_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&updated_block)),
+            });
+        }
+        if let Ok(updated_tab) = mstore.must_get::<Tab>(&tab_id) {
+            updates.push(obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "tab".into(),
+                oid: tab_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&updated_tab)),
+            });
+            if let Ok(updated_layout) = mstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
+                updates.push(obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "layout".into(),
+                    oid: updated_tab.layoutstate.clone(),
+                    obj: Some(obj::mux_obj_to_value(&updated_layout)),
+                });
+            }
+        }
+        // One batched frame so the renderer applies all of them in a single
+        // reactive flush — see EventBus::broadcast_mux_obj_updates.
+        event_bus.broadcast_mux_obj_updates(&updates);
+    }
+
+    Ok(PaneOpenResult {
+        block_id,
+        tab_id,
+        view: cmd.view,
+        created: true,
+    })
+}
+
+/// Core `pane.moveTab` logic — reorder `cmd.block_id` within its own pane, or
+/// move it into a different pane (`Command::LayoutStackMove`). Queues a
+/// `stackmove` layout action so any OTHER window/tab viewing the same
+/// `db_layout` sees the change (mirrors `stack_onto_block_id`'s `stackpush`
+/// queue above); the calling frontend applies its own optimistic local edit
+/// directly and does not wait on the queue for itself.
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> Result<(), String> {
+    let mstore = &state.mstore;
+    let position = match cmd.position.as_str() {
+        "before" => agentmux_common::StackMovePosition::Before,
+        "after" => agentmux_common::StackMovePosition::After,
+        "end" => agentmux_common::StackMovePosition::End,
+        other => return Err(format!("pane.moveTab: invalid position '{other}' (expected before/after/end)")),
+    };
+    let tab_id = resolve_tab_id_for_block(mstore, &cmd.block_id)
+        .map_err(|e| format!("pane.moveTab: {e}"))?;
+    // Cross-pane moves (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.4) were rejected here through Phase 3 (Codex P2 on PR #3444) —
+    // the frontend's pending-action handler didn't yet mirror a cross-leaf
+    // "stackmove" to other windows/tabs watching this layout. That gap is
+    // now closed (layoutPersistence.ts's StackMove case, via
+    // moveMemberAcrossStacks), so both same-pane and cross-pane targets are
+    // accepted here — Command::LayoutStackMove already validates everything
+    // else (existence, non-empty source, etc.) via move_stack_member.
+    let events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::LayoutStackMove {
+            tab_id: tab_id.clone(),
+            block_id: cmd.block_id.clone(),
+            target_block_id: cmd.target_block_id.clone(),
+            position,
+            activate: cmd.activate,
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    if let Some(msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.moveTab: {msg}"));
+    }
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
+            tracing::warn!("pane.moveTab: mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &events);
+    if let Err(e) = crate::server::service::layout_helpers::queue_target_stack_move(
+        state,
+        &tab_id,
+        &cmd.block_id,
+        &cmd.target_block_id,
+        &cmd.position,
+        cmd.activate,
+    )
+    .await
+    {
+        tracing::warn!(block_id = %cmd.block_id, "pane.moveTab: stackmove queue failed: {e}");
+    }
+    tracing::info!(block_id = %cmd.block_id, target = %cmd.target_block_id, position = %cmd.position, "pane.moveTab");
+    Ok(())
+}

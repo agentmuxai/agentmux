@@ -532,3 +532,271 @@ fn resolve_account_requirements(
 fn bounded_display(s: &str) -> String {
     crate::backend::bundle_import::truncate_display(s, crate::backend::bundle_import::MAX_DISPLAY_FIELD_CHARS)
 }
+
+pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
+    let memories = state.id_store.bundle_list().map_err(|e| format!("bundle.list: {e}"))?;
+    let bundles: Vec<_> = memories.iter().map(|m| json!({
+        "id": m.id, "name": m.name, "description": m.description,
+        "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
+    })).collect();
+    // Emit both keys: `bundle.list` callers read `bundles`; the separate
+    // REST route `/api/v1/agent/preset/list` (`PresetList` MCP tool,
+    // server/mod.rs) still reads `presets` and is unrelated to the internal
+    // WS `preset.*` aliases retired in this pass — do not drop `presets`
+    // here without first retiring that REST route too.
+    Ok(json!({ "bundles": bundles, "presets": bundles }))
+}
+
+pub(crate) async fn bundle_get_impl(
+    state: &AppState,
+    id: &str,
+    name: &str,
+) -> Result<serde_json::Value, String> {
+    let memory = if !id.is_empty() {
+        state.id_store.bundle_get(id).map_err(|e| format!("bundle.get: {e}"))?
+            .ok_or_else(|| format!("bundle.get: not found id={id}"))?
+    } else if !name.is_empty() {
+        let all = state.id_store.bundle_list().map_err(|e| format!("bundle.get: {e}"))?;
+        all.into_iter().filter(|m| m.name == name).max_by_key(|m| m.updated_at)
+            .ok_or_else(|| format!("bundle.get: not found name={name}"))?
+    } else {
+        return Err("bundle.get: provide id or name".to_string());
+    };
+    serde_json::to_value(&memory).map_err(|e| e.to_string())
+}
+
+/// Structurally validate a bundle draft — Armory Bundle Format (ABF)
+/// UI-alignment pass. Takes the SAME payload shape `bundle.upsert` accepts
+/// (reuses its `normalize_bundle_upsert_input`), not just an id, so the
+/// Armory editor's "Validate" button can check an unsaved draft (including a
+/// brand-new bundle with no id yet) rather than only whatever was last
+/// persisted.
+///
+/// Reads the bundle's bound MCP servers when the draft names a persisted
+/// bundle. Before Phase 0b this was fully store-free and validated the inline
+/// `mcp_servers` column; the ref tables are authoritative now, so validating
+/// that column would report on data nothing else consumes
+/// (`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4). An unsaved
+/// draft has no bindings, so it is still checked without touching the store.
+pub(crate) fn bundle_validate_impl(
+    mstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
+    data: serde_json::Value,
+) -> Result<crate::backend::bundle_validate::ValidationReport, String> {
+    let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
+        .map_err(|e| format!("bundle.validate: {e}"))?;
+    let (mcp_entries, resolve_warnings) = if memory.id.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        // A store failure must NOT read as "this bundle has no components":
+        // that would return a clean, apparently-successful report for a check
+        // that never ran (Codex, PR #3153). The UI is built to show a failed
+        // validate; give it one.
+        let resolved = bundle::resolve_bundle_components(mstore, identity_store, &memory.id)
+            .map_err(|e| format!("bundle.validate: {e}"))?;
+        (resolved.mcp_entries, resolved.warnings)
+    };
+    let mut report = crate::backend::bundle_validate::validate_bundle(&memory, &mcp_entries);
+
+    // The resolver drops a bound server whose config will not parse, and says
+    // so in a warning. Discarding that left the validator reporting `is_valid`
+    // for exactly the malformed component it exists to catch (Codex, PR
+    // #3153) — the entry is absent from `mcp_entries`, so nothing downstream
+    // could see it. Surface each as an error: unlike a duplicate name, an
+    // unusable config is not a stylistic warning, it is a component that will
+    // not load.
+    for w in resolve_warnings {
+        report.issues.push(crate::backend::bundle_validate::ValidationIssue {
+            severity: crate::backend::bundle_validate::IssueSeverity::Error,
+            field: "mcp_servers".to_string(),
+            message: w,
+        });
+    }
+    report.is_valid = !report
+        .issues
+        .iter()
+        .any(|i| i.severity == crate::backend::bundle_validate::IssueSeverity::Error);
+
+    Ok(report)
+}
+
+pub(crate) async fn bundle_self_get_impl<'o>(
+    state: &AppState,
+    owner: impl Into<SelfOwner<'o>>,
+) -> Result<serde_json::Value, String> {
+    let agent_id = match owner.into() {
+        SelfOwner::Slug(slug) => slug,
+        // Identity M4c-2c: an attributed caller's own row, and its registry
+        // record only by that row's slug AND id — never a same-named
+        // agent's.
+        SelfOwner::Uid(uid) => {
+            let row = SelfOwner::caller_row(uid, &state.mstore)
+                .map_err(|e| format!("bundle.self.get: {e}"))?;
+            // The launch's bundle (`AgentInstance.memory_id`), as on the slug
+            // path — not `AgentDefinition.memory_id`, the default a launch
+            // inherits (`db_agents.default_memory_id`).
+            let launch = state.mstore.instance_get(uid)
+                .map_err(|e| format!("bundle.self.get: {e}"))?;
+            let memory_id = launch
+                .map(|i| i.memory_id)
+                .filter(|m| !m.is_empty())
+                .or_else(|| {
+                    crate::backend::agent_registry_lookup::find_active_record_by_slug_and_definition(
+                        &row.slug, &row.id,
+                    )
+                    .and_then(|rec| rec.data.memory_id)
+                });
+            return bundle_self_get_by_memory_id(state, memory_id);
+        }
+    };
+    let instance = state.mstore.instance_get_by_slug(agent_id)
+        .map_err(|e| format!("bundle.self.get: {e}"))?;
+    // `instance_get_by_slug` only ever hits the local `db_agents` table — a
+    // live agent that only exists in the global named-agent registry (never
+    // created a `db_agents` instance row) falls through with `instance:
+    // None` here. Without this fallback that silently read as "no bundle
+    // bound" and returned the blank/vanilla preset regardless of what's
+    // actually bound, with nothing to distinguish it from a genuinely
+    // unbound agent. Mirrors the two-tier lookup
+    // `native_memory_handlers::memory_dir_for_agent` already does for the
+    // same reason (see that function's own doc comment, issue #1836).
+    let memory_id = instance.as_ref()
+        .and_then(|i| if i.memory_id.is_empty() { None } else { Some(i.memory_id.clone()) })
+        .or_else(|| {
+            crate::server::native_memory_handlers::find_active_registry_record_by_slug(agent_id)
+                .and_then(|rec| rec.data.memory_id)
+        });
+    bundle_self_get_by_memory_id(state, memory_id)
+}
+
+/// The bundle `memory_id` names, or the blank singleton when none is bound.
+fn bundle_self_get_by_memory_id(
+    state: &AppState,
+    memory_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let memory = if let Some(mid) = memory_id {
+        state.id_store.bundle_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
+            .ok_or_else(|| format!("bundle.self.get: memory_id {mid} not found"))?
+    } else {
+        // No bundle bound: return the blank singleton (two-step — list to find
+        // the blank id, then fetch the full object).
+        let all = state.id_store.bundle_list().map_err(|e| format!("bundle.self.get: {e}"))?;
+        let blank_id = all.into_iter().find(|m| m.is_blank).map(|m| m.id)
+            .ok_or_else(|| "bundle.self.get: blank singleton not found".to_string())?;
+        state.id_store.bundle_get(&blank_id).map_err(|e| format!("bundle.self.get: {e}"))?
+            .ok_or_else(|| "bundle.self.get: blank singleton row missing".to_string())?
+    };
+    serde_json::to_value(&memory).map_err(|e| e.to_string())
+}
+
+/// The agent a self-scoped App API call is about — whose personal memory
+/// (`memory.*`, M4c-2b), linked accounts (`identity.self.accounts`,
+/// `identity.account.validate`), bound preset (`preset.get` self) and
+/// history (`history.search`, M4c-2c) — identity spec §6.5.9.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SelfOwner<'a> {
+    /// The calling agent's own row, by its token's UID. Versions are keyed by
+    /// it as they are; the files are found by id
+    /// (`memory_dir_for_agent_by_id`), and a UID with no row or no directory
+    /// is an error — never another agent's directory (the #2901 class). A
+    /// directory that resolves but does not exist still lists as empty, as
+    /// on the slug path.
+    Uid(&'a str),
+    /// A slug, resolved as before M4c-2 (`memory_dir_for_agent`,
+    /// `resolve_agent_id`, the registry by slug): an Unattributed HTTP
+    /// caller, and the WS RPC.
+    Slug(&'a str),
+}
+
+impl<'a> From<&'a str> for SelfOwner<'a> {
+    fn from(slug: &'a str) -> Self {
+        Self::Slug(slug)
+    }
+}
+
+impl<'a> From<&'a String> for SelfOwner<'a> {
+    fn from(slug: &'a String) -> Self {
+        Self::Slug(slug)
+    }
+}
+
+impl<'a> SelfOwner<'a> {
+    /// The owner of an HTTP request: the caller's own row when attributed,
+    /// whatever `agent_id` names — a name that is not the caller's is counted
+    /// by M4a-2 — so a name two agents share no longer selects the other's
+    /// memory, accounts or history. An Unattributed request keeps the slug, counted as
+    /// `by_name_counter`.
+    pub(crate) fn of(
+        caller: Option<&'a crate::server::caller::Caller>,
+        slug: &'a str,
+        by_name_counter: &'static str,
+    ) -> Self {
+        match caller.and_then(crate::server::caller::Caller::uid) {
+            Some(uid) => Self::Uid(uid),
+            None => {
+                crate::backend::agent_resolve::record_uid_fallback(by_name_counter);
+                Self::Slug(slug)
+            }
+        }
+    }
+
+    /// The UID or the slug, for messages and logs.
+    pub(super) fn label(self) -> &'a str {
+        match self {
+            Self::Uid(v) | Self::Slug(v) => v,
+        }
+    }
+
+    /// The calling agent's row — a UID whose row is gone (a token that
+    /// outlived its agent) is an error on every path, never an empty history
+    /// or listing (ReAgent P1 on #3602).
+    pub(crate) fn caller_row(
+        uid: &str,
+        mstore: &crate::backend::storage::store::Store,
+    ) -> Result<crate::backend::storage::AgentDefinition, String> {
+        mstore
+            .agent_def_get(uid)
+            .map_err(|e| format!("store: {e}"))?
+            .ok_or_else(|| format!("calling agent {uid} not found"))
+    }
+
+    /// The owner's live memory directory.
+    pub(super) fn dir(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
+        match self {
+            Self::Uid(uid) => {
+                let agent = Self::caller_row(uid, mstore).map_err(|e| format!("memory: {e}"))?;
+                crate::server::native_memory_handlers::memory_dir_for_agent_by_id(mstore, &agent)
+                    .ok_or_else(|| format!("memory: memory directory for agent {uid} not found"))
+            }
+            Self::Slug(slug) => crate::server::native_memory_handlers::memory_dir_for_agent(mstore, slug),
+        }
+    }
+
+    /// The owner's memory directory for a write: never an unverified guess
+    /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
+    pub(super) fn dir_for_write(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
+        let id = self.owner_id(mstore).map_err(|e| format!("memory: {e}"))?;
+        match mstore.agent_def_get(&id).map_err(|e| format!("memory: store: {e}"))? {
+            Some(agent) => crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, &agent)
+                .map_err(|e| format!("memory: {e}")),
+            // No local row (a slug caller naming a registry-only agent): its
+            // own spawn record still proves its directory.
+            None => crate::server::native_memory_handlers::memory_dir_from_spawn(&id).ok_or_else(|| {
+                format!(
+                    "memory: agent {} has no local row and no spawn on record, so its memory directory \
+                     can't be verified for a write",
+                    self.label()
+                )
+            }),
+        }
+    }
+
+    /// The owner's definition id (`db_agents.id`) — what its memory versions,
+    /// mirror rows and identity links are keyed by.
+    pub(super) fn owner_id(self, mstore: &crate::backend::storage::store::Store) -> Result<String, String> {
+        match self {
+            Self::Uid(uid) => Self::caller_row(uid, mstore).map(|row| row.id),
+            Self::Slug(slug) => crate::server::native_memory_handlers::resolve_agent_uuid(mstore, slug),
+        }
+    }
+}
