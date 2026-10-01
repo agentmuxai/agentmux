@@ -81,6 +81,96 @@ createRoot(() =>
     })
 );
 
+// The tab `createTab` is building, until the committed tab reaches it. The
+// strip highlights it in the frame its pill first appears, instead of ~150 ms
+// later when the built tab is activated: the pill used to appear unselected
+// and then jump. The content still swaps in once the tab has settled.
+//
+// Before CreateTab replies, the new tab is the one that wasn't in the
+// workspace when the creation started: the Workspace push that adds its pill
+// can land before the reply, and waiting for the id cost a frame of an
+// unselected pill. Dropped as soon as the committed tab moves anywhere but
+// the tab this creation started from (the user went elsewhere meanwhile), or
+// the creation fails or is abandoned.
+//
+// Only the latest creation holds the selection, and only it activates its
+// tab: a newer New Tab, or any click in the strip while one is building
+// (cancelTabCreation), cancels it — that tab is still created, left
+// inactive. A click on the source tab would otherwise be a no-op switch to
+// the committed tab, after which this selection came straight back and the
+// built tab activated anyway (Codex on #4140).
+type Creation = {
+    tabId: string | null;
+    /** Committed tabs this creation may activate from: the tab it started on,
+     *  plus a tab an in-flight switch was already heading to — that switch
+     *  can't be retracted, and this newer creation must still win after it
+     *  lands (ReAgent on #4140). */
+    from: ReadonlySet<string>;
+    existing: ReadonlySet<string>;
+    cancelled: boolean;
+};
+const [creatingTab, setCreatingTab] = createSignal<Creation | null>(null);
+/** Creations not yet resolved (CreateTab hasn't replied or failed), oldest first. */
+const unresolvedCreations = new Set<Creation>();
+/** Tabs of creations that have resolved while others were still unresolved. */
+const resolvedCreationTabIds = new Set<string>();
+
+/** Mark `creation` resolved; once none are left, forget what was claimed. */
+function resolveCreation(creation: Creation): void {
+    unresolvedCreations.delete(creation);
+    if (creation.tabId != null) resolvedCreationTabIds.add(creation.tabId);
+    if (unresolvedCreations.size === 0) resolvedCreationTabIds.clear();
+}
+
+/**
+ * How many earlier, still-unresolved creations will add a pill after
+ * `creation`'s `existing` snapshot: their pills arrive before its own, so
+ * they come first among the unknown ids. Computed when read, not fixed at
+ * the start, so an earlier creation that fails stops counting. Their pills
+ * already in the snapshot don't count either: a tab that appeared since the
+ * oldest of them started and isn't claimed by a resolved creation is one of
+ * theirs (ReAgent on #4140).
+ */
+function creationsAhead(creation: Creation): number {
+    const earlier: Creation[] = [];
+    for (const c of unresolvedCreations) {
+        if (c === creation) break;
+        earlier.push(c);
+    }
+    if (earlier.length === 0) return 0;
+    const oldest = earlier[0];
+    const arrived = [...creation.existing].filter(
+        (id) => !oldest.existing.has(id) && !resolvedCreationTabIds.has(id)
+    ).length;
+    return Math.max(0, earlier.length - arrived);
+}
+/** The tab being created, for the strip to show as selected. */
+export function creatingTabId(): string | null {
+    const creating = creatingTab();
+    if (creating == null) return null;
+    if (creating.tabId != null) return creating.tabId;
+    const ws = workspace();
+    const ids = [...(ws?.pinnedtabids ?? []), ...(ws?.tabids ?? [])];
+    const unknown = ids.filter((id) => !creating.existing.has(id) && !resolvedCreationTabIds.has(id));
+    return unknown[creationsAhead(creating)] ?? null;
+}
+/** Stop the current creation from holding the selection or activating its
+ *  tab: the user chose a tab in the strip while it was building. */
+export function cancelTabCreation(): void {
+    const creating = creatingTab();
+    if (creating == null) return;
+    creating.cancelled = true;
+    setCreatingTab(null);
+}
+createRoot(() =>
+    createEffect(() => {
+        const creating = creatingTab();
+        if (creating == null) return;
+        const committed = activeTabId();
+        if (!creating.from.has(committed)) setCreatingTab(null);
+    })
+);
+
 /** How long a new tab may wait, hidden, for its panes' first data. */
 const NEW_TAB_SETTLE_CAP_MS = 800;
 
@@ -93,6 +183,14 @@ export function createTab() {
     // get yanked back to the new tab out from under whatever they
     // navigated to meanwhile (codex P2, PR #3300).
     const startingActiveTabId = activeTabId();
+    const existing = new Set([...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]);
+    const from = new Set([startingActiveTabId]);
+    const inFlight = switchIntentTabId();
+    if (inFlight != null) from.add(inFlight);
+    cancelTabCreation();
+    const creation: Creation = { tabId: null, from, existing, cancelled: false };
+    unresolvedCreations.add(creation);
+    setCreatingTab(creation);
     fireAndForget(async () => {
         try {
             // Created INACTIVE (`activate: false`) — the current tab
@@ -110,6 +208,13 @@ export function createTab() {
             // re-trigger the gate on an already-revealed tab — the
             // flash a user reported.
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", false, false);
+            creation.tabId = tabId;
+            resolveCreation(creation);
+            if (creatingTab() === creation) {
+                // Same object, new content: notify readers explicitly.
+                setCreatingTab(null);
+                setCreatingTab(creation);
+            }
             // New tabs intentionally start with no `tab:color` — see
             // docs/reports/REPORT_REMOVE_AUTO_TAB_COLOR_2026_08_18.md. Users
             // still pick one manually via the right-click swatch picker
@@ -146,7 +251,7 @@ export function createTab() {
             // can't hold the new tab back for long.
             const { whenTabContentSettled } = await import("@/app/tab/tab-content-settled");
             await whenTabContentSettled(tabId, NEW_TAB_SETTLE_CAP_MS);
-            if (activeTabId() === startingActiveTabId) {
+            if (!creation.cancelled && creation.from.has(activeTabId())) {
                 // Built while hidden, and kept laid out: the same state as a
                 // tab already shown, so it takes the same one-frame switch —
                 // no reveal gate, no cross-fade, no wait for the round trip
@@ -158,6 +263,13 @@ export function createTab() {
             }
         } catch (e) {
             console.error("[createTab] failed:", e);
+        } finally {
+            // Activated, the committed tab catches up (switchIntent is set
+            // until it does) and the effect above drops this. Left inactive
+            // or failed, nothing will: drop it here.
+            resolveCreation(creation);
+            const activating = creation.tabId != null && switchIntentTabId() === creation.tabId;
+            if (creatingTab() === creation && !activating) setCreatingTab(null);
         }
     });
 }
