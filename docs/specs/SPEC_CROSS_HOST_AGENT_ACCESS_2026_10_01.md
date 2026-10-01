@@ -163,6 +163,29 @@ Targets are named by instance (hostname alias plus instance id), resolved from t
 
 The SSH network stays as **break-glass** until the acceptance in section 8 passes on every host type. There is a parity checklist (run a command, edit a file, attach a PTY, elevate, transfer a large file, work on a headless host) and an explicit step that removes the stored logins afterwards. Nothing about this spec requires the SSH credentials to be read or copied; removing them is the owner's decision.
 
+### 6.11 Hops: things behind a host
+
+A grant is bound to **one host** (`aud`), so access is not transitive: being allowed to act on host A never lets a caller act on host B through A.
+
+- **Preferred: address each AgentMux host directly.** Anything that can run AgentMux (a bridged VM, a laptop, a server) is reachable on its own over LAN or WAN with its own grant. Nothing needs a hop.
+- **A target that does not run AgentMux** (a hypervisor's command line, a router, a vendor tool) is reached by a typed `exec` on a host that can reach it, under that host's own grant. The hypervisor is the standard case: `vmrun` runs on the VMware host, not in the guest.
+- **No generic proxy or port forwarding.** It is the side path that bypasses logging (AWS Session Manager does not log forwarded sessions) and the approval prompt.
+- **A request that host A makes to host B on behalf of a caller** is a new request, signed by A, that carries the original caller as `via`. B sees both identities, records both, and applies the **narrower** of the two policies. Default policy on every host: deny any request that has a `via`. An owner can allow it for named pairs of hosts, and L2 is never allowed over a hop. This stops a compromised or prompt-injected agent on A from borrowing A's reach.
+
+### 6.12 What this spec does not cover: the first install
+
+Putting AgentMux on a machine that does not have it yet needs a human or an existing channel (the SSH network, as break-glass). Everything here starts once a host runs AgentMux and its owner has turned remote access on.
+
+### 6.13 Worked example: the Windows test bed
+
+The VMware host (gamerlove) runs AgentMux. The clean Windows VM on it runs its own AgentMux and is bridged, so it is a LAN peer.
+
+1. The caller asks the host agent on gamerlove, with an L1 grant for the `vmrun` operations only (scoped to the test VM's folder: list, revert to a named snapshot, clone, start, stop; nothing else), to revert the VM to the clean snapshot and start it.
+2. When the guest's AgentMux is up, the caller addresses it directly, as an ordinary host, for L0 and L1 work: installing the build under test, reading logs, running the first-run checks. No hop through gamerlove.
+3. Every step is in the audit log of the host it ran on, with the grant id.
+
+Until phases 1 and 2 ship, the same flow works only agent-to-agent: a jekt asks the gamerlove agent to do the step with its own tools. That is useful but unaudited, and it rests on that agent's judgment and the host's default permission mode, which is the gap this spec closes.
+
 ## 7. Threat model
 
 | # | Threat | Control |
@@ -182,6 +205,7 @@ The SSH network stays as **break-glass** until the acceptance in section 8 passe
 | T13 | Path escape (symlinks, `..`, junctions, case folding) | Resolve then re-check against scope on every operation; typed file ops only |
 | T14 | Cross-account access | Not in scope for phases 1 to 3; the account directory only ever vouches for keys of the same account |
 | T15 | The elevation helper becomes a privilege-escalation tool | One action per launch, no resident root, verifies the grant itself, tiny typed surface, signed binary, caller verified every time |
+| T16 | A compromised or prompt-injected host borrows its reach to act on other hosts (confused deputy through a hop) | Grants are bound to one host; a forwarded request carries `via`, is denied by default, takes the narrower policy, is recorded on both hosts, and is never allowed for L2 (6.11) |
 
 ## 8. Acceptance (tests that must pass before the SSH network is retired)
 
@@ -197,6 +221,8 @@ The SSH network stays as **break-glass** until the acceptance in section 8 passe
 10. PTY recordings contain no plaintext for secrets typed at masked prompts.
 11. Headless Linux, a Windows host (no console user), and macOS each complete the L2 flow end to end with an approver device.
 12. Output and time limits stop a runaway command and a flood of requests.
+13. A request with a `via` is denied by default; when allowed for a named pair of hosts it shows both identities in the prompt and in both audit logs, uses the narrower policy, and is refused for L2.
+14. The test-bed flow of 6.13 runs end to end: revert and start the VM through a `vmrun`-scoped grant on the VMware host, then work on the guest directly, with no way to run anything else on the VMware host through that grant.
 
 ## 9. Delivery plan
 
@@ -227,6 +253,7 @@ Phases ship separately, each usable and reviewable alone. The gates before phase
 5. **Headless approval.** Is a phone approval acceptable, or must approval always be on a machine you own? This sets whether servers are in scope for L2.
 6. **Retention and privacy.** How long to keep audit logs and recordings on a host, and whether forwarding them to the account is on by default.
 7. **Organizational policy.** Does an administrator-managed machine get an enforceable "no remote access" switch that a user cannot flip?
+8. **Hops.** Is `via` worth building at all? Recommendation: not in phases 1 to 3. Direct addressing plus typed `exec` on the host that can reach a non-AgentMux target covers the known cases, and the hop adds a confused-deputy surface for no current need.
 
 ## 12. Sources
 
