@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { effectiveModel, effectiveRuntime, effortFromFlags, permissionModeFromFlags, effortApplies, effortNotUsedReason, modelFromFlags, modelTakesEffort } from "./runtime-capabilities";
+import type { PermissionMode } from "./types";
+import { effectiveModel, effectiveRuntime, effortFromFlags, permissionModeFromFlags, permissionModeText, effortApplies, effortNotUsedReason, modelFromFlags, modelTakesEffort } from "./runtime-capabilities";
 
 describe("modelTakesEffort", () => {
     it("Haiku does not, by alias or by concrete id, in any case", () => {
@@ -81,5 +82,30 @@ describe("permissionModeFromFlags / effectiveRuntime's mode", () => {
         const base = { permissionMode: "bypass", model: "sonnet", effort: "high" };
         expect(effectiveRuntime(base, "--permission-mode plan").permissionMode).toBe("plan");
         expect(effectiveRuntime(base, "--add-dir /tmp").permissionMode).toBe("bypass");
+    });
+});
+
+describe("permissionModeText", () => {
+    const MODES: PermissionMode[] = ["bypass", "auto", "acceptEdits", "plan", "default"];
+
+    it("where nothing answers the prompts for the user, the mode's own wording stands", () => {
+        expect(permissionModeText("default", false)).toEqual({ label: "Default (prompt all)" });
+        expect(permissionModeText("plan", false)).toEqual({ label: "Plan (read-only)" });
+        expect(permissionModeText("auto", false)).toEqual({ label: "Auto (AI classifier)" });
+        expect(permissionModeText("bypass", false)).toEqual({ label: "Bypass (no prompts)" });
+    });
+
+    it("where the server answers every prompt, no mode promises prompting", () => {
+        for (const m of MODES) {
+            const t = permissionModeText(m, true);
+            expect(t.label, m).not.toMatch(/prompt all|AI classifier|read-only/i);
+        }
+        expect(permissionModeText("default", true).note).toMatch(/allowed automatically/);
+        expect(permissionModeText("acceptEdits", true).note).toMatch(/allowed automatically/);
+        expect(permissionModeText("plan", true).note).toMatch(/approved automatically/);
+    });
+
+    it("Bypass says nothing false either way, so it needs no note", () => {
+        expect(permissionModeText("bypass", true)).toEqual({ label: "Bypass (no prompts)" });
     });
 });

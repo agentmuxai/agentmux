@@ -18,8 +18,8 @@
 
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
 import { patchRuntime } from "../../runtime-apply";
-import { PROVIDER_FLAGS_META_KEY } from "../../launch-args";
-import { effectiveModel, effectiveRuntime, effortNotUsedReason } from "../../runtime-capabilities";
+import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "../../launch-args";
+import { effectiveModel, effectiveRuntime, effortNotUsedReason, permissionModeText } from "../../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -145,6 +145,10 @@ const effortCommand: SlashCommand = {
 
 function permissionChoices(ctx: SlashCommandContext): SlashChoice[] {
     const current = shownRuntime(ctx).permissionMode;
+    // A persistent agent's permission prompts are answered for the user, so its
+    // modes mostly behave alike — say what actually happens (see permissionModeText).
+    const provider = ctx.provider();
+    const autoAnswers = !!provider && isPersistentLaunch(provider, ctx.block()?.meta?.["agentMode"] as string | undefined);
     const make = (
         value: string,
         label: string,
@@ -154,7 +158,7 @@ function permissionChoices(ctx: SlashCommandContext): SlashChoice[] {
     ): SlashChoice => ({
         value,
         label,
-        description,
+        description: permissionModeText(mode, autoAnswers).note ?? description,
         current: current === mode,
         aliases,
     });
