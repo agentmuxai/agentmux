@@ -37,7 +37,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { staticTabId } from "@/app/store/global";
-import { buildPaneArgs } from "./buildRuntimeArgs";
+import { buildPaneArgs, getRuntimeConfig } from "./buildRuntimeArgs";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "./launch-args";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
@@ -97,4 +97,78 @@ export async function applyRuntimeChange(
             forcerestart: true,
         });
     }
+}
+
+/**
+ * How long after its last write a block's own record of the runtime config is
+ * preferred over the block's meta. The write has to round-trip into the block's
+ * meta before a reader sees it; a change made inside that window must build on
+ * what was just written, not on the stale read.
+ */
+const META_CATCH_UP_MS = 3000;
+
+interface RuntimeChain {
+    /** Tail of the block's change queue; each change runs after the previous. */
+    tail: Promise<void>;
+    /** Changes queued or running. */
+    pending: number;
+    /** The config the last successful change wrote, with when. */
+    last?: { config: AgentRuntimeConfig; at: number };
+}
+
+const chains = new Map<string, RuntimeChain>();
+
+/** Test hook: forget every block's queue. */
+export function __resetRuntimeApply(): void {
+    chains.clear();
+}
+
+/**
+ * Change part of a pane's runtime config (model, effort or permission mode)
+ * and apply it. THE entry point for the Runtime menu and the slash commands.
+ *
+ * Changes to one pane are applied one at a time, in the order they were made,
+ * each built on the one before it. Callers used to build the new config from
+ * the block's meta at click time and call `applyRuntimeChange`; the Runtime
+ * panel stays open across selections, so a second change could read the meta
+ * before the first one's write had come back, and its write undid the first —
+ * in `agent:runtime` and in `cmd:args` alike, so the pane ran a combination
+ * nobody had asked for.
+ *
+ * `getMeta` is read when the change RUNS, not when it is requested.
+ * Resolves with the config that was applied; rejects with the underlying error
+ * (callers decide how to show it). A failed change is not carried into the next
+ * one: the next builds on what was last really applied, or on the block's meta.
+ */
+export function patchRuntime(
+    blockId: string,
+    provider: ProviderDefinition | undefined,
+    patch: Partial<AgentRuntimeConfig>,
+    getMeta: () => Record<string, unknown> | undefined,
+): Promise<AgentRuntimeConfig> {
+    const chain = chains.get(blockId) ?? { tail: Promise.resolve(), pending: 0 };
+    chains.set(blockId, chain);
+    chain.pending++;
+
+    const run = chain.tail.then(async () => {
+        const recent = chain.last && Date.now() - chain.last.at < META_CATCH_UP_MS ? chain.last.config : undefined;
+        const updated: AgentRuntimeConfig = { ...(recent ?? getRuntimeConfig(getMeta())), ...patch };
+        await applyRuntimeChange(blockId, provider, updated, getMeta());
+        chain.last = { config: updated, at: Date.now() };
+        return updated;
+    });
+    chain.tail = run.then(
+        () => undefined,
+        () => undefined,
+    );
+    const done = () => {
+        if (--chain.pending !== 0) return;
+        // Idle: forget the block once its last write is old enough that its
+        // meta can be trusted again, so a long session doesn't grow this map.
+        setTimeout(() => {
+            if (chain.pending === 0 && chains.get(blockId) === chain) chains.delete(blockId);
+        }, META_CATCH_UP_MS + 100);
+    };
+    run.then(done, done);
+    return run;
 }

@@ -32,7 +32,7 @@ import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "soli
 import { Portal } from "solid-js/web";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, type ProviderModel } from "../providers";
-import { applyRuntimeChange } from "../runtime-apply";
+import { patchRuntime } from "../runtime-apply";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
 /** Serialize a MenuPositionResult.style the same way flyoutmenu.tsx does. */
@@ -104,17 +104,20 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
 
     const runtime = (): AgentRuntimeConfig => getRuntimeConfig(props.blockAtom()?.meta);
 
+    // Why the last change did not apply, or null. The menu shows what was
+    // REQUESTED (`agent:runtime`); when applying it failed — the process may be
+    // running something else — it says so instead of looking fine.
+    const [applyError, setApplyError] = createSignal<string | null>(null);
+
+    // Goes through `patchRuntime`: changes to a pane are applied one at a time,
+    // each built on the last, so two quick selections (the panel stays open for
+    // exactly that) cannot undo each other.
     const updateRuntime = async (patch: Partial<AgentRuntimeConfig>) => {
         try {
-            await applyRuntimeChange(
-                props.blockId,
-                getProvider(props.providerId),
-                { ...runtime(), ...patch },
-                props.blockAtom()?.meta,
-            );
-        } catch {
-            // Silent — settings retry on next change (matches the prior
-            // AgentComposerStrip.updateRuntime tolerance).
+            await patchRuntime(props.blockId, getProvider(props.providerId), patch, () => props.blockAtom()?.meta);
+            setApplyError(null);
+        } catch (err: any) {
+            setApplyError(err?.message ?? String(err));
         }
     };
 
@@ -314,14 +317,24 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                 type="button"
                 ref={referenceEl}
                 class="agent-runtime-dropup-trigger"
+                classList={{ "agent-runtime-dropup-trigger--error": applyError() != null }}
                 style={{ "border-left": `3px solid ${PERMISSION_COLORS[runtime().permissionMode]}` }}
-                title="Mode / Model / Effort — applies on the next turn"
+                title={
+                    applyError() != null
+                        ? `Couldn't apply that change — the agent may still be running the previous settings. ${applyError()}`
+                        : "Mode / Model / Effort — applies on the next turn"
+                }
                 aria-haspopup="listbox"
                 aria-expanded={open()}
-                aria-label={`Runtime settings: ${compactSummary()}`}
+                aria-label={`Runtime settings: ${compactSummary()}${applyError() != null ? " — last change failed to apply" : ""}`}
                 onClick={() => toggleOpen()}
             >
                 <span class="agent-runtime-dropup-trigger-label">{compactSummary()}</span>
+                <Show when={applyError() != null}>
+                    <span class="agent-runtime-dropup-trigger-warn" aria-hidden="true">
+                        {" ⚠"}
+                    </span>
+                </Show>
             </button>
             <Show when={open()}>
                 <Portal>

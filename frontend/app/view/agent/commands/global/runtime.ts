@@ -17,7 +17,7 @@
  */
 
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
-import { applyRuntimeChange } from "../../runtime-apply";
+import { patchRuntime } from "../../runtime-apply";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -35,14 +35,12 @@ async function updateRuntime(
     ctx: SlashCommandContext,
     patch: Partial<AgentRuntimeConfig>,
 ): Promise<RuntimeUpdateResult> {
-    const current = getRuntimeConfig(ctx.block()?.meta);
-    const updated: AgentRuntimeConfig = { ...current, ...patch };
     try {
         // Persist + (for persistent Claude) rebuild cmd:args & force-restart so
-        // the change applies to the running agent. Shared with the GUI control
-        // bar via applyRuntimeChange — the persistent rebuild/restart used to
-        // live only here (#1503), so the dropdown silently no-op'd.
-        await applyRuntimeChange(ctx.blockId, ctx.provider(), updated, ctx.block()?.meta);
+        // the change applies to the running agent. Shared with the Runtime menu
+        // via patchRuntime — one queue per pane, so a slash command and a menu
+        // click (or two commands) cannot undo each other.
+        const updated = await patchRuntime(ctx.blockId, ctx.provider(), patch, () => ctx.block()?.meta);
         return { ok: true, updated };
     } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
