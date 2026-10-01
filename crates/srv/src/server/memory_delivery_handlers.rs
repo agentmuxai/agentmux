@@ -573,11 +573,31 @@ impl LaunchDirs {
     }
 }
 
+/// The files the CLI read by itself at session start.
+fn startup_files(launch: &LaunchDirs) -> Vec<crate::backend::startup_files::StartupFile> {
+    let home = dirs::home_dir();
+    crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
+}
+
+/// Whether the CLI already got the current Global Memory from a startup
+/// file: one AgentMux wrote that holds every current section, byte for byte.
+/// A foreign or stale file with some old section doesn't count, or the hook
+/// would drop current entries the agent never saw (Codex on #4131).
+fn global_memory_in_startup_files(files: &[crate::backend::startup_files::StartupFile], global: &[Entry]) -> bool {
+    !global.is_empty()
+        && files.iter().any(|f| {
+            f.owner == crate::backend::startup_files::Owner::Agentmux && global.iter().all(|e| f.text.contains(&e.text))
+        })
+}
+
 /// The files the CLI read by itself at session start, as card items. Only
 /// for a new session: on `/clear` and compaction they are still in context.
 fn startup_items(launch: &LaunchDirs) -> Vec<EntrySize> {
-    let home = dirs::home_dir();
-    crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
+    startup_items_of(startup_files(launch))
+}
+
+fn startup_items_of(files: Vec<crate::backend::startup_files::StartupFile>) -> Vec<EntrySize> {
+    files
         .into_iter()
         .map(|f| {
             let (size_bytes, tokens) = (f.text.len(), f.text.chars().count().div_ceil(4));
@@ -613,17 +633,16 @@ fn compose_delivery(
     now: i64,
 ) -> Option<Delivery> {
     // What the CLI loaded itself comes first, then what the hook carried.
-    let mut items = match (reason, launch) {
-        (Reason::Startup, Some(launch)) => startup_items(launch),
+    let files = match (reason, launch) {
+        (Reason::Startup, Some(launch)) => startup_files(launch),
         _ => Vec::new(),
     };
-    // A startup file the CLI loaded already carries the Global Memory: the
-    // hook doesn't send it a second time (LC3, §4.4). The card still lists
-    // each entry, marked as coming through that file.
-    let global_in_file = items
-        .iter()
-        .any(|i| i.startup.as_ref().is_some_and(|s| s.contains.contains(&"global_memory")));
     let global = global_entries(state, block_id);
+    // A startup file the CLI loaded already carries the current Global
+    // Memory: the hook doesn't send it a second time (LC3, §4.4). The card
+    // still lists each entry, marked as coming through that file.
+    let global_in_file = global_memory_in_startup_files(&files, &global);
+    let mut items = startup_items_of(files);
     let mut entries = if global_in_file { Vec::new() } else { global.clone() };
     if let Some(uid) = agent_uid {
         entries.extend(personal_entries(uid));
@@ -958,6 +977,39 @@ mod tests {
         assert!(own.get("contains").is_none(), "empty lists are left out");
         let mcp = items.iter().find(|i| i["role"] == "mcp_servers").unwrap();
         assert_eq!((mcp["count"].as_u64(), mcp["size_bytes"].as_u64()), (Some(1), Some(0)));
+    }
+
+    /// Only an AgentMux-written startup file holding every current section
+    /// counts as delivering the Global Memory (Codex on #4131).
+    #[test]
+    fn global_memory_counts_as_in_the_file_only_when_every_current_section_is() {
+        use crate::backend::startup_files::{Owner, StartupFile};
+        let entry = |name: &str, text: &str| Entry {
+            label: name.into(),
+            tier: Tier::Global,
+            text: text.into(),
+            name: name.into(),
+            system: true,
+            bundle_id: None,
+            path: None,
+        };
+        let file = |owner: Owner, text: &str| StartupFile {
+            role: "instructions_import",
+            name: "AGENTMUX_MEMORY.md".into(),
+            path: "/ws/.claude/AGENTMUX_MEMORY.md".into(),
+            owner,
+            text: text.into(),
+            count: None,
+            contains: vec!["global_memory"],
+        };
+        let global = [entry("A", "# [AgentMux System] A\n\nnew a"), entry("B", "# [Workspace] B\n\nb")];
+        let both = "# Memory\n# [AgentMux System] A\n\nnew a\n\n---\n\n# [Workspace] B\n\nb\n";
+        assert!(global_memory_in_startup_files(&[file(Owner::Agentmux, both)], &global));
+        assert!(!global_memory_in_startup_files(&[file(Owner::User, both)], &global), "not AgentMux's");
+        let stale = "# Memory\n# [AgentMux System] A\n\nold a\n\n---\n\n# [Workspace] B\n\nb\n";
+        assert!(!global_memory_in_startup_files(&[file(Owner::Agentmux, stale)], &global), "an old section");
+        assert!(!global_memory_in_startup_files(&[file(Owner::Agentmux, "# [Workspace] B\n\nb")], &global), "one missing");
+        assert!(!global_memory_in_startup_files(&[file(Owner::Agentmux, both)], &[]), "nothing to deliver");
     }
 
     #[test]

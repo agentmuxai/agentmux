@@ -1470,7 +1470,10 @@ pub fn write_claude_md_respecting_ownership(
     // forever. Adopt it, keeping a copy (LC3,
     // SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4).
     if let Some(Ok(content)) = &existing {
-        if !agentmux_owns_it && is_legacy_agentmux_claude_md(content) {
+        // Never through a symlink: the managed write below would follow it
+        // and overwrite whatever it points at (Codex P1 on #4131).
+        let is_symlink = std::fs::symlink_metadata(&claude_md_path).is_ok_and(|m| m.file_type().is_symlink());
+        if !agentmux_owns_it && !is_symlink && is_legacy_agentmux_claude_md(content) {
             // Resolved and symlink-checked like the other `.claude` side
             // files: a `.claude` that links outside the workspace must not
             // get the backup written through it (Codex on #4131). No safe
@@ -1483,9 +1486,22 @@ pub fn write_claude_md_respecting_ownership(
                 Some(backup) => {
                     let backed_up = backup.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
                         match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
-                            Ok(mut f) => std::io::Write::write_all(&mut f, content.as_bytes()),
-                            // An earlier adoption's copy is the original: keep it.
-                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                            Ok(mut f) => std::io::Write::write_all(&mut f, content.as_bytes()).and_then(|()| f.sync_all()).inspect_err(|_| {
+                                // A partial copy must not pass for the backup next launch.
+                                let _ = std::fs::remove_file(&backup);
+                            }),
+                            // A copy left by an earlier attempt counts only if it
+                            // is this file, whole (Codex on #4131).
+                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                                if std::fs::read_to_string(&backup).is_ok_and(|b| b == *content) {
+                                    Ok(())
+                                } else {
+                                    Err(std::io::Error::new(
+                                        std::io::ErrorKind::AlreadyExists,
+                                        "a different .pre-adopt copy already exists",
+                                    ))
+                                }
+                            }
                             Err(e) => Err(e),
                         }
                     });
@@ -2088,6 +2104,42 @@ mod tests {
         assert!(!outside.path().join("CLAUDE.md.pre-adopt").exists(), "no backup outside the workspace");
         let now = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
         assert!(!now.starts_with(CLAUDE_MD_MANAGED_MARKER), "not adopted: {now}");
+    }
+
+    /// A copy left by an earlier attempt that isn't this file whole (a
+    /// partial write) blocks adoption; the original stays.
+    #[test]
+    fn a_mismatched_backup_blocks_adoption() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), LEGACY_CLAUDE_MD).unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        std::fs::write(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP), &LEGACY_CLAUDE_MD[..20]).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap(), LEGACY_CLAUDE_MD);
+
+        // The same copy, whole: adopted.
+        std::fs::write(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP), LEGACY_CLAUDE_MD).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap().starts_with(CLAUDE_MD_MANAGED_MARKER));
+    }
+
+    /// A `CLAUDE.md` that is a symlink is never adopted: the managed write
+    /// would follow it (Codex P1 on #4131).
+    #[test]
+    fn a_symlinked_legacy_claude_md_is_not_adopted() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("CLAUDE.md");
+        std::fs::write(&target, LEGACY_CLAUDE_MD).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join("CLAUDE.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join("CLAUDE.md")).is_ok();
+        if !made {
+            return; // Windows needs privilege for symlinks.
+        }
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), LEGACY_CLAUDE_MD, "the outside file is untouched");
     }
 
     #[test]
