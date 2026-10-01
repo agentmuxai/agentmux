@@ -106,7 +106,11 @@ export function buildConfigFiles(
     const resolvedProviderId = providerId ?? "claude";
     const providerDef = PROVIDERS[resolvedProviderId] ?? PROVIDERS[resolveProviderAlias(resolvedProviderId)];
     const instructionsFilename = providerDef?.startupInstructionsFilename;
-    if (instructionsParts.length > 0 && instructionsFilename) {
+    // Written even when empty: srv injects the Global Memory into it
+    // (`inject_global_bundles`), and with the skills index gone for Claude
+    // (LC3) an agent with no soul, instructions or memory would otherwise get
+    // no startup file, and no Global Memory in it, at all.
+    if (instructionsFilename) {
         files.push({ path: instructionsFilename, content: instructionsParts.join("") });
     }
 

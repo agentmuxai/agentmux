@@ -122,15 +122,17 @@ pub fn build_config_files(
     // Resolved per-provider — `None` for an unrecognized provider_id or one
     // with no confirmed native file (kimi) skips writing this file
     // entirely rather than guessing "CLAUDE.md".
+    // Written even when empty: srv injects the Global Memory into it at write
+    // time (`inject_global_bundles`), and with the skills index gone for
+    // Claude (LC3) an agent with no soul, instructions or memory would
+    // otherwise get no startup file, and no Global Memory in it, at all.
     let instructions_filename = crate::backend::providers::get_provider(provider_id)
         .and_then(|p| p.startup_instructions_filename);
-    if !instructions_parts.is_empty() {
-        if let Some(filename) = instructions_filename {
-            files.push(AgentConfigFile {
-                filename: filename.to_string(),
-                content: instructions_parts.join(""),
-            });
-        }
+    if let Some(filename) = instructions_filename {
+        files.push(AgentConfigFile {
+            filename: filename.to_string(),
+            content: instructions_parts.join(""),
+        });
     }
 
     // ----------------------------------------------------------------
@@ -1961,6 +1963,18 @@ mod tests {
         assert!(claude_md.content.contains("Available Skills"));
         assert!(claude_md.content.contains("**Notes**"));
         assert!(!claude_md.content.contains("/deploy"), "Deploy has a command file");
+    }
+
+    /// An agent whose skills all have files, and nothing else, still gets its
+    /// instructions file: srv puts the Global Memory in it (LC3 live check —
+    /// without this the launch wrote no CLAUDE.md at all).
+    #[test]
+    fn the_instructions_file_is_written_even_when_empty() {
+        let skills = vec![make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all")];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        assert!(files.iter().any(|f| f.filename == "CLAUDE.md"), "{:?}", files.iter().map(|f| &f.filename).collect::<Vec<_>>());
+        let kimi = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "kimi");
+        assert!(!kimi.iter().any(|f| f.filename == "CLAUDE.md" || f.filename == "AGENTS.md"), "kimi has no file");
     }
 
     const LEGACY_CLAUDE_MD: &str = "\n# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n\

@@ -96,6 +96,11 @@ describe("buildConfigFiles — skills index (LC3)", () => {
         expect(md).not.toContain("/deploy");
     });
 
+    it("still writes CLAUDE.md when nothing but files-backed skills would go in it, for srv's Global Memory", () => {
+        const files = buildConfigFiles({}, [makeSkill({ name: "Deploy", trigger: "deploy", content: "x" })], undefined, undefined, "claude");
+        expect(files.some((f) => f.path === "CLAUDE.md")).toBe(true);
+    });
+
     it("keeps the full index for a provider that only reads its instructions file", () => {
         const md = instructions("codex");
         expect(md).toContain("**Deploy**");
