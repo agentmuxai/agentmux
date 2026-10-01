@@ -66,6 +66,7 @@ import { Logger } from "@/util/logger";
 import { resolveEffectiveVendor } from "../providers/catalog";
 import type { AgentSortOption } from "./AgentPickerFilterBar";
 import { RuntimeBadge } from "./RuntimeBadge";
+import type { OpenAgentLocation } from "../open-agent-panes";
 
 /** "type" sort groups Host before Sandbox (Container) before anything
  *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
@@ -181,6 +182,12 @@ export interface MyAgentsListProps {
      * the row shows the fork prompt instead of calling onReattach.
      */
     openDefinitions?: Accessor<Map<string, string>>;
+    /**
+     * definition_id → where that open pane is (this window or another),
+     * for the active badge's tooltip and the "already open" prompt.
+     * Optional: without it the wording stays "in another pane".
+     */
+    openLocations?: Accessor<Map<string, OpenAgentLocation>>;
     /**
      * Called after the user confirms a fork: fork has been created and
      * the new definition should be launched. Receives the new AgentDefinition.
@@ -996,6 +1003,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     <For each={sortedRows()}>
                         {(row) => {
                             const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
+                            const openWhere = () =>
+                                props.openLocations?.().get(row.definition_id)?.label ?? "open in another pane";
                             const forkState = () => getForkState(row.definition_id);
 
                             return (
@@ -1025,7 +1034,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 <Show when={isActive()}>
                                                     <span
                                                         class="agent-active-badge"
-                                                        title="Open in another pane"
+                                                        title={openWhere().charAt(0).toUpperCase() + openWhere().slice(1)}
                                                         aria-label="Active"
                                                     />
                                                 </Show>
@@ -1199,7 +1208,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                             <Show when={forkState().kind === "prompt" || isActive()}>
                                                 <span class="agent-fork-prompt-msg">
                                                     <strong>{row.instance_name || row.definition_name}</strong> is
-                                                    already open in another pane.
+                                                    already {openWhere()}.
                                                 </span>
                                             </Show>
                                             <Show when={forkState().kind === "prompt"}>

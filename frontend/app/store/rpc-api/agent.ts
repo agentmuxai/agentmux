@@ -26,6 +26,17 @@ import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAge
  * them missing. ts-rs can only mark a field optional for `Option<T>`, so the
  * generated type calls them required; deriving restores it.
  */
+/** One entry of `agent.open-panes` (srv `AgentOpenPane`). */
+export interface AgentOpenPane {
+    block_id: string;
+    /** Agent definition id. */
+    agent_id: string;
+    tab_id: string;
+    tab_name: string;
+    /** `Window` oids showing the pane's workspace; empty when none is open. */
+    window_ids: string[];
+}
+
 export type ListAgentHistoryInput = Omit<CommandListAgentHistoryData, "limit" | "offset"> &
     Partial<Pick<CommandListAgentHistoryData, "limit" | "offset">>;
 
@@ -695,6 +706,16 @@ export const AgentApi = {
         opts?: RpcOpts,
     ): Promise<{ block_ids: string[] }> {
         return client.rpcCall("agent.tracked-blocks", data, opts);
+    },
+
+    // Every agent pane open in this instance — all tabs, all windows
+    // (floating included) — with its agent id and where it is.
+    AgentOpenPanesCommand(
+        client: RpcClient,
+        data: Record<string, never>,
+        opts?: RpcOpts,
+    ): Promise<{ panes: AgentOpenPane[] }> {
+        return client.rpcCall("agent.open-panes", data, opts);
     },
 
     // Terminate a single PID in a given block's tracker tree.
