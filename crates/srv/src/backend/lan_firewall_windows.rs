@@ -16,10 +16,10 @@ use windows::core::{Interface, GUID};
 use windows::Win32::Foundation::VARIANT_BOOL;
 use windows::Win32::NetworkManagement::WindowsFirewall::{
     INetFwPolicy2, INetFwRule, INetFwRule3, NetFwPolicy2, NET_FW_ACTION_ALLOW, NET_FW_MODIFY_STATE_OK,
-    NET_FW_RULE_DIR_IN,
+    NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC, NET_FW_PROFILE_TYPE2, NET_FW_RULE_DIR_IN,
 };
 use windows::Win32::Networking::NetworkListManager::{
-    INetworkListManager, NetworkListManager, NLM_ENUM_NETWORK_CONNECTED, NLM_NETWORK_CATEGORY_DOMAIN_AUTHENTICATED,
+    INetworkListManager, NetworkListManager, NLM_NETWORK_CATEGORY_DOMAIN_AUTHENTICATED,
     NLM_NETWORK_CATEGORY_PRIVATE, NLM_NETWORK_CATEGORY_PUBLIC,
 };
 use windows::Win32::System::Com::{
@@ -28,7 +28,9 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Ole::IEnumVARIANT;
 use windows::Win32::System::Variant::VARIANT;
 
-use super::lan_firewall::{Adapter, Category, FwRule, PortSpec, Proto, Remote, Snapshot};
+use super::lan_firewall::{
+    Adapter, Category, FwRule, PortSpec, ProfileSettings, Profiles, Proto, Remote, Snapshot,
+};
 
 /// Read the firewall rules, the adapters and their network categories.
 ///
@@ -56,19 +58,26 @@ fn read_on_this_thread() -> Result<Snapshot, String> {
 }
 
 fn read_inner() -> Result<Snapshot, String> {
-    let (rules, local_rules_ignored) = read_rules().map_err(|e| format!("reading firewall rules: {e}"))?;
+    let (rules, local_rules_ignored, profiles) =
+        read_rules().map_err(|e| format!("reading firewall rules: {e}"))?;
     let categories = read_categories().map_err(|e| format!("reading network categories: {e}"))?;
     Ok(Snapshot {
         rules,
         adapters: adapters(&categories),
         local_rules_ignored,
+        profiles,
     })
 }
 
-fn read_rules() -> windows::core::Result<(Vec<FwRule>, bool)> {
+fn read_rules() -> windows::core::Result<(Vec<FwRule>, bool, Profiles)> {
     // SAFETY: COM is initialised on this thread by the caller.
     let policy: INetFwPolicy2 = unsafe { CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)? };
     let ignored = unsafe { policy.LocalPolicyModifyState()? } != NET_FW_MODIFY_STATE_OK;
+    let profiles = Profiles {
+        domain: profile_settings(&policy, NET_FW_PROFILE2_DOMAIN),
+        private: profile_settings(&policy, NET_FW_PROFILE2_PRIVATE),
+        public: profile_settings(&policy, NET_FW_PROFILE2_PUBLIC),
+    };
     let collection = unsafe { policy.Rules()? };
     let enumerator: IEnumVARIANT = unsafe { collection._NewEnum()? }.cast()?;
 
@@ -87,7 +96,27 @@ fn read_rules() -> windows::core::Result<(Vec<FwRule>, bool)> {
             rules.push(rule);
         }
     }
-    Ok((rules, ignored))
+    Ok((rules, ignored, profiles))
+}
+
+/// One profile's switches. A value that cannot be read keeps Windows' default
+/// (firewall on, default inbound Block): the cautious reading, which can only
+/// ever lead to a warning, never to a false claim of coverage.
+fn profile_settings(policy: &INetFwPolicy2, profile: NET_FW_PROFILE_TYPE2) -> ProfileSettings {
+    let mut s = ProfileSettings::default();
+    // SAFETY: plain property reads on a live COM object.
+    unsafe {
+        if let Ok(on) = policy.get_FirewallEnabled(profile) {
+            s.enabled = on.as_bool();
+        }
+        if let Ok(all) = policy.get_BlockAllInboundTraffic(profile) {
+            s.block_all_inbound = all.as_bool();
+        }
+        if let Ok(action) = policy.get_DefaultInboundAction(profile) {
+            s.default_inbound_allow = action == NET_FW_ACTION_ALLOW;
+        }
+    }
+    s
 }
 
 fn rule_from_variant(v: &VARIANT) -> windows::core::Result<FwRule> {
@@ -98,7 +127,7 @@ fn rule_from_variant(v: &VARIANT) -> windows::core::Result<FwRule> {
         let app = rule.ApplicationName().map(|b| b.to_string()).unwrap_or_default();
         let interface_types = rule.InterfaceTypes().map(|b| b.to_string()).unwrap_or_default();
         let interfaces_set = rule.Interfaces().map(|i| !i.is_empty()).unwrap_or(false);
-        let restricted = is_restricted(&rule);
+        let restricted = is_restricted(&rule, !app.trim().is_empty());
         Ok(FwRule {
             name: rule.Name().map(|b| b.to_string()).unwrap_or_default(),
             enabled: rule.Enabled().unwrap_or(VARIANT_BOOL(0)).as_bool(),
@@ -123,7 +152,7 @@ fn rule_from_variant(v: &VARIANT) -> windows::core::Result<FwRule> {
 /// have an empty `ApplicationName` and so look like "any program". Reads
 /// `INetFwRule3` (Windows 8 and later); where that is unavailable the extra
 /// restrictions cannot be read, and only the service name is checked.
-fn is_restricted(rule: &INetFwRule) -> bool {
+fn is_restricted(rule: &INetFwRule, names_a_program: bool) -> bool {
     let non_empty = |r: windows::core::Result<windows::core::BSTR>| r.map(|b| !b.to_string().trim().is_empty()).unwrap_or(false);
     // SAFETY: plain property reads on a live COM object.
     unsafe {
@@ -131,8 +160,16 @@ fn is_restricted(rule: &INetFwRule) -> bool {
             return true;
         }
         let Ok(r3) = rule.cast::<INetFwRule3>() else { return false };
-        non_empty(r3.LocalAppPackageId())
-            || non_empty(r3.LocalUserOwner())
+        // `LocalUserOwner` records who created the rule. On a rule that names a
+        // program it is only that (the user who clicked Allow on the firewall
+        // prompt), so it must not exclude the rule (ReAgent P1 on #4151). On a rule
+        // that names NO program it marks a per-user rule: measured on narko, the 25
+        // Store-app rules ("Microsoft Store", "Solitaire & Casual Games", ...) have
+        // an owner SID, no program, no package id and no authorisation list, while
+        // the rules a user creates for agentmux-srv have a program and no owner. An
+        // empirical rule, not a documented one, so it is written down as such.
+        (!names_a_program && non_empty(r3.LocalUserOwner()))
+            || non_empty(r3.LocalAppPackageId())
             || non_empty(r3.LocalUserAuthorizedList())
             || non_empty(r3.RemoteUserAuthorizedList())
             || non_empty(r3.RemoteMachineAuthorizedList())
@@ -156,15 +193,23 @@ fn read_categories() -> windows::core::Result<HashMap<String, Category>> {
             break;
         }
         let Some(connection) = slot[0].take() else { break };
+        // One connection that fails mid-transition (an adapter coming up or going
+        // down) is skipped, not fatal: aborting would turn the whole read into an
+        // `Err` and lose the verdict for every other adapter (ReAgent P2 on
+        // #4151). `IsConnected` is checked first so a disconnected connection is
+        // never asked for its network.
         // SAFETY: plain reads on live COM objects.
-        let (id, category, connected) = unsafe {
-            let id = connection.GetAdapterId()?;
-            let network = connection.GetNetwork()?;
-            (id, network.GetCategory()?, connection.IsConnected()?.as_bool())
+        let read = || -> windows::core::Result<Option<(GUID, windows::Win32::Networking::NetworkListManager::NLM_NETWORK_CATEGORY)>> {
+            unsafe {
+                if !connection.IsConnected()?.as_bool() {
+                    return Ok(None);
+                }
+                let id = connection.GetAdapterId()?;
+                let network = connection.GetNetwork()?;
+                Ok(Some((id, network.GetCategory()?)))
+            }
         };
-        if !connected {
-            continue;
-        }
+        let Ok(Some((id, category))) = read() else { continue };
         let category = match category {
             c if c == NLM_NETWORK_CATEGORY_PRIVATE => Category::Private,
             c if c == NLM_NETWORK_CATEGORY_DOMAIN_AUTHENTICATED => Category::Domain,
@@ -173,7 +218,6 @@ fn read_categories() -> windows::core::Result<HashMap<String, Category>> {
         };
         out.insert(guid_string(&id), category);
     }
-    let _ = NLM_ENUM_NETWORK_CONNECTED;
     Ok(out)
 }
 
@@ -228,6 +272,56 @@ mod tests {
         }
     }
 
+    /// Manual diagnostic: every property that could tell a Store-app rule from an
+    /// ordinary any-program rule, for rules whose name contains `AGENTMUX_FW_DUMP`.
+    #[test]
+    #[ignore = "reads the real firewall; run by hand"]
+    fn dump_rule_properties() {
+        let needle = std::env::var("AGENTMUX_FW_DUMP").unwrap_or_else(|_| "Microsoft Store".into());
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok().unwrap();
+        let policy: INetFwPolicy2 = unsafe { CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER).unwrap() };
+        let rules = unsafe { policy.Rules().unwrap() };
+        let enumerator: IEnumVARIANT = unsafe { rules._NewEnum().unwrap() }.cast().unwrap();
+        let mut shown = 0;
+        loop {
+            let mut item = [VARIANT::default()];
+            let mut fetched = 0u32;
+            if unsafe { enumerator.Next(&mut item, &mut fetched) }.is_err() || fetched == 0 {
+                break;
+            }
+            let Ok(d) = IDispatch::try_from(&item[0]) else { continue };
+            let Ok(r) = d.cast::<INetFwRule>() else { continue };
+            let name = unsafe { r.Name() }.map(|b| b.to_string()).unwrap_or_default();
+            if !name.contains(&needle) || shown >= 2 {
+                continue;
+            }
+            shown += 1;
+            let r3 = r.cast::<INetFwRule3>().ok();
+            let s = |x: windows::core::Result<windows::core::BSTR>| match x {
+                Ok(b) => format!("{:?}", b.to_string()),
+                Err(e) => format!("<err {e}>"),
+            };
+            unsafe {
+                println!("--- rule {name:?}");
+                println!("  ApplicationName={}", s(r.ApplicationName()));
+                println!("  ServiceName={}", s(r.ServiceName()));
+                println!("  Grouping={}", s(r.Grouping()));
+                println!("  Description={}", s(r.Description()));
+                println!("  InterfaceTypes={}", s(r.InterfaceTypes()));
+                println!("  Profiles={:?} Protocol={:?} LocalPorts={}", r.Profiles(), r.Protocol(), s(r.LocalPorts()));
+                if let Some(r3) = r3 {
+                    println!("  LocalAppPackageId={}", s(r3.LocalAppPackageId()));
+                    println!("  LocalUserOwner={}", s(r3.LocalUserOwner()));
+                    println!("  LocalUserAuthorizedList={}", s(r3.LocalUserAuthorizedList()));
+                    println!("  RemoteUserAuthorizedList={}", s(r3.RemoteUserAuthorizedList()));
+                    println!("  RemoteMachineAuthorizedList={}", s(r3.RemoteMachineAuthorizedList()));
+                    println!("  SecureFlags={:?}", r3.SecureFlags());
+                }
+            }
+        }
+        println!("matched {shown}");
+    }
+
     /// Manual: prints what the firewall reader sees, so the verdict can be
     /// compared with the real machine. `cargo test -p agentmux-srv -- --ignored --nocapture reads_and_reports`
     #[test]
@@ -235,6 +329,7 @@ mod tests {
     fn reads_and_reports() {
         let snap = read_snapshot().expect("snapshot");
         println!("rules: {} (local rules ignored: {})", snap.rules.len(), snap.local_rules_ignored);
+        println!("profiles: {:?}", snap.profiles);
         for a in &snap.adapters {
             println!("adapter {} {} {:?} {:?}", a.id, a.name, a.ipv4, a.category);
         }

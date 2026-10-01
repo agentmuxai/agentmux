@@ -237,6 +237,45 @@ pub fn matching_rules<'a>(
         .collect()
 }
 
+/// One profile's own switches, which decide whether any rule is needed at all
+/// (ReAgent P1 on #4151: judging from rules alone reported `needs-setup` on a
+/// profile whose firewall is off, or whose default inbound action is Allow).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileSettings {
+    /// The firewall is on for this profile. Off filters nothing, so nothing is
+    /// blocked, block rules included.
+    pub enabled: bool,
+    /// "Block all incoming connections": overrides every allow rule.
+    pub block_all_inbound: bool,
+    /// The default for inbound traffic no rule matches is Allow (Windows' own
+    /// default is Block). Then no allow rule is needed; a matching block still wins.
+    pub default_inbound_allow: bool,
+}
+
+impl Default for ProfileSettings {
+    /// Windows' defaults: firewall on, default inbound Block.
+    fn default() -> Self {
+        ProfileSettings { enabled: true, block_all_inbound: false, default_inbound_allow: false }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Profiles {
+    pub domain: ProfileSettings,
+    pub private: ProfileSettings,
+    pub public: ProfileSettings,
+}
+
+impl Profiles {
+    pub fn get(&self, c: Category) -> ProfileSettings {
+        match c {
+            Category::Domain => self.domain,
+            Category::Private => self.private,
+            Category::Public => self.public,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Coverage {
     /// Every need is allowed and none is blocked.
@@ -247,9 +286,30 @@ pub enum Coverage {
     Missing,
 }
 
-/// Does `category`'s profile let LAN peers reach `exe` on every need?
-/// A matching block rule wins over any allow, as it does in Windows.
+/// [`coverage_with`] under Windows' default profile settings.
 pub fn coverage(rules: &[FwRule], exe: &str, needs: &[Need], category: Category) -> Coverage {
+    coverage_with(rules, exe, needs, category, ProfileSettings::default())
+}
+
+/// Does `category`'s profile let LAN peers reach `exe` on every need?
+///
+/// Order, as Windows applies it: a profile with the firewall off filters nothing;
+/// "block all incoming" beats every allow; a matching block rule beats any allow;
+/// then, with a default inbound action of Allow, nothing more is needed;
+/// otherwise every need must have a matching allow rule.
+pub fn coverage_with(
+    rules: &[FwRule],
+    exe: &str,
+    needs: &[Need],
+    category: Category,
+    settings: ProfileSettings,
+) -> Coverage {
+    if !settings.enabled {
+        return Coverage::Covered;
+    }
+    if settings.block_all_inbound {
+        return Coverage::Blocked;
+    }
     let applies = |allow: bool, need: Need| {
         rules
             .iter()
@@ -258,7 +318,7 @@ pub fn coverage(rules: &[FwRule], exe: &str, needs: &[Need], category: Category)
     if needs.iter().any(|&n| applies(false, n)) {
         return Coverage::Blocked;
     }
-    if needs.iter().all(|&n| applies(true, n)) {
+    if settings.default_inbound_allow || needs.iter().all(|&n| applies(true, n)) {
         Coverage::Covered
     } else {
         Coverage::Missing
@@ -289,10 +349,20 @@ pub enum AdapterState {
 }
 
 pub fn adapter_state(rules: &[FwRule], exe: &str, needs: &[Need], adapter: &Adapter) -> AdapterState {
+    adapter_state_with(rules, exe, needs, adapter, Profiles::default())
+}
+
+pub fn adapter_state_with(
+    rules: &[FwRule],
+    exe: &str,
+    needs: &[Need],
+    adapter: &Adapter,
+    profiles: Profiles,
+) -> AdapterState {
     let Some(category) = adapter.category else {
         return AdapterState::Unknown;
     };
-    match coverage(rules, exe, needs, category) {
+    match coverage_with(rules, exe, needs, category, profiles.get(category)) {
         Coverage::Covered => AdapterState::Covered,
         Coverage::Blocked => AdapterState::Blocked,
         Coverage::Missing if category == Category::Public => AdapterState::PublicNotTrusted,
@@ -357,6 +427,8 @@ pub struct Snapshot {
     pub adapters: Vec<Adapter>,
     /// Group policy stops locally created rules from applying.
     pub local_rules_ignored: bool,
+    /// Each profile's own on/off, block-all and default-inbound settings.
+    pub profiles: Profiles,
 }
 
 #[derive(Debug, Clone)]
@@ -369,7 +441,7 @@ pub fn report(snapshot: &Snapshot, exe: &str, needs: &[Need]) -> Report {
     let per_adapter: Vec<(Adapter, AdapterState)> = snapshot
         .adapters
         .iter()
-        .map(|a| (a.clone(), adapter_state(&snapshot.rules, exe, needs, a)))
+        .map(|a| (a.clone(), adapter_state_with(&snapshot.rules, exe, needs, a, snapshot.profiles)))
         .collect();
     let states: Vec<AdapterState> = per_adapter.iter().map(|(_, s)| *s).collect();
     Report {
@@ -482,9 +554,21 @@ pub fn spawn_watcher(
             let snapshot = match tokio::task::spawn_blocking(read_snapshot).await {
                 Ok(Ok(s)) => s,
                 Ok(Err(e)) => {
-                    // "Unknown" is a fact worth one line, not one per tick.
+                    // "Unknown" is a fact worth one line, and one event, not one per
+                    // tick. The event matters: without it a needs-setup or blocked
+                    // sent earlier would stay on the status bar while the backend
+                    // no longer knows (ReAgent P2 on #4151).
                     if last.as_deref() != Some("unknown") {
                         tracing::warn!("could not read the OS firewall, so no verdict: {e}");
+                        event_bus.broadcast_event(&super::eventbus::WSEventType {
+                            eventtype: "laninstances:firewall".to_string(),
+                            oref: String::new(),
+                            data: Some(serde_json::json!({
+                                "status": "unknown",
+                                "adapters": [],
+                                "localRulesIgnored": false
+                            })),
+                        });
                         last = Some("unknown".to_string());
                     }
                     continue;
@@ -793,6 +877,7 @@ mod tests {
                 adapter("vEthernet (Default Switch)", Some(Category::Public)),
             ],
             local_rules_ignored: false,
+            profiles: Profiles::default(),
         };
         let r = report(&snap, EXE, &needs());
         assert_eq!(r.status, FirewallStatus::Ok);
@@ -836,6 +921,52 @@ mod tests {
         let store = FwRule { restricted: true, program: None, ..rule("Microsoft Store") };
         let rules = vec![store];
         assert_eq!(coverage(&rules, EXE, &needs(), Category::Private), Coverage::Missing);
+    }
+
+    // ReAgent P1 on #4151: the profile's own switches decide whether any rule is needed.
+    #[test]
+    fn a_profile_with_the_firewall_off_needs_no_rule_and_blocks_nothing() {
+        let off = ProfileSettings { enabled: false, ..ProfileSettings::default() };
+        assert_eq!(coverage_with(&[], EXE, &needs(), Category::Private, off), Coverage::Covered);
+        // Block rules are not enforced either when the firewall is off.
+        let blocked = vec![program_rule(EXE, Proto::Any, ALL, false)];
+        assert_eq!(coverage_with(&blocked, EXE, &needs(), Category::Private, off), Coverage::Covered);
+    }
+
+    #[test]
+    fn a_default_inbound_allow_needs_no_allow_rule_but_a_block_still_wins() {
+        let open = ProfileSettings { default_inbound_allow: true, ..ProfileSettings::default() };
+        assert_eq!(coverage_with(&[], EXE, &needs(), Category::Private, open), Coverage::Covered);
+        let blocked = vec![program_rule(EXE, Proto::Tcp, PROFILE_PRIVATE, false)];
+        assert_eq!(coverage_with(&blocked, EXE, &needs(), Category::Private, open), Coverage::Blocked);
+    }
+
+    #[test]
+    fn block_all_incoming_beats_every_allow_rule() {
+        let all = ProfileSettings { block_all_inbound: true, ..ProfileSettings::default() };
+        let rules = vec![program_rule(EXE, Proto::Any, ALL, true)];
+        assert_eq!(coverage_with(&rules, EXE, &needs(), Category::Private, all), Coverage::Blocked);
+    }
+
+    #[test]
+    fn settings_are_per_profile_in_the_report() {
+        let profiles = Profiles {
+            private: ProfileSettings { enabled: false, ..ProfileSettings::default() },
+            ..Profiles::default()
+        };
+        let snap = Snapshot {
+            rules: vec![],
+            adapters: vec![
+                adapter("Ethernet", Some(Category::Private)),
+                adapter("Wi-Fi", Some(Category::Public)),
+            ],
+            local_rules_ignored: false,
+            profiles,
+        };
+        let r = report(&snap, EXE, &needs());
+        assert_eq!(r.per_adapter[0].1, AdapterState::Covered, "Private firewall is off");
+        assert_eq!(r.per_adapter[1].1, AdapterState::PublicNotTrusted, "Public still defaults to block");
+        assert_eq!(r.status, FirewallStatus::Ok);
     }
 
     #[test]
