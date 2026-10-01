@@ -30,6 +30,7 @@ vi.mock("@/store/global", () => ({
     }),
     lanInstancesAtom: () => [],
     lanDiscoveryErrorAtom: () => null,
+    lanDiscoverabilityAtom: () => null,
     setLanDiscoveryErrorAtom: vi.fn(),
     settingsAtom: () => ({}),
 }));
@@ -75,7 +76,7 @@ const muxbus = {
     isConfigured: () => false,
 } as any;
 
-function renderPanel(mux = muxbus) {
+function renderPanel(mux = muxbus, extra: Record<string, unknown> = {}) {
     return render(() => (
         <HostPopoverPanel
             anchorRect={null}
@@ -86,8 +87,10 @@ function renderPanel(mux = muxbus) {
             lanCount={() => 0}
             lanDiscoveryEnabled={() => false}
             lanDiscoveryError={() => null}
+            lanDiscoverability={() => null}
             onLanToggle={() => {}}
             muxbus={mux}
+            {...(extra as any)}
         />
     ));
 }
@@ -198,5 +201,43 @@ describe("HostPopoverPanel — MuxBus Cloud row", () => {
         renderPanel(cloud({ connected: true, valid: true, needsReauth: false, email: "me@example.com" }));
         expect(screen.getByText("me@example.com")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    });
+});
+
+describe("HostPopoverPanel — undiscoverable warning", () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    // Area54, 2026-10-01: it listed three peers while none of them listed it.
+    it("warns that other machines cannot see this one, even with peers listed", () => {
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => true,
+            lanCount: () => 3,
+            lanDiscoverability: () => ({ state: "undiscoverable", missing: ["192.168.1.26"], rebuilds: 2 }),
+        });
+        const row = screen.getByTestId("lan-undiscoverable");
+        expect(row).toHaveTextContent("Other machines can't see this one");
+        expect(row).toHaveTextContent("UDP 5353");
+        expect(row).toHaveTextContent("2 time(s)");
+    });
+
+    it("shows nothing when discoverable, when LAN is off, or when there is no verdict", () => {
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => true,
+            lanDiscoverability: () => ({ state: "healthy", missing: [], rebuilds: 0 }),
+        });
+        expect(screen.queryByTestId("lan-undiscoverable")).not.toBeInTheDocument();
+        cleanup();
+
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => false,
+            lanDiscoverability: () => ({ state: "undiscoverable", missing: ["192.168.1.26"], rebuilds: 1 }),
+        });
+        expect(screen.queryByTestId("lan-undiscoverable")).not.toBeInTheDocument();
+        cleanup();
+
+        renderPanel(muxbus, { lanDiscoveryEnabled: () => true, lanDiscoverability: () => null });
+        expect(screen.queryByTestId("lan-undiscoverable")).not.toBeInTheDocument();
     });
 });

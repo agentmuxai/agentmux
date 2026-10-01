@@ -19,11 +19,17 @@
  *
  * Pure so the state table can be tested without mounting the status bar.
  */
-export type LanIndicatorState = "peers" | "idle" | "error" | "off";
+export type LanIndicatorState = "peers" | "idle" | "error" | "undiscoverable" | "off";
 
 export interface LanIndicatorInput {
     /** The `network:lan_discovery` setting. */
     enabled: boolean;
+    /** `lanDiscoverabilityAtom().state` — whether OTHER machines can find this
+     *  one. `"undiscoverable"` means the mDNS service never announced on any
+     *  IPv4 address, so peers cannot see us even though we may see them (Area54,
+     *  2026-10-01). It outranks "peers": hearing peers says nothing about being
+     *  heard, which is the whole failure. */
+    discoverability?: "healthy" | "degraded" | "undiscoverable" | "off" | null;
     /** Number of DISCOVERED peers — excludes this instance, post-#3025. */
     peerCount: number;
     /** `lanDiscoveryErrorAtom` — set when the mDNS daemon could not be
@@ -47,6 +53,16 @@ export function resolveLanIndicator(input: LanIndicatorInput): LanIndicator {
     // previous attempt is not something to nag about.
     if (!input.enabled) {
         return { state: "off", glyph: "◇", label: "LAN discovery off — click to enable" };
+    }
+    // Invisible to everyone else beats "peers": reaching a peer proves we can
+    // HEAR, not that anyone can hear us, and one-way is the failure this exists
+    // to show. The glyph stays hollow: nobody can see this machine.
+    if (input.discoverability === "undiscoverable") {
+        return {
+            state: "undiscoverable",
+            glyph: "◇",
+            label: "LAN: other machines can't see this one. Another program may be using the mDNS port (5353). Turn LAN off and on to retry",
+        };
     }
     // Peers outrank an error, mirroring the popover, whose peers rows are NOT
     // gated on the error while its "no peers" row IS (`!lanDiscoveryError()`).

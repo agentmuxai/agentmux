@@ -50,6 +50,7 @@ pub mod history;
 pub mod skill_seed;
 pub mod lan_discovery;
 pub mod lan_listeners;
+pub mod lan_mdns_health;
 pub mod lan_ports;
 pub mod lsp;
 pub mod messagebus;

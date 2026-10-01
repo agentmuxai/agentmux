@@ -1,7 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi, lanInstancesAtom, lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom, settingsAtom } from "@/store/global";
+import {
+    getApi,
+    lanDiscoverabilityAtom,
+    lanInstancesAtom,
+    lanDiscoveryErrorAtom,
+    setLanDiscoveryErrorAtom,
+    settingsAtom,
+    type LanDiscoverability,
+} from "@/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Accessor, createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -39,6 +47,7 @@ interface HostPopoverPanelProps {
     lanCount: Accessor<number>;
     lanDiscoveryEnabled: Accessor<boolean>;
     lanDiscoveryError: Accessor<string | null>;
+    lanDiscoverability: Accessor<LanDiscoverability | null>;
     onLanToggle: (enabled: boolean) => void;
     muxbus: MuxBusController;
     ref?: (el: HTMLDivElement) => void;
@@ -278,6 +287,23 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         <span>⚠ {props.lanDiscoveryError()}</span>
                     </div>
                 </Show>
+                <Show when={props.lanDiscoveryEnabled() && props.lanDiscoverability()?.state === "undiscoverable"}>
+                    <div
+                        class="status-bar-popover-row"
+                        data-testid="lan-undiscoverable"
+                        style={{
+                            "padding-left": "12px",
+                            "font-size": "0.85em",
+                            color: "var(--warning-color, #d97706)",
+                        }}
+                    >
+                        <span>
+                            ⚠ Other machines can't see this one, even though it may see them. Another program may be
+                            using the mDNS port (UDP 5353). AgentMux has already retried
+                            {" "}{props.lanDiscoverability()?.rebuilds ?? 0} time(s); turning LAN off and on tries again.
+                        </span>
+                    </div>
+                </Show>
                 <Show when={props.lanDiscoveryEnabled() && props.lanCount() > 0}>
                     <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
                         <span style={{ color: "var(--accent-color)" }}>◆</span>
@@ -482,6 +508,7 @@ const HostPopover = (): JSX.Element => {
             enabled: lanDiscoveryEnabled(),
             peerCount: lanCount(),
             error: lanDiscoveryError(),
+            discoverability: lanDiscoverabilityAtom()?.state,
         });
 
     // Toggle the network:lan_discovery setting. The backend's setconfig handler
@@ -582,6 +609,7 @@ const HostPopover = (): JSX.Element => {
                         lanCount={lanCount}
                         lanDiscoveryEnabled={lanDiscoveryEnabled}
                         lanDiscoveryError={lanDiscoveryError}
+                        lanDiscoverability={lanDiscoverabilityAtom}
                         onLanToggle={(enabled) => void handleLanToggle(enabled)}
                         muxbus={muxbus}
                         ref={(el) => { popoverRef = el; }}
