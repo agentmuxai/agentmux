@@ -91,6 +91,7 @@ Extend `resolveLanIndicator` with states for what a user can act on:
 | `blocked` | a Block rule exists for AgentMux | "Windows is blocking AgentMux on this network" → helper removes it |
 | `public-network` | the only connected adapter(s) are Public | "Windows treats this network as Public, so incoming connections are blocked. Mark it Private" + `ms-settings:network` |
 | `managed` | policy ignores local rules | "Your administrator manages the firewall for this device" |
+| `undiscoverable` | LAN on, firewall fine, but this instance holds no usable IPv4 mDNS socket (4.7), so no other machine can find it | "Other machines can't see this one. Another program may be using the mDNS port (5353)" -> Retry |
 | `idle` | rule OK, profile OK, no peers | unchanged |
 
 A silent `idle` with a blocked firewall (section 1) is the bug this removes.
@@ -118,6 +119,16 @@ It is never done silently.
 - **Windows mDNS through the OS** (`DnsServiceRegister` / `DnsServiceBrowse`): inbound mDNS goes through the DNS Client service's built-in rule, so discovery would not depend on our UDP rule at all (R8). Our TCP connection to a peer still needs 4.1. Must be verified on a clean machine before relying on it; today it is an inference.
 - **macOS:** confirm on a clean macOS 15 machine that `mdns-sd` raw sockets raise the Local Network prompt; if not, discover through the system Bonjour API (R10).
 - **Linux:** detect an active `ufw` or `firewalld` and show the exact one-line command; do not silently modify it.
+
+### 4.7 mDNS must not fail silently (found on Area54, 2026-10-01)
+
+`mdns-sd` 0.12 (our version) creates one socket per interface when the daemon is built. For IPv4 that is a bind to `0.0.0.0:5353` (address reuse on), a multicast-group join and one empty test packet; if any step fails, the daemon **logs at `debug!` only and skips that interface** (`service_daemon.rs`, "bind a socket to {}: {}. Skipped."). Nothing appears at the default log level, and `LAN discovery started (mDNS)` is still logged. The result is an instance that **hears** peers and is **never heard**: the worst kind of one-way failure, with a correct firewall and a healthy-looking indicator.
+
+Requirements:
+
+1. **Self-probe after start, without a second port-5353 receiver.** The probe must not bind UDP 5353: an address-reuse socket there competes with the daemon it is testing. On Windows a later reuse socket can take traffic from an earlier one (see the note in `lan_discovery.rs` on the UDP responder), and on macOS two same-process mDNS receivers sharing 5353 can leave one with no events (`docs/retro/retro-macos-ci-mdns-multicast-unsupported-2026-08-12.md`). A healthy daemon could fail such a probe and be rebuilt in a loop (Codex P1 on this PR). Instead, once the daemon is registered, send one **legacy-unicast** PTR query (RFC 6762 section 6.7: a query whose *source port is not 5353*, so a responder answers unicast to that source) for our own service type to `224.0.0.251:5353`, **from an ephemeral port**, with the outgoing interface set to each interface we advertise, and require our own instance in an answer on that same socket within a couple of seconds. It opens no receiver on 5353, so it cannot disturb the daemon, and an answer proves the daemon holds a socket on that interface that receives the question and answers it, which is exactly what was missing on Area54. As a corroborating signal that needs no network traffic at all, read this process's own UDP socket table (Windows `GetExtendedUdpTable`, Linux `/proc/net/udp`, macOS `lsof`/`proc_pidfdinfo`) for an IPv4 socket on 5353. No answer on an interface means `undiscoverable` (4.3) and a **warn** naming the interface.
+2. **Recover automatically, but not on a single miss.** A failed probe can be a lost packet. Require several consecutive failures spaced apart before acting, then rebuild the daemon (the same path as switching LAN off and on, which fixed Area54) with backoff and a small cap, and re-run the probe. Report `undiscoverable` only while it keeps failing, so a transient miss never flickers the indicator or tears down a working daemon.
+3. **A path that does not depend on mDNS.** Desktop-to-desktop discovery has no second route today: the UDP broadcast responder on 47891 only answers mobile probes (`lan_discovery.rs`). A broadcast announce between srv instances would cover hosts where mDNS is blocked or contested. This is larger than 1 and 2, so it is its own PR. Note 47891 lies in Linux's default ephemeral range (see 4.1), so it should move into the fixed block.
 
 ## 5. Acceptance (a fresh machine is the test)
 
@@ -167,9 +178,25 @@ narko (Windows 11, v0.59.1) and starpower (macOS 26.5.2, v0.59.1), LAN only, def
 | keyword, narko → starpower | same on the receiving side |
 | discovery | both directions; each host lists the other (narko `192.168.1.230:57319`, starpower `192.168.1.195`) |
 
-Not yet known: whether macOS showed a Local Network permission prompt on starpower (the agent cannot see the screen; the operator must say), and how LAN was enabled there. **Area54** and **charlie** (a Linux VM on gamerlove, see section 6) were not on narko's LAN list at the time.
+Not yet known: whether macOS showed a Local Network permission prompt on starpower (the agent cannot see the screen; the operator must say), and how LAN was enabled there. **charlie** (a Linux VM on gamerlove, see section 6) was not on narko's LAN list at that point; once its adapter was bridged it joined, and a plain jekt in each direction was `DELIVERY=lan`, `TRUST=lan-verified` (charlie v0.58.2 with the 0.59.1 machines). **Area54** (Windows, wired) stayed one-way until the fault in 8.1 was cleared.
 
 The same session also showed the failure this spec exists for: narko saw nothing while Area54 saw narko, until the Private profile was added by hand.
+
+### 8.1 Area54: heard, never heard (root-cause analysis, 2026-10-01)
+
+Symptom: Area54 listed narko, starpower and charlie; none of them listed Area54. LAN was enabled on all four. Worked out with Manoz (the Area54 agent) from facts on each side; nothing was changed on Area54 until the last step.
+
+| Finding | Evidence |
+|---|---|
+| Not the firewall, not the network | Area54 -> narko jekts arrived `DELIVERY=lan`; TCP from narko to `192.168.1.26:65524` opened; Area54 has Private-profile allow rules for the running srv; wired, same router and profile as the others |
+| Area54's multicast reaches the others | A beacon run on Area54 (a standard mDNS question every 3 s from its Ethernet adapter) was answered by narko, starpower and charlie, and narko captured about 35 queries from `.26` in that window |
+| srv on Area54 never **answers** | About 35 queries and **zero responses** from `.26`, not even for its own registered service; narko's log has no "LAN peer discovered" for Area54 in 13 hours while starpower and charlie appear hourly; narko's own multicast question was answered by starpower and charlie but not by Area54 |
+| srv held **no IPv4 socket on UDP 5353** | `Get-NetUDPEndpoint -LocalPort 5353`: srv only on `::`, Chrome on `0.0.0.0`. On narko, which works, srv is on `0.0.0.0` |
+| Not a port conflict at start, as first suspected | srv started 2026-09-30 21:41Z and LAN was enabled at runtime at 03:15:20Z; Chrome's oldest process started 08:37Z, later; a plain address-reuse bind, group join and test send to `0.0.0.0:5353` succeeded on both IPv4 interfaces afterwards |
+| Not an interface change or sleep | no network connect or disconnect events since 2026-09-27, no sleep since May, last boot 2026-09-13 |
+| **Clearing it** | LAN switched off and on at 16:20:39Z and 16:20:46Z (a brand-new mDNS daemon, same srv, no restart): srv then held `0.0.0.0:5353`, narko discovered Area54 at once with `192.168.1.26`, all four machines listed each other, and jekts in both directions were `DELIVERY=lan`, `TRUST=lan-verified` |
+
+What is **proven**: the IPv4 socket was missing, its absence alone explains every symptom, and rebuilding the daemon restored it. What is **not**: what made the IPv4 bind fail at 03:15:20Z (a process that held the port then and has since gone, or a Windows multicast quirk). One further observation is also unexplained: after the toggle srv held the IPv4 socket and had *lost* the IPv6 one to a Chrome process, so on this machine each address family seems to end up with srv or Chrome, not both. Neither changes the requirement: the failure is silent and the indicator cannot see it (4.7).
 
 ## 9. Delivery plan
 
@@ -177,9 +204,10 @@ One spec, separate PRs, in this order. Windows is the failing path and should no
 
 | PR | Scope | Verified on |
 |---|---|---|
-| **A: core** | Fixed LAN port range with fallback; advertise the actual port; a firewall-status interface that reports coverage **per interface**; the new indicator states (`needs-setup`, `blocked`, `public-network`, `managed`). No OS-specific code. | unit tests; narko ↔ starpower |
+| **A: core** | Fixed LAN port range with fallback; advertise the actual port; a firewall-status interface that reports coverage **per interface**; the new indicator states (`needs-setup`, `blocked`, `public-network`, `managed`, `undiscoverable`), and the mDNS self-probe and automatic daemon rebuild of 4.7 (items 1 and 2). No OS-specific code. | unit tests; narko ↔ starpower |
 | **B: Windows** | The elevated helper, the two port rules, Public-network consent, per-interface coverage gating of the LAN listeners and a decision on mDNS interface selection (4.2 caveat, settled by the measurement in section 6), installer step and uninstall cleanup. | a fresh Windows machine |
 | **C: macOS** | Verify first; change code only if the Local Network prompt does not appear with our current discovery. | starpower |
+| **E: discovery fallback** | A desktop-to-desktop announce that does not depend on mDNS (4.7 item 3); moves the UDP port into the fixed block. | a host where another program holds UDP 5353 |
 | **D: Linux** | Detect an active `ufw` or `firewalld` and show the exact command. | charlie, once it is a bridged LAN member |
 
 Separate from this spec: WAN delivery has no catch-up pull (a message that arrives before an agent subscribes waits for the next unrelated wake). Tracked on its own.
