@@ -679,6 +679,8 @@ export class AgentViewModel {
                 working_dir: writeWorkDir,
                 files: configFiles,
                 auto_allocate: autoAllocate,
+                // Picks which Operator Config entries the startup file gets.
+                agent_type: agentMode,
             });
             const finalWorkDir = writeResult?.working_dir || writeWorkDir;
             markAgentOpen(blockId, "config");

@@ -522,11 +522,15 @@ async fn open_agent_inner(
                 } else {
                     controller_type
                 };
-                let mut cli_args = resolve_cli_args(&provider, controller_type);
-                // Append definition-level flags (e.g. --model <value>) stored in provider_flags.
-                if !agent.provider_flags.is_empty() {
-                    cli_args.extend(agent.provider_flags.split_whitespace().map(str::to_string));
-                }
+                // Catalog args, the runtime the menu will show applied on top, then the
+                // definition's own flags. Without the middle step a pane opened here
+                // ran on the CLI's default model while its menu read Sonnet — see
+                // backend/agent_runtime.rs.
+                let seeded = crate::backend::agent_runtime::seed_launch(
+                    provider.id,
+                    resolve_cli_args(&provider, controller_type),
+                    &agent.provider_flags,
+                );
 
                 let agent_slug = agentmux_common::slug::path_slug(&agent.name);
                 // Shared with native-memory resolution so the two can never
@@ -777,7 +781,8 @@ async fn open_agent_inner(
                 meta.insert("agentOutputFormat".to_string(), json!(output_format));
                 meta.insert("controller".to_string(), json!(controller_type));
                 meta.insert("cmd".to_string(), json!(&resolved_cli_path));
-                meta.insert("cmd:args".to_string(), json!(cli_args));
+                // cmd:args + agent:runtime + agent:provider_flags, written together.
+                crate::backend::agent_runtime::apply_to_meta(&mut meta, seeded, &agent.provider_flags);
                 meta.insert("cmd:cwd".to_string(), json!(&work_dir));
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
@@ -1054,7 +1059,11 @@ pub(super) fn write_agent_config_files(
     // section carries a `# [Workspace] <name>` heading (see
     // format_global_bundle_block) so the rules are attributable to the
     // workspace and ordered per the Armory Global section's sort_order.
-    let global_bundles = id_store.bundle_list_global().unwrap_or_default();
+    // Operator Config entries targeted at another agent kind are left out.
+    let global_bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
+        id_store.bundle_list_global().unwrap_or_default(),
+        &agent.agent_type,
+    );
     let global_block = crate::backend::storage::format_global_bundle_block(&global_bundles);
     if !global_block.is_empty() {
         content_map

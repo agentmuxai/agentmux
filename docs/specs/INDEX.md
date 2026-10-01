@@ -18,6 +18,7 @@ See also:
 | [**TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17**](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | **CANONICAL tracking doc** (issue #3338) for the dock / working-indicator / input-gate / auto-backgrounding family — read this before any of the ~22 docs it indexes |
 | [SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21](SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md) | Per-pane progressive tab-switch reveal — replaces the global long-task-quiet signal (breaks down with several busy panes) with a per-pane structural readiness milestone |
 | [SPEC_CONTEXT_DELIVERY_2026_09_30](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | Context deliveries: everything the agent is given without the user typing it (memory, the compaction summary, the continuation packet) shown as one card with an expandable row per item; "ambient" kept for model calls only |
+| [SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | Host agents are told to clone and work in their own workspace (a host-only Operator Config entry, `AGENTMUX_AGENT_WORKDIR`); the "Given to the agent" card lists every startup file the provider reads, with owner and size; duplicated Global Memory and skills removed; the pane shows when an agent's CLI is installed or comes back on a different version |
 | [SPEC_AGENT_ARCHITECTURE_2026_05_27](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | Overall agent-pane component + state machine |
 | [SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | ACP wire protocol (initialize / session_create / tool_result) |
 | [SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | Pane lifecycle states and transitions |
@@ -537,6 +538,7 @@ partial list.
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
+| [`SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30`](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown |
 | [`SPEC_LAYOUT_FILES_2026_09_25`](SPEC_LAYOUT_FILES_2026_09_25.md) | SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08`](SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md) | Spec: MCP integration parity with Claude Desktop / Cursor, piloted on Ableton MCP |
@@ -599,6 +601,7 @@ partial list.
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |
 | [`SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12`](SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md) | Spec: Agent pane session-replay framework |
+| [`SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01`](SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md) | SPEC: The agent pane unloads collapsed tool results from memory |
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
 | [`SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md) | SPEC: Agent pane shell drawer — replace the Session/History bar with a process & shell info panel |

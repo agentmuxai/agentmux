@@ -21,4 +21,12 @@ files: Array<AgentConfigFile>,
  * frontend sets this based on whether it constructed the path
  * itself or pulled it from the agent definition.
  */
-auto_allocate: boolean, };
+auto_allocate: boolean, 
+/**
+ * The agent's kind, as the block's `agentMode` carries it (`"host"`,
+ * `"standalone"` or `"container"`). Decides which Operator Config
+ * entries the startup file gets
+ * (`operator_config_seed::global_bundles_for_agent`). Absent from an
+ * older frontend: treated as a host agent, the default kind.
+ */
+agent_type?: string, };

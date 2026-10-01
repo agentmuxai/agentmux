@@ -101,7 +101,7 @@ const LAN_AGENT_NAMES_MAX_NAME_LEN: usize = 256;
 /// it never collides with a registered service, while still being a fixed,
 /// easy-to-grep value in logs and firewall rules (unlike a random ephemeral
 /// port, which a fixed-port broadcast probe cannot target).
-const UDP_DISCOVERY_PORT: u16 = 47891;
+pub(crate) const UDP_DISCOVERY_PORT: u16 = 47891;
 
 /// Wire-protocol `type` value a probe datagram must carry.
 const UDP_PROBE_TYPE: &str = "agentmux_discover";
