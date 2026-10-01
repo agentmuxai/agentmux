@@ -1123,13 +1123,16 @@ const DIGEST_MAX_CHARS: usize = 6000;
 /// substance: a window of tool names and errors says what ran, not what the work
 /// is, and the model answers "I have no context" to it.
 fn finalize_digest(parts: Vec<String>) -> Option<String> {
-    let has_substance = parts
-        .iter()
-        .any(|p| p.starts_with("[user] ") || p.starts_with("[assistant] "));
-    if !has_substance {
-        return None;
+    let is_substance = |p: &String| p.starts_with("[user] ") || p.starts_with("[assistant] ");
+    let newest_substance = parts.iter().rposition(is_substance)?;
+    let mut skip = parts.len().saturating_sub(DIGEST_MAX_ENTRIES);
+    // A run of tool calls after the last message would push every message out of
+    // the window. Keep the newest message in that case, and make room for it.
+    let mut pinned: Option<String> = None;
+    if newest_substance < skip {
+        pinned = Some(parts[newest_substance].clone());
+        skip += 1;
     }
-    let skip = parts.len().saturating_sub(DIGEST_MAX_ENTRIES);
     let mut kept: Vec<String> = Vec::new();
     let mut total = 0usize;
     // Newest first, so the budget is spent on what is most recent.
@@ -1141,9 +1144,11 @@ fn finalize_digest(parts: Vec<String>) -> Option<String> {
         }
         kept.push(part);
     }
+    if let Some(pinned) = pinned {
+        kept.push(clip_entry(&pinned));
+    }
     kept.reverse();
-    Some(kept.join("
-"))
+    Some(kept.join("\n"))
 }
 
 /// Keeps the END of an over-long entry: the tail of a message (its question, its
@@ -1281,6 +1286,16 @@ pub(crate) async fn invoke_ambient_haiku_call_with_timeout(
     let stdout_bytes = stdout_task.await
         .map_err(|e| format!("activity CLI stdout reader task: {e}"))?;
     let stdout = String::from_utf8_lossy(&stdout_bytes);
+    // An empty reply is a valid answer ("nothing to say"), and the call still cost
+    // tokens, so it comes back as `Ok` with empty text rather than an error that
+    // would drop the usage. Callers already treat empty text as "no result".
+    Ok(parse_cli_stream(&stdout))
+}
+
+/// The last assistant text block (sanitized) and the usage from a `claude -p
+/// --output-format stream-json` transcript. Text is empty when the model said
+/// nothing, or only wrapped nothing in a fence.
+fn parse_cli_stream(stdout: &str) -> (String, Option<crate::agents::TokenCounts>) {
     let mut last_text = String::new();
     let mut tokens: Option<crate::agents::TokenCounts> = None;
     for line in stdout.lines() {
@@ -1306,13 +1321,7 @@ pub(crate) async fn invoke_ambient_haiku_call_with_timeout(
             _ => {}
         }
     }
-
-    let last_text = sanitize_ambient_text(&last_text);
-    if last_text.is_empty() {
-        return Err("no text in activity CLI response".to_string());
-    }
-
-    Ok((last_text, tokens))
+    (sanitize_ambient_text(&last_text), tokens)
 }
 
 /// Defends against the model wrapping its answer in markdown, or opening
@@ -2466,5 +2475,61 @@ mod build_next_prompt_prompt_tests {
         let p = build_next_prompt_prompt("[user] x");
         assert!(p.contains("force-pushing"));
         assert!(p.contains("not \"Yeah, let's debug the blank preview bug\""));
+    }
+}
+
+#[cfg(test)]
+mod ambient_cli_stream_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_fence_is_empty_text_but_the_usage_survives() {
+        let out = [
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"```\n```"}]}}"#,
+            r#"{"type":"result","usage":{"input_tokens":235,"output_tokens":4}}"#,
+        ].join("\n");
+        let (text, tokens) = parse_cli_stream(&out);
+        assert_eq!(text, "");
+        assert!(tokens.is_some());
+    }
+
+    #[test]
+    fn the_last_assistant_text_wins_and_thinking_blocks_are_ignored() {
+        let out = [
+            r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hmm"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Run the tests"}]}}"#,
+            r#"{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}"#,
+        ].join("\n");
+        assert_eq!(parse_cli_stream(&out).0, "Run the tests");
+    }
+
+    #[test]
+    fn a_transcript_with_no_result_line_has_no_usage() {
+        let out = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]}}"#;
+        assert!(parse_cli_stream(out).1.is_none());
+    }
+}
+
+#[cfg(test)]
+mod finalize_digest_tool_run_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_run_of_tool_calls_does_not_push_the_conversation_out() {
+        let mut parts = vec!["[user] fix the login bug".to_string(), "[assistant] On it".to_string()];
+        parts.extend((0..30).map(|i| format!("[tool] Tool{i}")));
+        let digest = finalize_digest(parts).unwrap();
+        assert!(digest.contains("[assistant] On it"));
+        assert!(!digest.contains("fix the login bug"), "only the newest message is pinned");
+        assert!(digest.ends_with("[tool] Tool29"));
+        assert_eq!(digest.lines().count(), DIGEST_MAX_ENTRIES);
+        // chronological: the pinned message comes before the tool run
+        assert!(digest.lines().next().unwrap().starts_with("[assistant]"));
+    }
+
+    #[test]
+    fn tools_only_still_means_no_digest() {
+        let parts: Vec<String> = (0..30).map(|i| format!("[tool] T{i}")).collect();
+        assert_eq!(finalize_digest(parts), None);
     }
 }
