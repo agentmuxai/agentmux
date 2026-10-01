@@ -1654,7 +1654,7 @@ describe("agent document reducer", () => {
 
 describe("UnloadToolResults / ResultLoaded (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01 §3.3–§3.4)", () => {
     const BIG = { stdout: "y".repeat(20_000), stderr: "", exitCode: 0 };
-    const SRC = { stream: "b:blk", gen: "g1", line: 3 };
+    const SRC = { stream: "g:agent", gen: "g1", line: 3 };
     const user = (id: string): DocumentNode => ({ type: "user_message", id, message: id, timestamp: 0 });
     const finished = (id: string, extra: Partial<ToolNode> = {}) =>
         tool(id, { status: "success", result: BIG, resultSource: SRC, ...extra });

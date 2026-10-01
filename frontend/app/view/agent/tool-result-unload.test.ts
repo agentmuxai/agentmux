@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { planUnload, resultBytes, UNLOAD_MIN_BYTES, unloadResult } from "./tool-result-unload";
 import type { DocumentNode, ToolNode } from "./types";
 
-const src = { stream: "b:blk", gen: "g1", line: 10 };
+const src = { stream: "g:agent", gen: "g1", line: 10 };
 const big = { stdout: "x".repeat(UNLOAD_MIN_BYTES + 100), stderr: "", exitCode: 0 };
 const tool = (id: string, extra: Partial<ToolNode> = {}): ToolNode => ({
     type: "tool",
@@ -43,6 +43,21 @@ describe("planUnload", () => {
             user("u1"),
         ];
         expect(planUnload(nodes, { keepIds: new Set(["held"]) })).toEqual(["go"]);
+    });
+
+    it("keeps a result from a block-local stream: it can't be read back after migration (Codex P2 on #4126)", () => {
+        const nodes: DocumentNode[] = [user("u0"), tool("t1", { resultSource: { ...src, stream: "b:blk" } }), user("u1")];
+        expect(planUnload(nodes, { keepIds: none })).toEqual([]);
+    });
+
+    it("keeps a promoted Bash call while the Activity Dock still shows it (Codex P2 on #4126)", () => {
+        const now = 1_000_000;
+        // Ran 40 s (promoted), ended 2 s ago: its dock row is still up.
+        const docked = tool("t1", { timestamp: now - 42_000, duration: 40 });
+        const nodes: DocumentNode[] = [user("u0"), docked, user("u1")];
+        expect(planUnload(nodes, { keepIds: none, now })).toEqual([]);
+        // A minute later the row is gone, and the result unloads.
+        expect(planUnload(nodes, { keepIds: none, now: now + 60_000 })).toEqual(["t1"]);
     });
 
     it("does nothing without a user message (the whole document is the turn in flight)", () => {
