@@ -27,7 +27,7 @@ import {
     tabWasShown,
 } from "@/store/tab-reveal";
 import { switchIntentTabId } from "@/store/tab-actions";
-import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 
 function WorkspaceElem(): JSX.Element {
@@ -208,12 +208,19 @@ function WorkspaceElem(): JSX.Element {
     // as any later one. Once, when the tab list first arrives: a tab arriving
     // later (torn in, say) still gets its first reveal gated, and a new tab
     // is marked by createTab once its panes are built.
-    let loadedTabsMarked = false;
+    // Armed untracked, with its cancel tied to this component rather than to
+    // the effect: the effect re-runs on every workspace update, and a re-run's
+    // cleanup used to cancel the pending idle callback without re-arming it
+    // (ReAgent P1 on #4132).
+    let cancelLoadedTabsMark: (() => void) | null = null;
+    onCleanup(() => cancelLoadedTabsMark?.());
     createEffect(() => {
+        if (cancelLoadedTabsMark != null) return;
         const ids = allTabIds();
-        if (loadedTabsMarked || ids.length === 0 || !keepInactiveTabsLaidOut()) return;
-        loadedTabsMarked = true;
-        onCleanup(markLoadedTabsShownWhenIdle(ids, keepInactiveTabsLaidOut));
+        if (ids.length === 0) return;
+        cancelLoadedTabsMark = untrack(() =>
+            keepInactiveTabsLaidOut() ? markLoadedTabsShownWhenIdle(ids, keepInactiveTabsLaidOut) : () => {}
+        );
     });
 
     return (

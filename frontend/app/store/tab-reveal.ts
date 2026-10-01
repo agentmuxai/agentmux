@@ -90,6 +90,10 @@ export function forgetTabShown(tabId: string): void {
 /** Forget every tab: called when `window:keepinactivetabslaidout` changes,
  *  since a tab shown under the other hiding mode wasn't kept laid out while
  *  inactive (ReAgent P2 on #3687). Each tab's next switch is gated once. */
+export function clearShownTabs(): void {
+    shownTabIds.clear();
+}
+
 /**
  * Count the tabs a window loaded with as shown, at its first idle moment
  * (at most 2 s on). Kept laid out, each was mounted and laid out behind the
@@ -108,10 +112,6 @@ export function markLoadedTabsShownWhenIdle(tabIds: readonly string[], keptLaidO
         { timeout: 2000 }
     );
     return () => cancelIdleCallback(handle);
-}
-
-export function clearShownTabs(): void {
-    shownTabIds.clear();
 }
 
 /** A switch that skipped the gate; logged in the gate's own format so
