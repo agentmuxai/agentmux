@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseProviderFlags } from "./launch-args";
+import type { PermissionMode } from "./types";
 
 /**
  * What a runtime setting does, for which model and provider. One definition for
@@ -123,4 +124,46 @@ export function effectiveRuntime<T extends { model: string; effort: string; perm
             ? { permissionMode: permissionModeFromFlags(flags) ?? runtime.permissionMode }
             : {}),
     };
+}
+
+/**
+ * What a permission mode actually does, so the menu and `/permission-mode`
+ * don't promise more than happens.
+ *
+ * A persistent Claude agent runs on the control protocol, and srv answers EVERY
+ * `can_use_tool` request itself: AskUserQuestion is shown to the user, and all
+ * other tools — including the request to leave plan mode — are allowed
+ * (`handle_control_frame`, crates/srv/src/backend/blockcontroller/persistent/
+ * input.rs; real approval prompts are a later phase). So there, Bypass, Default
+ * and Accept Edits behave alike, and "Default (prompt all)" prompted nothing.
+ * Other agents (a container's one-shot runs) have no such layer, and the
+ * mode's own wording is true.
+ *
+ * `autoAnswersPrompts`: whether this pane's permission requests are answered
+ * for the user, i.e. a persistent (control-protocol) launch.
+ */
+export function permissionModeText(
+    mode: PermissionMode,
+    autoAnswersPrompts: boolean,
+): { label: string; note?: string } {
+    const plain: Record<PermissionMode, string> = {
+        bypass: "Bypass (no prompts)",
+        auto: "Auto (AI classifier)",
+        acceptEdits: "Accept Edits",
+        plan: "Plan (read-only)",
+        default: "Default (prompt all)",
+    };
+    if (!autoAnswersPrompts) return { label: plain[mode] };
+    switch (mode) {
+        case "bypass":
+            return { label: plain.bypass };
+        case "default":
+            return { label: "Default", note: "every prompt is allowed automatically — same as Bypass for now" };
+        case "acceptEdits":
+            return { label: "Accept Edits", note: "every prompt is allowed automatically — same as Bypass for now" };
+        case "auto":
+            return { label: "Auto", note: "the CLI decides what to ask; every ask is allowed automatically" };
+        case "plan":
+            return { label: "Plan", note: "read-only while planning; the plan is then approved automatically" };
+    }
 }
