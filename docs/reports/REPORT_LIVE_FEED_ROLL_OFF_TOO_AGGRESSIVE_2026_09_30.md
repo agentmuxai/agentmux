@@ -217,22 +217,20 @@ F1 is the bug. F2–F5 are about how aggressive it is by design.
 
 ## 7. Related: the pane flashes when the user sends a message
 
-Reported by the owner on 2026-10-01. **Not yet reproduced**; two
-hypotheses, both triggered by a new `user_message`:
+Reported by the owner on 2026-10-01. **Measured; neither hypothesis was the
+cause.** A CDP capture over a send (screencast plus `layout-shift` and
+mutation observers) on a portable built from #4121 showed:
+- **Row churn of 4 nodes:** no remount of the previous turn, and roll-off
+  didn't run.
+- **A 0.09 layout shift** in `agent-document-streaming-buffer`, over three
+  changing frames.
 
-1. **The previous turn is remounted.** The always-mounted tail holds only
-   the turn in flight. A new user message moves the frontier
-   (`virtualization/AgentDocumentVirtualList.tsx:511`,
-   `turnScopedFrontier`), so the whole previous turn leaves the tail and is
-   remounted as virtualized head rows, with fresh DOM and *estimated*
-   heights until the measure pass. One frame with wrong heights is a
-   visible flash.
-2. **Roll-off runs in the same moment.** A new node triggers
-   `scheduleRollOff()` (`hooks/useLiveFeedRollOff.ts:148`), which removes
-   turns from the front.
+**Cause:** the new-message enter animation (`styles/_document.scss`,
+`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`).
+1. The user's own message row mounts at opacity 0.
+2. The pinned pane scrolls up to make room, leaving an empty strip.
+3. The white block fades in through grey over 120 ms.
 
-**Check:** a frame capture over the send (CDP screencast or performance
-trace), counting layout shifts and node remounts. Then either keep the
-previous turn's rows mounted until their head measurements exist, or defer
-roll-off until the new turn has painted. With a 20 MB budget, roll-off
-will run far less often, which narrows cause 2 anyway.
+**Fix (#4123):** skip the enter animation for `user_message` rows. Injected
+live first, it brought the layout shift to 0.00 and the changes down to one
+frame. Agent output keeps its fade.
