@@ -575,6 +575,7 @@ partial list.
 | [`SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26`](SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md) | Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row |
 | [`SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03`](SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md) | Spec: Scroll Chaining for Nested Tool-Preview Regions |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
+| [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
