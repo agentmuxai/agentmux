@@ -37,7 +37,7 @@ describe("sysinfo CPU colour is theme aware", () => {
 });
 
 describe("sysinfo CPU and Mem are told apart", () => {
-    const val = (css: string, name: string) => new RegExp(`${name}:\s*([^;]+);`).exec(css)?.[1].trim();
+    const val = (css: string, name: string) => new RegExp(String.raw`(?:^|[\s;{])${name}:\s*([^;]+);`).exec(css)?.[1].trim();
 
     it("Mem is green by default, CPU is the theme's primary colour", () => {
         expect(val(themeScss, "--sysinfo-mem-color")).toBe("#58c142");
