@@ -62,7 +62,9 @@ const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
 const USAGE_LIMIT = /reached your Codex usage limits/i;
 const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
-const SKIPPED_HEAD = /<!--\s*reagent:codex-skipped\s+reason=quota\s+head=([0-9a-f]{7,40})\s*-->/i;
+// reason: quota (Codex out of quota), round-cap (ReAgent stopped asking after
+// its per-PR cap of automatic rounds) or docs-only (a PR of only docs).
+const SKIPPED_HEAD = /<!--\s*reagent:codex-skipped\s+reason=(quota|round-cap|docs-only)\s+head=([0-9a-f]{7,40})\s*-->/i;
 
 // Mirrors is_docs_only_path in reagent's codex_policy.py; keep them in step.
 // Narrower than ci-classify-changes.mjs's rule on purpose: CLAUDE.md, AGENTS.md
@@ -132,11 +134,16 @@ function quotaAttribution({ comments, reviews }) {
     return attributed;
 }
 
-/** The head a ReAgent quota-skip comment names, or null. */
+/** The head a ReAgent skip comment names, or null. */
 export function skippedHead(comment) {
+    return skipNote(comment)?.sha ?? null;
+}
+
+/** A ReAgent skip comment's { sha, reason }, or null. */
+export function skipNote(comment) {
     if (comment?.user?.login !== SKIP_AUTHOR) return null;
     const m = SKIPPED_HEAD.exec(comment.body ?? "");
-    return m ? m[1].toLowerCase() : null;
+    return m ? { reason: m[1].toLowerCase(), sha: m[2].toLowerCase() } : null;
 }
 
 /** Review id -> Set of the paths its inline comments are on. */
@@ -162,8 +169,8 @@ function isDocsOnlyFindings(o) {
  */
 function reagentSkips(comments = []) {
     return comments
-        .filter((c) => skippedHead(c))
-        .map((c) => ({ kind: "quota", at: c.updated_at ?? c.created_at, sha: skippedHead(c) }))
+        .filter((c) => skipNote(c))
+        .map((c) => ({ kind: "quota", reason: skipNote(c).reason, at: c.updated_at ?? c.created_at, sha: skipNote(c).sha }))
         .sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
@@ -230,6 +237,16 @@ export function evaluateCodexGate({ headSha, comments = [], reviews = [], review
         return { state: "success", description: `Codex found no major issues in ${short}` };
     }
     if (onHead?.kind === "quota") {
+        // A ReAgent skip names why it didn't ask; Codex's own notice is quota.
+        if (onHead.reason === "round-cap") {
+            return {
+                state: "success",
+                description: `ReAgent stopped asking Codex after this PR's round cap; ${short} passes without it ('@reagentx-workflow codex re-review' asks anyway)`,
+            };
+        }
+        if (onHead.reason === "docs-only") {
+            return { state: "success", description: `Docs-only PR: Codex isn't asked; ${short} passes without it` };
+        }
         return { state: "success", description: `Codex is out of review quota; ${short} passes without it` };
     }
     if (isDocsOnlyFindings(onHead)) {

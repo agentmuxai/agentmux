@@ -470,3 +470,43 @@ describe("ReAgent quota skip marker", () => {
         expect(skippedHead({ ...c, body: c.body.replace("reason=quota", "reason=other") })).toBeNull();
     });
 });
+
+// a5af/reagent: ReAgent also skips Codex past a per-PR cap of automatic rounds
+// and on docs-only PRs, with the same note and a different reason.
+describe("ReAgent skip reasons", () => {
+    const note = (reason, sha = HEAD) => ({
+        user: { login: "reagentx-workflow[bot]" },
+        created_at: "2026-10-01T12:00:00Z",
+        body: `Codex not asked about \`${sha.slice(0, 10)}\`: x.\n\n<!-- reagent:codex-skipped reason=${reason} head=${sha} -->`,
+    });
+
+    it("a round-cap skip passes the head and says why", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [note("round-cap")] });
+        expect(r.state).toBe("success");
+        expect(r.description).toMatch(/round cap/);
+    });
+
+    it("a docs-only skip passes the head and says why", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [note("docs-only")] });
+        expect(r.state).toBe("success");
+        expect(r.description).toMatch(/Docs-only PR/);
+    });
+
+    it("a quota skip keeps its description", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [note("quota")] }).description).toMatch(/out of review quota/);
+    });
+
+    it("an unknown reason doesn't count", () => {
+        expect(skippedHead(note("other"))).toBeNull();
+    });
+
+    it("a skip note never outranks Codex's own findings on the head", () => {
+        const findings = {
+            id: 9, user: { login: "chatgpt-codex-connector[bot]" }, state: "COMMENTED",
+            submitted_at: "2026-10-01T11:00:00Z", commit_id: HEAD,
+            body: `### 💡 Codex Review\n\nhttps://github.com/agentmuxai/agentmux/blob/${HEAD}/x\n**Reviewed commit:** \`${HEAD.slice(0, 10)}\``,
+        };
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [note("round-cap")], reviews: [findings] });
+        expect(r.state).not.toBe("success");
+    });
+});
