@@ -28,6 +28,7 @@ pub mod mcp_seed;
 /// Phase E.4.B Phase 4 — pure layout-tree helpers (Rust port of layoutTree.ts).
 pub mod layout;
 pub mod project_instructions;
+pub mod agent_runtime;
 pub mod providers;
 pub mod cli_install;
 pub mod model_catalog;
