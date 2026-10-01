@@ -21,6 +21,9 @@
 //! normal per-call-site accounting path (tagged by purpose), same as any
 //! other RPC result. The gateway's job is coalescing/cancellation only.
 
+pub mod prompt;
+pub mod validate;
+
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
