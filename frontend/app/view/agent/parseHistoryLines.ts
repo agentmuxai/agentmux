@@ -339,9 +339,22 @@ export class HistoryParser {
             if (isMemoryInjectedFrame(rawEvent)) {
                 parser.flushPending();
                 putReleased();
-                // A fallback re-delivery's card (CD2b) stands for the hidden
-                // message that follows it.
-                if ((rawEvent as { fallback?: unknown }).fallback === true) parser.noteFallbackCard();
+                // A fallback re-delivery's card (CD2b) stands for its hidden
+                // message. srv writes it right after that message's own line,
+                // whose row (the reply under it stays hidden) it replaces; a
+                // card ahead of its message marks the echo to come instead.
+                if ((rawEvent as { fallback?: unknown }).fallback === true) {
+                    const card = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
+                    const last = nodes.length - 1;
+                    if (card && nodes[last]?.type === "memory_reinjection") {
+                        indexById.delete(nodes[last].id);
+                        nodes[last] = card;
+                        indexById.set(card.id, last);
+                        changed.add(card.id);
+                        continue;
+                    }
+                    parser.noteFallbackCard();
+                }
                 const node = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
                 if (node) put(node, indexById.get(node.id));
                 continue;

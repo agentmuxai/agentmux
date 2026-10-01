@@ -1420,29 +1420,14 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     cmd.hidden.unwrap_or(false),
                 );
                 // A re-delivery srv composed (`memorydelivery:compose`): its
-                // card goes into the pane now, ahead of the hidden message, so
-                // replay shows the card and knows the echo after it.
-                if cmd.hidden.unwrap_or(false) {
-                    if let Some(frame) = cmd
-                        .delivery_id
-                        .as_deref()
-                        .and_then(|id| crate::server::memory_delivery_handlers::take_fallback_frame(&cmd.blockid, id))
-                    {
-                        let line = format!("{frame}\n");
-                        let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
-                            &Some(deps.mstore.clone()),
-                            &cmd.blockid,
-                        );
-                        crate::backend::blockcontroller::shell::handle_append_block_file(
-                            &deps.broker,
-                            &cmd.blockid,
-                            crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT,
-                            line.as_bytes(),
-                            Some(&deps.filestore_gate),
-                            zone.as_deref(),
-                        );
-                    }
-                }
+                // card is written once the message has gone to the agent
+                // (below), never for one that didn't start.
+                let fallback_card = cmd
+                    .hidden
+                    .unwrap_or(false)
+                    .then_some(())
+                    .and(cmd.delivery_id.as_deref())
+                    .and_then(|id| crate::server::memory_delivery_handlers::take_fallback_frame(&cmd.blockid, id));
                 // A post-compaction memory reinjection also carries the
                 // agent's running summary (SPEC_DURABLE_CONVERSATION_MEMORY
                 // §4.4, "Compaction reuse").
@@ -1458,6 +1443,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 } else {
                     crate::backend::blockcontroller::health::TurnOrigin::User
                 };
+                let block_id = cmd.blockid.clone();
                 run_agent_turn(
                     &deps,
                     cmd.blockid,
@@ -1468,6 +1454,23 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     cmd.attachments.unwrap_or_default(),
                 )
                 .await?;
+                // Right after the hidden message's own transcript line: replay
+                // shows this card in its place (parseHistoryLines.ts).
+                if let Some(frame) = fallback_card {
+                    let line = format!("{frame}\n");
+                    let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+                        &Some(deps.mstore.clone()),
+                        &block_id,
+                    );
+                    crate::backend::blockcontroller::shell::handle_append_block_file(
+                        &deps.broker,
+                        &block_id,
+                        crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT,
+                        line.as_bytes(),
+                        Some(&deps.filestore_gate),
+                        zone.as_deref(),
+                    );
+                }
                 Ok(())
             }
         },

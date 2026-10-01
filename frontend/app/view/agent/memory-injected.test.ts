@@ -214,5 +214,11 @@ describe("history replay of a fallback re-delivery (CD2b)", () => {
         expect(nodes.map((n) => n.type)).toEqual(["context_delivery"]);
         const card = nodes[0];
         expect(card.type === "context_delivery" && card.reason).toBe("resume_fresh");
+
+        // srv writes the card once the message has gone out, so after its
+        // echo: the card takes the echo's row.
+        const after = parseHistoryLines([echo, fallbackCard, reply].map((l) => JSON.stringify(l)), "claude-stream-json");
+        expect(after.nodes.map((n) => n.type)).toEqual(["context_delivery"]);
+        expect(after.nodes[0].id).toBe("memory-injected-fb-9");
     });
 });
