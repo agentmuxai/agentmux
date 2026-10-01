@@ -654,7 +654,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                                 <div class="agent-session-outcome-detail">
                                     {n.continued
                                         ? "The provider couldn't resume the previous session, so this new one was given AgentMux's record of the conversation: a running summary and the recent exchange"
-                                        : "Prior conversation isn't available to this agent — it's preserved in the agent's history"}
+                                        : "The agent doesn't have the conversation above this line"}
                                 </div>
                             </Show>
                             <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>

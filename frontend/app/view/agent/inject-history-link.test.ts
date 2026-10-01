@@ -31,18 +31,18 @@ describe("injectHistoryLink (SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_20
         expect(injectHistoryLink(nodes, false)).toEqual(nodes);
     });
 
-    it("inserts the link row right after a leading fresh session_outcome divider", () => {
+    it("inserts the link row above a leading fresh divider: what it points to is older (2026-10-01)", () => {
         const out = injectHistoryLink([freshOutcome(), md("a"), md("b")], true);
-        expect(out.map((n) => n.type)).toEqual(["session_outcome", "history_link", "markdown", "markdown"]);
-        expect(out[1].id).toBe("history-link");
+        expect(out.map((n) => n.type)).toEqual(["history_link", "session_outcome", "markdown", "markdown"]);
+        expect(out[0].id).toBe("history-link");
     });
 
-    it("falls back to inserting at the very front when the first node is NOT a fresh divider (defensive edge case)", () => {
+    it("inserts at the very front when the first node is not a divider", () => {
         const out = injectHistoryLink([md("a"), md("b")], true);
         expect(out.map((n) => n.type)).toEqual(["history_link", "markdown", "markdown"]);
     });
 
-    it("falls back to the front when the first node is a resumed (not fresh) outcome — resumed is not a scope anchor", () => {
+    it("inserts at the front when the first node is a resumed outcome", () => {
         const out = injectHistoryLink([resumedOutcome(), md("a")], true);
         expect(out.map((n) => n.type)).toEqual(["history_link", "session_outcome", "markdown"]);
     });

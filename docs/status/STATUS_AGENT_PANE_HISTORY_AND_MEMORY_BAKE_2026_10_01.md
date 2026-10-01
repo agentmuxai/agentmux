@@ -68,7 +68,7 @@ The same pass frees the logs U1 kept once the dock has let the row go.
 
 | Symptom | Likely area | What to capture |
 |---|---|---|
-| "Open History" appears after only a few messages | Roll-off (#4121) or the fresh-session clamp (§6, F2) | Pane's agent, rough session length, whether a new session started |
+| "Open History" appears after only a few messages | Roll-off (#4121) | Pane's agent, rough session length, whether a new session started |
 | Conversation jumps or the scroll position moves during work | Roll-off pass while reading | Was the reader at the bottom? Did a turn just end? |
 | A tool row says "This result is no longer available in the pane" | U2 reload failed | Tool name, how old the turn is, whether the agent restarted or compacted since |
 | "Loading result…" stays up | U2 reload hung | Same as above, plus DevTools console |
@@ -113,7 +113,7 @@ Open items:
 
 | ID | Item | Needs |
 |---|---|---|
-| F2 | Fresh-session clamp hides earlier history; show a divider instead | Owner decision |
+| F2 | Fresh-session clamp hides earlier history; show a divider instead | **Decided 2026-10-01: divider.** In progress |
 | F3 | Fill the pane to the 15 MB budget on open (beyond 10,000 lines) | Owner decision; backend read cap |
 | F4 | Backend `is_claude_turn_start` counts jekts as turns (matters only with a turn cap set) | Small fix |
 | D1 | Diagnostics in §4 | Go-ahead |

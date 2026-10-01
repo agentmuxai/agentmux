@@ -21,7 +21,7 @@ export function useLiveFeedRollOff(opts: {
     block: Accessor<Block | undefined>;
     agentAtoms: () => AgentAtoms;
     hidden: Accessor<boolean>;
-    history: { scopeClamped: Accessor<boolean>; historyOffset: Accessor<number> };
+    history: { historyOffset: Accessor<number> };
 }) {
     const { paneModel, outputFormat, block, agentAtoms, hidden, history } = opts;
     // ---- The live feed (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9) ----
@@ -184,16 +184,13 @@ export function useLiveFeedRollOff(opts: {
     // once turns have rolled off the front, the lines just before the loaded
     // range no longer join what's on screen, so History takes over.
     const canPageOlder = (): boolean => !liveFeedOn() || rolledOffTurns() === 0;
-    const earlierHistoryAvailable = createMemo(() => {
-        if (history.scopeClamped()) return true;
-        if (liveFeedOn() && rolledOffTurns() > 0) return true;
-        const first = paneModel.document()[0];
-        return first?.type === "session_outcome" && first.outcome === "fresh";
-    });
+    // A new session's divider no longer hides what came before it, so only
+    // roll-off sends earlier turns to History.
+    const earlierHistoryAvailable = createMemo(() => liveFeedOn() && rolledOffTurns() > 0);
     // "N earlier turns" only when N is the whole story: everything before the
     // feed was loaded from line 0 and rolled off here.
     const earlierTurnsKnown = (): number | undefined =>
-        liveFeedOn() && rolledOffTurns() > 0 && history.historyOffset() === 0 && !history.scopeClamped()
+        liveFeedOn() && rolledOffTurns() > 0 && history.historyOffset() === 0
             ? rolledOffTurns()
             : undefined;
 
