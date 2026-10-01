@@ -1,6 +1,6 @@
 # Version drift upgrades (2026-10-01 report) and provider harness tests
 
-**Status:** active. Phase 1a (five CLI pins) shipped in #4166 alongside this spec. Phases 1b–5 remain, each as its own PR, tracked in §7.
+**Status:** active. Phase 1a (five CLI pins) shipped in #4166 alongside this spec. Phase 2 is in #4167 and #4168, and phase 3 in #4169. Phase 1b, the rest of phase 2, and phases 4–5 remain, tracked in §7.
 **Date:** 2026-10-01
 **Owner:** Manoz
 **Source:** `a5af/shared-infrastructure` `provider-reporter`, "AgentMux Version Drift Report - Oct 01, 2026 - 6 CLI(s) behind, 15 version(s) behind".
@@ -51,7 +51,7 @@ The report flags the first three as security-relevant, so any gap counts.
 |---|---|---|---|---|
 | rustls | 0.23.40 | 0.23.45 | patch (security) | 2 |
 | ed25519-dalek (jekt signing) | 2.2.0 | 3.0.0 | major (security) | 3 |
-| marked (agent markdown) | 16.4.2 | 18.0.14 | major (security) | 3 |
+| marked (the report calls it "agent markdown", but see §4.4) | 16.4.2 | 18.0.14 | transitive via mermaid | none (§4.4) |
 | reqwest | 0.12.28 | 0.13.5 | breaking 0.x | 4 |
 | rusqlite (bundled SQLite) | 0.31.0 | 0.40.2 | breaking 0.x | 4 |
 | keyring (OS credential store) | 2.3.3 | 4.2.0 | major | 4 |
@@ -136,7 +136,7 @@ What blocks the PR: `codex-version-fixture-gate.test.ts` requires all five live 
 ### 4.4 Phase 3: security-flagged majors
 
 - **ed25519-dalek 3:** jekt signatures must stay byte-compatible across a mixed-version fleet. The machines upgrade at different times: right now Area54 and narko run 0.59.x, and charlie runs 0.58.2. The PR has to include a cross-version test: verify a signature made by 2.x with 3.x, and the other way round, for the exact key and signature encodings used by `wan_verify`/`wan_publish`.
-- **marked 18:** agent markdown rendering goes through `marked` and then DOMPurify. Re-run the markdown render and sanitise suites (`app/element/markdown*.test.*`). Diff the rendered HTML for a corpus of real transcripts before and after. Pay particular attention to raw-HTML passthrough and link handling.
+- **marked 18: not actionable, and the report's label is wrong.** `marked` isn't a direct dependency, and no AgentMux code imports it. Agent markdown is rendered by remark/rehype (`remark-gfm`, `remark-rehype`). `marked` arrives only through `mermaid`, which requires `marked ^16.3.0`. That's still true of mermaid 12.0.0 (latest), so marked 18 can't be reached without overriding mermaid's own dependency range, and that isn't worth it for a library mermaid uses internally. Its exposure is mermaid diagram labels. Mermaid runs with `securityLevel: "strict"` (`markdown-mermaid.tsx`), and `npm audit` reports 0 vulnerabilities. The fix belongs in the drift reporter (`shared-infrastructure`): describe marked as "transitive via mermaid", and stop flagging it as a security gap that AgentMux can close on its own. It moves when mermaid moves its range.
 
 ### 4.5 Phase 4: breaking upgrades, one PR each, in this order
 
@@ -179,10 +179,13 @@ The results go in a `REPORT_PROVIDER_HARNESS_PASS_<date>.md` next to this spec. 
 
 | Phase | Item | PR | State |
 |---|---|---|---|
-| 1a | claude 2.1.287, gemini 0.62.0, qwen 0.24.7, openclaw 2026.9.7, copilot 1.0.91 | this PR | in review |
+| 1a | claude 2.1.287, gemini 0.62.0, qwen 0.24.7, openclaw 2026.9.7, copilot 1.0.91 | #4166 | approved |
 | 1b | codex 0.160.0 | branch `manoz/codex-0.160` | schema done; blocked on live fixture capture (§4.2) |
-| 2 | cef-dll-sys, Node, jq, ripgrep, rustls, toolchain | — | not started |
-| 3 | ed25519-dalek, marked | — | not started |
+| 2 | jq 1.8.2, ripgrep 15.2.0, rustls 0.23.45, `.nvmrc` 24.21.0 | #4167 | approved |
+| 2 | OpenClaw Node ≥ 24.16 prereq (`SystemPrereq.minVersion`) | #4168 | approved |
+| 2 | cef-dll-sys 154.3.0, Rust toolchain pin | — | not started (cef-rs rebase; the toolchain is the owner's decision) |
+| 3 | ed25519-dalek 3.0.0, with cross-version golden signatures | #4169 | in review |
+| 3 | marked | — | none needed: transitive via mermaid (§4.4) |
 | 4 | reqwest, rusqlite, keyring, katex, shiki, mermaid, vite, typescript | — | not started |
 | 5 | provider harness pass | — | not started |
 
