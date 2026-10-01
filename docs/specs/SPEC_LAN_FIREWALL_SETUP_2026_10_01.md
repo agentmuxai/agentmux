@@ -59,7 +59,7 @@ The owner approved the OS prompt. That is the point: **the prompt cannot be reli
 4. If the user accepted a Public network (4.4), add the scoped Public copies.
 5. Exit codes: `0` ok, `1223`-style cancel, `2` policy-managed (R11), `3` other. Idempotent; running it twice changes nothing.
 
-Port rules are what make this **once per machine**: they match through updates, new builds at new paths, and reinstalls (R4, R7). The cost is that any local program that listens in the range is reachable from the subnet. The range is small, `LocalSubnet` narrows who can reach it, and the LAN routes are still gated by the scoped LAN key. Predictable *loopback* ports are no new exposure, since they are authenticated already.
+Port rules are what make the base setup **once per machine**: they match through updates, new builds at new paths, and reinstalls (R4, R7). The count is exact, not "one ever": **one prompt per machine for Private and Domain networks, and one more each time the user chooses to trust a new Public network** (4.4), because each of those is a deliberate decision that adds a rule. The cost is that any local program that listens in the range is reachable from the subnet. The range is small, `LocalSubnet` narrows who can reach it, and the LAN routes are still gated by the scoped LAN key. Predictable *loopback* ports are no new exposure, since they are authenticated already.
 
 Public is **not** in the base rules; see 4.4.
 
@@ -68,7 +68,7 @@ Public is **not** in the base rules; see 4.4.
 Enabling LAN becomes:
 
 1. Read the firewall state **without admin** (`INetFwPolicy2` read, `INetworkListManager` for profiles).
-2. If both rules are present and enabled, srv's ports are inside the range, and no block rule exists: bind the LAN listeners and start mDNS. **No OS dialog can appear**, because matching allow rules exist.
+2. **Per interface, not per machine.** `LanListenerSupervisor` binds every non-loopback address, and each adapter has its own connection profile. For each interface it would bind, require an *applicable* allow rule: the Private/Domain rules cover an adapter only if that adapter's profile is Private or Domain, and a Public adapter is covered only by a consented, interface-scoped Public copy (4.4). Also require that srv's ports are inside the range and that no block rule exists. Bind the LAN listeners **only on the covered interfaces**, and start mDNS only if at least one is covered. **No OS dialog can appear** for a covered interface, because a matching allow rule exists. An uncovered interface simply stays unbound; the indicator reports why (`needs-setup` or `public-network`, 4.3). This also keeps sockets off a Public adapter that nobody agreed to trust.
 3. Otherwise show one explanatory sentence ("AgentMux will ask Windows for permission to accept connections from other devices on your private network"), then launch the helper with `runas` (R6, R7). On success go to step 2. On cancel: stay loopback-only, show "LAN needs one-time setup" (4.3), do **not** retry on every start.
 
 The srv must not bind a non-loopback socket before step 2, or Windows raises its own dialog and, on cancel, plants a block rule.
@@ -94,7 +94,7 @@ A new Windows network is typically classed **Public**, and many home users never
 So, when the active LAN adapter is Public (detected without admin through `INetworkListManager`):
 
 1. An in-app screen: *"Windows treats 'asaf_5G' as a Public network, which blocks incoming connections. Trust this network for AgentMux LAN? [Trust this network] [Not now]"*, naming the network and its subnet.
-2. Accepting adds, in the same single elevated run, Public-profile copies of the two rules **scoped to that adapter and that network's subnet** (`Interfaces` plus `RemoteAddresses = <CIDR>`). The network (name and CIDR) is recorded so the UI can show and revoke it. The residual risk is stated on the screen: the same adapter on a *different* network that happens to use the same private range (192.168.1.0/24 is common) would match.
+2. Accepting adds Public-profile copies of the two rules **scoped to that adapter and that network's subnet** (`Interfaces` plus `RemoteAddresses = <CIDR>`). The network (name and CIDR) is recorded so the UI can show and revoke it. This needs an elevated run of its own unless the base rules are being installed at the same moment (first enable on a Public network does both in one prompt). Trusting a *later* Public network is another prompt, by design: it is a deliberate decision, and the alternative, a persistent privileged service, is a much larger attack surface than one extra UAC click. The residual risk is stated on the screen: the same adapter on a *different* network that happens to use the same private range (192.168.1.0/24 is common) would match.
 3. Declining keeps AgentMux loopback-only and the indicator reads `public-network`, with a link to Windows' network settings. Marking the network Private in Windows also works, but it changes more than AgentMux needs (it turns on file and printer sharing and network discovery), so it is offered as an alternative and is not the default.
 
 It is never done silently.
@@ -115,15 +115,16 @@ It is never done silently.
 
 On a clean Windows 11 VM with no AgentMux rules, per-user install, standard (non-admin) login that can approve UAC:
 
-1. Enable LAN → one explanatory sentence, **one** UAC prompt, **no** "Windows Security Alert". Within 60 s the peer list fills **in both directions**, and a LAN jekt arrives `lan-verified`.
+1. Enable LAN on a Private network → one explanatory sentence, **one** UAC prompt, **no** "Windows Security Alert". Within 60 s the peer list fills **in both directions**, and a LAN jekt arrives `lan-verified`.
 2. Decline UAC → AgentMux keeps working loopback-only; the indicator reads `needs-setup`; no prompt on the next start.
 3. Cancel the *Windows* dialog in a build that predates this (block rule present) → helper removes the block; LAN works.
-4. Network classed Public → the in-app consent screen appears. Accepting adds the scoped rules in the same single UAC run and LAN works; declining leaves loopback-only with the `public-network` indicator and a Settings link.
+4. Network classed Public → the in-app consent screen appears. Accepting adds the scoped rules and LAN works, in the same UAC prompt if this is the first enable, or in **one more prompt** if the base rules already exist. A second, different Public network costs one more prompt each. Declining leaves loopback-only with the `public-network` indicator and a Settings link.
 5. **An update, or a second build at a new path → LAN keeps working with no prompt and no new rule** (the port rules still match; the rule count does not grow).
 6. Uninstall → no AgentMux rule remains.
 7. Two machines, one per direction, exchange a plain and a keyword jekt over LAN (done for Windows ↔ macOS on 2026-10-01, section 8).
-8. Range exhausted → srv falls back to an OS-chosen port, nothing crashes, and the indicator reads `needs-setup`.
-9. A Linux guest on a **bridged** adapter appears as a normal peer; on **NAT** it does not, and the docs say so (section 6).
+8. **Mixed profiles:** a host with one Private and one Public adapter, base rules installed, Public not trusted → LAN listeners bind on the Private adapter only, no Windows Security Alert appears, and the indicator names the uncovered adapter.
+9. Range exhausted → srv falls back to an OS-chosen port, nothing crashes, and the indicator reads `needs-setup`.
+10. A Linux guest on a **bridged** adapter appears as a normal peer; on **NAT** it does not, and the docs say so (section 6).
 
 ## 6. Open questions
 
@@ -166,8 +167,8 @@ One spec, separate PRs, in this order. Windows is the failing path and should no
 
 | PR | Scope | Verified on |
 |---|---|---|
-| **A: core** | Fixed LAN port range with fallback; advertise the actual port; a firewall-status interface; the new indicator states (`needs-setup`, `blocked`, `public-network`, `managed`). No OS-specific code. | unit tests; narko ↔ starpower |
-| **B: Windows** | The elevated helper, the two port rules, Public-network consent, rule-before-listeners ordering, installer step and uninstall cleanup. | a fresh Windows machine |
+| **A: core** | Fixed LAN port range with fallback; advertise the actual port; a firewall-status interface that reports coverage **per interface**; the new indicator states (`needs-setup`, `blocked`, `public-network`, `managed`). No OS-specific code. | unit tests; narko ↔ starpower |
+| **B: Windows** | The elevated helper, the two port rules, Public-network consent, per-interface coverage gating of the LAN listeners, installer step and uninstall cleanup. | a fresh Windows machine |
 | **C: macOS** | Verify first; change code only if the Local Network prompt does not appear with our current discovery. | starpower |
 | **D: Linux** | Detect an active `ufw` or `firewalld` and show the exact command. | charlie, once it is a bridged LAN member |
 
