@@ -916,28 +916,32 @@ pub fn cleanup_stale_managed_skill_files(
     let Ok(old_paths) = serde_json::from_str::<Vec<String>>(&raw) else {
         return;
     };
+    let Ok(wd) = crate::backend::workdir_fs::Workdir::open(base_path) else {
+        return;
+    };
     for old in &old_paths {
         if new_managed_paths.contains(old) {
             continue;
         }
-        let old_path = match crate::backend::base::safe_join_within_base(base_path, old) {
-            Ok(p) => p,
-            Err(_) => {
+        // Through the workdir: a manifest path outside it, or under a
+        // `.claude` that links out of it, is refused, never deleted.
+        match wd.remove_file(old) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                 tracing::warn!(
                     work_dir = %base_path.display(),
                     path = %old,
-                    "cleanup_stale_managed_skill_files: refusing to delete a manifest path \
-                     that escapes the working directory"
+                    error = %e,
+                    "cleanup_stale_managed_skill_files: refusing to delete a manifest path outside the working directory"
                 );
                 continue;
             }
-        };
-        let _ = std::fs::remove_file(&old_path);
+            _ => {}
+        }
         // Agent Skills format nests under .claude/skills/<slug>/ -- clean up
         // the now-empty slug directory too (no-op/fails silently if
         // anything else still lives there, e.g. a future scripts/ dir).
-        if let Some(parent) = old_path.parent() {
-            let _ = std::fs::remove_dir(parent);
+        if let Some(parent) = std::path::Path::new(old).parent().and_then(|p| p.to_str()).filter(|p| !p.is_empty()) {
+            let _ = wd.remove_dir(parent);
         }
     }
 }
@@ -951,9 +955,10 @@ pub fn write_managed_skill_file_manifest(
     base_path: &std::path::Path,
     new_managed_paths: &std::collections::BTreeSet<String>,
 ) {
-    let manifest_path = base_path.join(MANAGED_SKILL_FILES_MANIFEST);
     if let Ok(manifest_json) = serde_json::to_string(new_managed_paths) {
-        if let Err(e) = std::fs::write(&manifest_path, manifest_json) {
+        let written = crate::backend::workdir_fs::Workdir::open(base_path)
+            .and_then(|wd| wd.write(MANAGED_SKILL_FILES_MANIFEST, manifest_json.as_bytes(), false));
+        if let Err(e) = written {
             tracing::warn!(
                 work_dir = %base_path.display(),
                 error = %e,
@@ -1053,48 +1058,6 @@ const CLAUDE_MD_IMPORT_MARKER_COMMENT: &str =
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct ClaudeMdOwnershipMarker {
     import_line_offered: bool,
-}
-
-/// `relative` under `base_path`, refused when it would land outside it,
-/// including through a symlinked ancestor such as a linked `.claude`.
-fn resolve_within_workdir(base_path: &std::path::Path, relative: &str) -> Option<std::path::PathBuf> {
-    let base_canonical = base_path.canonicalize().ok()?;
-    let path = crate::backend::base::safe_join_within_base(base_path, relative).ok()?;
-    crate::backend::base::verify_no_symlink_escape(&path, &base_canonical).ok()?;
-    Some(path)
-}
-
-/// Resolve [`AGENTMUX_MEMORY_FILENAME`] and [`CLAUDE_MD_OWNERSHIP_MARKER_PATH`]
-/// against `base_path`, verifying neither escapes it via a symlinked
-/// ancestor (e.g. `.claude` itself existing as a symlink pointing outside
-/// the working directory) — same defense-in-depth the config-file write
-/// loops already apply to their own paths (codex P1 on PR #2747). Both
-/// constants are fixed, not user-controllable, so `safe_join_within_base`
-/// itself can never fail here; the symlink check is the one that matters.
-/// Returns `None` (having already logged why) if either check fails —
-/// callers treat that as "skip the foreign-file side effects this
-/// launch," not a hard error.
-fn resolve_claude_md_side_paths(
-    base_path: &std::path::Path,
-    base_canonical: &std::path::Path,
-) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
-    let resolve = |relative: &str| -> Option<std::path::PathBuf> {
-        let path = match crate::backend::base::safe_join_within_base(base_path, relative) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(base = %base_path.display(), relative, error = %e, "write_claude_md_respecting_ownership: path resolution failed");
-                return None;
-            }
-        };
-        if let Err(e) = crate::backend::base::verify_no_symlink_escape(&path, base_canonical) {
-            tracing::warn!(path = %path.display(), error = %e, "write_claude_md_respecting_ownership: refusing to write a path that escapes the working directory via a symlink");
-            return None;
-        }
-        Some(path)
-    };
-    let memory_path = resolve(AGENTMUX_MEMORY_FILENAME)?;
-    let ownership_marker_path = resolve(CLAUDE_MD_OWNERSHIP_MARKER_PATH)?;
-    Some((memory_path, ownership_marker_path))
 }
 
 /// Materialize `generated_content` (the composed Soul+AgentMD+Bundle+Skills
@@ -1244,26 +1207,20 @@ pub fn write_startup_instructions_respecting_existing(
     let agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(STARTUP_INSTRUCTIONS_MANAGED_MARKER));
 
-    // Never written through a symlink (dangling or not), nor under a folder
-    // that links out of the workspace (`.pi/` for pi): the write would land
-    // outside it. Codex on #4131, the same guard as `CLAUDE.md`'s.
-    let is_symlink = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
-    if is_symlink || resolve_within_workdir(base_path, filename).is_none() {
-        tracing::warn!(
-            path = %path.display(),
-            "write_startup_instructions_respecting_existing: a symlink, or outside the workspace; not writing"
-        );
-        return Ok(());
-    }
-
     if agentmux_owns_it || existing.is_none() {
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
         let marked_content = format!("{STARTUP_INSTRUCTIONS_MANAGED_MARKER}\n\n{content}");
-        return std::fs::write(&path, marked_content);
+        // Through the workdir: never written through a symlink (dangling or
+        // not), nor under a folder that links out of it (`.pi/` for pi).
+        // A refusal leaves the file alone, like a foreign one.
+        let written = crate::backend::workdir_fs::Workdir::open(base_path)
+            .and_then(|wd| wd.write(filename, marked_content.as_bytes(), false));
+        return match written {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                tracing::warn!(path = %path.display(), error = %e, "write_startup_instructions_respecting_existing: not writing");
+                Ok(())
+            }
+            other => other,
+        };
     }
 
     tracing::warn!(
@@ -1334,7 +1291,21 @@ pub fn write_mcp_json_respecting_user_servers(
 ) -> std::io::Result<()> {
     use serde_json::{Map, Value};
 
-    let path = base_path.join(".mcp.json");
+    let wd = crate::backend::workdir_fs::Workdir::open(base_path)?;
+    // Refused (a symlink, or outside the workdir) before anything is read
+    // or locked: this file carries the agent's signing keys. A refusal
+    // leaves the link alone and the launch goes on, as for `CLAUDE.md`
+    // (ReAgent on #4141). So does a refused ownership manifest (a `.claude`
+    // linking out): without it the next merge would take the user's own
+    // servers for AgentMux's and drop them (Codex on #4141).
+    let path = match wd.resolve(MANAGED_MCP_SERVERS_MANIFEST).and_then(|_| wd.resolve(".mcp.json")) {
+        Ok(path) => path,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            tracing::warn!(error = %e, "write_mcp_json_respecting_user_servers: not writing .mcp.json");
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
     let generated: Value = serde_json::from_str(generated_content).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("generated .mcp.json is not JSON: {e}"))
     })?;
@@ -1345,7 +1316,20 @@ pub fn write_mcp_json_respecting_user_servers(
         ));
     };
     // Serialize concurrent launches into this directory — see the doc comment.
-    let _dir_lock = lock_mcp_json_dir(base_path)?;
+    // The exclusive per-directory write lock; released on drop. A `.claude`
+    // linking out of the workdir refuses the lock file: the write then goes
+    // ahead unlocked (it is still atomic) rather than failing the launch.
+    let _dir_lock = match wd.open_lock_file(MCP_JSON_WRITE_LOCK) {
+        Ok(file) => {
+            file.lock()?;
+            Some(file)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            tracing::warn!(error = %e, "write_mcp_json_respecting_user_servers: writing .mcp.json without the directory lock");
+            None
+        }
+        Err(e) => return Err(e),
+    };
 
     let ours: Map<String, Value> = generated_obj
         .get("mcpServers")
@@ -1415,25 +1399,9 @@ pub fn write_mcp_json_respecting_user_servers(
 
     let body = serde_json::to_string_pretty(&Value::Object(merged))
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    write_owner_only_atomically(&path, body.as_bytes())?;
-    write_managed_mcp_server_names(base_path, ours.keys());
+    wd.write(".mcp.json", body.as_bytes(), true)?;
+    write_managed_mcp_server_names(&wd, ours.keys());
     Ok(())
-}
-
-/// Take the exclusive per-directory write lock; released on drop.
-fn lock_mcp_json_dir(base_path: &std::path::Path) -> std::io::Result<std::fs::File> {
-    let lock_path = base_path.join(MCP_JSON_WRITE_LOCK);
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)?;
-    file.lock()?;
-    Ok(file)
 }
 
 fn read_managed_mcp_server_names(base_path: &std::path::Path) -> Option<std::collections::BTreeSet<String>> {
@@ -1443,63 +1411,25 @@ fn read_managed_mcp_server_names(base_path: &std::path::Path) -> Option<std::col
 
 /// Best-effort, like [`write_managed_skill_file_manifest`]: losing this write
 /// only means the next launch falls back to the no-manifest rule once.
-fn write_managed_mcp_server_names<'a>(base_path: &std::path::Path, names: impl Iterator<Item = &'a String>) {
+fn write_managed_mcp_server_names<'a>(
+    wd: &crate::backend::workdir_fs::Workdir,
+    names: impl Iterator<Item = &'a String>,
+) {
     let names: std::collections::BTreeSet<&String> = names.collect();
-    let manifest_path = base_path.join(MANAGED_MCP_SERVERS_MANIFEST);
-    // Atomic for the same reason as the .mcp.json write itself: concurrent
-    // launches into one directory must not interleave into one manifest.
+    // Atomic (the workdir's write is) for the same reason as the .mcp.json
+    // write itself: concurrent launches into one directory must not
+    // interleave into one manifest.
     let result = serde_json::to_string(&names)
         .map_err(std::io::Error::other)
-        .and_then(|json| {
-            if let Some(parent) = manifest_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            write_owner_only_atomically(&manifest_path, json.as_bytes())
-        });
+        .and_then(|json| wd.write(MANAGED_MCP_SERVERS_MANIFEST, json.as_bytes(), true));
     if let Err(e) = result {
         tracing::warn!(
-            work_dir = %base_path.display(),
+            work_dir = %wd.base().display(),
             error = %e,
             "write_managed_mcp_server_names: failed to write manifest; the next launch \
              falls back to treating an agentmux-bearing .mcp.json as fully managed"
         );
     }
-}
-
-/// Write `bytes` to `path` via a sibling temp file renamed into place,
-/// created `0600` on Unix so the content is never readable by others, even
-/// for a moment. `rename` replaces an existing file (and its old mode) on
-/// every platform we ship.
-///
-/// The temp name is unique per call (a v4 UUID, as `bookmarks_store.rs`
-/// does), not per process: two launches into one shared project directory
-/// run concurrently in the same srv (`agent_open`'s dedupe lock is keyed by
-/// agent, not by directory), and a shared temp path would let their writes
-/// interleave into one file before either rename — publishing corrupt JSON.
-/// With unique temps the worst case is last-write-wins. `create_new` also
-/// refuses to open anything already sitting at the temp path (including a
-/// planted symlink).
-fn write_owner_only_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-    let tmp = path.with_file_name(format!(".{file_name}.{}.agentmux-tmp", uuid::Uuid::new_v4()));
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        opts.mode(0o600);
-    }
-    let write_result = (|| {
-        let mut f = opts.open(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()
-    })();
-    if let Err(e) = write_result.and_then(|_| std::fs::rename(&tmp, path)) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    Ok(())
 }
 
 /// Shared by `agent.open` (`server/app_api/agent_open.rs`) and the
@@ -1524,10 +1454,13 @@ pub fn write_claude_md_respecting_ownership(
 
     let mut agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(CLAUDE_MD_MANAGED_MARKER));
-    // A `CLAUDE.md` that is a symlink (dangling or not) is never written
-    // through: the write would follow it out of the workspace (Codex P1s on
-    // #4131).
-    let is_symlink = std::fs::symlink_metadata(&claude_md_path).is_ok_and(|m| m.file_type().is_symlink());
+
+    // Every write below goes through the workdir
+    // (SPEC_WORKDIR_SAFE_WRITES_2026_10_01): a `CLAUDE.md` that is a symlink
+    // (dangling or not), or a `.claude` linking out of the workspace, is
+    // refused rather than written through (Codex P1s on #4131).
+    let wd = crate::backend::workdir_fs::Workdir::open(base_path)?;
+    let claude_md_writable = wd.resolve("CLAUDE.md").is_ok();
 
     // A CLAUDE.md an older AgentMux wrote, before the managed marker existed:
     // nothing in it but the skills index and the managed import line. It was
@@ -1535,108 +1468,41 @@ pub fn write_claude_md_respecting_ownership(
     // forever. Adopt it, keeping a copy (LC3,
     // SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4).
     if let Some(Ok(content)) = &existing {
-        if !agentmux_owns_it && !is_symlink && is_legacy_agentmux_claude_md(content) {
-            // Resolved and symlink-checked like the other `.claude` side
-            // files: a `.claude` that links outside the workspace must not
-            // get the backup written through it (Codex on #4131). No safe
-            // path: not adopted, handled as a foreign file below.
-            match resolve_within_workdir(base_path, CLAUDE_MD_PRE_ADOPT_BACKUP) {
-                None => tracing::warn!(
-                    path = %claude_md_path.display(),
-                    "write_claude_md_respecting_ownership: no safe place to back up a legacy CLAUDE.md; leaving it as is"
-                ),
-                Some(backup) => {
-                    let backed_up = backup.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
-                        match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
-                            Ok(mut f) => std::io::Write::write_all(&mut f, content.as_bytes()).and_then(|()| f.sync_all()).inspect_err(|_| {
-                                // A partial copy must not pass for the backup next launch.
-                                let _ = std::fs::remove_file(&backup);
-                            }),
-                            // A copy left by an earlier attempt counts only if it
-                            // is this file, whole (Codex on #4131).
-                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                                if std::fs::read_to_string(&backup).is_ok_and(|b| b == *content) {
-                                    Ok(())
-                                } else {
-                                    Err(std::io::Error::new(
-                                        std::io::ErrorKind::AlreadyExists,
-                                        "a different .pre-adopt copy already exists",
-                                    ))
-                                }
-                            }
-                            Err(e) => Err(e),
-                        }
-                    });
-                    match backed_up {
-                        Ok(()) => {
-                            tracing::info!(path = %claude_md_path.display(), "CLAUDE.md written by an older AgentMux: adopting it as managed");
-                            agentmux_owns_it = true;
-                        }
-                        Err(e) => tracing::warn!(
-                            path = %backup.display(),
-                            error = %e,
-                            "write_claude_md_respecting_ownership: couldn't back up a legacy CLAUDE.md; leaving it as is"
-                        ),
-                    }
+        if !agentmux_owns_it && claude_md_writable && is_legacy_agentmux_claude_md(content) {
+            match back_up_legacy_claude_md(&wd, content) {
+                Ok(()) => {
+                    tracing::info!(path = %claude_md_path.display(), "CLAUDE.md written by an older AgentMux: adopting it as managed");
+                    agentmux_owns_it = true;
                 }
+                Err(e) => tracing::warn!(
+                    path = %claude_md_path.display(),
+                    error = %e,
+                    "write_claude_md_respecting_ownership: couldn't back up a legacy CLAUDE.md; leaving it as is"
+                ),
             }
         }
     }
 
-    // Known, accepted TOCTOU window (codex P2, third review round on
-    // PR #2747): if a foreign CLAUDE.md is created/swapped in between the
-    // read above and this write — e.g. this exact working directory
-    // becoming a real project mid-launch — that unconditional write would
-    // still clobber it once. Not closed here: doing so would need real
-    // file locking (flock/LockFile) across the read-decide-write sequence,
-    // which every other config file this module writes (.mcp.json, skill
-    // files, hooks.json) has the identical unaddressed race against
-    // (agent_open.rs's own "no collision resolution... overwrites
-    // whatever's there" comment, about a directory-level version of the
-    // same class of race). Singling out CLAUDE.md's OWNED-file fast path
-    // for stronger protection than every sibling write in this same
-    // function would be inconsistent scope for what this PR set out to
-    // fix (a stable, at-rest foreign file being clobbered on every
-    // ordinary launch) — narrower and far less likely than that. The
-    // foreign-file branch below (where this PR's actual guarantee lives)
-    // does not have this gap: it never writes CLAUDE.md's own content.
-    // Nothing is written to a symlinked CLAUDE.md, not even the @import
-    // append below: every write would land on the link's target.
-    if is_symlink {
-        tracing::warn!(path = %claude_md_path.display(), "write_claude_md_respecting_ownership: CLAUDE.md is a symlink; not writing through it");
+    // Nothing is written to a CLAUDE.md the workdir refuses, not even the
+    // @import append below: every write would land on a link's target.
+    if !claude_md_writable {
+        tracing::warn!(path = %claude_md_path.display(), "write_claude_md_respecting_ownership: CLAUDE.md is a symlink or outside the workspace; not writing through it");
         return Ok(());
     }
+    // Known, accepted TOCTOU window (codex P2, third review round on
+    // PR #2747): a foreign CLAUDE.md created between the read above and this
+    // write would be replaced once. Closing it needs file locking across the
+    // read-decide-write, which no sibling write here has either.
     if agentmux_owns_it || existing.is_none() {
         let content = format!("{CLAUDE_MD_MANAGED_MARKER}\n\n{generated_content}");
-        return std::fs::write(&claude_md_path, content);
+        return wd.write("CLAUDE.md", content.as_bytes(), false);
     }
-
-    // Resolve + symlink-verify the two new paths once, up front — neither
-    // write below proceeds if this fails.
-    let base_canonical = match base_path.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(path = %base_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to canonicalize base_path; skipping side-file write this launch");
-            return Ok(());
-        }
-    };
-    let Some((memory_path, ownership_marker_path)) =
-        resolve_claude_md_side_paths(base_path, &base_canonical)
-    else {
-        return Ok(());
-    };
 
     // Foreign (or unreadable) file — CLAUDE.md's own content is never
     // written to from here on. Everything from here down is best-effort
     // (see doc comment): a failure must not fail the whole agent launch.
-    if let Some(parent) = memory_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(path = %parent.display(), error = %e, "write_claude_md_respecting_ownership: failed to create .claude/; side file not written this launch");
-            return Ok(());
-        }
-    }
-    if let Err(e) = std::fs::write(&memory_path, generated_content) {
-        tracing::warn!(path = %memory_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to write AGENTMUX_MEMORY.md this launch");
+    if let Err(e) = wd.write(AGENTMUX_MEMORY_FILENAME, generated_content.as_bytes(), false) {
+        tracing::warn!(work_dir = %base_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to write AGENTMUX_MEMORY.md this launch");
         return Ok(());
     }
 
@@ -1649,78 +1515,63 @@ pub fn write_claude_md_respecting_ownership(
         return Ok(());
     };
 
-    if let Some(parent) = ownership_marker_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(path = %parent.display(), error = %e, "write_claude_md_respecting_ownership: failed to create dir for ownership marker");
-            return Ok(());
-        }
-    }
-
     // Atomic "am I the first to offer this" gate, not a read-then-write
-    // check: `create_new` fails with `AlreadyExists` if another
-    // concurrent call already won this race. Two agents sharing a
-    // working directory (agent_open.rs's shared-workdir fallback,
-    // `~/.agentmux/agents/<slug>`, launching concurrently) previously
-    // could both read "not yet offered" and both append the import
-    // line, duplicating it — the only existing serialization
-    // (`agent_open_lock`) is keyed by agent_id, not by working
-    // directory, so it doesn't cover this case (reagent P2, second
-    // review round on PR #2747). Only the caller whose `create_new`
-    // succeeds proceeds to append; every other caller — including a
-    // genuine concurrent racer, and every later launch once the marker
-    // exists — sees `AlreadyExists` and skips straight past.
+    // check: `create_new` reports an existing marker if another concurrent
+    // call already won this race. Two agents sharing a working directory
+    // (agent_open.rs's shared-workdir fallback, `~/.agentmux/agents/<slug>`,
+    // launching concurrently) previously could both read "not yet offered"
+    // and both append the import line, duplicating it (reagent P2, second
+    // review round on PR #2747). Only the caller that creates the marker
+    // proceeds to append; every other caller skips straight past.
     let marker_json = serde_json::to_string(&ClaudeMdOwnershipMarker { import_line_offered: true })
         .unwrap_or_default();
-    let create_result = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&ownership_marker_path)
-        .and_then(|mut f| std::io::Write::write_all(&mut f, marker_json.as_bytes()));
-
-    match create_result {
-        Ok(()) => {
+    match wd.create_new(CLAUDE_MD_OWNERSHIP_MARKER_PATH, marker_json.as_bytes()) {
+        Ok(true) => {
             let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
             // Idempotent even having won the race: don't duplicate if
             // the import somehow already appears (e.g. a user copied it
             // in by hand before AgentMux ever ran here).
             if !existing_content.contains(&import_needle) {
-                let import_block =
-                    format!("\n\n{CLAUDE_MD_IMPORT_MARKER_COMMENT}\n{import_needle}\n");
+                let import_block = format!("\n\n{CLAUDE_MD_IMPORT_MARKER_COMMENT}\n{import_needle}\n");
                 // True append (never a read-modify-write of the whole
                 // file) — an edit racing this function's earlier read is
-                // preserved, not silently discarded (codex P2 on
-                // PR #2747).
-                let append_result = std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&claude_md_path)
-                    .and_then(|mut f| std::io::Write::write_all(&mut f, import_block.as_bytes()));
-                if let Err(e) = append_result {
+                // preserved (codex P2 on PR #2747).
+                if let Err(e) = wd.append("CLAUDE.md", import_block.as_bytes()) {
                     tracing::warn!(path = %claude_md_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to append the @import line this launch");
                     // Roll back the marker we just created — winning the
-                    // race doesn't mean the offer actually completed. Without
-                    // this, the marker alone would permanently record
-                    // "offered" even though the import line was never
-                    // added, and every later launch's create_new would hit
-                    // AlreadyExists and skip forever, with no retry path
+                    // race doesn't mean the offer completed; a marker left
+                    // behind would record "offered" forever with no retry
                     // (reagent P1 + codex, third review round on PR #2747).
-                    // Best-effort: if the removal itself fails, a future
-                    // launch just stays stuck the way it would have been
-                    // without this fix — not worse, and not worth
-                    // escalating a cleanup failure into a launch failure.
-                    let _ = std::fs::remove_file(&ownership_marker_path);
+                    let _ = wd.remove_file(CLAUDE_MD_OWNERSHIP_MARKER_PATH);
                 }
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+        Ok(false) => {
             // Already offered — by us on a prior launch, or a concurrent
             // racer that won just now. Nothing to do.
         }
         Err(e) => {
-            tracing::warn!(path = %ownership_marker_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to create ownership marker");
+            tracing::warn!(work_dir = %base_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to create ownership marker");
         }
     }
 
     Ok(())
+}
+
+/// Copy a legacy `CLAUDE.md` to [`CLAUDE_MD_PRE_ADOPT_BACKUP`] before it is
+/// adopted. Whole or not at all (a failed write removes its partial copy);
+/// a copy left by an earlier attempt counts only if it is this file, whole
+/// (Codex on #4131).
+fn back_up_legacy_claude_md(wd: &crate::backend::workdir_fs::Workdir, content: &str) -> std::io::Result<()> {
+    if wd.create_new(CLAUDE_MD_PRE_ADOPT_BACKUP, content.as_bytes())? {
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(wd.resolve(CLAUDE_MD_PRE_ADOPT_BACKUP)?)?;
+    if existing == content {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "a different .pre-adopt copy already exists"))
+    }
 }
 
 /// Best-effort: mint-or-reuse `agent_slug`'s jekt/LAN signing keys
@@ -3148,6 +2999,47 @@ mod mcp_json_tests {
         write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
         let servers = mcp_servers_of(dir.path());
         assert_eq!(servers.keys().collect::<Vec<_>>(), vec!["agentmux", "github"]);
+    }
+
+    /// ReAgent on #4141: a symlinked `.mcp.json`, even one pointing inside
+    /// the workdir, is left alone and the launch goes on.
+    #[test]
+    fn mcp_json_a_symlinked_file_is_left_alone_without_failing_the_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("my-mcp.json");
+        std::fs::write(&target, r#"{"mcpServers":{}}"#).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join(".mcp.json")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join(".mcp.json")).is_ok();
+        if !made {
+            return;
+        }
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        assert!(std::fs::symlink_metadata(dir.path().join(".mcp.json")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), r#"{"mcpServers":{}}"#);
+    }
+
+    /// Codex on #4141: with `.claude` linking outside, the ownership manifest
+    /// can't be written, so `.mcp.json` isn't either; otherwise the second
+    /// launch would take the user's own server for AgentMux's and drop it.
+    #[test]
+    fn mcp_json_a_users_server_survives_two_launches_with_claude_linking_outside() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(outside.path(), dir.path().join(".claude")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(outside.path(), dir.path().join(".claude")).is_ok();
+        if !made {
+            return;
+        }
+        let users = r#"{"mcpServers":{"mine":{"command":"my-mcp"}}}"#;
+        std::fs::write(dir.path().join(".mcp.json"), users).unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        assert!(mcp_servers_of(dir.path()).contains_key("mine"));
+        assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none(), "nothing written outside");
     }
 
     #[test]

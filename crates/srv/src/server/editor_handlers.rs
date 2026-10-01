@@ -268,7 +268,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     let p = expanded_working_dir.as_path();
                     if !p.exists() {
-                        std::fs::create_dir_all(p)
+                        std::fs::create_dir_all(p) // workdir-fs: creates the workdir itself
                             .map_err(|e| format!("failed to create working dir: {e}"))?;
                     }
                     expanded_working_dir.to_string_lossy().to_string()
@@ -295,6 +295,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // that materialize config files can't drift out of sync on
                 // this (reagent P1, PR #2322 — this handler initially had
                 // no cleanup at all).
+                let wd = crate::backend::workdir_fs::Workdir::open(base_path)
+                    .map_err(|e| format!("failed to open working dir {}: {e}", base_path.display()))?;
                 let new_managed_skill_paths = crate::backend::agent_config::managed_skill_file_paths(
                     cmd.files.iter().map(|f| f.path.as_str()),
                 );
@@ -317,8 +319,13 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // symlink that resolves outside the workdir, reject.
                     // No-op for fully-fresh agent dirs (the common case
                     // where every component is new).
-                    crate::backend::base::verify_no_symlink_escape(&file_path, &canonical_base)
-                        .map_err(|e| format!("path traversal denied: {} ({e})", file.path))?;
+                    // Like a refused write below, this skips that one file
+                    // rather than failing the launch, as agent.open does
+                    // (Codex on #4141).
+                    if let Err(e) = crate::backend::base::verify_no_symlink_escape(&file_path, &canonical_base) {
+                        tracing::warn!(path = %file.path, error = %e, "writeagentconfig: not writing a config file under a folder linking outside the workdir");
+                        continue;
+                    }
                     // Inject global memory bundles into CLAUDE.md so agents
                     // launched from the picker receive the same workspace rules
                     // as agents launched via the agent.open RPC.
@@ -376,16 +383,19 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         tracing::debug!(path = %file_path.display(), "wrote config file (merged, owner-only)");
                         continue;
                     }
-                    // Create parent directories if needed
-                    if let Some(parent) = file_path.parent() {
-                        if !parent.exists() {
-                            std::fs::create_dir_all(parent)
-                                .map_err(|e| format!("failed to create dir for {}: {e}", file.path))?;
+                    // Atomic, parents created inside the workdir, never
+                    // through a symlinked file (SPEC_WORKDIR_SAFE_WRITES_2026_10_01).
+                    // A refusal skips that one file, as agent.open does
+                    // (ReAgent on #4141); any other failure fails the launch.
+                    match wd.write(&file.path, file.content.as_bytes(), false) {
+                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                            tracing::warn!(path = %file.path, error = %e, "writeagentconfig: not writing a config file");
+                        }
+                        other => {
+                            other.map_err(|e| format!("failed to write {}: {e}", file.path))?;
+                            tracing::debug!(path = %file_path.display(), "wrote config file");
                         }
                     }
-                    std::fs::write(&file_path, &file.content)
-                        .map_err(|e| format!("failed to write {}: {e}", file.path))?;
-                    tracing::debug!(path = %file_path.display(), "wrote config file");
                 }
 
                 crate::backend::agent_config::write_managed_skill_file_manifest(
