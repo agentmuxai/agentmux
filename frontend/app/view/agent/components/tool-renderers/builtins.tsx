@@ -112,10 +112,10 @@ function renderRead(node: ToolNode): JSX.Element {
     return (
         <div class="agent-tool-read">
             <div class="agent-tool-file-path-row">
-                <span class="agent-tool-file-path">{filePath}</span>
                 <Show when={range}>
                     <span class="agent-tool-read-range">{formatReadRangeLong(range!)}</span>
                 </Show>
+                <span class="agent-tool-file-path">{filePath}</span>
             </div>
             <Show
                 when={capped}

@@ -365,14 +365,19 @@ $transcript-preview-max-height: calc(50vh / 3);
                 font-weight: 400;
             }
 
-            // A reducer-set note on a status (e.g. "cleared via muxspect"),
-            // and a Read's line range ("L120–179 of 456"), which must stay
-            // visible when a long path is ellipsized beside it.
+            // A reducer-set note on a status (e.g. "cleared via muxspect").
             .agent-tool-status-note,
-            .agent-tool-duration,
-            .agent-tool-range {
+            .agent-tool-duration {
                 flex-shrink: 0;
                 color: var(--secondary-text-color);
+                font-size: 11px;
+            }
+
+            // A Read's line range ("120:179 of 456"), inside the name run
+            // before the path, so the path is what an ellipsis cuts.
+            .agent-tool-range {
+                color: var(--secondary-text-color);
+                font-family: var(--font-mono);
                 font-size: 11px;
             }
 

@@ -447,6 +447,12 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                     {" "}
                                     <span class="agent-tool-label">{header().label}</span>
                                 </Show>
+                                {/* A Read's lines come before the path: the path is the part
+                                    that gets ellipsized, and the range is what you scan for. */}
+                                <Show when={!authoredSummary() && header().range}>
+                                    {" "}
+                                    <span class="agent-tool-range">{header().range}</span>
+                                </Show>
                                 <Show when={header().detail}>
                                     {" "}
                                     <span class="agent-tool-detail">{header().detail}</span>
@@ -454,9 +460,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                             </span>
                         </Show>
                     </span>
-                    <Show when={!authoredSummary() && header().range}>
-                        <span class="agent-tool-range">{header().range}</span>
-                    </Show>
                     {/* Composed headers only: an authored summary already
                         carries the note (the muxspect force-cancel writes
                         both, for any tool — AskUserQuestion included). */}

@@ -12,7 +12,7 @@ Code citations are against `main` @ `e9a45699f`.
 
 ## 1. Summary
 
-1. **Range.** A Read row showed only the path. It now shows which lines were read, in the header (`L120–179 of 456`) and above the preview (`lines 120–179 of 456`), including while the read is still running. The numbers come from the CLI itself, which already sends them, and the translator was throwing them away.
+1. **Range.** A Read row showed only the path. It now shows which lines were read, in the header (`120:179 of 456`) and above the preview (`lines 120–179 of 456`), including while the read is still running. The numbers come from the CLI itself, which already sends them, and the translator was throwing them away.
 2. **Collapsed.** A Read is a few milliseconds. Its call and its result routinely land in one stream flush, so the row is first drawn already finished and the "expand until it scrolls off" hold, which is triggered by watching the row *change* from running to finished, never fires. Fixed by also holding a row that arrives finished with a fresh call stamp.
 3. **Highlighting is much weaker than it looks.** `detectLanguage` maps about 90 extensions, but the highlighter loads Shiki's **web** bundle, which has 78 languages and **no Rust, Go, TOML, PowerShell, Dockerfile, Makefile, Ruby, Kotlin, Swift or C#**. A Read of a `.rs` or `.toml` file, which is most of this repo, renders as plain text, with only a console warning. §5.
 4. **Non-text reads are poor.** An image read shows `▸ 0: {2 keys}`; a "file unchanged" stub and a PDF note are syntax-highlighted as if they were code; a token-capped read buries its warning inside the code block and breaks the gutter alignment. §6.
@@ -53,7 +53,7 @@ No notebook results appeared in this sample; the shape of one is unverified.
 3. The call: `offset`/`limit` (Claude's, 1-based, confirmed by `startLine: 1` for a default read), `start_line`/`end_line`, or `pages`. The only source while the read is running, and wrong once the file turns out shorter than asked, which is why 1 and 2 outrank it. Another provider's `offset` is not guessed at: Gemini's may be 0-based.
 
 **Display**
-- Header chip (`.agent-tool-range`, a sibling of the path so a long path's ellipsis can't cut it): `L120–179`, `L120–179 of 456`, `214 lines` for a whole file, `pages 1–5`. It shows from the moment the call lands, from the parameters, and updates to the actual range when the result arrives.
+- Header chip (`.agent-tool-range`, before the path inside the name run, so a long path's ellipsis cuts the path and never the range): `120:179`, `120:179 of 456`, `1:214` for a whole file, `pages 1–5`. It shows from the moment the call lands, from the parameters, and updates to the actual range when the result arrives.
 - Above the preview: `lines 120–179 of 456`, `all 214 lines`, or `lines 1–1082 of 1320 · cut off at the token cap`.
 - The plain-text header form (used by `/btw`) ends with the chip.
 

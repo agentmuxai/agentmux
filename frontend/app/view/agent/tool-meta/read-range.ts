@@ -161,12 +161,12 @@ export function readRangeOf(node: Pick<ToolNode, "tool" | "toolName" | "params" 
     return fromMeta(result) ?? fromText(result) ?? fromParams(name, node.params);
 }
 
-/** Header chip: `L120–179`, `L120–179 of 456`, `214 lines`, `pages 1–5`. */
+/** Header chip: `120:179`, `120:179 of 456`, `1:214`, `pages 1–5`. First and last line, as an editor writes them. */
 export function formatReadRangeShort(r: ReadRange): string {
     if (r.empty) return r.total != null ? `past end (${r.total} lines)` : "0 lines";
     if (r.unit === "pages") return r.end != null && r.end !== r.start ? `pages ${r.start}–${r.end}` : `page ${r.start}`;
-    if (r.start === 1 && r.end != null && r.total != null && r.end === r.total) return `${r.total} lines`;
-    const span = r.end == null ? `L${r.start}–` : r.end === r.start ? `L${r.start}` : `L${r.start}–${r.end}`;
+    // Always first:last, even for one line (`42:42`): a lone number reads as a count.
+    const span = r.end == null ? `${r.start}:` : `${r.start}:${r.end}`;
     return r.total != null && r.end !== r.total ? `${span} of ${r.total}` : span;
 }
 
