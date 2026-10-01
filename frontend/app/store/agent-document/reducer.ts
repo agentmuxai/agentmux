@@ -952,17 +952,14 @@ const FINISHED_TOOL_STATUSES = new Set<ToolNode["status"]>(["success", "failed",
 
 /**
  * Whether a tool's live log can be freed: it finished WITH a result, so its
- * body renders the result and never the chunks again. Not a background
- * launch (`run_in_background`), whose activity row keeps following its log
- * after the launching call returns.
+ * body renders the result and never the chunks again. Not an accepted
+ * background launch, whose activity row keeps following its log after the
+ * launching call returns; a call that only asked for the background (and
+ * ran synchronously, or was refused) is an ordinary finished call.
  * SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.1 (U1).
  */
 export function freesLog(tool: ToolNode): boolean {
-    return (
-        FINISHED_TOOL_STATUSES.has(tool.status) &&
-        tool.result != null &&
-        (tool.params as { run_in_background?: unknown } | undefined)?.run_in_background !== true
-    );
+    return FINISHED_TOOL_STATUSES.has(tool.status) && tool.result != null && !isAcceptedBackgroundLaunch(tool);
 }
 
 function nodeReasonFor(

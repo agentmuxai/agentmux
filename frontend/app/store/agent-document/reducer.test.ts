@@ -911,10 +911,23 @@ describe("agent document reducer", () => {
             s = update(s, { type: "ToolChunkAppend", toolId: "t1", chunk: chunk("tick\n", { timestamp: 1 }) }).state;
             const done = update(s, {
                 type: "StreamFlush",
-                newNodes: [bg("success", { result: { stdout: "", stderr: "", exitCode: 0 } })],
+                newNodes: [bg("success", { result: { stdout: "", stderr: "", exitCode: 0, backgroundTaskId: "b1" } as ToolNode["result"] })],
                 updatedNodes: [],
             }).state.nodes[0] as ToolNode;
             expect(done.log?.chunks).toHaveLength(1);
+        });
+
+        it("frees a call that asked for the background but ran synchronously (U1, Codex P2 on #4125)", () => {
+            const bg = (status: ToolNode["status"], extra: Partial<ToolNode> = {}) =>
+                tool("t1", { status, params: { command: "echo hi", run_in_background: true }, ...extra });
+            let s = update(initialState(), { type: "StreamFlush", newNodes: [bg("running")], updatedNodes: [] }).state;
+            s = update(s, { type: "ToolChunkAppend", toolId: "t1", chunk: chunk("hi\n", { timestamp: 1 }) }).state;
+            const done = update(s, {
+                type: "StreamFlush",
+                newNodes: [bg("success", { result: { stdout: "hi\n", stderr: "", exitCode: 0 } })],
+                updatedNodes: [],
+            }).state.nodes[0] as ToolNode;
+            expect(done.log).toEqual({ chunks: [], open: false });
         });
 
         it("drops a late chunk for a tool that already finished with a result (U1)", () => {
