@@ -3,7 +3,7 @@
 **Date:** 2026-09-30 (UTC; the evening of 2026-09-29 Pacific)
 **Found by:** the owner, on AgentX's pane in a local v0.58.3 portable build
 **Investigated by:** AgentX (narko)
-**Status:** retro — root cause identified; fixes 1 and 2 (launch applies the runtime; srv fills missing flags at spawn) implemented, fixes 3–5 open (see §5). Every binding and remaining gap: `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`
+**Status:** retro — root cause identified; fixes 1, 2, 4 and 5 implemented (launch applies the runtime; srv fills missing flags at spawn; the menu shows when the process runs something else; the Sonnet label follows the pinned CLI), fix 3 mitigated (the menu detects a stale process and offers a restart rather than doing it silently) (see §5). Every binding and remaining gap: `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`
 
 ## 1. What happened
 
