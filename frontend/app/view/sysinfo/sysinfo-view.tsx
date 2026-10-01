@@ -4,7 +4,7 @@
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import clsx from "clsx";
-import { holdPaneContent } from "@/app/store/pane-content-holds";
+import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
@@ -21,6 +21,7 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     const { model, blockId } = props;
     // The chart is empty until its history arrives: hold the pane until then
     // (pane-content-holds.ts).
+    onCleanup(trackPaneContent(blockId));
     const releaseContent = holdPaneContent(blockId);
     onCleanup(releaseContent);
     createEffect(() => {

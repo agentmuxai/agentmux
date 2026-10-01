@@ -33,6 +33,7 @@
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
+import { trackPaneContent } from "@/app/store/pane-content-holds";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
@@ -330,6 +331,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // two covers for one pane, whichever unmounted last winning. Both now go
     // through <PaneLoadingCover>, so the class has a single owner.
     const windowTabDisplayed = useWindowTabDisplayed();
+    // The picker's loading is all behind this cover (pane-content-holds.ts).
+    onCleanup(trackPaneContent(props.model.blockId));
     const pickerReadiness = createPaneReadiness({
         label: "agent-picker",
         holdFor: props.model.blockId,

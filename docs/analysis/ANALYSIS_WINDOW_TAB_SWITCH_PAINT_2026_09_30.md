@@ -191,7 +191,7 @@ After #4108 a new window tab was shown as soon as its panes *existed*, about 75 
 
 #4108 had removed the gate and the fade that used to blur this.
 
-**What shipped:** a tab is shown only once its content has *settled*. That means its layout has loaded, and every leaf pane is mounted with no content hold outstanding (`pane-content-holds.ts`, `tab-content-settled.ts`).
+**What shipped:** a tab is shown only once its content has *settled*. That means its layout has loaded, and every leaf pane is mounted, has a view that reports its own loading, and has no content hold outstanding (`pane-content-holds.ts`, `tab-content-settled.ts`). Reporting is opt-in (`trackPaneContent`): agent, picker, sysinfo and swarm opt in today. A tab holding any other view, such as a terminal, editor or toolchain, keeps its first reveal gated, so a view that loads without reporting it is never shown half-loaded (Codex on #4132).
 
 **Where the holds come from:**
 - A pane's loading cover holds its content until it is gone (`createPaneReadiness`'s `holdFor`, set by `block.tsx`, `usePaneReveal` and `AgentPicker`).
