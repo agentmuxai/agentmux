@@ -100,7 +100,9 @@ pub fn build_config_files(
     // Append skill index with trigger references. Claude Code lists the
     // skills it has a file for (.claude/commands, .claude/skills) by itself,
     // so for it the index carries only those without one (LC3, §4.4).
-    let indexed: Vec<_> = skills.iter().filter(|s| provider_id != "claude" || !skill_has_native_file(s)).collect();
+    // By the resolved provider, so an alias (`claude-code`) counts as Claude.
+    let is_claude = crate::backend::providers::get_provider(provider_id).is_some_and(|p| p.id == "claude");
+    let indexed: Vec<_> = skills.iter().filter(|s| !is_claude || !skill_has_native_file(s)).collect();
     if !indexed.is_empty() {
         instructions_parts.push("\n# Available Skills\n\n".to_string());
         instructions_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
@@ -1004,6 +1006,15 @@ struct ClaudeMdOwnershipMarker {
     import_line_offered: bool,
 }
 
+/// `relative` under `base_path`, refused when it would land outside it,
+/// including through a symlinked ancestor such as a linked `.claude`.
+fn resolve_within_workdir(base_path: &std::path::Path, relative: &str) -> Option<std::path::PathBuf> {
+    let base_canonical = base_path.canonicalize().ok()?;
+    let path = crate::backend::base::safe_join_within_base(base_path, relative).ok()?;
+    crate::backend::base::verify_no_symlink_escape(&path, &base_canonical).ok()?;
+    Some(path)
+}
+
 /// Resolve [`AGENTMUX_MEMORY_FILENAME`] and [`CLAUDE_MD_OWNERSHIP_MARKER_PATH`]
 /// against `base_path`, verifying neither escapes it via a symlinked
 /// ancestor (e.g. `.claude` itself existing as a symlink pointing outside
@@ -1014,15 +1025,6 @@ struct ClaudeMdOwnershipMarker {
 /// Returns `None` (having already logged why) if either check fails —
 /// callers treat that as "skip the foreign-file side effects this
 /// launch," not a hard error.
-/// `relative` under `base_path`, refused when it would land outside it,
-/// including through a symlinked ancestor such as a linked `.claude`.
-fn resolve_within_workdir(base_path: &std::path::Path, relative: &str) -> Option<std::path::PathBuf> {
-    let base_canonical = base_path.canonicalize().ok()?;
-    let path = crate::backend::base::safe_join_within_base(base_path, relative).ok()?;
-    crate::backend::base::verify_no_symlink_escape(&path, &base_canonical).ok()?;
-    Some(path)
-}
-
 fn resolve_claude_md_side_paths(
     base_path: &std::path::Path,
     base_canonical: &std::path::Path,
@@ -1979,6 +1981,21 @@ mod tests {
         assert!(agents_md.content.contains("Available Skills"));
         assert!(agents_md.content.contains("/deploy"));
         assert!(agents_md.content.contains("/test"));
+    }
+
+    /// An alias of Claude (`claude-code`) is Claude: no index for skills with
+    /// files (ReAgent on #4131).
+    #[test]
+    fn a_claude_alias_gets_no_index_for_file_backed_skills() {
+        let skills = vec![make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all")];
+        for alias in ["claude-code", "claude_code"] {
+            if crate::backend::providers::get_provider(alias).is_none() {
+                continue;
+            }
+            let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", alias);
+            let md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+            assert!(!md.content.contains("Available Skills"), "{alias}");
+        }
     }
 
     /// A skill with no file of its own (no usable trigger) is still indexed

@@ -82,7 +82,10 @@ export function buildConfigFiles(
     // skills it has a file for (.claude/commands, .claude/skills) by itself,
     // so for it the index carries only those without one — the same rule as
     // Rust's build_config_files (LC3).
-    const isClaude = (providerId ?? "claude") === "claude";
+    // By the resolved provider, so an alias (`claude-code`) counts as Claude.
+    const resolvedForIndex = providerId ?? "claude";
+    const isClaude =
+        (PROVIDERS[resolvedForIndex] ?? PROVIDERS[resolveProviderAlias(resolvedForIndex)])?.id === "claude";
     const hasNativeFile = (skill: (typeof skills)[number]): boolean =>
         !!skill.content && (skill.skill_type === SKILL_TYPE_AGENT_SKILL || !!sanitizeTrigger(skill.trigger));
     const indexed = skills.filter((skill) => !isClaude || !hasNativeFile(skill));
