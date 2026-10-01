@@ -69,6 +69,22 @@ describe("readRangeOf", () => {
         expect(formatReadRangeShort(r)).toBe("L10–20");
     });
 
+    // ReAgent on #4159: `numLines: 0` is a read past the end of the file.
+    it("reports a read past the end of the file as empty, not as the range the call asked for", () => {
+        const r = readRangeOf(
+            node({ file_path: "a.ts", offset: 500, limit: 50 }, { content: "", range: { startLine: 500, numLines: 0, totalLines: 456 } })
+        )!;
+        expect(r).toMatchObject({ empty: true, total: 456, source: "result" });
+        expect(formatReadRangeShort(r)).toBe("past end (456 lines)");
+        expect(formatReadRangeLong(r)).toBe("no lines read: line 500 is past the end of a 456-line file");
+    });
+
+    it("says only that no lines were read when the file's length is unknown", () => {
+        const r = readRangeOf(node({ file_path: "a.ts" }, { content: "", range: { startLine: 1, numLines: 0 } }))!;
+        expect(formatReadRangeShort(r)).toBe("0 lines");
+        expect(formatReadRangeLong(r)).toBe("no lines read");
+    });
+
     it("ignores other tools", () => {
         expect(readRangeOf(node({ file_path: "a.ts", offset: 1, limit: 2 }, undefined, "Edit"))).toBeNull();
     });

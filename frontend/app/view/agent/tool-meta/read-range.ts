@@ -33,6 +33,8 @@ export interface ReadRange {
     total: number | null;
     /** The CLI cut the read short at its token cap. */
     capped: boolean;
+    /** The read returned no lines: it started past the end of the file. */
+    empty: boolean;
     source: "result" | "gutter" | "params";
 }
 
@@ -54,13 +56,16 @@ function fromMeta(result: Rec | null): ReadRange | null {
     const m = rec(result?.range);
     const start = toInt(m?.startLine);
     const count = toInt(m?.numLines);
-    if (start == null || count == null || count < 1) return null;
+    if (start == null || count == null || count < 0) return null;
     return {
         unit: "lines",
         start,
-        end: start + count - 1,
+        // `numLines: 0` is a read past the end of the file: say so, rather than
+        // falling back to the range the call asked for (ReAgent on #4159).
+        end: count === 0 ? null : start + count - 1,
         total: toInt(m?.totalLines),
         capped: m?.truncatedByTokenCap === true,
+        empty: count === 0,
         source: "result",
     };
 }
@@ -93,6 +98,7 @@ function fromText(result: Rec | null): ReadRange | null {
         end,
         total: partial ? Number(partial[3]) : null,
         capped: partial != null,
+        empty: false,
         source: "gutter",
     };
 }
@@ -110,6 +116,7 @@ function fromParams(name: string, rawParams: unknown): ReadRange | null {
                 end: m[2] ? Number(m[2]) : Number(m[1]),
                 total: null,
                 capped: false,
+                empty: false,
                 source: "params",
             };
         }
@@ -123,6 +130,7 @@ function fromParams(name: string, rawParams: unknown): ReadRange | null {
             end: endLine,
             total: null,
             capped: false,
+            empty: false,
             source: "params",
         };
     }
@@ -140,6 +148,7 @@ function fromParams(name: string, rawParams: unknown): ReadRange | null {
         end: limit != null && limit > 0 ? start + limit - 1 : null,
         total: null,
         capped: false,
+        empty: false,
         source: "params",
     };
 }
@@ -154,6 +163,7 @@ export function readRangeOf(node: Pick<ToolNode, "tool" | "toolName" | "params" 
 
 /** Header chip: `L120–179`, `L120–179 of 456`, `214 lines`, `pages 1–5`. */
 export function formatReadRangeShort(r: ReadRange): string {
+    if (r.empty) return r.total != null ? `past end (${r.total} lines)` : "0 lines";
     if (r.unit === "pages") return r.end != null && r.end !== r.start ? `pages ${r.start}–${r.end}` : `page ${r.start}`;
     if (r.start === 1 && r.end != null && r.total != null && r.end === r.total) return `${r.total} lines`;
     const span = r.end == null ? `L${r.start}–` : r.end === r.start ? `L${r.start}` : `L${r.start}–${r.end}`;
@@ -162,6 +172,7 @@ export function formatReadRangeShort(r: ReadRange): string {
 
 /** Above the preview: `lines 120–179 of 456`, with the cap noted. */
 export function formatReadRangeLong(r: ReadRange): string {
+    if (r.empty) return r.total != null ? `no lines read: line ${r.start} is past the end of a ${r.total}-line file` : "no lines read";
     if (r.unit === "pages") return formatReadRangeShort(r);
     let text: string;
     if (r.start === 1 && r.end != null && r.total != null && r.end === r.total) {
