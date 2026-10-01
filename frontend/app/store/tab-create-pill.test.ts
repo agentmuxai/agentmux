@@ -162,6 +162,21 @@ describe("new tab pill selection", () => {
         await settle();
     });
 
+    // ReAgent on #4140: an earlier creation fails after a later one started.
+    it("stops waiting on an earlier creation that failed", async () => {
+        createTab();
+        createTab();
+        state.create[0].reject(new Error("rpc down"));
+        await settle();
+        state.setTabIds(["tab-a", "tab-2"]);
+        expect(creatingTabId()).toBe("tab-2");
+        state.create[1].resolve("tab-2");
+        await vi.waitFor(() => expect(state.settled.length).toBeGreaterThan(0));
+        state.settled.forEach((f) => f());
+        state.setActive("tab-2");
+        await settle();
+    });
+
     it("a newer New Tab takes over: the older one is left inactive", async () => {
         // setActiveTab publishes its destination as the switch intent at once.
         const intents: (string | null)[] = [];
@@ -181,5 +196,27 @@ describe("new tab pill selection", () => {
         state.settled[1]();
         await vi.waitFor(() => expect(switchIntentTabId()).toBe("tab-2"));
         expect(intents).toEqual([null]);
+    });
+
+    // ReAgent on #4140: the older creation's activation is already in flight.
+    it("a newer New Tab still wins over an older activation already in flight", async () => {
+        createTab();
+        state.setTabIds(["tab-a", "tab-1"]);
+        state.create[0].resolve("tab-1");
+        await vi.waitFor(() => expect(state.settled).toHaveLength(1));
+        state.settled[0]();
+        await vi.waitFor(() => expect(switchIntentTabId()).toBe("tab-1"));
+        createTab();
+        state.setTabIds(["tab-a", "tab-1", "tab-2"]);
+        expect(creatingTabId()).toBe("tab-2");
+        // The older activation lands.
+        state.setActive("tab-1");
+        expect(creatingTabId()).toBe("tab-2");
+        state.create[1].resolve("tab-2");
+        await vi.waitFor(() => expect(state.settled).toHaveLength(2));
+        state.settled[1]();
+        await vi.waitFor(() => expect(switchIntentTabId()).toBe("tab-2"));
+        state.setActive("tab-2");
+        await settle();
     });
 });

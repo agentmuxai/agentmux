@@ -101,11 +101,12 @@ createRoot(() =>
 // built tab activated anyway (Codex on #4140).
 type Creation = {
     tabId: string | null;
-    from: string;
+    /** Committed tabs this creation may activate from: the tab it started on,
+     *  plus a tab an in-flight switch was already heading to — that switch
+     *  can't be retracted, and this newer creation must still win after it
+     *  lands (ReAgent on #4140). */
+    from: ReadonlySet<string>;
     existing: ReadonlySet<string>;
-    /** Earlier creations whose tabs weren't in `existing`: their pills arrive
-     *  before this one's, so they come first among the unknown ids. */
-    ahead: number;
     cancelled: boolean;
 };
 const [creatingTab, setCreatingTab] = createSignal<Creation | null>(null);
@@ -122,16 +123,25 @@ function resolveCreation(creation: Creation): void {
 }
 
 /**
- * How many earlier, still-unresolved creations will add a pill after a new
- * creation's `existing` snapshot. Their pills already in the snapshot don't
- * count: a tab that appeared since the oldest of them started and isn't
- * claimed by a resolved creation is one of theirs (ReAgent on #4140).
+ * How many earlier, still-unresolved creations will add a pill after
+ * `creation`'s `existing` snapshot: their pills arrive before its own, so
+ * they come first among the unknown ids. Computed when read, not fixed at
+ * the start, so an earlier creation that fails stops counting. Their pills
+ * already in the snapshot don't count either: a tab that appeared since the
+ * oldest of them started and isn't claimed by a resolved creation is one of
+ * theirs (ReAgent on #4140).
  */
-function creationsAhead(existing: ReadonlySet<string>): number {
-    const earlier = [...unresolvedCreations];
+function creationsAhead(creation: Creation): number {
+    const earlier: Creation[] = [];
+    for (const c of unresolvedCreations) {
+        if (c === creation) break;
+        earlier.push(c);
+    }
     if (earlier.length === 0) return 0;
     const oldest = earlier[0];
-    const arrived = [...existing].filter((id) => !oldest.existing.has(id) && !resolvedCreationTabIds.has(id)).length;
+    const arrived = [...creation.existing].filter(
+        (id) => !oldest.existing.has(id) && !resolvedCreationTabIds.has(id)
+    ).length;
     return Math.max(0, earlier.length - arrived);
 }
 /** The tab being created, for the strip to show as selected. */
@@ -141,8 +151,8 @@ export function creatingTabId(): string | null {
     if (creating.tabId != null) return creating.tabId;
     const ws = workspace();
     const ids = [...(ws?.pinnedtabids ?? []), ...(ws?.tabids ?? [])];
-    const unknown = ids.filter((id) => !creating.existing.has(id));
-    return unknown[creating.ahead] ?? null;
+    const unknown = ids.filter((id) => !creating.existing.has(id) && !resolvedCreationTabIds.has(id));
+    return unknown[creationsAhead(creating)] ?? null;
 }
 /** Stop the current creation from holding the selection or activating its
  *  tab: the user chose a tab in the strip while it was building. */
@@ -157,7 +167,7 @@ createRoot(() =>
         const creating = creatingTab();
         if (creating == null) return;
         const committed = activeTabId();
-        if (committed !== creating.from) setCreatingTab(null);
+        if (!creating.from.has(committed)) setCreatingTab(null);
     })
 );
 
@@ -174,9 +184,11 @@ export function createTab() {
     // navigated to meanwhile (codex P2, PR #3300).
     const startingActiveTabId = activeTabId();
     const existing = new Set([...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]);
-    const ahead = creationsAhead(existing);
+    const from = new Set([startingActiveTabId]);
+    const inFlight = switchIntentTabId();
+    if (inFlight != null) from.add(inFlight);
     cancelTabCreation();
-    const creation: Creation = { tabId: null, from: startingActiveTabId, existing, ahead, cancelled: false };
+    const creation: Creation = { tabId: null, from, existing, cancelled: false };
     unresolvedCreations.add(creation);
     setCreatingTab(creation);
     fireAndForget(async () => {
@@ -239,7 +251,7 @@ export function createTab() {
             // can't hold the new tab back for long.
             const { whenTabContentSettled } = await import("@/app/tab/tab-content-settled");
             await whenTabContentSettled(tabId, NEW_TAB_SETTLE_CAP_MS);
-            if (!creation.cancelled && activeTabId() === startingActiveTabId) {
+            if (!creation.cancelled && creation.from.has(activeTabId())) {
                 // Built while hidden, and kept laid out: the same state as a
                 // tab already shown, so it takes the same one-frame switch —
                 // no reveal gate, no cross-fade, no wait for the round trip
