@@ -33,7 +33,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
-import { useHistoryPagination } from "./useHistoryPagination";
+import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 
 const makeMockModel = (): AgentPaneModel & {
@@ -340,12 +340,14 @@ describe("useHistoryPagination — cross-block continuation restore (#1397)", ()
 });
 
 describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGENT_OPEN_LATENCY §4.5)", () => {
+    // A transcript 1,000 lines longer than the restore window, so the window starts at line 1,000.
+    const HWM = RESTORE_WINDOW_LINES + 1000;
     const sameBlockV2 = () => {
         vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
             content: JSON.stringify({
                 schemaVersion: 2,
                 savedAt: "2026-09-27T00:00:00Z",
-                highWaterMark: 6000,
+                highWaterMark: HWM,
                 sourceBlockId: "blk-1",
                 documentState: {},
             }),
@@ -378,8 +380,8 @@ describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGEN
         sameBlockV2();
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
             lines: ['{"type":"user","message":{"content":"latest"}}'],
-            total: 6000,
-            offset: 5999,
+            total: HWM,
+            offset: HWM - 1,
             stream: "b:blk-1",
             gen: "g1",
         });
@@ -387,26 +389,26 @@ describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGEN
         await flush();
         expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledWith(
             {},
-            expect.objectContaining({ offset: 1000, limit: 5000, tail_turns: 7 }),
+            expect.objectContaining({ offset: 1000, limit: RESTORE_WINDOW_LINES, tail_turns: 7 }),
             { timeout: 30_000 },
         );
         // The live cursor resumes after the returned lines, contiguous from
         // their start, and load-older pages back from there.
-        expect(pins).toEqual([{ stream: "b:blk-1", gen: "g1", next: 6000 }]);
-        expect(hook().historyOffset()).toBe(5999);
+        expect(pins).toEqual([{ stream: "b:blk-1", gen: "g1", next: HWM }]);
+        expect(hook().historyOffset()).toBe(HWM - 1);
     });
 
     it("an older srv that ignores tail_turns returns the window, and that's where it starts", async () => {
         sameBlockV2();
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
-            lines: Array.from({ length: 5000 }, () => "{}"),
-            total: 6000,
+            lines: Array.from({ length: RESTORE_WINDOW_LINES }, () => "{}"),
+            total: HWM,
             stream: "b:blk-1",
             gen: "g1",
         });
         const { pins, hook } = mount(() => 7);
         await flush();
-        expect(pins).toEqual([{ stream: "b:blk-1", gen: "g1", next: 6000 }]);
+        expect(pins).toEqual([{ stream: "b:blk-1", gen: "g1", next: HWM }]);
         expect(hook().historyOffset()).toBe(1000);
     });
 
@@ -417,5 +419,14 @@ describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGEN
         await flush();
         const [, data] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0];
         expect(data).not.toHaveProperty("tail_turns");
+    });
+});
+
+describe("useHistoryPagination — read sizes stay within srv's per-read cap", () => {
+    it("never asks for more lines than blockfile:read_range returns (10,000)", () => {
+        // A larger window would come back as its OLDEST 10,000 lines, dropping
+        // the newest — crates/srv/src/server/app_api/blockfile.rs (`limit.min(10_000)`).
+        expect(RESTORE_WINDOW_LINES).toBeLessThanOrEqual(10_000);
+        expect(OLDER_PAGE_LINES).toBeLessThanOrEqual(10_000);
     });
 });

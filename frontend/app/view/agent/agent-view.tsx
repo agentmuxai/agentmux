@@ -406,12 +406,10 @@ export const AgentPresentationView = ({
         // outgoing bubble (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
         agentName,
         definitionId: agentId,
-        // What the live feed keeps: its K finished turns plus the one in
-        // flight. Only Claude's transcript is split into turns on the
-        // backend. Read at restore time — after this component's body, so
-        // the live-feed consts declared below are set.
+        // Only with a turn cap set (by default the feed is bounded by size):
+        // K + the turn in flight; Claude only. Read after this body runs.
         restoreTurns: () =>
-            liveFeed.liveFeedOn() && outputFormat() === "claude-stream-json" ? liveFeed.liveFeedTurns + 1 : undefined,
+            liveFeed.liveFeedOn() && outputFormat() === "claude-stream-json" && Number.isFinite(liveFeed.liveFeedTurns) ? liveFeed.liveFeedTurns + 1 : undefined,
         onHistoryReady: () => {
             historyReadyFn?.();
             // A pane opens with K turns, not the load window's worth (§6.9).
@@ -1357,9 +1355,9 @@ export const AgentPresentationView = ({
                         log("auth", "Login Again (inline error node) — forcing a fresh provider login");
                         void status.relogin();
                     }}
-                    onLoadOlder={liveFeedOn() ? undefined : history.loadOlder}
+                    onLoadOlder={liveFeed.canPageOlder() ? history.loadOlder : undefined}
                     loadingOlder={history.loadingOlder}
-                    hasOlderHistory={() => !liveFeedOn() && history.historyOffset() > 0}
+                    hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
                     followingRef={(f) => liveFeed.setFollowingBottom(f)}
                     scrollCommand={scroll.command}
                     scrollToBottomRef={(fn) => {
