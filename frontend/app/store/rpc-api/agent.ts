@@ -29,6 +29,10 @@ import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAge
 export type ListAgentHistoryInput = Omit<CommandListAgentHistoryData, "limit" | "offset"> &
     Partial<Pick<CommandListAgentHistoryData, "limit" | "offset">>;
 
+/** Same story for `searchagenthistory`s `limit`. */
+export type SearchAgentHistoryInput = Omit<CommandSearchAgentHistoryData, "limit"> &
+    Partial<Pick<CommandSearchAgentHistoryData, "limit">>;
+
 /** One entry of `agent.open-panes` (srv `AgentOpenPane`). */
 export interface AgentOpenPane {
     block_id: string;
@@ -39,10 +43,6 @@ export interface AgentOpenPane {
     /** `Window` oids showing the pane's workspace; empty when none is open. */
     window_ids: string[];
 }
-
-/** Same story for `searchagenthistory`s `limit`. */
-export type SearchAgentHistoryInput = Omit<CommandSearchAgentHistoryData, "limit"> &
-    Partial<Pick<CommandSearchAgentHistoryData, "limit">>;
 
 // The shell, agent-input and write-agent-config shapes are GENERATED from
 // their Rust definitions by ts-rs. This covers shell_handlers.rs,
