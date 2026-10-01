@@ -260,6 +260,11 @@ pub(crate) fn split_agent_identity_env(
 /// not user configuration, so a `cmd:env` copy never wins. Host agents only —
 /// a container's cwd is a host path that means nothing inside the image (the
 /// key is also on `CONTAINER_ENV_DENYLIST`).
+///
+/// Exported as the absolute path the process actually starts in: `~` is
+/// expanded and a relative `cmd:cwd` is resolved against srv's own cwd, as
+/// `core::apply_working_dir` does, so `cd "$AGENTMUX_AGENT_WORKDIR"` works
+/// from anywhere (Codex on #4113).
 pub(crate) fn carry_agent_workdir_env(
     env_vars: &mut std::collections::HashMap<String, String>,
     block_meta: &crate::backend::obj::MetaMapType,
@@ -268,7 +273,9 @@ pub(crate) fn carry_agent_workdir_env(
     let agent_mode = crate::backend::obj::meta_get_string(block_meta, "agentMode", "host");
     let work_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
     if crate::backend::operator_config_seed::agent_kind(&agent_mode) == "host" && !work_dir.trim().is_empty() {
-        env_vars.insert(KEY.to_string(), work_dir);
+        let expanded = crate::backend::blockcontroller::core::expand_home_dir(&work_dir);
+        let absolute = std::path::absolute(&expanded).map_or(expanded, |p| p.to_string_lossy().into_owned());
+        env_vars.insert(KEY.to_string(), absolute);
     } else {
         env_vars.remove(KEY);
     }
@@ -2018,18 +2025,33 @@ mod tests {
             std::collections::HashMap::from([("AGENTMUX_AGENT_WORKDIR".to_string(), "C:/stale".to_string())])
         };
 
+        let workdir = |e: &std::collections::HashMap<String, String>| std::path::PathBuf::from(&e["AGENTMUX_AGENT_WORKDIR"]);
+        let ws = std::env::temp_dir().join("clamk-0612a");
+        let ws_str = ws.to_string_lossy().into_owned();
+
         for mode in ["host", "standalone"] {
             let mut e = stale();
-            super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", mode), ("cmd:cwd", "C:/ws/clamk-0612a")]));
-            assert_eq!(e["AGENTMUX_AGENT_WORKDIR"], "C:/ws/clamk-0612a", "{mode}");
+            super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", mode), ("cmd:cwd", &ws_str)]));
+            assert_eq!(workdir(&e), ws, "{mode}");
         }
         // No agentMode is a host agent, srv's default.
         let mut e = stale();
-        super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", "C:/ws/a")]));
-        assert_eq!(e["AGENTMUX_AGENT_WORKDIR"], "C:/ws/a");
+        super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", &ws_str)]));
+        assert_eq!(workdir(&e), ws);
+
+        // Exported as the absolute path the process starts in: a relative
+        // cwd resolves against srv's own cwd, `~` against the home dir.
+        let mut e = stale();
+        super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", "projects/foo")]));
+        assert_eq!(workdir(&e), std::env::current_dir().unwrap().join("projects/foo"));
+        if let Some(home) = dirs::home_dir() {
+            let mut e = stale();
+            super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", "~/.agentmux/agents/x-0930a")]));
+            assert_eq!(workdir(&e), home.join(".agentmux/agents/x-0930a"));
+        }
 
         let mut e = stale();
-        super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", "container"), ("cmd:cwd", "C:/ws/a")]));
+        super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", "container"), ("cmd:cwd", &ws_str)]));
         assert!(!e.contains_key("AGENTMUX_AGENT_WORKDIR"), "container");
         let mut e = stale();
         super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", "host"), ("cmd:cwd", "  ")]));

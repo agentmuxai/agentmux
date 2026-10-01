@@ -967,11 +967,12 @@ mod tests {
     /// host spawn path (`carry_agent_workdir_env`).
     #[test]
     fn an_acp_spawn_env_carries_the_agent_workdir() {
+        let ws = std::env::temp_dir().join("acpy-0930a");
         let mut meta = super::super::super::obj::MetaMapType::new();
-        meta.insert("cmd:cwd".to_string(), serde_json::json!("C:/ws/acpy-0930a"));
-        meta.insert("cmd:env".to_string(), serde_json::json!({"AGENTMUX_AGENT_WORKDIR": "C:/stale"}));
+        meta.insert("cmd:cwd".to_string(), serde_json::json!(ws.to_string_lossy()));
+        meta.insert("cmd:env".to_string(), serde_json::json!({"AGENTMUX_AGENT_WORKDIR": "stale"}));
         let ctrl = AcpController::new("tab".to_string(), "block-acp-workdir".to_string(), None, None, None, None);
-        assert_eq!(ctrl.spawn_env(&meta)["AGENTMUX_AGENT_WORKDIR"], "C:/ws/acpy-0930a");
+        assert_eq!(std::path::PathBuf::from(&ctrl.spawn_env(&meta)["AGENTMUX_AGENT_WORKDIR"]), ws);
     }
 
     /// No agent env carries the account's cloud login, even from a
