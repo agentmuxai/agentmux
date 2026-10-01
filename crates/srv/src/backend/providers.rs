@@ -203,7 +203,7 @@ pub struct InstructionDirScan {
 ///
 /// Mirrors the `default: true` row of the frontend catalog
 /// (`frontend/app/view/agent/providers/catalog.ts`), which is where the menu's
-/// default comes from; `pin-consistency.test.ts` fails when the two disagree.
+/// default comes from; `providers/runtime-defaults-consistency.test.ts` fails when the two disagree.
 /// srv needs its own copy because `agent.open` builds a pane without going
 /// through the frontend, and a pane opened with no `--model` runs on the CLI's
 /// own default while its menu reads this one.

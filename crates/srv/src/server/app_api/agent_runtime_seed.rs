@@ -17,7 +17,7 @@
 //! This is the same decision the frontend makes at launch, for the two
 //! providers whose model the menu wires (Claude, Codex). The defaults are
 //! duplicated by necessity and pinned to the frontend's by
-//! `pin-consistency.test.ts`.
+//! `providers/runtime-defaults-consistency.test.ts`.
 
 use serde_json::{json, Value};
 
