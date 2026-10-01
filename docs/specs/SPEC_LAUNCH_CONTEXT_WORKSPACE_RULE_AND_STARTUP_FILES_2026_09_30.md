@@ -309,16 +309,24 @@ that carries it. LC3 then removes them in three steps:
      re-delivers.
 2. **Skills index for Claude.** Claude Code lists `.claude/commands/*.md`
    and `.claude/skills/*/SKILL.md` by itself. So Claude's `# Available
-   Skills` index now carries only skills with no file of their own: empty
-   content, or a prompt skill with no usable trigger. Dropping those would
-   hide them entirely. Other providers read only their instructions file
-   and keep the full index. Rust `build_config_files` and the TypeScript
-   `buildConfigFiles` share the rule (`skill_has_native_file`).
+   Skills` index now carries only skills left without a file of their
+   own: empty content, a prompt skill with no usable trigger, or a command
+   whose file a later skill's command overwrites (same trigger, compared
+   case-insensitively; the skill store doesn't enforce unique triggers).
+   Dropping those would hide them entirely. Other providers, and Claude
+   aliases resolve to Claude first, read only their instructions file and
+   keep the full index. The rule is `skills_with_their_own_file` in Rust
+   `build_config_files`, mirrored by `commandKey`/`hasOwnFile` in the
+   TypeScript `buildConfigFiles`. The instructions file is now written even
+   when empty, since srv injects the Global Memory into it.
 3. **Legacy foreign `CLAUDE.md`.** A `CLAUDE.md` whose content is exactly
    what an older AgentMux wrote is adopted as AgentMux-owned. "Exactly"
-   means, ignoring blank lines: the `# Available Skills` heading, its usage
-   line, `- **…` skill lines, and optionally the managed import comment
-   and line (`is_legacy_agentmux_claude_md`).
+   means, in order and ignoring blank lines: the `# Available Skills`
+   heading, its usage line, at least one skill row exactly as rendered
+   (`- **name**`, optional ` (trigger: /x)`, optional ` — description`),
+   then optionally the managed import (`is_legacy_agentmux_claude_md`,
+   `is_generated_skill_row`). A symlinked `CLAUDE.md` is never adopted or
+   written through, and the backup path is symlink-checked.
    - It is rewritten as the managed file, with the marker.
    - The original is kept in `.claude/CLAUDE.md.pre-adopt`, and a later
      adoption never overwrites that copy. A failed backup leaves the file
