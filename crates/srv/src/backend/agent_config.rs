@@ -752,11 +752,14 @@ pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> Stri
 /// made unique), or a command with a usable trigger that no later skill's
 /// command overwrites. Triggers are compared case-insensitively, as a
 /// case-insensitive filesystem would. Trigger uniqueness isn't enforced by
-/// the skill store (Codex on #4131).
+/// the skill store (Codex on #4131). A non-ASCII trigger never counts as
+/// owning its file: a normalization-insensitive filesystem (macOS) folds
+/// Unicode-equivalent names together, and keeping such a skill in the index
+/// costs at most a repeated line, never a lost skill.
 fn skills_with_their_own_file(skills: &[AgentSkill]) -> Vec<bool> {
     let command_key = |s: &AgentSkill| {
         (!s.content.is_empty() && s.skill_type != SKILL_TYPE_AGENT_SKILL)
-            .then(|| sanitize_trigger(&s.trigger).map(str::to_lowercase))
+            .then(|| sanitize_trigger(&s.trigger).filter(|t| t.is_ascii()).map(str::to_lowercase))
             .flatten()
     };
     let mut last_writer: HashMap<String, usize> = HashMap::new();
@@ -769,6 +772,8 @@ fn skills_with_their_own_file(skills: &[AgentSkill]) -> Vec<bool> {
         .iter()
         .enumerate()
         .map(|(i, s)| {
+            // A non-ASCII trigger maps to no key: it never owns a file here,
+            // and doesn't count as overwriting anyone (it may, harmlessly).
             !s.content.is_empty()
                 && (s.skill_type == SKILL_TYPE_AGENT_SKILL || command_key(s).is_some_and(|k| last_writer.get(&k) == Some(&i)))
         })
@@ -2110,6 +2115,16 @@ mod tests {
         let md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
         assert!(md.content.contains("**Deploy**"), "the overwritten one is indexed");
         assert!(!md.content.contains("**Deploy Staging**"), "the one that owns the file isn't");
+    }
+
+    /// A non-ASCII trigger stays indexed: Unicode-equivalent names can share
+    /// one file on macOS (Codex on #4131).
+    #[test]
+    fn a_skill_with_a_non_ascii_trigger_stays_indexed() {
+        let skills = vec![make_skill("Caf\u{e9}", "caf\u{e9}", "coffee", "brew")];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        let md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(md.content.contains("Caf\u{e9}"), "{}", md.content);
     }
 
     #[test]
