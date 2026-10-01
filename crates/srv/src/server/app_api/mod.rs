@@ -26,6 +26,7 @@ use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
 
 mod agent_open;
+mod agent_runtime_seed;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
 /// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the
 /// RPC path's exact implementation, including its AGENT_OPEN_LOCKS TOCTOU
