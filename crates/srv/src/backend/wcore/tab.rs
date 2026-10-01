@@ -101,7 +101,7 @@ pub(super) fn delete_tab_inner(store: &Store, tab_id: &str) -> Result<(), StoreE
     if let Ok(tab) = store.must_get::<Tab>(tab_id) {
         // Kill shell processes FIRST — must happen before DB cleanup
         for block_id in &tab.blockids {
-            crate::backend::blockcontroller::delete_controller(block_id);
+            crate::sagas::agent_teardown::discard(block_id);
         }
         // Delete layout state
         if !tab.layoutstate.is_empty() {

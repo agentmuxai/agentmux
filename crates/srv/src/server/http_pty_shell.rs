@@ -316,7 +316,7 @@ pub(super) async fn handle_pty_shell_create(
         // a failed spawn leaves a stale block + parent link + (possibly)
         // registered controller behind that the caller has no way to clean
         // up, since it never received a `shell_id` to call PtyShellStop with.
-        blockcontroller::delete_controller(&child_id);
+        crate::sagas::agent_teardown::discard(&child_id);
         let _ = state.mstore.delete::<crate::backend::obj::Block>(&child_id);
         if let Ok(mut parent) = state
             .mstore

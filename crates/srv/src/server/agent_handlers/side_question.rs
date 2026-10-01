@@ -438,7 +438,7 @@ async fn run_side_question(
 /// runs after the turn is already over, so a failure here is a leftover
 /// row/controller to log, not a failed `/btw` answer.
 fn cleanup_throwaway_block(mstore: &Arc<Store>, broker: &mps::Broker, throwaway_block_id: &str) {
-    blockcontroller::delete_controller(throwaway_block_id);
+    crate::sagas::agent_teardown::discard(throwaway_block_id);
     if let Err(e) = mstore.delete::<Block>(throwaway_block_id) {
         tracing::warn!(
             block_id = %throwaway_block_id,

@@ -13,13 +13,22 @@
 // |   (`close_pane`, `delete_block`, `delete_tab`,        |                   |
 // |   `delete_workspace`; the orphan reaper via close_pane)|                   |
 // | `/quit`, `QuitSelf`, no-arg `ClosePane` (`self_quit`)  | `Policy::quit()`  |
-// | Stop, `agent.stop`, `FleetBulkStop` Stop               | `Policy::stop(..)`|
+// | Stop, `agent.stop`, `FleetBulkStop` Stop, the watchdog | `Policy::stop(..)`|
+// | Controller replace (`resync_controller`)              | `Policy::replace()` |
+// | App exit (`main.rs`)                                  | `Policy::app_exit()` |
+// | A drawer closed, a `/btw` throwaway, a spawn rollback, | `discard`         |
+// |   the backstop after a close                          |                   |
 //
-// Phase 1 moves today's behaviour here unchanged, encoded as policies: the
+// `Shell()` and `!cmd` processes join the agent's tracker when they spawn
+// (`track_adopted`), and a graceful teardown closes the agent's PtyShell
+// drawers first, so all of them end with it.
+//
+// Phase 1 moved today's behaviour here unchanged, encoded as policies: the
 // close and quit paths are `close_pane::shutdown_one` and `self_quit`'s
-// claim/shell steps, verbatim; Stop is `ctrl.stop()`. Later phases change
-// what a policy covers (spec §10) without touching the consumers. Controller
-// replace and app exit move here in Phase 2.
+// claim/shell steps, verbatim; Stop is `ctrl.stop()`. Phase 2 adds controller
+// replace (`stop_for_replace`, unchanged) and app exit, which now closes every
+// agent gracefully instead of leaving them to the launcher's backstop. Later
+// phases change what a policy covers (spec §10) without touching the consumers.
 
 use serde::Serialize;
 
@@ -40,6 +49,11 @@ pub enum CliStop {
     /// and the tracker is kept, so what the agent started keeps running
     /// (today's Stop; spec §5).
     StopOnly { graceful: bool },
+    /// The controller is being replaced by a new one for the same block
+    /// (session restart): only its own CLI process dies; the tracker and
+    /// every declared-background task survive and are adopted by the new
+    /// controller (`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md`).
+    Replace,
 }
 
 /// What one teardown covers (spec §5). A consumer picks a constructor; it
@@ -55,9 +69,11 @@ pub struct Policy {
 }
 
 impl Policy {
-    /// A pane, tab, window-tab or window closing.
+    /// A pane, tab, window-tab or window closing: the agent and everything
+    /// it runs, `Shell()` sessions included; claims stay until their lease
+    /// expires, as before (spec §5).
     pub const fn close() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: false }
+        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true }
     }
     /// `/quit`, `QuitSelf`, no-argument `ClosePane`: everything (spec §0).
     pub const fn quit() -> Self {
@@ -67,7 +83,27 @@ impl Policy {
     pub const fn stop(graceful: bool) -> Self {
         Self { cli: CliStop::StopOnly { graceful }, release_claims: false, stop_shell_sessions: false }
     }
+    /// Restart / controller replace: the CLI only; background tasks survive.
+    pub const fn replace() -> Self {
+        Self { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false }
+    }
+    /// App exit: every agent closes gracefully and its `Shell()` sessions
+    /// stop. Claims stay: the agent comes back with the app and its lease
+    /// covers the gap (spec §5).
+    pub const fn app_exit() -> Self {
+        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true }
+    }
 }
+
+/// App exit's overall cap (spec §11 O3), the leftover-shell sweep included:
+/// every agent closes concurrently under it. It fits inside the launcher's
+/// upgrade quiesce (10 s, pinned there). On a normal quit the launcher's
+/// backstop (Windows J0 / Unix group kill) may end srv sooner; whatever this
+/// hasn't closed by then, the backstop takes, as before.
+pub const APP_EXIT_CAP: std::time::Duration = agentmux_common::process::SRV_APP_EXIT_CAP;
+
+/// The grace the leftover-shell sweep gives its kill tasks. [reagent #1422 P2]
+const SHELL_SWEEP_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
 
 /// What a teardown did, for the consumer's summary and the audit.
 #[derive(Clone, Debug, Default, Serialize)]
@@ -106,6 +142,60 @@ pub fn stop_now(block_id: &str, graceful: bool) -> Result<(), String> {
     let ctrl = blockcontroller::get_controller(block_id)
         .ok_or_else(|| format!("NOT_RUNNING: no controller for block {block_id}"))?;
     ctrl.stop(graceful, blockcontroller::STATUS_DONE)
+}
+
+/// Drop a block's controller and process tracker at once, with no graceful
+/// phase: for a controller that isn't an agent to wind down (a PtyShell
+/// drawer the user closed, a `/btw` throwaway, a spawn being rolled back) and
+/// as the backstop after a close that already ran the teardown (idempotent;
+/// finds nothing left).
+pub fn discard(block_id: &str) {
+    blockcontroller::delete_controller(block_id);
+}
+
+/// The replace policy's entry, for `resync_controller` (synchronous, below
+/// the saga layer, and already holding the old controller): stop its own CLI
+/// process only (`Policy::replace`).
+pub fn replace_now(ctrl: &dyn blockcontroller::Controller) -> Result<(), String> {
+    debug_assert!(matches!(Policy::replace().cli, CliStop::Replace));
+    ctrl.stop_for_replace(blockcontroller::STATUS_DONE)
+}
+
+/// App exit (`main.rs`, after the servers stop): tear down every live agent
+/// with `Policy::app_exit()`, concurrently, under [`APP_EXIT_CAP`]. Then stop
+/// any `Shell()` session left over (one whose agent is already gone, or whose
+/// teardown hit the cap). Returns how many controllers it closed.
+pub async fn app_exit(state: &AppState) -> usize {
+    let all: Vec<String> = blockcontroller::get_all_controllers().into_keys().collect();
+    // A drawer is closed by its parent's teardown (`close_sub_blocks`); listing
+    // it here too would run two teardowns of one block at once.
+    let ids = {
+        let (st, ids) = (state.clone(), all.clone());
+        tokio::task::spawn_blocking(move || without_sub_blocks(&st, ids)).await.unwrap_or(all)
+    };
+    let cap = APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE);
+    if tokio::time::timeout(cap, run_many(state, &ids, Policy::app_exit())).await.is_err() {
+        tracing::warn!(agents = ids.len(), "app exit: teardown hit the cap; the launcher's backstop takes the rest");
+    }
+    // The kill tasks run taskkill/killpg asynchronously; give them a brief
+    // grace to complete before srv exits. [reagent #1422 P2]
+    let live = state.shell_sessions.stop_all();
+    if live > 0 {
+        tracing::info!(count = live, "app exit: stopping leftover persistent shells");
+        tokio::time::sleep(SHELL_SWEEP_GRACE).await;
+    }
+    ids.len()
+}
+
+/// `ids` minus any that is a sub-block (PtyShell drawer) of another block in
+/// it. Store reads: call off the async workers.
+pub(crate) fn without_sub_blocks(state: &AppState, ids: Vec<String>) -> Vec<String> {
+    let subs: std::collections::HashSet<String> = ids
+        .iter()
+        .filter_map(|id| state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten())
+        .flat_map(|b| b.subblockids.unwrap_or_default())
+        .collect();
+    ids.into_iter().filter(|id| !subs.contains(id)).collect()
 }
 
 async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std::time::Instant) -> TeardownReport {
@@ -147,9 +237,37 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
                 tracing::debug!(block_id = %block_id, error = %e, "agent_teardown: stop");
             }
         }
-        CliStop::Graceful => close_cli(state, block_id, &who, &before, deadline, started).await,
+        CliStop::Replace => {
+            if let Some(ctrl) = blockcontroller::get_controller(block_id) {
+                if let Err(e) = replace_now(ctrl.as_ref()) {
+                    tracing::debug!(block_id = %block_id, error = %e, "agent_teardown: replace");
+                }
+            }
+        }
+        CliStop::Graceful => {
+            // PtyShell drawers first (spec §6.6), so teardown doesn't depend on
+            // the pane being mounted to send `deletesubblock`.
+            close_sub_blocks(state, &before.sub_blocks, deadline).await;
+            close_cli(state, block_id, &who, &before, deadline, started).await
+        }
     }
     report
+}
+
+/// Close a parent's sub-blocks (PtyShell drawers) the way a pane closes,
+/// concurrently and under the parent's deadline.
+async fn close_sub_blocks(state: &AppState, sub_blocks: &[String], deadline: std::time::Instant) {
+    if sub_blocks.is_empty() {
+        return;
+    }
+    let subs = sub_blocks.iter().map(|id| Box::pin(run_one(state, id, Policy::close(), deadline)));
+    futures_util::future::join_all(subs).await;
+    // Their processes are gone. Nothing deletes a drawer's record through a
+    // close saga's `finish_close`, so lift the respawn guard here: if the
+    // parent's close then fails, its drawer can be reopened.
+    for id in sub_blocks {
+        blockcontroller::unmark_closing(id);
+    }
 }
 
 /// Today's per-agent close (`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
@@ -257,10 +375,14 @@ mod tests {
 
     #[test]
     fn policies_encode_todays_scopes() {
-        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: false });
+        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true });
         assert_eq!(Policy::quit(), Policy { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true });
         assert_eq!(Policy::stop(false).cli, CliStop::StopOnly { graceful: false });
         assert!(!Policy::stop(true).release_claims && !Policy::stop(true).stop_shell_sessions);
+        assert_eq!(Policy::replace(), Policy { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false });
+        assert_eq!(Policy::app_exit(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true });
+        // App exit covers the CLI's own grace and the shell sweep.
+        assert!(APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE) > blockcontroller::SHUTDOWN_GRACE);
     }
 
     /// The single path (spec §3 G1, §9.1): outside this module and the
@@ -271,12 +393,12 @@ mod tests {
         // machinery's own internals, or a phase-2 consumer named in the spec.
         const ALLOWED: &[(&str, &str)] = &[
             ("sagas/agent_teardown.rs", "the one path"),
-            ("backend/blockcontroller/", "controller and tracker internals; controller replace moves here in Phase 2"),
+            ("backend/blockcontroller/mod.rs", "defines release_block_processes and delete_controller"),
+            ("backend/blockcontroller/persistent/", "the controller's own shutdown internals"),
+            ("backend/blockcontroller/shell/", "the controller's own stop internals"),
             ("backend/process_tracker/", "the tracker itself"),
             ("backend/shell_node.rs", "ShellSessionRegistry's own stop/stop_all"),
-            ("backend/identity_spawn.rs", "test fixture"),
             ("server/http_shell.rs", "the ShellStop tool: the agent stopping one shell on purpose"),
-            ("main.rs", "app exit: moves here in Phase 2 (spec §10)"),
         ];
         const PATTERNS: &[&str] = &[
             "release_block_processes(",
@@ -284,6 +406,8 @@ mod tests {
             ".stop_all()",
             ".shutdown(deadline",
             "ctrl.stop(",
+            ".stop_for_replace(",
+            "delete_controller(",
         ];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders = Vec::new();
@@ -299,7 +423,9 @@ mod tests {
                     continue;
                 }
                 let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
-                if ALLOWED.iter().any(|(a, _)| rel.starts_with(a) || rel == *a) {
+                // Test modules in their own files (`tests.rs`, `tests/`).
+                let is_test_file = rel.ends_with("tests.rs") || rel.contains("/tests/");
+                if is_test_file || ALLOWED.iter().any(|(a, _)| rel.starts_with(a) || rel == *a) {
                     continue;
                 }
                 let text = std::fs::read_to_string(&path).unwrap();

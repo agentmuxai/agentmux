@@ -177,7 +177,7 @@ async fn run_inner_with_policy(
         let block_still_in_reducer =
             state.srv_state.lock().await.blocks.contains_key(&block_id);
         if !block_still_in_reducer {
-            crate::backend::blockcontroller::delete_controller(&block_id);
+            crate::sagas::agent_teardown::discard(&block_id);
             // MPS persist_map is keyed by (event, scope) and its key set is
             // never otherwise pruned — a deleted block's persisted history
             // (install_progress, block:activity, ...) would linger for the

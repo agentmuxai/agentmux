@@ -1166,7 +1166,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
                 // Kill process FIRST — a lingering PTY tree is worse than a
                 // delayed row delete.
-                blockcontroller::delete_controller(&cmd.blockid);
+                crate::sagas::agent_teardown::discard(&cmd.blockid);
 
                 let parent_id = mstore
                     .get::<Block>(&cmd.blockid)

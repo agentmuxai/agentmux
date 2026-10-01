@@ -169,6 +169,12 @@ fn taskkill_tree(pid: i32) -> std::process::Command {
     cmd
 }
 
+/// The cap on srv's app-exit teardown (`agent_teardown::app_exit`: every
+/// agent closed, then leftover shells swept). Shared so the launcher can pin
+/// its upgrade quiesce (`upgrade::GRACEFUL_QUIESCE_TIMEOUT`) above it: a
+/// shorter wait would kill srv mid-teardown.
+pub const SRV_APP_EXIT_CAP: std::time::Duration = std::time::Duration::from_secs(8);
+
 #[cfg(test)]
 mod tests {
     use super::*;

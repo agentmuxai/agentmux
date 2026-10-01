@@ -221,7 +221,7 @@ async fn main() {
 
     // 7. Build router and serve on both listeners
     // Clone Arcs that are needed after `state` is moved into build_routers.
-    let shell_sessions_shutdown = state.shell_sessions.clone();
+    let state_for_exit = state.clone();
     let wal_mstore = Arc::clone(&state.mstore);
     let wal_filestore = Arc::clone(&state.filestore);
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
@@ -275,15 +275,12 @@ async fn main() {
         }
     }
 
-    // Shutdown cleanup — tree-kill any persistent shells so long-running
-    // children (`task dev` → task.exe/node) don't orphan on srv exit. stop_all()
-    // fires each shell's cancel handle; the kill_tasks run taskkill/killpg
-    // asynchronously, so give them a brief grace to complete before we exit.
-    // (`kill_on_drop` only reaps the wrapper shell and doesn't fire on a clean
-    // process exit, so this is the real orphan guard.) [reagent #1422 P2]
-    let live = shell_sessions_shutdown.stop_all();
-    if live > 0 {
-        tracing::info!(count = live, "shutdown: stopping persistent shells");
-        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-    }
+    // Shutdown cleanup: close every agent through the one teardown
+    // (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md, `Policy::app_exit()`),
+    // so each gets to end its turn and exit and nothing it started (`task dev`
+    // → task.exe/node, `Shell()` sessions) orphans on srv exit. Capped at
+    // `agent_teardown::APP_EXIT_CAP`; the launcher's backstop takes whatever
+    // is left.
+    let closed = sagas::agent_teardown::app_exit(&state_for_exit).await;
+    tracing::info!(agents = closed, "shutdown: agents closed");
 }

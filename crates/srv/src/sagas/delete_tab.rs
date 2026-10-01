@@ -157,7 +157,7 @@ pub async fn run(
         let tab_still_in_reducer = state.srv_state.lock().await.tabs.contains_key(&tab_id);
         if !tab_still_in_reducer {
             for block_id in &block_ids_to_cleanup {
-                crate::backend::blockcontroller::delete_controller(block_id);
+                crate::sagas::agent_teardown::discard(block_id);
             }
         }
     }

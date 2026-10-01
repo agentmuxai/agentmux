@@ -57,6 +57,9 @@ use crate::startup_events::StartupEventSink;
 /// recovery path, so there's no reason to race a slow-but-clean WAL
 /// checkpoint.
 pub const GRACEFUL_QUIESCE_TIMEOUT: Duration = Duration::from_secs(10);
+// srv closes its agents on the way out (agent_teardown::app_exit), capped at
+// SRV_APP_EXIT_CAP; a quiesce no longer than that would kill it mid-teardown.
+const _: () = assert!(GRACEFUL_QUIESCE_TIMEOUT.as_secs() > agentmux_common::process::SRV_APP_EXIT_CAP.as_secs());
 
 /// How [`quiesce_srv`] actually stopped the process — logged, and useful in
 /// tests, but callers don't need to branch on it: either variant means the
