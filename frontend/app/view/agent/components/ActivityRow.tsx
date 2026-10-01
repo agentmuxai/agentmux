@@ -23,6 +23,7 @@ import {
     type SubagentEvent,
 } from "../../swarm/swarm-model";
 import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../activity/types";
+import { toolOutputChunks } from "../activity/tool-adapter";
 import type { ToolLogChunk } from "../types";
 
 /** One-line text summary per subagent event kind — deliberately simpler than
@@ -135,11 +136,16 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
             return undefined;
         }
         if (a.tool) {
-            const chunks = a.tool.log?.chunks ?? [];
+            // The live log's last chunk, or, once a finished tool's log was
+            // freed (toolOutputChunks), the last line of its result's output.
+            const fromResult = (a.tool.log?.chunks.length ?? 0) === 0;
+            const chunks = toolOutputChunks(a.tool);
             for (let i = chunks.length - 1; i >= 0; i--) {
                 const c = chunks[i];
                 if ((c.kind === "stdout" || c.kind === "stderr") && c.content.trim()) {
-                    return c.content.trim();
+                    if (!fromResult) return c.content.trim();
+                    const lines = c.content.trim().split("\n");
+                    return lines[lines.length - 1].trim();
                 }
             }
             return undefined;
@@ -180,7 +186,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
     const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
     const capped = createMemo(() => {
         const a = props.activity();
-        const chunks = a?.shell?.log.chunks ?? a?.tool?.log?.chunks;
+        const chunks = a?.shell?.log.chunks ?? (a?.tool ? toolOutputChunks(a.tool) : undefined);
         return chunks
             ? chunkCap(chunks as ToolLogChunk[])
             : { chunks: [] as ToolLogChunk[], hiddenLines: 0 };

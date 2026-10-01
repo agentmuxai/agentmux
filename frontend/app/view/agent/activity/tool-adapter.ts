@@ -30,7 +30,7 @@
 
 import { toolDetailOf } from "../tool-meta/tool-descriptors";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
-import type { BashParams, BashResult, DocumentNode, ToolNode } from "../types";
+import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "../types";
 import { wholeCommandSleepMs } from "./sleep-detect";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
@@ -78,6 +78,27 @@ function resultText(result: ToolNode["result"]): string | undefined {
     if (typeof r?.stdout === "string") return r.stdout;
     if (typeof r?.content === "string") return r.content;
     return undefined;
+}
+
+/**
+ * A tool's output for the activity dock: its live log while it has one, else
+ * — once the log is freed because the tool finished with a result
+ * (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.1) — the result's
+ * stdout and stderr. A foreground call that ran long enough to be promoted
+ * stays in the dock for a while after it finishes (ReAgent P1 on #4125).
+ */
+export function toolOutputChunks(tool: ToolNode): ToolLogChunk[] {
+    const chunks = tool.log?.chunks ?? [];
+    if (chunks.length > 0 || tool.result == null) return chunks as ToolLogChunk[];
+    const r = tool.result as Partial<BashResult>;
+    const out: ToolLogChunk[] = [];
+    if (typeof r.stdout === "string" && r.stdout) out.push({ kind: "stdout", content: r.stdout, timestamp: 0 });
+    if (typeof r.stderr === "string" && r.stderr) out.push({ kind: "stderr", content: r.stderr, timestamp: 0 });
+    if (out.length === 0) {
+        const text = resultText(tool.result);
+        if (text) out.push({ kind: "stdout", content: text, timestamp: 0 });
+    }
+    return out;
 }
 
 /**
@@ -223,6 +244,13 @@ function everCrossedThreshold(n: ToolNode, now: number): boolean {
     if (pureSleepMs(n) != null) return true;
     if (n.duration != null) return n.duration * 1000 >= TOOL_PROMOTION_MS;
     return false;
+}
+
+/** A finished Bash call that got an Activity Dock row: its row renders the
+ *  live log in stream order, which the final result can't rebuild (stdout and
+ *  stderr come back as separate fields), so the log is kept (Codex P2 on #4125). */
+export function isFinishedDockedTool(n: DocumentNode): boolean {
+    return isBashToolNode(n) && n.status !== "running" && everCrossedThreshold(n, 0);
 }
 
 export function toolToActivity(n: ToolNode): PinnedActivity {
