@@ -101,6 +101,12 @@ describe("buildConfigFiles — skills index (LC3)", () => {
         expect(files.some((f) => f.path === "CLAUDE.md")).toBe(true);
     });
 
+    it("treats an alias of Claude as Claude", () => {
+        const md = instructions("claude-code");
+        expect(md).toContain("**Notes**");
+        expect(md).not.toContain("/deploy");
+    });
+
     it("keeps the full index for a provider that only reads its instructions file", () => {
         const md = instructions("codex");
         expect(md).toContain("**Deploy**");
