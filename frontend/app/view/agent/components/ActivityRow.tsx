@@ -136,12 +136,14 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
             return undefined;
         }
         if (a.tool) {
-            // The live log, or the result's output once a finished tool's log
-            // was freed (toolOutputChunks): its last non-empty line.
+            // The live log's last chunk, or, once a finished tool's log was
+            // freed (toolOutputChunks), the last line of its result's output.
+            const fromResult = (a.tool.log?.chunks.length ?? 0) === 0;
             const chunks = toolOutputChunks(a.tool);
             for (let i = chunks.length - 1; i >= 0; i--) {
                 const c = chunks[i];
                 if ((c.kind === "stdout" || c.kind === "stderr") && c.content.trim()) {
+                    if (!fromResult) return c.content.trim();
                     const lines = c.content.trim().split("\n");
                     return lines[lines.length - 1].trim();
                 }

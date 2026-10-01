@@ -945,7 +945,7 @@ describe("agent document reducer", () => {
             const s = seed([tool("t1", { status: "success", result: { stdout: "x", stderr: "", exitCode: 0 }, log: { chunks: [], open: false } })]);
             const r = update(s, { type: "ToolChunkAppend", toolId: "t1", chunk: chunk("replayed\n", { timestamp: 5 }) });
             expect((r.state.nodes[0] as ToolNode).log?.chunks).toHaveLength(0);
-            expect(r.events[0]).toMatchObject({ type: "tool-chunk-dropped", toolId: "t1", reason: "finished" });
+            expect(r.events).toEqual([]);
         });
 
         it("non-tool node replacement still falls through to the unconditional path", () => {

@@ -220,7 +220,7 @@ export type AgentDocumentEvent =
           type: "tool-chunk-dropped";
           toolId: string;
           /** Reason the chunk was rejected without touching state. */
-          reason: "unknown-tool-id" | "node-not-tool" | "duplicate" | "finished";
+          reason: "unknown-tool-id" | "node-not-tool" | "duplicate";
       }
     | { type: "user-cleared"; clearedCount: number }
     | {

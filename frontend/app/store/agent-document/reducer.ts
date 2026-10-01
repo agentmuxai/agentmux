@@ -627,13 +627,9 @@ export function update(
             }
             const tool = state.nodes[idx] as ToolNode;
             // A tool that finished with a result never shows its log again
-            // (U1): a late or replayed chunk is dropped, not buffered.
-            if (freesLog(tool)) {
-                return {
-                    state,
-                    events: [{ type: "tool-chunk-dropped", toolId: command.toolId, reason: "finished" }],
-                };
-            }
+            // (U1): a late or replayed chunk is dropped, not buffered. Expected,
+            // so no tool-chunk-dropped event: that one flags ordering bugs.
+            if (freesLog(tool)) return { state, events: [] };
             // Dedup against the last-stored chunk on (timestamp + kind +
             // content). This matters during history replay where the
             // backend rebroadcasts the chunk stream and we mustn't
