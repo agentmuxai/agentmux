@@ -175,32 +175,31 @@ Rejected:
 
 Id `operator-config-workspace`, name `AgentMux Operator Config: Your
 workspace`, `agent_types: ["host"]` (`crates/srv/operator-config-seed.json`,
-manifest v6). The "host agents" scope is stated in the body rather than
-the name, like the other entries' opening line:
+manifest v7). The "host agents" scope is stated in the body rather than
+the name, like the other entries' opening line.
 
-> This entry is maintained by AgentMux itself (Operator Config) and is the
-> same across every AgentMux deployment. It is given only to agents that
-> run as a process on this machine (host agents), not to container agents.
+The launch directory isn't always a private folder AgentMux allocated: a
+definition can set its own `working_directory` (a project folder), and
+`agent.open` with a blank one falls back to `~/.agentmux/agents/<slug>`,
+shared by every launch of that name (`agent_open.rs:1023-1029`). So the
+text defines the workspace as the launch directory, says it may be a
+chosen project folder, and tells an agent already in the repository it
+was asked to work on to work there instead of nesting a clone (Codex P1
+on #4113). Gating delivery on "allocated" instead was rejected: the
+hook and fallback paths only know the block, and the three launch paths
+classify the directory differently.
+
+> This entry is maintained by AgentMux itself (Operator Config) and is the same across every AgentMux deployment. It is given only to agents that run as a process on this machine (host agents), not to container agents.
 >
-> Your working directory at launch is your own workspace:
-> `~/.agentmux/agents/<your instance>/`. Its path is also in the
-> `AGENTMUX_AGENT_WORKDIR` environment variable, so you can find it again
-> after changing directory.
+> Your working directory at launch is your workspace. Its path is also in the `AGENTMUX_AGENT_WORKDIR` environment variable, so you can find it again after changing directory. Usually it is a folder AgentMux created for you under `~/.agentmux/agents/`, but it can also be a project folder chosen for this agent.
 >
-> - **Clone every repository you work on inside your workspace**, for
->   example `<workspace>/agentmux`, and keep its branches, builds and
->   scratch files there.
-> - **Don't clone into, build in, or edit another agent's workspace**, your
->   home directory, or a shared checkout elsewhere on the disk. Another
->   agent may be using it, and its owner can't see a change you make there.
-> - **For a second checkout of a repository you already have, clone again
->   inside your workspace.** `git clone --reference <your first clone>
->   <url> <dir>` saves disk. Don't use `git worktree` for this.
-> - **Temporary files** belong in your workspace or the system temp
->   directory, never in another agent's workspace.
+> - **If your workspace already is the repository you're asked to work on**, work in it directly. Don't clone a second copy inside it.
+> - **Otherwise, clone every repository you work on inside your workspace**, for example `<workspace>/agentmux`, and keep its branches, builds and scratch files there.
+> - **Don't clone into, build in, or edit another agent's workspace** (another agent's folder under `~/.agentmux/agents/`), or a checkout elsewhere on the disk that you weren't pointed at. Another agent may be using it, and its owner can't see a change you make there.
+> - **For a second checkout of a repository you already have, clone again inside your workspace.** `git clone --reference <your first clone> <url> <dir>` saves disk. Don't use `git worktree` for this.
+> - **Temporary files** belong in your workspace or the system temp directory, never in another agent's workspace.
 >
-> If a task needs a file outside your workspace, read it where it is, and
-> ask before changing it.
+> If a task needs a file outside your workspace, read it where it is, and ask before changing it.
 
 ### 3.4 `AGENTMUX_AGENT_WORKDIR`
 
@@ -209,7 +208,9 @@ was resumed with a different cwd) has no reliable way to find it. srv
 sets `AGENTMUX_AGENT_WORKDIR` to the block's `cmd:cwd` (the resolved
 workspace) in `build_persistent_spawn_env`
 (`carry_agent_workdir_env`, `crates/srv/src/server/agent_handlers/input.rs`),
-the env builder every spawn path shares. It is server-set: a `cmd:env`
+the env builder of the persistent and per-turn spawn paths, and in the
+ACP (`AcpController::spawn_env`) and app-server controllers, which build
+their own (Codex P2 on #4113). It is server-set: a `cmd:env`
 copy never wins. Host agents only; it is removed for a container agent
 and is on `CONTAINER_ENV_DENYLIST`, because the host path means nothing
 inside the image.
