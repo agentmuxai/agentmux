@@ -246,6 +246,13 @@ function everCrossedThreshold(n: ToolNode, now: number): boolean {
     return false;
 }
 
+/** A finished Bash call that got an Activity Dock row: its row renders the
+ *  live log in stream order, which the final result can't rebuild (stdout and
+ *  stderr come back as separate fields), so the log is kept (Codex P2 on #4125). */
+export function isFinishedDockedTool(n: DocumentNode): boolean {
+    return isBashToolNode(n) && n.status !== "running" && everCrossedThreshold(n, 0);
+}
+
 export function toolToActivity(n: ToolNode): PinnedActivity {
     // By raw name, then coarse kind: a WebSearch's kind is "Other", which
     // has no detail; a "BASH" is still a Bash.

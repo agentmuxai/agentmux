@@ -14,7 +14,7 @@
  */
 
 import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
-import { isAcceptedBackgroundLaunch } from "../../view/agent/activity/tool-adapter";
+import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../view/agent/activity/tool-adapter";
 import { planRollOff } from "../../view/agent/live-feed";
 import { planUnload, unloadResult } from "../../view/agent/tool-result-unload";
 import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
@@ -955,11 +955,17 @@ const FINISHED_TOOL_STATUSES = new Set<ToolNode["status"]>(["success", "failed",
  * body renders the result and never the chunks again. Not an accepted
  * background launch, whose activity row keeps following its log after the
  * launching call returns; a call that only asked for the background (and
- * ran synchronously, or was refused) is an ordinary finished call.
+ * ran synchronously, or was refused) is an ordinary finished call. Nor a
+ * long call with a dock row, which shows the log in stream order.
  * SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.1 (U1).
  */
 export function freesLog(tool: ToolNode): boolean {
-    return FINISHED_TOOL_STATUSES.has(tool.status) && tool.result != null && !isAcceptedBackgroundLaunch(tool);
+    return (
+        FINISHED_TOOL_STATUSES.has(tool.status) &&
+        tool.result != null &&
+        !isAcceptedBackgroundLaunch(tool) &&
+        !isFinishedDockedTool(tool)
+    );
 }
 
 function nodeReasonFor(

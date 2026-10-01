@@ -917,6 +917,17 @@ describe("agent document reducer", () => {
             expect(done.log?.chunks).toHaveLength(1);
         });
 
+        it("keeps a long call's chunks: its dock row shows them in stream order (U1, Codex P2 on #4125)", () => {
+            let s = update(initialState(), { type: "StreamFlush", newNodes: [tool("t1", { status: "running" })], updatedNodes: [] }).state;
+            s = update(s, { type: "ToolChunkAppend", toolId: "t1", chunk: chunk("warn\n", { timestamp: 1 }) }).state;
+            const done = update(s, {
+                type: "StreamFlush",
+                newNodes: [tool("t1", { status: "success", timestamp: 1, duration: 45, result: { stdout: "ok\n", stderr: "warn\n", exitCode: 0 } })],
+                updatedNodes: [],
+            }).state.nodes[0] as ToolNode;
+            expect(done.log?.chunks).toHaveLength(1);
+        });
+
         it("frees a call that asked for the background but ran synchronously (U1, Codex P2 on #4125)", () => {
             const bg = (status: ToolNode["status"], extra: Partial<ToolNode> = {}) =>
                 tool("t1", { status, params: { command: "echo hi", run_in_background: true }, ...extra });
