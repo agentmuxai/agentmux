@@ -1,6 +1,6 @@
 # SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown
 
-**Status:** active — LC1 (§3) implemented (#4113); LC4 (§6.3 steps 1-2) implemented (#4128); LC2 (§4.1-4.3, Claude) implemented; LC3, LC5 proposed.
+**Status:** active — LC1 (§3) implemented (#4113); LC4 (§6.3 steps 1-2) implemented (#4128); LC2 (§4.1-4.3, Claude) implemented (#4129); LC3 (§4.4) implemented; LC5 proposed.
 **Date:** 2026-09-30
 **Verified against:** `agentmux` `main` @ `48cc6fdbc` (§1-§4) and `3fcd1496a` (§6). Paths are relative
 to the repo root.
@@ -289,24 +289,50 @@ decision.
 
 ### 4.4 Duplicates are shown, then removed
 
-The manifest makes duplicates visible (`duplicates` field, a "duplicate"
-mark on each row). Then three fixes remove them:
+The LC2 card shows duplicates: a `+ Global Memory` mark on a startup file
+that carries it. LC3 then removes them in three steps:
 
-1. **Global Memory on startup.** On `source=startup`, the hook skips the
-   Global section when the manifest shows the startup file carries it
-   (the import line is present, or AgentMux owns `CLAUDE.md`). If a user
-   removed the import, the hook still delivers it. Personal Memory is
-   unaffected (the startup file never carries it). Updates
-   `SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md:180` to match.
-2. **Skills index for Claude.** Claude lists `.claude/commands` and
-   `.claude/skills` natively, so the `# Available Skills` index is dropped
-   from Claude's startup file. Other providers keep it.
+1. **Global Memory on startup.** On `source=startup`, the hook leaves the
+   Global section out when a startup file the CLI loaded carries it, i.e.
+   a listed file whose `contains` has `global_memory`. That covers an
+   imported `AGENTMUX_MEMORY.md` and an AgentMux-owned `CLAUDE.md`. A
+   user who removed the import gets it from the hook again.
+   - The hook's header says so: "Your Global Memory is already in your
+     startup instructions, so it isn't repeated here."
+   - The card still lists each Global entry, with `via: "startup_file"`,
+     size 0 (the file's row counts it), shown as "in startup file".
+   - With nothing left for the hook to carry (no Personal Memory), the
+     delivery has no parts, so its card is written on the first part
+     request (`send_partless_notice`).
+   - Personal Memory is unaffected (no startup file carries it).
+   - `/clear` and compaction are unchanged: there the hook still
+     re-delivers.
+2. **Skills index for Claude.** Claude Code lists `.claude/commands/*.md`
+   and `.claude/skills/*/SKILL.md` by itself. So Claude's `# Available
+   Skills` index now carries only skills left without a file of their
+   own: empty content, a prompt skill with no usable trigger, or a command
+   whose file a later skill's command overwrites (same trigger, compared
+   case-insensitively; the skill store doesn't enforce unique triggers).
+   Dropping those would hide them entirely. Other providers, and Claude
+   aliases resolve to Claude first, read only their instructions file and
+   keep the full index. The rule is `skills_with_their_own_file` in Rust
+   `build_config_files`, mirrored by `commandKey`/`hasOwnFile` in the
+   TypeScript `buildConfigFiles`. The instructions file is now written even
+   when empty, since srv injects the Global Memory into it.
 3. **Legacy foreign `CLAUDE.md`.** A `CLAUDE.md` whose content is exactly
-   what an older AgentMux wrote (a `# Available Skills` list plus the
-   managed import line, nothing else) is adopted as AgentMux-owned: its
-   content is replaced with the managed file and the marker, and the old
-   one is kept as `.claude/CLAUDE.md.pre-adopt`. Anything else stays
-   foreign.
+   what an older AgentMux wrote is adopted as AgentMux-owned. "Exactly"
+   means, in order and ignoring blank lines: the `# Available Skills`
+   heading, its usage line, at least one skill row exactly as rendered
+   (`- **name**`, optional ` (trigger: /x)`, optional ` — description`),
+   then optionally the managed import (`is_legacy_agentmux_claude_md`,
+   `is_generated_skill_row`). A symlinked `CLAUDE.md` is never adopted or
+   written through, and the backup path is symlink-checked.
+   - It is rewritten as the managed file, with the marker.
+   - The original is kept in `.claude/CLAUDE.md.pre-adopt`, and a later
+     adoption never overwrites that copy. A failed backup leaves the file
+     as it is.
+   - Anything else stays foreign. On this machine most agents' `CLAUDE.md`
+     had this frozen shape, with a stale skills list.
 
 ## 5. Tests
 

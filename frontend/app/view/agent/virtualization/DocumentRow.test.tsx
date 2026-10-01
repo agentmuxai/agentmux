@@ -635,9 +635,46 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("Given to the agent · new session · 4 items")).toBeInTheDocument();
         expect(screen.getByText("Hand-maintained")).toBeInTheDocument();
         expect(screen.getAllByText("AgentMux")).toHaveLength(2);
-        expect(screen.getByText("+ Global Memory")).toBeInTheDocument();
+        expect(screen.getByText("+ Global Memory")).toHaveAttribute(
+            "title",
+            "This file also carries the Global Memory, so a new session gets it twice",
+        );
         expect(screen.getByText("1 listed")).toBeInTheDocument();
         expect(screen.getByText("AgentMux system")).toBeInTheDocument();
+    });
+
+    it("says a Global entry came in the startup file instead of sizing it (LC3)", () => {
+        renderMemory({
+            type: "context_delivery",
+            id: "memory-injected-s1-startup-2",
+            reason: "startup",
+            timestamp: 0,
+            items: [
+                { kind: "startup_file", name: "CLAUDE.md", owner: "agentmux", contains: ["global_memory"], sizeBytes: 12, tokens: 3 },
+                { kind: "global_memory", name: "Rules", tier: "workspace", via: "startup_file", sizeBytes: 0, tokens: 0 },
+            ],
+        });
+        expect(screen.getByText("in startup file")).toBeInTheDocument();
+        expect(screen.queryByText(/0 B/)).toBeNull();
+        // The file is the one delivery, not a repeat (Codex on #4131).
+        expect(screen.getByText("+ Global Memory")).toHaveAttribute("title", "The Global Memory reached the agent through this file");
+    });
+
+    it("still marks a duplicate when two loaded startup files carry the Global Memory", () => {
+        renderMemory({
+            type: "context_delivery",
+            id: "memory-injected-s1-startup-3",
+            reason: "startup",
+            timestamp: 0,
+            items: [
+                { kind: "startup_file", name: "~/agents/CLAUDE.md", owner: "agentmux", contains: ["global_memory"], sizeBytes: 12, tokens: 3 },
+                { kind: "startup_file", name: "CLAUDE.md", owner: "agentmux", contains: ["global_memory"], sizeBytes: 12, tokens: 3 },
+                { kind: "global_memory", name: "Rules", tier: "workspace", via: "startup_file", sizeBytes: 0, tokens: 0 },
+            ],
+        });
+        for (const mark of screen.getAllByText("+ Global Memory")) {
+            expect(mark).toHaveAttribute("title", "This file also carries the Global Memory, so a new session gets it twice");
+        }
     });
 
     it("shows the size advice when Personal Memory is large", () => {

@@ -82,6 +82,62 @@ describe("buildConfigFiles — trigger sanitization", () => {
     });
 });
 
+describe("buildConfigFiles — skills index (LC3)", () => {
+    const skills = [
+        makeSkill({ name: "Deploy", trigger: "deploy", content: "Run: deploy" }),
+        makeSkill({ name: "Notes", trigger: "", content: "Look in NOTES.md" }),
+    ];
+    const instructions = (providerId?: string) =>
+        buildConfigFiles({}, skills, undefined, undefined, providerId).find((f) => /CLAUDE.md$|AGENTS.md$/.test(f.path))?.content ?? "";
+
+    it("indexes for Claude only the skills it has no file to list", () => {
+        const md = instructions("claude");
+        expect(md).toContain("**Notes**");
+        expect(md).not.toContain("/deploy");
+    });
+
+    it("still writes CLAUDE.md when nothing but files-backed skills would go in it, for srv's Global Memory", () => {
+        const files = buildConfigFiles({}, [makeSkill({ name: "Deploy", trigger: "deploy", content: "x" })], undefined, undefined, "claude");
+        expect(files.some((f) => f.path === "CLAUDE.md")).toBe(true);
+    });
+
+    it("keeps a skill indexed when a later skill's command overwrites its file", () => {
+        const md =
+            buildConfigFiles(
+                {},
+                [
+                    makeSkill({ name: "Deploy", trigger: "deploy", content: "a" }),
+                    makeSkill({ name: "Deploy Staging", trigger: "Deploy", content: "b" }),
+                ],
+                undefined,
+                undefined,
+                "claude",
+            ).find((f) => f.path === "CLAUDE.md")?.content ?? "";
+        expect(md).toContain("**Deploy**");
+        expect(md).not.toContain("**Deploy Staging**");
+    });
+
+    it("keeps a skill with a non-ASCII trigger indexed", () => {
+        const md =
+            buildConfigFiles({}, [makeSkill({ name: "Café", trigger: "café", content: "brew" })], undefined, undefined, "claude").find(
+                (f) => f.path === "CLAUDE.md",
+            )?.content ?? "";
+        expect(md).toContain("**Café**");
+    });
+
+    it("treats an alias of Claude as Claude", () => {
+        const md = instructions("claude-code");
+        expect(md).toContain("**Notes**");
+        expect(md).not.toContain("/deploy");
+    });
+
+    it("keeps the full index for a provider that only reads its instructions file", () => {
+        const md = instructions("codex");
+        expect(md).toContain("**Deploy**");
+        expect(md).toContain("**Notes**");
+    });
+});
+
 // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §7.
 describe("buildConfigFiles — provider-aware startup instructions filename", () => {
     it("resolves the filename per providerId, per the researched table", () => {

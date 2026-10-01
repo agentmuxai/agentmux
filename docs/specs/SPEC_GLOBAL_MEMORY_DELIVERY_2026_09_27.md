@@ -177,7 +177,7 @@ reducer's own session events, not Claude Code hooks.)
 
 | Case | Global Memory reaches the model via | User sees | Verified live? |
 |---|---|---|---|
-| Brand-new agent / new session | startup file only | nothing | yes (the file is present) |
+| Brand-new agent / new session | startup file; the SessionStart hook adds it only when no loaded startup file carries it (Claude, LC3 of SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | the "Given to the agent" card: startup files, then memory (LC2) | yes |
 | Normal resume | startup file (rewritten at open) | nothing | yes |
 | Resume refused or failed → `fresh` | startup file + hidden reinjection | label | the trigger fired, but it had nothing to send before P1 (below); not yet seen after P1 |
 | After compaction (Claude) | startup file + hidden reinjection + summary | label | no: no compaction observed since #3502 |
