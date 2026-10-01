@@ -27,40 +27,6 @@ import {
 } from "./types";
 
 /**
- * Clamp a merged node list to the working scrollback's session scope:
- * everything strictly before the LAST `session_outcome`/`fresh` node is
- * dropped (the model has none of it — showing it as live scrollback is
- * the misrepresentation
- * SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md
- * §3 exists to fix). The boundary node itself stays as the first row.
- *
- * Returns `null` when no trim is needed (no fresh boundary, or it is
- * already the first node) so hot-path callers can skip the state
- * allocation. By induction every state this reducer produces is already
- * clamped, so `HistoryLoaded`'s prepend of a strictly-older page reduces
- * to "drop the whole page" whenever the existing document contains a
- * boundary — that falls out of this same reverse-scan with no special
- * case.
- */
-function clampToSessionScope(nodes: DocumentNode[]): {
-    nodes: DocumentNode[];
-    nodeIdSet: Set<string>;
-    nodeIndexById: Map<string, number>;
-    removedCount: number;
-} | null {
-    const boundary = lastFreshBoundaryIndex(nodes);
-    if (boundary <= 0) return null;
-    const kept = nodes.slice(boundary);
-    const nodeIdSet = new Set<string>();
-    const nodeIndexById = new Map<string, number>();
-    for (let i = 0; i < kept.length; i++) {
-        nodeIdSet.add(kept[i].id);
-        nodeIndexById.set(kept[i].id, i);
-    }
-    return { nodes: kept, nodeIdSet, nodeIndexById, removedCount: boundary };
-}
-
-/**
  * Walk the document and mark orphaned in-progress nodes as canceled.
  *
  * Returns `null` if nothing changed (so the caller can skip the
@@ -355,25 +321,7 @@ export function update(
                     resolvedToolNodes: scrubResult.resolvedToolNodes,
                 });
             }
-            // Session-scope clamp. Two shapes land here: the prepended page
-            // itself contains a fresh boundary (keep only from that
-            // boundary), or the existing document already starts at one
-            // (the whole strictly-older page drops). Both are the same
-            // reverse-scan — see clampToSessionScope.
             const mergedLoaded = [...scrubbedFresh, ...state.nodes];
-            const loadClamp = clampToSessionScope(mergedLoaded);
-            if (loadClamp) {
-                loadEvents.push({ type: "session-scope-trimmed", removedCount: loadClamp.removedCount });
-                return {
-                    state: {
-                        ...state,
-                        nodes: loadClamp.nodes,
-                        nodeIdSet: loadClamp.nodeIdSet,
-                        nodeIndexById: loadClamp.nodeIndexById,
-                    },
-                    events: loadEvents,
-                };
-            }
             return {
                 state: {
                     ...state,
@@ -453,23 +401,6 @@ export function update(
                     toolsCanceled: scrubResult.toolsCanceled,
                     resolvedToolNodes: scrubResult.resolvedToolNodes,
                 });
-            }
-            // Session-scope clamp — the restored window can span any number
-            // of fresh boundaries (the persisted stream is boundary-blind);
-            // the working view keeps only content from the newest one on.
-            const restoreClamp = clampToSessionScope(mergedNodes);
-            if (restoreClamp) {
-                restoreEvents.push({ type: "session-scope-trimmed", removedCount: restoreClamp.removedCount });
-                return {
-                    state: {
-                        ...state,
-                        nodes: restoreClamp.nodes,
-                        nodeIdSet: restoreClamp.nodeIdSet,
-                        nodeIndexById: restoreClamp.nodeIndexById,
-                        sessionPhase: "active",
-                    },
-                    events: restoreEvents,
-                };
             }
             return {
                 state: {
@@ -575,30 +506,27 @@ export function update(
                     updateDropped,
                 },
             ];
-            // Session-scope clamp, gated on this batch actually carrying a
-            // fresh boundary so the per-chunk hot path pays one array scan
-            // of the (small) batch and nothing else. A live fresh outcome
-            // lands here as a newNode; clamping inside the same reduction —
-            // rather than a separate trim command dispatched after the
-            // flush — is what makes the trim race-free against
-            // still-queued pre-boundary nodes: they're in this same batch,
-            // ordered before the boundary, and get dropped with everything
-            // else. (Collided re-seen boundaries route to update against a
-            // state that is already clamped by induction — the scan below
-            // returns boundary index 0 and no-ops.)
+            // A new session started live: the conversation before its divider
+            // stays on screen (the agent just doesn't have it), but nothing of
+            // the old session is still in progress — its running tools and
+            // open thoughts are canceled, as a restore would. Gated on this
+            // batch carrying a fresh boundary, so the per-chunk hot path pays
+            // one scan of the (small) batch.
+            // SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §3 (revised 2026-10-01).
             if (command.newNodes.some((n) => n.type === "session_outcome" && n.outcome === "fresh")) {
-                const flushClamp = clampToSessionScope(next);
-                if (flushClamp) {
-                    flushEvents.push({ type: "session-scope-trimmed", removedCount: flushClamp.removedCount });
-                    return {
-                        state: {
-                            ...state,
-                            nodes: flushClamp.nodes,
-                            nodeIdSet: flushClamp.nodeIdSet,
-                            nodeIndexById: flushClamp.nodeIndexById,
-                        },
-                        events: flushEvents,
-                    };
+                const boundary = lastFreshBoundaryIndex(next);
+                const scrub =
+                    boundary > 0
+                        ? scrubOrphanedInProgress(next.slice(0, boundary), Date.now(), { hasContentAfter: true })
+                        : null;
+                if (scrub) {
+                    for (let i = 0; i < boundary; i++) next[i] = scrub.nodes[i];
+                    flushEvents.push({
+                        type: "orphans-scrubbed",
+                        markdownCanceled: scrub.markdownCanceled,
+                        toolsCanceled: scrub.toolsCanceled,
+                        resolvedToolNodes: scrub.resolvedToolNodes,
+                    });
                 }
             }
             return {

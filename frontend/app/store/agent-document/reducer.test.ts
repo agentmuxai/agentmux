@@ -1554,11 +1554,10 @@ describe("agent document reducer", () => {
         });
     });
 
-    // SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §3:
-    // the working document is clamped at the newest `fresh` session-outcome
-    // boundary — content the model provably does not have never renders as
-    // live scrollback. Display-scope only; the persisted stream is untouched.
-    describe("session-scope clamp (fresh session_outcome boundary)", () => {
+    // SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §3
+    // (revised 2026-10-01): a new session's divider no longer hides the
+    // conversation before it. The divider says the agent doesn't have it.
+    describe("a fresh session_outcome divider keeps earlier conversation", () => {
         const boundary = (id: string, outcome: "fresh" | "resumed"): DocumentNode => ({
             type: "session_outcome",
             id,
@@ -1568,97 +1567,51 @@ describe("agent document reducer", () => {
             timestamp: 0,
         });
 
-        it("HistoryRestored clamps at the fresh boundary, keeping it as the first row", () => {
-            const r = update(initialState(), {
-                type: "HistoryRestored",
-                fromSnapshot: true,
-                nodes: [md("old1"), md("old2"), boundary("b1", "fresh"), md("new1")],
-            });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["b1", "new1"]);
-            expect(r.events).toContainEqual({ type: "session-scope-trimmed", removedCount: 2 });
-        });
-
-        it("multiple fresh boundaries → the newest wins", () => {
+        it("HistoryRestored keeps everything across fresh boundaries", () => {
             const r = update(initialState(), {
                 type: "HistoryRestored",
                 fromSnapshot: true,
                 nodes: [md("s1"), boundary("b1", "fresh"), md("s2"), boundary("b2", "fresh"), md("s3")],
             });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["b2", "s3"]);
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["s1", "b1", "s2", "b2", "s3"]);
+            expect(r.state.nodeIndexById.get("s3")).toBe(4);
         });
 
-        it("a resumed boundary is NOT a scope anchor", () => {
-            // resumed nodes are no longer materialized by the parse paths,
-            // but legacy v1 snapshots can still carry them — the reducer
-            // must not treat one as a clamp point (the model genuinely has
-            // the prior turns).
-            const r = update(initialState(), {
-                type: "HistoryRestored",
-                fromSnapshot: true,
-                nodes: [md("old1"), boundary("b1", "resumed"), md("new1")],
-            });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["old1", "b1", "new1"]);
-            expect(r.events.some((e) => e.type === "session-scope-trimmed")).toBe(false);
-        });
-
-        it("no boundary → restore is untouched (legacy streams unchanged)", () => {
-            const r = update(initialState(), {
-                type: "HistoryRestored",
-                fromSnapshot: true,
-                nodes: [md("a"), md("b")],
-            });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["a", "b"]);
-            expect(r.events.some((e) => e.type === "session-scope-trimmed")).toBe(false);
-        });
-
-        it("HistoryLoaded drops a strictly-older page wholesale when the document starts at a boundary", () => {
+        it("HistoryLoaded prepends an older page in front of a leading divider", () => {
             const start = seed([boundary("b1", "fresh"), md("live1")]);
             const r = update(start, { type: "HistoryLoaded", nodes: [md("old1"), md("old2")] });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["b1", "live1"]);
-            expect(r.events).toContainEqual({ type: "session-scope-trimmed", removedCount: 2 });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["old1", "old2", "b1", "live1"]);
         });
 
-        it("HistoryLoaded keeps only the at-or-after-boundary part of a page containing one", () => {
-            const start = seed([md("live1")]);
-            const r = update(start, {
-                type: "HistoryLoaded",
-                nodes: [md("old1"), boundary("b1", "fresh"), md("post1")],
-            });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["b1", "post1", "live1"]);
-        });
-
-        it("StreamFlush with a live fresh boundary trims everything before it, including same-batch nodes", () => {
+        it("StreamFlush with a live fresh boundary keeps what came before it", () => {
             const start = seed([md("pre1"), md("pre2")]);
             const r = update(start, {
                 type: "StreamFlush",
                 newNodes: [md("queued-pre"), boundary("b1", "fresh"), md("post1")],
                 updatedNodes: [],
             });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["b1", "post1"]);
-            expect(r.events).toContainEqual({ type: "session-scope-trimmed", removedCount: 3 });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["pre1", "pre2", "queued-pre", "b1", "post1"]);
         });
 
-        it("re-flushing an already-first boundary is a no-op trim (idempotent)", () => {
-            const start = seed([boundary("b1", "fresh"), md("post1")]);
+        it("a live fresh boundary cancels the old session's running tools", () => {
+            const start = seed([tool("t-old", { status: "running" })]);
             const r = update(start, {
                 type: "StreamFlush",
-                newNodes: [boundary("b1", "fresh")],
+                newNodes: [boundary("b1", "fresh"), md("post1")],
                 updatedNodes: [],
             });
-            expect(r.state.nodes.map((n) => n.id)).toEqual(["b1", "post1"]);
-            expect(r.events.some((e) => e.type === "session-scope-trimmed")).toBe(false);
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            expect(r.events.some((e) => e.type === "orphans-scrubbed")).toBe(true);
         });
 
-        it("rebuilds nodeIdSet and nodeIndexById in lockstep after a clamp", () => {
-            const r = update(initialState(), {
-                type: "HistoryRestored",
-                fromSnapshot: true,
-                nodes: [md("old1"), boundary("b1", "fresh"), md("new1")],
+        it("a running tool after the boundary is left alone", () => {
+            const start = seed([md("pre1")]);
+            const r = update(start, {
+                type: "StreamFlush",
+                newNodes: [boundary("b1", "fresh"), tool("t-new", { status: "running" })],
+                updatedNodes: [],
             });
-            expect(r.state.nodeIdSet).toEqual(new Set(["b1", "new1"]));
-            expect(r.state.nodeIndexById.get("b1")).toBe(0);
-            expect(r.state.nodeIndexById.get("new1")).toBe(1);
-            expect(r.state.nodeIndexById.has("old1")).toBe(false);
+            expect((r.state.nodes[2] as ToolNode).status).toBe("running");
         });
     });
 });
