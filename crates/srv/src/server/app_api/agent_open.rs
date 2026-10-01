@@ -1054,7 +1054,11 @@ pub(super) fn write_agent_config_files(
     // section carries a `# [Workspace] <name>` heading (see
     // format_global_bundle_block) so the rules are attributable to the
     // workspace and ordered per the Armory Global section's sort_order.
-    let global_bundles = id_store.bundle_list_global().unwrap_or_default();
+    // Operator Config entries targeted at another agent kind are left out.
+    let global_bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
+        id_store.bundle_list_global().unwrap_or_default(),
+        &agent.agent_type,
+    );
     let global_block = crate::backend::storage::format_global_bundle_block(&global_bundles);
     if !global_block.is_empty() {
         content_map
