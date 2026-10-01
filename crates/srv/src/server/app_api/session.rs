@@ -374,11 +374,13 @@ pub(crate) async fn generate_pushed_activity_summary(
         return None;
     }
 
-    let prompt = format!(
-        "Summarize in {word_target} words or fewer what is currently being worked on. \
-         Plain text only — no markdown, no code fences, no backticks, no quotes, \
-         no punctuation, no preamble.\n\n\
-         Recent activity:\n\n{extracted}"
+    let prompt = crate::ambient::prompt::with_material(
+        &format!(
+            "Summarize in {word_target} words or fewer what is currently being worked on. {} No punctuation.",
+            crate::ambient::prompt::PLAIN_TEXT_RULES
+        ),
+        "recent_activity",
+        &extracted,
     );
 
     let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
@@ -535,12 +537,13 @@ pub(crate) async fn generate_definition_activity_summary(
         }
     };
 
-    let prompt = format!(
-        "Summarize in 12 words or fewer what this conversation/session was \
-         about, based on the raw terminal output below. Plain text only — \
-         no markdown, no code fences, no backticks, no quotes, no \
-         punctuation at the end, no preamble.\n\n\
-         Recent activity:\n\n{digest}"
+    let prompt = crate::ambient::prompt::with_material(
+        &format!(
+            "Summarize in 12 words or fewer what this conversation/session was about, based on the activity below. {} No punctuation at the end.",
+            crate::ambient::prompt::PLAIN_TEXT_RULES
+        ),
+        "recent_activity",
+        &digest,
     );
 
     let result = invoke_ambient_haiku_call(&cli_path, &prompt, &meta, cancel).await.ok();
@@ -655,11 +658,13 @@ pub(crate) async fn generate_subagent_name(
         return None;
     }
 
-    let prompt = format!(
-        "Give a concise ~5-word name for this task. Plain text only — no markdown, \
-         no code fences, no backticks, no punctuation, no quotes, no preamble. \
-         Respond with just the name.\n\n\
-         Task:\n\n{task_prompt}"
+    let prompt = crate::ambient::prompt::with_material(
+        &format!(
+            "Give a concise ~5-word name for this task. {} No punctuation. Respond with just the name.",
+            crate::ambient::prompt::PLAIN_TEXT_RULES
+        ),
+        "task",
+        &task_prompt,
     );
 
     let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
@@ -746,12 +751,13 @@ pub(crate) async fn generate_dispatch_name(
         return None;
     }
 
-    let prompt = format!(
-        "Give a concise ~5-word name for this workflow batch, based on its \
-         first task. Plain text only — no markdown, no code fences, no \
-         backticks, no punctuation, no quotes, no preamble. Respond with \
-         just the name.\n\n\
-         Task:\n\n{task_prompt}"
+    let prompt = crate::ambient::prompt::with_material(
+        &format!(
+            "Give a concise ~5-word name for this workflow batch, based on its first task. {} No punctuation. Respond with just the name.",
+            crate::ambient::prompt::PLAIN_TEXT_RULES
+        ),
+        "task",
+        &task_prompt,
     );
 
     let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
@@ -932,20 +938,7 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     return Ok(empty_suggestion_result());
                 }
 
-                let prompt = format!(
-                    "Based on this recent activity, predict ONE short next instruction \
-                     the user is likely to give to continue the work. Phrase it as a \
-                     direct, imperative command — the way someone types a task into a \
-                     prompt box, not casual chat. Do not start with conversational \
-                     filler or throat-clearing (\"Yeah\", \"Sure\", \"Let's\", \"Go ahead \
-                     and\", \"OK\", or similar) — begin directly with the action itself. \
-                     For example, write \"Debug the blank preview bug next\", not \"Yeah \
-                     let's debug the blank preview bug next\". Respond with just that \
-                     instruction and nothing else — plain text only, no markdown, no code \
-                     fences, no backticks, no quotes, no explanation, no preamble. If \
-                     nothing plausible comes to mind, respond with an empty string.\n\n\
-                     Recent activity:\n\n{extracted}"
-                );
+                let prompt = build_next_prompt_prompt(&extracted);
 
                 let (suggestion, tokens) =
                     invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await
@@ -957,10 +950,38 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 // guard is held until here — same rationale as activity_summary.
                 drop(guard);
 
+                // The tokens were spent either way, so they are still reported; only
+                // the text is withheld when it is not a usable next prompt.
+                let suggestion = match crate::ambient::validate::accept_next_prompt(&suggestion) {
+                    Some(s) => s,
+                    None => {
+                        if !suggestion.is_empty() {
+                            tracing::debug!(block_id = %cmd.block_id, "session:next_prompt_suggestion: rejected model output");
+                        }
+                        String::new()
+                    }
+                };
+
                 Ok(NextPromptSuggestionResult { suggestion, tokens })
             }
         },
     );
+}
+
+/// The prompt for `session:next_prompt_suggestion`. A pure function so its shape
+/// is unit-testable. The activity goes in a tagged block and the model is told
+/// when to say nothing: asked to guess with too little to go on, it answered as
+/// an assistant, and that text reached the composer.
+fn build_next_prompt_prompt(digest: &str) -> String {
+    let instruction = [
+        "Predict the ONE short instruction the user will most likely type next to continue this work, using only the activity below.",
+        "Write it the way someone types a task into a prompt box: a direct imperative that begins with the action itself (\"Debug the blank preview bug\", not \"Yeah, let's debug the blank preview bug\"). One line, under 20 words.",
+        "Output nothing at all if any of these hold: the activity doesn't show what the work is; the assistant's last message asks the user a question or waits for a decision; the work looks finished with nothing obvious left.",
+        "Never suggest deleting data, force-pushing, or touching credentials.",
+        crate::ambient::prompt::PLAIN_TEXT_RULES,
+    ]
+    .join(" ");
+    crate::ambient::prompt::with_material(&instruction, "recent_activity", digest)
 }
 
 /// Build the session-goal-title prompt for `session:activity_summary`.
@@ -1065,7 +1086,7 @@ fn read_recent_activity_digest(
         return None;
     }
 
-    const TAIL_BYTES: i64 = 32 * 1024;
+    const TAIL_BYTES: i64 = 96 * 1024;
     let all_lines: Vec<String> = match filestore.stat(block_id, "output") {
         Ok(Some(ref wf)) if wf.size > 0 => {
             let tail_offset = (wf.size - TAIL_BYTES).max(0);
@@ -1083,18 +1104,63 @@ fn read_recent_activity_digest(
         _ => Vec::new(),
     };
 
-    let n = all_lines.len();
-    let start = n.saturating_sub(30);
-    let window: Vec<&str> = all_lines[start..].iter().map(|s| s.as_str()).collect();
+    let window: Vec<&str> = all_lines.iter().map(|s| s.as_str()).collect();
     if window.is_empty() {
         return None;
     }
 
-    let extracted = extract_digest_text(&window);
-    if extracted.is_empty() {
-        return None;
+    finalize_digest(extract_digest_parts(&window))
+}
+
+/// Entries kept, per-entry and total character caps for a digest. The old digest
+/// was "the last 30 raw lines", which on a streaming session is mostly deltas.
+const DIGEST_MAX_ENTRIES: usize = 14;
+const DIGEST_ENTRY_MAX_CHARS: usize = 700;
+const DIGEST_MAX_CHARS: usize = 6000;
+
+/// Turns extracted entries into the text sent to the model, or `None` when there
+/// is no conversation in them. Only `[user]` and `[assistant]` entries count as
+/// substance: a window of tool names and errors says what ran, not what the work
+/// is, and the model answers "I have no context" to it.
+fn finalize_digest(parts: Vec<String>) -> Option<String> {
+    let is_substance = |p: &String| p.starts_with("[user] ") || p.starts_with("[assistant] ");
+    let newest_substance = parts.iter().rposition(is_substance)?;
+    let mut skip = parts.len().saturating_sub(DIGEST_MAX_ENTRIES);
+    // A run of tool calls after the last message would push every message out of
+    // the window. Keep the newest message in that case, and make room for it.
+    let mut pinned: Option<String> = None;
+    if newest_substance < skip {
+        pinned = Some(parts[newest_substance].clone());
+        skip += 1;
     }
-    Some(extracted)
+    let mut kept: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    // Newest first, so the budget is spent on what is most recent.
+    for part in parts.into_iter().skip(skip).rev() {
+        let part = clip_entry(&part);
+        total += part.chars().count() + 1;
+        if total > DIGEST_MAX_CHARS && !kept.is_empty() {
+            break;
+        }
+        kept.push(part);
+    }
+    if let Some(pinned) = pinned {
+        kept.push(clip_entry(&pinned));
+    }
+    kept.reverse();
+    Some(kept.join("\n"))
+}
+
+/// Keeps the END of an over-long entry: the tail of a message (its question, its
+/// conclusion) is what predicts the next one.
+fn clip_entry(part: &str) -> String {
+    let n = part.chars().count();
+    if n <= DIGEST_ENTRY_MAX_CHARS {
+        return part.to_string();
+    }
+    let tag_end = part.find("] ").map(|i| i + 2).unwrap_or(0);
+    let tail: String = part.chars().skip(n - (DIGEST_ENTRY_MAX_CHARS - 1)).collect();
+    format!("{}…{}", &part[..tag_end], tail)
 }
 
 /// Where ambient side calls run: `<data dir>/ambient-calls`, created on
@@ -1150,8 +1216,17 @@ pub(crate) async fn invoke_ambient_haiku_call_with_timeout(
     };
 
     let mut cmd = crate::server::cli_handlers::make_cli_cmd(cli_path);
+    // A bare text-generation call, not an agent session: no tools, one turn, no
+    // slash commands or MCP servers, nothing saved, and our own system prompt in
+    // place of Claude Code's. With the defaults the model answered as a
+    // conversational assistant ("I don't have access to...") whenever the
+    // digest was thin, and that text reached the UI.
     cmd.args(["-p", "--output-format", "stream-json", "--verbose",
-              "--model", "claude-haiku-4-5-20251001"])
+              "--model", "claude-haiku-4-5-20251001",
+              "--tools", "", "--max-turns", "1",
+              "--no-session-persistence", "--disable-slash-commands",
+              "--strict-mcp-config",
+              "--system-prompt", crate::ambient::prompt::AMBIENT_SYSTEM_PROMPT])
         .envs(&auth_env);
     // Run in a scratch dir of our own, never srv's cwd (the user's home):
     // Claude files each call's transcript under its cwd's project folder,
@@ -1211,6 +1286,16 @@ pub(crate) async fn invoke_ambient_haiku_call_with_timeout(
     let stdout_bytes = stdout_task.await
         .map_err(|e| format!("activity CLI stdout reader task: {e}"))?;
     let stdout = String::from_utf8_lossy(&stdout_bytes);
+    // An empty reply is a valid answer ("nothing to say"), and the call still cost
+    // tokens, so it comes back as `Ok` with empty text rather than an error that
+    // would drop the usage. Callers already treat empty text as "no result".
+    Ok(parse_cli_stream(&stdout))
+}
+
+/// The last assistant text block (sanitized) and the usage from a `claude -p
+/// --output-format stream-json` transcript. Text is empty when the model said
+/// nothing, or only wrapped nothing in a fence.
+fn parse_cli_stream(stdout: &str) -> (String, Option<crate::agents::TokenCounts>) {
     let mut last_text = String::new();
     let mut tokens: Option<crate::agents::TokenCounts> = None;
     for line in stdout.lines() {
@@ -1236,13 +1321,7 @@ pub(crate) async fn invoke_ambient_haiku_call_with_timeout(
             _ => {}
         }
     }
-
-    let last_text = sanitize_ambient_text(&last_text);
-    if last_text.is_empty() {
-        return Err("no text in activity CLI response".to_string());
-    }
-
-    Ok((last_text, tokens))
+    (sanitize_ambient_text(&last_text), tokens)
 }
 
 /// Defends against the model wrapping its answer in markdown, or opening
@@ -1445,6 +1524,13 @@ pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
 /// instance could (and once did — see that file's `clearHiddenReinjectionState`
 /// doc comment for the bug that required).
 pub(super) fn extract_digest_text(lines: &[&str]) -> String {
+    extract_digest_parts(lines).join("
+")
+}
+
+/// [`extract_digest_text`]'s entries, one per message/tool/error, so a caller
+/// can budget by entry instead of by raw line.
+fn extract_digest_parts(lines: &[&str]) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     let mut hiding = false;
 
@@ -1549,22 +1635,14 @@ pub(super) fn extract_digest_text(lines: &[&str]) -> String {
                     }
                 }
             }
-            "result" => {
-                // Aggregate cost/turn-count metadata only — no actual
-                // conversation content, so no leak risk; left unsuppressed
-                // even while `hiding` is true.
-                if let Some(cost) = val.get("total_cost_usd").and_then(|v| v.as_f64()) {
-                    if let Some(turns) = val.get("num_turns").and_then(|v| v.as_u64()) {
-                        parts.push(format!("[summary] {} turns, ${:.4} total cost", turns, cost));
-                    }
-                }
-            }
+            // `result` carries only turn count and cost. It is not conversation, and a
+            // window holding nothing else made the model answer "I have no context".
             // Skip: system, stream_event (deltas), rate_limit_event
             _ => {}
         }
     }
 
-    parts.join("\n")
+    parts
 }
 
 #[cfg(test)]
@@ -2294,5 +2372,164 @@ mod ambient_call_cwd_tests {
         assert!(dir.ends_with("ambient-calls"));
         assert!(dir.starts_with(crate::backend::base::get_mux_data_dir()));
         assert_ne!(Some(dir.as_path()), dirs::home_dir().as_deref());
+    }
+}
+
+#[cfg(test)]
+mod finalize_digest_tests {
+    use super::*;
+
+    fn parts(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn no_conversation_means_no_digest() {
+        assert_eq!(finalize_digest(vec![]), None);
+        assert_eq!(finalize_digest(parts(&["[tool] Bash", "[tool] Read"])), None);
+        assert_eq!(finalize_digest(parts(&["[error] boom"])), None);
+    }
+
+    #[test]
+    fn a_user_or_assistant_entry_is_enough() {
+        assert_eq!(
+            finalize_digest(parts(&["[tool] Bash", "[assistant] Tests pass"])),
+            Some("[tool] Bash
+[assistant] Tests pass".to_string())
+        );
+        assert!(finalize_digest(parts(&["[user] fix the bug"])).is_some());
+    }
+
+    #[test]
+    fn only_the_newest_entries_are_kept() {
+        let many: Vec<String> = (0..40).map(|i| format!("[user] msg {i}")).collect();
+        let digest = finalize_digest(many).unwrap();
+        assert_eq!(digest.lines().count(), DIGEST_MAX_ENTRIES);
+        assert!(digest.starts_with("[user] msg 26"));
+        assert!(digest.ends_with("[user] msg 39"));
+    }
+
+    #[test]
+    fn a_long_entry_keeps_its_tail() {
+        let long = format!("[assistant] {}FINAL QUESTION", "x".repeat(2000));
+        let digest = finalize_digest(vec![long]).unwrap();
+        assert!(digest.starts_with("[assistant] …"));
+        assert!(digest.ends_with("FINAL QUESTION"));
+        assert!(digest.chars().count() <= DIGEST_ENTRY_MAX_CHARS + 20);
+    }
+
+    #[test]
+    fn the_total_is_capped_but_the_newest_entry_always_survives() {
+        let big = format!("[assistant] {}", "y".repeat(690));
+        let many: Vec<String> = (0..14).map(|_| big.clone()).collect();
+        let digest = finalize_digest(many).unwrap();
+        assert!(digest.chars().count() <= DIGEST_MAX_CHARS + 1);
+        assert!(digest.lines().count() >= 1);
+    }
+
+    #[test]
+    fn a_cost_only_result_line_is_not_a_digest() {
+        let line = serde_json::json!({
+            "type": "result", "num_turns": 3, "total_cost_usd": 0.0412
+        }).to_string();
+        let lines = vec![line.as_str()];
+        assert_eq!(extract_digest_text(&lines), "");
+        assert_eq!(finalize_digest(extract_digest_parts(&lines)), None);
+    }
+
+    #[test]
+    fn stream_noise_before_the_conversation_does_not_crowd_it_out() {
+        let user = serde_json::json!({"type":"user","message":{"content":[{"type":"text","text":"fix the login bug"}]}}).to_string();
+        let noise = serde_json::json!({"type":"stream_event","event":{"type":"content_block_delta"}}).to_string();
+        let mut lines: Vec<String> = vec![user];
+        lines.extend((0..200).map(|_| noise.clone()));
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = finalize_digest(extract_digest_parts(&refs)).unwrap();
+        assert!(digest.contains("fix the login bug"));
+    }
+}
+
+#[cfg(test)]
+mod build_next_prompt_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn the_activity_is_tagged_material_after_the_instruction() {
+        let p = build_next_prompt_prompt("[user] fix the login bug");
+        assert!(p.contains("<recent_activity>
+[user] fix the login bug
+</recent_activity>"));
+        assert!(p.find("Predict the ONE").unwrap() < p.find("<recent_activity>").unwrap());
+    }
+
+    #[test]
+    fn it_says_when_to_stay_silent() {
+        let p = build_next_prompt_prompt("[user] x");
+        assert!(p.contains("Output nothing at all"));
+        assert!(p.contains("asks the user a question"));
+        assert!(p.contains("looks finished"));
+    }
+
+    #[test]
+    fn it_forbids_risky_suggestions_and_filler() {
+        let p = build_next_prompt_prompt("[user] x");
+        assert!(p.contains("force-pushing"));
+        assert!(p.contains("not \"Yeah, let's debug the blank preview bug\""));
+    }
+}
+
+#[cfg(test)]
+mod ambient_cli_stream_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_fence_is_empty_text_but_the_usage_survives() {
+        let out = [
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"```\n```"}]}}"#,
+            r#"{"type":"result","usage":{"input_tokens":235,"output_tokens":4}}"#,
+        ].join("\n");
+        let (text, tokens) = parse_cli_stream(&out);
+        assert_eq!(text, "");
+        assert!(tokens.is_some());
+    }
+
+    #[test]
+    fn the_last_assistant_text_wins_and_thinking_blocks_are_ignored() {
+        let out = [
+            r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hmm"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Run the tests"}]}}"#,
+            r#"{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}"#,
+        ].join("\n");
+        assert_eq!(parse_cli_stream(&out).0, "Run the tests");
+    }
+
+    #[test]
+    fn a_transcript_with_no_result_line_has_no_usage() {
+        let out = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]}}"#;
+        assert!(parse_cli_stream(out).1.is_none());
+    }
+}
+
+#[cfg(test)]
+mod finalize_digest_tool_run_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_run_of_tool_calls_does_not_push_the_conversation_out() {
+        let mut parts = vec!["[user] fix the login bug".to_string(), "[assistant] On it".to_string()];
+        parts.extend((0..30).map(|i| format!("[tool] Tool{i}")));
+        let digest = finalize_digest(parts).unwrap();
+        assert!(digest.contains("[assistant] On it"));
+        assert!(!digest.contains("fix the login bug"), "only the newest message is pinned");
+        assert!(digest.ends_with("[tool] Tool29"));
+        assert_eq!(digest.lines().count(), DIGEST_MAX_ENTRIES);
+        // chronological: the pinned message comes before the tool run
+        assert!(digest.lines().next().unwrap().starts_with("[assistant]"));
+    }
+
+    #[test]
+    fn tools_only_still_means_no_digest() {
+        let parts: Vec<String> = (0..30).map(|i| format!("[tool] T{i}")).collect();
+        assert_eq!(finalize_digest(parts), None);
     }
 }
