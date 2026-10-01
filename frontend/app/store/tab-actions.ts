@@ -81,16 +81,28 @@ createRoot(() =>
     })
 );
 
-// The tab `createTab` is building, from its CreateTab reply until the
-// committed tab reaches it. The strip highlights it at once, in the frame
-// its pill appears, instead of ~150 ms later when the built tab is
-// activated: the pill used to appear unselected and then jump. The content
-// still swaps in once the tab has settled. Dropped as soon as the committed
-// tab moves anywhere but the tab this creation started from (the user went
-// elsewhere meanwhile), or the creation fails.
-const [creatingTab, setCreatingTab] = createSignal<{ tabId: string; from: string } | null>(null);
+// The tab `createTab` is building, until the committed tab reaches it. The
+// strip highlights it in the frame its pill first appears, instead of ~150 ms
+// later when the built tab is activated: the pill used to appear unselected
+// and then jump. The content still swaps in once the tab has settled.
+//
+// Before CreateTab replies, the new tab is the one that wasn't in the
+// workspace when the creation started: the Workspace push that adds its pill
+// can land before the reply, and waiting for the id cost a frame of an
+// unselected pill. Dropped as soon as the committed tab moves anywhere but
+// the tab this creation started from (the user went elsewhere meanwhile), or
+// the creation fails or is abandoned.
+type Creation = { tabId: string | null; from: string; existing: ReadonlySet<string> };
+const [creatingTab, setCreatingTab] = createSignal<Creation | null>(null);
 /** The tab being created, for the strip to show as selected. */
-export const creatingTabId = (): string | null => creatingTab()?.tabId ?? null;
+export function creatingTabId(): string | null {
+    const creating = creatingTab();
+    if (creating == null) return null;
+    if (creating.tabId != null) return creating.tabId;
+    const ws = workspace();
+    const ids = [...(ws?.pinnedtabids ?? []), ...(ws?.tabids ?? [])];
+    return ids.find((id) => !creating.existing.has(id)) ?? null;
+}
 createRoot(() =>
     createEffect(() => {
         const creating = creatingTab();
@@ -112,7 +124,12 @@ export function createTab() {
     // get yanked back to the new tab out from under whatever they
     // navigated to meanwhile (codex P2, PR #3300).
     const startingActiveTabId = activeTabId();
-    let createdTabId: string | null = null;
+    let creation: Creation = {
+        tabId: null,
+        from: startingActiveTabId,
+        existing: new Set([...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]),
+    };
+    setCreatingTab(creation);
     fireAndForget(async () => {
         try {
             // Created INACTIVE (`activate: false`) — the current tab
@@ -130,8 +147,10 @@ export function createTab() {
             // re-trigger the gate on an already-revealed tab — the
             // flash a user reported.
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", false, false);
-            createdTabId = tabId;
-            if (activeTabId() === startingActiveTabId) setCreatingTab({ tabId, from: startingActiveTabId });
+            if (creatingTab() === creation) {
+                creation = { ...creation, tabId };
+                setCreatingTab(creation);
+            }
             // New tabs intentionally start with no `tab:color` — see
             // docs/reports/REPORT_REMOVE_AUTO_TAB_COLOR_2026_08_18.md. Users
             // still pick one manually via the right-click swatch picker
@@ -181,12 +200,11 @@ export function createTab() {
         } catch (e) {
             console.error("[createTab] failed:", e);
         } finally {
-            // Activated: the committed tab has caught up, or will, and the
-            // effect above drops this then. Otherwise (left inactive, or
-            // failed) nothing will: drop it now.
-            if (createdTabId != null && creatingTab()?.tabId === createdTabId && activeTabId() !== createdTabId) {
-                if (switchIntentTabId() !== createdTabId) setCreatingTab(null);
-            }
+            // Activated, the committed tab catches up (switchIntent is set
+            // until it does) and the effect above drops this. Left inactive
+            // or failed, nothing will: drop it here.
+            const activating = creation.tabId != null && switchIntentTabId() === creation.tabId;
+            if (creatingTab() === creation && !activating) setCreatingTab(null);
         }
     });
 }
