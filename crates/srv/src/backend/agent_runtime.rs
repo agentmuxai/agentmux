@@ -172,8 +172,13 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
     if args.is_empty() {
         return args;
     }
-    let provider_id = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
-    let Some(default_model) = default_model_for(&provider_id) else {
+    // `agentProvider` is written from the definition's `provider` verbatim, and
+    // that may be a legacy alias ("claude-code", "codex-cli"). Resolve it, or a
+    // pane on an alias — exactly the old, pre-existing kind this backstop exists
+    // for — would silently get nothing (ReAgent P1 on #4116). Unknown → "".
+    let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
+    let provider_id = crate::backend::providers::resolve_provider_alias(&raw_provider);
+    let Some(default_model) = default_model_for(provider_id) else {
         return args;
     };
     let runtime = |key: &str| {
@@ -193,7 +198,7 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
     });
 
     let mut out = args;
-    match provider_id.as_str() {
+    match provider_id {
         "claude" => {
             if have_model.is_none() {
                 out.extend(["--model".to_string(), model.clone()]);
@@ -535,6 +540,22 @@ mod tests {
                 "{stale}"
             );
         }
+    }
+
+    #[test]
+    fn a_pane_recorded_under_a_legacy_provider_alias_is_still_filled() {
+        // ReAgent P1 on #4116: `agentProvider` is the definition's provider as typed.
+        for alias in ["claude-code", "claude_code"] {
+            let meta = meta_with(alias, Some(json!({"model": "opus", "effort": "max"})));
+            let out = with_runtime_flags(&meta, s(&["--permission-mode", "default"]));
+            assert_eq!(after(&out, "--model").as_deref(), Some("opus"), "{alias}");
+            assert_eq!(after(&out, "--effort").as_deref(), Some("max"), "{alias}");
+        }
+        let meta = meta_with("codex-cli", Some(json!({"model": "gpt-5.4"})));
+        assert_eq!(
+            with_runtime_flags(&meta, s(&["exec", "--json", "-"])),
+            s(&["exec", "--json", "--model", "gpt-5.4", "-"])
+        );
     }
 
     #[test]
