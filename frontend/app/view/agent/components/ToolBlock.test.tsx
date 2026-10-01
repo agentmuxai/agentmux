@@ -134,6 +134,108 @@ describe("ToolBlock — panel mode", () => {
         expect(onHoldOpen).not.toHaveBeenCalled();
     });
 
+    // A Read is a few ms: its call and result can land in one stream flush, so
+    // the row is first drawn already finished and never shows a transition.
+    describe("a tool that finishes before its row is first drawn", () => {
+        it("is held open when its call was stamped moments ago (a live completion)", () => {
+            const onHoldOpen = vi.fn();
+            render(() => (
+                <ToolBlock
+                    node={{ ...baseTool, timestamp: Date.now() - 40 }}
+                    pinned={false}
+                    onTogglePin={() => {}}
+                    onHoldOpen={onHoldOpen}
+                />
+            ));
+            expect(onHoldOpen).toHaveBeenCalledTimes(1);
+        });
+
+        it("is not held when it was stamped long ago, or not at all (loaded history)", () => {
+            const onHoldOpen = vi.fn();
+            render(() => (
+                <ToolBlock
+                    node={{ ...baseTool, timestamp: Date.now() - 60_000 }}
+                    pinned={false}
+                    onTogglePin={() => {}}
+                    onHoldOpen={onHoldOpen}
+                />
+            ));
+            render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />);
+            expect(onHoldOpen).not.toHaveBeenCalled();
+        });
+
+        it("is not held when the user denied or canceled it", () => {
+            const onHoldOpen = vi.fn();
+            for (const status of ["denied", "canceled"] as const) {
+                render(() => (
+                    <ToolBlock
+                        node={{ ...baseTool, status, timestamp: Date.now() }}
+                        pinned={false}
+                        onTogglePin={() => {}}
+                        onHoldOpen={onHoldOpen}
+                    />
+                ));
+            }
+            expect(onHoldOpen).not.toHaveBeenCalled();
+        });
+
+        it("holds a node that arrives in a reused slot, finished and fresh", () => {
+            const onHoldOpen = vi.fn();
+            const [node, setNode] = createSignal<ToolNode>({ ...baseTool, id: "old", timestamp: Date.now() - 60_000 });
+            render(() => (
+                <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />
+            ));
+            expect(onHoldOpen).not.toHaveBeenCalled();
+            setNode({ ...baseTool, id: "new", timestamp: Date.now() - 10 });
+            expect(onHoldOpen).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("a Read's line range", () => {
+        const read = (over: Partial<ToolNode>): ToolNode => ({
+            ...baseTool,
+            tool: "Read",
+            toolName: "Read",
+            params: { file_path: "src/a.ts" },
+            ...over,
+        });
+
+        it("shows in the header while the read runs, from offset and limit", () => {
+            const { container } = render(() => (
+                <ToolBlock
+                    node={read({ status: "running", params: { file_path: "src/a.ts", offset: 120, limit: 60 } })}
+                    pinned={false}
+                    onTogglePin={() => {}}
+                />
+            ));
+            expect(container.querySelector(".agent-tool-range")?.textContent).toBe("L120–179");
+        });
+
+        it("shows the actual range, and the file's length, once the result is in", () => {
+            const { container } = render(() => (
+                <ToolBlock
+                    node={read({
+                        params: { file_path: "src/a.ts", offset: 120, limit: 500 },
+                        result: { content: "   120\tx", range: { startLine: 120, numLines: 24, totalLines: 143 } } as unknown as ToolNode["result"],
+                    })}
+                    pinned={true}
+                    onTogglePin={() => {}}
+                />
+            ));
+            expect(container.querySelector(".agent-tool-range")?.textContent).toBe("L120–143");
+            expect(container.querySelector(".agent-tool-read-range")?.textContent).toBe("lines 120–143 of 143");
+        });
+
+        it("has no chip for a whole-file read with no result yet, or for another tool", () => {
+            const { container } = render(() => (
+                <ToolBlock node={read({ status: "running" })} pinned={false} onTogglePin={() => {}} />
+            ));
+            expect(container.querySelector(".agent-tool-range")).toBeNull();
+            const other = render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />);
+            expect(other.container.querySelector(".agent-tool-range")).toBeNull();
+        });
+    });
+
     // ── Hover is not a trigger ────────────────────────────────────────
     // Asserts the core invariant of SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28:
     // hovering a completed tool row produces zero visible state change.
