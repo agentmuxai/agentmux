@@ -69,7 +69,8 @@ describe("tool descriptors — parity with the pre-migration facts", () => {
             const p = new ClaudeCodeStreamParser();
             const call = p.parseStreamEvent({ type: "tool_call", tool: r.name, id: "x", params: r.params } as any) as ToolNode;
             const done: ToolNode = { ...call, status: "success" };
-            expect(toolHeaderParts(done)).toEqual({ icon: r.icon, label: r.label, detail: r.detail });
+            // `range` is a Read's line range (tool-meta/read-range.ts): none of these rows set one.
+            expect(toolHeaderParts(done)).toEqual({ icon: r.icon, label: r.label, detail: r.detail, range: null });
             expect(call.summary).toBe(r.summary);
             expect(isContentFirstTool(done)).toBe(r.contentFirst);
             expect(startsAtTop(done)).toBe(r.top);

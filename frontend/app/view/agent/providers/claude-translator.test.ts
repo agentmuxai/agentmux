@@ -584,4 +584,56 @@ describe("ClaudeTranslator", () => {
             expect(events).toHaveLength(0);
         });
     });
+
+
+    // ── A Read's line numbers ───────────────────────────────────────────────
+    describe("a Read's structured result", () => {
+        const resultOf = (e: unknown): unknown => (e as { result: unknown }).result;
+        const resultEvent = (content: unknown, toolUseResult: unknown) => ({
+            type: "user",
+            message: { role: "user", content: [{ type: "tool_result", tool_use_id: "r1", content }] },
+            tool_use_result: toolUseResult,
+        });
+
+        it("keeps where the text sits in the file, and never the file text beside it", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate(
+                resultEvent("     1\tone\n     2\ttwo", {
+                    type: "text",
+                    file: { filePath: "a.ts", content: "SECRET FILE TEXT", numLines: 2, startLine: 1, totalLines: 214 },
+                })
+            );
+            expect(events[0]).toMatchObject({
+                type: "tool_result",
+                result: { content: "     1\tone\n     2\ttwo", range: { startLine: 1, numLines: 2, totalLines: 214 } },
+            });
+            expect(JSON.stringify(events[0])).not.toContain("SECRET FILE TEXT");
+        });
+
+        it("notes a read the CLI cut short at its token cap", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate(
+                resultEvent("text", {
+                    type: "text",
+                    file: { filePath: "a.rs", content: "x", numLines: 1082, startLine: 1, totalLines: 1320, truncatedByTokenCap: true },
+                })
+            );
+            expect((resultOf(events[0]) as { range: unknown }).range).toEqual({
+                startLine: 1,
+                numLines: 1082,
+                totalLines: 1320,
+                truncatedByTokenCap: true,
+            });
+        });
+
+        it("adds nothing for an image or any other structured result", () => {
+            const t = new ClaudeTranslator();
+            const img = t.translate(
+                resultEvent([{ type: "image", source: { type: "base64", data: "AA" } }], { type: "image", file: { base64: "AA" } })
+            );
+            expect(resultOf(img[0])).toEqual([{ type: "image", source: { type: "base64", data: "AA" } }]);
+            const plain = t.translate(resultEvent("hello", { type: "unchanged" }));
+            expect(resultOf(plain[0])).toEqual({ content: "hello" });
+        });
+    });
 });

@@ -365,9 +365,12 @@ $transcript-preview-max-height: calc(50vh / 3);
                 font-weight: 400;
             }
 
-            // A reducer-set note on a status (e.g. "cleared via muxspect").
+            // A reducer-set note on a status (e.g. "cleared via muxspect"),
+            // and a Read's line range ("L120–179 of 456"), which must stay
+            // visible when a long path is ellipsized beside it.
             .agent-tool-status-note,
-            .agent-tool-duration {
+            .agent-tool-duration,
+            .agent-tool-range {
                 flex-shrink: 0;
                 color: var(--secondary-text-color);
                 font-size: 11px;
@@ -1558,6 +1561,21 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     // === Read Tool ===
     .agent-tool-read {
+        // The path, and beside it which lines were read.
+        .agent-tool-file-path-row {
+            display: flex;
+            align-items: baseline;
+            gap: var(--space-2);
+            min-width: 0;
+        }
+
+        .agent-tool-read-range {
+            flex-shrink: 0;
+            font-size: 11px;
+            color: var(--secondary-text-color);
+            font-family: var(--font-mono);
+        }
+
         .agent-tool-file-path {
             color: var(--accent-color);
             margin-bottom: var(--space-1);

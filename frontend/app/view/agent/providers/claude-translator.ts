@@ -35,6 +35,24 @@ export function textOfContentBlocks(content: unknown): string | null {
  *
  * Events that already match StreamEvent format are passed through directly.
  */
+/** The line numbers in a Read's structured `tool_use_result`, or null for any other result. */
+function readFileRange(
+    structured: unknown
+): { startLine: number; numLines: number; totalLines?: number; truncatedByTokenCap?: true } | null {
+    const outer = structured && typeof structured === "object" ? (structured as { file?: unknown }).file : null;
+    if (!outer || typeof outer !== "object") return null;
+    const file = outer as Record<string, unknown>;
+    const { startLine, numLines, totalLines } = file;
+    if (typeof startLine !== "number" || !Number.isFinite(startLine)) return null;
+    if (typeof numLines !== "number" || !Number.isFinite(numLines)) return null;
+    return {
+        startLine,
+        numLines,
+        ...(typeof totalLines === "number" && Number.isFinite(totalLines) ? { totalLines } : {}),
+        ...(file.truncatedByTokenCap === true ? { truncatedByTokenCap: true as const } : {}),
+    };
+}
+
 export class ClaudeTranslator implements OutputTranslator {
     /**
      * `replay`: translating stored history. A replayed user line has no wire
@@ -432,12 +450,22 @@ export class ClaudeTranslator implements OutputTranslator {
                       ? { content: blockText }
                       : block.content;
                 const useStructured = canApplyStructured && blockContentIsString;
+                // A Read's structured result carries where the text sits in the
+                // file: `startLine`, `numLines`, `totalLines`, and whether the
+                // CLI's token cap cut it short. Keep those numbers (never the
+                // file text or base64 beside them) so the row can say which lines
+                // were read (tool-meta/read-range.ts).
+                const range = !useStructured && toolResultBlocks.length === 1 ? readFileRange(structuredResult) : null;
                 results.push({
                     type: "tool_result",
                     tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
                     id: toolId,
                     status: isError ? "failed" : "success",
-                    result: useStructured ? structuredResult : fallback,
+                    result: useStructured
+                        ? structuredResult
+                        : range && blockContentIsString
+                          ? { content: block.content, range }
+                          : fallback,
                 });
             }
         }
