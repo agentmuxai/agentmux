@@ -19,7 +19,7 @@
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
 import { patchRuntime } from "../../runtime-apply";
 import { PROVIDER_FLAGS_META_KEY } from "../../launch-args";
-import { effectiveModel, effortNotUsedReason } from "../../runtime-capabilities";
+import { effectiveModel, effectiveRuntime, effortNotUsedReason } from "../../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -53,10 +53,19 @@ function runtimeError(error: string): SlashResult {
     return { kind: "error", message: `failed to update runtime config: ${error}` };
 }
 
+/**
+ * The runtime the pane actually has: the agent definition's own `--model` /
+ * `--effort` win over the stored selection, so choices and `/runtime` show them.
+ */
+function shownRuntime(ctx: SlashCommandContext): AgentRuntimeConfig {
+    const meta = ctx.block()?.meta;
+    return effectiveRuntime(getRuntimeConfig(meta), meta?.[PROVIDER_FLAGS_META_KEY]);
+}
+
 // ── /model ────────────────────────────────────────────────────────────
 
 function modelChoices(ctx: SlashCommandContext): SlashChoice[] {
-    const current = getRuntimeConfig(ctx.block()?.meta).model;
+    const current = shownRuntime(ctx).model;
     // Per-provider model list — Claude shows opus/sonnet/haiku, codex shows the
     // gpt-5.x line, etc. Providers without a `models` list (kimi/openclaw/pi/
     // copilot/gemini/qwen/muxcode pick their model in their own config) show no
@@ -87,7 +96,7 @@ const modelCommand: SlashCommand = {
 // ── /effort ───────────────────────────────────────────────────────────
 
 function effortChoices(ctx: SlashCommandContext): SlashChoice[] {
-    const current = getRuntimeConfig(ctx.block()?.meta).effort;
+    const current = shownRuntime(ctx).effort;
     const make = (
         value: string,
         label: string,
@@ -240,7 +249,7 @@ const runtimeCommand: SlashCommand = {
     arg: { kind: "none" },
     availability: "any-agent",
     handler: async (ctx): Promise<SlashResult> => {
-        const r = getRuntimeConfig(ctx.block()?.meta);
+        const r = shownRuntime(ctx);
         const parts = [
             `permission: ${r.permissionMode}`,
             `model: ${r.model}`,

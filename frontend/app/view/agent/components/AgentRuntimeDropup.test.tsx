@@ -368,3 +368,37 @@ describe("AgentRuntimeDropup — effort only where it applies", () => {
         expect(screen.getByRole("button", { name: /Runtime settings/i }).textContent).not.toMatch(/high/);
     });
 });
+
+describe("AgentRuntimeDropup — shows what the agent really runs, and a pick holds", () => {
+    // A definition that pins Opus (its provider_flags), under a stored Sonnet selection.
+    const pinned = {
+        meta: {
+            "agent:runtime": { model: "sonnet", permissionMode: "default", effort: "high" },
+            "agent:provider_flags": "--model opus --effort low",
+        },
+    };
+    const renderPinned = () =>
+        render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={() => pinned as any} providerId="claude" />);
+
+    it("the label and the selected rows are the definition's model and effort, not the stored selection", async () => {
+        renderPinned();
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(trigger.textContent).toMatch(/Opus/);
+        expect(trigger.textContent).not.toMatch(/Sonnet/);
+        expect(trigger.textContent).toMatch(/low/);
+        await userEvent.click(trigger);
+        const selected = screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true");
+        const names = selected.map((o) => o.textContent ?? "");
+        expect(names.some((n) => /Opus/i.test(n))).toBe(true);
+        expect(names.some((n) => /^low/i.test(n))).toBe(true);
+        expect(names.some((n) => /Sonnet/i.test(n))).toBe(false);
+    });
+
+    it("picking another model sends the pick (patchRuntime then takes the definition's flag out of the pane)", async () => {
+        renderPinned();
+        await userEvent.click(screen.getByRole("button", { name: /Runtime settings/i }));
+        await userEvent.click(screen.getAllByRole("option").find((o) => /Sonnet/i.test(o.textContent ?? ""))!);
+        expect(patchRuntime).toHaveBeenCalledTimes(1);
+        expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "sonnet" });
+    });
+});

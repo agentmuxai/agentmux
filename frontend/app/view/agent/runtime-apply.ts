@@ -38,7 +38,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { staticTabId } from "@/app/store/global";
 import { buildPaneArgs, getRuntimeConfig } from "./buildRuntimeArgs";
-import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { isPersistentLaunch, parseProviderFlags, PROVIDER_FLAGS_META_KEY, withoutOverriddenFlags } from "./launch-args";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
 
@@ -112,8 +112,8 @@ interface RuntimeChain {
     tail: Promise<void>;
     /** Changes queued or running. */
     pending: number;
-    /** The config the last successful change wrote, with when. */
-    last?: { config: AgentRuntimeConfig; at: number };
+    /** The config (and the pane's provider flags) the last successful change wrote, with when. */
+    last?: { config: AgentRuntimeConfig; flags: string; at: number };
 }
 
 const chains = new Map<string, RuntimeChain>();
@@ -151,10 +151,32 @@ export function patchRuntime(
     chain.pending++;
 
     const run = chain.tail.then(async () => {
-        const recent = chain.last && Date.now() - chain.last.at < META_CATCH_UP_MS ? chain.last.config : undefined;
-        const updated: AgentRuntimeConfig = { ...(recent ?? getRuntimeConfig(getMeta())), ...patch };
-        await applyRuntimeChange(blockId, provider, updated, getMeta());
-        chain.last = { config: updated, at: Date.now() };
+        const meta = getMeta();
+        const recent = chain.last && Date.now() - chain.last.at < META_CATCH_UP_MS ? chain.last : undefined;
+        const updated: AgentRuntimeConfig = { ...(recent?.config ?? getRuntimeConfig(meta)), ...patch };
+
+        // A pick has to win over the agent definition's own flags. They are
+        // appended after the runtime's, so a `--model` among them would
+        // otherwise override the pick: the menu would show one model and the
+        // process run another. Take the replaced flags out of THIS PANE'S copy;
+        // the agent definition is untouched.
+        const current = recent?.flags ?? parseProviderFlags(meta?.[PROVIDER_FLAGS_META_KEY]).join(" ");
+        const flags = withoutOverriddenFlags(current, {
+            model: patch.model !== undefined,
+            effort: patch.effort !== undefined,
+            permissionMode: patch.permissionMode !== undefined,
+        });
+        if (flags !== current) {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: MOS.makeORef("block", blockId),
+                // `MetaType` is a closed list that doesn't name this key; the
+                // launch path writes it as a plain record too.
+                meta: { [PROVIDER_FLAGS_META_KEY]: flags } as MetaType,
+            });
+        }
+
+        await applyRuntimeChange(blockId, provider, updated, { ...meta, [PROVIDER_FLAGS_META_KEY]: flags });
+        chain.last = { config: updated, flags, at: Date.now() };
         return updated;
     });
     chain.tail = run.then(

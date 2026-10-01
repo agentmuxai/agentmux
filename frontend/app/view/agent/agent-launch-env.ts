@@ -16,6 +16,8 @@ import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
+import { parseProviderFlags } from "./launch-args";
+import { effortFromFlags, modelFromFlags } from "./runtime-capabilities";
 
 /**
  * Check that Node.js and npm are available for a provider installed via
@@ -195,9 +197,22 @@ export async function resolveEffectiveLaunchProvider(agent: AgentDefinition): Pr
 export function resolveInitialRuntimeConfig(
     overridesModel: string | undefined,
     providerModels: ProviderModel[] | undefined,
+    /**
+     * The agent definition's own `provider_flags`. Its `--model` / `--effort` are
+     * what the agent is DEFINED to run, so they seed the menu: otherwise the menu
+     * would start on the catalog default while the process runs the definition's.
+     * An explicit model chosen at launch still wins.
+     */
+    providerFlags?: unknown,
 ): AgentRuntimeConfig {
-    const model = overridesModel || providerModels?.find((m) => m.default)?.value || DEFAULT_RUNTIME_CONFIG.model;
-    return { ...DEFAULT_RUNTIME_CONFIG, model };
+    const flags = parseProviderFlags(providerFlags);
+    const model =
+        overridesModel ||
+        modelFromFlags(flags) ||
+        providerModels?.find((m) => m.default)?.value ||
+        DEFAULT_RUNTIME_CONFIG.model;
+    const effort = effortFromFlags(flags) ?? DEFAULT_RUNTIME_CONFIG.effort;
+    return { ...DEFAULT_RUNTIME_CONFIG, model, effort: effort as AgentRuntimeConfig["effort"] };
 }
 
 /**

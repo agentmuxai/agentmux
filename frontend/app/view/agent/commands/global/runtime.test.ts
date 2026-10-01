@@ -55,3 +55,25 @@ describe("/effort", () => {
         expect(r.message).toContain("resync refused");
     });
 });
+
+describe("/runtime and the choice lists show what the agent really runs", () => {
+    const meta = {
+        "agent:runtime": { model: "sonnet", permissionMode: "bypass", effort: "high" },
+        "agent:provider_flags": "--model opus --effort max",
+    };
+    const c = { blockId: "b1", provider: () => ({ id: "claude", models: [{ value: "sonnet", label: "Sonnet" }, { value: "opus", label: "Opus" }] }), block: () => ({ meta }) } as unknown as SlashCommandContext;
+
+    it("/runtime prints the definition's model and effort", async () => {
+        const cmd = RUNTIME_COMMANDS.find((x) => x.name === "runtime")!;
+        const r = (await cmd.handler(c, "")) as { message: string };
+        expect(r.message).toContain("model: opus");
+        expect(r.message).toContain("effort: max");
+        expect(r.message).not.toContain("model: sonnet");
+    });
+
+    it("/model marks the model that runs as the current one", () => {
+        const cmd = RUNTIME_COMMANDS.find((x) => x.name === "model")!;
+        const choices = (cmd.arg as any).choices(c) as { value: string; current?: boolean }[];
+        expect(choices.find((x) => x.current)?.value).toBe("opus");
+    });
+});

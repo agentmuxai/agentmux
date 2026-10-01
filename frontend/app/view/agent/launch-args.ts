@@ -95,3 +95,54 @@ export function withProviderFlags(args: string[], raw: unknown): string[] {
     const flags = parseProviderFlags(raw);
     return flags.length > 0 ? [...args, ...flags] : args;
 }
+
+/** Which runtime settings a change is about to take over from the flags. */
+export interface OverriddenRuntime {
+    model?: boolean;
+    effort?: boolean;
+    permissionMode?: boolean;
+}
+
+const FLAGS_WITH_VALUE: Record<keyof OverriddenRuntime, string[]> = {
+    model: ["--model", "-m"],
+    effort: ["--effort"],
+    permissionMode: ["--permission-mode"],
+};
+const FLAGS_ALONE: Record<keyof OverriddenRuntime, string[]> = {
+    model: [],
+    effort: [],
+    permissionMode: ["--dangerously-skip-permissions", "--yolo"],
+};
+
+/**
+ * `provider_flags` without the flags for the runtime settings a user has just
+ * chosen in the menu. An agent definition's flags are appended AFTER the
+ * runtime's, so a `--model` among them wins over the menu — the menu then shows
+ * one thing, the process runs another, and picking a model changes nothing.
+ * When the user picks, the pick has to win: this removes the flags it replaces
+ * from THIS PANE'S copy of the flags (the agent definition is untouched, so a
+ * fresh launch of the agent still starts as it is defined).
+ *
+ * Handles `--flag value`, `-m value` and `--flag=value`. Returns the flags as
+ * the single string they are stored as.
+ */
+export function withoutOverriddenFlags(raw: unknown, overridden: OverriddenRuntime): string {
+    const tokens = parseProviderFlags(raw);
+    const withValue = (Object.keys(overridden) as (keyof OverriddenRuntime)[])
+        .filter((k) => overridden[k])
+        .flatMap((k) => FLAGS_WITH_VALUE[k]);
+    const alone = (Object.keys(overridden) as (keyof OverriddenRuntime)[])
+        .filter((k) => overridden[k])
+        .flatMap((k) => FLAGS_ALONE[k]);
+    const out: string[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (withValue.includes(t)) {
+            i++; // and its value
+            continue;
+        }
+        if (alone.includes(t) || withValue.some((f) => t.startsWith(`${f}=`))) continue;
+        out.push(t);
+    }
+    return out.join(" ");
+}
