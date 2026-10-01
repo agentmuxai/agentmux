@@ -47,6 +47,15 @@ describe("sysinfoPaneTab", () => {
         }
     });
 
+    // The chart runs edge to edge: without this, .block-content adds 5px of padding
+    // on every side, so the axis numbers sat ~6px in and the chart never touched
+    // the pane's right edge.
+    it("opts out of the block's 5px padding, so the chart can run to the pane's edges", () => {
+        for (const view of ["sysinfo", "cpuplot"] as const) {
+            expect(sysinfoPaneTab(view).capabilities?.noPadding).toBe(true);
+        }
+    });
+
     it("titles the pane with its plot type, read from the block's meta, and follows it", () => {
         createRoot((dispose) => {
             const { ctx, setMeta } = fakeCtx({ "sysinfo:type": "Mem" });

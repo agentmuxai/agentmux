@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 import {
     buildPlotAxisLabelOptions,
     computeAutoMaxY,
+    computeLeftMarginForTicks,
     computePlotMargins,
+    xTickFitsBeforeRightEdge,
+    PLOT_EDGE_PAD_PX,
+    PLOT_TICK_GUTTER_PX,
     getGapThresholdMs,
     resolveDomainBound,
 } from "./sysinfo-util";
@@ -27,11 +31,62 @@ describe("computePlotMargins", () => {
         expect(titled).toMatchObject({ marginRight: untitled.marginRight, marginBottom: untitled.marginBottom, marginLeft: untitled.marginLeft });
     });
 
-    it("never returns a non-positive margin for a non-sparkline panel (tick text still needs room)", () => {
+    it("runs the chart flush against the pane's right edge", () => {
+        for (const title of [true, false]) expect(computePlotMargins(false, title).marginRight).toBe(0);
+    });
+
+    it("never returns a non-positive top/bottom/left margin for a non-sparkline panel (tick text still needs room)", () => {
         for (const title of [true, false]) {
-            const m = computePlotMargins(false, title);
-            for (const v of Object.values(m)) expect(v).toBeGreaterThan(0);
+            const { marginTop, marginBottom, marginLeft } = computePlotMargins(false, title);
+            for (const v of [marginTop, marginBottom, marginLeft]) expect(v).toBeGreaterThan(0);
         }
+    });
+});
+
+describe("xTickFitsBeforeRightEdge", () => {
+    // 100 s window across a 500 px wide plot with a 20 px left margin and no right margin.
+    const fits = (secsFromRight: number) =>
+        xTickFitsBeforeRightEdge(100_000 - secsFromRight * 1000, 0, 100_000, 500, 20, 0);
+
+    it("keeps a tick label with room for half its width before the right edge", () => {
+        expect(fits(50)).toBe(true);
+        expect(fits(10)).toBe(true); // 10 s = 48 px from the edge
+    });
+
+    it("hides the label of a tick so close to the flush right edge that it would be clipped", () => {
+        expect(fits(0)).toBe(false);
+        expect(fits(2)).toBe(false); // ~10 px from the edge
+    });
+
+    it("a right margin makes room: the same tick fits once the plot stops short of the edge", () => {
+        const d = 100_000 - 2000;
+        expect(xTickFitsBeforeRightEdge(d, 0, 100_000, 500, 20, 40)).toBe(true);
+    });
+
+    it("leaves a degenerate domain alone", () => {
+        expect(xTickFitsBeforeRightEdge(5, 5, 5, 500, 20, 0)).toBe(true);
+    });
+});
+
+describe("computeLeftMarginForTicks", () => {
+    it("leaves 1px between the plot's left edge and the widest y tick label (the pane adds its 1px border)", () => {
+        expect(PLOT_EDGE_PAD_PX).toBe(1);
+        // margin = edge pad + label width + the gutter Plot puts between a label and the axis
+        expect(computeLeftMarginForTicks(18)).toBe(PLOT_EDGE_PAD_PX + 18 + PLOT_TICK_GUTTER_PX);
+    });
+
+    it("rounds a fractional width up, so the label never crosses the edge", () => {
+        expect(computeLeftMarginForTicks(17.2)).toBe(PLOT_EDGE_PAD_PX + 18 + PLOT_TICK_GUTTER_PX);
+    });
+
+    it("grows with a wider label (e.g. a rate with units) and shrinks with a narrower one", () => {
+        expect(computeLeftMarginForTicks(40)).toBeGreaterThan(computeLeftMarginForTicks(18));
+        expect(computeLeftMarginForTicks(6)).toBeLessThan(computeLeftMarginForTicks(18));
+    });
+
+    it("falls back to the default left margin when nothing could be measured", () => {
+        const fallback = computePlotMargins(false, false).marginLeft;
+        for (const w of [0, NaN, -1]) expect(computeLeftMarginForTicks(w)).toBe(fallback);
     });
 });
 
