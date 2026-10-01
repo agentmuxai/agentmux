@@ -1,7 +1,7 @@
 # The Read tool in the agent pane: which lines, why it sometimes collapses, and what the preview does and could do
 
 **Date:** 2026-10-01
-**Status:** analysis. §3 (the line range) and §4 (the collapse) are implemented in the PR that adds this doc. §5–§7 are findings and recommendations; none is implemented.
+**Status:** analysis. §3 (the line range) and §4 (the collapse) are implemented in #4159; §3.1 (Edit and Write ranges, and the `start:end` format before the path) in the PR after it. §5–§7 are findings and recommendations; none is implemented.
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"in the read tool (agent pane) we want to know what range of lines are being read. Also I notice it sometimes comes out collapsed (instead of expanded until off the screen, then collapsing). Also investigate what previews and code highlighting we can get for Read, what is there currently, what is available?"*
 **Related:** `SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md`, `PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`, `SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md`, `SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md`, `SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md`.
@@ -47,7 +47,7 @@ No notebook results appeared in this sample; the shape of one is unverified.
 
 ## 3. The line range
 
-**Sources, in order of reliability** (`tool-meta/read-range.ts`):
+**Sources, in order of reliability** (`tool-meta/file-range.ts`):
 1. `result.range`: the CLI's `startLine`, `numLines`, `totalLines` and cap flag. The translator now keeps these small numbers from the structured result for a single-result text read, and never the file text or base64 beside them.
 2. The result text: the `<N>\t` gutter's first and last numbers, and the `showing lines A-B of N total` note. This covers results recorded before (1) was kept, and history replay.
 3. The call: `offset`/`limit` (Claude's, 1-based, confirmed by `startLine: 1` for a default read), `start_line`/`end_line`, or `pages`. The only source while the read is running, and wrong once the file turns out shorter than asked, which is why 1 and 2 outrank it. Another provider's `offset` is not guessed at: Gemini's may be 0-based.
@@ -56,6 +56,25 @@ No notebook results appeared in this sample; the shape of one is unverified.
 - Header chip (`.agent-tool-range`, before the path inside the name run, so a long path's ellipsis cuts the path and never the range): `120:179`, `120:179 of 456`, `1:214` for a whole file, `pages 1–5`. It shows from the moment the call lands, from the parameters, and updates to the actual range when the result arrives.
 - Above the preview: `lines 120–179 of 456`, `all 214 lines`, or `lines 1–1082 of 1320 · cut off at the token cap`.
 - The plain-text header form (used by `/btw`) ends with the chip.
+
+### 3.1 Edit and Write, and the format
+
+The owner asked for the same on Write: *"if it is writing to only a part of the file, are line numbers available?"* From the same survey of real transcripts (4,400 file-change results):
+
+| Tool | Result type | Count | What it carries |
+|---|---|---|---|
+| Edit | (none) | 3,829 | `structuredPatch`: hunks with `oldStart`, `oldLines`, `newStart`, `newLines`, and the diff `lines`; also `oldString`, `newString`, `replaceAll`, and `originalFile` (the whole old file) |
+| Write | `create` | 540 | `content`, an **empty** `structuredPatch` |
+| Write | `update` | 64 | `content`, and a `structuredPatch` against the file it replaced |
+
+**Write has no partial form**: its parameters are `file_path` and `content`, so it always writes the whole file. The answer to "is it writing only part of a file" is Edit. Both are covered now:
+- **Edit**: the changed lines, in the file as it is after the edit, from the patch. A hunk carries three lines of context either side, so the span runs from the first to the last `+`/`-` line, not the hunk's own bounds. A deletion sits where the next line now is. Several hunks show as `5:11, 40:46`, or `10:31 · 3 places` beyond two. It is known only once the result is in: before that the call has an old and a new string, and the pane doesn't have the file.
+- **Write**: `1:N` from the content being written, known while it runs. The preview line says `new file, N lines` for a create, or `all N lines · differs at 16:118` for an overwrite.
+- The translator keeps only these numbers: never the diff text, and never `originalFile`.
+
+**Format.** The header chip is `start:end` (`33:334`), placed **before the path** inside the name run: `Read 33:334 C:\…`. A long path's ellipsis then cuts the path and never the range. A single line is `42:42`, because a lone number reads as a count. Whole files read `1:214`. When a Read covers only part of a known-length file it adds `of 456`. The long form above the preview stays in words.
+
+Not done: a diff view with real line numbers in its gutter. The patch hunks have what it needs; `DiffViewer` builds its diff from the old and new strings and shows none.
 
 ## 4. Why a Read sometimes comes out collapsed
 

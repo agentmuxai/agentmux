@@ -938,3 +938,39 @@ describe("ToolBlock — panel body mounts on first open, then stays", () => {
         expect(container.querySelector(".agent-tool-overlay")).toBe(body);
     });
 });
+
+describe("an Edit's and a Write's line range in the header", () => {
+    const fileTool = (over: Partial<ToolNode>): ToolNode => ({ ...baseTool, id: "tc-f", ...over });
+
+    it("shows an Edit's changed lines before the path once the result is in", () => {
+        const { container } = render(() => (
+            <ToolBlock
+                node={fileTool({
+                    tool: "Edit",
+                    toolName: "Edit",
+                    params: { file_path: "src/a.ts", old_string: "a", new_string: "b" },
+                    result: { content: "ok", patch: [{ start: 109, end: 157, added: 18, removed: 5 }] } as unknown as ToolNode["result"],
+                })}
+                pinned={false}
+                onTogglePin={() => {}}
+            />
+        ));
+        expect(container.querySelector(".agent-tool-name")?.textContent).toBe("✏️ Edit 109:157 src/a.ts");
+    });
+
+    it("shows a Write's whole file while it runs", () => {
+        const { container } = render(() => (
+            <ToolBlock
+                node={fileTool({
+                    tool: "Write",
+                    toolName: "Write",
+                    status: "running",
+                    params: { file_path: "src/a.ts", content: "a\nb\nc\n" },
+                })}
+                pinned={false}
+                onTogglePin={() => {}}
+            />
+        ));
+        expect(container.querySelector(".agent-tool-name")?.textContent).toBe("📝 Write 1:3 src/a.ts");
+    });
+});
