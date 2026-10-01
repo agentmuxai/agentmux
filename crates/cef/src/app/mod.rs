@@ -685,31 +685,44 @@ wrap_app! {
                 // backend (regression testing / per-machine override).
                 #[cfg(target_os = "linux")]
                 {
+                    // Only the browser process decides. A child inherits the
+                    // browser's --ozone-platform, or reads the choice from
+                    // OZONE_CHOICE_ENV (set below, inherited by every child).
+                    // Recomputing in a child could disagree with the browser's
+                    // XWayland fallback and run X11 against an unreachable
+                    // server.
+                    const OZONE_CHOICE_ENV: &str = "AGENTMUX_INTERNAL_OZONE_PLATFORM";
+                    let oz_key = CefString::from("ozone-platform");
+                    let is_child = process_type.is_some();
                     let forced = std::env::var("AGENTMUX_OZONE_PLATFORM")
                         .ok()
                         .filter(|s| !s.is_empty());
-                    let ozone = forced.or_else(|| {
-                        let on_wayland = std::env::var("WAYLAND_DISPLAY")
-                            .map(|s| !s.is_empty())
-                            .unwrap_or(false);
-                        if !on_wayland {
-                            return None;
+                    let ozone = if is_child {
+                        if cmd.has_switch(Some(&oz_key)) != 0 {
+                            None
+                        } else {
+                            std::env::var(OZONE_CHOICE_ENV).ok().filter(|s| !s.is_empty())
                         }
-                        // Track 1 window transparency (uniform whole-window
-                        // alpha, SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01) is
-                        // delivered via the EWMH `_NET_WM_WINDOW_OPACITY` X11
-                        // property — native Wayland has no equivalent protocol
-                        // Chromium supports. Route transparent windows through
-                        // XWayland (the universal default until CEF 148) so the
-                        // property applies; opaque users keep native Wayland.
-                        // An explicit AGENTMUX_OZONE_PLATFORM still wins above.
-                        if read_window_transparent_setting() {
-                            // Only the browser process probes; CEF passes its
-                            // --ozone-platform choice on to the child processes.
-                            // Without an X cookie Chromium exits before any
-                            // window opens (#4011), so stay on native Wayland
-                            // rather than fail to start.
-                            if process_type.is_none() {
+                    } else {
+                        forced.or_else(|| {
+                            let on_wayland = std::env::var("WAYLAND_DISPLAY")
+                                .map(|s| !s.is_empty())
+                                .unwrap_or(false);
+                            if !on_wayland {
+                                return None;
+                            }
+                            // Track 1 window transparency (uniform whole-window
+                            // alpha, SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01) is
+                            // delivered via the EWMH `_NET_WM_WINDOW_OPACITY` X11
+                            // property — native Wayland has no equivalent protocol
+                            // Chromium supports. Route transparent windows through
+                            // XWayland (the universal default until CEF 148) so the
+                            // property applies; opaque users keep native Wayland.
+                            // An explicit AGENTMUX_OZONE_PLATFORM still wins above.
+                            if read_window_transparent_setting() {
+                                // Without an X cookie Chromium exits before any
+                                // window opens (#4011), so stay on native Wayland
+                                // rather than fail to start.
                                 xauthority::ensure_xauthority();
                                 if !xauthority::xwayland_reachable() {
                                     tracing::warn!(
@@ -717,20 +730,22 @@ wrap_app! {
                                     );
                                     return Some("wayland".to_string());
                                 }
+                                tracing::info!(
+                                    "window:transparent=true → ozone-platform=x11 (XWayland) for _NET_WM_WINDOW_OPACITY"
+                                );
+                                Some("x11".to_string())
+                            } else {
+                                Some("wayland".to_string())
                             }
-                            tracing::info!(
-                                "window:transparent=true → ozone-platform=x11 (XWayland) for _NET_WM_WINDOW_OPACITY"
-                            );
-                            Some("x11".to_string())
-                        } else {
-                            Some("wayland".to_string())
-                        }
-                    });
+                        })
+                    };
                     if let Some(platform) = ozone {
-                        if platform == "x11" && process_type.is_none() {
-                            xauthority::ensure_xauthority();
+                        if !is_child {
+                            if platform == "x11" {
+                                xauthority::ensure_xauthority();
+                            }
+                            std::env::set_var(OZONE_CHOICE_ENV, &platform);
                         }
-                        let oz_key = CefString::from("ozone-platform");
                         let oz_val = CefString::from(platform.as_str());
                         cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
                         let _ = crate::app::SELECTED_OZONE_PLATFORM.set(platform);
