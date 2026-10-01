@@ -99,6 +99,23 @@ describe("fileRangeOf: Read", () => {
     });
 });
 
+// ReAgent on #4165: a call that did not go through reached none of the lines it names.
+describe("fileRangeOf: a call that did not go through", () => {
+    it.each(["failed", "denied", "canceled"] as const)("has no range for a %s Write, Read or Edit", (status) => {
+        const base = { collapsed: true, summary: "", id: "t", type: "tool" as const, status };
+        expect(fileRangeOf({ ...base, tool: "Write", toolName: "Write", params: { content: "a\nb" } } as ToolNode)).toBeNull();
+        expect(fileRangeOf({ ...base, tool: "Read", toolName: "Read", params: { file_path: "a", offset: 1, limit: 5 } } as ToolNode)).toBeNull();
+        expect(fileRangeOf({ ...base, tool: "Edit", toolName: "Edit", params: {}, result: { patch: [{ start: 1, end: 2 }] } } as ToolNode)).toBeNull();
+    });
+
+    it("still has one while the call is running or waiting for approval", () => {
+        for (const status of ["running", "pending_approval"] as const) {
+            const w = { type: "tool", id: "t", tool: "Write", toolName: "Write", params: { content: "a\nb" }, status, collapsed: true, summary: "" } as ToolNode;
+            expect(fileRangeOf(w)).toMatchObject({ start: 1, end: 2 });
+        }
+    });
+});
+
 const tool = (toolName: string, params: Record<string, unknown>, result?: unknown): ToolNode =>
     ({ type: "tool", id: "t", tool: "Edit", toolName, params, result, status: "success", collapsed: true, summary: "" }) as ToolNode;
 
