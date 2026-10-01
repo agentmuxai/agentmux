@@ -31,9 +31,11 @@ export function useLiveFeedRollOff(opts: {
     const liveFeedOn = (): boolean =>
         liveFeedSetting && liveFeedSupported(outputFormat(), block()?.meta?.["controller"] as string | undefined);
     // Whether the reader follows the bottom — handed over by the document view.
-    let followingBottom: Accessor<boolean> = () => true;
+    // Held in a signal so the backstop below re-runs when it's handed over.
+    const [followingBottomSrc, setFollowingBottomSrc] = createSignal<Accessor<boolean>>(() => true);
+    const followingBottom = (): boolean => followingBottomSrc()();
     const setFollowingBottom = (f: Accessor<boolean>): void => {
-        followingBottom = f;
+        setFollowingBottomSrc(() => f);
     };
     // Turns rolled off the front since mount, and the gap rows between kept turns.
     const [rolledOffTurns, setRolledOffTurns] = createSignal(0);
@@ -122,12 +124,23 @@ export function useLiveFeedRollOff(opts: {
     // Backstop for paths that add many turns at once without a turn end or a
     // send (a restore, a large history load): a pass whenever the feed first
     // holds clearly more turns than it keeps. A memo, so it fires on the
-    // transition, not on every flush.
+    // transition, not on every flush. A pass made while the reader was up in
+    // older rows may keep them all, so it runs again once they're back at the
+    // bottom.
     const feedOverBudget = createMemo(() => liveFeedOn() && feedOverLimits(paneModel.document(), liveFeedTurns));
     createEffect(
         on(feedOverBudget, (over) => {
             if (over) scheduleRollOff();
         })
+    );
+    createEffect(
+        on(
+            followingBottom,
+            (atBottom) => {
+                if (atBottom && untrack(feedOverBudget)) scheduleRollOff();
+            },
+            { defer: true }
+        )
     );
 
     // Roll-off points besides the history load and turn end (below): the next
