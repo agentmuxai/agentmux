@@ -443,6 +443,12 @@ fn extract_jwt_claims(token: &str) -> (String, String) {
 }
 
 
+/// Serializes every test that touches process-global state: the login statics
+/// above and the `AGENTMUX_MUXBUS_REST_URL` / `AGENTMUX_MUXBUS_WS_URL`
+/// environment overrides (`cloud_subscriber`'s session test shares it).
+#[cfg(test)]
+pub(crate) static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,7 +531,7 @@ Connection: close
     // in this file on parallel threads of the same process by default, so
     // any two tests that drive a real flow through those statics race each
     // other unless serialized here.
-    static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use super::TEST_SERIAL;
 
     // The superseded-login guarantee: starting flow B while flow A is pending
     // must abort A rather than leaving two flows both polling (and both able
