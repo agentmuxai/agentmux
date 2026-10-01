@@ -8,6 +8,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_output(engine, state);
     register_agent_process_list(engine, state);
     register_agent_tracked_blocks(engine, state);
+    register_agent_open_panes(engine, state);
     register_agent_kill_process(engine, state);
     register_agent_kill_tree(engine, state);
 }
@@ -77,6 +78,85 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+/// `agent.open-panes`: every agent pane in this instance, wherever it is.
+/// A renderer only knows the panes in its own window, so "is this agent
+/// open?" asked of a renderer misses one in a floating or other window —
+/// My agents then offered a reattach for an agent that was live, and the
+/// second pane could never run (SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_
+/// RECOVERY_2026_10_01.md §2 G0). Same source as `agent.tracked-blocks`.
+fn register_agent_open_panes(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let process_broker = state.process_broker.clone();
+    let mstore = state.mstore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_OPEN_PANES,
+        Box::new(move |_data, _ctx| {
+            let process_broker = process_broker.clone();
+            let mstore = mstore.clone();
+            Box::pin(async move {
+                let block_ids: Vec<String> = process_broker
+                    .list_agent_panes()
+                    .into_iter()
+                    .map(|status| status.block_id)
+                    .collect();
+                let panes = tokio::task::spawn_blocking(move || open_agent_panes(&mstore, &block_ids))
+                    .await
+                    .map_err(|e| format!("agent.open-panes: {e}"))?;
+                Ok(Some(serde_json::to_value(&AgentOpenPanesResult { panes }).unwrap()))
+            })
+        }),
+    );
+}
+
+/// Where each of `block_ids` is open: its agent, tab, and the windows
+/// showing its workspace. The agent is resolved like the rest of srv
+/// resolves a block's agent (`instance_get_active_for_block`: `agentId`,
+/// the legacy `agent:id`, a template-launched row, the latest launch on the
+/// block) so a pane from an older build is not reported closed (Codex P1 on
+/// #4127); the raw meta id is the fallback when that finds no row. Blocks
+/// with no resolvable agent or no parent tab are skipped. Workspaces and
+/// windows are read once for the whole list.
+pub(crate) fn open_agent_panes(store: &Store, block_ids: &[String]) -> Vec<AgentOpenPane> {
+    let workspaces = store.get_all::<Workspace>().unwrap_or_default();
+    let windows = store.get_all::<obj::Window>().unwrap_or_default();
+    let mut panes: Vec<AgentOpenPane> = block_ids
+        .iter()
+        .filter_map(|block_id| {
+            let block = store.get::<Block>(block_id).ok().flatten()?;
+            let agent_id = match store.instance_get_active_for_block(block_id) {
+                Ok(Some(row)) if !row.id.is_empty() => row.id,
+                _ => {
+                    let meta_id = obj::meta_get_string(&block.meta, "agentId", "");
+                    if meta_id.is_empty() {
+                        obj::meta_get_string(&block.meta, "agent:id", "")
+                    } else {
+                        meta_id
+                    }
+                }
+            };
+            if agent_id.is_empty() {
+                return None;
+            }
+            let tab_id = block.parentoref.strip_prefix("tab:")?.to_string();
+            let tab = store.get::<Tab>(&tab_id).ok().flatten()?;
+            let mut window_ids: Vec<String> = workspaces
+                .iter()
+                .find(|w| w.tabids.contains(&tab_id) || w.pinnedtabids.contains(&tab_id))
+                .map(|ws| {
+                    windows
+                        .iter()
+                        .filter(|w| w.workspaceid == ws.oid)
+                        .map(|w| w.oid.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            window_ids.sort();
+            Some(AgentOpenPane { block_id: block_id.clone(), agent_id, tab_id, tab_name: tab.name, window_ids })
+        })
+        .collect();
+    panes.sort_by(|a, b| a.block_id.cmp(&b.block_id));
+    panes
 }
 
 fn register_agent_kill_process(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -792,5 +872,119 @@ mod tests {
         let env = env_for(&store, &block).await;
         assert!(!env.contains_key("AGENTMUX_AGENT_UID"));
         assert!(!env.contains_key("AGENTMUX_AGENT_TOKEN"));
+    }
+}
+
+#[cfg(test)]
+mod open_panes_tests {
+    use super::*;
+    use crate::backend::storage::store::Store;
+
+    fn insert_tab(store: &Store, name: &str) -> Tab {
+        let mut tab = Tab { oid: uuid::Uuid::new_v4().to_string(), name: name.to_string(), ..Default::default() };
+        store.insert(&mut tab).unwrap();
+        tab
+    }
+
+    fn insert_workspace(store: &Store, tab_ids: &[&str]) -> Workspace {
+        let mut ws = Workspace {
+            oid: uuid::Uuid::new_v4().to_string(),
+            tabids: tab_ids.iter().map(|t| t.to_string()).collect(),
+            ..Default::default()
+        };
+        store.insert(&mut ws).unwrap();
+        ws
+    }
+
+    fn insert_window(store: &Store, workspace_id: &str) -> obj::Window {
+        let mut w = obj::Window { oid: uuid::Uuid::new_v4().to_string(), workspaceid: workspace_id.to_string(), ..Default::default() };
+        store.insert(&mut w).unwrap();
+        w
+    }
+
+    fn insert_block(store: &Store, tab_id: &str, agent_id: Option<&str>) -> String {
+        let mut meta = obj::MetaMapType::new();
+        if let Some(a) = agent_id {
+            meta.insert("agentId".to_string(), serde_json::json!(a));
+        }
+        let mut block = Block {
+            oid: uuid::Uuid::new_v4().to_string(),
+            parentoref: format!("tab:{tab_id}"),
+            meta,
+            ..Default::default()
+        };
+        store.insert(&mut block).unwrap();
+        block.oid
+    }
+
+    /// The 2026-10-01 case: Korp torn off into a floating window (its own
+    /// workspace and `Window`), a second agent in the main window. Both are
+    /// reported, each with the window that shows it.
+    #[test]
+    fn lists_agent_panes_in_every_window_including_a_floating_one() {
+        let store = Store::open_in_memory().unwrap();
+        let main_tab = insert_tab(&store, "Tab 2");
+        let main_ws = insert_workspace(&store, &[&main_tab.oid]);
+        let main_win = insert_window(&store, &main_ws.oid);
+        let float_tab = insert_tab(&store, "");
+        let float_ws = insert_workspace(&store, &[&float_tab.oid]);
+        let float_win = insert_window(&store, &float_ws.oid);
+
+        let agent3 = insert_block(&store, &main_tab.oid, Some("agent3-def"));
+        let korp = insert_block(&store, &float_tab.oid, Some("korp-def"));
+
+        let panes = open_agent_panes(&store, &[agent3.clone(), korp.clone()]);
+        let korp_pane = panes.iter().find(|p| p.block_id == korp).expect("floating pane listed");
+        assert_eq!(korp_pane.agent_id, "korp-def");
+        assert_eq!(korp_pane.tab_id, float_tab.oid);
+        assert_eq!(korp_pane.window_ids, vec![float_win.oid]);
+        let a3 = panes.iter().find(|p| p.block_id == agent3).expect("main pane listed");
+        assert_eq!(a3.tab_name, "Tab 2");
+        assert_eq!(a3.window_ids, vec![main_win.oid]);
+    }
+
+    /// A pane from an older build carries only the legacy `agent:id` key.
+    #[test]
+    fn resolves_a_legacy_agent_id_pane_to_its_agent_row() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def(
+            "uid-legacy",
+            "Korp",
+            "test-no-credentials",
+            "agent",
+            1,
+            "",
+        );
+        store.agent_def_insert(&mut def).unwrap();
+        let tab = insert_tab(&store, "t");
+        insert_workspace(&store, &[&tab.oid]);
+        let mut meta = obj::MetaMapType::new();
+        meta.insert("agent:id".to_string(), serde_json::json!("uid-legacy"));
+        let mut block = Block {
+            oid: uuid::Uuid::new_v4().to_string(),
+            parentoref: format!("tab:{}", tab.oid),
+            meta,
+            ..Default::default()
+        };
+        store.insert(&mut block).unwrap();
+
+        let panes = open_agent_panes(&store, &[block.oid.clone()]);
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].agent_id, "uid-legacy");
+    }
+
+    #[test]
+    fn skips_non_agent_and_orphan_blocks_and_reports_a_windowless_workspace() {
+        let store = Store::open_in_memory().unwrap();
+        let tab = insert_tab(&store, "t");
+        insert_workspace(&store, &[&tab.oid]); // open in no window
+        let terminal = insert_block(&store, &tab.oid, None);
+        let agent = insert_block(&store, &tab.oid, Some("def"));
+        let missing = "no-such-block".to_string();
+
+        let panes = open_agent_panes(&store, &[terminal, agent.clone(), missing]);
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].block_id, agent);
+        assert!(panes[0].window_ids.is_empty());
     }
 }

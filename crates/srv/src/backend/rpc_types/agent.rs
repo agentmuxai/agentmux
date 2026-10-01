@@ -240,6 +240,28 @@ pub struct AgentTrackedBlocksResult {
     pub block_ids: Vec<String>,
 }
 
+/// One agent pane open anywhere in this instance — any tab, any window,
+/// floating windows included. See `agent.open-panes` and
+/// SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md §4.0.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentOpenPane {
+    pub block_id: String,
+    /// The agent definition id (block meta `agentId`).
+    pub agent_id: String,
+    pub tab_id: String,
+    pub tab_name: String,
+    /// `Window` oids showing the pane's workspace. Empty when the
+    /// workspace is open in no window.
+    pub window_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentOpenPanesResult {
+    pub panes: Vec<AgentOpenPane>,
+}
+
 /// Request for `agent.kill-process` — terminate a single PID if it's
 /// in a given block's tracker tree.
 #[derive(Debug, Clone, Deserialize)]

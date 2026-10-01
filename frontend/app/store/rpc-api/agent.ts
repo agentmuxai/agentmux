@@ -33,6 +33,17 @@ export type ListAgentHistoryInput = Omit<CommandListAgentHistoryData, "limit" | 
 export type SearchAgentHistoryInput = Omit<CommandSearchAgentHistoryData, "limit"> &
     Partial<Pick<CommandSearchAgentHistoryData, "limit">>;
 
+/** One entry of `agent.open-panes` (srv `AgentOpenPane`). */
+export interface AgentOpenPane {
+    block_id: string;
+    /** Agent definition id. */
+    agent_id: string;
+    tab_id: string;
+    tab_name: string;
+    /** `Window` oids showing the pane's workspace; empty when none is open. */
+    window_ids: string[];
+}
+
 // The shell, agent-input and write-agent-config shapes are GENERATED from
 // their Rust definitions by ts-rs. This covers shell_handlers.rs,
 // agent_handlers/input.rs, and `writeagentconfig` -- the last untyped
@@ -695,6 +706,16 @@ export const AgentApi = {
         opts?: RpcOpts,
     ): Promise<{ block_ids: string[] }> {
         return client.rpcCall("agent.tracked-blocks", data, opts);
+    },
+
+    // Every agent pane open in this instance — all tabs, all windows
+    // (floating included) — with its agent id and where it is.
+    AgentOpenPanesCommand(
+        client: RpcClient,
+        data: Record<string, never>,
+        opts?: RpcOpts,
+    ): Promise<{ panes: AgentOpenPane[] }> {
+        return client.rpcCall("agent.open-panes", data, opts);
     },
 
     // Terminate a single PID in a given block's tracker tree.

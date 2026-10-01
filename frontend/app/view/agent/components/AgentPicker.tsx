@@ -58,7 +58,9 @@ import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
-import type { AgentDefinition } from "@/app/store/rpc-api";
+import type { AgentDefinition, AgentOpenPane } from "@/app/store/rpc-api";
+import { windowId } from "@/app/store/window-identity";
+import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from "../open-agent-panes";
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
 import { readZoom } from "@/app/store/zoom-factor";
 
@@ -185,6 +187,75 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
     return [openDefinitions, refresh];
 }
 
+/** srv publishes this whenever an agent (or any) pane's controller registers or goes away. */
+const EVENT_TRACKED_BLOCKS_CHANGED = "processbroker:tracked-blocks-changed";
+
+/**
+ * Like `useOpenDefinitionMap`, but instance-wide: an agent open in ANY tab of
+ * ANY window — floating ones included — counts as open, via srv's
+ * `agent.open-panes`. `useOpenDefinitionMap` only sees this window's panes,
+ * which is right for the fork tab strip (its pills switch within the window)
+ * but let My agents reattach an agent that was live in a floating window
+ * (SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md §4.0).
+ * Returns `[map, refresh, locations, resolve]`. The map is a cached view for
+ * rendering; a decision (reattach or not) must use `resolve`, which answers
+ * from a fresh srv read — before the first one lands, or after a failed one,
+ * the cached map can't tell "open elsewhere" from "closed" (Codex P1, #4127).
+ */
+export function useInstanceOpenDefinitions(): [
+    () => Map<string, string>,
+    () => void,
+    () => Map<string, OpenAgentLocation>,
+    () => Promise<Map<string, string>>,
+] {
+    const [local, refreshLocal] = useOpenDefinitionMap();
+    const [panes, setPanes] = createSignal<AgentOpenPane[]>([]);
+    let fetchSeq = 0;
+    let appliedSeq = 0;
+    /** `true` once srv answered. A reply older than one already applied is dropped. */
+    const fetchPanes = async (): Promise<boolean> => {
+        const seq = ++fetchSeq;
+        try {
+            const r = await RpcApi.AgentOpenPanesCommand(TabRpcClient, {});
+            if (seq > appliedSeq) {
+                appliedSeq = seq;
+                setPanes(r?.panes ?? []);
+            }
+            return true;
+        } catch (e) {
+            console.warn("[agent-picker] agent.open-panes failed", String(e));
+            return false;
+        }
+    };
+    onMount(() => void fetchPanes());
+    const unsub = muxEventSubscribe({ eventType: EVENT_TRACKED_BLOCKS_CHANGED, handler: () => void fetchPanes() });
+    onCleanup(unsub);
+    // Tear-off, redock and tab moves keep the pane's controller, so they emit
+    // no tracked-blocks event; refetch when the user comes back to this
+    // window, which is when a moved pane's location matters (Codex P2, #4127).
+    const onFocus = () => void fetchPanes();
+    window.addEventListener("focus", onFocus);
+    onCleanup(() => window.removeEventListener("focus", onFocus));
+    const merged = createMemo(() => mergeOpenDefinitions(local(), panes(), windowId()));
+    const locations = createMemo(() => openAgentLocations(local(), panes(), windowId()));
+    const refresh = () => {
+        refreshLocal();
+        void fetchPanes();
+    };
+    const resolve = async (): Promise<Map<string, string>> => {
+        refreshLocal();
+        // One retry for a transient failure. If srv still can't answer (an
+        // older srv without agent.open-panes), this window's panes are all
+        // there is to go on.
+        if (!(await fetchPanes())) {
+            await new Promise((r) => setTimeout(r, 250));
+            await fetchPanes();
+        }
+        return merged();
+    };
+    return [merged, refresh, locations, resolve];
+}
+
 // ── AgentPicker component ───────────────────────────────────────────────────────
 
 interface AgentPickerProps {
@@ -271,7 +342,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     });
 
     // Reactive map of definition_id → blockId for panes currently open.
-    const [openDefinitions, refreshOpenDefinitions] = useOpenDefinitionMap();
+    const [openDefinitions, refreshOpenDefinitions, openLocations, resolveOpenDefinitions] =
+        useInstanceOpenDefinitions();
 
     // Per-agent install state, keyed by agent.id.
     //   undefined = not yet checked / non-npm provider (no install needed)
@@ -1041,6 +1113,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             sortBy={sortBy}
                             onReattach={handleReattach}
                             openDefinitions={openDefinitions}
+                            openLocations={openLocations}
+                            resolveOpenDefinitions={resolveOpenDefinitions}
                             onFork={handleFork}
                             onSwitchToExisting={handleSwitchToExisting}
                             onFirstLoad={() => setMyAgentsLoaded(true)}

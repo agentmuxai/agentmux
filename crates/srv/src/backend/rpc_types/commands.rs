@@ -395,6 +395,9 @@ pub const COMMAND_ATTACHMENTS_COPY_TO_WORKDIR: &str = "attachments.copy-to-workd
 /// List every block currently tracked (for the swarm aggregate view).
 /// Returns `AgentTrackedBlocksResult`.
 pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
+/// Every agent pane open in this instance — all tabs, all windows — with
+/// its agent id and where it is. Returns `AgentOpenPanesResult`.
+pub const COMMAND_AGENT_OPEN_PANES: &str = "agent.open-panes";
 /// Terminate a single process by PID if it's a member of a given
 /// block's tracker tree. Silently no-ops if the PID isn't tracked.
 /// Returns `AgentKillResult { ok: bool }`.
