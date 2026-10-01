@@ -8,7 +8,7 @@ import { settingsAtom } from "@/store/config-signals";
 import { atoms, setActiveTab } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
-import { beginClosePromotion } from "@/store/tab-actions";
+import { beginClosePromotion, creatingTabId } from "@/store/tab-actions";
 import { isMacOS } from "@/util/platformutil";
 import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
@@ -98,7 +98,8 @@ function TabBar(props: TabBarProps): JSX.Element {
             realActiveTabId: activeTabId(),
             allTabIds: allTabIds(),
             hiddenTabIds: pendingHiddenTabIds(),
-            pendingSelectedTabId: pendingSelectedTabId(),
+            // A click in flight outranks a tab still being created.
+            pendingSelectedTabId: pendingSelectedTabId() ?? creatingTabId(),
         });
 
     // Whether a switch loop is already draining `pendingSelectedTabId`. Not a

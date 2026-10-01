@@ -81,6 +81,25 @@ createRoot(() =>
     })
 );
 
+// The tab `createTab` is building, from its CreateTab reply until the
+// committed tab reaches it. The strip highlights it at once, in the frame
+// its pill appears, instead of ~150 ms later when the built tab is
+// activated: the pill used to appear unselected and then jump. The content
+// still swaps in once the tab has settled. Dropped as soon as the committed
+// tab moves anywhere but the tab this creation started from (the user went
+// elsewhere meanwhile), or the creation fails.
+const [creatingTab, setCreatingTab] = createSignal<{ tabId: string; from: string } | null>(null);
+/** The tab being created, for the strip to show as selected. */
+export const creatingTabId = (): string | null => creatingTab()?.tabId ?? null;
+createRoot(() =>
+    createEffect(() => {
+        const creating = creatingTab();
+        if (creating == null) return;
+        const committed = activeTabId();
+        if (committed !== creating.from) setCreatingTab(null);
+    })
+);
+
 /** How long a new tab may wait, hidden, for its panes' first data. */
 const NEW_TAB_SETTLE_CAP_MS = 800;
 
@@ -93,6 +112,7 @@ export function createTab() {
     // get yanked back to the new tab out from under whatever they
     // navigated to meanwhile (codex P2, PR #3300).
     const startingActiveTabId = activeTabId();
+    let createdTabId: string | null = null;
     fireAndForget(async () => {
         try {
             // Created INACTIVE (`activate: false`) — the current tab
@@ -110,6 +130,8 @@ export function createTab() {
             // re-trigger the gate on an already-revealed tab — the
             // flash a user reported.
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", false, false);
+            createdTabId = tabId;
+            if (activeTabId() === startingActiveTabId) setCreatingTab({ tabId, from: startingActiveTabId });
             // New tabs intentionally start with no `tab:color` — see
             // docs/reports/REPORT_REMOVE_AUTO_TAB_COLOR_2026_08_18.md. Users
             // still pick one manually via the right-click swatch picker
@@ -158,6 +180,13 @@ export function createTab() {
             }
         } catch (e) {
             console.error("[createTab] failed:", e);
+        } finally {
+            // Activated: the committed tab has caught up, or will, and the
+            // effect above drops this then. Otherwise (left inactive, or
+            // failed) nothing will: drop it now.
+            if (createdTabId != null && creatingTab()?.tabId === createdTabId && activeTabId() !== createdTabId) {
+                if (switchIntentTabId() !== createdTabId) setCreatingTab(null);
+            }
         }
     });
 }
