@@ -26,6 +26,9 @@ import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAge
  * them missing. ts-rs can only mark a field optional for `Option<T>`, so the
  * generated type calls them required; deriving restores it.
  */
+export type ListAgentHistoryInput = Omit<CommandListAgentHistoryData, "limit" | "offset"> &
+    Partial<Pick<CommandListAgentHistoryData, "limit" | "offset">>;
+
 /** One entry of `agent.open-panes` (srv `AgentOpenPane`). */
 export interface AgentOpenPane {
     block_id: string;
@@ -36,9 +39,6 @@ export interface AgentOpenPane {
     /** `Window` oids showing the pane's workspace; empty when none is open. */
     window_ids: string[];
 }
-
-export type ListAgentHistoryInput = Omit<CommandListAgentHistoryData, "limit" | "offset"> &
-    Partial<Pick<CommandListAgentHistoryData, "limit" | "offset">>;
 
 /** Same story for `searchagenthistory`s `limit`. */
 export type SearchAgentHistoryInput = Omit<CommandSearchAgentHistoryData, "limit"> &
