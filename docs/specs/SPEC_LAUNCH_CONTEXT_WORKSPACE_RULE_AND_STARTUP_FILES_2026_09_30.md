@@ -1,6 +1,6 @@
 # SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown
 
-**Status:** proposed — nothing here is built.
+**Status:** LC1 (§3) implemented in this PR; LC2-LC5 proposed.
 **Date:** 2026-09-30
 **Verified against:** `agentmux` `main` @ `48cc6fdbc` (§1-§4) and `3fcd1496a` (§6). Paths are relative
 to the repo root.
@@ -173,23 +173,31 @@ Rejected:
 
 ### 3.3 The entry's text
 
-Name: `AgentMux Operator Config: Your workspace (host agents)`.
+Id `operator-config-workspace`, name `AgentMux Operator Config: Your
+workspace`, `agent_types: ["host"]` (`crates/srv/operator-config-seed.json`,
+manifest v6). The "host agents" scope is stated in the body rather than
+the name, like the other entries' opening line:
 
-> You run as a process on this machine, and your working directory at
-> launch is your own workspace: `~/.agentmux/agents/<your instance>/`,
-> also in `AGENTMUX_AGENT_WORKDIR`.
+> This entry is maintained by AgentMux itself (Operator Config) and is the
+> same across every AgentMux deployment. It is given only to agents that
+> run as a process on this machine (host agents), not to container agents.
 >
-> - Clone every repository you work on inside your workspace (for
->   example `<workspace>/agentmux`), and keep its branches, builds and
+> Your working directory at launch is your own workspace:
+> `~/.agentmux/agents/<your instance>/`. Its path is also in the
+> `AGENTMUX_AGENT_WORKDIR` environment variable, so you can find it again
+> after changing directory.
+>
+> - **Clone every repository you work on inside your workspace**, for
+>   example `<workspace>/agentmux`, and keep its branches, builds and
 >   scratch files there.
-> - Don't clone into, build in, or edit another agent's workspace, your
+> - **Don't clone into, build in, or edit another agent's workspace**, your
 >   home directory, or a shared checkout elsewhere on the disk. Another
->   agent may be using it, and a change there is invisible to its owner.
-> - For a second checkout of a repository you already have, clone again
->   inside your workspace; `git clone --reference <your first clone>`
->   saves disk. Don't use `git worktree` for this.
-> - Temporary files belong in your workspace or the system temp
->   directory, never another agent's workspace.
+>   agent may be using it, and its owner can't see a change you make there.
+> - **For a second checkout of a repository you already have, clone again
+>   inside your workspace.** `git clone --reference <your first clone>
+>   <url> <dir>` saves disk. Don't use `git worktree` for this.
+> - **Temporary files** belong in your workspace or the system temp
+>   directory, never in another agent's workspace.
 >
 > If a task needs a file outside your workspace, read it where it is, and
 > ask before changing it.
@@ -197,12 +205,14 @@ Name: `AgentMux Operator Config: Your workspace (host agents)`.
 ### 3.4 `AGENTMUX_AGENT_WORKDIR`
 
 The rule points at the workspace, but an agent that has `cd`'d away (or
-was resumed with a different cwd) has no reliable way to find it. Add
-`AGENTMUX_AGENT_WORKDIR` next to the existing agent env vars
-(`AGENTMUX_AGENT_ID/SLUG/…`, set in `agent-model.ts:560-628` and
-`crates/srv/src/server/agent_handlers/input.rs`), with the resolved
-`working_directory`. Host agents only; a container agent's path would
-mean nothing on the host.
+was resumed with a different cwd) has no reliable way to find it. srv
+sets `AGENTMUX_AGENT_WORKDIR` to the block's `cmd:cwd` (the resolved
+workspace) in `build_persistent_spawn_env`
+(`carry_agent_workdir_env`, `crates/srv/src/server/agent_handlers/input.rs`),
+the env builder every spawn path shares. It is server-set: a `cmd:env`
+copy never wins. Host agents only; it is removed for a container agent
+and is on `CONTAINER_ENV_DENYLIST`, because the host path means nothing
+inside the image.
 
 ## 4. Design: every startup file in the card
 
