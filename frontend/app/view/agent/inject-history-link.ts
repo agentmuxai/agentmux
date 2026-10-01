@@ -15,11 +15,9 @@ import type { DocumentNode, HistoryLinkNode } from "./types";
 const HISTORY_LINK_NODE: HistoryLinkNode = { type: "history_link", id: "history-link" };
 
 /**
- * Insert the history-link row right after the first node when it's a fresh
- * `session_outcome` divider (the normal clamp shape — see agent-view.tsx's
- * `earlierHistoryAvailable`), otherwise at the very front (defensive
- * fallback so the link still appears whenever the caller says earlier
- * history is available, even if the boundary node isn't literally first).
+ * Insert the history-link row at the very front: what it points to is older
+ * than everything in the pane, a new session's divider included (that
+ * divider no longer hides the conversation before it).
  * No-op — returns `nodes` unchanged — when `show` is false.
  */
 export function injectHistoryLink(
@@ -30,10 +28,6 @@ export function injectHistoryLink(
     if (!show) return nodes as DocumentNode[];
     const link: HistoryLinkNode =
         opts?.earlierTurns != null ? { ...HISTORY_LINK_NODE, earlierTurns: opts.earlierTurns } : HISTORY_LINK_NODE;
-    const first = nodes[0];
-    if (first?.type === "session_outcome" && first.outcome === "fresh") {
-        return [first, link, ...nodes.slice(1)];
-    }
     return [link, ...nodes];
 }
 

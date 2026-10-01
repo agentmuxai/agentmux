@@ -255,19 +255,6 @@ export type AgentDocumentEvent =
           gapsBefore: string[];
       }
     | {
-          /**
-           * The working scrollback was clamped at a `session_outcome`/
-           * `fresh` boundary: `removedCount` nodes strictly older than the
-           * boundary were dropped from the visible document (the persisted
-           * stream is untouched — display scope only). Emitted by
-           * HistoryRestored / HistoryLoaded / StreamFlush via
-           * `clampToSessionScope`. Spec:
-           * SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §3.
-           */
-          type: "session-scope-trimmed";
-          removedCount: number;
-      }
-    | {
           type: "orphans-scrubbed";
           /** Thinking-markdown nodes flipped to canceled. */
           markdownCanceled: number;

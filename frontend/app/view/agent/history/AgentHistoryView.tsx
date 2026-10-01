@@ -12,9 +12,8 @@
  * subscription to double here regardless.
  *
  * Deliberately NOT a consumer of the agent-document reducer store: the
- * reader has no live stream, no truncate/dedup races, and must render the
- * stream boundary-blind (the working view's session-scope clamp — reducer
- * `clampToSessionScope` — must NOT apply here). It holds plain local
+ * reader has no live stream, no truncate/dedup races, and renders the
+ * stream boundary-blind, `resumed` dividers included. It holds plain local
  * signals and feeds them straight from `parseHistoryLines` with
  * `includeResumedOutcomes: true`, then injects `day_divider` rows at
  * render time. The virtual list + row renderers are reused as-is via

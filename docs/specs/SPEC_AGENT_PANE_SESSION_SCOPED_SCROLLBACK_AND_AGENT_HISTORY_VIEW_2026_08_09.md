@@ -1,7 +1,7 @@
 # SPEC: Session-scoped pane scrollback + a full "Agent History" view
 
 **Date:** 2026-08-09
-**Status:** active — P1 shipped in PR #2507 (session-scope clamp + `resumed`-divider demotion); §4.4's `output.tsidx` capture + replay stamping shipped in PR #2508; P2's Agent History view (§4.1-4.3 `bodyMode` swap, day separators, §3.4 link row, control-bar entry) implemented 2026-08-10. Remaining: P3 (§4.5 archives section, jump-to-date, link-row session count).
+**Status:** active — §3's clamp reversed 2026-10-01 (see §3 note); P1 shipped in PR #2507 (session-scope clamp + `resumed`-divider demotion); §4.4's `output.tsidx` capture + replay stamping shipped in PR #2508; P2's Agent History view (§4.1-4.3 `bodyMode` swap, day separators, §3.4 link row, control-bar entry) implemented 2026-08-10. Remaining: P3 (§4.5 archives section, jump-to-date, link-row session count).
 **Severity:** Medium — UX/correctness follow-up, no data loss involved
 **Extends:** `SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md` (Part A shipped the
 honest *"New session started"* divider this spec builds on)
@@ -172,6 +172,20 @@ uniformly (§4.4).
 ---
 
 ## 3. Part 1 — session-scoped working scrollback
+
+> [!IMPORTANT]
+> **Revised 2026-10-01 — the clamp is gone; the divider stays.** Owner
+> direction: hiding earlier conversation that would fit in memory is the
+> wrong trade. When an agent opens in a new instance and has to start a new
+> session, the old part of the conversation must stay visible. The pane now
+> keeps everything across a `fresh` boundary; the "New session started"
+> divider marks it and says the agent doesn't have the conversation above
+> it. Restore and load-older page past the boundary; a live boundary cancels
+> the old session's still-running rows instead of dropping them. What leaves
+> the pane is decided only by the live feed's size budget
+> (`STATUS_AGENT_PANE_HISTORY_AND_MEMORY_BAKE_2026_10_01.md`). §3.1–§3.3
+> below describe the original clamp and are kept for history; §3.4's link
+> row now shows only when turns rolled off, and §3.5 is unchanged.
 
 ### 3.1 Scope rule
 

@@ -83,12 +83,12 @@ export function sessionOutcomeLiveTimestamp(frameTimestamp: string | null | unde
 
 /**
  * Index of the LAST `session_outcome` node with `outcome: "fresh"` in an
- * ordered node list, or -1 if none. A `fresh` outcome is the working
- * scrollback's scope anchor: the model has none of the content before it,
- * so the working view must not show that content
+ * ordered node list, or -1 if none. A `fresh` outcome marks where the
+ * current session begins: the model has none of the content before it,
+ * which stays visible above the divider but is no longer in progress
  * (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md
- * §3.1). `resumed` outcomes are NOT anchors — the model genuinely has the
- * prior turns. Structurally typed (not `DocumentNode[]`) so both the
+ * §3, revised 2026-10-01). `resumed` outcomes don't mark one — the model
+ * genuinely has the prior turns. Structurally typed (not `DocumentNode[]`) so both the
  * document reducer and the pagination hook can call it without an import
  * cycle through the full node union.
  */

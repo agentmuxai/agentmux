@@ -33,7 +33,6 @@ function mount(opts: { outputFormat?: string; rollOff?: { prefixTurns: number; g
             ];
         },
     };
-    const [scopeClamped, setScopeClamped] = createSignal(false);
     const root = createRoot((dispose) => {
         const feed = useLiveFeedRollOff({
             blockId: "b1",
@@ -42,11 +41,11 @@ function mount(opts: { outputFormat?: string; rollOff?: { prefixTurns: number; g
             block: () => undefined,
             agentAtoms: () => ({ documentStateAtom: [docState, setDocState] }) as never,
             hidden: () => false,
-            history: { scopeClamped, historyOffset: () => 0 },
+            history: { historyOffset: () => 0 },
         });
         return { feed, dispose };
     });
-    return { ...root, dispatched, setScopeClamped };
+    return { ...root, dispatched };
 }
 
 describe("useLiveFeedRollOff", () => {
@@ -88,16 +87,6 @@ describe("useLiveFeedRollOff", () => {
         expect(m.feed.earlierTurnsKnown()).toBe(2);
         expect(m.feed.earlierHistoryAvailable()).toBe(true);
         expect([...m.feed.gapsBefore()]).toEqual(["keep", "gone"]);
-        m.dispose();
-    });
-
-    it("says earlier history exists, but not how much, when the restore was clamped", () => {
-        const m = mount({ rollOff: { prefixTurns: 2, gapsBefore: [] } });
-        m.setScopeClamped(true);
-        m.feed.scheduleRollOff();
-        vi.advanceTimersByTime(100);
-        expect(m.feed.earlierHistoryAvailable()).toBe(true);
-        expect(m.feed.earlierTurnsKnown()).toBeUndefined();
         m.dispose();
     });
 });

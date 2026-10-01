@@ -436,10 +436,6 @@ export const AgentPresentationView = ({
     // signal is retrospective. See `hooks/useResumePreflight.ts`.
     const resumePreflight = useResumePreflight(model.blockId);
 
-    // True when content older than the working session exists out of view:
-    // set by the restore/pagination clamp paths (scopeClamped) OR derived
-    // from a live clamp — after the reducer's StreamFlush trim, the fresh
-    // session_outcome divider is always the first document node.
     // The live feed: the turn in flight plus the last K finished turns; older
     // ones roll off into History (hooks/useLiveFeedRollOff.ts). Created here,
     // after the history hook; the callbacks above that call into it
