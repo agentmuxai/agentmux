@@ -540,8 +540,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     // background ambient spend is a separate,
                                     // cross-cutting follow-up, not scoped to
                                     // this one call site.
-                                    if let Some((_, tokens)) = result {
-                                        if let Some(tokens) = tokens {
+                                    if let Some(generated) = result {
+                                        if let Some(tokens) = generated.tokens {
                                             tracing::debug!(
                                                 definition_id = %definition_id_bg,
                                                 ?tokens,

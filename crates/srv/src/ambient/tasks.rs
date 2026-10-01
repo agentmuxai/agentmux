@@ -12,11 +12,31 @@
 
 use std::sync::Arc;
 
-use super::call::{self, CliTarget};
+use super::call::{self, CliTarget, Reply};
 use super::{digest, limits, prompt, purpose, validate, AmbientCallKey};
 use crate::agents::TokenCounts;
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::store::Store;
+
+/// What a background call produced. `None` from a task means it did not run to
+/// completion (superseded, capped out, nothing to send, CLI failed), so a caller
+/// that tracks progress should try again later. `Some` means the CLI ran: `text`
+/// is `None` when the model had nothing usable to say (the reply failed
+/// validation, or was empty), which is a finished attempt, not a failure, and
+/// `tokens` is the spend either way.
+#[derive(Debug)]
+pub(crate) struct Generated {
+    pub text: Option<String>,
+    pub tokens: Option<TokenCounts>,
+}
+
+fn finish(reply: Reply) -> Option<Generated> {
+    if reply.error.is_some() {
+        return None;
+    }
+    let text = (!reply.text.is_empty()).then_some(reply.text);
+    Some(Generated { text, tokens: reply.tokens })
+}
 
 /// Read-only CLI path lookup for `provider_id` — checks the versioned
 /// local-install dir, then falls back to system PATH. Deliberately never
@@ -55,7 +75,7 @@ pub(crate) async fn generate_pushed_activity_summary(
     block_id: &str,
     generation: u64,
     word_target: u32,
-) -> Option<(String, Option<TokenCounts>)> {
+) -> Option<Generated> {
     let word_target = word_target.max(3).min(20);
 
     // No concurrency permit here: the sweep in `activity_watcher` bounds itself.
@@ -66,9 +86,10 @@ pub(crate) async fn generate_pushed_activity_summary(
     let target = CliTarget::from_meta(&block.meta)?;
 
     let prompt = prompt::build_activity_summary_prompt(word_target, &digest);
-    slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::title_limits(word_target)))
-        .await
-        .into_option()
+    finish(
+        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::title_limits(word_target)))
+            .await,
+    )
 }
 
 /// Generate (and persist) a short activity summary for a definition whose
@@ -115,7 +136,7 @@ pub(crate) async fn generate_definition_activity_summary(
     definition_id: &str,
     block_id: &str,
     provider_id: &str,
-) -> Option<(String, Option<TokenCounts>)> {
+) -> Option<Generated> {
     // Background-call semaphore, not `pull_call_semaphore()` — see
     // `limits::definition_summary_semaphore`'s own doc comment.
     let slot = call::admit(
@@ -136,10 +157,13 @@ pub(crate) async fn generate_definition_activity_summary(
     };
 
     let prompt = prompt::build_definition_summary_prompt(&digest);
-    let (summary, tokens) = slot
-        .run(&target, &prompt, |t| validate::accept_line(t, &validate::PREVIEW))
-        .await
-        .into_option()?;
+    let generated = finish(
+        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::PREVIEW))
+            .await,
+    )?;
+    let Some(summary) = generated.text.clone() else {
+        return Some(generated);
+    };
 
     let now = agentmux_common::time::now_ms();
     match mstore.agent_activity_summary_set(definition_id, &summary, now) {
@@ -168,7 +192,7 @@ pub(crate) async fn generate_definition_activity_summary(
         }
     }
 
-    Some((summary, tokens))
+    Some(generated)
 }
 
 /// The provider's own CLI with an EMPTY auth env, for a block that no longer
@@ -198,10 +222,10 @@ pub(crate) async fn generate_subagent_name(
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     agent_id: &str,
     semaphore: &'static tokio::sync::Semaphore,
-) -> Option<(String, Option<TokenCounts>)> {
+) -> Option<Generated> {
     let info = subagent_watcher.get_info(agent_id)?;
     if let Some(existing) = info.display_name {
-        return Some((existing, None));
+        return Some(Generated { text: Some(existing), tokens: None });
     }
 
     // Concurrency cap — `pull_call_semaphore()` for the live on-click path
@@ -220,13 +244,14 @@ pub(crate) async fn generate_subagent_name(
     let target = CliTarget::from_meta(&block.meta)?;
 
     let prompt = prompt::build_subagent_name_prompt(&task_prompt);
-    let (name, tokens) = slot
-        .run(&target, &prompt, |t| validate::accept_line(t, &validate::NAME))
-        .await
-        .into_option()?;
-
-    subagent_watcher.set_display_name(agent_id, &name);
-    Some((name, tokens))
+    let generated = finish(
+        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::NAME))
+            .await,
+    )?;
+    if let Some(name) = &generated.text {
+        subagent_watcher.set_display_name(agent_id, name);
+    }
+    Some(generated)
 }
 
 /// Generate the one Haiku display name for a Workflow-kind dispatch,
@@ -254,7 +279,7 @@ pub(crate) async fn generate_dispatch_name(
     dispatch_id: &str,
     first_member_agent_id: &str,
     semaphore: &'static tokio::sync::Semaphore,
-) -> Option<(String, Option<TokenCounts>)> {
+) -> Option<Generated> {
     let info = subagent_watcher.get_info(first_member_agent_id)?;
 
     // Concurrency cap — see `generate_subagent_name`'s matching comment
@@ -271,13 +296,14 @@ pub(crate) async fn generate_dispatch_name(
     let target = CliTarget::from_meta(&block.meta)?;
 
     let prompt = prompt::build_dispatch_name_prompt(&task_prompt);
-    let (name, tokens) = slot
-        .run(&target, &prompt, |t| validate::accept_line(t, &validate::NAME))
-        .await
-        .into_option()?;
-
-    subagent_watcher.set_dispatch_name(dispatch_id, &name);
-    Some((name, tokens))
+    let generated = finish(
+        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::NAME))
+            .await,
+    )?;
+    if let Some(name) = &generated.text {
+        subagent_watcher.set_dispatch_name(dispatch_id, name);
+    }
+    Some(generated)
 }
 
 /// Generate a short user-facing line narrating an autonomous action.
@@ -364,5 +390,33 @@ mod narration_key_tests {
         };
         // The second admission must leave the first alone.
         assert!(!cancel1.is_cancelled(), "a sibling narration cancelled the first");
+    }
+}
+
+#[cfg(test)]
+mod finish_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_or_superseded_call_is_not_a_finished_attempt() {
+        let reply = Reply { text: String::new(), tokens: None, error: Some("cancelled".into()) };
+        assert!(finish(reply).is_none());
+    }
+
+    #[test]
+    fn a_rejected_reply_is_a_finished_attempt_that_keeps_its_spend() {
+        let tokens = Some(TokenCounts::default());
+        let reply = Reply { text: String::new(), tokens: tokens.clone(), error: None };
+        let generated = finish(reply).expect("the CLI ran");
+        assert!(generated.text.is_none());
+        assert!(generated.tokens.is_some());
+    }
+
+    #[test]
+    fn a_usable_reply_carries_its_text_and_spend() {
+        let reply = Reply { text: "Fix login".into(), tokens: Some(TokenCounts::default()), error: None };
+        let generated = finish(reply).unwrap();
+        assert_eq!(generated.text.as_deref(), Some("Fix login"));
+        assert!(generated.tokens.is_some());
     }
 }

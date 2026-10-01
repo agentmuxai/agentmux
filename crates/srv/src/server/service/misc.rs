@@ -164,7 +164,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             )
             .await;
             let (display_name, tokens) = match result {
-                Some((name, tokens)) => (Some(name), tokens),
+                Some(generated) => (generated.text, generated.tokens),
                 None => (None, None),
             };
             WebReturnType::success(serde_json::json!({ "displayName": display_name, "tokens": tokens }))
