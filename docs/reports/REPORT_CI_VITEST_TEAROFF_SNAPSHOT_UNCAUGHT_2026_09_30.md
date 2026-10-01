@@ -78,9 +78,12 @@ not reproduced.
    instead of `FileReader`. In jsdom that copy is synchronous, into the right realm, and
    never reaches `@exodus/bytes`; in Chromium it's equivalent. Whatever the realm or
    timing, this code path can no longer throw from inside jsdom.
-2. **No work outlives its test:** the module tracks its in-flight base64 encodes, and the
-   test file's `afterEach` awaits them (`settleTearOffSnapshotForTests()`). Only encodes
-   are tracked, not whole captures: the budget test's capture never resolves by design.
+2. **No work outlives its test:** the module tracks the decode/crop/encode work that runs
+   after the capture RPC answers, and the test file's `afterEach` awaits it
+   (`settleTearOffSnapshotForTests()`, which first lets one task pass so already-answered
+   captures register). A stalled RPC is never tracked, so it can't be retained forever in
+   the app or hang a test; the budget test still stalls its capture and proves this
+   (Codex P2 on #4110 caught an earlier version that tracked whole captures).
 3. **A regression test** stubs `FileReader` to throw, and checks that a snapshot still
    encodes.
 
