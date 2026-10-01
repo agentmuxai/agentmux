@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { effortApplies, effortNotUsedReason, modelTakesEffort } from "./runtime-capabilities";
+import { effectiveModel, effortApplies, effortNotUsedReason, modelFromFlags, modelTakesEffort } from "./runtime-capabilities";
 
 describe("modelTakesEffort", () => {
     it("Haiku does not, by alias or by concrete id, in any case", () => {
@@ -30,5 +30,22 @@ describe("effortApplies", () => {
         expect(effortNotUsedReason("claude", "sonnet")).toBeNull();
         expect(effortNotUsedReason("claude", "haiku")).toMatch(/Haiku/);
         expect(effortNotUsedReason("codex", "gpt-5.5")).toMatch(/codex has no effort/);
+    });
+});
+
+describe("modelFromFlags / effectiveModel", () => {
+    it("reads the model a flag list selects, the last one winning", () => {
+        expect(modelFromFlags(["--model", "opus"])).toBe("opus");
+        expect(modelFromFlags(["-m", "gpt-5.5"])).toBe("gpt-5.5");
+        expect(modelFromFlags(["--model=haiku"])).toBe("haiku");
+        expect(modelFromFlags(["--model", "opus", "--x", "--model", "haiku"])).toBe("haiku");
+        expect(modelFromFlags(["--add-dir", "/tmp"])).toBeUndefined();
+        expect(modelFromFlags(["--model"])).toBeUndefined();
+    });
+    it("the definition's own --model beats the runtime's, as it does on the command line", () => {
+        expect(effectiveModel("sonnet", "--model claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5-20251001");
+        expect(effectiveModel("sonnet", "--add-dir /tmp")).toBe("sonnet");
+        expect(effectiveModel("sonnet", "")).toBe("sonnet");
+        expect(effectiveModel("sonnet", undefined)).toBe("sonnet");
     });
 });

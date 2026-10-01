@@ -18,7 +18,8 @@
 
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
 import { patchRuntime } from "../../runtime-apply";
-import { effortNotUsedReason } from "../../runtime-capabilities";
+import { PROVIDER_FLAGS_META_KEY } from "../../launch-args";
+import { effectiveModel, effortNotUsedReason } from "../../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -120,7 +121,10 @@ const effortCommand: SlashCommand = {
         if (result.ok === false) return runtimeError(result.error);
         // Recorded either way (it is remembered for when the model takes it),
         // but say plainly when it changes nothing now.
-        const notUsed = effortNotUsedReason(ctx.provider()?.id, result.updated.model);
+        const notUsed = effortNotUsedReason(
+            ctx.provider()?.id,
+            effectiveModel(result.updated.model, ctx.block()?.meta?.[PROVIDER_FLAGS_META_KEY]),
+        );
         if (notUsed !== null) {
             return { kind: "ok", message: `effort recorded as ${result.updated.effort}, but it has no effect now — ${notUsed}` };
         }

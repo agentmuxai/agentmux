@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { parseProviderFlags } from "./launch-args";
+
 /**
  * What a runtime setting does, for which model and provider. One definition for
  * the arg builder, the Runtime menu and the slash commands, so a control is
@@ -34,4 +36,34 @@ export function effortNotUsedReason(providerId: string | undefined, model: strin
     if (effortApplies(providerId, model)) return null;
     if (providerId && providerId !== "claude") return `${providerId} has no effort setting`;
     return "Haiku does not use it";
+}
+
+/**
+ * The model a list of CLI flags selects, if it selects one: the last
+ * `--model X`, `-m X` or `--model=X`.
+ */
+export function modelFromFlags(flags: readonly string[]): string | undefined {
+    let model: string | undefined;
+    for (let i = 0; i < flags.length; i++) {
+        const f = flags[i];
+        if ((f === "--model" || f === "-m") && flags[i + 1] !== undefined) {
+            model = flags[i + 1];
+            i++;
+        } else if (f.startsWith("--model=")) {
+            model = f.slice("--model=".length);
+        }
+    }
+    return model;
+}
+
+/**
+ * The model the process actually runs. An agent definition's own `provider_flags`
+ * are appended after the runtime's flags, so a `--model` among them wins; a
+ * decision that depends on the model (does `--effort` apply?) must be made on
+ * THIS, not on the runtime's selection, or a definition that picks Haiku gets
+ * `--effort` with the Haiku it overrode to — HTTP 400 every turn
+ * (Codex P1 on #4152).
+ */
+export function effectiveModel(runtimeModel: string, providerFlags: unknown): string {
+    return modelFromFlags(parseProviderFlags(providerFlags)) ?? runtimeModel;
 }
