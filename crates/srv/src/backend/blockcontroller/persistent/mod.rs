@@ -1459,6 +1459,10 @@ impl Controller for PersistentSubprocessController {
         if inner.proc_status != new_status {
             Self::set_status(&mut inner, new_status);
         }
+        drop(inner);
+        // Leaving "running" clears what the process was spawned with; the menu
+        // must hear that too, or it keeps judging a process that is gone.
+        self.publish_runtime();
         Ok(())
     }
 

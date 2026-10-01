@@ -40,11 +40,16 @@ impl PersistentSubprocessController {
             // Alongside every status change, so the two cannot disagree about
             // whether a process is running: what it was spawned with, and
             // whether a restart is already on its way.
-            let (running, restart_pending) = {
-                let inner = self.inner.lock().unwrap();
-                (inner.spawn_runtime.clone(), inner.restart_when_idle || inner.restart_pending)
-            };
-            crate::backend::agent_runtime::publish_agent_runtime(broker, &self.block_id, running.as_ref(), restart_pending);
+            publish_runtime_event(&self.inner, broker, &self.block_id);
+        }
+    }
+
+    /// Announce only what the process runs (or that none does), without
+    /// repeating the controller status. For the paths that move the status off
+    /// "running" without publishing it themselves (`stop`).
+    pub(super) fn publish_runtime(&self) {
+        if let Some(ref broker) = self.broker {
+            publish_runtime_event(&self.inner, broker, &self.block_id);
         }
     }
 
@@ -142,4 +147,28 @@ impl PersistentSubprocessController {
         }
         self.publish_status();
     }
+}
+
+/// Announce what the process runs, from state the caller already holds locked.
+/// `restart_pending` covers both a restart deferred to the end of the turn and
+/// one already committed.
+pub(super) fn announce_runtime(broker: &crate::backend::mps::Broker, block_id: &str, inner: &PersistentInner) {
+    crate::backend::agent_runtime::publish_agent_runtime(
+        broker,
+        block_id,
+        inner.spawn_runtime.as_ref(),
+        inner.restart_when_idle || inner.restart_pending,
+    );
+}
+
+/// [`announce_runtime`], taking the lock itself. EVERY path that moves the
+/// status off "running" must call one of the two: the menu judges its
+/// selection against the LAST announcement, so a process that ended without
+/// one would go on being judged (ReAgent P1 on #4149).
+pub(super) fn publish_runtime_event(
+    inner: &Mutex<PersistentInner>,
+    broker: &crate::backend::mps::Broker,
+    block_id: &str,
+) {
+    announce_runtime(broker, block_id, &inner.lock().unwrap());
 }

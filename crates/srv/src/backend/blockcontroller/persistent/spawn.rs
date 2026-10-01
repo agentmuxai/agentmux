@@ -1589,6 +1589,12 @@ impl PersistentSubprocessController {
                     // arm; a stale-resume retry spawning first supersedes it.
                     let respawn_after_restart = Self::config_restart_due_locked(&inner, my_generation_wait);
                     drop(inner);
+                    // The process is gone: say so, whatever else this arm publishes.
+                    if is_current_generation {
+                        if let Some(b) = broker_wait.as_ref() {
+                            super::status::publish_runtime_event(&inner_wait, b, &block_id_wait);
+                        }
+                    }
 
                     if is_current_generation {
                         // The process is gone — nothing is waiting on the user
@@ -2024,6 +2030,12 @@ impl PersistentSubprocessController {
                     // before then still wins.
                     let respawn_after_restart = Self::config_restart_due_locked(&inner, my_generation_wait);
                     drop(inner);
+                    // The process is gone: say so, whatever else this arm publishes.
+                    if is_current_generation {
+                        if let Some(b) = broker_wait.as_ref() {
+                            super::status::publish_runtime_event(&inner_wait, b, &block_id_wait);
+                        }
+                    }
 
                     // reagentx P1 on PR #2776: a user-initiated Stop can
                     // land at any point, including mid stale-`--resume`
