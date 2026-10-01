@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { buildRuntimeArgs } from "./buildRuntimeArgs";
+import { buildPaneArgs, buildRuntimeArgs } from "./buildRuntimeArgs";
+import { getProvider } from "./providers";
 import type { AgentRuntimeConfig } from "./types";
+
+const CLAUDE_PROVIDER = getProvider("claude")!;
 
 // Base args as declared in providers/index.ts (launchArgs).
 const CODEX_BASE = ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"];
@@ -95,6 +98,25 @@ describe("buildRuntimeArgs", () => {
         it("omits --effort on Haiku (effort 400s on Haiku 4.5) but keeps --model", () => {
             const out = buildRuntimeArgs(CLAUDE_BASE, cfg({ model: "haiku" }), "claude");
             expect(out[out.indexOf("--model") + 1]).toBe("haiku");
+            expect(out).not.toContain("--effort");
+        });
+
+        it("decides --effort on the model the process will RUN: a definition's own Haiku (Codex P1 on #4152)", () => {
+            // Runtime says Sonnet (takes effort); the definition's provider_flags
+            // are appended after and override to Haiku (does not). Sending --effort
+            // here is HTTP 400 on every turn.
+            const haiku = buildPaneArgs(CLAUDE_PROVIDER, "host", cfg({ model: "sonnet" }), "--model claude-haiku-4-5-20251001");
+            expect(haiku).not.toContain("--effort");
+            expect(haiku.filter((a) => a === "--model")).toHaveLength(2); // the runtime's, then the definition's, which wins
+            // …and the other way round: a definition's Opus under a runtime Haiku DOES take effort.
+            expect(buildPaneArgs(CLAUDE_PROVIDER, "host", cfg({ model: "haiku" }), "--model opus")).toContain("--effort");
+            // no override in the flags: the runtime's model decides, as before
+            expect(buildPaneArgs(CLAUDE_PROVIDER, "host", cfg({ model: "sonnet" }), "--add-dir /tmp")).toContain("--effort");
+        });
+
+        it("omits --effort for a CONCRETE Haiku id too (it used to match only the alias)", () => {
+            const out = buildRuntimeArgs(CLAUDE_BASE, cfg({ model: "claude-haiku-4-5-20251001" }), "claude");
+            expect(out[out.indexOf("--model") + 1]).toBe("claude-haiku-4-5-20251001");
             expect(out).not.toContain("--effort");
         });
     });

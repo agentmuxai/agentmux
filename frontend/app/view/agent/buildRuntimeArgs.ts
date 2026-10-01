@@ -11,6 +11,7 @@
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import { getProvider } from "./providers";
+import { effectiveModel, effortApplies } from "./runtime-capabilities";
 import { selectLaunchArgs, withProviderFlags, type LaunchArgsProvider } from "./launch-args";
 
 /**
@@ -84,6 +85,12 @@ export function buildRuntimeArgs(
     baseLaunchArgs: string[],
     runtime: AgentRuntimeConfig | null | undefined,
     providerId?: string,
+    /**
+     * The model the process will actually run, when something appended after
+     * these flags overrides the runtime's (an agent definition's own `--model`).
+     * Decides whether `--effort` applies; defaults to the runtime's model.
+     */
+    effectiveModelId?: string,
 ): string[] {
     const config = runtime ?? DEFAULT_RUNTIME_CONFIG;
     const args: string[] = [];
@@ -146,9 +153,9 @@ export function buildRuntimeArgs(
         args.push("--model", config.model);
     }
     // --effort: claude only, and NOT on Haiku — `--effort` 400s on Haiku 4.5
-    // (effort is supported on Opus/Sonnet only). Skip it so a `haiku` pane
-    // doesn't error out on every turn.
-    if ((!providerId || providerId === "claude") && config.model !== "haiku") {
+    // (effort is supported on Opus/Sonnet only). Skip it so a Haiku pane
+    // doesn't error out on every turn. Matches a concrete Haiku id too.
+    if (effortApplies(providerId, effectiveModelId ?? config.model)) {
         args.push("--effort", config.effort);
     }
 
@@ -224,5 +231,9 @@ export function buildPaneArgs(
     runtime: AgentRuntimeConfig | null | undefined,
     providerFlags: unknown,
 ): string[] {
-    return withProviderFlags(buildRuntimeArgs(selectLaunchArgs(provider, agentMode), runtime, provider.id), providerFlags);
+    const model = effectiveModel((runtime ?? DEFAULT_RUNTIME_CONFIG).model, providerFlags);
+    return withProviderFlags(
+        buildRuntimeArgs(selectLaunchArgs(provider, agentMode), runtime, provider.id, model),
+        providerFlags,
+    );
 }

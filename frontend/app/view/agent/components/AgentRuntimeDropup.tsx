@@ -32,9 +32,10 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX 
 import { Portal } from "solid-js/web";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, type ProviderModel } from "../providers";
-import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
 import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
+import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
+import { effectiveModel, effortApplies, effortNotUsedReason } from "../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
 /** Serialize a MenuPositionResult.style the same way flyoutmenu.tsx does. */
@@ -87,7 +88,11 @@ interface OptionRow {
     color?: string;
 }
 
-type Row = { kind: "header"; section: Section } | (OptionRow & { kind: "option" });
+type Row =
+    | { kind: "header"; section: Section }
+    // A line of text in a section whose options do not apply.
+    | { kind: "note"; section: Section; text: string }
+    | (OptionRow & { kind: "option" });
 
 interface AgentRuntimeDropupProps {
     blockId: string;
@@ -200,9 +205,19 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     const effortLabel = (value: string): string => EFFORT_OPTIONS.find((o) => o.value === value)?.label ?? value;
     const modeLabel = (value: string): string => MODE_OPTIONS.find((o) => o.value === value)?.label ?? value;
 
+    // The model the process actually runs: the agent definition's own `--model`
+    // (appended after the runtime's) wins over the selection. Whether effort
+    // applies depends on THAT.
+    const runningModel = (): string =>
+        effectiveModel(runtime().model, props.blockAtom()?.meta?.[PROVIDER_FLAGS_META_KEY]);
+
     const compactSummary = (): string => {
         const r = runtime();
-        return [modeLabel(r.permissionMode), modelLabel(r.model), effortLabel(r.effort)].join(" · ");
+        // Effort is left out when it does nothing for this pane: the label says
+        // what the agent runs, and "Haiku · high" would claim an effort it never gets.
+        const parts = [modeLabel(r.permissionMode), modelLabel(r.model)];
+        if (effortApplies(props.providerId, runningModel())) parts.push(effortLabel(r.effort));
+        return parts.join(" · ");
     };
 
     // Single pass builds both the render list (rows, incl. section headers)
@@ -235,7 +250,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
 
         addSection("mode", MODE_OPTIONS, r.permissionMode, true);
         addSection("model", modelOptions(), r.model, false);
-        addSection("effort", EFFORT_OPTIONS, r.effort, false);
+        const notUsed = effortNotUsedReason(props.providerId, runningModel());
+        if (notUsed === null) {
+            addSection("effort", EFFORT_OPTIONS, r.effort, false);
+        } else {
+            // Shown, but not selectable: the choice would be recorded and do nothing.
+            rows.push({ kind: "header", section: "effort" });
+            rows.push({ kind: "note", section: "effort", text: `Not applied — ${notUsed}` });
+        }
         return { rows, options };
     };
 
@@ -447,6 +469,9 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                 {(row) => {
                                     if (row.kind === "header") {
                                         return <div class="agent-runtime-dropup-section">{row.section}</div>;
+                                    }
+                                    if (row.kind === "note") {
+                                        return <div class="agent-runtime-dropup-note">{row.text}</div>;
                                     }
                                     const optIndex = () =>
                                         build().options.findIndex(
