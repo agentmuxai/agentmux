@@ -94,8 +94,7 @@ impl Workdir {
         self.ensure_parent(&path)?;
         #[cfg(unix)]
         let keep_mode = if owner_only { None } else { std::fs::metadata(&path).ok().map(|m| m.permissions()) };
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let tmp = path.with_file_name(format!(".{file_name}.{}.agentmux-tmp", uuid::Uuid::new_v4()));
+        let tmp = temp_path(&path);
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
@@ -122,11 +121,30 @@ impl Workdir {
     }
 
     /// Create `rel` with `bytes` only if nothing is there: `Ok(true)` when
-    /// created, `Ok(false)` when it already existed. A failed write removes
-    /// the partial file, so it can't pass for a complete one later.
+    /// created, `Ok(false)` when it already existed. The file appears whole
+    /// or not at all, even across a crash: it is written and synced under a
+    /// temporary name, then hard-linked into place, which fails if `rel`
+    /// already exists (Codex on #4141 — a partial `.pre-adopt` backup would
+    /// otherwise block adoption forever).
     pub fn create_new(&self, rel: &str, bytes: &[u8]) -> io::Result<bool> {
         let path = self.resolve(rel)?;
         self.ensure_parent(&path)?;
+        let tmp = temp_path(&path);
+        let staged = (|| {
+            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+            f.write_all(bytes)?;
+            f.sync_all()
+        })();
+        let linked = staged.and_then(|()| std::fs::hard_link(&tmp, &path));
+        let _ = std::fs::remove_file(&tmp);
+        match linked {
+            Ok(()) => return Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(false),
+            // A filesystem without hard links (FAT, some network shares):
+            // fall back to creating the file in place, removing it if the
+            // write fails.
+            Err(_) => {}
+        }
         let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(false),
@@ -168,6 +186,13 @@ impl Workdir {
         #[allow(clippy::suspicious_open_options)]
         std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)
     }
+}
+
+/// A fresh temporary name beside `path`, so a rename or link stays on one
+/// filesystem.
+fn temp_path(path: &Path) -> PathBuf {
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    path.with_file_name(format!(".{file_name}.{}.agentmux-tmp", uuid::Uuid::new_v4()))
 }
 
 /// `fs::rename`, retried briefly when Windows refuses to replace a file
@@ -301,6 +326,12 @@ mod tests {
         assert!(wd.create_new(".claude/marker.json", b"first").unwrap());
         assert!(!wd.create_new(".claude/marker.json", b"second").unwrap());
         assert_eq!(std::fs::read(dir.path().join(".claude/marker.json")).unwrap(), b"first");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path().join(".claude"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".agentmux-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "no temp file left behind");
     }
 
     #[test]

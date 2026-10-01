@@ -1295,8 +1295,10 @@ pub fn write_mcp_json_respecting_user_servers(
     // Refused (a symlink, or outside the workdir) before anything is read
     // or locked: this file carries the agent's signing keys. A refusal
     // leaves the link alone and the launch goes on, as for `CLAUDE.md`
-    // (ReAgent on #4141).
-    let path = match wd.resolve(".mcp.json") {
+    // (ReAgent on #4141). So does a refused ownership manifest (a `.claude`
+    // linking out): without it the next merge would take the user's own
+    // servers for AgentMux's and drop them (Codex on #4141).
+    let path = match wd.resolve(MANAGED_MCP_SERVERS_MANIFEST).and_then(|_| wd.resolve(".mcp.json")) {
         Ok(path) => path,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             tracing::warn!(error = %e, "write_mcp_json_respecting_user_servers: not writing .mcp.json");
@@ -3016,6 +3018,28 @@ mod mcp_json_tests {
         write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
         assert!(std::fs::symlink_metadata(dir.path().join(".mcp.json")).unwrap().file_type().is_symlink());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), r#"{"mcpServers":{}}"#);
+    }
+
+    /// Codex on #4141: with `.claude` linking outside, the ownership manifest
+    /// can't be written, so `.mcp.json` isn't either; otherwise the second
+    /// launch would take the user's own server for AgentMux's and drop it.
+    #[test]
+    fn mcp_json_a_users_server_survives_two_launches_with_claude_linking_outside() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(outside.path(), dir.path().join(".claude")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(outside.path(), dir.path().join(".claude")).is_ok();
+        if !made {
+            return;
+        }
+        let users = r#"{"mcpServers":{"mine":{"command":"my-mcp"}}}"#;
+        std::fs::write(dir.path().join(".mcp.json"), users).unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        assert!(mcp_servers_of(dir.path()).contains_key("mine"));
+        assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none(), "nothing written outside");
     }
 
     #[test]

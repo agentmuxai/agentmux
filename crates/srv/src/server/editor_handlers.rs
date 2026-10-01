@@ -319,8 +319,13 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // symlink that resolves outside the workdir, reject.
                     // No-op for fully-fresh agent dirs (the common case
                     // where every component is new).
-                    crate::backend::base::verify_no_symlink_escape(&file_path, &canonical_base)
-                        .map_err(|e| format!("path traversal denied: {} ({e})", file.path))?;
+                    // Like a refused write below, this skips that one file
+                    // rather than failing the launch, as agent.open does
+                    // (Codex on #4141).
+                    if let Err(e) = crate::backend::base::verify_no_symlink_escape(&file_path, &canonical_base) {
+                        tracing::warn!(path = %file.path, error = %e, "writeagentconfig: not writing a config file under a folder linking outside the workdir");
+                        continue;
+                    }
                     // Inject global memory bundles into CLAUDE.md so agents
                     // launched from the picker receive the same workspace rules
                     // as agents launched via the agent.open RPC.
