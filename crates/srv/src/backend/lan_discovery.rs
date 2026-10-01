@@ -318,6 +318,9 @@ pub struct LanDiscovery {
     /// monitor channel. An interface whose socket failed to bind never appears
     /// here (see `lan_mdns_health`). Filled by `monitor_loop`.
     announced_v4: Arc<Mutex<BTreeSet<Ipv4Addr>>>,
+    /// Whether the monitor channel was obtained. Without it `announced_v4` never
+    /// fills, so `health()` has no basis for a verdict and stays `Pending`.
+    monitored: bool,
     /// When this daemon was built, for the start-up grace in `health()`.
     started_at: std::time::Instant,
 }
@@ -497,6 +500,7 @@ impl LanDiscovery {
             udp_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
             announced_v4: announced_v4.clone(),
+            monitored: monitor.is_some(),
             started_at: std::time::Instant::now(),
         });
 
@@ -1088,7 +1092,8 @@ impl LanDiscovery {
     /// Is this instance really announced on an IPv4 interface other machines
     /// can reach? `Pending` until the start-up grace has passed.
     pub fn health(&self) -> lan_mdns_health::MdnsHealth {
-        if self.started_at.elapsed() < lan_mdns_health::GRACE {
+        // Cheap exits first: no monitor, or still inside the grace.
+        if !self.monitored || self.started_at.elapsed() < lan_mdns_health::GRACE {
             return lan_mdns_health::MdnsHealth::Pending;
         }
         // Grouped by interface: `mdns-sd` announces on one address per
@@ -1100,7 +1105,7 @@ impl LanDiscovery {
             .map(|i| (i.name.clone(), i.ip()));
         let expected = lan_mdns_health::expected_by_interface(local);
         let announced = self.announced_v4.lock().clone();
-        lan_mdns_health::evaluate(&expected, &announced)
+        lan_mdns_health::verdict(self.monitored, self.started_at.elapsed(), &expected, &announced)
     }
 
     /// Get current list of discovered LAN peers (excludes self).
@@ -2285,6 +2290,7 @@ mod handle_event_tests {
             udp_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
             announced_v4: Arc::new(Mutex::new(BTreeSet::new())),
+            monitored: true,
             started_at: std::time::Instant::now(),
         }
     }

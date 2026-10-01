@@ -159,6 +159,25 @@ pub fn evaluate(expected: &[BTreeSet<Ipv4Addr>], announced: &BTreeSet<Ipv4Addr>)
     }
 }
 
+/// The verdict for a daemon of a given age.
+///
+/// `Pending` unless we are actually watching the daemon (`monitored`) and it has
+/// had its start-up grace. Without a monitor nothing ever fills `announced`, so
+/// evaluating would report a false `Undiscoverable` on any host with an IPv4
+/// address, rebuild three times for nothing and flag the indicator (ReAgent P1
+/// on #4148). "We cannot tell" is `Pending`, never a fault.
+pub fn verdict(
+    monitored: bool,
+    since_start: std::time::Duration,
+    expected: &[BTreeSet<Ipv4Addr>],
+    announced: &BTreeSet<Ipv4Addr>,
+) -> MdnsHealth {
+    if !monitored || since_start < GRACE {
+        return MdnsHealth::Pending;
+    }
+    evaluate(expected, announced)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     Nothing,
@@ -381,6 +400,23 @@ mod tests {
         assert!(!w.observe_down(), "exhausted");
         w.observe(&MdnsHealth::Pending); // a daemon exists again
         assert!(w.observe_down(), "retries start over");
+    }
+
+    #[test]
+    fn no_monitor_means_no_verdict_however_long_it_has_been() {
+        // ReAgent P1 on #4148: nothing would ever fill `announced`.
+        let e = ifaces(&["192.168.1.26"]);
+        let long_ago = GRACE * 100;
+        assert_eq!(verdict(false, long_ago, &e, &set(&[])), MdnsHealth::Pending);
+        assert_eq!(verdict(false, long_ago, &e, &set(&["192.168.1.26"])), MdnsHealth::Pending);
+    }
+
+    #[test]
+    fn a_monitored_daemon_gets_its_start_up_grace_then_a_verdict() {
+        let e = ifaces(&["192.168.1.26"]);
+        assert_eq!(verdict(true, GRACE / 2, &e, &set(&[])), MdnsHealth::Pending);
+        assert!(verdict(true, GRACE, &e, &set(&[])).is_undiscoverable());
+        assert_eq!(verdict(true, GRACE, &e, &set(&["192.168.1.26"])), MdnsHealth::Healthy);
     }
 
     #[test]
