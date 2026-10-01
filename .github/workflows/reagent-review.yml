@@ -47,9 +47,9 @@ permissions:
 
 jobs:
   review:
-    # reagentx caught this on PR #4009: without this gate, EVERY comment on
+    # reagentx caught this on PR #4009: without a gate, EVERY comment on
     # ANY issue in the repo (not just a PR) spun up AWS OIDC credential
-    # exchange, ECR login, and a docker pull before build_task()'s own
+    # exchange, a registry login and a docker pull before build_task()'s own
     # "not a PR" filter ever ran downstream. Same gate shape as this repo's
     # own codex-review-gate.yml uses for the identical problem.
     #
