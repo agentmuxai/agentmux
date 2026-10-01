@@ -66,7 +66,7 @@ capped!(backlog_naming_semaphore, MAX_CONCURRENT_BACKLOG_NAMING);
 /// Load-bearing, and not inherited from anywhere: `AmbientGateway` deduplicates
 /// and cancels only within a single `(entity_id, purpose)` key, so without this
 /// N panes backgrounding a task at the same moment means N concurrent CLI
-/// spawns. The pushed-summary caller this function is modelled on is bounded by
+/// spawns. The pushed-summary caller `tasks::generate_ambient_narration` is modelled on is bounded by
 /// a semaphore that lives in its *caller* (`activity_watcher.rs`), which an
 /// RPC-driven path inherits nothing from. The 15s timeout inside
 /// `invoke_haiku` bounds each call's duration, not how many run at

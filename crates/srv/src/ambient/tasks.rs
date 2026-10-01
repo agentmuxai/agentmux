@@ -40,7 +40,7 @@ pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<Str
 /// callable directly (no RPC envelope) by the background sweep in
 /// `backend::reactive::activity_watcher`. Goes through the same Ambient
 /// Model Call gateway (admission, cancellation-of-superseded, token
-/// accounting) under the distinct `_PUSHED` purpose above.
+/// accounting) under the distinct `purpose::ACTIVITY_SUMMARY_PUSHED` purpose.
 ///
 /// `generation` only needs to strictly increase across successive calls for
 /// the *same* `block_id` — the sweep loop's tick counter is sufficient; it
