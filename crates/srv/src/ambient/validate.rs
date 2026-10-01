@@ -90,7 +90,7 @@ const RISKY_PHRASES: &[&str] = &[
     "drop database",
     "delete the database",
     "delete all",
-    "wipe ",
+    "wipe",
     "password",
     "secret",
     "credential",
@@ -103,6 +103,28 @@ const RISKY_PHRASES: &[&str] = &[
 /// matching only (the text handed back is untouched).
 fn normalized(text: &str) -> String {
     text.replace(['\u{2019}', '\u{2018}'], "'").to_lowercase()
+}
+
+/// Whether `phrase` occurs in `lower` as whole words. A bare substring match
+/// would read "has an AI summary bug" as the refusal "as an ai".
+fn has_phrase(lower: &str, phrase: &str) -> bool {
+    let mut from = 0;
+    while let Some(found) = lower[from..].find(phrase) {
+        let start = from + found;
+        let end = start + phrase.len();
+        let before_ok = lower[..start].chars().next_back().map_or(true, |c| !c.is_alphanumeric());
+        let after_ok = lower[end..].chars().next().map_or(true, |c| !c.is_alphanumeric());
+        if before_ok && after_ok {
+            return true;
+        }
+        // Advance past this match's first character, staying on a char boundary.
+        from = start + lower[start..].chars().next().map_or(1, |c| c.len_utf8());
+    }
+    false
+}
+
+fn has_any(lower: &str, phrases: &[&str]) -> bool {
+    phrases.iter().any(|p| has_phrase(lower, p))
 }
 
 fn is_placeholder(lower: &str) -> bool {
@@ -130,7 +152,7 @@ pub fn accept_line(raw: &str, limits: &Limits) -> Option<String> {
     if is_placeholder(&lower) {
         return None;
     }
-    if REFUSAL_PHRASES.iter().any(|p| lower.contains(p)) {
+    if has_any(&lower, REFUSAL_PHRASES) {
         return None;
     }
     Some(text.to_string())
@@ -146,10 +168,10 @@ pub fn accept_next_prompt(raw: &str) -> Option<String> {
         return None;
     }
     let lower = normalized(&text);
-    if NEXT_PROMPT_META_PHRASES.iter().any(|p| lower.contains(p)) {
+    if has_any(&lower, NEXT_PROMPT_META_PHRASES) {
         return None;
     }
-    if RISKY_PHRASES.iter().any(|p| lower.contains(p)) {
+    if has_any(&lower, RISKY_PHRASES) {
         return None;
     }
     Some(text)
@@ -230,6 +252,7 @@ mod tests {
             "git reset --hard origin/main",
             "Print the API token",
             "Drop table users",
+            "Wipe the disk",
         ] {
             assert_eq!(accept_next_prompt(s), None, "{s}");
         }
@@ -237,9 +260,8 @@ mod tests {
 
     #[test]
     fn ordinary_commands_pass_and_over_blocking_is_deliberate() {
-        // "secret" also blocks "secretary": a missed ghost text costs nothing, so
-        // the list errs toward blocking. Pinned so the trade-off is deliberate.
-        assert_eq!(accept_next_prompt("Email the secretary"), None);
+        // Plurals ("tokens", "secrets") are separate words and are NOT matched by
+        // "token"/"secret": add them to the list if that ever matters.
         assert_eq!(
             accept_next_prompt("Merge the PR once CI is green"),
             Some("Merge the PR once CI is green".into())
@@ -283,6 +305,26 @@ mod tests {
         assert!(accept_line("I started the dev server in the background.", &NARRATION).is_some());
         let paragraph = vec!["word"; 60].join(" ");
         assert_eq!(accept_line(&paragraph, &NARRATION), None);
+    }
+
+    #[test]
+    fn phrases_match_whole_words_only() {
+        // "has an AI" contains the substring "as an ai".
+        for t in ["Fix pane has an AI summary bug", "Agent was an AI wrapper", "Rewire the bias in token counts"] {
+            assert_eq!(accept_line(t, &title_limits(7)).as_deref(), Some(t), "{t}");
+        }
+        assert_eq!(accept_line("As an AI, I have no title", &NAME), None);
+        assert_eq!(accept_line("Sorry, as an AI model I can't say", &NAME), None);
+        assert!(has_phrase("sorry. i cannot do that", "i cannot"));
+        assert!(!has_phrase("lexi cannot", "i cannot"));
+    }
+
+    #[test]
+    fn risky_words_inside_other_words_no_longer_block_a_next_prompt() {
+        // "secret" used to block "secretary"; whole-word matching fixes the false
+        // positive while "secrets" and "tokens" stay out of reach by design.
+        assert_eq!(accept_next_prompt("Email the secretary"), Some("Email the secretary".into()));
+        assert_eq!(accept_next_prompt("Print the secret"), None);
     }
 
     #[test]
