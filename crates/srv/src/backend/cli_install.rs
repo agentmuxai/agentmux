@@ -950,4 +950,115 @@ mod tests {
             .collect();
         assert_eq!(todo, vec!["codex"]);
     }
+
+    // ── a pin bump, as a user meets it ─────────────────────────────────────
+    //
+    // The user upgraded AgentMux, the provider's pin moved, and they open an
+    // existing agent. The previous pin is installed and complete; the new one is
+    // not. These use the LIVE registry pin (never a hardcoded version — that is
+    // what silently broke `warm_up_picks_used_npm_providers…` at 2.1.280 →
+    // 2.1.285) and a fake npm.
+
+    /// A completed install of "some earlier pin" of claude, plus the paths.
+    fn with_previous_pin_installed() -> (tempfile::TempDir, DataPaths, String, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(tmp.path());
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        let previous = "1.0.0-previous".to_string();
+        assert_ne!(previous, live.pinned_version);
+        let req = NpmInstallRequest {
+            provider_id: "claude".into(),
+            npm_package: live.npm_package.into(),
+            pinned_version: previous.clone(),
+            cli_command: live.cli_command.into(),
+            background: true,
+        };
+        install_pinned_cli_with(&paths, &req, &|_, _| {}, fake_npm(true, true)).unwrap();
+        let old_bin = npm_bin(
+            &shared_cli_dir(&paths, "claude", &previous).unwrap(),
+            "claude",
+        );
+        assert!(old_bin.is_file());
+        (tmp, paths, previous, old_bin)
+    }
+
+    fn live_claude_req(background: bool) -> NpmInstallRequest {
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        NpmInstallRequest {
+            provider_id: "claude".into(),
+            npm_package: live.npm_package.into(),
+            pinned_version: live.pinned_version.into(),
+            cli_command: live.cli_command.into(),
+            background,
+        }
+    }
+
+    #[test]
+    fn after_a_pin_bump_the_previous_install_is_not_mistaken_for_the_new_pin() {
+        let (_tmp, paths, _prev, _old_bin) = with_previous_pin_installed();
+        assert_eq!(
+            find_installed_for_provider(&paths, "claude"),
+            None,
+            "an open must resolve the NEW pin (installing it), not run whatever was there"
+        );
+        // …and the warm-up knows it has work to do, for exactly the live pin.
+        let todo = providers_needing_install(&paths, &["claude".to_string()]);
+        assert_eq!(todo.len(), 1);
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        assert_eq!(todo[0].pinned_version, live.pinned_version);
+    }
+
+    #[test]
+    fn installing_the_new_pin_leaves_the_previous_one_runnable_for_panes_that_hold_its_path() {
+        // A pane restored with the old `cmd` path keeps working until its mount
+        // flow rewrites it; nothing may delete the old install out from under it.
+        let (_tmp, paths, previous, old_bin) = with_previous_pin_installed();
+        install_pinned_cli_with(
+            &paths,
+            &live_claude_req(false),
+            &|_, _| {},
+            fake_npm(true, true),
+        )
+        .unwrap();
+
+        let new_bin = find_installed_for_provider(&paths, "claude").expect("new pin resolves");
+        assert_ne!(new_bin, old_bin);
+        assert!(is_valid_install(
+            &shared_cli_dir(&paths, "claude", &previous).unwrap(),
+            "claude"
+        ));
+        assert!(old_bin.is_file(), "the previous pin's shim is untouched");
+        // Resolving again is stable and does not reinstall.
+        assert_eq!(find_installed_for_provider(&paths, "claude"), Some(new_bin));
+    }
+
+    #[test]
+    fn a_failed_install_of_the_new_pin_does_not_fall_back_to_the_previous_one() {
+        // DOCUMENTS CURRENT BEHAVIOUR: the pin is exact. Offline (or no npm)
+        // right after an upgrade, opening an agent fails with the install error
+        // rather than silently running the previous CLI. The previous install is
+        // still on disk and valid; nothing selects it.
+        let (_tmp, paths, previous, old_bin) = with_previous_pin_installed();
+        let out = install_pinned_cli_with(
+            &paths,
+            &live_claude_req(false),
+            &|_, _| {},
+            fake_npm(false, false),
+        );
+        assert!(
+            matches!(out, Err(InstallError::NpmFailed { .. })),
+            "{out:?}"
+        );
+        assert_eq!(find_installed_for_provider(&paths, "claude"), None);
+        assert!(old_bin.is_file());
+        assert!(is_valid_install(
+            &shared_cli_dir(&paths, "claude", &previous).unwrap(),
+            "claude"
+        ));
+        // The failed attempt left nothing behind that a later attempt would trip on.
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        assert!(!shared_cli_dir(&paths, "claude", live.pinned_version)
+            .unwrap()
+            .exists());
+    }
 }
