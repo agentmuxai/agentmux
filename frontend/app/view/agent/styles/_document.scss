@@ -257,7 +257,7 @@
     // up to make room (an empty strip), then it fades in grey-to-white — the
     // "flash on send". Measured on 2026-10-01: layout shift 0.09 → 0.00 and
     // three changing frames → one without it. Agent output still fades in.
-    // docs/reports/REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30.md §7.
+    // REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30 (docs/reports) §7.
     .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
         opacity: 1;
         transform: translateY(0);
