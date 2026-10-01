@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { holdPaneContent } from "@/app/store/pane-content-holds";
+import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
@@ -42,6 +42,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
     const ctx = props.ctx;
     // "Loading…" until the first list arrives: hold the pane until then
     // (pane-content-holds.ts).
+    onCleanup(trackPaneContent(model.blockId));
     const releaseContent = holdPaneContent(model.blockId);
     onCleanup(releaseContent);
     createEffect(() => {

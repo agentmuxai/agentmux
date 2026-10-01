@@ -228,8 +228,9 @@ describe("createPaneReadiness", () => {
 // hidden tab.
 describe("createPaneReadiness content hold", () => {
     it("holds the block's content until the cover goes live, then releases it", async () => {
-        const { paneContentSettled, registerPaneMounted } = await import("./pane-content-holds");
+        const { paneContentSettled, registerPaneMounted, trackPaneContent } = await import("./pane-content-holds");
         const unmount = registerPaneMounted("blk-hold");
+        const untrack = trackPaneContent("blk-hold");
         const { value: r, dispose } = inRoot(() => createPaneReadiness({ holdFor: "blk-hold" }));
         const done = r.gate("data");
         expect(paneContentSettled("blk-hold")).toBe(false);
@@ -240,26 +241,31 @@ describe("createPaneReadiness content hold", () => {
         expect(paneContentSettled("blk-hold")).toBe(true);
         dispose();
         unmount();
+        untrack();
     });
 
     it("goes straight to live when hidden, releasing the hold without a fade", async () => {
-        const { paneContentSettled, registerPaneMounted } = await import("./pane-content-holds");
+        const { paneContentSettled, registerPaneMounted, trackPaneContent } = await import("./pane-content-holds");
         const unmount = registerPaneMounted("blk-hidden");
+        const untrack = trackPaneContent("blk-hidden");
         const { value: r, dispose } = inRoot(() => createPaneReadiness({ holdFor: "blk-hidden", hidden: () => true }));
         r.gate("data")();
         expect(r.phase()).toBe("live");
         expect(paneContentSettled("blk-hidden")).toBe(true);
         dispose();
         unmount();
+        untrack();
     });
 
     it("releases the hold if the pane is disposed while still assembling", async () => {
-        const { paneContentSettled, registerPaneMounted } = await import("./pane-content-holds");
+        const { paneContentSettled, registerPaneMounted, trackPaneContent } = await import("./pane-content-holds");
         const unmount = registerPaneMounted("blk-gone");
+        const untrack = trackPaneContent("blk-gone");
         const { value: r, dispose } = inRoot(() => createPaneReadiness({ holdFor: "blk-gone" }));
         r.gate("never");
         dispose();
         expect(paneContentSettled("blk-gone")).toBe(true);
         unmount();
+        untrack();
     });
 });

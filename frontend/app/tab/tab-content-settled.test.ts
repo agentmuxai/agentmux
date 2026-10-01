@@ -18,9 +18,19 @@ vi.mock("@/layout/index", () => ({
     },
 }));
 
-import { holdPaneContent, registerPaneMounted } from "@/app/store/pane-content-holds";
+import { holdPaneContent, registerPaneMounted, trackPaneContent } from "@/app/store/pane-content-holds";
 import { tabWasShown } from "@/app/store/tab-reveal";
 import { markLoadedTabsShownWhenSettled, tabContentSettled, whenTabContentSettled } from "./tab-content-settled";
+
+// A pane as a reporting view mounts it: mounted and tracked.
+const mountTracked = (blockId: string) => {
+    const unmount = registerPaneMounted(blockId);
+    const untrack = trackPaneContent(blockId);
+    return () => {
+        unmount();
+        untrack();
+    };
+};
 
 describe("tab content settled", () => {
     const cleanups: (() => void)[] = [];
@@ -39,9 +49,9 @@ describe("tab content settled", () => {
 
     it("waits for every pane to mount and release its holds", () => {
         layout.models.set("t1", { loaded: true, blockIds: ["a", "b"] });
-        cleanups.push(registerPaneMounted("a"));
+        cleanups.push(mountTracked("a"));
         expect(tabContentSettled("t1")).toBe(false);
-        cleanups.push(registerPaneMounted("b"));
+        cleanups.push(mountTracked("b"));
         const hold = holdPaneContent("b");
         expect(tabContentSettled("t1")).toBe(false);
         hold();
@@ -51,7 +61,7 @@ describe("tab content settled", () => {
     it("whenTabContentSettled resolves once settled, or false at the cap", async () => {
         layout.models.set("t2", { loaded: true, blockIds: ["c"] });
         const settled = whenTabContentSettled("t2", 1000);
-        cleanups.push(registerPaneMounted("c"));
+        cleanups.push(mountTracked("c"));
         await expect(settled).resolves.toBe(true);
         await expect(whenTabContentSettled("never", 30)).resolves.toBe(false);
     });
@@ -59,12 +69,18 @@ describe("tab content settled", () => {
     it("marks each loaded tab shown as it settles", async () => {
         layout.models.set("t3", { loaded: true, blockIds: ["d"] });
         layout.models.set("t4", { loaded: true, blockIds: ["e"] });
-        cleanups.push(registerPaneMounted("d"));
+        cleanups.push(mountTracked("d"));
         cleanups.push(markLoadedTabsShownWhenSettled(["t3", "t4"], () => true));
         await vi.waitFor(() => expect(tabWasShown("t3")).toBe(true));
         expect(tabWasShown("t4")).toBe(false);
-        cleanups.push(registerPaneMounted("e"));
+        cleanups.push(mountTracked("e"));
         await vi.waitFor(() => expect(tabWasShown("t4")).toBe(true));
+    });
+
+    it("never settles a pane whose view doesn't report its loading (Codex on #4132)", () => {
+        layout.models.set("t6", { loaded: true, blockIds: ["untracked"] });
+        cleanups.push(registerPaneMounted("untracked"));
+        expect(tabContentSettled("t6")).toBe(false);
     });
 
     it("marks nothing while inactive tabs aren't kept laid out", async () => {
