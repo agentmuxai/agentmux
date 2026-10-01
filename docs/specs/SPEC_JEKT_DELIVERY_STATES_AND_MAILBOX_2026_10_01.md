@@ -121,7 +121,7 @@ The relay (G1), the deferred queue (G5), the held row (G6), the spawn gate (G4) 
 
 1. **State, not success.** The sender is told the jekt's *state* and the receiver's *condition*, never a bare success.
 2. **One mailbox.** Every jekt that is not written to a ready process lives in one durable store with one set of rules, whichever tier accepted it.
-3. **Local first.** If the target is an agent this srv knows, the mailbox is here. The relay is for agents on other instances.
+3. **Local first, but only where this srv owns the agent.** If the target is an agent this srv knows **and this srv holds its single-live-instance lease, or nobody does**, the mailbox is here. If another instance holds the lease the agent is live there, and a local hold would strand the message: it goes to the relay, which that instance pulls from (§5.3 *Leases*). The relay is for agents on other instances.
 4. **Online means drain.** When an agent becomes able to take a message (spawn succeeded, signed in, restarted), its mailbox drains. Nothing waits for an unrelated event.
 5. **Every end state is reported.** Delivered late, expired, failed: the sender hears, once, in the same channel (a jekt).
 6. **Never claim more than we know.** `delivered` = written to a process srv believes is authenticated. `read` is a separate, optional state (§5.4).
@@ -171,6 +171,7 @@ Generalise `db_jekt_held` (migration v40) into the mailbox; do not add a second 
 - Rows are keyed by `msg_id`; add `state`, `reason`, `delivered_at_ms`, `read_at_ms`, `notified_sender`.
 - Everything not written to a ready process goes in: the in-memory `deferred_deliveries` queue (G5), spawn-gate refusals (G4), jekts for a `needs_login` controller (G3), and local-agent messages that today go to the relay (G2).
 - Retention: undelivered 24 h (unchanged); delivered/expired/failed rows kept 7 days for `MessageStatus` and receipts, with the body cleared on delivery (only trust metadata and a length stay).
+- **Leases.** A mailbox row belongs to the instance that holds the agent's lease. On Take over or fencing (`not_holder`), the instance that lost the lease re-posts its pending rows for that agent to the relay under the **same `msg_id`** (the relay's idempotency key) and marks them `relayed`; the instance that gained it pulls them like any relayed message. A row whose re-post fails keeps `state = held` and gets `repost_pending = 1` (a new nullable column, with the other mailbox columns above). The existing 30 s replay pass already walks every row (`server/jekt_held.rs`); it gains one rule: a row with `repost_pending` is re-posted to the relay first, and is delivered locally only if this srv holds the agent's lease again, in which case the flag is cleared. The sweep therefore retries exactly the rows a Take over left behind, and a row is only ever in one place: local while this srv holds the lease, on the relay once it has been re-posted. Because the relay dedupes on `msg_id`, a re-post that succeeded but whose reply was lost is harmless to repeat. A send that arrives while the lease is held elsewhere is relayed, never held locally.
 - Caps unchanged (64 per target, 1000 per channel); a full mailbox is a `failed(mailbox_full)` the sender is told about, never a silent drop.
 - A spawn-gate refusal is **not** an attempt against the 20-attempt budget; it is `needs_login` and waits for the gate to pass. The attempt budget applies only to genuine delivery errors, and exhausting it is a `failed` the sender hears about (G6).
 - **Drain triggers** (all idempotent, ordered by send time): agent registered; spawn succeeded; sign-in completed (the `CheckCliAuth` / in-app login success path); restart finished; a 30 s sweep as the backstop that already exists. This replaces "waits for an unrelated wake" (G1).
@@ -208,7 +209,7 @@ a sender that doesn't is told it in the send result (§5.2).
 
 - **Phase 0 — truthful and unstuck (small, no schema change).**
   1. Pull on `SubscribeAdd`/connect and a 60 s resync in `cloud_subscriber.rs` (G1).
-  2. Local-first: a target that resolves to a known local agent is held locally, not relayed (G2).
+  2. Local-first, **lease-aware** (G2): a known local agent is held locally only if this srv holds its lease or the relay reports it free. The relay today exposes only `claim`, `take`, `renew` and `release` for leases, so this needs a **read-only holder query** (`GET /agents/lease/:agent`, same auth as `/reactive/pending`). Until it exists, a target whose lease state srv does not know keeps going to the relay as today; 0.1 already makes that path deliver on subscribe, so the §1 scenario is fixed without 0.2.
   3. `SendMessage` returns `id=` and the receiver condition where srv already knows it; refresh `tool_schemas.rs` (G10).
   4. A spawn-gate refusal is reported as `HELD (needs_login)` and the jekt is kept (G4).
   Acceptance: the §1 scenario passes (§7 test 1).
@@ -228,7 +229,8 @@ Phase 0 is independent of the rest and fixes the observed failure; ship it first
 6. Expiry: a held message past 24 h and a relayed one past 30 min each produce exactly one sender notice; a sender that is itself offline gets it on reconnect.
 7. Attempt budget: three spawn-gate refusals do not count against the 20; 20 genuine failures produce `failed` and a sender notice.
 8. Trust: a replayed message keeps its original verdict (§8); `TIER=sensitive` / `ESCALATE=required` messages are never auto-acted on from a digest.
-9. Ordering: messages drain oldest first; a live message sent during the drain does not overtake held ones (the durable spec's recorded residual).
+9. Leases: with the agent live on instance B, a send from instance A is `relayed`, not held on A, and B receives it; after a Take over from B to A, rows B was holding reach A exactly once; with the relay unreachable, A holds locally and the result says `unconfirmed`.
+10. Ordering: messages drain oldest first; a live message sent during the drain does not overtake held ones (the durable spec's recorded residual).
 
 ## 8. Security
 
@@ -252,6 +254,7 @@ Phase 0 is independent of the rest and fixes the observed failure; ship it first
 - **O2.** Does the relay already wake a newly subscribed agent? Read in `agentmux-cloud` (`muxbus/server/src/index.ts`): wakes are sent on new injections only. If the relay can cheaply send one wake on `subscribe:add`, Phase 0.1 shrinks to a server change, but srv should not depend on it.
 - **O3.** `read` needs a reliable signal that the model consumed the line. Candidate: the stream-json user-message echo in the next turn's `init`. Not needed until someone wants "read" shown.
 - **O4.** Should a sender be able to ask for `no_hold` (deliver now or fail) for time-critical messages (e.g. review requests that go stale, issue #3894)? Proposed: yes, a `ttl_seconds` and `no_hold` argument on `SendMessage`, honoured by held, deferred and relay alike, which also closes #3894.
+- **O6.** Should the read-only lease query also report *where* (host and instance) so the send result can say "live on Area54"? Useful for the sender; it discloses presence the relay already shows through `409 held_by`.
 - **O5.** How much of the 7-day receipt history is worth keeping, and whether it should be visible in the pane.
 
 ## 11. Cost
