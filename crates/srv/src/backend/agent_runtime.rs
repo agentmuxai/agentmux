@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The runtime a pane opened by `agent.open` starts with.
+//! The runtime flags a pane's CLI is given, decided in srv.
 //!
 //! The runtime menu shows `agent:runtime` block meta; the process runs on
 //! `cmd:args`. The frontend keeps the two in step (`buildPaneArgs`), but
@@ -14,10 +14,19 @@
 //! docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md,
 //! docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md (G3).
 //!
-//! This is the same decision the frontend makes at launch, for the two
-//! providers whose model the menu wires (Claude, Codex). The defaults are
-//! duplicated by necessity and pinned to the frontend's by
-//! `providers/runtime-defaults-consistency.test.ts`.
+//! Two entry points, one decision, for the two providers whose model the menu
+//! wires (Claude, Codex):
+//!
+//! - [`seed_launch`] — a pane `agent.open` is creating.
+//! - [`with_runtime_flags`] — a pane that already exists, at the moment it
+//!   spawns. srv never reads `agent:runtime` otherwise, and a persistent
+//!   process never re-reads `cmd:args`, so a pane saved before the fixes (or
+//!   written by any path that forgets) would run on the CLI default for its
+//!   whole life. This is the backstop that makes srv authoritative at the one
+//!   moment it matters.
+//!
+//! The defaults are duplicated from the frontend by necessity and pinned to
+//! its by `providers/runtime-defaults-consistency.test.ts`.
 
 use serde_json::{json, Value};
 
@@ -25,15 +34,15 @@ use crate::backend::obj::MetaMapType;
 use crate::backend::providers::default_model_for;
 
 /// `DEFAULT_RUNTIME_CONFIG.permissionMode` in `frontend/app/view/agent/types.ts`.
-pub(super) const DEFAULT_PERMISSION_MODE: &str = "bypass";
+pub(crate) const DEFAULT_PERMISSION_MODE: &str = "bypass";
 /// `DEFAULT_RUNTIME_CONFIG.effort` in `frontend/app/view/agent/types.ts`.
-pub(super) const DEFAULT_EFFORT: &str = "high";
+pub(crate) const DEFAULT_EFFORT: &str = "high";
 
 /// Flags this module owns. Stripped from the catalog args so a base that ever
 /// grows one cannot double it.
 const OWNED_FLAGS: &[&str] = &["--model", "-m", "--effort"];
 
-pub(super) struct SeededLaunch {
+pub(crate) struct SeededLaunch {
     /// The argv to store as `cmd:args`.
     pub cli_args: Vec<String>,
     /// The value for `agent:runtime`, or `None` for a provider whose model the
@@ -81,7 +90,7 @@ fn without_owned_flags(base: Vec<String>) -> Vec<String> {
 /// frontend does, and a `--model` / `--effort` among them is the agent's own
 /// choice — it becomes the runtime the menu shows and no second flag is added,
 /// so the two cannot disagree.
-pub(super) fn seed_launch(
+pub(crate) fn seed_launch(
     provider_id: &str,
     base: Vec<String>,
     provider_flags: &str,
@@ -144,13 +153,77 @@ pub(super) fn seed_launch(
     }
 }
 
+/// Claude model names: the aliases and concrete ids. A pane carried over from
+/// before per-provider models can have one stored for a Codex agent; it must
+/// never reach Codex, which rejects it (frontend `buildRuntimeArgs.ts` guards the
+/// same way).
+fn is_claude_model(m: &str) -> bool {
+    matches!(m, "opus" | "sonnet" | "haiku") || m.starts_with("claude-")
+}
+
+/// `args` as stored in `cmd:args`, plus any runtime flag it lacks, taken from
+/// the pane's `agent:runtime` (or the defaults when it has none).
+///
+/// Never overrides a flag already present: the frontend's rebuild and
+/// [`seed_launch`] put them there, and a definition's own `--model` is the
+/// agent's choice. Leaves alone a provider the menu does not wire, an unknown
+/// provider, and an empty argv (nothing to extend). Idempotent.
+pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<String> {
+    if args.is_empty() {
+        return args;
+    }
+    let provider_id = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
+    let Some(default_model) = default_model_for(&provider_id) else {
+        return args;
+    };
+    let runtime = |key: &str| {
+        meta.get("agent:runtime")
+            .and_then(|r| r.get(key))
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+
+    let have_model = flag_value(&args, &["--model", "-m"]).map(str::to_string);
+    let have_effort = flag_value(&args, &["--effort"]).is_some();
+    let model = have_model.clone().unwrap_or_else(|| {
+        runtime("model")
+            .filter(|m| provider_id != "codex" || !is_claude_model(m))
+            .unwrap_or_else(|| default_model.to_string())
+    });
+
+    let mut out = args;
+    match provider_id.as_str() {
+        "claude" => {
+            if have_model.is_none() {
+                out.extend(["--model".to_string(), model.clone()]);
+            }
+            if !have_effort && model != "haiku" {
+                let effort = runtime("effort").unwrap_or_else(|| DEFAULT_EFFORT.to_string());
+                out.extend(["--effort".to_string(), effort]);
+            }
+        }
+        "codex" => {
+            if have_model.is_none() {
+                let marker = (out.last().map(String::as_str) == Some("-"))
+                    .then(|| out.pop())
+                    .flatten();
+                out.extend(["--model".to_string(), model]);
+                out.extend(marker);
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 /// Write the three keys that must travel together into a new pane's meta:
 /// `cmd:args` (what runs), `agent:runtime` (what the menu shows) and
 /// `agent:provider_flags` (what the frontend's per-send rebuild reapplies — it
 /// starts from the catalog and would drop the definition's flags on the first
 /// send otherwise, #2872). One call, so no caller can write one without the
 /// others.
-pub(super) fn apply_to_meta(meta: &mut MetaMapType, seeded: SeededLaunch, provider_flags: &str) {
+pub(crate) fn apply_to_meta(meta: &mut MetaMapType, seeded: SeededLaunch, provider_flags: &str) {
     meta.insert("cmd:args".to_string(), json!(seeded.cli_args));
     if let Some(runtime) = seeded.runtime {
         meta.insert("agent:runtime".to_string(), runtime);
@@ -357,5 +430,106 @@ mod tests {
         );
         assert!(!meta.contains_key("agent:runtime"));
         assert_eq!(meta["agent:provider_flags"], "--x y");
+    }
+
+    fn meta_with(provider: &str, runtime: Option<Value>) -> MetaMapType {
+        let mut m = MetaMapType::new();
+        m.insert("agentProvider".to_string(), json!(provider));
+        if let Some(r) = runtime {
+            m.insert("agent:runtime".to_string(), r);
+        }
+        m
+    }
+
+    #[test]
+    fn a_stored_pane_with_no_flags_gets_what_its_menu_shows() {
+        let meta = meta_with(
+            "claude",
+            Some(json!({"model": "opus", "effort": "max", "permissionMode": "bypass"})),
+        );
+        let out = with_runtime_flags(&meta, s(&["--permission-mode", "default"]));
+        assert_eq!(after(&out, "--model").as_deref(), Some("opus"));
+        assert_eq!(after(&out, "--effort").as_deref(), Some("max"));
+    }
+
+    #[test]
+    fn a_pane_with_no_runtime_at_all_gets_the_defaults() {
+        let out = with_runtime_flags(
+            &meta_with("claude", None),
+            s(&["--permission-mode", "default"]),
+        );
+        assert_eq!(after(&out, "--model").as_deref(), Some("sonnet"));
+        assert_eq!(after(&out, "--effort").as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn flags_already_present_are_never_overridden_or_doubled() {
+        let meta = meta_with("claude", Some(json!({"model": "sonnet", "effort": "low"})));
+        let args = s(&["--model", "opus", "--effort", "max"]);
+        assert_eq!(with_runtime_flags(&meta, args.clone()), args);
+    }
+
+    #[test]
+    fn a_model_flag_without_an_effort_still_gets_the_runtimes_effort() {
+        let meta = meta_with("claude", Some(json!({"model": "sonnet", "effort": "low"})));
+        let out = with_runtime_flags(&meta, s(&["--model", "opus"]));
+        assert_eq!(after(&out, "--model").as_deref(), Some("opus"));
+        assert_eq!(after(&out, "--effort").as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn haiku_gets_no_effort_whether_it_comes_from_the_args_or_the_runtime() {
+        let from_args = with_runtime_flags(&meta_with("claude", None), s(&["--model", "haiku"]));
+        assert!(!from_args.iter().any(|a| a == "--effort"), "{from_args:?}");
+        let from_runtime = with_runtime_flags(
+            &meta_with("claude", Some(json!({"model": "haiku"}))),
+            s(&["-p"]),
+        );
+        assert!(
+            !from_runtime.iter().any(|a| a == "--effort"),
+            "{from_runtime:?}"
+        );
+        assert_eq!(after(&from_runtime, "--model").as_deref(), Some("haiku"));
+    }
+
+    #[test]
+    fn it_is_idempotent() {
+        let meta = meta_with("claude", Some(json!({"model": "opus", "effort": "max"})));
+        let once = with_runtime_flags(&meta, s(&["--permission-mode", "default"]));
+        assert_eq!(with_runtime_flags(&meta, once.clone()), once);
+    }
+
+    #[test]
+    fn codex_gets_its_model_before_the_stdin_marker() {
+        let meta = meta_with("codex", Some(json!({"model": "gpt-5.4"})));
+        let out = with_runtime_flags(&meta, s(&["exec", "--json", "-"]));
+        assert_eq!(out, s(&["exec", "--json", "--model", "gpt-5.4", "-"]));
+    }
+
+    #[test]
+    fn a_claude_model_stored_on_a_codex_pane_never_reaches_codex() {
+        for stale in ["opus", "sonnet", "haiku", "claude-sonnet-5-5"] {
+            let meta = meta_with("codex", Some(json!({ "model": stale })));
+            let out = with_runtime_flags(&meta, s(&["exec", "-"]));
+            assert_eq!(
+                after(&out, "--model").as_deref(),
+                Some("gpt-5.5"),
+                "{stale}"
+            );
+        }
+    }
+
+    #[test]
+    fn it_leaves_alone_what_it_cannot_judge() {
+        // not wired, unknown, no provider recorded, and an empty argv
+        for provider in ["gemini", "kimi", "antigravity", "mystery", ""] {
+            let args = s(&["--yolo"]);
+            assert_eq!(
+                with_runtime_flags(&meta_with(provider, None), args.clone()),
+                args,
+                "{provider:?}"
+            );
+        }
+        assert!(with_runtime_flags(&meta_with("claude", None), vec![]).is_empty());
     }
 }

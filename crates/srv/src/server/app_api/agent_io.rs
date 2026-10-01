@@ -201,6 +201,8 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .collect(),
                     _ => vec![],
                 };
+                // Same backstop as `agentinput`: this path has no frontend rebuild.
+                let cli_args = crate::backend::agent_runtime::with_runtime_flags(&block.meta, cli_args);
                 let working_dir = obj::meta_get_string(&block.meta, "cmd:cwd", "");
                 // Identity M4b-1 (spec §6.5.8): the same env builder as
                 // `agentinput`, so a row-backed block's process carries its

@@ -776,6 +776,10 @@ pub async fn run_agent_turn(
             "stream-json".to_string(),
         ],
     };
+    // A pane stored without --model/--effort (saved before the launch fixes, or
+    // written by a path that forgot) would spawn on the CLI default; fill what
+    // its `agent:runtime` says. Never overrides a flag already there.
+    let cli_args = crate::backend::agent_runtime::with_runtime_flags(&block.meta, cli_args);
     let working_dir = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
     let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
         Some(serde_json::Value::Object(obj)) => obj

@@ -1,8 +1,9 @@
 // Drift guard for the runtime defaults srv duplicates from the frontend.
 //
-// `agent.open` (MCP `OpenAgent`, layouts) builds a pane without the frontend, so
-// srv has to pick the pane's starting model, effort and permission mode itself
-// (`crates/srv/src/server/app_api/agent_runtime_seed.rs`). The runtime menu shows
+// `agent.open` (MCP `OpenAgent`, layouts) builds a pane without the frontend, and
+// srv fills a stored pane's missing runtime flags at spawn, so srv has to know the
+// default model, effort and permission mode itself
+// (`crates/srv/src/backend/agent_runtime.rs`). The runtime menu shows
 // the FRONTEND's idea of the default; if the two disagree, a pane opens running
 // one model while its menu reads another — the bug this exists to keep closed.
 // docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md (G3).
@@ -10,7 +11,7 @@
 //   frontend/app/view/agent/types.ts            DEFAULT_RUNTIME_CONFIG
 //   frontend/app/view/agent/providers/catalog.ts  models[].default
 //   crates/srv/src/backend/providers.rs          default_model_for()
-//   crates/srv/src/server/app_api/agent_runtime_seed.rs  DEFAULT_PERMISSION_MODE / DEFAULT_EFFORT
+//   crates/srv/src/backend/agent_runtime.rs  DEFAULT_PERMISSION_MODE / DEFAULT_EFFORT
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -34,10 +35,10 @@ function srvDefaultModels(): Map<string, string> {
 }
 
 function srvConst(name: string): string {
-    const m = read("crates/srv/src/server/app_api/agent_runtime_seed.rs").match(
+    const m = read("crates/srv/src/backend/agent_runtime.rs").match(
         new RegExp(`const ${name}: &str = "([^"]+)";`)
     );
-    if (!m) throw new Error(`${name} not found in agent_runtime_seed.rs`);
+    if (!m) throw new Error(`${name} not found in agent_runtime.rs`);
     return m[1];
 }
 
