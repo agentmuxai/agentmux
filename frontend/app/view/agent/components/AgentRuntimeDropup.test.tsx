@@ -326,3 +326,45 @@ describe("AgentRuntimeDropup — says when the agent is not running what is sele
         expect(state().differs).toBe(false);
     });
 });
+
+describe("AgentRuntimeDropup — effort only where it applies", () => {
+    const withModel = (model: string) => ({
+        meta: { "agent:runtime": { model, permissionMode: "default", effort: "high" } },
+    });
+    const renderWith = (model: string) =>
+        render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={() => withModel(model) as any} providerId="claude" />);
+
+    it("a model that takes effort shows the effort rows and the effort in the label", async () => {
+        renderWith("sonnet");
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(trigger.textContent).toMatch(/high/);
+        await userEvent.click(trigger);
+        expect(screen.getAllByRole("option").some((o) => /^max/i.test(o.textContent ?? ""))).toBe(true);
+    });
+
+    it("Haiku does not: no effort rows to pick, no effort in the label, and it says why", async () => {
+        renderWith("haiku");
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(trigger.textContent).not.toMatch(/high/);
+        await userEvent.click(trigger);
+        expect(screen.getAllByRole("option").some((o) => /^max/i.test(o.textContent ?? ""))).toBe(false);
+        expect(screen.getByText(/Not applied — Haiku does not use it/)).toBeTruthy();
+    });
+
+    it("decides on the model the process RUNS: a definition's own Haiku under a Sonnet selection (Codex P1 on #4152)", async () => {
+        const meta = {
+            "agent:runtime": { model: "sonnet", permissionMode: "default", effort: "high" },
+            "agent:provider_flags": "--model claude-haiku-4-5-20251001",
+        };
+        render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={() => ({ meta }) as any} providerId="claude" />);
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(trigger.textContent).not.toMatch(/high/);
+        await userEvent.click(trigger);
+        expect(screen.getByText(/Not applied — Haiku does not use it/)).toBeTruthy();
+    });
+
+    it("a concrete Haiku id is treated the same", async () => {
+        renderWith("claude-haiku-4-5-20251001");
+        expect(screen.getByRole("button", { name: /Runtime settings/i }).textContent).not.toMatch(/high/);
+    });
+});
