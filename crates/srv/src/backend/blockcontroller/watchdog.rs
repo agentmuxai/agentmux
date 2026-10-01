@@ -58,7 +58,7 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>) {
                             limit_hours = %max_runtime_hours,
                             "watchdog: agent pane exceeded max-runtime, stopping"
                         );
-                        let _ = ctrl.stop(true, super::STATUS_DONE);
+                        let _ = crate::sagas::agent_teardown::stop_now(&block_id, true);
                         continue;
                     }
                 }
@@ -76,7 +76,7 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>) {
                                 limit_mins = %idle_timeout_mins,
                                 "watchdog: agent pane exceeded idle-output timeout, stopping"
                             );
-                            let _ = ctrl.stop(true, super::STATUS_DONE);
+                            let _ = crate::sagas::agent_teardown::stop_now(&block_id, true);
                         }
                     }
                 }

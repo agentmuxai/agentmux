@@ -883,7 +883,7 @@ pub fn resync_controller(
             // down the block's shared process tracker — only the old
             // controller's own CLI process should die. See
             // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
-            let _ = ctrl.stop_for_replace(STATUS_DONE);
+            let _ = crate::sagas::agent_teardown::replace_now(ctrl.as_ref());
             remove_controller_entry_only(block_id);
         } else {
             // Existing controller is fine, just check if it needs starting
