@@ -538,6 +538,7 @@ partial list.
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
+| [`SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30`](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown |
 | [`SPEC_LAYOUT_FILES_2026_09_25`](SPEC_LAYOUT_FILES_2026_09_25.md) | SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08`](SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md) | Spec: MCP integration parity with Claude Desktop / Cursor, piloted on Ableton MCP |

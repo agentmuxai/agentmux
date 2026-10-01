@@ -1,6 +1,6 @@
 # SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown
 
-**Status:** LC1 (§3) implemented (#4113); LC2-LC5 proposed.
+**Status:** active — LC1 (§3) implemented (#4113); LC2-LC5 proposed.
 **Date:** 2026-09-30
 **Verified against:** `agentmux` `main` @ `48cc6fdbc` (§1-§4) and `3fcd1496a` (§6). Paths are relative
 to the repo root.
