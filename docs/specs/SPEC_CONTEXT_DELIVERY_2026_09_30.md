@@ -1,6 +1,6 @@
 # SPEC: Context deliveries — what the agent was given, one item at a time
 
-**Status:** proposed — nothing here is built.
+**Status:** active — CD1 (#4037) and CD2a (#4041) implemented; CD2b (srv-composed fallback, `memorydelivery:compose`) implemented; CD3–CD5 proposed (CD3 awaits the owner's decision on storing bodies).
 **Date:** 2026-09-30
 **Verified against:** `agentmux` `main` @ `49ad410b8`. Paths are relative
 to the repo root; `frontend/…/agent/` means `frontend/app/view/agent/`.

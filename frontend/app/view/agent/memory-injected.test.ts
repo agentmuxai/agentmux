@@ -187,3 +187,38 @@ describe("history replay of the memory-injected frame", () => {
         expect(cards[0].id).toBe(frame.id);
     });
 });
+
+describe("history replay of a fallback re-delivery (CD2b)", () => {
+    it("shows the card once: the hidden echo after it adds no row, and the reply stays hidden", async () => {
+        const { parseHistoryLines } = await import("./parseHistoryLines");
+        const { composeReinjectionMessage } = await import("./memory-reinjection");
+        const fallbackCard = {
+            type: "system",
+            subtype: "agentmux_memory_injected",
+            id: "memory-injected-fb-9",
+            reason: "resume_fresh",
+            fallback: true,
+            delivery_id: "fb-9",
+            entries: [{ label: "notes.md", source: "personal", kind: "personal_memory", name: "notes.md", size_bytes: 2, tokens: 1 }],
+            timestamp: "2026-10-01T08:00:00+00:00",
+        };
+        const echo = {
+            type: "user",
+            message: {
+                role: "user",
+                content: composeReinjectionMessage([{ label: "notes.md", source: "personal", body: "P1", sizeBytes: 2 }], "fresh_session"),
+            },
+        };
+        const reply = { type: "assistant", message: { id: "m1", role: "assistant", content: [{ type: "text", text: "Noted." }] } };
+        const { nodes } = parseHistoryLines([fallbackCard, echo, reply].map((l) => JSON.stringify(l)), "claude-stream-json");
+        expect(nodes.map((n) => n.type)).toEqual(["context_delivery"]);
+        const card = nodes[0];
+        expect(card.type === "context_delivery" && card.reason).toBe("resume_fresh");
+
+        // srv writes the card once the message has gone out, so after its
+        // echo: the card takes the echo's row.
+        const after = parseHistoryLines([echo, fallbackCard, reply].map((l) => JSON.stringify(l)), "claude-stream-json");
+        expect(after.nodes.map((n) => n.type)).toEqual(["context_delivery"]);
+        expect(after.nodes[0].id).toBe("memory-injected-fb-9");
+    });
+});

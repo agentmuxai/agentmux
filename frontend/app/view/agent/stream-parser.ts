@@ -229,6 +229,17 @@ export class ClaudeCodeStreamParser {
     // happens.
     clearHiddenReinjectionState(): void {
         this.hidingUntilNextUserMessage = false;
+        this.fallbackCardShown = false;
+    }
+
+    // Set by parseHistoryLines.ts on a fallback re-delivery's own card
+    // (`agentmux_memory_injected` with `fallback: true`, CD2b): the hidden
+    // message right after it is that delivery's echo, already shown as the
+    // card, so it adds no row of its own. It is still hidden, as before.
+    private fallbackCardShown = false;
+
+    noteFallbackCard(): void {
+        this.fallbackCardShown = true;
     }
 
     /**
@@ -447,6 +458,14 @@ export class ClaudeCodeStreamParser {
 
             case "user_message": {
                 const node = this.userMessageToNode(event as UserMessageEvent);
+                const echoOfCard = this.fallbackCardShown && node.type === "memory_reinjection";
+                this.fallbackCardShown = false;
+                if (echoOfCard) {
+                    this.releaseHeldJekts();
+                    this.currentTextNode = null;
+                    this.currentThinkingNode = null;
+                    return null;
+                }
                 // A jekt mid-block waits for the block to end (see heldJekts).
                 // Anything else — the human typing — ends the block as before.
                 if (node.type === "jekt_message" && (this.currentTextNode || this.currentThinkingNode)) {

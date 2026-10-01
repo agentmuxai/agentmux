@@ -158,7 +158,7 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
         const node = controller.onSessionEnd();
         expect(node).not.toBeNull();
         expect(node?.type).toBe("memory_reinjection");
-        expect(node?.globalMemoryCount).toBe(1);
+        expect(node?.type === "memory_reinjection" && node.globalMemoryCount).toBe(1);
         expect(controller.isHiding()).toBe(false);
 
         // A second call (e.g. a stray extra session_end) must not resurrect
@@ -428,5 +428,60 @@ describe("createMemoryReinjectionController — claimFallback (the SessionStart 
         await controller.trigger(null, "compaction");
         expect(sendRpc).not.toHaveBeenCalled();
         expect(controller.isHiding()).toBe(false);
+    });
+});
+
+describe("createMemoryReinjectionController — srv composes (CD2b)", () => {
+    const card = {
+        type: "context_delivery" as const,
+        id: "memory-injected-fb-1",
+        reason: "compaction" as const,
+        items: [{ kind: "global_memory" as const, name: "App API", tier: "system" as const, sizeBytes: 10, tokens: 3 }],
+        timestamp: 1,
+    };
+    const make = (compose: () => Promise<unknown>) => {
+        const sendRpc = vi.fn().mockResolvedValue(undefined);
+        const fetchEntries = vi.fn().mockResolvedValue([
+            { label: "notes.md", source: "personal", body: "local", sizeBytes: 5 },
+        ] satisfies MemoryEntryInput[]);
+        const controller = createMemoryReinjectionController({
+            contextWindow: () => 200_000,
+            now: () => 0,
+            isPaneWorking: () => false,
+            fetchEntries,
+            sendRpc,
+            compose: compose as never,
+            dispatchTurnStart: vi.fn(),
+            dispatchTurnReset: vi.fn(),
+        });
+        return { controller, sendRpc, fetchEntries };
+    };
+
+    it("sends srv's message with its delivery id, and shows srv's card", async () => {
+        const { controller, sendRpc, fetchEntries } = make(() =>
+            Promise.resolve({ deliveryId: "fb-1", text: "<system-reminder>srv</system-reminder>\n", node: card }),
+        );
+        await controller.trigger(null, "compaction");
+        expect(sendRpc).toHaveBeenCalledWith("<system-reminder>srv</system-reminder>\n", "fb-1");
+        expect(fetchEntries).not.toHaveBeenCalled();
+        expect(controller.onSessionEnd()).toBe(card);
+    });
+
+    it("does nothing when srv has no memory to deliver", async () => {
+        const { controller, sendRpc, fetchEntries } = make(() => Promise.resolve(null));
+        await controller.trigger(null, "compaction");
+        expect(sendRpc).not.toHaveBeenCalled();
+        expect(fetchEntries).not.toHaveBeenCalled();
+        expect(controller.isHiding()).toBe(false);
+    });
+
+    it("composes here, as before, when srv can't (an older srv)", async () => {
+        const { controller, sendRpc, fetchEntries } = make(() => Promise.reject(new Error("unknown command")));
+        await controller.trigger(null, "compaction");
+        expect(fetchEntries).toHaveBeenCalledTimes(1);
+        const [message, deliveryId] = sendRpc.mock.calls[0];
+        expect(message).toContain("Your memory was reinjected because your working context was just reset.");
+        expect(deliveryId).toBeUndefined();
+        expect(controller.onSessionEnd()?.type).toBe("memory_reinjection");
     });
 });

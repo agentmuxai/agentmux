@@ -404,3 +404,32 @@ describe("replay of a compaction reinjection that carries the running summary", 
         expect(personal?.sizeBytes).toBe("pbody".length);
     });
 });
+
+describe("composeReinjectionMessage — srv's compose_fallback writes the same (CD2b)", () => {
+    // crates/srv/src/backend/memory_delivery.rs's
+    // compose_fallback_writes_the_frontends_exact_message pins this same
+    // literal for the same entries: the fallback's wire format must not drift
+    // between the two composers.
+    it("matches the pinned literal", () => {
+        const message = composeReinjectionMessage(
+            [
+                { label: "[AgentMux System] App API", source: "global", body: "# [AgentMux System] App API\n\nG1", sizeBytes: 0 },
+                { label: "[Workspace] Rules", source: "global", body: "# [Workspace] Rules\n\nG2", sizeBytes: 0 },
+                { label: "notes.md", source: "personal", body: "P1", sizeBytes: 0 },
+            ],
+            "compaction",
+        );
+        expect(message).toBe(
+            "<system-reminder>\n" +
+                "Your memory was reinjected because your working context was just reset. Your recent conversation was just compacted into a summary. Below is your\n" +
+                "complete Global Memory and Personal Memory content — read all of it now,\n" +
+                "not just the index.\n\n" +
+                "# Global Memory (2 entries)\n" +
+                "# [AgentMux System] App API\n\nG1\n\n---\n\n# [Workspace] Rules\n\nG2\n" +
+                "\n" +
+                "# Personal Memory (1 entry)\n" +
+                "P1\n" +
+                "</system-reminder>\n",
+        );
+    });
+});

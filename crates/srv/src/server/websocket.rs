@@ -1795,7 +1795,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
     // Memory delivery: the hidden reinjection's claim against the
     // SessionStart hook (memorydelivery:claim_fallback).
-    super::memory_delivery_handlers::register_memory_delivery_handlers(engine);
+    super::memory_delivery_handlers::register_memory_delivery_handlers(engine, &state);
 
     // OS notification Router (notify.emit / focus / ack / test / takeactivation
     // — docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §3.3).

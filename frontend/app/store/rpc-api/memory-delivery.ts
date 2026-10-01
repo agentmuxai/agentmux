@@ -14,6 +14,8 @@ export type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/Command
 export type { MemoryDeliveryClaimFallbackResult } from "@/types/rpc/MemoryDeliveryClaimFallbackResult";
 import type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/CommandMemoryDeliveryClaimFallbackData";
 import type { MemoryDeliveryClaimFallbackResult } from "@/types/rpc/MemoryDeliveryClaimFallbackResult";
+import type { CommandMemoryDeliveryComposeData } from "@/types/rpc/CommandMemoryDeliveryComposeData";
+import type { MemoryDeliveryComposeResult } from "@/types/rpc/MemoryDeliveryComposeResult";
 
 export const MemoryDeliveryApi = {
     /**
@@ -27,5 +29,18 @@ export const MemoryDeliveryApi = {
         opts?: RpcOpts,
     ): Promise<MemoryDeliveryClaimFallbackResult> {
         return client.rpcCall("memorydelivery:claim_fallback", data, opts);
+    },
+    /**
+     * srv composes the fallback's hidden message and keeps its item list
+     * (SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.4 step 2). Send `text` with
+     * `delivery_id` on the hidden AgentInput; srv then writes `frame`, the
+     * delivery's card, to the pane. All absent when there's no memory.
+     */
+    ComposeCommand(
+        client: RpcClient,
+        data: CommandMemoryDeliveryComposeData,
+        opts?: RpcOpts,
+    ): Promise<MemoryDeliveryComposeResult> {
+        return client.rpcCall("memorydelivery:compose", data, opts);
     },
 };

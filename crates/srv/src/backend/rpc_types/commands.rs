@@ -295,6 +295,7 @@ pub const COMMAND_GLOBAL_MEMORY_SECTIONS: &str = "globalmemory:sections";
 /// down because the `SessionStart` hook delivered the same event
 /// (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
 pub const COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK: &str = "memorydelivery:claim_fallback";
+pub const COMMAND_MEMORY_DELIVERY_COMPOSE: &str = "memorydelivery:compose";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";

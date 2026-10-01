@@ -124,6 +124,9 @@ struct DeliveryState {
     /// Events the frontend's hidden-reinjection fallback claimed:
     /// (block, reason) → when.
     fallback_claims: HashMap<(String, Reason), i64>,
+    /// Re-deliveries srv composed for the frontend's fallback, by
+    /// `delivery_id`, until the hidden message that sends one arrives.
+    fallbacks: HashMap<String, FallbackDelivery>,
 }
 
 /// What the fallback's claim found.
@@ -142,6 +145,7 @@ impl DeliveryState {
     fn prune(&mut self, now: i64) {
         self.deliveries.retain(|_, d| now - d.created_ms < DELIVERY_TTL_MS);
         self.fallback_claims.retain(|_, at| now - *at < CLAIM_WINDOW_MS);
+        self.fallbacks.retain(|_, f| now - f.created_ms < FALLBACK_TTL_MS);
     }
 
     fn fallback_claimed(&self, block_id: &str, reason: Reason) -> bool {
@@ -352,10 +356,15 @@ pub(crate) async fn claim_fallback(block_id: &str, reason: &str) -> bool {
 }
 
 /// Registers `memorydelivery:claim_fallback` — the frontend's hidden memory
-/// reinjection asks it right before it would fire.
-pub(crate) fn register_memory_delivery_handlers(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>) {
+/// reinjection asks it right before it would fire — and
+/// `memorydelivery:compose`, which composes what it sends.
+pub(crate) fn register_memory_delivery_handlers(
+    engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>,
+    state: &AppState,
+) {
     use crate::backend::rpc_types::{
-        CommandMemoryDeliveryClaimFallbackData, MemoryDeliveryClaimFallbackResult, COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
+        CommandMemoryDeliveryClaimFallbackData, CommandMemoryDeliveryComposeData, MemoryDeliveryClaimFallbackResult,
+        MemoryDeliveryComposeResult, COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK, COMMAND_MEMORY_DELIVERY_COMPOSE,
     };
     engine.register_typed(
         COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
@@ -363,6 +372,132 @@ pub(crate) fn register_memory_delivery_handlers(engine: &std::sync::Arc<crate::b
             Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason).await })
         },
     );
+    let state = state.clone();
+    engine.register_typed(COMMAND_MEMORY_DELIVERY_COMPOSE, move |req: CommandMemoryDeliveryComposeData, _ctx| {
+        let state = state.clone();
+        async move {
+            let reason = memory_delivery::FallbackReason::from_wire(&req.reason)
+                .ok_or_else(|| format!("memorydelivery:compose: unknown reason {:?}", req.reason))?;
+            let now = agentmux_common::time::now_ms();
+            let composed = tokio::task::spawn_blocking(move || compose_fallback_delivery(&state, &req.block_id, reason, now))
+                .await
+                .map_err(|e| format!("memorydelivery:compose: {e}"))?;
+            Ok::<_, String>(match composed {
+                Some(f) => {
+                    let reply = MemoryDeliveryComposeResult {
+                        delivery_id: Some(f.delivery_id.clone()),
+                        text: Some(f.text.clone()),
+                        frame: Some(f.frame.clone()),
+                    };
+                    let mut st = state_lock();
+                    st.prune(now);
+                    st.fallbacks.insert(f.delivery_id.clone(), f);
+                    reply
+                }
+                None => MemoryDeliveryComposeResult::default(),
+            })
+        }
+    });
+}
+
+/// How long a composed fallback delivery waits for its hidden message. The
+/// frontend sends it right after composing, unless the pane turned busy.
+const FALLBACK_TTL_MS: i64 = 10 * 60_000;
+
+/// A re-delivery srv composed for the frontend's fallback (CD2b).
+#[derive(Debug, Clone)]
+struct FallbackDelivery {
+    delivery_id: String,
+    block_id: String,
+    text: String,
+    /// The card, written to the pane when the hidden message is accepted.
+    frame: serde_json::Value,
+    created_ms: i64,
+}
+
+/// Composes the fallback's hidden message from the same memory the hook
+/// delivers (`global_entries`, `personal_entries`), and the card that will
+/// stand for it. `None` when there is no memory.
+fn compose_fallback_delivery(
+    state: &AppState,
+    block_id: &str,
+    reason: memory_delivery::FallbackReason,
+    now: i64,
+) -> Option<FallbackDelivery> {
+    let mut entries = global_entries(state, block_id);
+    if let Some(uid) = crate::server::agent_handlers::input::persisted_agent_identity(&state.mstore, block_id).map(|i| i.uid) {
+        entries.extend(personal_entries(&uid));
+    }
+    let composed = memory_delivery::compose_fallback(&entries, reason)?;
+    let mut items = delivery_items(&entries, &composed, composed.text.chars().count());
+    // A compaction's running summary rides along: srv's input handler appends
+    // it to this same message (`continuity_state::with_state_after_compaction`).
+    let summary = (reason == memory_delivery::FallbackReason::Compaction)
+        .then(|| crate::backend::continuity_state::running_summary_section(&state.mstore, block_id))
+        .flatten();
+    if let Some(summary) = &summary {
+        let (size, tokens) = (summary.len(), summary.chars().count().div_ceil(4));
+        items.push(EntrySize {
+            label: "Running summary".into(),
+            source: "summary",
+            size_bytes: size,
+            tokens,
+            kind: "running_summary",
+            name: "Running summary (AgentMux)".into(),
+            tier: None,
+            bundle_id: None,
+            path: None,
+            delivered: "full",
+            source_size_bytes: size,
+            source_tokens: tokens,
+            startup: None,
+        });
+    }
+    let delivery_id = format!("fb-{}", uuid::Uuid::new_v4());
+    let frame = fallback_frame(&delivery_id, reason, &items, summary.as_ref().map_or(0, |s| s.len()), now);
+    Some(FallbackDelivery { delivery_id, block_id: block_id.to_string(), text: composed.text, frame, created_ms: now })
+}
+
+/// The card for a fallback re-delivery: the hook notice's shape, under the
+/// delivery's own id. `fallback: true` tells replay that the hidden message
+/// right after it is this delivery's echo, not a second one.
+fn fallback_frame(
+    delivery_id: &str,
+    reason: memory_delivery::FallbackReason,
+    entries: &[EntrySize],
+    summary_bytes: usize,
+    now: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "system",
+        "subtype": "agentmux_memory_injected",
+        "id": format!("memory-injected-{delivery_id}"),
+        "reason": match reason {
+            memory_delivery::FallbackReason::Compaction => "compact",
+            memory_delivery::FallbackReason::FreshSession => "resume_fresh",
+        },
+        "fallback": true,
+        "delivery_id": delivery_id,
+        "entries": entries,
+        "summary_bytes": summary_bytes,
+        "timestamp": chrono::DateTime::from_timestamp_millis(now).unwrap_or_default().to_rfc3339(),
+    })
+}
+
+/// The card of the fallback delivery `delivery_id`, taken once, when its
+/// hidden message reaches srv. `None` for an unknown or expired id, or one
+/// composed for another block.
+pub(crate) fn take_fallback_frame(block_id: &str, delivery_id: &str) -> Option<serde_json::Value> {
+    let mut st = state_lock();
+    st.prune(agentmux_common::time::now_ms());
+    match st.fallbacks.remove(delivery_id) {
+        Some(f) if f.block_id == block_id => Some(f.frame),
+        Some(f) => {
+            tracing::warn!(block_id, delivery_block = %f.block_id, "memory delivery: a fallback delivery id from another block");
+            None
+        }
+        None => None,
+    }
 }
 
 /// Where a session's CLI looked for its startup files.
@@ -756,6 +891,45 @@ mod tests {
         assert!(LaunchDirs::from_request(&req("", "/cfg")).is_none(), "an older hook sends no cwd");
         let l = LaunchDirs::from_request(&req("/ws", " ")).unwrap();
         assert_eq!((l.cwd, l.config_dir), ("/ws".into(), None));
+    }
+
+    /// The fallback's card is the hook notice's shape under the delivery's
+    /// own id, flagged so replay knows the hidden echo after it (CD2b).
+    #[test]
+    fn a_fallback_card_names_its_delivery_and_reason() {
+        let items = delivery(1).entries;
+        let f = fallback_frame("fb-1", memory_delivery::FallbackReason::FreshSession, &items, 0, 1_790_000_000_000);
+        assert_eq!(f["subtype"], "agentmux_memory_injected");
+        assert_eq!(f["id"], "memory-injected-fb-1");
+        assert_eq!(f["reason"], "resume_fresh");
+        assert_eq!(f["fallback"], true);
+        assert_eq!(f["delivery_id"], "fb-1");
+        assert_eq!(f["entries"][0]["label"], "notes.md");
+        let c = fallback_frame("fb-2", memory_delivery::FallbackReason::Compaction, &items, 0, 0);
+        assert_eq!(c["reason"], "compact");
+    }
+
+    #[test]
+    fn a_fallback_card_is_taken_once_and_only_by_its_own_block() {
+        let now = agentmux_common::time::now_ms();
+        let put = |id: &str, block: &str| {
+            state_lock().fallbacks.insert(
+                id.to_string(),
+                FallbackDelivery {
+                    delivery_id: id.to_string(),
+                    block_id: block.to_string(),
+                    text: String::new(),
+                    frame: serde_json::json!({"id": id}),
+                    created_ms: now,
+                },
+            );
+        };
+        put("fb-take-1", "blk-a");
+        assert_eq!(take_fallback_frame("blk-a", "fb-take-1"), Some(serde_json::json!({"id": "fb-take-1"})));
+        assert_eq!(take_fallback_frame("blk-a", "fb-take-1"), None, "once");
+        put("fb-take-2", "blk-a");
+        assert_eq!(take_fallback_frame("blk-b", "fb-take-2"), None, "another block's id");
+        assert_eq!(take_fallback_frame("blk-a", "fb-unknown"), None);
     }
 
     #[test]
