@@ -19,13 +19,16 @@
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 
+const patchRuntime = vi.fn();
 vi.mock("../runtime-apply", () => ({
     applyRuntimeChange: vi.fn().mockResolvedValue(undefined),
+    patchRuntime: (...args: unknown[]) => patchRuntime(...args),
 }));
 
+beforeEach(() => patchRuntime.mockReset().mockResolvedValue({}));
 afterEach(() => cleanup());
 
 function renderDropup() {
@@ -151,9 +154,6 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
     });
 
     it("migrates a superseded concrete id to its current family member", async () => {
-        const { applyRuntimeChange } = await import("../runtime-apply");
-        vi.mocked(applyRuntimeChange).mockClear();
-
         render(() => (
             <AgentRuntimeDropup
                 blockId="block-1"
@@ -162,15 +162,13 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
             />
         ));
 
-        await vi.waitFor(() => expect(applyRuntimeChange).toHaveBeenCalled());
-        const cfg = vi.mocked(applyRuntimeChange).mock.calls[0][2] as { model: string };
-        expect(cfg.model).toMatch(/^claude-fable-5-1$/);
+        await vi.waitFor(() => expect(patchRuntime).toHaveBeenCalled());
+        // A patch, not a whole config: only the model is being migrated.
+        const patch = patchRuntime.mock.calls[0][2] as { model: string };
+        expect(patch).toEqual({ model: expect.stringMatching(/^claude-fable-5-1$/) });
     });
 
     it("leaves an alias selection untouched", async () => {
-        const { applyRuntimeChange } = await import("../runtime-apply");
-        vi.mocked(applyRuntimeChange).mockClear();
-
         render(() => (
             <AgentRuntimeDropup
                 blockId="block-1"
@@ -181,13 +179,10 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
 
         // Aliases are never superseded, so nothing should be rewritten.
         await new Promise((r) => setTimeout(r, 20));
-        expect(applyRuntimeChange).not.toHaveBeenCalled();
+        expect(patchRuntime).not.toHaveBeenCalled();
     });
 
     it("leaves an unrecognised id alone rather than guessing a family", async () => {
-        const { applyRuntimeChange } = await import("../runtime-apply");
-        vi.mocked(applyRuntimeChange).mockClear();
-
         render(() => (
             <AgentRuntimeDropup
                 blockId="block-1"
@@ -197,6 +192,36 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
         ));
 
         await new Promise((r) => setTimeout(r, 20));
-        expect(applyRuntimeChange).not.toHaveBeenCalled();
+        expect(patchRuntime).not.toHaveBeenCalled();
+    });
+});
+
+describe("AgentRuntimeDropup — a change is a patch, and a failure is visible", () => {
+    const rowByName = (name: RegExp) => screen.getAllByRole("option").find((o) => name.test(o.textContent ?? ""))!;
+
+    it("sends only what was changed, so two quick selections cannot undo each other", async () => {
+        renderDropup();
+        await openPanel();
+        await userEvent.click(rowByName(/Opus/i));
+        await userEvent.click(rowByName(/^max/i));
+        expect(patchRuntime).toHaveBeenCalledTimes(2);
+        expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "opus" });
+        expect(patchRuntime.mock.calls[1][2]).toEqual({ effort: "max" });
+    });
+
+    it("says so on the trigger when a change could not be applied, and clears on the next one that can", async () => {
+        patchRuntime.mockRejectedValueOnce(new Error("controller resync refused"));
+        renderDropup();
+        await openPanel();
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(trigger.className).not.toContain("agent-runtime-dropup-trigger--error");
+
+        await userEvent.click(rowByName(/Opus/i));
+        await vi.waitFor(() => expect(trigger.className).toContain("agent-runtime-dropup-trigger--error"));
+        expect(trigger.title).toContain("controller resync refused");
+        expect(trigger.getAttribute("aria-label")).toContain("failed to apply");
+
+        await userEvent.click(rowByName(/Sonnet/i));
+        await vi.waitFor(() => expect(trigger.className).not.toContain("agent-runtime-dropup-trigger--error"));
     });
 });

@@ -202,6 +202,17 @@
         color: var(--main-text-color);
     }
 
+    // The last change did not apply: what the label shows is only what was asked for.
+    &--error {
+        border-color: var(--error-color);
+        color: var(--error-color);
+
+        &:hover {
+            border-color: var(--error-color);
+            color: var(--error-color);
+        }
+    }
+
     &:focus-visible {
         outline: 2px solid var(--accent-color);
         outline-offset: 1px;
