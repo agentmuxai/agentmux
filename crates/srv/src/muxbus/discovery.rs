@@ -125,6 +125,14 @@ async fn fetch(http: &reqwest::Client, base: &str) -> Option<CloudSettings> {
 /// Where the cloud subscriber connects: the published WebSocket URL, else the
 /// compiled one.
 pub async fn ws_url(http: &reqwest::Client) -> String {
+    // The same kind of override as `relay::rest_base_url`'s
+    // `AGENTMUX_MUXBUS_REST_URL`: for tests and a local muxbus server.
+    if let Some(url) = std::env::var("AGENTMUX_MUXBUS_WS_URL")
+        .ok()
+        .filter(|v| !v.is_empty())
+    {
+        return url;
+    }
     cloud_settings(http)
         .await
         .map(|s| s.ws)
