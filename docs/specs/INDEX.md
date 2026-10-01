@@ -517,6 +517,7 @@ partial list.
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
+| [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21`](SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) | SPEC: cross-channel agent history resolution |
 | [`SPEC_DECISION_PROMPT_2026_04_24`](SPEC_DECISION_PROMPT_2026_04_24.md) | Spec: Per-Tool-Call Permission Decision Prompt |
 | [`SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03`](SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) | Docs Lifecycle Audit & Hardening Plan |
@@ -623,7 +624,6 @@ partial list.
 | [`SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30`](SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md) | SPEC: Code comment density and condensing |
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
-| [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) | SPEC: Continuous session persistence + trustworthy shutdown |
 | [`SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20`](SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md) | Spec: Cross-Instance Global Memory Sync |
 | [`SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02`](SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02.md) | Spec: default tab names — "Tab N", not "tabN" |
