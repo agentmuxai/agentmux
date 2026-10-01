@@ -1463,6 +1463,10 @@ pub fn write_claude_md_respecting_ownership(
 
     let mut agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(CLAUDE_MD_MANAGED_MARKER));
+    // A `CLAUDE.md` that is a symlink (dangling or not) is never written
+    // through: the write would follow it out of the workspace (Codex P1s on
+    // #4131).
+    let is_symlink = std::fs::symlink_metadata(&claude_md_path).is_ok_and(|m| m.file_type().is_symlink());
 
     // A CLAUDE.md an older AgentMux wrote, before the managed marker existed:
     // nothing in it but the skills index and the managed import line. It was
@@ -1470,9 +1474,6 @@ pub fn write_claude_md_respecting_ownership(
     // forever. Adopt it, keeping a copy (LC3,
     // SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4).
     if let Some(Ok(content)) = &existing {
-        // Never through a symlink: the managed write below would follow it
-        // and overwrite whatever it points at (Codex P1 on #4131).
-        let is_symlink = std::fs::symlink_metadata(&claude_md_path).is_ok_and(|m| m.file_type().is_symlink());
         if !agentmux_owns_it && !is_symlink && is_legacy_agentmux_claude_md(content) {
             // Resolved and symlink-checked like the other `.claude` side
             // files: a `.claude` that links outside the workspace must not
@@ -1538,6 +1539,12 @@ pub fn write_claude_md_respecting_ownership(
     // ordinary launch) — narrower and far less likely than that. The
     // foreign-file branch below (where this PR's actual guarantee lives)
     // does not have this gap: it never writes CLAUDE.md's own content.
+    // Nothing is written to a symlinked CLAUDE.md, not even the @import
+    // append below: every write would land on the link's target.
+    if is_symlink {
+        tracing::warn!(path = %claude_md_path.display(), "write_claude_md_respecting_ownership: CLAUDE.md is a symlink; not writing through it");
+        return Ok(());
+    }
     if agentmux_owns_it || existing.is_none() {
         let content = format!("{CLAUDE_MD_MANAGED_MARKER}\n\n{generated_content}");
         return std::fs::write(&claude_md_path, content);
@@ -2140,6 +2147,26 @@ mod tests {
         }
         write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), LEGACY_CLAUDE_MD, "the outside file is untouched");
+    }
+
+    /// A symlinked `CLAUDE.md` whose target already looks managed is not
+    /// written through either (Codex on #4131).
+    #[test]
+    fn a_symlinked_managed_claude_md_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("CLAUDE.md");
+        let managed = format!("{CLAUDE_MD_MANAGED_MARKER}\n\n# Memory\nold\n");
+        std::fs::write(&target, &managed).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join("CLAUDE.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join("CLAUDE.md")).is_ok();
+        if !made {
+            return; // Windows needs privilege for symlinks.
+        }
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), managed, "the outside file is untouched");
     }
 
     #[test]
