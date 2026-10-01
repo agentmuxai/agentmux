@@ -9,6 +9,7 @@ import { initialState } from "../../store/agent-document/types";
 import { update } from "../../store/agent-document/reducer";
 import {
     blocksRollOff,
+    feedOverLimits,
     LIVE_FEED_DEFAULT_TURNS,
     LIVE_FEED_MAX_FINISHED_BYTES,
     LIVE_FEED_MAX_ROWS,
@@ -259,5 +260,34 @@ describe("RollOff reducer command", () => {
         } as never);
         expect(after.nodeIdSet.has("a0")).toBe(false);
         expect(ids(after.nodes)[0]).toBe("u4");
+    });
+});
+
+describe("feedOverLimits (Codex on #4121)", () => {
+    it("fires on rows or bytes even with no turn cap", () => {
+        expect(feedOverLimits(turns(10), LIVE_FEED_DEFAULT_TURNS)).toBe(false);
+        // Bytes: a finished turn over 1.1× the budget.
+        const huge: DocumentNode[] = [
+            user("u0"),
+            ...Array.from({ length: 10 }, (_, i) => md(`a${i}`, "x".repeat(1_900_000))),
+            user("u1"),
+        ];
+        expect(feedOverLimits(huge, LIVE_FEED_DEFAULT_TURNS)).toBe(true);
+        // Nodes over 2 MB count in full (Codex P2 on #4121): seven 10 MB nodes
+        // are 70 MB, not 14.
+        const big: DocumentNode[] = [
+            user("u0"),
+            ...Array.from({ length: 7 }, (_, i) => md(`b${i}`, "x".repeat(10_000_000))),
+            user("u1"),
+        ];
+        expect(feedOverLimits(big, LIVE_FEED_DEFAULT_TURNS)).toBe(true);
+        // Rows: more than the row cap.
+        const many: DocumentNode[] = Array.from({ length: LIVE_FEED_MAX_ROWS + 1 }, (_, i) => md(`m${i}`));
+        expect(feedOverLimits(many, LIVE_FEED_DEFAULT_TURNS)).toBe(true);
+    });
+
+    it("still honours an explicit turn cap", () => {
+        expect(feedOverLimits(turns(10), 3)).toBe(true);
+        expect(feedOverLimits(turns(6), 3)).toBe(false);
     });
 });
