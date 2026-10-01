@@ -365,8 +365,6 @@ pub(crate) fn register_memory_delivery_handlers(engine: &std::sync::Arc<crate::b
     );
 }
 
-/// Reads the memory and composes the delivery. `None` when there is nothing
-/// to deliver.
 /// Where a session's CLI looked for its startup files.
 #[derive(Debug, Clone)]
 struct LaunchDirs {
@@ -411,6 +409,9 @@ fn startup_items(launch: &LaunchDirs) -> Vec<EntrySize> {
         .collect()
 }
 
+/// Reads the memory and composes the delivery. `None` when there is nothing
+/// to deliver. A new session's delivery also lists the startup files the CLI
+/// loaded from `launch` (`startup_items`), ahead of the memory items.
 fn compose_delivery(
     state: &AppState,
     block_id: &str,
