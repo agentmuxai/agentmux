@@ -1,7 +1,7 @@
 # REPORT: every binding between the runtime menu and what the agent runs
 
 **Date:** 2026-09-30
-**Status:** analysis — complete inventory of the model / effort / permission-mode bindings; G0, G3 and the srv half of G6/G7 fixed (#4098, the `agent.open` seed, and the spawn-time fill-in), the rest open (§4)
+**Status:** analysis — complete inventory of the model / effort / permission-mode bindings. The launch, `agent.open`, spawn-time, queueing, effort, definition-flag, fork and mode-text gaps are fixed (§8); what remains open is listed there, honestly.
 **Author:** Agento
 **Prompted by:** the owner, after an agent resumed into Opus 5.5 while its menu read Sonnet 5.5.
 Follows `docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md` (root cause) and
@@ -186,3 +186,44 @@ Things this report could not settle from code alone:
 - Does `/btw` on a persistent Claude pane work at all with the inherited stream-json flags? (G11)
 - CLI 2.1.283+ reportedly emits `system`/`init` only after the first user message; confirm before relying on it
   as a readback source (reconciliation report §2.2).
+
+## 8. Where every gap stands (2026-10-01)
+
+Everything below is merged to `main` unless marked otherwise. "Fixed" means a test fails if it regresses;
+none of it has been exercised in a running build with a real restored layout or a live subagent. That
+live check is still outstanding (§6 item 4).
+
+| Gap | State | Where |
+|---|---|---|
+| **G0** launch wrote no `--model`/`--effort` | **Fixed** | #4098 (`buildPaneArgs`, one composition for launch / per-send / runtime change) |
+| **G1** stray permission flag on other providers | **Open.** Pinned by a ratchet test; whether those CLIs tolerate `--dangerously-skip-permissions` is unverified | `pane-args-parity.test.ts` |
+| **G2** antigravity lists models, applies none | **Open.** Pinned by a ratchet test | `pane-args-parity.test.ts` |
+| **G3** `agent.open` / stored panes had no runtime | **Fixed.** New panes are seeded, stored panes are filled at spawn, and `agent.open` installs a missing pinned CLI instead of refusing | #4114, #4116, #4156 |
+| **G4** effort shown for Haiku, applied by exact alias only | **Fixed.** One rule (`modelTakesEffort`: any Haiku id, any case), decided on the model that actually runs (a definition's own `--model` wins; a repeated flag: the last wins, in TS and Rust), Claude only | #4152 |
+| **G5** Mode labels promised prompting that never happens | **Fixed as wording.** Making the modes actually prompt is a separate feature and is **not done** | #4163 |
+| **G6** srv-originated turns skip the per-send rebuild | **Partly.** A turn with *no* `--model`/`--effort` gets them from `agent:runtime`; a *changed* value in an existing flag still waits for the next UI send | #4116 |
+| **G7** a running process ignores later `cmd:args` | **Mitigated.** The common cause is closed (#4098/#4114/#4116) and the menu now detects the rest and offers "Restart to apply" | #4149 |
+| **G8** a definition's `--model`/`--effort`/mode silently overrode the menu | **Fixed.** The menu shows what runs; a pick takes the overriding flag out of that pane's copy (the definition is untouched); launch seeds from the definition | #4161 |
+| **G9** runtime lost across launches | **Partly.** A fork carries its source's effective runtime. Continue / Reattach / New session start from a closed agent and need the runtime stored on the agent instance (a schema change) | #4162 |
+| **G10** the effective model is never observed | **Partly.** The menu compares its selection with what each process was *spawned with* (srv publishes the argv's runtime flags, `agentruntime`), and shows a difference, or "applies after this turn". It does not show the model the CLI *resolved* an alias to; the in-stream signal for that is now trustworthy (#4158) but is not used yet | #4149 |
+| **G11** `/btw` copies the source pane's `cmd:args` | **Open** | |
+| **G12** codex app-server reads `agent:model`, which nothing writes | **Open** (dormant: that controller is not enabled) | |
+| **G13** dropup auto-migration restarts the agent silently | **Open** | |
+| **G14** only Claude panes have a runtime menu | **Open** | |
+| **G15** env / settings can override a missing flag | **Open** (only matters where a flag is missing) | |
+| **G16** catalog drift (srv has no model list) | **Open.** Narrowed: srv's default model, effort and mode are pinned to the frontend's by `runtime-defaults-consistency.test.ts` | #4114 |
+
+Found after the inventory was written:
+
+| Gap | State | Where |
+|---|---|---|
+| **G17** two quick menu changes could undo each other, and a failed change looked applied | **Fixed.** One serialized queue per pane (`patchRuntime`); a failure marks the trigger | #4146 |
+| **G18** a subagent's stream lines fed the context meter and the model the pane learns its window from | **Fixed.** `mainAgentUsage` ignores lines carrying a `parent_tool_use_id` | #4158 |
+| **G19** nothing ever removes old CLI installs | **Open.** `shared/cli/<provider>/<pin>` accumulates ~200 MB per bump; the legacy per-AgentMux-version folders (8.3 GB on the machine this was written on) are never pruned | |
+
+### What this does not claim
+
+- The **permission modes still do not prompt** on a persistent agent. Only the menu's description of them was corrected.
+- A definition's `--model` that is *also* in the agent's pane flags is taken out when the user picks; a user who wants the definition's model back has to pick it again (or relaunch).
+- Whether the CLI takes the **last** of two repeated `--model` flags is assumed everywhere (frontend, srv, tests) and **unverified**.
+- Whether `muxcode`, `openclaw`, `copilot`, `pi` and antigravity tolerate `--dangerously-skip-permissions` (G1) is **unverified**.
