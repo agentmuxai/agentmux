@@ -104,13 +104,17 @@ export function clearShownTabs(): void {
  * the setting changed meanwhile. Returns a cancel.
  */
 export function markLoadedTabsShownWhenIdle(tabIds: readonly string[], keptLaidOut: () => boolean): () => void {
-    const handle = requestIdleCallback(
-        () => {
-            if (!keptLaidOut()) return;
-            for (const id of tabIds) markTabShown(id);
-        },
-        { timeout: 2000 }
-    );
+    const mark = () => {
+        if (!keptLaidOut()) return;
+        for (const id of tabIds) markTabShown(id);
+    };
+    // Feature-detected like termwrap.ts / useLiveFeedRollOff.ts: a webview
+    // without it gets a plain timeout at the same cap (ReAgent P1 on #4132).
+    if (typeof requestIdleCallback !== "function") {
+        const timer = setTimeout(mark, 2000);
+        return () => clearTimeout(timer);
+    }
+    const handle = requestIdleCallback(mark, { timeout: 2000 });
     return () => cancelIdleCallback(handle);
 }
 

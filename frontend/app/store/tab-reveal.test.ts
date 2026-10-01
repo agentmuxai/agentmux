@@ -427,4 +427,19 @@ describe("tabs a window loaded with", () => {
         markLoadedTabsShownWhenIdle(["load-d"], () => true)();
         expect(cancelled).toEqual([1]);
     });
+
+    test("fall back to a 2 s timeout where requestIdleCallback is missing", async () => {
+        const { markLoadedTabsShownWhenIdle, tabWasShown } = await import("./tab-reveal");
+        vi.useFakeTimers();
+        vi.stubGlobal("requestIdleCallback", undefined);
+        try {
+            markLoadedTabsShownWhenIdle(["load-e"], () => true);
+            vi.advanceTimersByTime(1999);
+            expect(tabWasShown("load-e")).toBe(false);
+            vi.advanceTimersByTime(1);
+            expect(tabWasShown("load-e")).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
