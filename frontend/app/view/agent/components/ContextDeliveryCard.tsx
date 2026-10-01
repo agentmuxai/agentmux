@@ -72,11 +72,17 @@ const fmt = formatCompactNumber;
 
 /** One item's head row: icon, name, chip, cut mark, size. The file shows on hover. */
 /**
- * Whether the hook delivered the Global Memory too. When it was left out
- * because a startup file carries it (LC3), its entries come `via` that file,
- * and the file's "+ Global Memory" mark is the one delivery, not a repeat.
+ * Whether the agent got the Global Memory more than once: one copy per
+ * startup file carrying it, plus the hook's, unless the hook left it out
+ * because a file carries it (LC3; its entries then come `via` that file).
+ * Two loaded files with it are a duplicate even when the hook sent none
+ * (Codex on #4131).
  */
-const globalSentTwice = (node: ContextDeliveryNode): boolean => !node.items.some((i) => i.via === "startup_file");
+const globalSentTwice = (node: ContextDeliveryNode): boolean => {
+    const files = node.items.filter((i) => i.contains?.includes("global_memory")).length;
+    const hookSentIt = !node.items.some((i) => i.via === "startup_file");
+    return files + (hookSentIt ? 1 : 0) > 1;
+};
 
 const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.Element => (
     <div class={clsx("agent-context-delivery-item-head", props.item.delivered && `delivered-${props.item.delivered}`)}>
