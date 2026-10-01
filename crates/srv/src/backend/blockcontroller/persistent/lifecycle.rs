@@ -231,6 +231,9 @@ impl PersistentSubprocessController {
         }
         inner.restart_when_idle = true;
         drop(inner);
+        // Tell the menu a restart is coming, so a selection that has not
+        // reached the process yet reads as pending and not as a mismatch.
+        self.publish_status();
         tracing::info!(
             block_id = %self.block_id,
             "runtime-config change arrived mid-turn — deferring the restart to the end of this turn \

@@ -24,6 +24,8 @@ pub const EVENT_BLOCK_CLOSE: &str = "blockclose";
 pub const EVENT_CONN_CHANGE: &str = "connchange";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
+/// What an agent process was actually spawned with. See `agent_runtime.rs`.
+pub const EVENT_AGENT_RUNTIME: &str = "agentruntime";
 pub const EVENT_MUX_OBJ_UPDATE: &str = "waveobj:update";
 pub const EVENT_BLOCK_FILE: &str = "blockfile";
 pub const EVENT_INSTALL_PROGRESS: &str = "install_progress";

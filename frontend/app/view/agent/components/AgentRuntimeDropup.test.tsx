@@ -22,13 +22,25 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 
+// The process-runtime report the menu listens to; each test sets it.
+import { createSignal } from "solid-js";
+import type { ProcessRuntime } from "../process-runtime";
+const [report, setReport] = createSignal<ProcessRuntime | undefined>(undefined);
+vi.mock("../process-runtime", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../process-runtime")>()),
+    useProcessRuntime: () => report,
+}));
+
 const patchRuntime = vi.fn();
 vi.mock("../runtime-apply", () => ({
     applyRuntimeChange: vi.fn().mockResolvedValue(undefined),
     patchRuntime: (...args: unknown[]) => patchRuntime(...args),
 }));
 
-beforeEach(() => patchRuntime.mockReset().mockResolvedValue({}));
+beforeEach(() => {
+    patchRuntime.mockReset().mockResolvedValue({});
+    setReport(undefined);
+});
 afterEach(() => cleanup());
 
 function renderDropup() {
@@ -223,5 +235,94 @@ describe("AgentRuntimeDropup — a change is a patch, and a failure is visible",
 
         await userEvent.click(rowByName(/Sonnet/i));
         await vi.waitFor(() => expect(trigger.className).not.toContain("agent-runtime-dropup-trigger--error"));
+    });
+});
+
+describe("AgentRuntimeDropup — says when the agent is not running what is selected", () => {
+    // Defaults with no block meta: bypass / sonnet / high, which a persistent
+    // agent is spawned with as `--permission-mode default --model sonnet --effort high`.
+    const AGREES: ProcessRuntime = {
+        running: true,
+        restartPending: false,
+        model: "sonnet",
+        effort: "high",
+        permissionMode: "default",
+    };
+    const INCIDENT: ProcessRuntime = { ...AGREES, model: undefined, effort: undefined };
+    const trigger = () => screen.getByRole("button", { name: /Runtime settings/i });
+    const state = () => ({
+        differs: trigger().className.includes("agent-runtime-dropup-trigger--differs"),
+        pending: trigger().className.includes("agent-runtime-dropup-trigger--pending"),
+    });
+
+    afterEach(() => vi.useRealTimers());
+
+    it("shows nothing before the server has reported, or when the process agrees", async () => {
+        vi.useFakeTimers();
+        renderDropup();
+        expect(state()).toEqual({ differs: false, pending: false });
+        setReport(AGREES);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(state()).toEqual({ differs: false, pending: false });
+    });
+
+    it("the incident: a process started on the CLI default under a Sonnet/high menu is flagged", async () => {
+        vi.useFakeTimers();
+        renderDropup();
+        setReport(INCIDENT);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(state().differs).toBe(true);
+        expect(trigger().title).toContain("not running what is selected");
+        expect(trigger().title).toContain("the CLI default");
+        expect(trigger().getAttribute("aria-label")).toContain("not running this selection");
+
+        fireEvent.click(trigger());
+        expect(screen.getByRole("status").textContent).toContain("Model: selected");
+        expect(screen.getByRole("status").textContent).toContain("running the CLI default");
+    });
+
+    it("waits a moment before saying so: the old process outlives a change by a beat", async () => {
+        vi.useFakeTimers();
+        renderDropup();
+        setReport(INCIDENT);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(state().differs).toBe(false);
+        setReport(AGREES); // replaced before the delay elapsed
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(state().differs).toBe(false);
+    });
+
+    it("a selection that is on its way in is pending, with no restart button", async () => {
+        vi.useFakeTimers();
+        renderDropup();
+        setReport({ ...INCIDENT, restartPending: true });
+        await vi.advanceTimersByTimeAsync(10);
+        expect(state()).toEqual({ differs: false, pending: true });
+        expect(trigger().title).toContain("Applies after the current turn");
+        fireEvent.click(trigger());
+        expect(screen.getByRole("status").textContent).toContain("Applies after the current turn");
+        expect(screen.queryByRole("button", { name: /Restart to apply/i })).toBeNull();
+    });
+
+    it("\"Restart to apply\" re-applies the current selection", async () => {
+        vi.useFakeTimers();
+        renderDropup();
+        setReport(INCIDENT);
+        await vi.advanceTimersByTimeAsync(2000);
+        fireEvent.click(trigger());
+        fireEvent.click(screen.getByRole("button", { name: /Restart to apply/i }));
+        expect(patchRuntime).toHaveBeenCalledTimes(1);
+        expect(patchRuntime.mock.calls[0][2]).toEqual({});
+    });
+
+    it("clears once the restarted process reports the right flags", async () => {
+        vi.useFakeTimers();
+        renderDropup();
+        setReport(INCIDENT);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(state().differs).toBe(true);
+        setReport(AGREES);
+        await vi.advanceTimersByTimeAsync(10);
+        expect(state().differs).toBe(false);
     });
 });

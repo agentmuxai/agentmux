@@ -733,6 +733,9 @@ impl PersistentSubprocessController {
                 turn_active: self.health_monitor.is_active_turn(),
             };
             super::super::publish_controller_status(broker, &status);
+            // `set_status(STATUS_DONE)` above cleared what the process was
+            // spawned with; announce it from the guard already held.
+            super::status::announce_runtime(broker, &self.block_id, &inner);
         }
         // Nothing was accepted from the user, but the CLI's own account of
         // why the resume failed still reaches them (codex P2 on PR #2371).
