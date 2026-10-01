@@ -222,3 +222,44 @@ describe("createPaneReadiness", () => {
         expect(onTimeout).not.toHaveBeenCalled();
     });
 });
+
+// ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md section 9: a cover holds its
+// pane's content until it's gone, and skips the fade nobody would see in a
+// hidden tab.
+describe("createPaneReadiness content hold", () => {
+    it("holds the block's content until the cover goes live, then releases it", async () => {
+        const { paneContentSettled, registerPaneMounted } = await import("./pane-content-holds");
+        const unmount = registerPaneMounted("blk-hold");
+        const { value: r, dispose } = inRoot(() => createPaneReadiness({ holdFor: "blk-hold" }));
+        const done = r.gate("data");
+        expect(paneContentSettled("blk-hold")).toBe(false);
+        done();
+        expect(r.phase()).toBe("revealing");
+        expect(paneContentSettled("blk-hold")).toBe(false);
+        r.revealComplete();
+        expect(paneContentSettled("blk-hold")).toBe(true);
+        dispose();
+        unmount();
+    });
+
+    it("goes straight to live when hidden, releasing the hold without a fade", async () => {
+        const { paneContentSettled, registerPaneMounted } = await import("./pane-content-holds");
+        const unmount = registerPaneMounted("blk-hidden");
+        const { value: r, dispose } = inRoot(() => createPaneReadiness({ holdFor: "blk-hidden", hidden: () => true }));
+        r.gate("data")();
+        expect(r.phase()).toBe("live");
+        expect(paneContentSettled("blk-hidden")).toBe(true);
+        dispose();
+        unmount();
+    });
+
+    it("releases the hold if the pane is disposed while still assembling", async () => {
+        const { paneContentSettled, registerPaneMounted } = await import("./pane-content-holds");
+        const unmount = registerPaneMounted("blk-gone");
+        const { value: r, dispose } = inRoot(() => createPaneReadiness({ holdFor: "blk-gone" }));
+        r.gate("never");
+        dispose();
+        expect(paneContentSettled("blk-gone")).toBe(true);
+        unmount();
+    });
+});

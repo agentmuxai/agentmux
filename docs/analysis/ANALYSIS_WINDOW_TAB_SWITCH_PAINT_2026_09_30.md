@@ -180,4 +180,26 @@ After §7 the repo owner reported one flash left in two places: closing a window
 
 **Close.** `tabbar.tsx`'s close path always held the gate on the neighbor that `CloseTab` promotes. It never went through `setActiveTab`, so it missed #4107's warm path. `beginClosePromotion` (tab-actions.ts) now shows a warm neighbor from the switch intent in the click's frame. A neighbor that was never shown is still gated, and a failed close drops the intent.
 
-**First switch after load.** No tab counted as shown until it had been displayed once, so each first visit was gated and cross-faded. Kept laid out, every tab a window loads with is mounted and laid out behind the displayed one, which is the warm state. So `markLoadedTabsShownWhenIdle` (tab-reveal.ts) marks them shown at the window's first idle moment (at most 2 s on). A tab arriving later is still gated on its first reveal.
+**First switch after load.** No tab counted as shown until it had been displayed once, so each first visit was gated and cross-faded. Kept laid out, every tab a window loads with is mounted and laid out behind the displayed one, which is the warm state. These are marked shown once each tab's content has settled (§9). That replaced a first version that marked them at the window's first idle moment: Codex pointed out that idle doesn't mean a tab's layout and data have loaded. A tab arriving later is still gated on its first reveal.
+
+## 9. A new tab showed its panes loading
+
+After #4108 a new window tab was shown as soon as its panes *existed*, about 75 ms after Alt+T, but their first data was still arriving. The trace showed several states in sequence:
+- **75 ms:** the agent pane's loading cover (the brain), an empty sysinfo chart, and swarm's "Loading…";
+- **100–140 ms:** the chart and the swarm list filling in;
+- **140–170 ms:** the picker fading in over the cover.
+
+#4108 had removed the gate and the fade that used to blur this.
+
+**What shipped:** a tab is shown only once its content has *settled*. That means its layout has loaded, and every leaf pane is mounted with no content hold outstanding (`pane-content-holds.ts`, `tab-content-settled.ts`).
+
+**Where the holds come from:**
+- A pane's loading cover holds its content until it is gone (`createPaneReadiness`'s `holdFor`, set by `block.tsx`, `usePaneReveal` and `AgentPicker`).
+- A view whose first data arrives outside the cover takes its own hold: sysinfo until its history arrives, swarm until its first list.
+- A cover that finishes while its tab is hidden goes straight to `live` (`hidden`): nobody would see that fade, and it would only delay the tab.
+
+**Who waits:**
+- `createTab` waits, hidden, until the new tab has settled (capped at 800 ms), then switches to it in one frame.
+- The tabs a window loads with are marked shown as each one settles (`markLoadedTabsShownWhenSettled`), not merely when the window first goes idle.
+
+**Measured** (Alt+T, 3 new tabs, trace screenshots): the pill appears at 15–29 ms. The tab then appears **complete in one frame at about 153 ms**: picker, chart and swarm already in place, with no cover, no empty chart and no fade.
