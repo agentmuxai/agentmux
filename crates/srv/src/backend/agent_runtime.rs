@@ -205,9 +205,9 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
         }
         "codex" => {
             if have_model.is_none() {
-                let marker = (out.last().map(String::as_str) == Some("-"))
-                    .then(|| out.pop())
-                    .flatten();
+                // The stdin marker `-` must end up last even when the stored
+                // argv has flags after it (provider_flags were appended past it).
+                let marker = out.iter().rposition(|a| a == "-").map(|i| out.remove(i));
                 out.extend(["--model".to_string(), model]);
                 out.extend(marker);
             }
@@ -504,6 +504,24 @@ mod tests {
         let meta = meta_with("codex", Some(json!({"model": "gpt-5.4"})));
         let out = with_runtime_flags(&meta, s(&["exec", "--json", "-"]));
         assert_eq!(out, s(&["exec", "--json", "--model", "gpt-5.4", "-"]));
+    }
+
+    #[test]
+    fn codex_keeps_its_stdin_marker_last_even_when_flags_sit_after_it() {
+        let meta = meta_with("codex", Some(json!({"model": "gpt-5.4"})));
+        let out = with_runtime_flags(&meta, s(&["exec", "--json", "-", "--add-dir", "/tmp"]));
+        assert_eq!(
+            out,
+            s(&[
+                "exec",
+                "--json",
+                "--add-dir",
+                "/tmp",
+                "--model",
+                "gpt-5.4",
+                "-"
+            ])
+        );
     }
 
     #[test]
