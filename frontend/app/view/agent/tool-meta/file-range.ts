@@ -232,8 +232,16 @@ function writeRange(node: Pick<ToolNode, "params" | "result">): FileRange | null
     };
 }
 
-/** The range a Read, Edit or Write covers, or null when nothing is known yet. */
-export function fileRangeOf(node: Pick<ToolNode, "tool" | "toolName" | "params" | "result">): FileRange | null {
+/** A call that did not go through reached none of the lines it names. */
+const NO_RANGE_STATUSES = new Set<ToolNode["status"]>(["failed", "denied", "canceled"]);
+
+/**
+ * The range a Read, Edit or Write covers, or null when nothing is known yet,
+ * or the call failed, was denied or was canceled: its parameters name lines it
+ * never touched (ReAgent on #4165).
+ */
+export function fileRangeOf(node: Pick<ToolNode, "tool" | "toolName" | "params" | "result" | "status">): FileRange | null {
+    if (NO_RANGE_STATUSES.has(node.status)) return null;
     const name = toolNameOf(node);
     if (READ_NAMES.has(name)) {
         const result = rec(node.result);
