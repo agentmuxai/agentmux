@@ -522,7 +522,12 @@ export class AgentViewModel {
         // — so without them it runs on the CLI's own default while the strip
         // reads the selection (docs/retro/
         // RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
-        const runtimeConfig = resolveInitialRuntimeConfig(overrides?.model, provider.models, agent.provider_flags);
+        const runtimeConfig = resolveInitialRuntimeConfig(
+            overrides?.model,
+            provider.models,
+            agent.provider_flags,
+            overrides?.carryOverRuntime,
+        );
         const cliArgs = buildPaneArgs(provider, agentMode, runtimeConfig, agent.provider_flags);
         // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
         // comment, and fork-session-args.ts's doc comment for the two real

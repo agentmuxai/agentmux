@@ -141,6 +141,32 @@ describe("quickForkAgent", () => {
         expect(result).toBe(true);
     });
 
+    describe("the fork starts as the source is RUNNING", () => {
+        const launchedOverrides = async (meta: Record<string, unknown>) => {
+            getObjectValue.mockReturnValue({ meta: { view: "agent", agentId: "source-def", "agent:sessionid": "sid-parent", ...meta } });
+            await quickForkAgent(model);
+            return launchAgentDefinition.mock.calls[0][1];
+        };
+
+        it("carries the source's model, effort and mode, not the defaults", async () => {
+            const o = await launchedOverrides({ "agent:runtime": { model: "opus", effort: "xhigh", permissionMode: "plan" } });
+            expect(o.carryOverRuntime).toEqual({ model: "opus", effort: "xhigh", permissionMode: "plan" });
+        });
+
+        it("carries what the source actually runs: its definition's own --model wins over the stored selection", async () => {
+            const o = await launchedOverrides({
+                "agent:runtime": { model: "sonnet", effort: "high", permissionMode: "bypass" },
+                "agent:provider_flags": "--model opus --effort low",
+            });
+            expect(o.carryOverRuntime).toMatchObject({ model: "opus", effort: "low" });
+        });
+
+        it("a source with no runtime of its own forks onto the defaults it was showing", async () => {
+            const o = await launchedOverrides({});
+            expect(o.carryOverRuntime).toMatchObject({ model: "sonnet", effort: "high", permissionMode: "bypass" });
+        });
+    });
+
     // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22: the pane must be
     // hidden for the whole duration of the fork (every RPC in the chain,
     // not just the final pushBlockOntoStack remount), and always revealed

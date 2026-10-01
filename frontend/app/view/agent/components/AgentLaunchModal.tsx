@@ -87,6 +87,10 @@ export interface LaunchOverrides {
      *  first launch doesn't silently start on an unrelated provider's
      *  default model. */
     model?: string;
+    /** Settings carried over from another pane (a fork of a running agent), so the
+     *  fork starts as the source was running instead of on the defaults. Each
+     *  field is optional; `model` above (an explicit launch choice) wins over it. */
+    carryOverRuntime?: Partial<import("../types").AgentRuntimeConfig>;
 }
 
 interface AgentLaunchModalPanelProps {

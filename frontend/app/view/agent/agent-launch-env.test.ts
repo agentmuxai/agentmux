@@ -115,6 +115,42 @@ describe("resolveEffectiveLaunchProvider", () => {
 });
 
 describe("resolveInitialRuntimeConfig", () => {
+    it("a fork carries the source's runtime over the defaults, per setting", () => {
+        const r = resolveInitialRuntimeConfig(undefined, models({ value: "sonnet", default: true }), "", {
+            model: "opus",
+            effort: "max",
+            permissionMode: "plan",
+        });
+        expect(r).toEqual({ model: "opus", effort: "max", permissionMode: "plan" });
+        // only what it names
+        expect(resolveInitialRuntimeConfig(undefined, models({ value: "sonnet", default: true }), "", { effort: "low" })).toEqual({
+            model: "sonnet",
+            effort: "low",
+            permissionMode: "bypass",
+        });
+    });
+
+    it("the carried-over runtime beats the definition's flags for effort and mode too", () => {
+        const m = models({ value: "sonnet", default: true });
+        const r = resolveInitialRuntimeConfig(undefined, m, "--effort low --permission-mode plan", {
+            effort: "max",
+            permissionMode: "acceptEdits",
+        });
+        expect(r).toMatchObject({ effort: "max", permissionMode: "acceptEdits" });
+        // and with nothing carried over, the definition's flags seed them
+        expect(resolveInitialRuntimeConfig(undefined, m, "--effort low --permission-mode plan")).toMatchObject({
+            effort: "low",
+            permissionMode: "plan",
+        });
+    });
+
+    it("a model chosen at launch beats the carried-over one, which beats the definition's flags", () => {
+        const m = models({ value: "sonnet", default: true });
+        expect(resolveInitialRuntimeConfig("haiku", m, "--model opus", { model: "opus" }).model).toBe("haiku");
+        expect(resolveInitialRuntimeConfig(undefined, m, "--model haiku", { model: "opus" }).model).toBe("opus");
+        expect(resolveInitialRuntimeConfig(undefined, m, "--model haiku", {}).model).toBe("haiku");
+    });
+
     it("seeds the menu from the agent definition's own --model and --effort", () => {
         const r = resolveInitialRuntimeConfig(undefined, models({ value: "sonnet", default: true }), "--model opus --effort max");
         expect(r).toMatchObject({ model: "opus", effort: "max" });
