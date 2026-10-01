@@ -181,3 +181,58 @@ F1 is the bug. F2–F5 are about how aggressive it is by design.
    messages split turns. F1 makes the backend match the pane. The other
    option is to make both count jekts and raise K.
 3. **The default K (F4):** 12, or another number?
+
+## 6. Owner direction (2026-10-01)
+
+- **Be generous.** During a period of active work the pane should stay
+  contiguous, without opening History. Only very long continuous sessions
+  should move.
+- **Bound by bytes, not turns.** The turn count doesn't matter for
+  performance: the DOM is already bounded by virtualization, and memory
+  scales with content bytes.
+  - The live feed becomes **20 MB** of displayed content, plus a row safety
+    cap of about 20,000 rows, and always the turn in flight.
+  - Turns stay only as the unit roll-off removes in, so a turn is never
+    split.
+  - Restore asks for a byte budget instead of `tail_turns`, which also
+    makes the jekt miscount (F1) moot for restore.
+- **Context for the numbers.** The earlier performance problems came from
+  very large transcripts: AgentA's is 1.28 GB raw (2.75M lines), Manoz's
+  673 MB. Raw is 8–10× the displayed content (about 160 MB and 68 MB).
+  - So 20 MB displayed is about 200 MB of transcript to read. Opening a
+    pane must therefore **load a small recent window first and fill older
+    turns afterwards** (as the reader scrolls up, or in the background) up
+    to the cap, so open latency doesn't regress.
+- **History of the cap:**
+  - #3700 (2026-09-24) shipped 3 turns / 1 MB;
+  - #3726 (the same day) raised it to 6 turns / 2 MB;
+  - #3964 (2026-09-27) restored only the last 7 turns, counting jekts.
+
+  Six turns bound far more often than 2 MB.
+
+**Plan:**
+1. Roll-off by bytes and rows; restore by bytes; F1.
+2. Fast first load, then filling older turns.
+3. F2 (a divider at fresh boundaries), if the owner confirms.
+
+## 7. Related: the pane flashes when the user sends a message
+
+Reported by the owner on 2026-10-01. **Not yet reproduced**; two
+hypotheses, both triggered by a new `user_message`:
+
+1. **The previous turn is remounted.** The always-mounted tail holds only
+   the turn in flight. A new user message moves the frontier
+   (`virtualization/AgentDocumentVirtualList.tsx:511`,
+   `turnScopedFrontier`), so the whole previous turn leaves the tail and is
+   remounted as virtualized head rows, with fresh DOM and *estimated*
+   heights until the measure pass. One frame with wrong heights is a
+   visible flash.
+2. **Roll-off runs in the same moment.** A new node triggers
+   `scheduleRollOff()` (`hooks/useLiveFeedRollOff.ts:148`), which removes
+   turns from the front.
+
+**Check:** a frame capture over the send (CDP screencast or performance
+trace), counting layout shifts and node remounts. Then either keep the
+previous turn's rows mounted until their head measurements exist, or defer
+roll-off until the new turn has painted. With a 20 MB budget, roll-off
+will run far less often, which narrows cause 2 anyway.
