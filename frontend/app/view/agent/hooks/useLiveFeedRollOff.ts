@@ -8,6 +8,9 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
 import { feedOverLimits, liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "../live-feed";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { readToolResult, type ToolResultLoader } from "../tool-result-loader";
 import type { AgentAtoms } from "../state";
 import { userIsInteracting } from "../stream-scheduler";
 
@@ -47,9 +50,18 @@ export function useLiveFeedRollOff(opts: {
 
     /** One roll-off pass: a single reducer command, planned on its current nodes. */
     const runRollOff = (): void => {
-        if (!liveFeedOn() || rollOffDisposed) return;
+        if (rollOffDisposed) return;
         const [docState, setDocState] = agentAtoms().documentStateAtom;
         const pinnedIds = untrack(docState).pinnedNodes;
+        // Collapsed tool results leave memory in the same idle pass; rows the
+        // user pinned or that are held open keep theirs
+        // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.3). This
+        // runs with the live feed off too (Codex P2 on #4126).
+        paneModel.dispatchDoc({
+            type: "UnloadToolResults",
+            keepIds: new Set([...pinnedIds, ...untrack(docState).expandedTools]),
+        });
+        if (!liveFeedOn()) return;
         const events = paneModel.dispatchDoc({
             type: "RollOff",
             keepTurns: liveFeedTurns,
@@ -108,7 +120,7 @@ export function useLiveFeedRollOff(opts: {
         else setTimeout(cb, Math.min(50, Math.max(0, timeoutMs)));
     };
     function scheduleRollOff(): void {
-        if (!liveFeedOn() || rollOffQueued) return;
+        if (rollOffQueued) return;
         rollOffQueued = true;
         const deadline = performance.now() + ROLL_OFF_DEADLINE_MS;
         const attempt = (): void => {
@@ -185,9 +197,20 @@ export function useLiveFeedRollOff(opts: {
             ? rolledOffTurns()
             : undefined;
 
+    /** Reads an unloaded tool result back from its transcript line (§3.4). */
+    const loadToolResult: ToolResultLoader = async (node) => {
+        const result = await readToolResult(node, outputFormat(), (offset) =>
+            RpcApi.BlockfileReadRangeCommand(TabRpcClient, { block_id: opts.blockId, filename: "output", offset, limit: 1 }, { timeout: 15_000 }),
+        );
+        if (!result) return false;
+        paneModel.dispatchDoc({ type: "ResultLoaded", nodeId: node.id, result });
+        return true;
+    };
+
     return {
         liveFeedOn,
         liveFeedTurns,
+        loadToolResult,
         canPageOlder,
         scheduleRollOff,
         gapsBefore,

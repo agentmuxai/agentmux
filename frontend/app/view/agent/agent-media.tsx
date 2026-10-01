@@ -17,6 +17,7 @@
 import type { MarkdownMediaOpts } from "@/app/element/markdown-media";
 import { createContext, useContext, type Accessor, type JSX } from "solid-js";
 import { AgentDormancyProvider } from "./agent-dormancy";
+import { ToolResultLoaderProvider, type ToolResultLoader } from "./tool-result-loader";
 
 /** Outside an agent pane: no inline media. */
 const AgentMediaContext = createContext<Accessor<MarkdownMediaOpts | undefined>>(() => undefined);
@@ -40,12 +41,20 @@ export function AgentPaneProviders(props: {
     dormant: Accessor<boolean>;
     block: Accessor<{ meta?: Record<string, unknown> } | null | undefined>;
     agent: Accessor<{ working_directory?: string } | null | undefined>;
+    /** Reads an unloaded tool result back (tool-result-loader.tsx). */
+    loadToolResult?: ToolResultLoader;
     children: JSX.Element;
 }): JSX.Element {
     const baseDir = (): string => (props.block()?.meta?.["cmd:cwd"] as string) || props.agent()?.working_directory || "";
     return (
         <AgentDormancyProvider dormant={props.dormant}>
-            <AgentMediaProvider baseDir={baseDir}>{props.children}</AgentMediaProvider>
+            <AgentMediaProvider baseDir={baseDir}>
+                {props.loadToolResult ? (
+                    <ToolResultLoaderProvider load={props.loadToolResult}>{props.children}</ToolResultLoaderProvider>
+                ) : (
+                    props.children
+                )}
+            </AgentMediaProvider>
         </AgentDormancyProvider>
     );
 }

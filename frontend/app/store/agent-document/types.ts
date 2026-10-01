@@ -10,7 +10,7 @@
  * and produces typed Events for audit. Pure function, no I/O.
  */
 
-import type { DocumentNode, ShellNode, ToolLogChunk } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolResult } from "../../view/agent/types";
 
 type SessionPhase = "loading-history" | "active" | "ended";
 
@@ -180,7 +180,15 @@ export type AgentDocumentCommand =
           keepIds?: ReadonlySet<string>;
           pinned: boolean;
           maxFinishedBytes?: number;
-      };
+      }
+    /**
+     * Unload collapsed tool results the reducer plans against its current
+     * nodes (`planUnload`): each becomes a stub until it's read back.
+     * SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.3.
+     */
+    | { type: "UnloadToolResults"; keepIds: ReadonlySet<string> }
+    /** A tool's unloaded result, read back from the transcript (§3.4). */
+    | { type: "ResultLoaded"; nodeId: string; result: ToolResult };
 
 /**
  * Audit events emitted by the reducer. v1 logs them via the dispatcher's
@@ -223,6 +231,13 @@ export type AgentDocumentEvent =
           reason: "unknown-tool-id" | "node-not-tool" | "duplicate";
       }
     | { type: "user-cleared"; clearedCount: number }
+    | {
+          /** Collapsed tool results left memory (`UnloadToolResults`). */
+          type: "tool-results-unloaded";
+          count: number;
+          bytes: number;
+      }
+    | { type: "tool-result-loaded"; nodeId: string }
     | {
           /** Finished turns left the live feed (`RollOff`, spec §6.9). */
           type: "turns-rolled-off";

@@ -471,7 +471,12 @@ export function useAgentStream({
 
         // Records the transcript cursor (below) has placed, parsed as live
         // input.
-        const parseRecords = (text: string) => {
+        const parseRecords = (text: string, from?: { stream: string; gen: string; line: number }) => {
+            // Where each complete line sits in the transcript, so a tool node
+            // records its result's line (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_
+            // 2026_10_01.md §3.2). Only when this text starts a fresh line: a
+            // partial line held from before would shift every number.
+            let sourceLine = from && lineBuffer === "" ? from.line : null;
             // Accumulate into line buffer and process complete lines
             lineBuffer += text;
             const lines = lineBuffer.split("\n");
@@ -486,6 +491,9 @@ export function useAgentStream({
             }
 
             for (const line of lines) {
+                // Every element is one transcript line, blank or not.
+                parser.setSourceLine(sourceLine != null && from ? { stream: from.stream, gen: from.gen, line: sourceLine } : null);
+                if (sourceLine != null) sourceLine++;
                 const trimmed = line.trim();
                 if (!trimmed) continue;
 
@@ -854,6 +862,7 @@ export function useAgentStream({
                     }
                 }
             }
+            parser.setSourceLine(null);
 
             // Schedule a single flush per animation frame
             if (queue.hasPendingNewOrUpdated()) {

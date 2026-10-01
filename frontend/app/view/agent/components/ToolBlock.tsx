@@ -42,7 +42,7 @@ import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
-import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, untrack, type JSX } from "solid-js";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { ToolNode } from "../types";
@@ -54,6 +54,7 @@ import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
 import { mcpDisplayName, toolNameOf, toolPill } from "../tool-meta/tool-descriptors";
 import { rowDisclosure } from "../virtualization/disclosure";
+import { useToolResultLoader } from "../tool-result-loader";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -222,6 +223,23 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const onHeaderClick = () =>
         disclosure().toggle === "collapse" ? props.onToggleCollapse?.() : props.onTogglePin();
 
+    // A result unloaded from memory still counts as present; opening the row
+    // reads it back from the transcript
+    // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.4).
+    const hasResult = (): boolean => props.node.result != null || props.node.resultUnloaded != null;
+    const loadResult = useToolResultLoader();
+    const [loadState, setLoadState] = createSignal<"idle" | "loading" | "failed">("idle");
+    createEffect(() => {
+        if (!expanded() || !props.node.resultUnloaded || !loadResult || untrack(loadState) !== "idle") return;
+        setLoadState("loading");
+        void loadResult(props.node).then((ok) => setLoadState(ok ? "idle" : "failed"));
+    });
+    // A failed read is retried the next time the row is opened, including one
+    // that failed after the row was closed.
+    createEffect(() => {
+        if (!expanded() && loadState() === "failed") setLoadState("idle");
+    });
+
     // Result pill — compact inline summary shown at medium+ pane widths
     // (visible only via CSS container query; always rendered so the
     // DOM is stable when the pane is resized through the breakpoint).
@@ -245,11 +263,13 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 return { label: "done", variant: "agent" };
             }
             // No confident match — fall back to today's static, result-gated behavior.
-            if (s === "running" || s === "pending_approval" || !props.node.result) return null;
+            if (s === "running" || s === "pending_approval" || !hasResult()) return null;
             return s === "success" ? { label: "done", variant: "agent" } : null;
         }
 
-        if (TOOL_STATUS[s].active || !props.node.result) return null;
+        if (TOOL_STATUS[s].active || !hasResult()) return null;
+        // An unloaded result keeps the pill it had (tool-result-unload.ts).
+        if (props.node.resultUnloaded) return props.node.resultUnloaded.pill;
         return toolPill(props.node);
     };
 
@@ -302,7 +322,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     });
     const peekEstimateText = createMemo(() => {
         const text = JSON.stringify(props.node.params ?? {}) + JSON.stringify(props.node.result ?? "");
-        const count = estimateTokenCount(text);
+        const count = estimateTokenCount(text) + (props.node.resultUnloaded?.tokens ?? 0);
         return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
     });
     // Raw-data existence check for showing the overlay at all — deliberately
@@ -513,7 +533,18 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     onClick={(e) => e.stopPropagation()}
                 >
                     <Show when={bodyMounted()}>
-                        <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} />
+                        <Show
+                            when={!props.node.resultUnloaded}
+                            fallback={
+                                <div class="agent-tool-result-unloaded">
+                                    {loadState() === "failed"
+                                        ? "This result is no longer available in the pane. Open History to see it."
+                                        : "Loading result…"}
+                                </div>
+                            }
+                        >
+                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} />
+                        </Show>
                     </Show>
                 </div>
             </div>
