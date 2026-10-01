@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.59.2 — 2026-10-01
+
+- feat(srv): stream-local-file serves byte ranges, so inline videos show a poster frame; agents are told about video and audio
+- feat(tear-off): on Windows, a pane torn off into a floating window appears already showing its content, then turns live, instead of the loading splash
+- feat(tear-off): on Windows, a window tab torn off into a new window appears already showing its content, like a torn-off pane
+- feat(redock): dragging a floating pane over a window now shows where it would land straight away (a faint outline), turning solid once holding still would redock it
+- fix(layout): a pane redocked into a window tab that had been torn off and dropped back no longer disappears
+- fix(agent): a resumed or continued agent starts on the model and effort its menu shows, not the CLI default
+- fix(agent): a finished background command leaves the Activity Dock in every pane — including one opened after an upgrade or restart, where two finished commands used to stay 'running' for hours because the dock only heard about endings from a registry that starts empty
+- fix(agent-pane): pasting files follows attachments:enabled like dropping does; with attachments off, pasted files are copied into the working folder instead of the tray
+- fix(ui): System Info charts drop their redundant axis labels; the version panel lists Runtime above Build Time
+- fix(agent): the agent picker checks each CLI once instead of ~700 times, so a new window tab builds ~300 ms faster
+- fix(ui): switching to a window tab you've already visited paints in one frame — content swaps with the pill, and nothing pops in a frame late
+- perf(ui): a new window tab appears in ~120 ms instead of ~370 ms — panes are created in parallel and it opens without the reveal gate or fade
+
 ## 0.59.1 — 2026-09-30
 
 - fix(dnd): on Windows, dragging a torn-off window's only tab onto another window's tab bar moves it there again (it did nothing before)
