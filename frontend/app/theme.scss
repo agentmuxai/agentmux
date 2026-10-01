@@ -259,8 +259,9 @@
     --conn-icon-color-8: #58c142;
     --conn-status-overlay-bg-color: rgba(230, 186, 30, 0.2);
 
-    --sysinfo-cpu-color: #58c142;
-    --sysinfo-mem-color: #53b4ea;
+    // The CPU chart is the theme's primary colour, so it follows every theme.
+    --sysinfo-cpu-color: var(--accent-color);
+    --sysinfo-mem-color: #58c142; // green: CPU is the theme's primary colour, so Mem needs a different one
     --sysinfo-net-color: #ff69b4; // Pink for network I/O
 
     --bulb-color: rgb(255, 221, 51);

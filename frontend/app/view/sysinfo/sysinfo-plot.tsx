@@ -8,7 +8,14 @@ import type { JSX } from "solid-js";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import type { DataItem } from "./sysinfo-types";
-import { buildPlotAxisLabelOptions, computeAutoMaxY, computePlotMargins, resolveDomainBound } from "./sysinfo-util";
+import {
+    buildPlotAxisLabelOptions,
+    computeAutoMaxY,
+    computeLeftMarginForTicks,
+    computePlotMargins,
+    resolveDomainBound,
+    xTickFitsBeforeRightEdge,
+} from "./sysinfo-util";
 
 type SingleLinePlotProps = {
     plotData: Array<DataItem>;
@@ -27,6 +34,16 @@ type SingleLinePlotProps = {
 // DOM during dock/float transitions. Document-scoped SVG ids conflict across
 // SVGs; a per-instance suffix prevents the wrong gradient being resolved.
 let _gradientSeq = 0;
+
+/** Width in px of the widest y-axis tick label in a rendered plot; 0 if it can't be measured. */
+function widestYTickLabel(plot: Element): number {
+    let widest = 0;
+    for (const t of Array.from(plot.querySelectorAll('[aria-label="y-axis tick label"] text'))) {
+        const w = (t as SVGGraphicsElement).getBBox?.().width ?? 0;
+        if (w > widest) widest = w;
+    }
+    return widest;
+}
 
 function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
     let containerRef!: HTMLDivElement;
@@ -209,22 +226,37 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         const margins = computePlotMargins(sparkline, title);
         const axisLabels = buildPlotAxisLabelOptions();
 
-        const plot = Plot.plot({
-            axis: !sparkline,
-            ...margins,
-            x: {
-                grid: true,
-                ...axisLabels.x,
-                tickFormat: (d: number) => dayjs.unix(d / 1000).format("h:mm A"),
-                domain: [minX, maxX],
-            },
-            y: { ...axisLabels.y, domain: [minY, maxY], nice: niceY },
-            width: pw,
-            height: ph,
-            marks: marks,
-        });
-
+        const buildPlot = (marginLeft: number) =>
+            Plot.plot({
+                axis: !sparkline,
+                ...margins,
+                marginLeft,
+                x: {
+                    grid: true,
+                    ...axisLabels.x,
+                    tickFormat: (d: number) =>
+                        xTickFitsBeforeRightEdge(d, minX, maxX, pw, marginLeft, margins.marginRight)
+                            ? dayjs.unix(d / 1000).format("h:mm A")
+                            : "",
+                    domain: [minX, maxX],
+                },
+                y: { ...axisLabels.y, domain: [minY, maxY], nice: niceY },
+                width: pw,
+                height: ph,
+                marks: marks,
+            });
+        let plot = buildPlot(margins.marginLeft);
         containerRef.append(plot);
+        if (!sparkline) {
+            // Fit the left margin to the labels as actually rendered, so the
+            // widest sits PLOT_EDGE_PAD_PX from the pane's edge. One refit only.
+            const fitted = computeLeftMarginForTicks(widestYTickLabel(plot));
+            if (Math.abs(fitted - margins.marginLeft) >= 1) {
+                const refit = buildPlot(fitted);
+                containerRef.replaceChild(refit, plot);
+                plot = refit;
+            }
+        }
         onCleanup(() => {
             plot.remove();
         });

@@ -59,8 +59,8 @@ export type PlotMargins = {
  *
  * With no axis labels (see buildPlotAxisLabelOptions below), neither axis
  * claims a reserved band past the last tick, so marginRight/marginBottom only
- * need to fit the tick text itself plus a few px of clearance for the pointer
- * dot at the data's edge.
+ * need to fit the tick text itself. The right margin is 0: the chart ends flush
+ * against the pane's edge.
  */
 export function computePlotMargins(sparkline: boolean, title: boolean): PlotMargins {
     if (sparkline) {
@@ -68,12 +68,30 @@ export function computePlotMargins(sparkline: boolean, title: boolean): PlotMarg
     }
     return {
         marginTop: title ? 16 : 6,
-        marginRight: 10,
+        // Flush: the data runs to the pane's right edge.
+        marginRight: 0,
         // Tick text row + axis line.
         marginBottom: 20,
         // Up to 3-digit tick values + a leading "-".
         marginLeft: 30,
     };
+}
+
+/** Gap between the plot's left edge and the widest y tick label (the pane's own 1px border adds to it). */
+export const PLOT_EDGE_PAD_PX = 1;
+/** What Plot leaves between a y tick label and the axis: tick length (6) + padding (3). */
+export const PLOT_TICK_GUTTER_PX = 9;
+
+/**
+ * The left margin that puts the widest y tick label `PLOT_EDGE_PAD_PX` from the
+ * pane's left edge: that padding, the label, and the tick gutter. Fed with the
+ * measured width of the rendered labels, so it fits "100" (CPU) and wider ones
+ * (rates with units) alike. Falls back to `computePlotMargins`' default when
+ * nothing could be measured (no layout, e.g. jsdom, or a hidden pane).
+ */
+export function computeLeftMarginForTicks(maxLabelWidthPx: number): number {
+    if (!Number.isFinite(maxLabelWidthPx) || maxLabelWidthPx <= 0) return computePlotMargins(false, false).marginLeft;
+    return PLOT_EDGE_PAD_PX + Math.ceil(maxLabelWidthPx) + PLOT_TICK_GUTTER_PX;
 }
 
 /**
@@ -130,4 +148,26 @@ export function computeAutoMaxY(
         padded = Math.min(padded, hardCap);
     }
     return padded;
+}
+
+/** Half the width of the widest x tick label ("12:59 AM"), plus a px of clearance. */
+export const X_TICK_HALF_LABEL_PX = 26;
+
+/**
+ * Whether the tick at time `d` has room for its (centred) label before the
+ * plot's right edge. With the chart flush against the pane (marginRight 0), the
+ * last tick can sit closer to the edge than half its label is wide, which cuts
+ * the label off ("9:41 A"); such a tick's label is left blank instead.
+ */
+export function xTickFitsBeforeRightEdge(
+    d: number,
+    minX: number,
+    maxX: number,
+    width: number,
+    marginLeft: number,
+    marginRight: number
+): boolean {
+    if (!(maxX > minX)) return true;
+    const x = marginLeft + ((d - minX) / (maxX - minX)) * (width - marginLeft - marginRight);
+    return width - x >= X_TICK_HALF_LABEL_PX;
 }
