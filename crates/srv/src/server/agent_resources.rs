@@ -80,8 +80,9 @@ impl AgentIdentity {
     }
 }
 
-/// The process-side inventory of `block_id`: cheap, in-memory and local-store
-/// reads only.
+/// The process-side inventory of `block_id`: in-memory reads plus two
+/// local-store (SQLite) reads, so call it off the async workers
+/// (`spawn_blocking`), as the teardown does.
 pub fn snapshot(state: &AppState, block_id: &str) -> AgentResources {
     let processes = state
         .process_tracker

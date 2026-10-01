@@ -179,17 +179,17 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
     let agent = crate::server::agent_resources::AgentIdentity::of(state, block_id).label(block_id);
     // 2–4. One teardown with the quit policy: releases claims, stops its
     //      shells and shuts it down, then the block is closed.
-    let result = crate::sagas::delete_block::run_with_policy(
+    let (result, report) = crate::sagas::delete_block::run_with_policy(
         state,
         tab_id,
         block_id.to_string(),
         crate::sagas::agent_teardown::Policy::quit(),
     )
     .await;
-    let report = result.as_ref().ok().and_then(|(_, r)| r.clone()).unwrap_or_default();
+    // The real counts even when the close failed after the teardown ran.
+    let report = report.unwrap_or_default();
     let (released_claims, stopped_shells, crons) =
         (report.released_claims, report.stopped_shells, report.crons_targeting.clone());
-    let result = result.map(|(value, _)| value);
 
     // 5. Audit.
     let request_id = uuid::Uuid::new_v4().to_string();

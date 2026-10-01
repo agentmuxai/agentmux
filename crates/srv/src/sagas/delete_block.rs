@@ -12,7 +12,8 @@
 // `docs/retro/reducer-architecture-gaps-2026-05-01.md`).
 //
 // **Steps:**
-// 0. `close_pane::shutdown_agents` for the block — the same graceful
+// 0. `agent_teardown::run` for the block, with the caller's policy
+//    (`Policy::close()` by default, `Policy::quit()` from `self_quit`) — the same graceful
 //    shutdown the pane's × uses (interrupt a running turn, EOF, force-kill
 //    only at the deadline, release its processes, save final state),
 //    BEFORE the records go (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md
@@ -86,20 +87,31 @@ pub async fn run(
     tab_id: String,
     block_id: String,
 ) -> Result<Value, String> {
-    run_with_policy(state, tab_id, block_id, super::agent_teardown::Policy::close())
-        .await
-        .map(|(value, _)| value)
+    run_with_policy(state, tab_id, block_id, super::agent_teardown::Policy::close()).await.0
 }
 
 /// [`run`] with the teardown policy for the block (`self_quit` passes
-/// `Policy::quit()`), returning the teardown's report alongside the saga's
-/// value. The report is `None` when the close failed before the teardown ran.
+/// `Policy::quit()`). Returns the saga's result and the teardown's report;
+/// the report is there whenever the teardown ran, even if the close then
+/// failed, and `None` only when the close failed before it.
 pub async fn run_with_policy(
     state: &AppState,
     tab_id: String,
     block_id: String,
     policy: super::agent_teardown::Policy,
-) -> Result<(Value, Option<super::agent_teardown::TeardownReport>), String> {
+) -> (Result<Value, String>, Option<super::agent_teardown::TeardownReport>) {
+    let mut report = None;
+    let result = run_inner_with_policy(state, tab_id, block_id, policy, &mut report).await;
+    (result, report)
+}
+
+async fn run_inner_with_policy(
+    state: &AppState,
+    tab_id: String,
+    block_id: String,
+    policy: super::agent_teardown::Policy,
+    report_out: &mut Option<super::agent_teardown::TeardownReport>,
+) -> Result<Value, String> {
     // Pre-condition: block exists and is in the named tab. Reducer
     // would silent-no-op otherwise (see handle_delete_block); the
     // saga surfaces a clear error instead.
@@ -142,7 +154,7 @@ pub async fn run_with_policy(
     // §4.2). Deleting first left the controller's own exit cleanup writing
     // to a block that no longer existed. After `emit_saga_started`, so a
     // saga-start collision still has no side effect (round 1 below).
-    let report = super::agent_teardown::run(state, &block_id, policy).await;
+    *report_out = Some(super::agent_teardown::run(state, &block_id, policy).await);
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("delete_block", run_inner(ctx, tab_id, block_id.clone())).await;
     // Controller-kill ordering. Three rounds of bot review:
@@ -179,7 +191,7 @@ pub async fn run_with_policy(
     }
     super::close_pane::finish_close(state, &block_id).await;
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
-    result.map(|value| (value, Some(report)))
+    result
 }
 
 async fn run_inner(
