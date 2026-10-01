@@ -19,7 +19,16 @@
  *
  * Pure so the state table can be tested without mounting the status bar.
  */
-export type LanIndicatorState = "peers" | "idle" | "error" | "undiscoverable" | "off";
+export type LanIndicatorState =
+    | "peers"
+    | "idle"
+    | "error"
+    | "undiscoverable"
+    | "blocked"
+    | "needs-setup"
+    | "public-network"
+    | "managed"
+    | "off";
 
 export interface LanIndicatorInput {
     /** The `network:lan_discovery` setting. */
@@ -30,6 +39,17 @@ export interface LanIndicatorInput {
      *  2026-10-01). It outranks "peers": hearing peers says nothing about being
      *  heard, which is the whole failure. */
     discoverability?: "healthy" | "degraded" | "undiscoverable" | "off" | null;
+    /** `lanFirewallAtom().status` — what the OS firewall would do to a peer
+     *  trying to reach this machine (Windows only for now; `null` elsewhere).
+     *  Every problem verdict OUTRANKS peers. A peer count proves only that this
+     *  process received discovery traffic; it does not prove other machines can
+     *  connect to its listeners, and "hear but not heard" is the failure this
+     *  indicator exists to expose (Codex P1 on #4151). The label keeps both
+     *  facts ("2 on LAN. ...") and the glyph stays filled while peers exist.
+     *  The inferred verdicts can be wrong for rules we cannot read, which is why
+     *  their wording says what is missing rather than that LAN is broken.
+     *  See SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.3. */
+    firewall?: "ok" | "needs-setup" | "blocked" | "public-network" | "managed" | "unknown" | "off" | null;
     /** Number of DISCOVERED peers — excludes this instance, post-#3025. */
     peerCount: number;
     /** `lanDiscoveryErrorAtom` — set when the mDNS daemon could not be
@@ -37,6 +57,34 @@ export interface LanIndicatorInput {
      *  setting stays enabled in that case, so without this the failure would
      *  render as the muted, documented-as-healthy idle state [codex P2]. */
     error?: string | null;
+}
+
+/** The one wording for each firewall problem, shared by the status-bar tooltip
+ *  and the popover so the two cannot disagree. */
+export const FIREWALL_MESSAGES = {
+    // Two different causes reach this state: a Block rule that matches AgentMux, or
+    // the profile's "Block all incoming connections" setting (no rule involved, so
+    // "delete the rule" would be the wrong fix). The sentence names both.
+    blocked:
+        "LAN: Windows Firewall is blocking incoming connections to AgentMux, through a Block rule or the \"Block all incoming connections\" setting. Other devices can't reach this one",
+    "needs-setup":
+        "LAN needs one-time setup: Windows Firewall has no rule letting other devices reach this AgentMux",
+    "public-network":
+        "LAN: Windows treats this network as Public, which blocks incoming connections. Mark it Private to use LAN",
+    managed: "LAN: your administrator manages the firewall for this device, so AgentMux cannot open it",
+} as const;
+
+/** The firewall verdicts that are problems (everything but ok/unknown/off/none). */
+function firewallProblemState(
+    status: string | null | undefined,
+): "blocked" | "needs-setup" | "public-network" | "managed" | null {
+    return status === "blocked" || status === "needs-setup" || status === "public-network" || status === "managed"
+        ? status
+        : null;
+}
+
+export function firewallMessage(status: string | null | undefined): string | null {
+    return status != null && status in FIREWALL_MESSAGES ? FIREWALL_MESSAGES[status as keyof typeof FIREWALL_MESSAGES] : null;
 }
 
 export interface LanIndicator {
@@ -62,6 +110,21 @@ export function resolveLanIndicator(input: LanIndicatorInput): LanIndicator {
             state: "undiscoverable",
             glyph: "◇",
             label: "LAN: other machines can't see this one. Another program may be using the mDNS port (5353). Turn LAN off and on to retry",
+        };
+    }
+    // The firewall verdicts rank above peers. See `LanIndicatorInput.firewall`:
+    // hearing peers does not show that anyone can reach us. `blocked` is a fact (an
+    // enabled Block rule matches us and Windows enforces it over any Allow); the
+    // others are inferred from a missing rule or a Public network. With peers
+    // present the glyph stays filled and the label says both things.
+    const firewallProblem = firewallProblemState(input.firewall);
+    if (firewallProblem) {
+        const peers = input.peerCount > 0 ? input.peerCount : 0;
+        const message = FIREWALL_MESSAGES[firewallProblem];
+        return {
+            state: firewallProblem,
+            glyph: peers > 0 ? "◆" : "◇",
+            label: peers > 0 ? `${peers} on LAN. ${message}` : message,
         };
     }
     // Peers outrank an error, mirroring the popover, whose peers rows are NOT

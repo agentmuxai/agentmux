@@ -4,17 +4,19 @@
 import {
     getApi,
     lanDiscoverabilityAtom,
+    lanFirewallAtom,
     lanInstancesAtom,
     lanDiscoveryErrorAtom,
     setLanDiscoveryErrorAtom,
     settingsAtom,
     type LanDiscoverability,
+    type LanFirewall,
 } from "@/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Accessor, createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
-import { resolveLanIndicator } from "./lan-indicator";
+import { firewallMessage, resolveLanIndicator } from "./lan-indicator";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
@@ -48,6 +50,7 @@ interface HostPopoverPanelProps {
     lanDiscoveryEnabled: Accessor<boolean>;
     lanDiscoveryError: Accessor<string | null>;
     lanDiscoverability: Accessor<LanDiscoverability | null>;
+    lanFirewall: Accessor<LanFirewall | null>;
     onLanToggle: (enabled: boolean) => void;
     muxbus: MuxBusController;
     ref?: (el: HTMLDivElement) => void;
@@ -287,6 +290,21 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         <span>⚠ {props.lanDiscoveryError()}</span>
                     </div>
                 </Show>
+                <Show when={props.lanDiscoveryEnabled() && firewallMessage(props.lanFirewall()?.status)}>
+                    {(message) => (
+                        <div
+                            class="status-bar-popover-row"
+                            data-testid="lan-firewall"
+                            style={{
+                                "padding-left": "12px",
+                                "font-size": "0.85em",
+                                color: "var(--warning-color, #d97706)",
+                            }}
+                        >
+                            <span>⚠ {message()}</span>
+                        </div>
+                    )}
+                </Show>
                 <Show when={props.lanDiscoveryEnabled() && props.lanDiscoverability()?.state === "undiscoverable"}>
                     <div
                         class="status-bar-popover-row"
@@ -509,6 +527,7 @@ const HostPopover = (): JSX.Element => {
             peerCount: lanCount(),
             error: lanDiscoveryError(),
             discoverability: lanDiscoverabilityAtom()?.state,
+            firewall: lanFirewallAtom()?.status,
         });
 
     // Toggle the network:lan_discovery setting. The backend's setconfig handler
@@ -610,6 +629,7 @@ const HostPopover = (): JSX.Element => {
                         lanDiscoveryEnabled={lanDiscoveryEnabled}
                         lanDiscoveryError={lanDiscoveryError}
                         lanDiscoverability={lanDiscoverabilityAtom}
+                        lanFirewall={lanFirewallAtom}
                         onLanToggle={(enabled) => void handleLanToggle(enabled)}
                         muxbus={muxbus}
                         ref={(el) => { popoverRef = el; }}

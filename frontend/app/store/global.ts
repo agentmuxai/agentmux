@@ -111,6 +111,18 @@ export interface LanDiscoverability {
     rebuilds: number;
 }
 export const [lanDiscoverabilityAtom, setLanDiscoverabilityAtom] = createSignal<LanDiscoverability | null>(null);
+// What the OS firewall would do to LAN peers trying to reach this machine
+// (Windows only for now; elsewhere srv sends nothing and this stays `null`).
+// Set by `laninstances:firewall`. See SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.3.
+export type LanFirewallStatus = "ok" | "needs-setup" | "blocked" | "public-network" | "managed" | "unknown" | "off";
+export interface LanFirewall {
+    status: LanFirewallStatus;
+    /** Per adapter: its network category and whether a rule covers it. */
+    adapters: { name: string; category: string; state: string }[];
+    /** Group policy makes locally created rules ineffective. */
+    localRulesIgnored: boolean;
+}
+export const [lanFirewallAtom, setLanFirewallAtom] = createSignal<LanFirewall | null>(null);
 
 // List of all open AgentMux window labels in this process. Updated by
 // app-init's window-instances-changed listener whenever a window opens
@@ -291,6 +303,29 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             handler: (event) => {
                 const errMsg = event.data?.error ?? "unknown error";
                 setLanDiscoveryErrorAtom(String(errMsg));
+            },
+        },
+        {
+            eventType: "laninstances:firewall",
+            handler: (event) => {
+                const d = event.data as Partial<LanFirewall> | null | undefined;
+                const status = d?.status;
+                if (
+                    status !== "ok" &&
+                    status !== "needs-setup" &&
+                    status !== "blocked" &&
+                    status !== "public-network" &&
+                    status !== "managed" &&
+                    status !== "unknown" &&
+                    status !== "off"
+                ) {
+                    return;
+                }
+                setLanFirewallAtom({
+                    status,
+                    adapters: Array.isArray(d?.adapters) ? d.adapters : [],
+                    localRulesIgnored: d?.localRulesIgnored === true,
+                });
             },
         },
         {
