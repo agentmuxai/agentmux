@@ -268,7 +268,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     let p = expanded_working_dir.as_path();
                     if !p.exists() {
-                        std::fs::create_dir_all(p)
+                        std::fs::create_dir_all(p) // workdir-fs: creates the workdir itself
                             .map_err(|e| format!("failed to create working dir: {e}"))?;
                     }
                     expanded_working_dir.to_string_lossy().to_string()
@@ -295,6 +295,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // that materialize config files can't drift out of sync on
                 // this (reagent P1, PR #2322 — this handler initially had
                 // no cleanup at all).
+                let wd = crate::backend::workdir_fs::Workdir::open(base_path)
+                    .map_err(|e| format!("failed to open working dir {}: {e}", base_path.display()))?;
                 let new_managed_skill_paths = crate::backend::agent_config::managed_skill_file_paths(
                     cmd.files.iter().map(|f| f.path.as_str()),
                 );
@@ -376,14 +378,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         tracing::debug!(path = %file_path.display(), "wrote config file (merged, owner-only)");
                         continue;
                     }
-                    // Create parent directories if needed
-                    if let Some(parent) = file_path.parent() {
-                        if !parent.exists() {
-                            std::fs::create_dir_all(parent)
-                                .map_err(|e| format!("failed to create dir for {}: {e}", file.path))?;
-                        }
-                    }
-                    std::fs::write(&file_path, &file.content)
+                    // Atomic, parents created inside the workdir, never
+                    // through a symlinked file (SPEC_WORKDIR_SAFE_WRITES_2026_10_01).
+                    wd.write(&file.path, file.content.as_bytes(), false)
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                     tracing::debug!(path = %file_path.display(), "wrote config file");
                 }

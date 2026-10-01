@@ -395,6 +395,8 @@ jobs:
         run: bash scripts/check-name-resolver-callers.sh
       - name: No new hand-rolled epoch time (use agentmux_common::time)
         run: node scripts/check-time-helpers.mjs
+      - name: Agent workdir writes go through workdir_fs
+        run: node scripts/check-workdir-writes.mjs
       - name: No CEF/Chromium version in the README or overview diagrams
         run: bash scripts/check-no-cef-version-in-overview.sh
 
