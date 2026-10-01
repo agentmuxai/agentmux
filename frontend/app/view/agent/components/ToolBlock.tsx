@@ -234,6 +234,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         setLoadState("loading");
         void loadResult(props.node).then((ok) => setLoadState(ok ? "idle" : "failed"));
     });
+    // A failed read is retried the next time the row is opened.
+    createEffect(() => {
+        if (!expanded() && untrack(loadState) === "failed") setLoadState("idle");
+    });
 
     // Result pill — compact inline summary shown at medium+ pane widths
     // (visible only via CSS container query; always rendered so the
