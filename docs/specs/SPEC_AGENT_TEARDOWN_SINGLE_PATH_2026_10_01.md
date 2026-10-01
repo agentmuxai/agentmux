@@ -390,7 +390,14 @@ for teardown. A lint test pins it (§9).
     until then.
   - Add the structural tests (§9.1–2).
   - The close dialog and `/quit` summary read the inventory.
-- **Phase 2: close the gaps on Windows.**
+- **Phase 2: close the gaps on Windows; the last two consumers move.**
+  - Controller replace (`resync_controller` → `stop_for_replace`) calls
+    `agent_teardown` with `Policy::replace()`. That needs a backend-level
+    entry, since `blockcontroller` sits below the saga layer.
+  - App exit (`main.rs`) runs `agent_teardown` with `Policy::app_exit()` for
+    every live agent, under the 10 s cap (§11 O3).
+  - Both entries leave the structural test's allow-list, which then lists only
+    definitions and the `ShellStop` tool.
   - `Shell()` and `!cmd` join the agent's job (§6.5).
   - PtyShell cascade (§6.6), containers and routes (§6.7).
   - `Stop` releases claims, with the background-task question (§7.4).
