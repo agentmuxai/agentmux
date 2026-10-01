@@ -209,6 +209,13 @@ describe("one composition only", () => {
         expect(callers(/\bbuildRuntimeArgs\(/, ["buildRuntimeArgs.ts"])).toEqual([]);
     });
 
+    /** Every runtime change goes through `patchRuntime`'s per-pane queue. A writer
+     *  that calls `applyRuntimeChange` itself builds its config from the block's
+     *  meta at click time and can undo a change still in flight. */
+    it("only runtime-apply.ts calls applyRuntimeChange()", () => {
+        expect(callers(/\bapplyRuntimeChange\(/, ["runtime-apply.ts"])).toEqual([]);
+    });
+
     /** `cmd:args` built from `selectLaunchArgs` alone has no --model/--effort.
      *  That is the exact shape of the launch bug: launchAgentDefinition did this. */
     it("only buildPaneArgs reads the catalog's base args", () => {
