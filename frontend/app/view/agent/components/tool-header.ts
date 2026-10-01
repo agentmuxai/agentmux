@@ -22,7 +22,7 @@ export interface ToolHeaderParts {
     label: string | null;
     /** The tool's main argument (path, command, query, …); "" when none. */
     detail: string;
-    /** Which part of the file a Read covers ("L120–179 of 456"); null for any other tool. */
+    /** Which part of the file a Read covers ("120:179 of 456"); null for any other tool. */
     range: string | null;
 }
 
@@ -51,6 +51,6 @@ export function hasAuthoredSummary(node: ToolNode): boolean {
 export function toolHeaderText(node: ToolNode): string {
     if (hasAuthoredSummary(node)) return node.summary;
     const { icon, label, detail, range } = toolHeaderParts(node);
-    const header = [icon, label, detail, range].filter(Boolean).join(" ");
+    const header = [icon, label, range, detail].filter(Boolean).join(" ");
     return node.statusNote ? `${header} — ${node.statusNote}` : header;
 }

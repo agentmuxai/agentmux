@@ -208,7 +208,9 @@ describe("ToolBlock — panel mode", () => {
                     onTogglePin={() => {}}
                 />
             ));
-            expect(container.querySelector(".agent-tool-range")?.textContent).toBe("L120–179");
+            expect(container.querySelector(".agent-tool-range")?.textContent).toBe("120:179");
+            // Before the path, in one text run: Read 120:179 src/a.ts.
+            expect(container.querySelector(".agent-tool-name")?.textContent).toBe("📖 Read 120:179 src/a.ts");
         });
 
         it("shows the actual range, and the file's length, once the result is in", () => {
@@ -222,7 +224,7 @@ describe("ToolBlock — panel mode", () => {
                     onTogglePin={() => {}}
                 />
             ));
-            expect(container.querySelector(".agent-tool-range")?.textContent).toBe("L120–143");
+            expect(container.querySelector(".agent-tool-range")?.textContent).toBe("120:143");
             expect(container.querySelector(".agent-tool-read-range")?.textContent).toBe("lines 120–143 of 143");
         });
 
