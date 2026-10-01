@@ -564,11 +564,8 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
 pub(crate) fn stop_one_agent_block(block_id: &str, signal: Option<&str>) -> Result<AgentStopResult, String> {
     tracing::info!(block_id = %block_id, signal = ?signal, "agent.stop");
 
-    let ctrl = blockcontroller::get_controller(block_id)
-        .ok_or_else(|| format!("NOT_RUNNING: no controller for block {block_id}"))?;
-
     let force = matches!(signal, Some("SIGKILL") | Some("SIGTERM"));
-    ctrl.stop(!force, blockcontroller::STATUS_DONE)?;
+    crate::sagas::agent_teardown::stop_now(block_id, !force)?;
 
     let exit_code = blockcontroller::get_block_controller_status(block_id)
         .map(|s| s.shellprocexitcode);
