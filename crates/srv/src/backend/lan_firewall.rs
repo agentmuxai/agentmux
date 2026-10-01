@@ -287,17 +287,57 @@ pub fn lan_needs(web_port: u16, ws_port: u16) -> Vec<Need> {
     ]
 }
 
+/// Does a rule apply to `need` on this adapter? Three answers, not two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Applies {
+    /// Every field says it does.
+    Yes,
+    /// Every field we CAN evaluate says it does, but one we cannot (an interface
+    /// scope, a service, package or user restriction, a port or local-address spec
+    /// we could not read exactly) leaves it open.
+    Maybe,
+    /// Something we can evaluate says it does not.
+    No,
+}
+
+fn applies_to(rule: &FwRule, exe: &str, need: Need, category: Category, local_ips: &[Ipv4Addr]) -> Applies {
+    // Fields that settle the question either way.
+    if !rule.enabled
+        || !rule.inbound
+        || rule.profiles & category.bit() == 0
+        || !rule.proto.covers(need.proto)
+        || !rule.remote.reaches_lan_peers()
+        || rule.program.as_deref().is_some_and(|p| !same_path(p, exe))
+    {
+        return Applies::No;
+    }
+    let mut uncertain = rule.interface_scoped || rule.restricted;
+    match &rule.local_ports {
+        PortSpec::Any => {}
+        PortSpec::Ranges(_) if rule.local_ports.contains(need.port) => {}
+        PortSpec::Ranges(_) => return Applies::No,
+        PortSpec::Unparseable => uncertain = true,
+    }
+    match &rule.local_addresses {
+        LocalScope::Any => {}
+        LocalScope::Addrs(_) if rule.local_addresses.applies_to(local_ips) => {}
+        LocalScope::Addrs(_) => return Applies::No,
+        LocalScope::Unparseable => uncertain = true,
+    }
+    if uncertain {
+        Applies::Maybe
+    } else {
+        Applies::Yes
+    }
+}
+
+/// An ALLOW counts only when every field is evaluable and says yes: counting one
+/// we cannot evaluate would claim coverage we cannot prove. A BLOCK is the
+/// opposite case, handled in `coverage_with`: skipping one we cannot evaluate
+/// would lean toward `Covered`, the very direction the unreadable-means-unknown
+/// rule forbids (ReAgent on #4151).
 fn rule_applies(rule: &FwRule, exe: &str, need: Need, category: Category, local_ips: &[Ipv4Addr]) -> bool {
-    rule.enabled
-        && rule.inbound
-        && rule.profiles & category.bit() != 0
-        && !rule.interface_scoped
-        && !rule.restricted
-        && rule.proto.covers(need.proto)
-        && rule.local_ports.contains(need.port)
-        && rule.remote.reaches_lan_peers()
-        && rule.local_addresses.applies_to(local_ips)
-        && rule.program.as_deref().is_none_or(|p| same_path(p, exe))
+    applies_to(rule, exe, need, category, local_ips) == Applies::Yes
 }
 
 /// The rules that decide `need` for `category`, allow or block. For diagnostics
@@ -363,6 +403,11 @@ pub enum Coverage {
     Blocked,
     /// No block, but at least one need has no allow rule.
     Missing,
+    /// Every need is allowed, and no block is certain, but a block rule that might
+    /// apply could not be ruled out (scoped to an interface type, bound to a
+    /// service or user, or with a port or address spec we could not read). Coverage
+    /// cannot be proven.
+    Uncertain,
 }
 
 /// [`coverage_with`] under Windows' default profile settings, for an adapter
@@ -399,8 +444,18 @@ pub fn coverage_with(
     if needs.iter().any(|&n| applies(false, n)) {
         return Coverage::Blocked;
     }
+    // A block we cannot rule out, next to an allow we can see.
+    let maybe_blocked = needs.iter().any(|&n| {
+        rules
+            .iter()
+            .any(|r| !r.allow && applies_to(r, exe, n, category, local_ips) == Applies::Maybe)
+    });
     if settings.default_inbound_allow || needs.iter().all(|&n| applies(true, n)) {
-        Coverage::Covered
+        if maybe_blocked {
+            Coverage::Uncertain
+        } else {
+            Coverage::Covered
+        }
     } else {
         Coverage::Missing
     }
@@ -448,6 +503,8 @@ pub fn adapter_state_with(
         Coverage::Blocked => AdapterState::Blocked,
         Coverage::Missing if category == Category::Public => AdapterState::PublicNotTrusted,
         Coverage::Missing => AdapterState::NeedsSetup,
+        // Cannot prove it either way: no claim, like an unknown category.
+        Coverage::Uncertain => AdapterState::Unknown,
     }
 }
 
@@ -1145,6 +1202,69 @@ mod tests {
         // A missing allow stays a warning: an unreadable rule does not make it less missing.
         let none = Snapshot { rules: vec![], unreadable_rules: 3, ..snap };
         assert_eq!(report(&none, EXE, &needs()).status, FirewallStatus::NeedsSetup);
+    }
+
+    // ReAgent on #4151: skipping a block we cannot evaluate leans toward Covered.
+    #[test]
+    fn a_block_that_might_apply_cannot_be_skipped_toward_covered() {
+        let allow = program_rule(EXE, Proto::Any, ALL, true);
+        let block = || program_rule(EXE, Proto::Any, ALL, false);
+        let cases = [
+            // The review's example: a Block limited to the Wireless interface type,
+            // next to an any-interface Allow, while Windows blocks that adapter.
+            ("interface-scoped", FwRule { interface_scoped: true, ..block() }),
+            ("restricted", FwRule { restricted: true, ..block() }),
+            ("unparseable ports", FwRule { local_ports: PortSpec::Unparseable, ..block() }),
+            ("unparseable local addresses", FwRule { local_addresses: LocalScope::Unparseable, ..block() }),
+        ];
+        for (label, b) in cases {
+            let rules = vec![allow.clone(), b];
+            assert_eq!(coverage(&rules, EXE, &needs(), Category::Private), Coverage::Uncertain, "{label}");
+            let a = adapter("Ethernet", Some(Category::Private));
+            assert_eq!(adapter_state(&rules, EXE, &needs(), &a), AdapterState::Unknown, "{label}");
+        }
+        let snap = Snapshot {
+            rules: vec![allow.clone(), FwRule { interface_scoped: true, ..block() }],
+            adapters: vec![adapter("Ethernet", Some(Category::Private))],
+            ..Snapshot::default()
+        };
+        assert_eq!(report(&snap, EXE, &needs()).status, FirewallStatus::Unknown);
+    }
+
+    #[test]
+    fn a_block_that_cannot_apply_is_still_ignored() {
+        let allow = program_rule(EXE, Proto::Any, ALL, true);
+        for no in [
+            FwRule { enabled: false, ..program_rule(EXE, Proto::Any, ALL, false) },
+            FwRule { inbound: false, ..program_rule(EXE, Proto::Any, ALL, false) },
+            program_rule(OLD_EXE, Proto::Any, ALL, false),
+            program_rule(EXE, Proto::Any, PROFILE_PUBLIC, false),
+            FwRule { proto: Proto::Other, ..program_rule(EXE, Proto::Any, ALL, false) },
+            // A block for specific remote addresses does not block LAN peers in general.
+            FwRule { remote: Remote::Other, ..program_rule(EXE, Proto::Any, ALL, false) },
+            // Ports that exclude ours are settled, not uncertain.
+            FwRule { local_ports: PortSpec::parse("80"), ..program_rule(EXE, Proto::Any, ALL, false) },
+            FwRule { local_addresses: LocalScope::parse("10.9.9.9"), ..program_rule(EXE, Proto::Any, ALL, false) },
+        ] {
+            let rules = vec![allow.clone(), no.clone()];
+            assert_eq!(coverage(&rules, EXE, &needs(), Category::Private), Coverage::Covered, "{no:?}");
+        }
+    }
+
+    #[test]
+    fn an_uncertain_block_does_not_make_a_missing_allow_less_missing() {
+        let uncertain = FwRule { interface_scoped: true, ..program_rule(EXE, Proto::Any, ALL, false) };
+        assert_eq!(coverage(&[uncertain], EXE, &needs(), Category::Private), Coverage::Missing);
+    }
+
+    #[test]
+    fn a_certain_block_still_wins_over_an_uncertain_one() {
+        let rules = vec![
+            program_rule(EXE, Proto::Any, ALL, true),
+            FwRule { interface_scoped: true, ..program_rule(EXE, Proto::Any, ALL, false) },
+            program_rule(EXE, Proto::Tcp, PROFILE_PRIVATE, false),
+        ];
+        assert_eq!(coverage(&rules, EXE, &needs(), Category::Private), Coverage::Blocked);
     }
 
     #[test]
