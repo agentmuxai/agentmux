@@ -110,8 +110,13 @@ fn register_agent_open_panes(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// Where each of `block_ids` is open: its agent, tab, and the windows
-/// showing its workspace. Blocks with no `agentId` or no parent tab are
-/// skipped. Workspaces and windows are read once for the whole list.
+/// showing its workspace. The agent is resolved like the rest of srv
+/// resolves a block's agent (`instance_get_active_for_block`: `agentId`,
+/// the legacy `agent:id`, a template-launched row, the latest launch on the
+/// block) so a pane from an older build is not reported closed (Codex P1 on
+/// #4127); the raw meta id is the fallback when that finds no row. Blocks
+/// with no resolvable agent or no parent tab are skipped. Workspaces and
+/// windows are read once for the whole list.
 pub(crate) fn open_agent_panes(store: &Store, block_ids: &[String]) -> Vec<AgentOpenPane> {
     let workspaces = store.get_all::<Workspace>().unwrap_or_default();
     let windows = store.get_all::<obj::Window>().unwrap_or_default();
@@ -119,7 +124,17 @@ pub(crate) fn open_agent_panes(store: &Store, block_ids: &[String]) -> Vec<Agent
         .iter()
         .filter_map(|block_id| {
             let block = store.get::<Block>(block_id).ok().flatten()?;
-            let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
+            let agent_id = match store.instance_get_active_for_block(block_id) {
+                Ok(Some(row)) if !row.id.is_empty() => row.id,
+                _ => {
+                    let meta_id = obj::meta_get_string(&block.meta, "agentId", "");
+                    if meta_id.is_empty() {
+                        obj::meta_get_string(&block.meta, "agent:id", "")
+                    } else {
+                        meta_id
+                    }
+                }
+            };
             if agent_id.is_empty() {
                 return None;
             }
@@ -924,6 +939,36 @@ mod open_panes_tests {
         let a3 = panes.iter().find(|p| p.block_id == agent3).expect("main pane listed");
         assert_eq!(a3.tab_name, "Tab 2");
         assert_eq!(a3.window_ids, vec![main_win.oid]);
+    }
+
+    /// A pane from an older build carries only the legacy `agent:id` key.
+    #[test]
+    fn resolves_a_legacy_agent_id_pane_to_its_agent_row() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def(
+            "uid-legacy",
+            "Korp",
+            "test-no-credentials",
+            "agent",
+            1,
+            "",
+        );
+        store.agent_def_insert(&mut def).unwrap();
+        let tab = insert_tab(&store, "t");
+        insert_workspace(&store, &[&tab.oid]);
+        let mut meta = obj::MetaMapType::new();
+        meta.insert("agent:id".to_string(), serde_json::json!("uid-legacy"));
+        let mut block = Block {
+            oid: uuid::Uuid::new_v4().to_string(),
+            parentoref: format!("tab:{}", tab.oid),
+            meta,
+            ..Default::default()
+        };
+        store.insert(&mut block).unwrap();
+
+        let panes = open_agent_panes(&store, &[block.oid.clone()]);
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].agent_id, "uid-legacy");
     }
 
     #[test]
