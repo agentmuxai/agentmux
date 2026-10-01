@@ -1426,8 +1426,7 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
 /// this one match suppresses both without needing to track which reason
 /// fired.
 pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
-    text.starts_with("<system-reminder>")
-        && text.contains("Your memory was reinjected because your working context was just reset.")
+    text.starts_with("<system-reminder>") && text.contains(crate::backend::memory_delivery::REINJECTION_SIGNATURE)
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.

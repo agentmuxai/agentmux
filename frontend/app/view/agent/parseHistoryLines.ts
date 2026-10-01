@@ -339,6 +339,9 @@ export class HistoryParser {
             if (isMemoryInjectedFrame(rawEvent)) {
                 parser.flushPending();
                 putReleased();
+                // A fallback re-delivery's card (CD2b) stands for the hidden
+                // message that follows it.
+                if ((rawEvent as { fallback?: unknown }).fallback === true) parser.noteFallbackCard();
                 const node = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
                 if (node) put(node, indexById.get(node.id));
                 continue;

@@ -83,7 +83,17 @@
 
 import { buildMemoryReinjectionNode, composeReinjectionMessage, shouldReinject } from "./memory-reinjection";
 import type { MemoryEntryInput, ReinjectionReason } from "./memory-reinjection";
-import type { MemoryReinjectionNode } from "./types";
+import type { ContextDeliveryNode, MemoryReinjectionNode } from "./types";
+
+/**
+ * A re-delivery srv composed (`memorydelivery:compose`, CD2b): the hidden
+ * message, the id to send it with, and the card srv writes when it arrives.
+ */
+export interface ComposedDelivery {
+    deliveryId: string;
+    text: string;
+    node: ContextDeliveryNode;
+}
 
 /**
  * Deliberately content-free — see this module's doc comment, fix 2. Never
@@ -102,7 +112,14 @@ export interface MemoryReinjectionControllerOpts {
     /** Fetches Global + Personal memory entries with full bodies. May reject (e.g. RPC failure) — handled by trigger(). */
     fetchEntries: () => Promise<MemoryEntryInput[]>;
     /** Delivers the composed message to the live CLI process. Expected to be the raw send RPC, NOT the pending-zone/promotion path — see module doc comment. May reject. */
-    sendRpc: (message: string) => Promise<void>;
+    sendRpc: (message: string, deliveryId?: string) => Promise<void>;
+    /**
+     * srv composes the message and keeps its item list, so the card shows
+     * every item and replays (SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.4 step
+     * 2). Resolves `null` when there's no memory. Absent, or a rejection (an
+     * older srv), falls back to `fetchEntries` and composing here.
+     */
+    compose?: (reason: ReinjectionReason) => Promise<ComposedDelivery | null>;
     /** Starts real turn-state bookkeeping — expected to be the actual `TurnStart` dispatch, reused unmodified, called ONLY with `HIDDEN_TURN_PLACEHOLDER_CONTENT` and `hidden: true` (the controller enforces this — the caller's implementation should just forward both args verbatim). */
     dispatchTurnStart: (content: string, hidden: boolean) => void;
     /** Reverts turn-state bookkeeping on a send failure — expected to be the actual `TurnReset` dispatch. */
@@ -147,7 +164,7 @@ export interface MemoryReinjectionController {
      * actually in flight; returns `null` and does nothing otherwise, so
      * calling this for a normal turn's session_end is always safe.
      */
-    onSessionEnd: () => MemoryReinjectionNode | null;
+    onSessionEnd: () => MemoryReinjectionNode | ContextDeliveryNode | null;
     /**
      * Call AFTER `finalizeTurn()` has run for ANY session_end (real or
      * hidden) — i.e. once `turnPhase` has genuinely settled to `Done` for
@@ -166,10 +183,26 @@ interface DeferredTrigger {
 
 export function createMemoryReinjectionController(opts: MemoryReinjectionControllerOpts): MemoryReinjectionController {
     let hiding = false;
-    let pendingNode: MemoryReinjectionNode | null = null;
+    let pendingNode: MemoryReinjectionNode | ContextDeliveryNode | null = null;
     let deferred: DeferredTrigger | undefined = undefined; // undefined = nothing deferred
 
-    async function doTrigger(frameTimestamp: string | null, reason: ReinjectionReason): Promise<void> {
+    /**
+     * What to send and what to show: srv's composition when it can (CD2b),
+     * else this side's own from `fetchEntries`. `null` = nothing to deliver.
+     */
+    async function prepare(
+        frameTimestamp: string | null,
+        reason: ReinjectionReason,
+    ): Promise<{ message: string; deliveryId?: string; node: MemoryReinjectionNode | ContextDeliveryNode } | null> {
+        if (opts.compose) {
+            const composed = await opts.compose(reason).then(
+                (c) => ({ ok: true as const, c }),
+                () => ({ ok: false as const }),
+            );
+            if (composed.ok) {
+                return composed.c ? { message: composed.c.text, deliveryId: composed.c.deliveryId, node: composed.c.node } : null;
+            }
+        }
         let entries: MemoryEntryInput[];
         try {
             entries = await opts.fetchEntries();
@@ -177,10 +210,22 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             // Fetch failed before anything was sent or dispatched — nothing
             // to revert. Best-effort: skip this reinjection rather than
             // block or surface an error for a hidden, unsolicited turn.
-            return;
+            return null;
         }
+        if (!shouldReinject(entries)) return null; // §3.1 suppression rule
+        return {
+            message: composeReinjectionMessage(entries, reason),
+            node: buildMemoryReinjectionNode(entries, {
+                frameTimestamp,
+                now: opts.now(),
+                contextWindow: opts.contextWindow(),
+            }),
+        };
+    }
 
-        if (!shouldReinject(entries)) return; // §3.1 suppression rule
+    async function doTrigger(frameTimestamp: string | null, reason: ReinjectionReason): Promise<void> {
+        const prepared = await prepare(frameTimestamp, reason);
+        if (!prepared) return;
 
         // Re-check busy-ness HERE, after the async fetchEntries() await —
         // reagentx P1, second review round: checking isPaneWorking() only
@@ -218,12 +263,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             }
         }
 
-        const node = buildMemoryReinjectionNode(entries, {
-            frameTimestamp,
-            now: opts.now(),
-            contextWindow: opts.contextWindow(),
-        });
-        const message = composeReinjectionMessage(entries, reason);
+        const { message, deliveryId, node } = prepared;
 
         // Mirrors the real send path's own optimistic-TurnStart-before-RPC
         // ordering (agent-view.tsx's handleSendMessage) — turnPhase must
@@ -241,7 +281,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         opts.dispatchTurnStart(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
 
         try {
-            await opts.sendRpc(message);
+            await opts.sendRpc(message, deliveryId);
         } catch {
             // RPC outright failed — mirror useAgentCommands.ts's own
             // catch-path philosophy (never leave the pane stuck showing
@@ -269,7 +309,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         await doTrigger(frameTimestamp, reason);
     }
 
-    function onSessionEnd(): MemoryReinjectionNode | null {
+    function onSessionEnd(): MemoryReinjectionNode | ContextDeliveryNode | null {
         if (!hiding) return null;
         const node = pendingNode;
         hiding = false;

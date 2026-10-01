@@ -299,13 +299,26 @@ export function useAgentStream({
         // routinely scrolls past. This flag is the authoritative gate
         // (session::set_hidden_reinjection_active) — set here, not
         // reconstructed from transcript bytes later.
-        sendRpc: (message) =>
+        sendRpc: (message, deliveryId) =>
             RpcApi.AgentInputCommand(TabRpcClient, {
                 blockid: blockId,
                 message,
                 message_id: `memreinject_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                 hidden: true,
+                // srv writes this delivery's card to the pane (CD2b).
+                ...(deliveryId ? { delivery_id: deliveryId } : {}),
             }).then(() => undefined),
+        // srv composes the message and the card (CD2b); an older srv rejects
+        // and the controller composes here instead.
+        compose: async (reason) => {
+            const r = await MemoryDeliveryApi.ComposeCommand(TabRpcClient, { block_id: blockId, reason });
+            if (!r.text || !r.delivery_id || !r.frame) return null;
+            const node = buildMemoryInjectedNode(r.frame, {
+                contextWindow: contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
+                now: Date.now(),
+            });
+            return node ? { deliveryId: r.delivery_id, text: r.text, node } : null;
+        },
         // Claude Code's SessionStart hook now delivers the same memory at a
         // session start and after a compaction; this fallback fires only when
         // the hook didn't (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
@@ -690,6 +703,13 @@ export function useAgentStream({
                 // model already has the content — this is only the label.
                 // SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
                 if (isMemoryInjectedFrame(rawEvent)) {
+                    // A fallback re-delivery's own card arrives while its
+                    // hidden turn is in flight; the controller shows the same
+                    // card (same id) when the turn ends, so skip it here
+                    // rather than mark the id seen behind the hiding queue.
+                    if ((rawEvent as { fallback?: unknown }).fallback === true && memoryReinjectionController.isHiding()) {
+                        continue;
+                    }
                     parser.flushPending();
                     pushReleasedJekts();
                     const node = buildMemoryInjectedNode(rawEvent, {
