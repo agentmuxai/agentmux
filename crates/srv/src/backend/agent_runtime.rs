@@ -28,6 +28,7 @@
 //! The defaults are duplicated from the frontend by necessity and pinned to
 //! its by `providers/runtime-defaults-consistency.test.ts`.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::backend::obj::MetaMapType;
@@ -41,6 +42,109 @@ pub(crate) const DEFAULT_EFFORT: &str = "high";
 /// Flags this module owns. Stripped from the catalog args so a base that ever
 /// grows one cannot double it.
 const OWNED_FLAGS: &[&str] = &["--model", "-m", "--effort"];
+
+/// What an agent process was actually spawned with: the runtime flags in its
+/// final argv. The Runtime menu shows what was REQUESTED (`agent:runtime`);
+/// this is what the process was GIVEN, so the menu can say when they differ.
+/// `None` for a flag the argv does not carry — the CLI then uses its own default.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnRuntime {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+}
+
+/// The runtime flags in `args`. The LAST occurrence of a repeated flag wins,
+/// which is how the CLI is expected to read them (unverified; it matters only
+/// when `provider_flags` repeats a flag the runtime already set).
+/// `--dangerously-skip-permissions` reads as `bypass`; `--permission-mode X`
+/// as `X`.
+pub fn spawn_runtime_from_args(args: &[String]) -> SpawnRuntime {
+    let mut out = SpawnRuntime::default();
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        let next = || args.get(i + 1).cloned();
+        match a {
+            "--model" | "-m" => {
+                if let Some(v) = next() {
+                    out.model = Some(v);
+                    i += 1;
+                }
+            }
+            "--effort" => {
+                if let Some(v) = next() {
+                    out.effort = Some(v);
+                    i += 1;
+                }
+            }
+            "--permission-mode" => {
+                if let Some(v) = next() {
+                    out.permission_mode = Some(v);
+                    i += 1;
+                }
+            }
+            "--dangerously-skip-permissions" => out.permission_mode = Some("bypass".to_string()),
+            _ => {
+                if let Some(v) = a.strip_prefix("--model=") {
+                    out.model = Some(v.to_string());
+                } else if let Some(v) = a.strip_prefix("--effort=") {
+                    out.effort = Some(v.to_string());
+                } else if let Some(v) = a.strip_prefix("--permission-mode=") {
+                    out.permission_mode = Some(v.to_string());
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The `agentruntime` event for one pane (persisted, so a menu that mounts late
+/// still gets the latest). `running` is `None` when no process is alive — then
+/// there is nothing for the menu to compare against.
+pub fn agent_runtime_event(
+    block_id: &str,
+    running: Option<&SpawnRuntime>,
+    restart_pending: bool,
+) -> Value {
+    let mut v = json!({
+        "blockid": block_id,
+        "running": running.is_some(),
+        "restart_pending": restart_pending,
+    });
+    if let (Some(rt), Some(obj)) = (running, v.as_object_mut()) {
+        if let Some(m) = &rt.model {
+            obj.insert("model".to_string(), json!(m));
+        }
+        if let Some(e) = &rt.effort {
+            obj.insert("effort".to_string(), json!(e));
+        }
+        if let Some(p) = &rt.permission_mode {
+            obj.insert("permission_mode".to_string(), json!(p));
+        }
+    }
+    v
+}
+
+pub fn publish_agent_runtime(
+    broker: &crate::backend::mps::Broker,
+    block_id: &str,
+    running: Option<&SpawnRuntime>,
+    restart_pending: bool,
+) {
+    use crate::backend::mps::{MuxEvent, EVENT_AGENT_RUNTIME};
+    broker.publish(MuxEvent {
+        event: EVENT_AGENT_RUNTIME.to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 1,
+        data: Some(agent_runtime_event(block_id, running, restart_pending)),
+    });
+}
 
 pub(crate) struct SeededLaunch {
     /// The argv to store as `cmd:args`.
@@ -239,6 +343,93 @@ pub(crate) fn apply_to_meta(meta: &mut MetaMapType, seeded: SeededLaunch, provid
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ss(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn the_spawn_runtime_is_read_from_the_final_argv() {
+        let rt = spawn_runtime_from_args(&ss(&[
+            "--input-format",
+            "stream-json",
+            "--permission-mode",
+            "default",
+            "--model",
+            "opus",
+            "--effort",
+            "max",
+        ]));
+        assert_eq!(rt.model.as_deref(), Some("opus"));
+        assert_eq!(rt.effort.as_deref(), Some("max"));
+        assert_eq!(rt.permission_mode.as_deref(), Some("default"));
+    }
+
+    #[test]
+    fn a_flag_the_argv_lacks_is_none_which_means_the_cli_default() {
+        let rt = spawn_runtime_from_args(&ss(&["--permission-mode", "default", "--resume", "sid"]));
+        assert_eq!(rt.model, None);
+        assert_eq!(rt.effort, None);
+    }
+
+    #[test]
+    fn every_spelling_of_a_flag_is_read_and_the_last_one_wins() {
+        assert_eq!(
+            spawn_runtime_from_args(&ss(&["--model=opus"]))
+                .model
+                .as_deref(),
+            Some("opus")
+        );
+        assert_eq!(
+            spawn_runtime_from_args(&ss(&["-m", "gpt-5.5"]))
+                .model
+                .as_deref(),
+            Some("gpt-5.5")
+        );
+        assert_eq!(
+            spawn_runtime_from_args(&ss(&["--effort=low"]))
+                .effort
+                .as_deref(),
+            Some("low")
+        );
+        assert_eq!(
+            spawn_runtime_from_args(&ss(&["--model", "sonnet", "--model", "haiku"]))
+                .model
+                .as_deref(),
+            Some("haiku")
+        );
+        assert_eq!(
+            spawn_runtime_from_args(&ss(&["--dangerously-skip-permissions"]))
+                .permission_mode
+                .as_deref(),
+            Some("bypass")
+        );
+        // a flag with no value is not a value
+        assert_eq!(spawn_runtime_from_args(&ss(&["--model"])).model, None);
+    }
+
+    #[test]
+    fn the_event_says_what_runs_and_whether_a_restart_is_coming() {
+        let rt = SpawnRuntime {
+            model: Some("sonnet".into()),
+            effort: None,
+            permission_mode: Some("default".into()),
+        };
+        let v = agent_runtime_event("b1", Some(&rt), true);
+        assert_eq!(v["blockid"], "b1");
+        assert_eq!(v["running"], true);
+        assert_eq!(v["model"], "sonnet");
+        assert_eq!(v["permission_mode"], "default");
+        assert_eq!(v["restart_pending"], true);
+        assert!(
+            v.get("effort").is_none(),
+            "an absent flag is omitted, not null"
+        );
+
+        let none = agent_runtime_event("b1", None, false);
+        assert_eq!(none["running"], false);
+        assert!(none.get("model").is_none());
+    }
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()

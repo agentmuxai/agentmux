@@ -10,6 +10,11 @@ impl PersistentSubprocessController {
     pub(super) fn set_status(inner: &mut PersistentInner, status: &str) {
         inner.proc_status = status.to_string();
         inner.status_version += 1;
+        // The argv belongs to a live process; once it is gone there is nothing
+        // to compare a selection against.
+        if status != STATUS_RUNNING {
+            inner.spawn_runtime = None;
+        }
     }
 
     pub(super) fn get_status_snapshot(&self) -> BlockControllerRuntimeStatus {
@@ -32,6 +37,14 @@ impl PersistentSubprocessController {
         if let Some(ref broker) = self.broker {
             let status = self.get_status_snapshot();
             super::super::publish_controller_status(broker, &status);
+            // Alongside every status change, so the two cannot disagree about
+            // whether a process is running: what it was spawned with, and
+            // whether a restart is already on its way.
+            let (running, restart_pending) = {
+                let inner = self.inner.lock().unwrap();
+                (inner.spawn_runtime.clone(), inner.restart_when_idle || inner.restart_pending)
+            };
+            crate::backend::agent_runtime::publish_agent_runtime(broker, &self.block_id, running.as_ref(), restart_pending);
         }
     }
 

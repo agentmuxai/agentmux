@@ -516,6 +516,67 @@ async fn a_stored_pane_without_runtime_flags_spawns_with_the_ones_its_menu_shows
     assert!(argv.windows(2).any(|w| w[0] == "--resume" && w[1] == "sid-to-resume"), "{argv:?}");
 }
 
+// The menu compares its selection with what the process was actually GIVEN.
+// The controller records that at spawn, from the final argv (so it includes
+// anything the fill-in added), and forgets it once the process is gone.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_controller_records_the_runtime_its_process_was_spawned_with() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let stub = std::env::temp_dir().join(format!("agentmux-spawnrt-{}.js", uuid::Uuid::new_v4()));
+    std::fs::write(
+        &stub,
+        r#"process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: "s" }) + "\n"); setInterval(() => {}, 1000);"#,
+    )
+    .unwrap();
+    let mut meta = meta_with_session("sid-to-resume", &[stub.to_string_lossy().as_ref(), "--permission-mode", "default"]);
+    meta.insert("agentProvider".to_string(), serde_json::json!("claude"));
+    meta.insert(
+        "agent:runtime".to_string(),
+        serde_json::json!({"permissionMode": "bypass", "model": "opus", "effort": "max"}),
+    );
+    let store = make_store();
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        "blk-spawnrt".to_string(),
+        Some(broker.clone()),
+        None,
+        None,
+        None,
+    )
+    .with_identity_stores(Some(store.clone()), Some(store.clone()), "key".to_string());
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    let _kill_on_drop = KillOnDrop(&c);
+
+    assert_eq!(c.inner.lock().unwrap().spawn_runtime, None, "nothing runs yet");
+    Controller::start(&c, meta, None, false).unwrap();
+    assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+    let rt = c.inner.lock().unwrap().spawn_runtime.clone().expect("recorded at spawn");
+    assert_eq!(rt.model.as_deref(), Some("opus"), "{rt:?}");
+    assert_eq!(rt.effort.as_deref(), Some("max"), "{rt:?}");
+    assert_eq!(rt.permission_mode.as_deref(), Some("default"), "{rt:?}");
+
+    // The menu hears it: published, with the process's own argv values.
+    let published = broker.read_event_history(crate::backend::mps::EVENT_AGENT_RUNTIME, "block:blk-spawnrt", 5);
+    let last = published.last().expect("an agentruntime event is published at spawn");
+    let data = last.data.clone().expect("with a payload");
+    assert_eq!(data["running"], true, "{data}");
+    assert_eq!(data["model"], "opus", "{data}");
+    assert_eq!(data["effort"], "max", "{data}");
+    assert_eq!(data["restart_pending"], false, "{data}");
+
+    // …and forgotten (and announced) when the process is gone.
+    PersistentSubprocessController::set_status(&mut c.inner.lock().unwrap(), STATUS_DONE);
+    assert_eq!(c.inner.lock().unwrap().spawn_runtime, None);
+    c.publish_status();
+    let after = broker.read_event_history(crate::backend::mps::EVENT_AGENT_RUNTIME, "block:blk-spawnrt", 5);
+    assert_eq!(after.last().unwrap().data.as_ref().unwrap()["running"], false);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stored_pane_that_already_has_its_flags_is_not_changed_by_the_fill_in() {
     if !has_node() {

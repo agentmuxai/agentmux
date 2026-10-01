@@ -511,6 +511,7 @@ impl PersistentSubprocessController {
             // (see `acquire_agent_lease`), so no release happens here.
             inner.agent_lease = agent_lease.clone();
             Self::set_status(&mut inner, STATUS_RUNNING);
+            inner.spawn_runtime = Some(crate::backend::agent_runtime::spawn_runtime_from_args(&spawn_args));
         }
         // Now visible to `session_held_elsewhere` — a concurrent resume of
         // the same session may run its check.

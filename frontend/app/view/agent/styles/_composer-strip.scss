@@ -202,6 +202,16 @@
         color: var(--main-text-color);
     }
 
+    // The agent is not running what the label shows (see process-runtime.ts), or
+    // will be once the current turn ends.
+    &--differs {
+        border-color: var(--warning-color);
+        color: var(--warning-color);
+    }
+    &--pending {
+        border-style: dashed;
+    }
+
     // The last change did not apply: what the label shows is only what was asked for.
     &--error {
         border-color: var(--error-color);
@@ -692,4 +702,33 @@
     font-size: 10px;
     font-family: var(--font-family, sans-serif);
     pointer-events: none;
+}
+
+// Inside the Runtime panel: what differs, and how to fix it.
+.agent-runtime-dropup-drift {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    margin-bottom: var(--space-1);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 10px;
+    color: var(--warning-color);
+
+    &[data-kind="pending"] {
+        color: var(--secondary-text-color);
+    }
+}
+.agent-runtime-dropup-drift-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.agent-runtime-dropup-drift-btn {
+    flex: 0 0 auto;
+    background: transparent;
+    border: 1px solid currentColor;
+    color: inherit;
+    font: inherit;
+    padding: 1px var(--space-1-5);
+    cursor: pointer;
 }
