@@ -405,6 +405,12 @@ impl ShellNodeRunner {
 
         let pid = child.id();
         tracing::info!(shell_id = %shell_id, pid = ?pid, capture_stdin = self.capture_stdin, "shell.spawn");
+        // Join the agent's tracker, so the shell and everything it starts
+        // (`task dev` → task.exe/node) end with the agent on every teardown
+        // path, not only an explicit stop (agent_teardown spec §6.5).
+        if let Some(pid) = pid {
+            crate::backend::process_tracker::registry::track_adopted(&block_id, pid);
+        }
 
         // Spawn stdin relay only when capture_stdin=true.
         let stdin_tx: Option<mpsc::UnboundedSender<String>> = if self.capture_stdin {

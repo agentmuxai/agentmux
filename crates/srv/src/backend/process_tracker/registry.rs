@@ -55,6 +55,23 @@ pub fn track_spawned(block_id: &str, pid: u32) {
     }
 }
 
+/// Put a process srv spawned on an agent's behalf (`Shell()`, `!cmd`) into
+/// that agent's tracker, so it dies with the agent like anything the agent
+/// started itself (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md §6.5). Unlike
+/// [`track_spawned`] it never creates a tracker (a block with no agent process
+/// has nothing to join) and doesn't mark the PID as a root, so the process
+/// still counts as something the agent started. Best-effort, like
+/// [`track_spawned`].
+pub fn track_adopted(block_id: &str, pid: u32) {
+    if block_id.is_empty() {
+        return;
+    }
+    let Some(registry) = global() else { return };
+    if let Err(e) = registry.adopt(block_id, pid) {
+        tracing::warn!(block_id = %block_id, pid = pid, err = %e, "[process-tracker] adopt failed");
+    }
+}
+
 /// Settings key: run agents' process trees at below-normal CPU priority so
 /// their builds and tests yield to AgentMux (and the user's foreground apps)
 /// under contention, while still using every idle core. Default on.
@@ -156,6 +173,17 @@ impl AgentProcessRegistry {
             entry.roots.insert(pid);
         }
         Ok(())
+    }
+
+    /// Add `pid` to `block_id`'s tracker if it has one, without marking it a
+    /// root. `Ok(false)` when the block has no tracker.
+    pub fn adopt(&self, block_id: &str, pid: u32) -> Result<bool, String> {
+        let tracker = match self.inner.lock().get(block_id) {
+            Some(e) => e.tracker.clone(),
+            None => return Ok(false),
+        };
+        tracker.assign_process(pid)?;
+        Ok(true)
     }
 
     /// Drop a block's tracker — call when the pane closes. The tracker's
@@ -427,5 +455,45 @@ mod tests {
         // to terminate.
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    #[test]
+    fn adopt_never_creates_a_tracker() {
+        let registry = AgentProcessRegistry::new(None);
+        assert_eq!(registry.adopt("no-such-block", std::process::id()), Ok(false));
+        assert_eq!(registry.stats().0, 0, "adopt must not register a tracker");
+    }
+
+    /// A `Shell()` process adopted into an agent's tracker is listed as
+    /// agent-started and dies when the agent's tracker is released
+    /// (agent_teardown spec §6.5).
+    #[test]
+    #[cfg(windows)]
+    fn an_adopted_process_is_listed_and_dies_with_the_agent() {
+        let spawn = || {
+            std::process::Command::new("cmd")
+                .args(["/C", "ping -n 30 127.0.0.1 > nul"])
+                .spawn()
+                .expect("failed to spawn a disposable test child")
+        };
+        let (mut agent, mut shell) = (spawn(), spawn());
+        let registry = AgentProcessRegistry::new(None);
+        registry.assign("test-block-adopt", agent.id()).expect("assign the agent root");
+        assert_eq!(registry.adopt("test-block-adopt", shell.id()), Ok(true));
+
+        let listed = registry.list_block("test-block-adopt");
+        assert!(
+            listed.iter().any(|p| p.pid == shell.id()),
+            "an adopted shell is agent-started, not a root: {listed:?}"
+        );
+
+        registry.remove("test-block-adopt");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while shell.try_wait().ok().flatten().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(shell.try_wait().ok().flatten().is_some(), "releasing the agent's tracker must end the adopted shell");
+        let _ = agent.kill();
+        let _ = agent.wait();
     }
 }

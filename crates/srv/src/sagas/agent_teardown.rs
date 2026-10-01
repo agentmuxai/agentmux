@@ -16,6 +16,12 @@
 // | Stop, `agent.stop`, `FleetBulkStop` Stop, the watchdog | `Policy::stop(..)`|
 // | Controller replace (`resync_controller`)              | `Policy::replace()` |
 // | App exit (`main.rs`)                                  | `Policy::app_exit()` |
+// | A drawer closed, a `/btw` throwaway, a spawn rollback, | `discard`         |
+// |   the backstop after a close                          |                   |
+//
+// `Shell()` and `!cmd` processes join the agent's tracker when they spawn
+// (`track_adopted`), and a graceful teardown closes the agent's PtyShell
+// drawers first, so all of them end with it.
 //
 // Phase 1 moved today's behaviour here unchanged, encoded as policies: the
 // close and quit paths are `close_pane::shutdown_one` and `self_quit`'s
@@ -63,9 +69,11 @@ pub struct Policy {
 }
 
 impl Policy {
-    /// A pane, tab, window-tab or window closing.
+    /// A pane, tab, window-tab or window closing: the agent and everything
+    /// it runs, `Shell()` sessions included; claims stay until their lease
+    /// expires, as before (spec §5).
     pub const fn close() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: false }
+        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true }
     }
     /// `/quit`, `QuitSelf`, no-argument `ClosePane`: everything (spec §0).
     pub const fn quit() -> Self {
@@ -128,6 +136,15 @@ pub fn stop_now(block_id: &str, graceful: bool) -> Result<(), String> {
     let ctrl = blockcontroller::get_controller(block_id)
         .ok_or_else(|| format!("NOT_RUNNING: no controller for block {block_id}"))?;
     ctrl.stop(graceful, blockcontroller::STATUS_DONE)
+}
+
+/// Drop a block's controller and process tracker at once, with no graceful
+/// phase: for a controller that isn't an agent to wind down (a PtyShell
+/// drawer the user closed, a `/btw` throwaway, a spawn being rolled back) and
+/// as the backstop after a close that already ran the teardown (idempotent;
+/// finds nothing left).
+pub fn discard(block_id: &str) {
+    blockcontroller::delete_controller(block_id);
 }
 
 /// The replace policy's entry, for `resync_controller` (synchronous, below
@@ -203,9 +220,30 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
                 }
             }
         }
-        CliStop::Graceful => close_cli(state, block_id, &who, &before, deadline, started).await,
+        CliStop::Graceful => {
+            // PtyShell drawers first (spec §6.6), so teardown doesn't depend on
+            // the pane being mounted to send `deletesubblock`.
+            close_sub_blocks(state, &before.sub_blocks, deadline).await;
+            close_cli(state, block_id, &who, &before, deadline, started).await
+        }
     }
     report
+}
+
+/// Close a parent's sub-blocks (PtyShell drawers) the way a pane closes,
+/// concurrently and under the parent's deadline.
+async fn close_sub_blocks(state: &AppState, sub_blocks: &[String], deadline: std::time::Instant) {
+    if sub_blocks.is_empty() {
+        return;
+    }
+    let subs = sub_blocks.iter().map(|id| Box::pin(run_one(state, id, Policy::close(), deadline)));
+    futures_util::future::join_all(subs).await;
+    // Their processes are gone. Nothing deletes a drawer's record through a
+    // close saga's `finish_close`, so lift the respawn guard here: if the
+    // parent's close then fails, its drawer can be reopened.
+    for id in sub_blocks {
+        blockcontroller::unmark_closing(id);
+    }
 }
 
 /// Today's per-agent close (`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
@@ -313,7 +351,7 @@ mod tests {
 
     #[test]
     fn policies_encode_todays_scopes() {
-        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: false });
+        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true });
         assert_eq!(Policy::quit(), Policy { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true });
         assert_eq!(Policy::stop(false).cli, CliStop::StopOnly { graceful: false });
         assert!(!Policy::stop(true).release_claims && !Policy::stop(true).stop_shell_sessions);
@@ -345,6 +383,7 @@ mod tests {
             ".shutdown(deadline",
             "ctrl.stop(",
             ".stop_for_replace(",
+            "delete_controller(",
         ];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders = Vec::new();
