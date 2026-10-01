@@ -338,7 +338,7 @@ pub(crate) fn register_memory_delivery_handlers(engine: &std::sync::Arc<crate::b
 /// Reads the memory and composes the delivery. `None` when there is nothing
 /// to deliver.
 fn compose_delivery(state: &AppState, block_id: &str, agent_uid: Option<&str>, reason: Reason, now: i64) -> Option<Delivery> {
-    let mut entries = global_entries(state);
+    let mut entries = global_entries(state, block_id);
     if let Some(uid) = agent_uid {
         entries.extend(personal_entries(uid));
     }
@@ -361,8 +361,13 @@ fn compose_delivery(state: &AppState, block_id: &str, agent_uid: Option<&str>, r
 
 /// Global Memory as the startup file carries it — its sections, Operator
 /// Config first (`globalmemory:sections`, P1).
-fn global_entries(state: &AppState) -> Vec<Entry> {
-    let bundles = state.id_store.bundle_list_global().unwrap_or_default();
+fn global_entries(state: &AppState, block_id: &str) -> Vec<Entry> {
+    // The same entries the pane's startup file got: Operator Config targeted
+    // at another agent kind is left out.
+    let bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
+        state.id_store.bundle_list_global().unwrap_or_default(),
+        &crate::backend::operator_config_seed::agent_mode_of_block(&state.mstore, block_id),
+    );
     crate::backend::storage::global_bundle_sections(&bundles)
         .into_iter()
         .map(|s| Entry {

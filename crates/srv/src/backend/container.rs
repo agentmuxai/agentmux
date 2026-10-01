@@ -242,6 +242,9 @@ pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
     "TMPDIR",
     "TEMP",
     "TMP",
+    // The host path of the agent's workspace; srv sets it for host agents
+    // only, this keeps a stale `cmd:env` copy out of a container too.
+    "AGENTMUX_AGENT_WORKDIR",
 ];
 
 /// Shared container manager. Clone-on-Arc; cheap to pass around.

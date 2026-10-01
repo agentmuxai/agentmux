@@ -525,6 +525,14 @@ pub struct CommandWriteAgentConfigData {
     /// itself or pulled it from the agent definition.
     #[serde(default)]
     pub auto_allocate: bool,
+    /// The agent's kind, as the block's `agentMode` carries it (`"host"`,
+    /// `"standalone"` or `"container"`). Decides which Operator Config
+    /// entries the startup file gets
+    /// (`operator_config_seed::global_bundles_for_agent`). Absent from an
+    /// older frontend: treated as a host agent, the default kind.
+    #[serde(default)]
+    #[ts(optional)]
+    pub agent_type: Option<String>,
 }
 
 /// Result of WriteAgentConfigCommand. Returns the final working

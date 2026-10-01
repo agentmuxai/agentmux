@@ -281,7 +281,7 @@ export function useAgentStream({
         // at all. See memory-reinjection-controller.ts's module doc
         // comment, "fix 1".
         isPaneWorking: () => workingFromPhase(paneSnapshot(blockId)?.turnPhase ?? { kind: "Idle" }),
-        fetchEntries: () => fetchMemoryReinjectionEntries(TabRpcClient, agentName ?? ""),
+        fetchEntries: () => fetchMemoryReinjectionEntries(TabRpcClient, agentName ?? "", blockId),
         // Deliberately the raw send RPC, not the full sendMessage/pending-
         // zone path (§3.3 — that path is what creates the visible
         // UserMessageNode this feature must never produce). This DOES skip

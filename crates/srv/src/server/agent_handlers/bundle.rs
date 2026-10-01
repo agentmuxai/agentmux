@@ -346,12 +346,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// Operator Config included (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
 pub(crate) fn register_global_memory_sections(engine: &WshRpcEngine, state: &AppState) {
     let id_store = state.id_store.clone();
+    let mstore = state.mstore.clone();
     engine.register_typed(
         COMMAND_GLOBAL_MEMORY_SECTIONS,
-        move |_cmd: CommandGlobalMemorySectionsData, _ctx| {
+        move |cmd: CommandGlobalMemorySectionsData, _ctx| {
             let store = id_store.clone();
+            let mstore = mstore.clone();
             async move {
                 let bundles = store.bundle_list_global().map_err(|e| format!("globalmemory:sections: {e}"))?;
+                // The same entries the pane's startup file got: Operator
+                // Config targeted at another agent kind is left out.
+                let agent_mode = cmd
+                    .block_id
+                    .as_deref()
+                    .map_or_else(|| "host".to_string(), |b| crate::backend::operator_config_seed::agent_mode_of_block(&mstore, b));
+                let bundles = crate::backend::operator_config_seed::global_bundles_for_agent(bundles, &agent_mode);
                 Ok::<Vec<crate::backend::storage::GlobalMemorySection>, String>(
                     crate::backend::storage::global_bundle_sections(&bundles),
                 )
