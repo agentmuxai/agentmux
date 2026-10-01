@@ -94,30 +94,6 @@ export function clearShownTabs(): void {
     shownTabIds.clear();
 }
 
-/**
- * Count the tabs a window loaded with as shown, at its first idle moment
- * (at most 2 s on). Kept laid out, each was mounted and laid out behind the
- * displayed tab: the same state as a tab already shown, short of a first
- * paint that every switch pays anyway. Without this, the first switch to
- * each tab after a load went through the gate and the cross-fade, a ~65 ms
- * blank flash once per tab. `keptLaidOut` is re-read when it fires, in case
- * the setting changed meanwhile. Returns a cancel.
- */
-export function markLoadedTabsShownWhenIdle(tabIds: readonly string[], keptLaidOut: () => boolean): () => void {
-    const mark = () => {
-        if (!keptLaidOut()) return;
-        for (const id of tabIds) markTabShown(id);
-    };
-    // Feature-detected like termwrap.ts / useLiveFeedRollOff.ts: a webview
-    // without it gets a plain timeout at the same cap (ReAgent P1 on #4132).
-    if (typeof requestIdleCallback !== "function") {
-        const timer = setTimeout(mark, 2000);
-        return () => clearTimeout(timer);
-    }
-    const handle = requestIdleCallback(mark, { timeout: 2000 });
-    return () => cancelIdleCallback(handle);
-}
-
 /** A switch that skipped the gate; logged in the gate's own format so
  *  `scripts/tab-switch-report.mjs` measures both kinds the same way. */
 export function logUngatedReveal(tabId: string): void {

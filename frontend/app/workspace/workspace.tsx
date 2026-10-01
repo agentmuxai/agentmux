@@ -20,13 +20,13 @@ import {
     clearShownTabs,
     forgetTabShown,
     gateTargetTabId,
-    markLoadedTabsShownWhenIdle,
     markTabShown,
     scheduleRevealLift,
     tabSwitching,
     tabWasShown,
 } from "@/store/tab-reveal";
 import { switchIntentTabId } from "@/store/tab-actions";
+import { markLoadedTabsShownWhenSettled } from "@/app/tab/tab-content-settled";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -203,9 +203,9 @@ function WorkspaceElem(): JSX.Element {
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
 
-    // The tabs this window loaded with count as shown once it settles
-    // (markLoadedTabsShownWhenIdle), so the first switch to each is as clean
-    // as any later one. Once, when the tab list first arrives: a tab arriving
+    // The tabs this window loaded with count as shown once each one's content
+    // has settled (markLoadedTabsShownWhenSettled), so the first switch to
+    // each is as clean as any later one. Once, when the tab list first arrives: a tab arriving
     // later (torn in, say) still gets its first reveal gated, and a new tab
     // is marked by createTab once its panes are built.
     // Armed untracked, with its cancel tied to this component rather than to
@@ -219,7 +219,7 @@ function WorkspaceElem(): JSX.Element {
         const ids = allTabIds();
         if (ids.length === 0) return;
         cancelLoadedTabsMark = untrack(() =>
-            keepInactiveTabsLaidOut() ? markLoadedTabsShownWhenIdle(ids, keepInactiveTabsLaidOut) : () => {}
+            keepInactiveTabsLaidOut() ? markLoadedTabsShownWhenSettled(ids, keepInactiveTabsLaidOut) : () => {}
         );
     });
 

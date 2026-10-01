@@ -67,6 +67,7 @@
  */
 
 import { createSignal, onCleanup } from "solid-js";
+import { holdPaneContent } from "./pane-content-holds";
 
 export type PaneReadinessPhase = "assembling" | "revealing" | "live";
 
@@ -100,6 +101,18 @@ export interface PaneReadinessOptions {
     revealTimeoutMs?: number;
     /** Identifies the pane in the warning. */
     label?: string;
+    /**
+     * The block whose content this cover hides. Holds it as still loading
+     * (pane-content-holds.ts) until the cover is gone, so a hidden window tab
+     * isn't shown mid-assembly.
+     */
+    holdFor?: string;
+    /**
+     * True while nobody can see the pane (its window tab is hidden). A reveal
+     * then goes straight to `live`: there's no one to fade the cover out for,
+     * and the fade would only delay the tab becoming showable.
+     */
+    hidden?: () => boolean;
     /**
      * Seam for tests. Fires with the outstanding gates each time a deadline
      * elapses while still assembling — so a caller that sets both options and
@@ -148,9 +161,20 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         }
     };
 
+    let releaseContentHold = opts.holdFor != null ? holdPaneContent(opts.holdFor) : null;
+    const releaseHold = () => {
+        releaseContentHold?.();
+        releaseContentHold = null;
+    };
+
     const toRevealing = () => {
         if (phase() !== "assembling") return;
         clearTimers();
+        if (opts.hidden?.()) {
+            setPhase("live");
+            releaseHold();
+            return;
+        }
         setPhase("revealing");
     };
 
@@ -221,6 +245,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         if (phase() === "live") return;
         clearTimers();
         setPhase("live");
+        releaseHold();
     };
 
     // A pane that never registers a gate has nothing to wait for. Defer by a
@@ -230,6 +255,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
     });
 
     onCleanup(clearTimers);
+    onCleanup(releaseHold);
 
     return {
         phase,

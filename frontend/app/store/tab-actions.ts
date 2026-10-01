@@ -81,6 +81,9 @@ createRoot(() =>
     })
 );
 
+/** How long a new tab may wait, hidden, for its panes' first data. */
+const NEW_TAB_SETTLE_CAP_MS = 800;
+
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
@@ -135,6 +138,14 @@ export function createTab() {
             // the new tab is left created but inactive; the user reaches
             // it via the tab bar whenever they actually want it, same as
             // any other background tab.
+            // Its panes exist now, but their first data (the picker's agents,
+            // the sysinfo history, the swarm list) is still arriving. Showing
+            // the tab now put that loading on screen: covers, an empty chart,
+            // "Loading…", then content popping in. Wait until it has settled,
+            // hidden, then show it in one frame — bounded, so a slow pane
+            // can't hold the new tab back for long.
+            const { whenTabContentSettled } = await import("@/app/tab/tab-content-settled");
+            await whenTabContentSettled(tabId, NEW_TAB_SETTLE_CAP_MS);
             if (activeTabId() === startingActiveTabId) {
                 // Built while hidden, and kept laid out: the same state as a
                 // tab already shown, so it takes the same one-frame switch —
