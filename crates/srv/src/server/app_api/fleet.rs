@@ -234,10 +234,10 @@ pub(crate) async fn fleet_bulk_stop_impl(
             // (REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md
             // §3.2 — this was host-tier-only before).
             let (target_agent, outcome) = match state.reactive_handler.get_agent_by_block(&block_id) {
-                Some(agent) => (agent.agent_id, stop_one_agent_block(&block_id, signal).map(|_| ())),
+                Some(agent) => (agent.agent_id, stop_one_agent_block(state, &block_id, signal, None).await.map(|_| ())),
                 None => match forward_stop_to_shared_channel(state, &block_id, signal).await {
                     Some((agent_name, outcome)) => (agent_name, outcome),
-                    None => (block_id.clone(), stop_one_agent_block(&block_id, signal).map(|_| ())),
+                    None => (block_id.clone(), stop_one_agent_block(state, &block_id, signal, None).await.map(|_| ())),
                 },
             };
             match outcome {

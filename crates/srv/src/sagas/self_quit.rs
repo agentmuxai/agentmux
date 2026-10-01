@@ -151,6 +151,9 @@ pub struct QuitSummary {
     pub stopped_shells: usize,
     /// Names of cron jobs still targeting the agent (kept, §4.3).
     pub crons_targeting: Vec<String>,
+    /// Processes still running after the quit, as `name (pid N)`
+    /// (agent teardown spec §6.2 step 8, §7.3). Empty is the goal.
+    pub survivors: Vec<String>,
 }
 
 // Moved to the one inventory (spec §6.1); re-exported for existing callers.
@@ -190,6 +193,11 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
     let report = report.unwrap_or_default();
     let (released_claims, stopped_shells, crons) =
         (report.released_claims, report.stopped_shells, report.crons_targeting.clone());
+    let survivors: Vec<String> = report
+        .survivors
+        .iter()
+        .map(|p| format!("{} (pid {})", crate::sagas::close_pane::short_command(&p.command), p.pid))
+        .collect();
 
     // 5. Audit.
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -213,11 +221,12 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
         released_claims,
         stopped_shells,
         crons_targeting = crons.len(),
+        survivors = survivors.len(),
         ok = result.is_ok(),
         "self-quit"
     );
     result?;
-    Ok(QuitSummary { status: "quit", agent, released_claims, stopped_shells, crons_targeting: crons })
+    Ok(QuitSummary { status: "quit", agent, released_claims, stopped_shells, crons_targeting: crons, survivors })
 }
 
 #[cfg(test)]

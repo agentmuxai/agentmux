@@ -74,4 +74,10 @@ describe("quit notice", () => {
         expect(m).toContain("Stopped 1 shell.");
         expect(m).toContain("1 cron job still targets it (nightly)");
     });
+
+    it("names any process that survived the quit", () => {
+        const m = quitNoticeMessage(summary({ survivors: ["node.exe (pid 4242)"] }));
+        expect(m).toContain("1 process is still running (node.exe (pid 4242))");
+        expect(quitNoticeMessage(summary({ survivors: [] }))).not.toContain("still running");
+    });
 });
