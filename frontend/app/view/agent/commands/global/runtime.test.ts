@@ -96,3 +96,26 @@ describe("/permission-mode and /runtime show the mode a definition pins (ReAgent
         expect(r.message).toContain("permission: plan");
     });
 });
+
+describe("/permission-mode choices", () => {
+    const perm = RUNTIME_COMMANDS.find((c) => c.name === "permission-mode")!;
+    const choices = (agentMode: string) =>
+        (perm.arg as any).choices({
+            blockId: "b1",
+            provider: () => ({ id: "claude", controllerType: "persistent", launchArgs: ["-p"], persistentLaunchArgs: ["--x"] }),
+            block: () => ({ meta: { agentMode } }),
+        }) as { value: string; description: string }[];
+
+    it("a persistent agent: says what actually happens", () => {
+        const d = Object.fromEntries(choices("host").map((c) => [c.value, c.description]));
+        expect(d.default).toMatch(/allowed automatically/);
+        expect(d.plan).toMatch(/approved automatically/);
+        expect(d.default).not.toMatch(/Standard permission prompts/);
+    });
+
+    it("a container agent keeps the mode's own description", () => {
+        const d = Object.fromEntries(choices("container").map((c) => [c.value, c.description]));
+        expect(d.default).toBe("Standard permission prompts");
+        expect(d.plan).toBe("No tool execution — read-only planning");
+    });
+});

@@ -419,3 +419,28 @@ describe("AgentRuntimeDropup — the mode a definition pins is the mode shown (R
         expect(selected.some((t) => /^Bypass/.test(t))).toBe(false);
     });
 });
+
+describe("AgentRuntimeDropup — the Mode section doesn't promise prompting that doesn't happen", () => {
+    const withMeta = (agentMode?: string) => ({ meta: { ...(agentMode ? { agentMode } : {}), "agent:runtime": { model: "sonnet", permissionMode: "default", effort: "high" } } });
+    const open = async (agentMode?: string) => {
+        render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={() => withMeta(agentMode) as any} providerId="claude" />);
+        await userEvent.click(screen.getByRole("button", { name: /Runtime settings/i }));
+        return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    };
+
+    it("a persistent agent: Default says its prompts are allowed automatically", async () => {
+        const rows = await open("host");
+        const text = rows.join(" | ");
+        expect(text).not.toMatch(/prompt all/i);
+        expect(text).not.toMatch(/AI classifier/i);
+        expect(rows.find((r) => /^Default/.test(r))).toMatch(/allowed automatically/);
+        expect(rows.find((r) => /^Plan/.test(r))).toMatch(/approved automatically/);
+        expect(rows.find((r) => /^Bypass/.test(r))).toContain("no prompts");
+    });
+
+    it("a container agent has no such layer, so the modes keep their own wording", async () => {
+        const rows = await open("container");
+        expect(rows.find((r) => /^Default/.test(r))).toContain("prompt all");
+        expect(rows.find((r) => /^Plan/.test(r))).toContain("read-only");
+    });
+});

@@ -34,8 +34,8 @@ import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, type ProviderModel } from "../providers";
 import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
-import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
-import { effectiveRuntime, effortApplies, effortNotUsedReason } from "../runtime-capabilities";
+import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "../launch-args";
+import { effectiveRuntime, effortApplies, effortNotUsedReason, permissionModeText } from "../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
 /** Serialize a MenuPositionResult.style the same way flyoutmenu.tsx does. */
@@ -251,7 +251,20 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
             }
         };
 
-        addSection("mode", MODE_OPTIONS, r.permissionMode, true);
+        // What each mode does depends on the controller: a persistent agent's
+        // permission prompts are answered for the user (see permissionModeText).
+        const meta = props.blockAtom()?.meta;
+        const provider = getProvider(props.providerId);
+        const autoAnswers = !!provider && isPersistentLaunch(provider, meta?.["agentMode"] as string | undefined);
+        addSection(
+            "mode",
+            MODE_OPTIONS.map((o) => {
+                const t = permissionModeText(o.value, autoAnswers);
+                return { ...o, menuLabel: t.label, description: t.note };
+            }),
+            r.permissionMode,
+            true,
+        );
         addSection("model", modelOptions(), r.model, false);
         const notUsed = effortNotUsedReason(props.providerId, runningModel());
         if (notUsed === null) {
