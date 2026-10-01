@@ -744,6 +744,12 @@ pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> Stri
     format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
 }
 
+/// Whether `build_config_files` writes `skill` as a file Claude Code lists
+/// natively: an Agent Skill's `SKILL.md`, or a command with a usable trigger.
+fn skill_has_native_file(skill: &AgentSkill) -> bool {
+    !skill.content.is_empty() && (skill.skill_type == SKILL_TYPE_AGENT_SKILL || sanitize_trigger(&skill.trigger).is_some())
+}
+
 /// Validate a skill's `trigger` is safe to use as a single path segment in
 /// `.claude/commands/<trigger>.md`. `trigger` is free-form user input with
 /// no format validation anywhere upstream (the skill create/update RPCs and
@@ -755,12 +761,6 @@ pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> Stri
 /// or that is exactly `.`/`..`; callers skip writing that skill's command
 /// file entirely rather than silently rewriting the trigger into something
 /// the user didn't ask for.
-/// Whether `build_config_files` writes `skill` as a file Claude Code lists
-/// natively: an Agent Skill's `SKILL.md`, or a command with a usable trigger.
-fn skill_has_native_file(skill: &AgentSkill) -> bool {
-    !skill.content.is_empty() && (skill.skill_type == SKILL_TYPE_AGENT_SKILL || sanitize_trigger(&skill.trigger).is_some())
-}
-
 fn sanitize_trigger(trigger: &str) -> Option<&str> {
     if trigger.is_empty() || trigger == "." || trigger == ".." {
         return None;
@@ -968,8 +968,6 @@ pub const BUNDLE_SECTION_HEADING: &str = "# Memory";
 /// content entirely) would see it silently reappear on their next launch.
 const CLAUDE_MD_OWNERSHIP_MARKER_PATH: &str = ".claude/.agentmux-claude-md-ownership.json";
 
-/// Comment wrapping the `@import` line so its origin — and how to remove
-/// it — is unambiguous to anyone reading a foreign `CLAUDE.md` by hand.
 /// Where an adopted legacy `CLAUDE.md` is kept (`is_legacy_agentmux_claude_md`).
 pub const CLAUDE_MD_PRE_ADOPT_BACKUP: &str = ".claude/CLAUDE.md.pre-adopt";
 
@@ -985,6 +983,8 @@ pub fn is_legacy_agentmux_claude_md(content: &str) -> bool {
         && lines.all(|l| l.starts_with("- **") || l == CLAUDE_MD_IMPORT_MARKER_COMMENT || l == import_line)
 }
 
+/// Comment wrapping the `@import` line so its origin — and how to remove
+/// it — is unambiguous to anyone reading a foreign `CLAUDE.md` by hand.
 const CLAUDE_MD_IMPORT_MARKER_COMMENT: &str =
     "<!-- agentmux:managed-import (safe to delete this line to opt out) -->";
 
