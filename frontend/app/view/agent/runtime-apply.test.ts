@@ -133,3 +133,79 @@ describe("patchRuntime", () => {
         expect(byBlock("b2").at(-1)).toMatchObject({ model: "sonnet", effort: "low" });
     });
 });
+
+describe("patchRuntime — a pick wins over the agent definition's own flags", () => {
+    /** The value the process uses for a flag: the LAST occurrence, as the CLI reads a repeat. */
+    const lastFlag = (args: string[], f: string) => args[args.lastIndexOf(f) + 1];
+    /** The pane's `agent:provider_flags` writes, in order. */
+    const flagWrites = (): string[] =>
+        setMeta.mock.calls.map((c) => c[0].meta["agent:provider_flags"]).filter((v) => v !== undefined);
+    const withFlags = (flags: string, r: AgentRuntimeConfig = base) => () => ({ ...meta(r), "agent:provider_flags": flags });
+
+    it("picking a model takes the definition's --model out of this pane, so the pick is what runs", async () => {
+        await patchRuntime("b1", claude, { model: "haiku" }, withFlags("--model opus --add-dir /tmp"));
+        expect(flagWrites()).toEqual(["--add-dir /tmp"]);
+        const args = argWrites().at(-1)!;
+        expect(args.filter((a) => a === "--model")).toEqual(["--model"]); // exactly one
+        expect(flag(args, "--model")).toBe("haiku");
+        expect(args.slice(-2)).toEqual(["--add-dir", "/tmp"]); // the rest of the flags survive
+    });
+
+    it("picking an effort or a mode does the same for its own flag, and leaves the model flag alone", async () => {
+        await patchRuntime("b1", claude, { effort: "max" }, withFlags("--model opus --effort low"));
+        expect(flagWrites().at(-1)).toBe("--model opus");
+        expect(lastFlag(argWrites().at(-1)!, "--effort")).toBe("max");
+        // the model flag stays the definition's: the runtime's sonnet, then the definition's opus, which wins
+        expect(lastFlag(argWrites().at(-1)!, "--model")).toBe("opus");
+    });
+
+    it("writes nothing extra when there is nothing to take out", async () => {
+        await patchRuntime("b1", claude, { model: "opus" }, withFlags("--add-dir /tmp"));
+        expect(flagWrites()).toEqual([]);
+        await patchRuntime("b2", claude, { model: "opus" }, () => meta());
+        expect(flagWrites()).toEqual([]);
+    });
+
+    it("picking a model that takes no --effort also takes the definition's --effort out (ReAgent P1 on #4161)", async () => {
+        // The definition pins Opus + max effort; the user picks Haiku. The
+        // definition's --effort would otherwise stay in the flags, be appended
+        // after the runtime's, and Haiku answers HTTP 400 on it.
+        await patchRuntime("b1", claude, { model: "haiku" }, withFlags("--model opus --effort max --add-dir /tmp"));
+        expect(flagWrites()).toEqual(["--add-dir /tmp"]);
+        const args = argWrites().at(-1)!;
+        expect(args).not.toContain("--effort");
+        expect(lastFlag(args, "--model")).toBe("haiku");
+    });
+
+    it("…only for Claude: another provider's own --effort is left alone", async () => {
+        const codex = { id: "codex", controllerType: "persistent", launchArgs: ["exec", "-"], persistentLaunchArgs: ["exec", "-"] } as unknown as ProviderDefinition;
+        await patchRuntime("b1", codex, { model: "haiku" }, withFlags("--effort high"));
+        expect(flagWrites()).toEqual([]); // nothing to take out: "--effort" is not the model's to remove
+    });
+
+    it("…and a pick of a model that does take effort keeps the definition's --effort", async () => {
+        await patchRuntime("b1", claude, { model: "sonnet" }, withFlags("--model opus --effort max"));
+        expect(flagWrites()).toEqual(["--effort max"]);
+        expect(lastFlag(argWrites().at(-1)!, "--effort")).toBe("max");
+    });
+
+    it("a restart with no pick ({}) does not touch the flags", async () => {
+        await patchRuntime("b1", claude, {}, withFlags("--model opus"));
+        expect(flagWrites()).toEqual([]);
+        expect(lastFlag(argWrites().at(-1)!, "--model")).toBe("opus");
+    });
+
+    it("two quick picks: the second builds on the first's flags, not on stale meta", async () => {
+        const stale = withFlags("--model sonnet --effort low");
+        await Promise.all([
+            patchRuntime("b1", claude, { model: "opus" }, stale),
+            patchRuntime("b1", claude, { effort: "max" }, stale),
+        ]);
+        expect(flagWrites().at(-1)).toBe("");
+        const args = argWrites().at(-1)!;
+        expect(lastFlag(args, "--model")).toBe("opus");
+        expect(lastFlag(args, "--effort")).toBe("max");
+        expect(args.filter((a) => a === "--model")).toHaveLength(1);
+        expect(args.filter((a) => a === "--effort")).toHaveLength(1);
+    });
+});

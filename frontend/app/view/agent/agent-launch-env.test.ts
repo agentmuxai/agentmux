@@ -115,6 +115,27 @@ describe("resolveEffectiveLaunchProvider", () => {
 });
 
 describe("resolveInitialRuntimeConfig", () => {
+    it("seeds the menu from the agent definition's own --model and --effort", () => {
+        const r = resolveInitialRuntimeConfig(undefined, models({ value: "sonnet", default: true }), "--model opus --effort max");
+        expect(r).toMatchObject({ model: "opus", effort: "max" });
+    });
+
+    it("seeds the permission mode from the definition's flags too", () => {
+        const m = models({ value: "sonnet", default: true });
+        expect(resolveInitialRuntimeConfig(undefined, m, "--permission-mode plan").permissionMode).toBe("plan");
+        expect(resolveInitialRuntimeConfig(undefined, m, "--add-dir /tmp").permissionMode).toBe("bypass");
+    });
+
+    it("a model chosen at launch still wins over the definition's", () => {
+        const r = resolveInitialRuntimeConfig("haiku", models({ value: "sonnet", default: true }), "--model opus");
+        expect(r.model).toBe("haiku");
+    });
+
+    it("flags that say nothing about the model or effort change nothing", () => {
+        const r = resolveInitialRuntimeConfig(undefined, models({ value: "sonnet", default: true }), "--add-dir /tmp");
+        expect(r).toMatchObject({ model: "sonnet", effort: "high" });
+    });
+
     // Fixes the latent bug this function exists to close: launchAgentDefinition
     // never set "agent:runtime" meta at all on a fresh launch, so
     // getRuntimeConfig's fallback (DEFAULT_RUNTIME_CONFIG, hardcoded to
