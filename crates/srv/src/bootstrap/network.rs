@@ -118,6 +118,10 @@ pub async fn bind_listeners_and_network(
     ));
     // The LAN tier of one-live-instance-per-agent asks these peers.
     backend::agent_admission::set_lan_discovery(lan_discovery.clone());
+    // Notices an instance that hears peers but cannot be heard (no IPv4 mDNS
+    // socket: `lan_mdns_health`), rebuilds the daemon, and tells the indicator.
+    // Idle while LAN discovery is off.
+    lan_discovery.clone().spawn_health_watchdog();
     // Deliberately NOT applied here. The supervisor below is the single driver
     // of `lan_discovery.apply`, so mDNS can never advertise an endpoint before
     // (or without) a socket actually listening on it. `main.rs` reads the
