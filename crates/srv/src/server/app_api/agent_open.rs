@@ -525,8 +525,8 @@ async fn open_agent_inner(
                 // Catalog args, the runtime the menu will show applied on top, then the
                 // definition's own flags. Without the middle step a pane opened here
                 // ran on the CLI's default model while its menu read Sonnet — see
-                // agent_runtime_seed.rs.
-                let seeded = super::agent_runtime_seed::seed_launch(
+                // backend/agent_runtime.rs.
+                let seeded = crate::backend::agent_runtime::seed_launch(
                     provider.id,
                     resolve_cli_args(&provider, controller_type),
                     &agent.provider_flags,
@@ -782,7 +782,7 @@ async fn open_agent_inner(
                 meta.insert("controller".to_string(), json!(controller_type));
                 meta.insert("cmd".to_string(), json!(&resolved_cli_path));
                 // cmd:args + agent:runtime + agent:provider_flags, written together.
-                super::agent_runtime_seed::apply_to_meta(&mut meta, seeded, &agent.provider_flags);
+                crate::backend::agent_runtime::apply_to_meta(&mut meta, seeded, &agent.provider_flags);
                 meta.insert("cmd:cwd".to_string(), json!(&work_dir));
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));

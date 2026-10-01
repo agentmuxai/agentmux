@@ -439,6 +439,101 @@ setInterval(() => {{}}, 1000);
     // panic — see `KillOnDrop`'s own doc comment.
 }
 
+/// Spawn a stub through the real eager-resume path and return the argv it received.
+async fn eager_resume_argv_for(mut meta: MetaMapType, tag: &str) -> Vec<String> {
+    let argv_out = std::env::temp_dir().join(format!("agentmux-eager-{tag}-{}.json", uuid::Uuid::new_v4()));
+    let stub = std::env::temp_dir().join(format!("agentmux-eager-{tag}-{}.js", uuid::Uuid::new_v4()));
+    std::fs::write(
+        &stub,
+        format!(
+            r#"
+require("fs").writeFileSync({argv_out:?}, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(JSON.stringify({{ type: "system", subtype: "init", session_id: "echoed-session" }}) + "\n");
+setInterval(() => {{}}, 1000);
+"#,
+            argv_out = argv_out.to_string_lossy(),
+        ),
+    )
+    .unwrap();
+    // The stub is the first "arg" `node` receives; whatever `cmd:args` the test
+    // stored follows it.
+    let stored: Vec<serde_json::Value> = meta
+        .get("cmd:args")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let mut args = vec![serde_json::json!(stub.to_string_lossy())];
+    args.extend(stored);
+    meta.insert("cmd:args".to_string(), serde_json::Value::Array(args));
+
+    let store = make_store();
+    let c = controller(&format!("blk-{tag}")).with_identity_stores(
+        Some(store.clone()),
+        Some(store.clone()),
+        "key".to_string(),
+    );
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    let _kill_on_drop = KillOnDrop(&c);
+    Controller::start(&c, meta, None, false).unwrap();
+    assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if let Ok(raw) = std::fs::read_to_string(&argv_out) {
+            if let Ok(parsed) = serde_json::from_str(&raw) {
+                return parsed;
+            }
+        }
+        assert!(std::time::Instant::now() < deadline, "stub never wrote its argv file");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+fn argv_value(argv: &[String], flag: &str) -> Option<String> {
+    argv.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
+}
+
+// The model the strip shows is the model the process gets — through the real
+// spawn path, for a pane STORED without the flags (saved before the launch fix,
+// or written by a path that never added them). A persistent process never
+// re-reads `cmd:args`, so without the spawn-time fill-in it ran on the CLI's own
+// default (Opus 5.5 / medium) for its whole life.
+// docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stored_pane_without_runtime_flags_spawns_with_the_ones_its_menu_shows() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let mut meta = meta_with_session("sid-to-resume", &["--permission-mode", "default"]);
+    meta.insert("agentProvider".to_string(), serde_json::json!("claude"));
+    meta.insert(
+        "agent:runtime".to_string(),
+        serde_json::json!({"permissionMode": "bypass", "model": "opus", "effort": "max"}),
+    );
+    let argv = eager_resume_argv_for(meta, "fills").await;
+    assert_eq!(argv_value(&argv, "--model").as_deref(), Some("opus"), "{argv:?}");
+    assert_eq!(argv_value(&argv, "--effort").as_deref(), Some("max"), "{argv:?}");
+    assert!(argv.windows(2).any(|w| w[0] == "--resume" && w[1] == "sid-to-resume"), "{argv:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stored_pane_that_already_has_its_flags_is_not_changed_by_the_fill_in() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let mut meta = meta_with_session("sid-to-resume", &["--model", "haiku"]);
+    meta.insert("agentProvider".to_string(), serde_json::json!("claude"));
+    meta.insert(
+        "agent:runtime".to_string(),
+        serde_json::json!({"model": "opus", "effort": "max"}),
+    );
+    let argv = eager_resume_argv_for(meta, "keeps").await;
+    assert_eq!(argv.iter().filter(|a| *a == "--model").count(), 1, "{argv:?}");
+    assert_eq!(argv_value(&argv, "--model").as_deref(), Some("haiku"), "{argv:?}");
+    assert!(!argv.iter().any(|a| a == "--effort"), "haiku takes no --effort: {argv:?}");
+}
+
 // codex P1 on PR #3513: the controller is placed in the global registry
 // before `start()` runs, so a concurrent message can reach
 // `send_message` while `try_eager_resume` is still resolving the

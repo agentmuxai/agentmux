@@ -90,6 +90,9 @@ impl PersistentSubprocessController {
             }
             _ => return EagerResumeOutcome::DeclinedTo("cmd:args meta missing — refusing to guess CLI flags"),
         };
+        // A pane stored without --model/--effort spawns here, before any message,
+        // and the process never re-reads `cmd:args`: fill from `agent:runtime`.
+        let cli_args = crate::backend::agent_runtime::with_runtime_flags(block_meta, cli_args);
         let working_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
         let base_env_vars: HashMap<String, String> = match block_meta.get("cmd:env") {
             Some(serde_json::Value::Object(obj)) => {
