@@ -14,6 +14,7 @@ import { CompactionSummaryTracker } from "./context-delivery";
 import { createTranslator } from "./providers/translator-factory";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcome";
 import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
+import { parseCliNoticeFrame } from "./cli-notice";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode, SessionStats } from "./types";
 
@@ -341,6 +342,19 @@ export class HistoryParser {
                 const node = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
                 if (node) put(node, indexById.get(node.id));
                 continue;
+            }
+
+            // CLI install / version-change notices (cli-notice.ts). An
+            // install's later frame has the same id, so it replaces the
+            // "installing" row instead of adding one.
+            {
+                const cliNode = parseCliNoticeFrame(rawEvent, stampFor(lineIdx) ?? 0);
+                if (cliNode) {
+                    parser.flushPending();
+                    putReleased();
+                    put(cliNode, indexById.get(cliNode.id));
+                    continue;
+                }
             }
 
             // Translate provider-specific envelope → StreamEvent[]

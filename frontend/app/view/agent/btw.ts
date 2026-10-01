@@ -79,6 +79,7 @@ function renderSnapshotLine(node: DocumentNode): string | null {
         case "context_compacted":
         case "compaction_started":
         case "session_outcome":
+        case "cli_notice":
         case "day_divider":
         case "history_link":
         case "resume_preflight":

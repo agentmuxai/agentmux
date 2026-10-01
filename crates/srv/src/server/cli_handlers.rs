@@ -25,10 +25,20 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // read-only lookup): `backend::cli_install`.
     // Never falls back to system PATH for npm-backed providers.
     let broker_resolve = state.broker.clone();
+    let filestore_resolve = state.filestore.clone();
+    let mstore_resolve = state.mstore.clone();
     engine.register_typed(
         COMMAND_RESOLVE_CLI,
         move |cmd: CommandResolveCliData, _ctx| {
             let broker = broker_resolve.clone();
+            let notices = CliNotices {
+                broker: broker_resolve.clone(),
+                filestore: filestore_resolve.clone(),
+                mstore: mstore_resolve.clone(),
+                block_id: notice_block_id(&cmd),
+                agent_id: cmd.agent_id.clone().filter(|a| !a.trim().is_empty()),
+                provider: cmd.provider_id.clone(),
+            };
             async move {
                 const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -67,6 +77,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let found = found.to_string_lossy().to_string();
                     let version = get_cli_version(&found).await;
                     tracing::info!(path = %found, version = %version, "CLI found in local install");
+                    notices.observe_version(&version);
                     return Ok(ResolveCliResult {
                         cli_path: found,
                         version,
@@ -82,6 +93,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             path = %path, version = %version,
                             "CLI found on system PATH"
                         );
+                        notices.observe_version(&version);
                         return Ok(ResolveCliResult {
                             cli_path: path,
                             version,
@@ -157,6 +169,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     };
                     let install_paths = paths.clone();
                     let block_id_install = cmd.block_id.clone();
+                    // The pane says it's installing, then how it went: a pane
+                    // restored at startup otherwise just starts slower.
+                    let install_id = format!("{}-{}-{}", cmd.provider_id, pinned_version, agentmux_common::time::now_ms());
+                    let install_started = std::time::Instant::now();
+                    notices.install(&install_id, &pinned_version, crate::backend::cli_notice::InstallState::Installing, None, None);
                     let broker_npm = broker.clone();
                     let outcome = tokio::task::spawn_blocking(move || {
                         let on_line = |stream: &'static str, line: &str| {
@@ -177,6 +194,22 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     })
                     .await
                     .map_err(|e| format!("npm install task panicked: {e}"))?;
+                    match &outcome {
+                        Ok(_) => notices.install(
+                            &install_id,
+                            &pinned_version,
+                            crate::backend::cli_notice::InstallState::Installed,
+                            Some(install_started.elapsed().as_secs_f64()),
+                            None,
+                        ),
+                        Err(e) => notices.install(
+                            &install_id,
+                            &pinned_version,
+                            crate::backend::cli_notice::InstallState::Failed,
+                            None,
+                            Some(&e.to_string()),
+                        ),
+                    }
 
                     use crate::backend::cli_install::{InstallError, InstallOutcome};
                     let (bin, source) = match outcome {
@@ -206,6 +239,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let bin = bin.to_string_lossy().to_string();
                     let version = get_cli_version(&bin).await;
                     tracing::info!(path = %bin, version = %version, source, "CLI installed (npm)");
+                    notices.observe_version(&version);
                     Ok(ResolveCliResult {
                         cli_path: bin,
                         version,
@@ -784,6 +818,74 @@ pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
     None
 }
 
+/// The CLI notices one `ResolveCli` call can put in its pane
+/// (`backend::cli_notice`, SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md
+/// §6.3). A probe with no `block_id` (the picker, the Toolchain pane) puts
+/// nothing anywhere.
+struct CliNotices {
+    broker: std::sync::Arc<crate::backend::mps::Broker>,
+    filestore: std::sync::Arc<crate::backend::storage::filestore::FileStore>,
+    mstore: std::sync::Arc<crate::backend::storage::store::Store>,
+    /// The pane being launched (`notice_block_id`, else `block_id`).
+    block_id: String,
+    /// The agent being launched, when the caller says; else the pane's
+    /// `agentId` meta.
+    agent_id: Option<String>,
+    provider: String,
+}
+
+/// The pane a resolve's notices go to: the launch target when the caller
+/// names one (a quick fork resolves from its source pane), else `block_id`.
+fn notice_block_id(cmd: &CommandResolveCliData) -> String {
+    cmd.notice_block_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .unwrap_or(&cmd.block_id)
+        .to_string()
+}
+
+impl CliNotices {
+    fn install(
+        &self,
+        install_id: &str,
+        version: &str,
+        state: crate::backend::cli_notice::InstallState,
+        seconds: Option<f64>,
+        error: Option<&str>,
+    ) {
+        if self.block_id.is_empty() {
+            return;
+        }
+        let frame = crate::backend::cli_notice::install_frame(install_id, &self.provider, version, state, seconds, error);
+        crate::backend::cli_notice::append_to_pane(&self.broker, &self.filestore, &self.mstore, &self.block_id, &frame);
+    }
+
+    /// Record the version this pane's agent is about to run. Claude reports
+    /// the version it actually runs in its own `system/init` frame, which
+    /// covers every spawn path (`persistent/spawn.rs`), so it is observed
+    /// there and not here.
+    fn observe_version(&self, raw_version: &str) {
+        if self.block_id.is_empty() || self.provider == "claude" {
+            return;
+        }
+        let Some(version) = crate::backend::cli_notice::version_token(raw_version) else { return };
+        let (broker, filestore, mstore) = (self.broker.clone(), self.filestore.clone(), self.mstore.clone());
+        let (block_id, provider, agent_id) = (self.block_id.clone(), self.provider.clone(), self.agent_id.clone());
+        tokio::task::spawn_blocking(move || {
+            crate::backend::cli_notice::observe_and_notify(
+                &broker,
+                &filestore,
+                &mstore,
+                &block_id,
+                agent_id.as_deref(),
+                &provider,
+                &version,
+            );
+        });
+    }
+}
+
 async fn get_cli_version(cli_path: &str) -> String {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -811,6 +913,29 @@ async fn get_cli_version(cli_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resolve_cmd(block_id: &str, notice_block_id: Option<&str>) -> CommandResolveCliData {
+        CommandResolveCliData {
+            provider_id: "qwen".to_string(),
+            cli_command: "qwen".to_string(),
+            npm_package: "@qwen-code/qwen-code".to_string(),
+            pinned_version: "0.24.0".to_string(),
+            windows_install_command: String::new(),
+            unix_install_command: String::new(),
+            block_id: block_id.to_string(),
+            notice_block_id: notice_block_id.map(str::to_string),
+            agent_id: None,
+        }
+    }
+
+    /// CLI notices go to the pane being launched: a quick fork resolves from
+    /// its source pane (`block_id`) but names its new pane (Codex on #4128).
+    #[test]
+    fn cli_notices_go_to_the_launch_target() {
+        assert_eq!(notice_block_id(&resolve_cmd("source", Some("fork"))), "fork");
+        assert_eq!(notice_block_id(&resolve_cmd("source", None)), "source");
+        assert_eq!(notice_block_id(&resolve_cmd("source", Some("  "))), "source");
+    }
 
     /// An unknown provider is refused before anything touches the disk.
     #[tokio::test]
