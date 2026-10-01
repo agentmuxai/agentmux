@@ -75,4 +75,36 @@ describe("resolveLanIndicator", () => {
         expect(resolveLanIndicator({ enabled: true, peerCount: 0, error: null }).state).toBe("idle");
         expect(resolveLanIndicator({ enabled: true, peerCount: 0 }).state).toBe("idle");
     });
+
+    // Area54, 2026-10-01: it listed three peers while none of them listed it,
+    // because its mDNS service never announced on an IPv4 interface. Reaching a
+    // peer proves we can HEAR; it says nothing about being heard.
+    describe("undiscoverable", () => {
+        it("outranks peers: seeing others does not mean they see us", () => {
+            const r = resolveLanIndicator({ enabled: true, peerCount: 3, discoverability: "undiscoverable" });
+            expect(r.state).toBe("undiscoverable");
+            expect(r.glyph).toBe("◇");
+            expect(r.label).toContain("can't see this one");
+            expect(r.label).toContain("5353");
+        });
+
+        it("is not confused with idle or error when nothing else is wrong", () => {
+            const r = resolveLanIndicator({ enabled: true, peerCount: 0, discoverability: "undiscoverable" });
+            expect(r.state).toBe("undiscoverable");
+            expect(r.state).not.toBe("idle");
+            expect(r.state).not.toBe("error");
+        });
+
+        it("still reports off when LAN is switched off, even with a stale verdict", () => {
+            const r = resolveLanIndicator({ enabled: false, peerCount: 0, discoverability: "undiscoverable" });
+            expect(r.state).toBe("off");
+        });
+
+        it("ignores healthy, degraded, off and null verdicts", () => {
+            for (const d of ["healthy", "degraded", "off", null, undefined] as const) {
+                expect(resolveLanIndicator({ enabled: true, peerCount: 2, discoverability: d }).state).toBe("peers");
+                expect(resolveLanIndicator({ enabled: true, peerCount: 0, discoverability: d }).state).toBe("idle");
+            }
+        });
+    });
 });

@@ -98,6 +98,19 @@ export { lanInstancesAtom };
 // Last error message from the LAN discovery daemon (e.g. firewall block).
 // Cleared on successful enable. See docs/specs/lan-discovery-toggle.md.
 export const [lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom] = createSignal<string | null>(null);
+// Whether other machines can actually find THIS one. A host can see peers and
+// still be invisible to them (its mDNS service never announced on an IPv4
+// interface: Area54, 2026-10-01), so this is separate from the peer list and
+// from the start-up error above. `null` means "no news / fine". Set by the
+// `laninstances:health` event; see docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.7.
+export interface LanDiscoverability {
+    state: "healthy" | "degraded" | "undiscoverable" | "off";
+    /** IPv4 addresses the service was expected on but never announced on. */
+    missing: string[];
+    /** Daemon rebuilds the watchdog has already tried. */
+    rebuilds: number;
+}
+export const [lanDiscoverabilityAtom, setLanDiscoverabilityAtom] = createSignal<LanDiscoverability | null>(null);
 
 // List of all open AgentMux window labels in this process. Updated by
 // app-init's window-instances-changed listener whenever a window opens
@@ -278,6 +291,21 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             handler: (event) => {
                 const errMsg = event.data?.error ?? "unknown error";
                 setLanDiscoveryErrorAtom(String(errMsg));
+            },
+        },
+        {
+            eventType: "laninstances:health",
+            handler: (event) => {
+                const d = event.data as Partial<LanDiscoverability> | null | undefined;
+                const state = d?.state;
+                if (state !== "healthy" && state !== "degraded" && state !== "undiscoverable" && state !== "off") {
+                    return;
+                }
+                setLanDiscoverabilityAtom({
+                    state,
+                    missing: Array.isArray(d?.missing) ? d.missing.map(String) : [],
+                    rebuilds: typeof d?.rebuilds === "number" ? d.rebuilds : 0,
+                });
             },
         },
         {

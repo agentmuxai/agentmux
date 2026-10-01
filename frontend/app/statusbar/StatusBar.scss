@@ -604,6 +604,13 @@
     &--error {
         color: var(--error-color);
     }
+
+    // We may see peers, but nobody can see us (no IPv4 mDNS socket). Warning,
+    // not error: this machine works, it just cannot be found. Ranked above
+    // --peers on purpose: hearing peers does not prove we are heard.
+    &--undiscoverable {
+        color: var(--warning-color);
+    }
 }
 
 // ── MuxBus session dot (on the network pill, next to the LAN diamond) ──────

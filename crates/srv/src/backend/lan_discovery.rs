@@ -7,12 +7,14 @@
 //! continuously browses for peers. Discovered instances are tracked in memory
 //! and broadcast to frontend clients via EventBus.
 
-use std::collections::HashMap;
-use std::net::IpAddr;
+use std::collections::{BTreeSet, HashMap};
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use parking_lot::{Mutex, RwLock};
+
+use crate::backend::lan_mdns_health;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::UdpSocket;
@@ -312,6 +314,12 @@ pub struct LanDiscovery {
     /// zero and the loop would otherwise keep issuing authenticated requests
     /// to peers forever — leaking one orphaned task per disable/enable cycle.
     agent_names_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// IPv4 addresses `mdns-sd` reported announcing our service on, from its
+    /// monitor channel. An interface whose socket failed to bind never appears
+    /// here (see `lan_mdns_health`). Filled by `monitor_loop`.
+    announced_v4: Arc<Mutex<BTreeSet<Ipv4Addr>>>,
+    /// When this daemon was built, for the start-up grace in `health()`.
+    started_at: std::time::Instant,
 }
 
 /// Normalize an OS hostname into a valid mDNS host name by appending the
@@ -397,6 +405,17 @@ impl LanDiscovery {
         event_bus: Arc<EventBus>,
     ) -> Result<Arc<Self>, String> {
         let daemon = ServiceDaemon::new().map_err(|e| format!("mDNS daemon failed: {e}"))?;
+        // Taken before `register` so the registration's own announcement is not
+        // missed. Not fatal if unavailable: health then stays `Pending` and the
+        // watchdog never acts, which is the pre-existing behaviour.
+        let monitor = match daemon.monitor() {
+            Ok(rx) => Some(rx),
+            Err(e) => {
+                tracing::warn!("mDNS monitor unavailable, discoverability cannot be checked: {e}");
+                None
+            }
+        };
+        let announced_v4: Arc<Mutex<BTreeSet<Ipv4Addr>>> = Arc::new(Mutex::new(BTreeSet::new()));
 
         // Register this instance. mdns-sd requires the host name passed to
         // `ServiceInfo::new` to end with `.local.` — we always normalize so
@@ -477,7 +496,13 @@ impl LanDiscovery {
             port,
             udp_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
+            announced_v4: announced_v4.clone(),
+            started_at: std::time::Instant::now(),
         });
+
+        if let Some(rx) = monitor {
+            tokio::task::spawn_blocking(move || monitor_loop(rx, announced_v4));
+        }
 
         // Spawn event receiver on a blocking thread to avoid starving the tokio runtime
         let disc = discovery.clone();
@@ -1060,6 +1085,21 @@ impl LanDiscovery {
         });
     }
 
+    /// Is this instance really announced on an IPv4 interface other machines
+    /// can reach? `Pending` until the start-up grace has passed.
+    pub fn health(&self) -> lan_mdns_health::MdnsHealth {
+        if self.started_at.elapsed() < lan_mdns_health::GRACE {
+            return lan_mdns_health::MdnsHealth::Pending;
+        }
+        let expected = lan_mdns_health::expected_ipv4(
+            crate::backend::lan_listeners::cached_local_addresses()
+                .iter()
+                .copied(),
+        );
+        let announced = self.announced_v4.lock().clone();
+        lan_mdns_health::evaluate(&expected, &announced)
+    }
+
     /// Get current list of discovered LAN peers (excludes self).
     pub fn get_instances(&self) -> Vec<LanInstance> {
         let now = agentmux_common::time::now_secs_u64();
@@ -1134,6 +1174,43 @@ impl Drop for LanDiscovery {
 /// process.
 ///
 /// Spec: docs/specs/lan-discovery-toggle.md
+/// How often the watchdog looks at discoverability. Two consecutive
+/// undiscoverable ticks are needed before a rebuild
+/// (`lan_mdns_health::STRIKES_BEFORE_REBUILD`).
+const HEALTH_TICK: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Reads the daemon's monitor channel and records the IPv4 addresses it
+/// announced our service on. Ends when the daemon shuts down (the channel
+/// disconnects). Runs on a blocking thread, like the browse loop.
+fn monitor_loop(
+    rx: mdns_sd::Receiver<mdns_sd::DaemonEvent>,
+    announced: Arc<Mutex<BTreeSet<Ipv4Addr>>>,
+) {
+    while let Ok(event) = rx.recv() {
+        record_daemon_event(event, &announced);
+    }
+}
+
+/// Folds one daemon event into the set of IPv4 addresses we announced on.
+fn record_daemon_event(event: mdns_sd::DaemonEvent, announced: &Mutex<BTreeSet<Ipv4Addr>>) {
+    use mdns_sd::DaemonEvent;
+    match event {
+        DaemonEvent::Announce(_, addrs) => {
+            let found = lan_mdns_health::ipv4_in(&addrs);
+            if !found.is_empty() {
+                announced.lock().extend(found);
+            }
+        }
+        DaemonEvent::IpDel(IpAddr::V4(gone)) => {
+            announced.lock().remove(&gone);
+        }
+        DaemonEvent::Error(e) => {
+            tracing::warn!("mDNS daemon error: {e}");
+        }
+        _ => {}
+    }
+}
+
 pub struct LanDiscoveryController {
     slot: Arc<RwLock<Option<Arc<LanDiscovery>>>>,
     instance_id: String,
@@ -1515,6 +1592,89 @@ impl LanDiscoveryController {
         }
     }
 
+    /// The running daemon's discoverability, or `None` when LAN discovery is
+    /// off or failed to start.
+    pub fn health(&self) -> Option<lan_mdns_health::MdnsHealth> {
+        self.slot.read().as_ref().map(|d| d.health())
+    }
+
+    /// Start the watchdog that notices an instance nobody can find and
+    /// rebuilds its mDNS daemon, the same path as switching LAN off and on
+    /// (which cleared the fault on Area54, SPEC_LAN_FIREWALL_SETUP 8.1). It
+    /// also tells the frontend, via `laninstances:health`, so the indicator can
+    /// say so: a host can see peers and still be invisible to them.
+    pub fn spawn_health_watchdog(self: Arc<Self>) {
+        tokio::spawn(async move {
+            let mut watchdog = lan_mdns_health::Watchdog::default();
+            let mut last_sent: Option<(String, Vec<Ipv4Addr>, u32)> = None;
+            let mut tick = tokio::time::interval(HEALTH_TICK);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                let Some(health) = self.health() else {
+                    watchdog.reset();
+                    // LAN went off: clear whatever the indicator was showing.
+                    if last_sent.as_ref().is_some_and(|(state, _, _)| state != "off") {
+                        self.publish_health("off", &[], 0);
+                        last_sent = Some(("off".to_string(), Vec::new(), 0));
+                    }
+                    continue;
+                };
+                match watchdog.observe(&health) {
+                    lan_mdns_health::Action::Rebuild => {
+                        tracing::warn!(
+                            missing = ?health.missing(),
+                            attempt = watchdog.rebuilds(),
+                            "mDNS announced on none of this host's IPv4 addresses, so other machines cannot find it; rebuilding the mDNS daemon"
+                        );
+                        self.apply(false);
+                        self.apply(true);
+                    }
+                    lan_mdns_health::Action::GiveUp => {
+                        tracing::warn!(
+                            missing = ?health.missing(),
+                            rebuilds = watchdog.rebuilds(),
+                            "mDNS still announced on none of this host's IPv4 addresses after rebuilding; leaving the LAN indicator flagged. Another program may be holding UDP port 5353"
+                        );
+                    }
+                    lan_mdns_health::Action::Nothing => {
+                        if let lan_mdns_health::MdnsHealth::Degraded { missing } = &health {
+                            // Logged once per change below, not per tick.
+                            if last_sent.as_ref().map(|(s, _, _)| s.as_str()) != Some("degraded") {
+                                tracing::warn!(
+                                    ?missing,
+                                    "mDNS announced on some of this host's IPv4 addresses but not these (often a virtual adapter)"
+                                );
+                            }
+                        }
+                    }
+                }
+                let sent = (
+                    health.wire_state().to_string(),
+                    health.missing().to_vec(),
+                    watchdog.rebuilds(),
+                );
+                // `Pending` is a gap between verdicts, not news.
+                if health != lan_mdns_health::MdnsHealth::Pending && last_sent.as_ref() != Some(&sent) {
+                    self.publish_health(&sent.0, &sent.1, sent.2);
+                    last_sent = Some(sent);
+                }
+            }
+        });
+    }
+
+    fn publish_health(&self, state: &str, missing: &[Ipv4Addr], rebuilds: u32) {
+        self.event_bus.broadcast_event(&WSEventType {
+            eventtype: "laninstances:health".to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "state": state,
+                "missing": missing.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
+                "rebuilds": rebuilds,
+            })),
+        });
+    }
+
     /// Read the current peer list. Returns empty when the daemon is not
     /// running (discovery disabled or start failed).
     pub fn get_instances(&self) -> Vec<LanInstance> {
@@ -1529,12 +1689,15 @@ impl LanDiscoveryController {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, LanDiscovery,
-        SERVICE_TYPE, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
+        is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, record_daemon_event,
+        LanDiscovery, SERVICE_TYPE, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
     };
+    use crate::backend::lan_mdns_health;
     use mdns_sd::ServiceEvent;
+    use parking_lot::Mutex;
     use serde_json::json;
-    use std::net::SocketAddr;
+    use std::collections::BTreeSet;
+    use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use tokio::net::UdpSocket;
 
@@ -1781,6 +1944,61 @@ mod tests {
         );
     }
 
+    /// The daemon's announcements, in the two payload shapes `mdns-sd` 0.12 uses,
+    /// accumulate into the announced set, and an address that goes away leaves it.
+    #[test]
+    fn daemon_events_fold_into_the_announced_set() {
+        use mdns_sd::DaemonEvent;
+        let announced = Mutex::new(BTreeSet::new());
+        record_daemon_event(
+            DaemonEvent::Announce("a._agentmux._tcp.local.".into(), "[192.168.1.26, fe80::1]".into()),
+            &announced,
+        );
+        record_daemon_event(
+            DaemonEvent::Announce("a._agentmux._tcp.local.".into(), "Area54.local.:172.17.16.1".into()),
+            &announced,
+        );
+        // Unrelated events change nothing.
+        record_daemon_event(DaemonEvent::IpAdd("10.0.0.9".parse().unwrap()), &announced);
+        record_daemon_event(DaemonEvent::Respond("192.168.1.26".parse().unwrap()), &announced);
+        let want: BTreeSet<Ipv4Addr> = ["192.168.1.26", "172.17.16.1"].iter().map(|s| s.parse().unwrap()).collect();
+        assert_eq!(*announced.lock(), want);
+
+        record_daemon_event(DaemonEvent::IpDel("172.17.16.1".parse().unwrap()), &announced);
+        assert!(!announced.lock().contains(&"172.17.16.1".parse::<Ipv4Addr>().unwrap()));
+        assert!(announced.lock().contains(&"192.168.1.26".parse::<Ipv4Addr>().unwrap()));
+    }
+
+    /// Real daemon, real multicast: a freshly started instance must report itself
+    /// announced on this host's IPv4 addresses. This is what proves the payload
+    /// shape `ipv4_in` parses is the one the crate actually emits, and it is the
+    /// check that would have failed on Area54. Manual, like the neighbouring
+    /// test, for the same reason (CI has no reliable multicast).
+    #[tokio::test]
+    #[ignore = "real multicast: run by hand, e.g. `cargo test -p agentmux-srv -- --ignored a_started_instance_reports_itself_healthy`"]
+    async fn a_started_instance_reports_itself_healthy() {
+        let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
+        let discovery = LanDiscovery::start(
+            format!("health-{}", std::process::id()),
+            "health-host".to_string(),
+            "0.0.0-test".to_string(),
+            54322,
+            "test-auth-key".to_string(),
+            event_bus,
+        )
+        .expect("LanDiscovery::start should succeed");
+
+        tokio::time::sleep(lan_mdns_health::GRACE + std::time::Duration::from_secs(1)).await;
+        let health = discovery.health();
+        let announced = discovery.announced_v4.lock().clone();
+        discovery.shutdown();
+
+        assert!(
+            matches!(health, lan_mdns_health::MdnsHealth::Healthy | lan_mdns_health::MdnsHealth::Degraded { .. }),
+            "a started instance must be announced on at least one IPv4 address; health={health:?} announced={announced:?}"
+        );
+    }
+
     /// End-to-end probe/response round trip over real loopback sockets
     /// (ephemeral ports, NOT the fixed UDP_DISCOVERY_PORT — avoids CI port
     /// collisions and avoids needing a full `LanDiscovery` + real mDNS
@@ -1840,7 +2058,7 @@ mod handle_event_tests {
     use super::{LanDiscovery, LanInstance, SERVICE_TYPE};
     use mdns_sd::{ServiceEvent, ServiceInfo};
     use parking_lot::{Mutex, RwLock};
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::Arc;
     use tokio::sync::oneshot;
 
@@ -1919,6 +2137,8 @@ mod handle_event_tests {
             port: self_port,
             udp_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
+            announced_v4: Arc::new(Mutex::new(BTreeSet::new())),
+            started_at: std::time::Instant::now(),
         }
     }
 
