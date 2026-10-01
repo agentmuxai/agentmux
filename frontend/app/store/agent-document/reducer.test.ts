@@ -889,6 +889,41 @@ describe("agent document reducer", () => {
             expect(finalTool.log?.open).toBe(false);
         });
 
+        // SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01 §3.1 (U1): once a
+        // tool finishes WITH a result, nothing renders its log again
+        // (ToolOverlayLog's "result" branch), so the chunks are freed.
+        it("drops log.chunks when the tool finishes with a result (U1)", () => {
+            let s = update(initialState(), { type: "StreamFlush", newNodes: [tool("t1", { status: "running" })], updatedNodes: [] }).state;
+            s = update(s, { type: "ToolChunkAppend", toolId: "t1", chunk: chunk("first\n", { timestamp: 100 }) }).state;
+            const done = update(s, {
+                type: "StreamFlush",
+                newNodes: [tool("t1", { status: "success", result: { stdout: "first\n", stderr: "", exitCode: 0 } })],
+                updatedNodes: [],
+            }).state.nodes[0] as ToolNode;
+            expect(done.result).toBeDefined();
+            expect(done.log).toEqual({ chunks: [], open: false });
+        });
+
+        it("keeps a background launch's chunks: its activity row follows them (U1)", () => {
+            const bg = (status: ToolNode["status"], extra: Partial<ToolNode> = {}) =>
+                tool("t1", { status, params: { command: "sleep 9", run_in_background: true }, ...extra });
+            let s = update(initialState(), { type: "StreamFlush", newNodes: [bg("running")], updatedNodes: [] }).state;
+            s = update(s, { type: "ToolChunkAppend", toolId: "t1", chunk: chunk("tick\n", { timestamp: 1 }) }).state;
+            const done = update(s, {
+                type: "StreamFlush",
+                newNodes: [bg("success", { result: { stdout: "", stderr: "", exitCode: 0 } })],
+                updatedNodes: [],
+            }).state.nodes[0] as ToolNode;
+            expect(done.log?.chunks).toHaveLength(1);
+        });
+
+        it("drops a late chunk for a tool that already finished with a result (U1)", () => {
+            const s = seed([tool("t1", { status: "success", result: { stdout: "x", stderr: "", exitCode: 0 }, log: { chunks: [], open: false } })]);
+            const r = update(s, { type: "ToolChunkAppend", toolId: "t1", chunk: chunk("replayed\n", { timestamp: 5 }) });
+            expect((r.state.nodes[0] as ToolNode).log?.chunks).toHaveLength(0);
+            expect(r.events[0]).toMatchObject({ type: "tool-chunk-dropped", toolId: "t1", reason: "finished" });
+        });
+
         it("non-tool node replacement still falls through to the unconditional path", () => {
             // Guard: mergeReplacement must not alter markdown→markdown
             // handling.
