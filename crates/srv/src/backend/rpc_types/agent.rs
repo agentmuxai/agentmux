@@ -32,6 +32,10 @@ pub struct CommandAgentSendData {
 pub struct CommandAgentStopApiData {
     pub block_id: String,
     pub signal: Option<String>,
+    /// Also stop the agent's `run_in_background` tasks? Absent: the user's
+    /// `agent:stopkeepsbackground` setting (default keep).
+    #[serde(default)]
+    pub stop_background: Option<bool>,
 }
 
 /// Request for agent.status — query status of an agent pane.

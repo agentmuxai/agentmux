@@ -204,7 +204,7 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
         ("object", "QuitAgent") => Some(MethodMeta {
             desc: Some("end an agent gracefully and close its own tab (/quit)".into()),
             arg_names: vec!["uiContext".into(), "blockId".into()],
-            return_desc: Some("{status, agent, released_claims, stopped_shells, crons_targeting}".into()),
+            return_desc: Some("{status, agent, released_claims, stopped_shells, crons_targeting, survivors}".into()),
         }),
         ("object", "ClosePane") => Some(MethodMeta {
             desc: Some("close a pane: stop and delete every block in its stack".into()),

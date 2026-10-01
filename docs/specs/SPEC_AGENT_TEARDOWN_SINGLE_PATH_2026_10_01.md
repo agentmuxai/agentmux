@@ -1,6 +1,6 @@
 # SPEC: One teardown path for everything an agent owns
 
-**Status:** proposed
+**Status:** active (Phase 1: PR #4160; Phase 2: PR #4164 and the Phase 2 follow-up; see §12)
 **Date:** 2026-10-01
 **Author:** Lark
 **Builds on:** `SPEC_AGENT_SELF_QUIT_2026_09_24.md` (`/quit`, `QuitSelf`, the
@@ -320,6 +320,13 @@ for teardown. A lint test pins it (§9).
    [Keep running] [Stop them]". The default is keep, today's behaviour. A
    remembered choice is per user. Quit never asks; it stops everything, which
    is the ask.
+   - **Amended 2026-10-01 (implementation):** no pane surface ends an agent
+     with Stop today. The pane's Esc / stop button interrupts the turn
+     (`ControllerInput` SIGINT); Stop is reached only through `agent.stop`,
+     `FleetBulkStop` and a deferred `Stop` action, all programmatic. So the
+     question is a parameter, `agent.stop`'s `stop_background`. When it is
+     absent, the per-user setting `agent:stopkeepsbackground` (O2) answers
+     (default keep). A dialog comes with the first UI that offers Stop.
 
 ## 8. Safety rules
 
@@ -431,6 +438,14 @@ phase changes one resource kind behind the same entry point.
     the launcher backstop (Windows J0 / Unix group kill) takes over as today.
   - 10 s is the per-agent 8 s grace plus margin for the verify step. Agents run
     in parallel, so the total doesn't grow with the agent count.
+  - **Amended 2026-10-01 (implementation, PR #4164):** the cap is 8 s, sweep
+    included (`agentmux_common::process::SRV_APP_EXIT_CAP`). The launcher's
+    upgrade quiesce (10 s) is pinned above it. On a normal quit the launchers
+    keep their timing (Windows drops J0 when the host exits; Unix waits 1.5 s
+    after SIGTERM), so there the backstop usually ends srv first. A longer
+    wait holds the single-instance pipe while agents close, so a quick
+    relaunch would forward to a dying instance and open nothing. It needs a
+    single-instance handoff first (§12).
 - **O4. Verified: `Start-Process` does not escape the agent's job on today's
   Windows build.**
   - **Test:** 2026-10-01, from inside an agent's Bash on AgentMux 0.59. A
@@ -444,3 +459,32 @@ phase changes one resource kind behind the same entry point.
   - **What changes:** §6.4's descendant walk stays as the verify step's safety
     net (for the assignment race and job-creation failures), not as a known
     escape route.
+
+## 12. Implementation status (2026-10-01)
+
+- **Phase 1** (PR #4160): `AgentResources`, `agent_teardown`, every user-facing
+  consumer routed, structural test.
+- **Phase 2**
+  - PR #4164:
+    - Controller replace (`Policy::replace`) and the watchdog's stops go
+      through the teardown.
+    - App exit (`Policy::app_exit`, 8 s cap) goes through it too.
+    - `Shell()` and `!cmd` join the agent's tracker (`track_adopted`).
+    - PtyShell drawers cascade, and pane close stops `Shell()` sessions.
+    - Every `delete_controller` caller goes through `agent_teardown::discard`.
+    - The structural test now lists file by file and pins
+      `stop_for_replace` and `delete_controller`.
+  - Follow-up PR:
+    - The verify step and survivor report (§6.2 steps 8–10): `/quit`'s
+      summary carries `survivors`.
+    - Stop releases claims and takes `stop_background` (§7.4 as amended).
+    - Containers stop on close, quit and app exit (§6.7). They are not
+      removed: `ensure_running` restarts them and the volume keeps state.
+      A container another live pane uses is kept.
+- **Not yet:**
+  - Stopping foreground descendants on Stop (§5). They need telling apart
+    from background tasks in the tracker.
+  - The close dialog reading `AgentResources`.
+  - The `AgentResources` MCP tool.
+  - A normal-quit wait in the launchers (§11 O3 amendment).
+  - Phases 3 and 4.
