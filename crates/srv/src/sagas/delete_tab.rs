@@ -145,7 +145,7 @@ pub async fn run(
     // before its records go (pane-close spec §9.5). The persist step's
     // `delete_tab_inner` still calls `delete_controller` per block; it finds
     // nothing left to stop.
-    super::close_pane::shutdown_agents(state, &block_ids_to_cleanup).await;
+    super::agent_teardown::run_many(state, &block_ids_to_cleanup, super::agent_teardown::Policy::close()).await;
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("delete_tab", run_inner(ctx, workspace_id, tab_id.clone())).await;
     // If the tab is gone from reducer state, the reducer dispatched

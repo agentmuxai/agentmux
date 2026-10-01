@@ -125,7 +125,7 @@ pub async fn run(state: &AppState, workspace_id: String) -> Result<Value, String
     // Stop every agent in every tab of the workspace up front — gracefully,
     // concurrently, under one deadline — before any record goes (pane-close
     // spec §9.5). The per-tab cascade below then finds nothing left to stop.
-    super::close_pane::shutdown_agents(state, &block_ids).await;
+    super::agent_teardown::run_many(state, &block_ids, super::agent_teardown::Policy::close()).await;
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga(
         "delete_workspace",
