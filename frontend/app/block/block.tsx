@@ -23,7 +23,9 @@ import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getApi } from "@/app/store/app-api";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
+import { registerPaneMounted } from "@/app/store/pane-content-holds";
 import { createPaneReadiness, type PaneReadinessPhase } from "@/app/store/pane-readiness";
+import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -545,7 +547,13 @@ function Block(props: BlockProps): JSX.Element {
     // This is a REVEAL gate, never a mount gate. `ready()` still decides
     // mounting entirely on its own and depends on nothing here — see the
     // deadlock note above, which is exactly what happens if that is blurred.
-    const readiness = createPaneReadiness({ label: `block:${props.nodeModel.blockId.substring(0, 8)}` });
+    onCleanup(registerPaneMounted(props.nodeModel.blockId));
+    const windowTabDisplayed = useWindowTabDisplayed();
+    const readiness = createPaneReadiness({
+        label: `block:${props.nodeModel.blockId.substring(0, 8)}`,
+        holdFor: props.nodeModel.blockId,
+        hidden: () => !windowTabDisplayed(),
+    });
     const releaseMountGate = readiness.gate("content");
     createEffect(() => {
         if (ready()) releaseMountGate();
