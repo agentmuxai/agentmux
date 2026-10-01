@@ -112,6 +112,12 @@ async fn first_two_free(
 mod tests {
     use super::*;
 
+    /// These tests bind and release ports to learn which are free. Run in
+    /// parallel, one can be handed a port another just released, and the
+    /// candidate list it built then holds fewer free ports than it thinks.
+    /// One at a time (Codex P2 on #4120).
+    static PORT_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     /// A port that is free right now (bound, noted, released).
     fn free_port() -> u16 {
         std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
@@ -134,6 +140,7 @@ mod tests {
 
     #[tokio::test]
     async fn takes_the_first_two_free_ports_in_order() {
+        let _serial = PORT_TESTS.lock().await;
         let (a, b) = two_free_ports();
         let got = bind_startup_listeners_from([a, b]).await;
         assert!(got.in_range);
@@ -143,6 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn skips_a_port_another_instance_holds() {
+        let _serial = PORT_TESTS.lock().await;
         // `taken` stands for an instance that started earlier and is still running.
         let taken = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let taken_port = taken.local_addr().unwrap().port();
@@ -159,9 +167,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_taken_port_between_two_free_ones_is_skipped_not_paired() {
-        let (a, c) = two_free_ports();
+        let _serial = PORT_TESTS.lock().await;
+        // Held FIRST: choosing the free ports afterwards means the OS cannot
+        // hand `taken_port` back as one of them.
         let taken = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let taken_port = taken.local_addr().unwrap().port();
+        let (a, c) = two_free_ports();
         let got = bind_startup_listeners_from([a, taken_port, c]).await;
         assert!(got.in_range);
         assert_eq!(got.web.local_addr().unwrap().port(), a);
@@ -175,6 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn fewer_than_two_free_falls_back_to_os_chosen_ports() {
+        let _serial = PORT_TESTS.lock().await;
         let taken = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let taken_port = taken.local_addr().unwrap().port();
         let only_one_free = free_port();
@@ -191,6 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_candidate_list_falls_back() {
+        let _serial = PORT_TESTS.lock().await;
         let got = bind_startup_listeners_from(std::iter::empty()).await;
         assert!(!got.in_range);
         assert!(got.web.local_addr().unwrap().ip().is_loopback());
