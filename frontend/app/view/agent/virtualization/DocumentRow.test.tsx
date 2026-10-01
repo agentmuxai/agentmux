@@ -640,6 +640,18 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("AgentMux system")).toBeInTheDocument();
     });
 
+    it("says a Global entry came in the startup file instead of sizing it (LC3)", () => {
+        renderMemory({
+            type: "context_delivery",
+            id: "memory-injected-s1-startup-2",
+            reason: "startup",
+            timestamp: 0,
+            items: [{ kind: "global_memory", name: "Rules", tier: "workspace", via: "startup_file", sizeBytes: 0, tokens: 0 }],
+        });
+        expect(screen.getByText("in startup file")).toBeInTheDocument();
+        expect(screen.queryByText(/0 B/)).toBeNull();
+    });
+
     it("shows the size advice when Personal Memory is large", () => {
         renderMemory(memoryCard("high"));
         expect(screen.getByText(/Personal memory has grown large/)).toBeInTheDocument();

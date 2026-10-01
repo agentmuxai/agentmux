@@ -164,6 +164,19 @@ impl Tracked {
 /// [`compose`], also recording where each item landed so the notice can say
 /// which items a cut delivery carried whole, in part, or not at all.
 pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<&str>) -> Option<Composed> {
+    compose_items_with(entries, reason, running_summary, false)
+}
+
+/// [`compose_items`], saying so when the Global Memory was left out because
+/// the agent's startup file already carries it (a new Claude session that
+/// loaded `AGENTMUX_MEMORY.md` or an AgentMux-owned `CLAUDE.md`;
+/// SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4).
+pub fn compose_items_with(
+    entries: &[Entry],
+    reason: Reason,
+    running_summary: Option<&str>,
+    global_in_startup_file: bool,
+) -> Option<Composed> {
     let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
     let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
     let summary = running_summary.filter(|s| !s.trim().is_empty() && reason == Reason::Compact);
@@ -172,11 +185,20 @@ pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<
     }
 
     let mut b = Tracked { out: String::new(), chars: 0 };
-    b.push(&format!(
-        "AgentMux memory for this agent. {} Read all of it now — it is your complete Global \
-         Memory and Personal Memory, not just the index.\n\n",
-        reason.clause()
-    ));
+    if global_in_startup_file {
+        b.push(&format!(
+            "AgentMux memory for this agent. {} Your Global Memory is already in your startup \
+             instructions, so it isn't repeated here. Read all of this now — it is your complete \
+             Personal Memory, not just the index.\n\n",
+            reason.clause()
+        ));
+    } else {
+        b.push(&format!(
+            "AgentMux memory for this agent. {} Read all of it now — it is your complete Global \
+             Memory and Personal Memory, not just the index.\n\n",
+            reason.clause()
+        ));
+    }
     let mut spans = Vec::new();
     let wrote_section = push_sections(&mut b, entries, &global, &personal, &mut spans);
     if let Some(summary) = summary {
@@ -610,5 +632,23 @@ mod tests {
         assert_eq!(FallbackReason::from_wire("compaction"), Some(FallbackReason::Compaction));
         assert_eq!(FallbackReason::from_wire("fresh_session"), Some(FallbackReason::FreshSession));
         assert_eq!(FallbackReason::from_wire("startup"), None);
+    }
+
+    #[test]
+    fn a_delivery_without_the_global_memory_says_where_it_is() {
+        let personal = vec![Entry {
+            label: "notes.md".into(),
+            tier: Tier::Personal,
+            text: "P1".into(),
+            name: "notes.md".into(),
+            system: false,
+            bundle_id: None,
+            path: None,
+        }];
+        let c = compose_items_with(&personal, Reason::Startup, None, true).unwrap();
+        assert!(c.text.contains("Your Global Memory is already in your startup instructions"), "{}", c.text);
+        assert!(!c.text.contains("# Global Memory"));
+        assert!(c.text.contains("# Personal Memory (1 entry)\nP1\n"));
+        assert_eq!(compose_items_with(&[], Reason::Startup, None, true), None);
     }
 }

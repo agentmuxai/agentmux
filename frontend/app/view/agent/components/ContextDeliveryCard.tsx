@@ -57,6 +57,7 @@ function chip(item: ContextItem): string | null {
 /** What the size column says: a count for the skill and MCP listings, which carry no file text. */
 function sizeText(item: ContextItem): string {
     if (item.count != null) return `${item.count} listed`;
+    if (item.via === "startup_file") return "in startup file";
     return `${fmt(item.sizeBytes)} B · ~${fmt(item.tokens)} tok (est.)`;
 }
 

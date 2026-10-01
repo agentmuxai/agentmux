@@ -84,6 +84,7 @@ function toItem(x: RawFrame): ContextItem {
         tokens: num(x.tokens),
         ...(typeof x.source_tokens === "number" ? { sourceTokens: num(x.source_tokens) } : {}),
         ...(kind === "startup_file" ? startupFields(x) : {}),
+        ...(x.via === "startup_file" ? { via: "startup_file" as const } : {}),
     };
 }
 

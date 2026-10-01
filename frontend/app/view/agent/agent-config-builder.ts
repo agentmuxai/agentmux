@@ -78,11 +78,18 @@ export function buildConfigFiles(
         instructionsParts.push(contentMap["memory"]);
     }
 
-    // Append skill index with trigger references
-    if (skills.length > 0) {
+    // Append skill index with trigger references. Claude Code lists the
+    // skills it has a file for (.claude/commands, .claude/skills) by itself,
+    // so for it the index carries only those without one — the same rule as
+    // Rust's build_config_files (LC3).
+    const isClaude = (providerId ?? "claude") === "claude";
+    const hasNativeFile = (skill: (typeof skills)[number]): boolean =>
+        !!skill.content && (skill.skill_type === SKILL_TYPE_AGENT_SKILL || !!sanitizeTrigger(skill.trigger));
+    const indexed = skills.filter((skill) => !isClaude || !hasNativeFile(skill));
+    if (indexed.length > 0) {
         instructionsParts.push("\n# Available Skills\n\n");
         instructionsParts.push("Use `/<trigger>` to invoke a skill.\n\n");
-        for (const skill of skills) {
+        for (const skill of indexed) {
             const triggerPart = skill.trigger ? ` (trigger: /${skill.trigger})` : "";
             const descPart = skill.description ? ` — ${skill.description}` : "";
             instructionsParts.push(`- **${skill.name}**${triggerPart}${descPart}\n`);

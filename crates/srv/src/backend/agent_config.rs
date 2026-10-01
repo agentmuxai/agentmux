@@ -97,11 +97,14 @@ pub fn build_config_files(
         instructions_parts.push(memory.clone());
     }
 
-    // Append skill index with trigger references
-    if !skills.is_empty() {
+    // Append skill index with trigger references. Claude Code lists the
+    // skills it has a file for (.claude/commands, .claude/skills) by itself,
+    // so for it the index carries only those without one (LC3, §4.4).
+    let indexed: Vec<_> = skills.iter().filter(|s| provider_id != "claude" || !skill_has_native_file(s)).collect();
+    if !indexed.is_empty() {
         instructions_parts.push("\n# Available Skills\n\n".to_string());
         instructions_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
-        for skill in skills {
+        for skill in indexed {
             let trigger_part = if skill.trigger.is_empty() {
                 String::new()
             } else {
@@ -750,6 +753,12 @@ pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> Stri
 /// or that is exactly `.`/`..`; callers skip writing that skill's command
 /// file entirely rather than silently rewriting the trigger into something
 /// the user didn't ask for.
+/// Whether `build_config_files` writes `skill` as a file Claude Code lists
+/// natively: an Agent Skill's `SKILL.md`, or a command with a usable trigger.
+fn skill_has_native_file(skill: &AgentSkill) -> bool {
+    !skill.content.is_empty() && (skill.skill_type == SKILL_TYPE_AGENT_SKILL || sanitize_trigger(&skill.trigger).is_some())
+}
+
 fn sanitize_trigger(trigger: &str) -> Option<&str> {
     if trigger.is_empty() || trigger == "." || trigger == ".." {
         return None;
@@ -959,6 +968,21 @@ const CLAUDE_MD_OWNERSHIP_MARKER_PATH: &str = ".claude/.agentmux-claude-md-owner
 
 /// Comment wrapping the `@import` line so its origin — and how to remove
 /// it — is unambiguous to anyone reading a foreign `CLAUDE.md` by hand.
+/// Where an adopted legacy `CLAUDE.md` is kept (`is_legacy_agentmux_claude_md`).
+pub const CLAUDE_MD_PRE_ADOPT_BACKUP: &str = ".claude/CLAUDE.md.pre-adopt";
+
+/// Whether `content` is exactly what an older AgentMux wrote as `CLAUDE.md`:
+/// ignoring blank lines, the `# Available Skills` heading, its usage line,
+/// skill lines (`- **…`), and optionally the managed import comment and
+/// line. Anything else in it means a person wrote there, and it stays theirs.
+pub fn is_legacy_agentmux_claude_md(content: &str) -> bool {
+    let import_line = format!("@{AGENTMUX_MEMORY_FILENAME}");
+    let mut lines = content.lines().map(str::trim_end).filter(|l| !l.trim().is_empty());
+    lines.next() == Some("# Available Skills")
+        && lines.next() == Some("Use `/<trigger>` to invoke a skill.")
+        && lines.all(|l| l.starts_with("- **") || l == CLAUDE_MD_IMPORT_MARKER_COMMENT || l == import_line)
+}
+
 const CLAUDE_MD_IMPORT_MARKER_COMMENT: &str =
     "<!-- agentmux:managed-import (safe to delete this line to opt out) -->";
 
@@ -1413,8 +1437,38 @@ pub fn write_claude_md_respecting_ownership(
         Err(e) => Some(Err(e)),
     };
 
-    let agentmux_owns_it =
+    let mut agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(CLAUDE_MD_MANAGED_MARKER));
+
+    // A CLAUDE.md an older AgentMux wrote, before the managed marker existed:
+    // nothing in it but the skills index and the managed import line. It was
+    // taken for the user's and frozen, so its agent kept a stale skills list
+    // forever. Adopt it, keeping a copy (LC3,
+    // SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4).
+    if let Some(Ok(content)) = &existing {
+        if !agentmux_owns_it && is_legacy_agentmux_claude_md(content) {
+            let backup = base_path.join(CLAUDE_MD_PRE_ADOPT_BACKUP);
+            let backed_up = backup.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
+                match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
+                    Ok(mut f) => std::io::Write::write_all(&mut f, content.as_bytes()),
+                    // An earlier adoption's copy is the original: keep it.
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                    Err(e) => Err(e),
+                }
+            });
+            match backed_up {
+                Ok(()) => {
+                    tracing::info!(path = %claude_md_path.display(), "CLAUDE.md written by an older AgentMux: adopting it as managed");
+                    agentmux_owns_it = true;
+                }
+                Err(e) => tracing::warn!(
+                    path = %backup.display(),
+                    error = %e,
+                    "write_claude_md_respecting_ownership: couldn't back up a legacy CLAUDE.md; leaving it as is"
+                ),
+            }
+        }
+    }
 
     // Known, accepted TOCTOU window (codex P2, third review round on
     // PR #2747): if a foreign CLAUDE.md is created/swapped in between the
@@ -1878,15 +1932,79 @@ mod tests {
 
         let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
 
-        // CLAUDE.md should have the skills index
-        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
-        assert!(claude_md.content.contains("Available Skills"));
-        assert!(claude_md.content.contains("/deploy"));
-        assert!(claude_md.content.contains("/test"));
+        // Claude Code lists skills with a file by itself: no index (LC3).
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md");
+        assert!(claude_md.is_none_or(|f| !f.content.contains("Available Skills")), "{claude_md:?}");
 
         // Individual skill command files
         assert!(files.iter().any(|f| f.filename == ".claude/commands/deploy.md"));
         assert!(files.iter().any(|f| f.filename == ".claude/commands/test.md"));
+
+        // Another provider reads only its instructions file: it keeps the index.
+        let codex = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "codex");
+        let agents_md = codex.iter().find(|f| f.filename == "AGENTS.md").unwrap();
+        assert!(agents_md.content.contains("Available Skills"));
+        assert!(agents_md.content.contains("/deploy"));
+        assert!(agents_md.content.contains("/test"));
+    }
+
+    /// A skill with no file of its own (no usable trigger) is still indexed
+    /// for Claude: dropping it from the index would hide it entirely.
+    #[test]
+    fn claude_still_indexes_a_skill_that_has_no_file() {
+        let skills = vec![
+            make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all"),
+            make_skill("Notes", "", "Read the notes", "Look in NOTES.md"),
+        ];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(claude_md.content.contains("Available Skills"));
+        assert!(claude_md.content.contains("**Notes**"));
+        assert!(!claude_md.content.contains("/deploy"), "Deploy has a command file");
+    }
+
+    const LEGACY_CLAUDE_MD: &str = "\n# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n\
+        - **Test-Driven Development** (trigger: /tdd) \u{2014} write the test first.\n\
+        - **Code Review** (trigger: /code-review) \u{2014} review.\n\n\n\
+        <!-- agentmux:managed-import (safe to delete this line to opt out) -->\n\
+        @.claude/AGENTMUX_MEMORY.md\n";
+
+    #[test]
+    fn recognises_only_exactly_what_an_older_agentmux_wrote() {
+        assert!(is_legacy_agentmux_claude_md(LEGACY_CLAUDE_MD));
+        assert!(is_legacy_agentmux_claude_md("# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n- **A** x\n"));
+        assert!(!is_legacy_agentmux_claude_md(&format!("{LEGACY_CLAUDE_MD}\nAlways run the tests.\n")), "a person's line");
+        assert!(!is_legacy_agentmux_claude_md(&format!("{CLAUDE_MD_MANAGED_MARKER}\n\n# Memory\n")));
+        assert!(!is_legacy_agentmux_claude_md("# Project\n\n# Available Skills\n"));
+        assert!(!is_legacy_agentmux_claude_md(""));
+    }
+
+    #[test]
+    fn a_legacy_claude_md_is_adopted_with_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), LEGACY_CLAUDE_MD).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+
+        let now = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(now.starts_with(CLAUDE_MD_MANAGED_MARKER), "{now}");
+        assert!(now.contains("fresh"));
+        let backup = std::fs::read_to_string(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP)).unwrap();
+        assert_eq!(backup, LEGACY_CLAUDE_MD);
+
+        // Managed from now on; the original copy is never overwritten.
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nnewer\n").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap().contains("newer"));
+        assert_eq!(std::fs::read_to_string(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP)).unwrap(), LEGACY_CLAUDE_MD);
+    }
+
+    #[test]
+    fn a_users_claude_md_is_still_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = format!("{LEGACY_CLAUDE_MD}\nAlways run the tests.\n");
+        std::fs::write(dir.path().join("CLAUDE.md"), &mine).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap(), mine);
+        assert!(!dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP).exists());
     }
 
     #[test]
@@ -1917,9 +2035,9 @@ mod tests {
             .contains("description: \"Runs the pre-deploy checklist\""));
         assert!(skill_file.content.contains("---\n\n1. Run tests"));
 
-        // Skills index in CLAUDE.md still lists it (trigger-agnostic)
-        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
-        assert!(claude_md.content.contains("Deploy Checklist"));
+        // Claude Code lists a SKILL.md itself, so CLAUDE.md doesn't index it (LC3).
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md");
+        assert!(claude_md.is_none_or(|f| !f.content.contains("Deploy Checklist")), "{claude_md:?}");
     }
 
     #[test]

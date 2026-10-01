@@ -6794,6 +6794,49 @@ async fn memory_session_start_notice_lists_the_startup_files_of_the_hooks_cwd() 
     assert!(kinds[..first_memory].iter().all(|k| *k == "startup_file"), "startup files first: {kinds:?}");
 }
 
+/// LC3 (§4.4): when a startup file the CLI loaded already carries the Global
+/// Memory, the hook doesn't send it again. The card still lists each entry,
+/// marked as coming through the file; with nothing left for the hook to
+/// carry, the card goes out on the first part request.
+#[tokio::test]
+async fn memory_session_start_skips_global_memory_the_startup_file_carries() {
+    let (state, token) = m4c1_state();
+    let bundle: crate::backend::storage::store::Bundle = serde_json::from_value(serde_json::json!({
+        "id": "g-rules", "name": "Rules", "is_global": true, "instructions": "workspace rules",
+    }))
+    .unwrap();
+    state.id_store.bundle_upsert(&bundle).unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ws.path().join(".claude")).unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md\n").unwrap();
+    std::fs::write(ws.path().join(".claude/AGENTMUX_MEMORY.md"), "# Memory\n# [Workspace] Rules\n\nworkspace rules\n").unwrap();
+    let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+    let session = format!("sess-{}", uuid::Uuid::new_v4());
+    let cwd = ws.path().to_string_lossy().into_owned();
+    let req = serde_json::json!({"block_id": block_id, "session_id": session, "source": "startup", "part": 1, "cwd": cwd});
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(v["text"].is_null() && v["of"] == 0, "nothing left for the hook to send: {v}");
+
+    let written = state
+        .filestore
+        .read_file(&block_id, crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .map(|b| String::from_utf8(b).unwrap())
+        .expect("the card goes out without any part to acknowledge");
+    assert_eq!(written.lines().count(), 1, "{written}");
+    let frame: serde_json::Value = serde_json::from_str(written.trim()).unwrap();
+    let rules = frame["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == "Rules")
+        .expect("the Global entry is still listed");
+    assert_eq!(rules["via"], "startup_file");
+    assert_eq!(rules["size_bytes"], 0, "the file's row counts it");
+}
+
 // ---- Container-agent credential (REPORT_AGENT_FILE_ACCESS_2026_09_29.md) ----
 
 async fn status_with_key(method: &str, uri: &str, key: &str) -> StatusCode {

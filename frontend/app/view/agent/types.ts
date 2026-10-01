@@ -577,6 +577,12 @@ export interface ContextItem {
     count?: number;
     /** `startup_file` only: AgentMux sections it carries, e.g. `global_memory`. */
     contains?: string[];
+    /**
+     * `startup_file`: a memory entry the agent got through its startup file
+     * rather than the hook, so it has no size of its own (the file's row
+     * counts it). SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4.
+     */
+    via?: "startup_file";
 }
 
 /**
