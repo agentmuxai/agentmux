@@ -515,7 +515,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let block_id_bg = inst.block_id.clone();
                                 let provider_id_bg = def.map(|d| d.provider.clone()).unwrap_or_default();
                                 tokio::spawn(async move {
-                                    let result = crate::server::app_api::session::generate_definition_activity_summary(
+                                    let result = crate::ambient::tasks::generate_definition_activity_summary(
                                         &mstore_bg,
                                         &filestore_bg,
                                         &broker_bg,

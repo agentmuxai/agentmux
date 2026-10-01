@@ -1414,8 +1414,8 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // Authoritative hidden-window gate for ambient digest reads
                 // (next_prompt_suggestion / activity_summary / activity_watcher)
                 // — set here, not reconstructed from transcript bytes. See
-                // session::set_hidden_reinjection_active's doc comment.
-                crate::server::app_api::session::set_hidden_reinjection_active(
+                // crate::ambient::digest::set_hidden_reinjection_active's doc comment.
+                crate::ambient::digest::set_hidden_reinjection_active(
                     &cmd.blockid,
                     cmd.hidden.unwrap_or(false),
                 );

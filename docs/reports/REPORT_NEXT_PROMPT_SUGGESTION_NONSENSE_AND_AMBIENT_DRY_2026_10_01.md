@@ -65,9 +65,9 @@ assistant asking "Which do you prefer?" gives nothing.
 |---|---|---|
 | The same plain-text boilerplate ("no markdown, no code fences, no backticks, no quotes, no preamble") written out in 5 prompts, each slightly different | `session.rs` (activity summary, definition summary, subagent name, dispatch name, next prompt) | **Done here:** `ambient::prompt::PLAIN_TEXT_RULES` + `with_material` |
 | Material pasted after "Recent activity:" with no delimiter, so the model can read it as a message to answer | same | **Done here:** tagged block |
-| Nothing shared decides whether an ambient call's *output* is usable; each caller does its own `trim()`/`is_empty()` | 6 call sites | **Partly:** next prompt only. Titles and names would benefit from a length/refusal check (follow-up) |
-| `invoke_ambient_haiku_call` and `invoke_ambient_haiku_call_with_timeout` live in the 2,400-line RPC file with the sanitizer, digest reader and 6 prompt builders | `session.rs` | Follow-up: move the CLI call, sanitizer and digest into `crates/srv/src/ambient/` so the gateway owns the whole path. Not done here to keep this diff reviewable. |
-| Each caller repeats the guard / cancel / `cmd` path / empty-check sequence | 6 call sites | Follow-up: one `run_ambient(purpose, prompt, validator)` helper |
+| Nothing shared decides whether an ambient call's *output* is usable; each caller did its own `trim()`/`is_empty()` | 6 call sites | **Done (follow-up PR):** `ambient::validate::accept_line` runs on every reply, with per-purpose size limits; next prompts add the question/meta/risky checks |
+| The CLI call, sanitizer, digest reader and 6 prompt builders lived in the 2,400-line RPC file | `session.rs` | **Done (follow-up PR):** moved to `ambient/{cli,sanitize,digest,prompt}.rs`; `session.rs` keeps handlers only (~570 lines) |
+| Each caller repeated the admit / permit / invoke / drop-guard / empty-check sequence | 6 call sites | **Done (follow-up PR):** `ambient::call::admit` + `Slot::run`; the semaphores are in `ambient::limits`, the purpose tags in `ambient::purpose` |
 
 ## 5. Not changed
 

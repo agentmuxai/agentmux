@@ -1332,7 +1332,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
                 tokio::spawn(async move {
                     let generation = agentmux_common::time::now_ms_u64();
-                    let Some(text) = crate::server::app_api::session::generate_ambient_narration(
+                    let Some(text) = crate::ambient::tasks::generate_ambient_narration(
                         &mstore,
                         &cmd.blockid,
                         &cmd.dedupe_key,
