@@ -78,11 +78,41 @@ export function buildConfigFiles(
         instructionsParts.push(contentMap["memory"]);
     }
 
-    // Append skill index with trigger references
-    if (skills.length > 0) {
+    // Append skill index with trigger references. Claude Code lists the
+    // skills it has a file for (.claude/commands, .claude/skills) by itself,
+    // so for it the index carries only those without one — the same rule as
+    // Rust's build_config_files (LC3).
+    // By the resolved provider, so an alias (`claude-code`) counts as Claude.
+    const resolvedForIndex = providerId ?? "claude";
+    const isClaude =
+        (PROVIDERS[resolvedForIndex] ?? PROVIDERS[resolveProviderAlias(resolvedForIndex)])?.id === "claude";
+    // A command a later skill's command overwrites (same trigger, compared
+    // case-insensitively as a case-insensitive filesystem would) has no file
+    // of its own — the same rule as Rust's skills_with_their_own_file.
+    // A non-ASCII trigger never counts as owning its file: macOS folds
+    // Unicode-equivalent names together (Rust's skills_with_their_own_file).
+    const commandKey = (skill: (typeof skills)[number]): string | null => {
+        if (!skill.content || skill.skill_type === SKILL_TYPE_AGENT_SKILL) return null;
+        const trigger = sanitizeTrigger(skill.trigger);
+        // eslint-disable-next-line no-control-regex
+        return trigger && /^[\x00-\x7f]*$/.test(trigger) ? trigger.toLowerCase() : null;
+    };
+    const lastWriter = new Map<string, number>();
+    skills.forEach((skill, i) => {
+        const key = commandKey(skill);
+        if (key) lastWriter.set(key, i);
+    });
+    const hasOwnFile = (skill: (typeof skills)[number], i: number): boolean => {
+        if (!skill.content) return false;
+        if (skill.skill_type === SKILL_TYPE_AGENT_SKILL) return true;
+        const key = commandKey(skill);
+        return key != null && lastWriter.get(key) === i;
+    };
+    const indexed = skills.filter((skill, i) => !isClaude || !hasOwnFile(skill, i));
+    if (indexed.length > 0) {
         instructionsParts.push("\n# Available Skills\n\n");
         instructionsParts.push("Use `/<trigger>` to invoke a skill.\n\n");
-        for (const skill of skills) {
+        for (const skill of indexed) {
             const triggerPart = skill.trigger ? ` (trigger: /${skill.trigger})` : "";
             const descPart = skill.description ? ` — ${skill.description}` : "";
             instructionsParts.push(`- **${skill.name}**${triggerPart}${descPart}\n`);
@@ -99,7 +129,11 @@ export function buildConfigFiles(
     const resolvedProviderId = providerId ?? "claude";
     const providerDef = PROVIDERS[resolvedProviderId] ?? PROVIDERS[resolveProviderAlias(resolvedProviderId)];
     const instructionsFilename = providerDef?.startupInstructionsFilename;
-    if (instructionsParts.length > 0 && instructionsFilename) {
+    // Written even when empty: srv injects the Global Memory into it
+    // (`inject_global_bundles`), and with the skills index gone for Claude
+    // (LC3) an agent with no soul, instructions or memory would otherwise get
+    // no startup file, and no Global Memory in it, at all.
+    if (instructionsFilename) {
         files.push({ path: instructionsFilename, content: instructionsParts.join("") });
     }
 

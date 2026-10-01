@@ -97,11 +97,17 @@ pub fn build_config_files(
         instructions_parts.push(memory.clone());
     }
 
-    // Append skill index with trigger references
-    if !skills.is_empty() {
+    // Append skill index with trigger references. Claude Code lists the
+    // skills it has a file for (.claude/commands, .claude/skills) by itself,
+    // so for it the index carries only those without one (LC3, §4.4).
+    // By the resolved provider, so an alias (`claude-code`) counts as Claude.
+    let is_claude = crate::backend::providers::get_provider(provider_id).is_some_and(|p| p.id == "claude");
+    let own_file = skills_with_their_own_file(skills);
+    let indexed: Vec<_> = skills.iter().enumerate().filter(|(i, _)| !is_claude || !own_file[*i]).map(|(_, s)| s).collect();
+    if !indexed.is_empty() {
         instructions_parts.push("\n# Available Skills\n\n".to_string());
         instructions_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
-        for skill in skills {
+        for skill in indexed {
             let trigger_part = if skill.trigger.is_empty() {
                 String::new()
             } else {
@@ -119,15 +125,17 @@ pub fn build_config_files(
     // Resolved per-provider — `None` for an unrecognized provider_id or one
     // with no confirmed native file (kimi) skips writing this file
     // entirely rather than guessing "CLAUDE.md".
+    // Written even when empty: srv injects the Global Memory into it at write
+    // time (`inject_global_bundles`), and with the skills index gone for
+    // Claude (LC3) an agent with no soul, instructions or memory would
+    // otherwise get no startup file, and no Global Memory in it, at all.
     let instructions_filename = crate::backend::providers::get_provider(provider_id)
         .and_then(|p| p.startup_instructions_filename);
-    if !instructions_parts.is_empty() {
-        if let Some(filename) = instructions_filename {
-            files.push(AgentConfigFile {
-                filename: filename.to_string(),
-                content: instructions_parts.join(""),
-            });
-        }
+    if let Some(filename) = instructions_filename {
+        files.push(AgentConfigFile {
+            filename: filename.to_string(),
+            content: instructions_parts.join(""),
+        });
     }
 
     // ----------------------------------------------------------------
@@ -739,6 +747,39 @@ pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> Stri
     format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
 }
 
+/// For each skill, whether `build_config_files` leaves it a file of its own
+/// that Claude Code lists natively: an Agent Skill's `SKILL.md` (slugs are
+/// made unique), or a command with a usable trigger that no later skill's
+/// command overwrites. Triggers are compared case-insensitively, as a
+/// case-insensitive filesystem would. Trigger uniqueness isn't enforced by
+/// the skill store (Codex on #4131). A non-ASCII trigger never counts as
+/// owning its file: a normalization-insensitive filesystem (macOS) folds
+/// Unicode-equivalent names together, and keeping such a skill in the index
+/// costs at most a repeated line, never a lost skill.
+fn skills_with_their_own_file(skills: &[AgentSkill]) -> Vec<bool> {
+    let command_key = |s: &AgentSkill| {
+        (!s.content.is_empty() && s.skill_type != SKILL_TYPE_AGENT_SKILL)
+            .then(|| sanitize_trigger(&s.trigger).filter(|t| t.is_ascii()).map(str::to_lowercase))
+            .flatten()
+    };
+    let mut last_writer: HashMap<String, usize> = HashMap::new();
+    for (i, s) in skills.iter().enumerate() {
+        if let Some(key) = command_key(s) {
+            last_writer.insert(key, i);
+        }
+    }
+    skills
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            // A non-ASCII trigger maps to no key: it never owns a file here,
+            // and doesn't count as overwriting anyone (it may, harmlessly).
+            !s.content.is_empty()
+                && (s.skill_type == SKILL_TYPE_AGENT_SKILL || command_key(s).is_some_and(|k| last_writer.get(&k) == Some(&i)))
+        })
+        .collect()
+}
+
 /// Validate a skill's `trigger` is safe to use as a single path segment in
 /// `.claude/commands/<trigger>.md`. `trigger` is free-form user input with
 /// no format validation anywhere upstream (the skill create/update RPCs and
@@ -957,6 +998,53 @@ pub const BUNDLE_SECTION_HEADING: &str = "# Memory";
 /// content entirely) would see it silently reappear on their next launch.
 const CLAUDE_MD_OWNERSHIP_MARKER_PATH: &str = ".claude/.agentmux-claude-md-ownership.json";
 
+/// Where an adopted legacy `CLAUDE.md` is kept (`is_legacy_agentmux_claude_md`).
+pub const CLAUDE_MD_PRE_ADOPT_BACKUP: &str = ".claude/CLAUDE.md.pre-adopt";
+
+/// A skills-index row exactly as `build_config_files` renders it:
+/// `- **<name>**`, then optionally ` (trigger: /<trigger>)`, then optionally
+/// ` — <description>` (Codex on #4131: a bare `- **note` is a person's).
+fn is_generated_skill_row(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("- **") else { return false };
+    let Some(close) = rest.find("**") else { return false };
+    if close == 0 {
+        return false;
+    }
+    let mut rest = &rest[close + 2..];
+    if let Some(after) = rest.strip_prefix(" (trigger: /") {
+        let Some(end) = after.find(')') else { return false };
+        if end == 0 {
+            return false;
+        }
+        rest = &after[end + 1..];
+    }
+    rest.is_empty() || rest.strip_prefix(" \u{2014} ").is_some_and(|d| !d.is_empty())
+}
+
+
+/// Whether `content` is exactly what an older AgentMux wrote as `CLAUDE.md`,
+/// in its order, ignoring blank lines: the `# Available Skills` heading, its
+/// usage line, at least one skill row (`- **…`; AgentMux wrote the section
+/// only when there were skills), then optionally the managed import (its
+/// comment and line, or the line alone). Anything else means a person wrote
+/// there, and it stays theirs.
+pub fn is_legacy_agentmux_claude_md(content: &str) -> bool {
+    let import_line = format!("@{AGENTMUX_MEMORY_FILENAME}");
+    let mut lines = content.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).peekable();
+    if lines.next() != Some("# Available Skills") || lines.next() != Some("Use `/<trigger>` to invoke a skill.") {
+        return false;
+    }
+    let mut skill_rows = 0;
+    while lines.next_if(|l| is_generated_skill_row(l)).is_some() {
+        skill_rows += 1;
+    }
+    let tail: Vec<&str> = lines.collect();
+    skill_rows > 0
+        && (tail.is_empty()
+            || tail == [import_line.as_str()]
+            || tail == [CLAUDE_MD_IMPORT_MARKER_COMMENT, import_line.as_str()])
+}
+
 /// Comment wrapping the `@import` line so its origin — and how to remove
 /// it — is unambiguous to anyone reading a foreign `CLAUDE.md` by hand.
 const CLAUDE_MD_IMPORT_MARKER_COMMENT: &str =
@@ -965,6 +1053,15 @@ const CLAUDE_MD_IMPORT_MARKER_COMMENT: &str =
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct ClaudeMdOwnershipMarker {
     import_line_offered: bool,
+}
+
+/// `relative` under `base_path`, refused when it would land outside it,
+/// including through a symlinked ancestor such as a linked `.claude`.
+fn resolve_within_workdir(base_path: &std::path::Path, relative: &str) -> Option<std::path::PathBuf> {
+    let base_canonical = base_path.canonicalize().ok()?;
+    let path = crate::backend::base::safe_join_within_base(base_path, relative).ok()?;
+    crate::backend::base::verify_no_symlink_escape(&path, &base_canonical).ok()?;
+    Some(path)
 }
 
 /// Resolve [`AGENTMUX_MEMORY_FILENAME`] and [`CLAUDE_MD_OWNERSHIP_MARKER_PATH`]
@@ -1146,6 +1243,18 @@ pub fn write_startup_instructions_respecting_existing(
     };
     let agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(STARTUP_INSTRUCTIONS_MANAGED_MARKER));
+
+    // Never written through a symlink (dangling or not), nor under a folder
+    // that links out of the workspace (`.pi/` for pi): the write would land
+    // outside it. Codex on #4131, the same guard as `CLAUDE.md`'s.
+    let is_symlink = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
+    if is_symlink || resolve_within_workdir(base_path, filename).is_none() {
+        tracing::warn!(
+            path = %path.display(),
+            "write_startup_instructions_respecting_existing: a symlink, or outside the workspace; not writing"
+        );
+        return Ok(());
+    }
 
     if agentmux_owns_it || existing.is_none() {
         if let Some(parent) = path.parent() {
@@ -1413,8 +1522,66 @@ pub fn write_claude_md_respecting_ownership(
         Err(e) => Some(Err(e)),
     };
 
-    let agentmux_owns_it =
+    let mut agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(CLAUDE_MD_MANAGED_MARKER));
+    // A `CLAUDE.md` that is a symlink (dangling or not) is never written
+    // through: the write would follow it out of the workspace (Codex P1s on
+    // #4131).
+    let is_symlink = std::fs::symlink_metadata(&claude_md_path).is_ok_and(|m| m.file_type().is_symlink());
+
+    // A CLAUDE.md an older AgentMux wrote, before the managed marker existed:
+    // nothing in it but the skills index and the managed import line. It was
+    // taken for the user's and frozen, so its agent kept a stale skills list
+    // forever. Adopt it, keeping a copy (LC3,
+    // SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4).
+    if let Some(Ok(content)) = &existing {
+        if !agentmux_owns_it && !is_symlink && is_legacy_agentmux_claude_md(content) {
+            // Resolved and symlink-checked like the other `.claude` side
+            // files: a `.claude` that links outside the workspace must not
+            // get the backup written through it (Codex on #4131). No safe
+            // path: not adopted, handled as a foreign file below.
+            match resolve_within_workdir(base_path, CLAUDE_MD_PRE_ADOPT_BACKUP) {
+                None => tracing::warn!(
+                    path = %claude_md_path.display(),
+                    "write_claude_md_respecting_ownership: no safe place to back up a legacy CLAUDE.md; leaving it as is"
+                ),
+                Some(backup) => {
+                    let backed_up = backup.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
+                        match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
+                            Ok(mut f) => std::io::Write::write_all(&mut f, content.as_bytes()).and_then(|()| f.sync_all()).inspect_err(|_| {
+                                // A partial copy must not pass for the backup next launch.
+                                let _ = std::fs::remove_file(&backup);
+                            }),
+                            // A copy left by an earlier attempt counts only if it
+                            // is this file, whole (Codex on #4131).
+                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                                if std::fs::read_to_string(&backup).is_ok_and(|b| b == *content) {
+                                    Ok(())
+                                } else {
+                                    Err(std::io::Error::new(
+                                        std::io::ErrorKind::AlreadyExists,
+                                        "a different .pre-adopt copy already exists",
+                                    ))
+                                }
+                            }
+                            Err(e) => Err(e),
+                        }
+                    });
+                    match backed_up {
+                        Ok(()) => {
+                            tracing::info!(path = %claude_md_path.display(), "CLAUDE.md written by an older AgentMux: adopting it as managed");
+                            agentmux_owns_it = true;
+                        }
+                        Err(e) => tracing::warn!(
+                            path = %backup.display(),
+                            error = %e,
+                            "write_claude_md_respecting_ownership: couldn't back up a legacy CLAUDE.md; leaving it as is"
+                        ),
+                    }
+                }
+            }
+        }
+    }
 
     // Known, accepted TOCTOU window (codex P2, third review round on
     // PR #2747): if a foreign CLAUDE.md is created/swapped in between the
@@ -1433,6 +1600,12 @@ pub fn write_claude_md_respecting_ownership(
     // ordinary launch) — narrower and far less likely than that. The
     // foreign-file branch below (where this PR's actual guarantee lives)
     // does not have this gap: it never writes CLAUDE.md's own content.
+    // Nothing is written to a symlinked CLAUDE.md, not even the @import
+    // append below: every write would land on the link's target.
+    if is_symlink {
+        tracing::warn!(path = %claude_md_path.display(), "write_claude_md_respecting_ownership: CLAUDE.md is a symlink; not writing through it");
+        return Ok(());
+    }
     if agentmux_owns_it || existing.is_none() {
         let content = format!("{CLAUDE_MD_MANAGED_MARKER}\n\n{generated_content}");
         return std::fs::write(&claude_md_path, content);
@@ -1878,15 +2051,271 @@ mod tests {
 
         let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
 
-        // CLAUDE.md should have the skills index
-        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
-        assert!(claude_md.content.contains("Available Skills"));
-        assert!(claude_md.content.contains("/deploy"));
-        assert!(claude_md.content.contains("/test"));
+        // Claude Code lists skills with a file by itself: no index (LC3).
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md");
+        assert!(claude_md.is_none_or(|f| !f.content.contains("Available Skills")), "{claude_md:?}");
 
         // Individual skill command files
         assert!(files.iter().any(|f| f.filename == ".claude/commands/deploy.md"));
         assert!(files.iter().any(|f| f.filename == ".claude/commands/test.md"));
+
+        // Another provider reads only its instructions file: it keeps the index.
+        let codex = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "codex");
+        let agents_md = codex.iter().find(|f| f.filename == "AGENTS.md").unwrap();
+        assert!(agents_md.content.contains("Available Skills"));
+        assert!(agents_md.content.contains("/deploy"));
+        assert!(agents_md.content.contains("/test"));
+    }
+
+    /// An alias of Claude (`claude-code`) is Claude: no index for skills with
+    /// files (ReAgent on #4131).
+    #[test]
+    fn a_claude_alias_gets_no_index_for_file_backed_skills() {
+        let skills = vec![make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all")];
+        for alias in ["claude-code", "claude_code"] {
+            if crate::backend::providers::get_provider(alias).is_none() {
+                continue;
+            }
+            let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", alias);
+            let md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+            assert!(!md.content.contains("Available Skills"), "{alias}");
+        }
+    }
+
+    /// A skill with no file of its own (no usable trigger) is still indexed
+    /// for Claude: dropping it from the index would hide it entirely.
+    #[test]
+    fn claude_still_indexes_a_skill_that_has_no_file() {
+        let skills = vec![
+            make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all"),
+            make_skill("Notes", "", "Read the notes", "Look in NOTES.md"),
+        ];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(claude_md.content.contains("Available Skills"));
+        assert!(claude_md.content.contains("**Notes**"));
+        assert!(!claude_md.content.contains("/deploy"), "Deploy has a command file");
+    }
+
+    /// An agent whose skills all have files, and nothing else, still gets its
+    /// instructions file: srv puts the Global Memory in it (LC3 live check —
+    /// without this the launch wrote no CLAUDE.md at all).
+    #[test]
+    fn the_instructions_file_is_written_even_when_empty() {
+        let skills = vec![make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all")];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        assert!(files.iter().any(|f| f.filename == "CLAUDE.md"), "{:?}", files.iter().map(|f| &f.filename).collect::<Vec<_>>());
+        let kimi = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "kimi");
+        assert!(!kimi.iter().any(|f| f.filename == "CLAUDE.md" || f.filename == "AGENTS.md"), "kimi has no file");
+    }
+
+    const LEGACY_CLAUDE_MD: &str = "\n# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n\
+        - **Test-Driven Development** (trigger: /tdd) \u{2014} write the test first.\n\
+        - **Code Review** (trigger: /code-review) \u{2014} review.\n\n\n\
+        <!-- agentmux:managed-import (safe to delete this line to opt out) -->\n\
+        @.claude/AGENTMUX_MEMORY.md\n";
+
+    /// Two skills on one trigger write one command file, the later winning:
+    /// the earlier one has no file and stays in the index (Codex on #4131).
+    #[test]
+    fn a_skill_whose_command_file_a_later_one_overwrites_stays_indexed() {
+        let skills = vec![
+            make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all"),
+            make_skill("Deploy Staging", "Deploy", "Deploy staging", "Run: deploy staging"),
+        ];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        let md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(md.content.contains("**Deploy**"), "the overwritten one is indexed");
+        assert!(!md.content.contains("**Deploy Staging**"), "the one that owns the file isn't");
+    }
+
+    /// A non-ASCII trigger stays indexed: Unicode-equivalent names can share
+    /// one file on macOS (Codex on #4131).
+    #[test]
+    fn a_skill_with_a_non_ascii_trigger_stays_indexed() {
+        let skills = vec![make_skill("Caf\u{e9}", "caf\u{e9}", "coffee", "brew")];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        let md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(md.content.contains("Caf\u{e9}"), "{}", md.content);
+    }
+
+    #[test]
+    fn only_rows_as_agentmux_rendered_them_count() {
+        assert!(is_generated_skill_row("- **TDD** (trigger: /tdd) \u{2014} write the test first."));
+        assert!(is_generated_skill_row("- **TDD** (trigger: /tdd)"));
+        assert!(is_generated_skill_row("- **TDD** \u{2014} write it first"));
+        assert!(is_generated_skill_row("- **TDD**"));
+        assert!(!is_generated_skill_row("- **this is my hand-written note"));
+        assert!(!is_generated_skill_row("- **TDD** and also a note"));
+        assert!(!is_generated_skill_row("- **TDD** (trigger: /tdd"));
+        assert!(!is_legacy_agentmux_claude_md(
+            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n- **this is my hand-written note\n"
+        ));
+    }
+
+    #[test]
+    fn recognises_only_exactly_what_an_older_agentmux_wrote() {
+        assert!(is_legacy_agentmux_claude_md(LEGACY_CLAUDE_MD));
+        // AgentMux wrote the section only with skills: no rows, not ours (Codex on #4131).
+        assert!(!is_legacy_agentmux_claude_md("# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n"));
+        // Its order: skill rows after the import mean someone rearranged it.
+        assert!(!is_legacy_agentmux_claude_md(
+            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n@.claude/AGENTMUX_MEMORY.md\n- **A** x\n"
+        ));
+        assert!(is_legacy_agentmux_claude_md(
+            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n- **A** \u{2014} x\n@.claude/AGENTMUX_MEMORY.md\n"
+        ));
+        assert!(is_legacy_agentmux_claude_md("# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n- **A** \u{2014} x\n"));
+        assert!(!is_legacy_agentmux_claude_md(&format!("{LEGACY_CLAUDE_MD}\nAlways run the tests.\n")), "a person's line");
+        assert!(!is_legacy_agentmux_claude_md(&format!("{CLAUDE_MD_MANAGED_MARKER}\n\n# Memory\n")));
+        assert!(!is_legacy_agentmux_claude_md("# Project\n\n# Available Skills\n"));
+        assert!(!is_legacy_agentmux_claude_md(""));
+    }
+
+    #[test]
+    fn a_legacy_claude_md_is_adopted_with_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), LEGACY_CLAUDE_MD).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+
+        let now = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(now.starts_with(CLAUDE_MD_MANAGED_MARKER), "{now}");
+        assert!(now.contains("fresh"));
+        let backup = std::fs::read_to_string(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP)).unwrap();
+        assert_eq!(backup, LEGACY_CLAUDE_MD);
+
+        // Managed from now on; the original copy is never overwritten.
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nnewer\n").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap().contains("newer"));
+        assert_eq!(std::fs::read_to_string(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP)).unwrap(), LEGACY_CLAUDE_MD);
+    }
+
+    /// A `.claude` linked outside the workspace gets no backup written
+    /// through it, and the file isn't adopted (Codex on #4131).
+    #[test]
+    fn a_legacy_claude_md_is_not_adopted_through_a_symlinked_claude_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(outside.path(), dir.path().join(".claude")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(outside.path(), dir.path().join(".claude")).is_ok();
+        if !made {
+            // Windows needs privilege for symlinks; the guard is exercised
+            // wherever one can be made.
+            return;
+        }
+        std::fs::write(dir.path().join("CLAUDE.md"), LEGACY_CLAUDE_MD).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert!(!outside.path().join("CLAUDE.md.pre-adopt").exists(), "no backup outside the workspace");
+        let now = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(!now.starts_with(CLAUDE_MD_MANAGED_MARKER), "not adopted: {now}");
+    }
+
+    /// A copy left by an earlier attempt that isn't this file whole (a
+    /// partial write) blocks adoption; the original stays.
+    #[test]
+    fn a_mismatched_backup_blocks_adoption() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), LEGACY_CLAUDE_MD).unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        std::fs::write(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP), &LEGACY_CLAUDE_MD[..20]).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap(), LEGACY_CLAUDE_MD);
+
+        // The same copy, whole: adopted.
+        std::fs::write(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP), LEGACY_CLAUDE_MD).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap().starts_with(CLAUDE_MD_MANAGED_MARKER));
+    }
+
+    /// A `CLAUDE.md` that is a symlink is never adopted: the managed write
+    /// would follow it (Codex P1 on #4131).
+    #[test]
+    fn a_symlinked_legacy_claude_md_is_not_adopted() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("CLAUDE.md");
+        std::fs::write(&target, LEGACY_CLAUDE_MD).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join("CLAUDE.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join("CLAUDE.md")).is_ok();
+        if !made {
+            return; // Windows needs privilege for symlinks.
+        }
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), LEGACY_CLAUDE_MD, "the outside file is untouched");
+    }
+
+    /// A symlinked `CLAUDE.md` whose target already looks managed is not
+    /// written through either (Codex on #4131).
+    #[test]
+    fn a_symlinked_managed_claude_md_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("CLAUDE.md");
+        let managed = format!("{CLAUDE_MD_MANAGED_MARKER}\n\n# Memory\nold\n");
+        std::fs::write(&target, &managed).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join("CLAUDE.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join("CLAUDE.md")).is_ok();
+        if !made {
+            return; // Windows needs privilege for symlinks.
+        }
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), managed, "the outside file is untouched");
+    }
+
+    /// A symlinked non-Claude instructions file is never written through,
+    /// dangling or pointing at an already-managed file (Codex on #4131).
+    #[test]
+    fn a_symlinked_startup_instructions_file_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("AGENTS.md");
+        let managed = format!("{STARTUP_INSTRUCTIONS_MANAGED_MARKER}\n\nold\n");
+        std::fs::write(&target, &managed).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join("AGENTS.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join("AGENTS.md")).is_ok();
+        if !made {
+            return; // Windows needs privilege for symlinks.
+        }
+        write_startup_instructions_respecting_existing(dir.path(), "AGENTS.md", "fresh").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), managed, "the outside file is untouched");
+
+        // Dangling: nothing is created at the link's target either.
+        let gone = outside.path().join("GEMINI.md");
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&gone, dir.path().join("GEMINI.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&gone, dir.path().join("GEMINI.md")).is_ok();
+        if made {
+            write_startup_instructions_respecting_existing(dir.path(), "GEMINI.md", "fresh").unwrap();
+            assert!(!gone.exists(), "no file created through a dangling link");
+        }
+    }
+
+    #[test]
+    fn a_plain_startup_instructions_file_is_still_written() {
+        let dir = tempfile::tempdir().unwrap();
+        write_startup_instructions_respecting_existing(dir.path(), "AGENTS.md", "fresh").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap().contains("fresh"));
+        write_startup_instructions_respecting_existing(dir.path(), ".pi/APPEND_SYSTEM.md", "pi").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join(".pi/APPEND_SYSTEM.md")).unwrap().contains("pi"));
+    }
+
+    #[test]
+    fn a_users_claude_md_is_still_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = format!("{LEGACY_CLAUDE_MD}\nAlways run the tests.\n");
+        std::fs::write(dir.path().join("CLAUDE.md"), &mine).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap(), mine);
+        assert!(!dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP).exists());
     }
 
     #[test]
@@ -1917,9 +2346,9 @@ mod tests {
             .contains("description: \"Runs the pre-deploy checklist\""));
         assert!(skill_file.content.contains("---\n\n1. Run tests"));
 
-        // Skills index in CLAUDE.md still lists it (trigger-agnostic)
-        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
-        assert!(claude_md.content.contains("Deploy Checklist"));
+        // Claude Code lists a SKILL.md itself, so CLAUDE.md doesn't index it (LC3).
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md");
+        assert!(claude_md.is_none_or(|f| !f.content.contains("Deploy Checklist")), "{claude_md:?}");
     }
 
     #[test]
