@@ -197,36 +197,63 @@ const EVENT_TRACKED_BLOCKS_CHANGED = "processbroker:tracked-blocks-changed";
  * which is right for the fork tab strip (its pills switch within the window)
  * but let My agents reattach an agent that was live in a floating window
  * (SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md §4.0).
- * Returns `[map, refresh, locations]`.
+ * Returns `[map, refresh, locations, resolve]`. The map is a cached view for
+ * rendering; a decision (reattach or not) must use `resolve`, which answers
+ * from a fresh srv read — before the first one lands, or after a failed one,
+ * the cached map can't tell "open elsewhere" from "closed" (Codex P1, #4127).
  */
 export function useInstanceOpenDefinitions(): [
     () => Map<string, string>,
     () => void,
     () => Map<string, OpenAgentLocation>,
+    () => Promise<Map<string, string>>,
 ] {
     const [local, refreshLocal] = useOpenDefinitionMap();
     const [panes, setPanes] = createSignal<AgentOpenPane[]>([]);
     let fetchSeq = 0;
-    const fetchPanes = async () => {
+    let appliedSeq = 0;
+    /** `true` once srv answered. A reply older than one already applied is dropped. */
+    const fetchPanes = async (): Promise<boolean> => {
         const seq = ++fetchSeq;
         try {
             const r = await RpcApi.AgentOpenPanesCommand(TabRpcClient, {});
-            if (seq === fetchSeq) setPanes(r?.panes ?? []);
+            if (seq > appliedSeq) {
+                appliedSeq = seq;
+                setPanes(r?.panes ?? []);
+            }
+            return true;
         } catch (e) {
-            // An older srv without agent.open-panes: this window's panes only.
             console.warn("[agent-picker] agent.open-panes failed", String(e));
+            return false;
         }
     };
     onMount(() => void fetchPanes());
     const unsub = muxEventSubscribe({ eventType: EVENT_TRACKED_BLOCKS_CHANGED, handler: () => void fetchPanes() });
     onCleanup(unsub);
+    // Tear-off, redock and tab moves keep the pane's controller, so they emit
+    // no tracked-blocks event; refetch when the user comes back to this
+    // window, which is when a moved pane's location matters (Codex P2, #4127).
+    const onFocus = () => void fetchPanes();
+    window.addEventListener("focus", onFocus);
+    onCleanup(() => window.removeEventListener("focus", onFocus));
     const merged = createMemo(() => mergeOpenDefinitions(local(), panes(), windowId()));
     const locations = createMemo(() => openAgentLocations(local(), panes(), windowId()));
     const refresh = () => {
         refreshLocal();
         void fetchPanes();
     };
-    return [merged, refresh, locations];
+    const resolve = async (): Promise<Map<string, string>> => {
+        refreshLocal();
+        // One retry for a transient failure. If srv still can't answer (an
+        // older srv without agent.open-panes), this window's panes are all
+        // there is to go on.
+        if (!(await fetchPanes())) {
+            await new Promise((r) => setTimeout(r, 250));
+            await fetchPanes();
+        }
+        return merged();
+    };
+    return [merged, refresh, locations, resolve];
 }
 
 // ── AgentPicker component ───────────────────────────────────────────────────────
@@ -315,7 +342,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     });
 
     // Reactive map of definition_id → blockId for panes currently open.
-    const [openDefinitions, refreshOpenDefinitions, openLocations] = useInstanceOpenDefinitions();
+    const [openDefinitions, refreshOpenDefinitions, openLocations, resolveOpenDefinitions] =
+        useInstanceOpenDefinitions();
 
     // Per-agent install state, keyed by agent.id.
     //   undefined = not yet checked / non-npm provider (no install needed)
@@ -1086,6 +1114,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             onReattach={handleReattach}
                             openDefinitions={openDefinitions}
                             openLocations={openLocations}
+                            resolveOpenDefinitions={resolveOpenDefinitions}
                             onFork={handleFork}
                             onSwitchToExisting={handleSwitchToExisting}
                             onFirstLoad={() => setMyAgentsLoaded(true)}

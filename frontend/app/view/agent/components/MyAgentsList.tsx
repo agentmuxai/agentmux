@@ -189,6 +189,13 @@ export interface MyAgentsListProps {
      */
     openLocations?: Accessor<Map<string, OpenAgentLocation>>;
     /**
+     * A fresh, instance-wide read of `openDefinitions`, awaited on row click
+     * before deciding between the "already open" prompt and a reattach — the
+     * rendered map may not have srv's answer yet. Optional: without it the
+     * click reads `openDefinitions` as before.
+     */
+    resolveOpenDefinitions?: () => Promise<Map<string, string>>;
+    /**
      * Called after the user confirms a fork: fork has been created and
      * the new definition should be launched. Receives the new AgentDefinition.
      */
@@ -470,7 +477,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     };
 
     const handleRowClick = async (row: RecentSessionRow) => {
-        const openMap = props.openDefinitions?.() ?? new Map<string, string>();
+        const openMap = props.resolveOpenDefinitions
+            ? await props.resolveOpenDefinitions()
+            : (props.openDefinitions?.() ?? new Map<string, string>());
         const existingBlockId = openMap.get(row.definition_id);
         if (existingBlockId) {
             // Already open — show fork prompt
