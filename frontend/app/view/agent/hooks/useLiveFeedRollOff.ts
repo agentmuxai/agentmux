@@ -50,16 +50,18 @@ export function useLiveFeedRollOff(opts: {
 
     /** One roll-off pass: a single reducer command, planned on its current nodes. */
     const runRollOff = (): void => {
-        if (!liveFeedOn() || rollOffDisposed) return;
+        if (rollOffDisposed) return;
         const [docState, setDocState] = agentAtoms().documentStateAtom;
         const pinnedIds = untrack(docState).pinnedNodes;
         // Collapsed tool results leave memory in the same idle pass; rows the
         // user pinned or that are held open keep theirs
-        // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.3).
+        // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.3). This
+        // runs with the live feed off too (Codex P2 on #4126).
         paneModel.dispatchDoc({
             type: "UnloadToolResults",
             keepIds: new Set([...pinnedIds, ...untrack(docState).expandedTools]),
         });
+        if (!liveFeedOn()) return;
         const events = paneModel.dispatchDoc({
             type: "RollOff",
             keepTurns: liveFeedTurns,
@@ -118,7 +120,7 @@ export function useLiveFeedRollOff(opts: {
         else setTimeout(cb, Math.min(50, Math.max(0, timeoutMs)));
     };
     function scheduleRollOff(): void {
-        if (!liveFeedOn() || rollOffQueued) return;
+        if (rollOffQueued) return;
         rollOffQueued = true;
         const deadline = performance.now() + ROLL_OFF_DEADLINE_MS;
         const attempt = (): void => {

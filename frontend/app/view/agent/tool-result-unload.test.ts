@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { planUnload, resultBytes, UNLOAD_MIN_BYTES, unloadResult } from "./tool-result-unload";
+import { planLogFree, planUnload, resultBytes, UNLOAD_MIN_BYTES, unloadResult } from "./tool-result-unload";
 import type { DocumentNode, ToolNode } from "./types";
 
 const src = { stream: "g:agent", gen: "g1", line: 10 };
@@ -62,6 +62,27 @@ describe("planUnload", () => {
 
     it("does nothing without a user message (the whole document is the turn in flight)", () => {
         expect(planUnload([tool("t1")], { keepIds: none })).toEqual([]);
+    });
+});
+
+describe("planLogFree (Codex P2 on #4126)", () => {
+    const log = { chunks: [{ kind: "stdout" as const, content: "out\n", timestamp: 1 }], open: false };
+
+    it("frees a long call's kept log once its dock row has gone", () => {
+        const now = 1_000_000;
+        const long = tool("t1", { timestamp: now - 42_000, duration: 40, log });
+        // Ended 2 s ago: the dock still shows it.
+        expect(planLogFree([long], { keepIds: none, now })).toEqual([]);
+        expect(planLogFree([long], { keepIds: none, now: now + 60_000 })).toEqual(["t1"]);
+    });
+
+    it("keeps a running call's log, an empty log, and a kept row's log", () => {
+        const nodes: DocumentNode[] = [
+            tool("running", { status: "running", log }),
+            tool("empty", { log: { chunks: [], open: false } }),
+            tool("held", { log }),
+        ];
+        expect(planLogFree(nodes, { keepIds: new Set(["held"]) })).toEqual([]);
     });
 });
 

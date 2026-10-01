@@ -72,11 +72,11 @@ describe("useLiveFeedRollOff", () => {
         m.dispose();
     });
 
-    it("does nothing when the live feed is off", () => {
+    it("only unloads tool results when the live feed is off (Codex P2 on #4126)", () => {
         const m = mount({ outputFormat: "some-other-format" });
         m.feed.scheduleRollOff();
         vi.advanceTimersByTime(2_000);
-        expect(m.dispatched).toEqual([]);
+        expect(m.dispatched.map((c) => c.type)).toEqual(["UnloadToolResults"]);
         m.dispose();
     });
 

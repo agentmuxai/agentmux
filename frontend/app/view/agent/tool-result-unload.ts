@@ -55,11 +55,7 @@ export function planUnload(
     nodes: readonly DocumentNode[],
     opts: { keepIds: ReadonlySet<string>; now?: number }
 ): string[] {
-    const now = opts.now ?? Date.now();
-    const docked = new Set<string>();
-    for (const a of toolActivities(nodes, now)) {
-        if (a.endedAt == null || now - a.endedAt < RETENTION_MS[a.status] + DOCK_GRACE_MS) docked.add(a.id);
-    }
+    const docked = dockedToolIds(nodes, opts.now ?? Date.now());
     let lastUser = -1;
     for (let i = nodes.length - 1; i >= 0; i--) {
         if (nodes[i].type === "user_message") {
@@ -76,6 +72,35 @@ export function planUnload(
         if (opts.keepIds.has(n.id) || docked.has(n.id)) continue;
         if (isContentFirstTool(n)) continue;
         if (resultBytes(n.result) < UNLOAD_MIN_BYTES) continue;
+        ids.push(n.id);
+    }
+    return ids;
+}
+
+/** Tool calls the Activity Dock still shows: running, or within retention. */
+function dockedToolIds(nodes: readonly DocumentNode[], now: number): Set<string> {
+    const docked = new Set<string>();
+    for (const a of toolActivities(nodes, now)) {
+        if (a.endedAt == null || now - a.endedAt < RETENTION_MS[a.status] + DOCK_GRACE_MS) docked.add(a.id);
+    }
+    return docked;
+}
+
+/**
+ * Ids of finished tools whose live log can go now. The reducer frees most
+ * logs the moment the result lands (U1), but keeps those a dock row shows in
+ * stream order (a long call, an accepted background launch); once the dock
+ * has let the row go, nothing reads that log again (Codex P2 on #4126).
+ */
+export function planLogFree(
+    nodes: readonly DocumentNode[],
+    opts: { keepIds: ReadonlySet<string>; now?: number }
+): string[] {
+    const docked = dockedToolIds(nodes, opts.now ?? Date.now());
+    const ids: string[] = [];
+    for (const n of nodes) {
+        if (n.type !== "tool" || !FINISHED.has(n.status) || n.result == null) continue;
+        if (!n.log?.chunks.length || opts.keepIds.has(n.id) || docked.has(n.id)) continue;
         ids.push(n.id);
     }
     return ids;

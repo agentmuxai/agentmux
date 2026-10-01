@@ -16,7 +16,7 @@
 import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
 import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../view/agent/activity/tool-adapter";
 import { planRollOff } from "../../view/agent/live-feed";
-import { planUnload, unloadResult } from "../../view/agent/tool-result-unload";
+import { planLogFree, planUnload, unloadResult } from "../../view/agent/tool-result-unload";
 import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
 import {
     AgentDocumentCommand,
@@ -797,8 +797,14 @@ export function update(
 
         case "UnloadToolResults": {
             const ids = planUnload(state.nodes, command);
-            if (ids.length === 0) return { state, events: [] };
+            const logIds = planLogFree(state.nodes, command);
+            if (ids.length === 0 && logIds.length === 0) return { state, events: [] };
             const nodes = state.nodes.slice();
+            for (const id of logIds) {
+                const idx = state.nodeIndexById.get(id);
+                if (idx != null) nodes[idx] = { ...(nodes[idx] as ToolNode), log: { chunks: [], open: false } };
+            }
+            if (ids.length === 0) return { state: { ...state, nodes }, events: [] };
             let bytes = 0;
             for (const id of ids) {
                 const idx = state.nodeIndexById.get(id);
