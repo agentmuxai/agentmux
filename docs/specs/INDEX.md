@@ -649,6 +649,7 @@ partial list.
 | [`SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15`](SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md) | SPEC: Narrow TIER=sensitive to real red flags only |
 | [`SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md) | SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender |
 | [`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17`](SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md) | SPEC: general agent-to-agent WAN-tier jekt signing |
+| [`SPEC_LAN_FIREWALL_SETUP_2026_10_01`](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) | SPEC: LAN that works on a fresh install, with no manual firewall steps |
 | [`SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05`](SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md) | SPEC: Launcher + reducer/saga parity on Linux + Linux splash |
 | [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30`](SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) | SPEC: Integrating `agentmux-launcher` into macOS / Linux `task dev` |
 | [`SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31`](SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31.md) | SPEC: Launcher in packaged macOS builds + restore the splash + tear-off crash |
@@ -780,7 +781,6 @@ partial list.
 | [`widget-visibility-rearchitecture`](widget-visibility-rearchitecture.md) | Widget Visibility Re-Architecture |
 | [`window-close-process-cleanup`](window-close-process-cleanup.md) | Window Close Process Cleanup Spec |
 | [`window-drag-dead-spots`](window-drag-dead-spots.md) | Spec: Eliminate Window Drag Dead Spots |
-| [`windows-firewall-fix`](windows-firewall-fix.md) | Windows Firewall Popup — Root Cause & Fix |
 | [`xterm-v6-upgrade-spec`](xterm-v6-upgrade-spec.md) | xterm.js v6.0.0 Upgrade Spec |
 
 ### draft
@@ -1076,6 +1076,7 @@ partial list.
 | [`modal-cleanup-migration-2026-05-01`](modal-cleanup-migration-2026-05-01.md) | Modal Cleanup — Migration Audit & Plan |
 | [`service-update-consolidation`](service-update-consolidation.md) | Analysis: Consolidate Object Update Return Paths |
 | [`sysinfo-continuous-monitor-animation-2026-05-03`](sysinfo-continuous-monitor-animation-2026-05-03.md) | Sysinfo Plot — Continuous-Monitor Animation |
+| [`windows-firewall-fix`](windows-firewall-fix.md) | Windows Firewall Popup — Root Cause & Fix |
 
 ### superseded
 
