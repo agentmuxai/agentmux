@@ -1604,18 +1604,25 @@ describe("agent document reducer", () => {
             expect(r.events.some((e) => e.type === "orphans-scrubbed")).toBe(true);
         });
 
-        it("a live fresh boundary cancels the old session's open thought and unanswered question (ReAgent P1 on #4147)", () => {
-            const thought: DocumentNode = { ...md("think"), metadata: { thinking: true } } as DocumentNode;
-            const start = seed([tool("q", { status: "awaiting_answer" }), thought]);
-            const r = update(start, {
-                type: "StreamFlush",
-                newNodes: [boundary("b1", "fresh")],
-                updatedNodes: [],
-            });
-            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
-            const md0 = r.state.nodes[1] as Extract<DocumentNode, { type: "markdown" }>;
-            expect(md0.metadata?.thinking).toBe(false);
-            expect(md0.metadata?.canceled).toBe(true);
+        it("a live fresh boundary cancels the old session's trailing open thought only (ReAgent on #4147)", () => {
+            const thought = (id: string): DocumentNode => ({ ...md(id), metadata: { thinking: true } }) as DocumentNode;
+            const start = seed([thought("done-thought"), md("reply"), thought("open-thought")]);
+            const r = update(
+                start,
+                { type: "StreamFlush", newNodes: [boundary("b1", "fresh")], updatedNodes: [] },
+                1234
+            );
+            type Md = Extract<DocumentNode, { type: "markdown" }>;
+            // A finished thought keeps thinking:true; it must not be relabeled.
+            expect((r.state.nodes[0] as Md).metadata?.canceled).toBeUndefined();
+            expect((r.state.nodes[2] as Md).metadata).toMatchObject({ thinking: false, canceled: true, canceledAt: 1234 });
+        });
+
+        it("a live fresh boundary cancels a trailing unanswered question and resolves earlier ones as answered", () => {
+            const start = seed([tool("q-old", { status: "awaiting_answer" }), md("reply"), tool("q-open", { status: "awaiting_answer" })]);
+            const r = update(start, { type: "StreamFlush", newNodes: [boundary("b1", "fresh")], updatedNodes: [] });
+            expect((r.state.nodes[0] as ToolNode).status).toBe("success");
+            expect((r.state.nodes[2] as ToolNode).status).toBe("canceled");
         });
 
         it("a running tool after the boundary is left alone", () => {

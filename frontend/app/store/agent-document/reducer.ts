@@ -28,11 +28,14 @@ import {
 
 /**
  * Retire the nodes of a session that has ended: everything before a live
- * `fresh` divider. Running tools are canceled (scrubOrphanedInProgress), and
- * — unlike a restore, which only trusts the tail — every open thought and
- * every unanswered question is canceled wherever it sits: the new session
- * can't finish or answer any of them (ReAgent P1 on #4147). In-pane shells
- * are AgentMux's, not the session's, and are left alone.
+ * `fresh` divider. Running tools are canceled (scrubOrphanedInProgress). A
+ * finished thought keeps `thinking: true` and an answered question stays
+ * `awaiting_answer` (nothing rewrites them), so — as on restore — only the
+ * old session's LAST node can be an open thought or an unanswered question:
+ * that one is canceled, since the new session can't finish or answer it
+ * (ReAgent on #4147). An earlier question was answered and resolves as on
+ * restore. In-pane shells are AgentMux's, not the session's, and are left
+ * alone.
  */
 function endOldSession(
     nodes: DocumentNode[],
@@ -50,15 +53,20 @@ function endOldSession(
     let markdownCanceled = 0;
     let toolsCanceled = scrub?.toolsCanceled ?? 0;
     const resolvedToolNodes = [...(scrub?.resolvedToolNodes ?? [])];
+    const last = out.length - 1;
     for (let i = 0; i < out.length; i++) {
         const n = out[i];
-        if (n.type === "markdown" && n.metadata?.thinking === true) {
+        if (i === last && n.type === "markdown" && n.metadata?.thinking === true) {
             out[i] = { ...n, metadata: { ...n.metadata, thinking: false, canceled: true, canceledAt: at } };
             markdownCanceled++;
         } else if (n.type === "tool" && n.status === "awaiting_answer") {
-            out[i] = { ...n, status: "canceled", question: undefined };
+            const status = i === last ? "canceled" : "success";
+            out[i] =
+                i === last
+                    ? { ...n, status, question: undefined }
+                    : { ...n, status, question: undefined, summary: "❓ Question answered" };
             toolsCanceled++;
-            resolvedToolNodes.push({ id: n.id, status: "canceled", toolName: n.toolName ?? n.tool });
+            resolvedToolNodes.push({ id: n.id, status, toolName: n.toolName ?? n.tool });
         }
     }
     if (markdownCanceled === 0 && toolsCanceled === 0) return null;
@@ -553,7 +561,7 @@ export function update(
             // SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §3 (revised 2026-10-01).
             if (command.newNodes.some((n) => n.type === "session_outcome" && n.outcome === "fresh")) {
                 const boundary = lastFreshBoundaryIndex(next);
-                const ended = boundary > 0 ? endOldSession(next.slice(0, boundary), Date.now()) : null;
+                const ended = boundary > 0 ? endOldSession(next.slice(0, boundary), nowMs) : null;
                 if (ended) {
                     for (let i = 0; i < boundary; i++) next[i] = ended.nodes[i];
                     flushEvents.push({ type: "orphans-scrubbed", ...ended.counts });
