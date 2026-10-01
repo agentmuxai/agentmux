@@ -90,6 +90,26 @@ export function forgetTabShown(tabId: string): void {
 /** Forget every tab: called when `window:keepinactivetabslaidout` changes,
  *  since a tab shown under the other hiding mode wasn't kept laid out while
  *  inactive (ReAgent P2 on #3687). Each tab's next switch is gated once. */
+/**
+ * Count the tabs a window loaded with as shown, at its first idle moment
+ * (at most 2 s on). Kept laid out, each was mounted and laid out behind the
+ * displayed tab: the same state as a tab already shown, short of a first
+ * paint that every switch pays anyway. Without this, the first switch to
+ * each tab after a load went through the gate and the cross-fade, a ~65 ms
+ * blank flash once per tab. `keptLaidOut` is re-read when it fires, in case
+ * the setting changed meanwhile. Returns a cancel.
+ */
+export function markLoadedTabsShownWhenIdle(tabIds: readonly string[], keptLaidOut: () => boolean): () => void {
+    const handle = requestIdleCallback(
+        () => {
+            if (!keptLaidOut()) return;
+            for (const id of tabIds) markTabShown(id);
+        },
+        { timeout: 2000 }
+    );
+    return () => cancelIdleCallback(handle);
+}
+
 export function clearShownTabs(): void {
     shownTabIds.clear();
 }

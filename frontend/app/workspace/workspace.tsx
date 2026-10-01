@@ -20,6 +20,7 @@ import {
     clearShownTabs,
     forgetTabShown,
     gateTargetTabId,
+    markLoadedTabsShownWhenIdle,
     markTabShown,
     scheduleRevealLift,
     tabSwitching,
@@ -202,28 +203,17 @@ function WorkspaceElem(): JSX.Element {
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
 
-    // Once the window has settled after loading, count every tab it loaded
-    // with as shown. Kept laid out, each was mounted and laid out behind the
-    // displayed one: the same state as a tab already shown, short of a first
-    // paint that every switch pays anyway. Without this, the first switch to
-    // each tab after a load went through the reveal gate and cross-fade,
-    // which showed as a ~65 ms blank flash once per tab. Once, at the first
-    // idle moment after the tab list arrives; a tab arriving later (torn in,
-    // say) still gets its first reveal gated, and a new tab is marked by
-    // createTab once its panes are built.
+    // The tabs this window loaded with count as shown once it settles
+    // (markLoadedTabsShownWhenIdle), so the first switch to each is as clean
+    // as any later one. Once, when the tab list first arrives: a tab arriving
+    // later (torn in, say) still gets its first reveal gated, and a new tab
+    // is marked by createTab once its panes are built.
     let loadedTabsMarked = false;
     createEffect(() => {
         const ids = allTabIds();
         if (loadedTabsMarked || ids.length === 0 || !keepInactiveTabsLaidOut()) return;
         loadedTabsMarked = true;
-        const handle = requestIdleCallback(
-            () => {
-                if (!keepInactiveTabsLaidOut()) return;
-                for (const id of ids) markTabShown(id);
-            },
-            { timeout: 2000 }
-        );
-        onCleanup(() => cancelIdleCallback(handle));
+        onCleanup(markLoadedTabsShownWhenIdle(ids, keepInactiveTabsLaidOut));
     });
 
     return (
