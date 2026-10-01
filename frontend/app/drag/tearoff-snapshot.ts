@@ -71,14 +71,41 @@ function base64ToBlob(b64: string, type: string): Blob {
     return new Blob([bytes], { type });
 }
 
+/**
+ * Decode/crop/encode work still running, including work nobody will take (a
+ * newer prewarm replaced it, or the take gave up). Tracked so a test can wait
+ * for work it didn't await (`settleTearOffSnapshotForTests`). Only the work
+ * after the capture RPC answers, which always finishes: a stalled RPC is
+ * never tracked, so it can't be retained here forever (Codex P2 on #4110).
+ */
+const pendingCaptures = new Set<Promise<unknown>>();
+
+function track<T>(capture: Promise<T>): Promise<T> {
+    pendingCaptures.add(capture);
+    const forget = () => pendingCaptures.delete(capture);
+    capture.then(forget, forget);
+    return capture;
+}
+
+/** Base64 of `bytes`, in chunks so a large picture doesn't overflow the call stack. */
+function bytesToBase64(bytes: Uint8Array): string {
+    const CHUNK = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+}
+
+/**
+ * Not `FileReader.readAsDataURL`: under jsdom that finishes in a later
+ * `setImmediate` and can throw "Expected an Uint8Array" from inside jsdom, out
+ * of reach of any handler (the intermittent CI failure in
+ * docs/reports/REPORT_CI_VITEST_TEAROFF_SNAPSHOT_UNCAUGHT_2026_09_30.md).
+ * `arrayBuffer()` is equivalent here, and in Chromium no slower.
+ */
 async function blobToBase64(blob: Blob): Promise<string> {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result as string);
-        r.onerror = () => reject(r.error);
-        r.readAsDataURL(blob);
-    });
-    return dataUrl.slice(dataUrl.indexOf(",") + 1);
+    return bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
 }
 
 function ownWindowLabel(): string {
@@ -88,6 +115,10 @@ function ownWindowLabel(): string {
 /** The window's viewport, cropped to `rect`, as a base64 JPEG. */
 async function capturePane(rect: CssRect): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
+    return track(cropToPane(jpeg_base64, rect));
+}
+
+async function cropToPane(jpeg_base64: string, rect: CssRect): Promise<string | null> {
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
         const crop = cropRectInImage(rect, window.innerWidth, full);
@@ -111,6 +142,10 @@ const SHRINK_SCALES = [0.5, 0.35, 0.25];
 async function captureWindow(): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
     if (jpeg_base64.length <= MAX_SNAPSHOT_CHARS) return jpeg_base64;
+    return track(shrinkToFit(jpeg_base64));
+}
+
+async function shrinkToFit(jpeg_base64: string): Promise<string | null> {
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
         for (const scale of SHRINK_SCALES) {
@@ -247,4 +282,16 @@ export function paneDragCandidate(target: EventTarget | null): string | null {
 /** Test hook. */
 export function resetTearOffSnapshotForTests(): void {
     held = null;
+}
+
+/**
+ * Waits for every decode/encode still running, including ones no test
+ * awaited. Lets a task pass first, so a capture whose RPC has already
+ * answered gets to register its work before the set is checked.
+ */
+export async function settleTearOffSnapshotForTests(): Promise<void> {
+    do {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await Promise.allSettled([...pendingCaptures]);
+    } while (pendingCaptures.size > 0);
 }
