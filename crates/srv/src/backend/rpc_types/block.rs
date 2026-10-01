@@ -566,6 +566,18 @@ pub struct CommandResolveCliData {
     /// Block ID to stream install output into (optional — if empty, no streaming)
     #[serde(default)]
     pub block_id: String,
+    /// The pane this resolve launches into, for its CLI notices
+    /// (`backend::cli_notice`). A quick fork resolves from its source pane
+    /// (`block_id`) but launches into a new one. Absent: `block_id`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub notice_block_id: Option<String>,
+    /// The agent the CLI is resolved for, whose last-run version is
+    /// recorded. A new picker pane resolves before its `agentId` meta is
+    /// written, so the caller says. Absent: the notice pane's `agentId`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub agent_id: Option<String>,
 }
 
 /// Result from ResolveCliCommand

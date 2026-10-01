@@ -35,7 +35,8 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 broker: broker_resolve.clone(),
                 filestore: filestore_resolve.clone(),
                 mstore: mstore_resolve.clone(),
-                block_id: cmd.block_id.clone(),
+                block_id: notice_block_id(&cmd),
+                agent_id: cmd.agent_id.clone().filter(|a| !a.trim().is_empty()),
                 provider: cmd.provider_id.clone(),
             };
             async move {
@@ -825,8 +826,23 @@ struct CliNotices {
     broker: std::sync::Arc<crate::backend::mps::Broker>,
     filestore: std::sync::Arc<crate::backend::storage::filestore::FileStore>,
     mstore: std::sync::Arc<crate::backend::storage::store::Store>,
+    /// The pane being launched (`notice_block_id`, else `block_id`).
     block_id: String,
+    /// The agent being launched, when the caller says; else the pane's
+    /// `agentId` meta.
+    agent_id: Option<String>,
     provider: String,
+}
+
+/// The pane a resolve's notices go to: the launch target when the caller
+/// names one (a quick fork resolves from its source pane), else `block_id`.
+fn notice_block_id(cmd: &CommandResolveCliData) -> String {
+    cmd.notice_block_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .unwrap_or(&cmd.block_id)
+        .to_string()
 }
 
 impl CliNotices {
@@ -855,9 +871,17 @@ impl CliNotices {
         }
         let Some(version) = crate::backend::cli_notice::version_token(raw_version) else { return };
         let (broker, filestore, mstore) = (self.broker.clone(), self.filestore.clone(), self.mstore.clone());
-        let (block_id, provider) = (self.block_id.clone(), self.provider.clone());
+        let (block_id, provider, agent_id) = (self.block_id.clone(), self.provider.clone(), self.agent_id.clone());
         tokio::task::spawn_blocking(move || {
-            crate::backend::cli_notice::observe_and_notify(&broker, &filestore, &mstore, &block_id, &provider, &version);
+            crate::backend::cli_notice::observe_and_notify(
+                &broker,
+                &filestore,
+                &mstore,
+                &block_id,
+                agent_id.as_deref(),
+                &provider,
+                &version,
+            );
         });
     }
 }
@@ -889,6 +913,29 @@ async fn get_cli_version(cli_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resolve_cmd(block_id: &str, notice_block_id: Option<&str>) -> CommandResolveCliData {
+        CommandResolveCliData {
+            provider_id: "qwen".to_string(),
+            cli_command: "qwen".to_string(),
+            npm_package: "@qwen-code/qwen-code".to_string(),
+            pinned_version: "0.24.0".to_string(),
+            windows_install_command: String::new(),
+            unix_install_command: String::new(),
+            block_id: block_id.to_string(),
+            notice_block_id: notice_block_id.map(str::to_string),
+            agent_id: None,
+        }
+    }
+
+    /// CLI notices go to the pane being launched: a quick fork resolves from
+    /// its source pane (`block_id`) but names its new pane (Codex on #4128).
+    #[test]
+    fn cli_notices_go_to_the_launch_target() {
+        assert_eq!(notice_block_id(&resolve_cmd("source", Some("fork"))), "fork");
+        assert_eq!(notice_block_id(&resolve_cmd("source", None)), "source");
+        assert_eq!(notice_block_id(&resolve_cmd("source", Some("  "))), "source");
+    }
 
     /// An unknown provider is refused before anything touches the disk.
     #[tokio::test]

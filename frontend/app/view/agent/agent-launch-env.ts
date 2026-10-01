@@ -104,6 +104,9 @@ export async function resolveCliBin(
     // (open-trace.ts) — the launch target, which a quick fork makes a
     // different block from `blockId` (ReAgent P1 on #3939).
     traceBlockId: string = blockId,
+    // The agent being launched, for its last-run CLI version record: a new
+    // pane resolves before its `agentId` meta is written (cli_notice.rs).
+    agentId?: string,
 ): Promise<string> {
     const result = await RpcApi.ResolveCliCommand(
         TabRpcClient,
@@ -115,6 +118,10 @@ export async function resolveCliBin(
             windows_install_command: provider.windowsInstallCommand,
             unix_install_command: provider.unixInstallCommand,
             block_id: blockId,
+            // CLI notices go to the pane being launched, not a quick
+            // fork's source pane.
+            notice_block_id: traceBlockId,
+            agent_id: agentId,
         },
         // Same budget as launch-flow.ts: a first launch may npm-install.
         { timeout: 300000 },

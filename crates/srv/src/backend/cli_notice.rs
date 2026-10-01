@@ -186,18 +186,23 @@ pub fn agent_key_of_block(mstore: &crate::backend::storage::store::Store, block_
     (!id.trim().is_empty()).then_some(id)
 }
 
-/// Observe `version` for the agent on `block_id` and, if it changed, append
-/// the notice to that pane. The one entry point both sources use: Claude's
-/// own `system/init` frame, and `ResolveCli` for the other providers.
+/// Observe `version` for an agent and, if it changed, append the notice to
+/// `block_id`'s pane. The agent is `agent_id` when the caller knows it (a
+/// new pane resolves its CLI before its `agentId` meta is written), else
+/// the pane's `agentId`. The one entry point both sources use: Claude's own
+/// `system/init` frame, and `ResolveCli` for the other providers.
 pub fn observe_and_notify(
     broker: &Arc<crate::backend::mps::Broker>,
     filestore: &Arc<crate::backend::storage::filestore::FileStore>,
     mstore: &Arc<crate::backend::storage::store::Store>,
     block_id: &str,
+    agent_id: Option<&str>,
     provider: &str,
     version: &str,
 ) {
-    let Some(agent_key) = agent_key_of_block(mstore, block_id) else { return };
+    let Some(agent_key) = agent_id.map(str::to_string).or_else(|| agent_key_of_block(mstore, block_id)) else {
+        return;
+    };
     let Some(paths) = agentmux_common::DataPaths::from_env() else { return };
     if let Some(from) = observe_version(record_dir(&paths), &agent_key, provider, version) {
         let pinned = crate::backend::providers::get_provider(provider).map(|p| p.pinned_version);

@@ -31,4 +31,16 @@ unix_install_command: string,
 /**
  * Block ID to stream install output into (optional — if empty, no streaming)
  */
-block_id: string, };
+block_id: string, 
+/**
+ * The pane this resolve launches into, for its CLI notices
+ * (`backend::cli_notice`). A quick fork resolves from its source pane
+ * (`block_id`) but launches into a new one. Absent: `block_id`.
+ */
+notice_block_id?: string, 
+/**
+ * The agent the CLI is resolved for, whose last-run version is
+ * recorded. A new picker pane resolves before its `agentId` meta is
+ * written, so the caller says. Absent: the notice pane's `agentId`.
+ */
+agent_id?: string, };

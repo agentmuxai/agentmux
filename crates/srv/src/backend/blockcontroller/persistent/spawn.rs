@@ -854,7 +854,7 @@ impl PersistentSubprocessController {
                             let (block_id, version) = (block_id_read.clone(), version.to_string());
                             tokio::task::spawn_blocking(move || {
                                 crate::backend::cli_notice::observe_and_notify(
-                                    &broker, &filestore, &store, &block_id, "claude", &version,
+                                    &broker, &filestore, &store, &block_id, None, "claude", &version,
                                 );
                             });
                         }
