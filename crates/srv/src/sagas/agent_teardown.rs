@@ -112,7 +112,14 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
     let started = std::time::Instant::now();
     // Identity and inventory while the block is still registered (step 2).
     let who = AgentIdentity::of(state, block_id);
-    let before = agent_resources::snapshot(state, block_id);
+    // Store reads (SQLite) off the async workers: a bulk close runs this
+    // for every block at once.
+    let before = {
+        let (st, id) = (state.clone(), block_id.to_string());
+        tokio::task::spawn_blocking(move || agent_resources::snapshot(&st, &id))
+            .await
+            .unwrap_or_default()
+    };
     let mut report = TeardownReport {
         block_id: block_id.to_string(),
         agent: who.label(block_id),

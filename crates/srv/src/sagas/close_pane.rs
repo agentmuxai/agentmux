@@ -10,7 +10,8 @@
 // `ClosePane` MCP tool had the same gap (#3202). This saga takes the whole set.
 //
 // **Steps (§4.2, §9.2):**
-// 1. `shutdown_agents` over every block at once, one deadline: refuse
+// 1. `agent_teardown::run_many(.., Policy::close())` over every block at
+//    once, one deadline (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md): refuse
 //    respawn and messaging delivery, interrupt any turn, let the process
 //    exit (force-kill at the deadline), THEN drop its process tracker, then
 //    save final state (`session:active_pid` cleared, instance row `stopped`
