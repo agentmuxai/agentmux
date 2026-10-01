@@ -105,6 +105,24 @@ describe("permissionModeText", () => {
         expect(permissionModeText("plan", true).note).toMatch(/approved automatically/);
     });
 
+    // `Record<PermissionMode, true>` makes this a COMPILE-TIME list: adding a mode to
+    // the PermissionMode union without adding it here is a type error, so a new
+    // mode cannot ship without someone deciding what its menu text says.
+    const EVERY_MODE: Record<PermissionMode, true> = { bypass: true, auto: true, acceptEdits: true, plan: true, default: true };
+
+    it("every permission mode has wording for both kinds of controller", () => {
+        for (const mode of Object.keys(EVERY_MODE) as PermissionMode[]) {
+            for (const autoAnswers of [true, false]) {
+                const t = permissionModeText(mode, autoAnswers);
+                expect(t.label.length, `${mode}/${autoAnswers}`).toBeGreaterThan(0);
+                // a note exists exactly where the label alone would mislead: modes whose
+                // prompts are answered for the user, other than Bypass (already true)
+                const needsNote = autoAnswers && mode !== "bypass";
+                expect(Boolean(t.note), `${mode}/${autoAnswers}`).toBe(needsNote);
+            }
+        }
+    });
+
     it("Bypass says nothing false either way, so it needs no note", () => {
         expect(permissionModeText("bypass", true)).toEqual({ label: "Bypass (no prompts)" });
     });
