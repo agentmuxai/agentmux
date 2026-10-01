@@ -67,3 +67,60 @@ export function modelFromFlags(flags: readonly string[]): string | undefined {
 export function effectiveModel(runtimeModel: string, providerFlags: unknown): string {
     return modelFromFlags(parseProviderFlags(providerFlags)) ?? runtimeModel;
 }
+
+/** The value of a flag list's `--effort`, if it has one; the last wins. */
+export function effortFromFlags(flags: readonly string[]): string | undefined {
+    let effort: string | undefined;
+    for (let i = 0; i < flags.length; i++) {
+        const f = flags[i];
+        if (f === "--effort" && flags[i + 1] !== undefined) {
+            effort = flags[i + 1];
+            i++;
+        } else if (f.startsWith("--effort=")) {
+            effort = f.slice("--effort=".length);
+        }
+    }
+    return effort;
+}
+
+/**
+ * The permission mode a flag list selects, if it selects one: the last of
+ * `--permission-mode X` (also `=X`), `--dangerously-skip-permissions` and
+ * `--yolo` (both are "bypass").
+ */
+export function permissionModeFromFlags(flags: readonly string[]): string | undefined {
+    let mode: string | undefined;
+    for (let i = 0; i < flags.length; i++) {
+        const f = flags[i];
+        if (f === "--permission-mode" && flags[i + 1] !== undefined) {
+            mode = flags[i + 1];
+            i++;
+        } else if (f.startsWith("--permission-mode=")) {
+            mode = f.slice("--permission-mode=".length);
+        } else if (f === "--dangerously-skip-permissions" || f === "--yolo") {
+            mode = "bypass";
+        }
+    }
+    return mode;
+}
+
+/**
+ * The model, effort and permission mode the process actually runs: the agent
+ * definition's own flags (appended after the runtime's) win over the stored
+ * selection. What the menu and `/runtime` should SHOW, so they never claim a
+ * selection the definition overrides.
+ */
+export function effectiveRuntime<T extends { model: string; effort: string; permissionMode?: string }>(
+    runtime: T,
+    providerFlags: unknown,
+): T {
+    const flags = parseProviderFlags(providerFlags);
+    return {
+        ...runtime,
+        model: modelFromFlags(flags) ?? runtime.model,
+        effort: effortFromFlags(flags) ?? runtime.effort,
+        ...(runtime.permissionMode !== undefined
+            ? { permissionMode: permissionModeFromFlags(flags) ?? runtime.permissionMode }
+            : {}),
+    };
+}

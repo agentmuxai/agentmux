@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { effectiveModel, effortApplies, effortNotUsedReason, modelFromFlags, modelTakesEffort } from "./runtime-capabilities";
+import { effectiveModel, effectiveRuntime, effortFromFlags, permissionModeFromFlags, effortApplies, effortNotUsedReason, modelFromFlags, modelTakesEffort } from "./runtime-capabilities";
 
 describe("modelTakesEffort", () => {
     it("Haiku does not, by alias or by concrete id, in any case", () => {
@@ -47,5 +47,39 @@ describe("modelFromFlags / effectiveModel", () => {
         expect(effectiveModel("sonnet", "--add-dir /tmp")).toBe("sonnet");
         expect(effectiveModel("sonnet", "")).toBe("sonnet");
         expect(effectiveModel("sonnet", undefined)).toBe("sonnet");
+    });
+});
+
+describe("effectiveRuntime", () => {
+    const base = { permissionMode: "bypass", model: "sonnet", effort: "high" };
+    it("the definition's own --model and --effort win over the stored selection", () => {
+        expect(effectiveRuntime(base, "--model opus --effort max")).toEqual({ ...base, model: "opus", effort: "max" });
+        expect(effectiveRuntime(base, "--effort=low")).toEqual({ ...base, effort: "low" });
+    });
+    it("the selection stands when the flags say nothing about it", () => {
+        expect(effectiveRuntime(base, "--add-dir /tmp")).toEqual(base);
+        expect(effectiveRuntime(base, undefined)).toEqual(base);
+    });
+    it("reads the last of a repeated effort", () => {
+        expect(effortFromFlags(["--effort", "low", "--effort", "max"])).toBe("max");
+        expect(effortFromFlags(["--effort"])).toBeUndefined();
+    });
+});
+
+describe("permissionModeFromFlags / effectiveRuntime's mode", () => {
+    it("reads the mode a flag list selects; the last wins; bypass flags read as bypass", () => {
+        expect(permissionModeFromFlags(["--permission-mode", "plan"])).toBe("plan");
+        expect(permissionModeFromFlags(["--permission-mode=acceptEdits"])).toBe("acceptEdits");
+        expect(permissionModeFromFlags(["--dangerously-skip-permissions"])).toBe("bypass");
+        expect(permissionModeFromFlags(["--yolo"])).toBe("bypass");
+        expect(permissionModeFromFlags(["--permission-mode", "plan", "--dangerously-skip-permissions"])).toBe("bypass");
+        expect(permissionModeFromFlags(["--dangerously-skip-permissions", "--permission-mode", "plan"])).toBe("plan");
+        expect(permissionModeFromFlags(["--add-dir", "/x"])).toBeUndefined();
+        expect(permissionModeFromFlags(["--permission-mode"])).toBeUndefined();
+    });
+    it("the definition's own mode wins over the stored selection (ReAgent P2 on #4161)", () => {
+        const base = { permissionMode: "bypass", model: "sonnet", effort: "high" };
+        expect(effectiveRuntime(base, "--permission-mode plan").permissionMode).toBe("plan");
+        expect(effectiveRuntime(base, "--add-dir /tmp").permissionMode).toBe("bypass");
     });
 });

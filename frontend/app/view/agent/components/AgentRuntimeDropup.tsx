@@ -35,7 +35,7 @@ import { familyKey, getProvider, type ProviderModel } from "../providers";
 import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
 import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
-import { effectiveModel, effortApplies, effortNotUsedReason } from "../runtime-capabilities";
+import { effectiveRuntime, effortApplies, effortNotUsedReason } from "../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
 /** Serialize a MenuPositionResult.style the same way flyoutmenu.tsx does. */
@@ -205,14 +205,17 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     const effortLabel = (value: string): string => EFFORT_OPTIONS.find((o) => o.value === value)?.label ?? value;
     const modeLabel = (value: string): string => MODE_OPTIONS.find((o) => o.value === value)?.label ?? value;
 
-    // The model the process actually runs: the agent definition's own `--model`
-    // (appended after the runtime's) wins over the selection. Whether effort
-    // applies depends on THAT.
-    const runningModel = (): string =>
-        effectiveModel(runtime().model, props.blockAtom()?.meta?.[PROVIDER_FLAGS_META_KEY]);
+    // What the process actually runs. An agent definition's own `--model` /
+    // `--effort` (appended after the runtime's) win over the stored selection, so
+    // the menu shows THAT — it must never claim a selection the definition
+    // overrides. Picking something here removes the overriding flag from this
+    // pane (`patchRuntime`), so the pick then holds.
+    const shown = (): AgentRuntimeConfig =>
+        effectiveRuntime(runtime(), props.blockAtom()?.meta?.[PROVIDER_FLAGS_META_KEY]);
+    const runningModel = (): string => shown().model;
 
     const compactSummary = (): string => {
-        const r = runtime();
+        const r = shown();
         // Effort is left out when it does nothing for this pane: the label says
         // what the agent runs, and "Haiku · high" would claim an effort it never gets.
         const parts = [modeLabel(r.permissionMode), modelLabel(r.model)];
@@ -223,7 +226,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     // Single pass builds both the render list (rows, incl. section headers)
     // and the flat option list keyboard nav / selection walks.
     const build = (): { rows: Row[]; options: OptionRow[] } => {
-        const r = runtime();
+        const r = shown();
         const rows: Row[] = [];
         const options: OptionRow[] = [];
 
@@ -393,7 +396,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     "agent-runtime-dropup-trigger--differs": shownAgreement().kind === "differs",
                     "agent-runtime-dropup-trigger--pending": shownAgreement().kind === "pending",
                 }}
-                style={{ "border-left": `3px solid ${PERMISSION_COLORS[runtime().permissionMode]}` }}
+                style={{ "border-left": `3px solid ${PERMISSION_COLORS[shown().permissionMode] ?? PERMISSION_COLORS.default}` }}
                 title={
                     applyError() != null
                         ? `Couldn't apply that change — the agent may still be running the previous settings. ${applyError()}`

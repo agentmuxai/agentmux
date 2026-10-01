@@ -17,6 +17,7 @@ import {
     parseProviderFlags,
     selectLaunchArgs,
     withProviderFlags,
+    withoutOverriddenFlags,
     type LaunchArgsProvider,
 } from "./launch-args";
 
@@ -154,5 +155,32 @@ describe("provider_flags are durable; --fork-session is not", () => {
         const out = withProviderFlags(rebuilt, "--x");
         expect(rebuilt).toEqual(["-p"]);
         expect(out).not.toBe(rebuilt);
+    });
+});
+
+describe("withoutOverriddenFlags", () => {
+    it("takes out the flags a menu pick replaces, in every spelling, and keeps the rest", () => {
+        const flags = "--add-dir /tmp --model opus --effort low -m haiku --model=sonnet --verbose";
+        expect(withoutOverriddenFlags(flags, { model: true })).toBe("--add-dir /tmp --effort low --verbose");
+        expect(withoutOverriddenFlags(flags, { effort: true })).toBe("--add-dir /tmp --model opus -m haiku --model=sonnet --verbose");
+        expect(withoutOverriddenFlags(flags, { model: true, effort: true })).toBe("--add-dir /tmp --verbose");
+    });
+
+    it("takes out the permission flags only when the permission mode is picked", () => {
+        const flags = "--permission-mode plan --dangerously-skip-permissions --yolo --model opus";
+        expect(withoutOverriddenFlags(flags, { permissionMode: true })).toBe("--model opus");
+        expect(withoutOverriddenFlags(flags, {})).toBe(flags);
+    });
+
+    it("leaves unrelated flags that merely look similar", () => {
+        expect(withoutOverriddenFlags("--model-dir /x --effort-log y", { model: true, effort: true })).toBe(
+            "--model-dir /x --effort-log y",
+        );
+    });
+
+    it("is a no-op for nothing, or for non-string meta", () => {
+        expect(withoutOverriddenFlags("", { model: true })).toBe("");
+        expect(withoutOverriddenFlags(undefined, { model: true })).toBe("");
+        expect(withoutOverriddenFlags(null, { model: true })).toBe("");
     });
 });
