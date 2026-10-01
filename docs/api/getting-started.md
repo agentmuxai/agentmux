@@ -128,9 +128,12 @@ Tier 3).
   are different values.
 - **`unknown command`** — check the command name against
   `app-api-status.md`. Tier 1 is implemented; Tier 2+ may not be yet.
-- **`CLI_NOT_AVAILABLE` on `agent.open`** — the target provider's CLI
-  isn't installed at the expected path. Install it first; see
-  `app-api-status.md` for the exact npm command.
+- **`CLI_INSTALLING` on `agent.open`** — the provider's CLI is being
+  installed (first use, or just after an upgrade moved its pin). Retry in
+  a minute; the install carries on in the background.
+- **`CLI_NOT_AVAILABLE` on `agent.open`** — the provider's CLI could not
+  be installed (no `npm`, offline, or a provider with no npm package).
+  The error says why; fix that and retry.
 
 ## What's next
 

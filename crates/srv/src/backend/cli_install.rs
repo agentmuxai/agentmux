@@ -452,6 +452,61 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
     })
 }
 
+// ─── install on demand ──────────────────────────────────────────────────────
+
+/// Why [`ensure_installed`] did not hand back a CLI.
+#[derive(Debug)]
+pub enum EnsureError {
+    /// The install ran and failed (no npm, offline, npm exited non-zero, ...).
+    Failed(String),
+    /// It is still running after the wait. The install is NOT cancelled: it keeps
+    /// the cross-instance lock until npm returns, and a later call waits on that
+    /// lock and then reuses the result.
+    StillInstalling,
+}
+
+/// The pinned CLI for a provider whose install is missing: install it, waiting
+/// up to `wait`. `install` is injected so tests don't need npm.
+///
+/// This is what the UI's launch flow does on a pin bump (`ResolveCli` installs
+/// and waits). `agent.open` used to refuse instead, with `CLI_NOT_AVAILABLE`,
+/// for the minute or two after an upgrade while the new pin downloaded.
+pub async fn ensure_installed_with<F>(
+    paths: DataPaths,
+    req: NpmInstallRequest,
+    wait: std::time::Duration,
+    install: F,
+) -> Result<PathBuf, EnsureError>
+where
+    F: FnOnce(&DataPaths, &NpmInstallRequest) -> Result<InstallOutcome, InstallError>
+        + Send
+        + 'static,
+{
+    let task = tokio::task::spawn_blocking(move || install(&paths, &req));
+    match tokio::time::timeout(wait, task).await {
+        Ok(Ok(Ok(InstallOutcome::Installed(bin) | InstallOutcome::AlreadyInstalled(bin)))) => {
+            Ok(bin)
+        }
+        Ok(Ok(Err(e))) => Err(EnsureError::Failed(e.to_string())),
+        Ok(Err(join)) => Err(EnsureError::Failed(format!(
+            "the install task failed: {join}"
+        ))),
+        Err(_elapsed) => Err(EnsureError::StillInstalling),
+    }
+}
+
+/// [`ensure_installed_with`] running the real npm install.
+pub async fn ensure_installed(
+    paths: DataPaths,
+    req: NpmInstallRequest,
+    wait: std::time::Duration,
+) -> Result<PathBuf, EnsureError> {
+    ensure_installed_with(paths, req, wait, |p, r| {
+        install_pinned_cli(p, r, &|_, _| {})
+    })
+    .await
+}
+
 // ─── startup warm-up ────────────────────────────────────────────────────────
 
 /// How long after srv start the warm-up begins: after the first IPC traffic,
@@ -949,5 +1004,227 @@ mod tests {
             .map(|r| r.provider_id)
             .collect();
         assert_eq!(todo, vec!["codex"]);
+    }
+
+    // ── a pin bump, as a user meets it ─────────────────────────────────────
+    //
+    // The user upgraded AgentMux, the provider's pin moved, and they open an
+    // existing agent. The previous pin is installed and complete; the new one is
+    // not. These use the LIVE registry pin (never a hardcoded version — that is
+    // what silently broke `warm_up_picks_used_npm_providers…` at 2.1.280 →
+    // 2.1.285) and a fake npm.
+
+    /// A completed install of "some earlier pin" of claude, plus the paths.
+    fn with_previous_pin_installed() -> (tempfile::TempDir, DataPaths, String, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = paths_in(tmp.path());
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        let previous = "1.0.0-previous".to_string();
+        assert_ne!(previous, live.pinned_version);
+        let req = NpmInstallRequest {
+            provider_id: "claude".into(),
+            npm_package: live.npm_package.into(),
+            pinned_version: previous.clone(),
+            cli_command: live.cli_command.into(),
+            background: true,
+        };
+        install_pinned_cli_with(&paths, &req, &|_, _| {}, fake_npm(true, true)).unwrap();
+        let old_bin = npm_bin(
+            &shared_cli_dir(&paths, "claude", &previous).unwrap(),
+            "claude",
+        );
+        assert!(old_bin.is_file());
+        (tmp, paths, previous, old_bin)
+    }
+
+    fn live_claude_req(background: bool) -> NpmInstallRequest {
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        NpmInstallRequest {
+            provider_id: "claude".into(),
+            npm_package: live.npm_package.into(),
+            pinned_version: live.pinned_version.into(),
+            cli_command: live.cli_command.into(),
+            background,
+        }
+    }
+
+    #[test]
+    fn after_a_pin_bump_the_previous_install_is_not_mistaken_for_the_new_pin() {
+        let (_tmp, paths, _prev, _old_bin) = with_previous_pin_installed();
+        assert_eq!(
+            find_installed_for_provider(&paths, "claude"),
+            None,
+            "an open must resolve the NEW pin (installing it), not run whatever was there"
+        );
+        // …and the warm-up knows it has work to do, for exactly the live pin.
+        let todo = providers_needing_install(&paths, &["claude".to_string()]);
+        assert_eq!(todo.len(), 1);
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        assert_eq!(todo[0].pinned_version, live.pinned_version);
+    }
+
+    #[test]
+    fn installing_the_new_pin_leaves_the_previous_one_runnable_for_panes_that_hold_its_path() {
+        // A pane restored with the old `cmd` path keeps working until its mount
+        // flow rewrites it; nothing may delete the old install out from under it.
+        let (_tmp, paths, previous, old_bin) = with_previous_pin_installed();
+        install_pinned_cli_with(
+            &paths,
+            &live_claude_req(false),
+            &|_, _| {},
+            fake_npm(true, true),
+        )
+        .unwrap();
+
+        let new_bin = find_installed_for_provider(&paths, "claude").expect("new pin resolves");
+        assert_ne!(new_bin, old_bin);
+        assert!(is_valid_install(
+            &shared_cli_dir(&paths, "claude", &previous).unwrap(),
+            "claude"
+        ));
+        assert!(old_bin.is_file(), "the previous pin's shim is untouched");
+        // Resolving again is stable and does not reinstall.
+        assert_eq!(find_installed_for_provider(&paths, "claude"), Some(new_bin));
+    }
+
+    #[test]
+    fn a_failed_install_of_the_new_pin_does_not_fall_back_to_the_previous_one() {
+        // DOCUMENTS CURRENT BEHAVIOUR: the pin is exact. Offline (or no npm)
+        // right after an upgrade, opening an agent fails with the install error
+        // rather than silently running the previous CLI. The previous install is
+        // still on disk and valid; nothing selects it.
+        let (_tmp, paths, previous, old_bin) = with_previous_pin_installed();
+        let out = install_pinned_cli_with(
+            &paths,
+            &live_claude_req(false),
+            &|_, _| {},
+            fake_npm(false, false),
+        );
+        assert!(
+            matches!(out, Err(InstallError::NpmFailed { .. })),
+            "{out:?}"
+        );
+        assert_eq!(find_installed_for_provider(&paths, "claude"), None);
+        assert!(old_bin.is_file());
+        assert!(is_valid_install(
+            &shared_cli_dir(&paths, "claude", &previous).unwrap(),
+            "claude"
+        ));
+        // The failed attempt left nothing behind that a later attempt would trip on.
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        assert!(!shared_cli_dir(&paths, "claude", live.pinned_version)
+            .unwrap()
+            .exists());
+    }
+
+    // ── installing on demand (agent.open) ──────────────────────────────────
+
+    fn live_req() -> NpmInstallRequest {
+        live_claude_req(false)
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_installs_the_missing_pin_and_returns_the_shim() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        let want = npm_bin(
+            &shared_cli_dir(&paths, "claude", live.pinned_version).unwrap(),
+            "claude",
+        );
+        let bin = ensure_installed_with(
+            paths.clone(),
+            live_req(),
+            std::time::Duration::from_secs(30),
+            |p, r| install_pinned_cli_with(p, r, &|_, _| {}, fake_npm(true, true)),
+        )
+        .await
+        .expect("installs");
+        assert_eq!(bin, want);
+        assert!(bin.is_file());
+        assert_eq!(find_installed_for_provider(&paths, "claude"), Some(bin));
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_reuses_an_install_that_finished_meanwhile() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        install_pinned_cli_with(
+            &paths,
+            &live_claude_req(true),
+            &|_, _| {},
+            fake_npm(true, true),
+        )
+        .unwrap();
+        let bin = ensure_installed_with(
+            paths,
+            live_req(),
+            std::time::Duration::from_secs(30),
+            |p, r| {
+                install_pinned_cli_with(
+                    p,
+                    r,
+                    &|_, _| {},
+                    |_: &Path, _: &str, _: bool| -> std::io::Result<NpmRun> {
+                        panic!("npm must not run again")
+                    },
+                )
+            },
+        )
+        .await
+        .expect("reuses");
+        assert!(bin.is_file());
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_reports_a_failed_install_with_its_reason() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        let err = ensure_installed_with(
+            paths.clone(),
+            live_req(),
+            std::time::Duration::from_secs(30),
+            |p, r| install_pinned_cli_with(p, r, &|_, _| {}, fake_npm(false, false)),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, EnsureError::Failed(m) if m.contains("npm install exited 1")),
+            "{err:?}"
+        );
+        assert_eq!(find_installed_for_provider(&paths, "claude"), None);
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_stops_waiting_but_does_not_cancel_a_slow_install() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = finished.clone();
+        let err = ensure_installed_with(
+            paths.clone(),
+            live_req(),
+            std::time::Duration::from_millis(50),
+            move |p, r| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                let out = install_pinned_cli_with(p, r, &|_, _| {}, fake_npm(true, true));
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                out
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, EnsureError::StillInstalling), "{err:?}");
+        // The caller got its answer quickly; the install carries on and lands.
+        for _ in 0..100 {
+            if finished.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            finished.load(std::sync::atomic::Ordering::SeqCst),
+            "the install must keep running"
+        );
+        assert!(
+            find_installed_for_provider(&paths, "claude").is_some(),
+            "and a later open finds it"
+        );
     }
 }
