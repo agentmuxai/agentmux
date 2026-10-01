@@ -70,7 +70,6 @@ const totalTokens = (node: ContextDeliveryNode): number => node.items.reduce((su
 
 const fmt = formatCompactNumber;
 
-/** One item's head row: icon, name, chip, cut mark, size. The file shows on hover. */
 /**
  * Whether the agent got the Global Memory more than once: one copy per
  * startup file carrying it, plus the hook's, unless the hook left it out
@@ -84,6 +83,7 @@ const globalSentTwice = (node: ContextDeliveryNode): boolean => {
     return files + (hookSentIt ? 1 : 0) > 1;
 };
 
+/** One item's head row: icon, name, chip, cut mark, size. The file shows on hover. */
 const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.Element => (
     <div class={clsx("agent-context-delivery-item-head", props.item.delivered && `delivered-${props.item.delivered}`)}>
         <span class="agent-context-delivery-item-icon">{ITEM_ICON[props.item.kind]}</span>
