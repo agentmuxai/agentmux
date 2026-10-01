@@ -71,7 +71,14 @@ const totalTokens = (node: ContextDeliveryNode): number => node.items.reduce((su
 const fmt = formatCompactNumber;
 
 /** One item's head row: icon, name, chip, cut mark, size. The file shows on hover. */
-const ItemHead = (props: { item: ContextItem }): JSX.Element => (
+/**
+ * Whether the hook delivered the Global Memory too. When it was left out
+ * because a startup file carries it (LC3), its entries come `via` that file,
+ * and the file's "+ Global Memory" mark is the one delivery, not a repeat.
+ */
+const globalSentTwice = (node: ContextDeliveryNode): boolean => !node.items.some((i) => i.via === "startup_file");
+
+const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.Element => (
     <div class={clsx("agent-context-delivery-item-head", props.item.delivered && `delivered-${props.item.delivered}`)}>
         <span class="agent-context-delivery-item-icon">{ITEM_ICON[props.item.kind]}</span>
         <span class="agent-context-delivery-item-name" title={props.item.path ?? props.item.name}>
@@ -87,8 +94,12 @@ const ItemHead = (props: { item: ContextItem }): JSX.Element => (
         </Show>
         <Show when={props.item.contains?.includes("global_memory")}>
             <span
-                class="agent-context-delivery-item-chip agent-context-delivery-item-dup"
-                title="This file also carries the Global Memory, so a new session gets it twice"
+                class={clsx("agent-context-delivery-item-chip", props.globalSentTwice && "agent-context-delivery-item-dup")}
+                title={
+                    props.globalSentTwice
+                        ? "This file also carries the Global Memory, so a new session gets it twice"
+                        : "The Global Memory reached the agent through this file"
+                }
             >
                 + Global Memory
             </span>
@@ -128,7 +139,7 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
             {/* Memory deliveries list every item without opening the card. */}
             <Show when={!summaryCard()}>
                 <div class="agent-context-delivery-rows">
-                    <For each={props.node.items}>{(item) => <ItemHead item={item} />}</For>
+                    <For each={props.node.items}>{(item) => <ItemHead item={item} globalSentTwice={globalSentTwice(props.node)} />}</For>
                 </div>
             </Show>
             <Show when={bigMemory()}>
@@ -162,7 +173,7 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
                     <For each={bodies()}>
                         {(item) => (
                             <div class="agent-context-delivery-item">
-                                <ItemHead item={item} />
+                                <ItemHead item={item} globalSentTwice={globalSentTwice(props.node)} />
                                 <pre class="agent-context-delivery-body" ref={handoff}>
                                     <LinkifiedText text={item.body ?? ""} />
                                 </pre>
