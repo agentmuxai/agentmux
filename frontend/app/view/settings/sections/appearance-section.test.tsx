@@ -30,6 +30,8 @@ vi.mock("@/app/store/global", () => ({
     settingsAtom: () => settings,
 }));
 vi.mock("@/app/menu/base-menus", () => ({ THEME_OPTIONS: [] }));
+let linux = false;
+vi.mock("@/util/platformutil", () => ({ isLinux: () => linux }));
 
 import { AppearanceSection } from "./appearance-section";
 
@@ -73,6 +75,46 @@ describe("Appearance — startup splash toggle", () => {
         settings = { "splash:disabled": true };
         fireEvent.click(splashToggle());
         expect(setConfig.mock.calls[0][1]).toEqual({ "splash:disabled": false });
+    });
+});
+
+describe("Appearance — Linux transparency restart notice (#4011)", () => {
+    const NOTICE = /Restart AgentMux to apply/;
+
+    beforeEach(() => {
+        settings = {};
+        linux = true;
+        window.history.replaceState({}, "", "/?window_transparent=0");
+    });
+    afterEach(() => {
+        cleanup();
+        linux = false;
+        window.history.replaceState({}, "", "/");
+    });
+
+    it("shows when transparency is on but the session started opaque", () => {
+        settings = { "window:transparent": true };
+        render(() => <AppearanceSection />);
+        expect(screen.getByText(NOTICE)).toBeTruthy();
+    });
+
+    it("is hidden when the session started transparent", () => {
+        window.history.replaceState({}, "", "/?window_transparent=1");
+        settings = { "window:transparent": true };
+        render(() => <AppearanceSection />);
+        expect(screen.queryByText(NOTICE)).toBeNull();
+    });
+
+    it("is hidden while transparency is off", () => {
+        render(() => <AppearanceSection />);
+        expect(screen.queryByText(NOTICE)).toBeNull();
+    });
+
+    it("is hidden off Linux", () => {
+        linux = false;
+        settings = { "window:transparent": true };
+        render(() => <AppearanceSection />);
+        expect(screen.queryByText(NOTICE)).toBeNull();
     });
 });
 

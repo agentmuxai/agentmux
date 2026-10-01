@@ -5,8 +5,10 @@ import { For, Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
+import { isLinux } from "@/util/platformutil";
 import type { SettingsIndexEntry } from "../settings-model";
 import { NumberControl, SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { startupWindowTransparent, transparencyNeedsRestart } from "../transparency-restart";
 
 // ── Search index — one entry per row below, named-key so re-ordering rows
 // can't silently misalign an entry with the wrong row (see settings-model.ts's
@@ -105,6 +107,9 @@ export const APPEARANCE_SETTINGS = {
 export function AppearanceSection(): JSX.Element {
     const s = () => settingsAtom() ?? ({} as any);
     const transparent = () => !!(s()["window:transparent"] as boolean);
+    const startupTransparent = startupWindowTransparent();
+    const needsRestart = () =>
+        transparencyNeedsRestart({ linux: isLinux(), startup: startupTransparent, transparent: transparent() });
 
     return (
         <div class="settings-section-body">
@@ -150,6 +155,11 @@ export function AppearanceSection(): JSX.Element {
                     />
                 }
             />
+            <Show when={needsRestart()}>
+                <div class="setting-row-note" role="status">
+                    Restart AgentMux to apply. On Linux, transparency is set up when the app starts.
+                </div>
+            </Show>
             <Show when={transparent()}>
                 <SettingRow
                     id={APPEARANCE_SETTINGS.opacity.id}
