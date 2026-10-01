@@ -203,6 +203,7 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     jekt_message: false,
     // One-shot marker, same as context_compacted — not chunked.
     session_outcome: false,
+    cli_notice: false,
     // Render-time synthetic calendar separator (Agent History view) — static.
     day_divider: false,
     // Render-time synthetic link row (live view) — static.
@@ -262,6 +263,7 @@ export function estimateNodeForState(
             case "context_compacted": return 48;
             case "compaction_started": return 32;
             case "session_outcome":   return 48;
+            case "cli_notice":        return 48;
             case "day_divider":       return 32;
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
@@ -283,6 +285,7 @@ export function estimateNodeForState(
         case "context_compacted": return 48;
         case "compaction_started": return 32;
         case "session_outcome":   return 48;
+        case "cli_notice":        return 48;
         case "day_divider":       return 32;
         case "history_link":      return 40;
         case "resume_preflight":  return 56;

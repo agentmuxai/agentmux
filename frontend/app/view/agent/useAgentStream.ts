@@ -54,6 +54,7 @@ import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
 import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
+import { parseCliNoticeFrame } from "./cli-notice";
 import { MemoryDeliveryApi } from "@/app/store/rpc-api/memory-delivery";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
@@ -653,6 +654,25 @@ export function useAgentStream({
                             queue.pushNewNode(summaryNode);
                             queue.scheduleFlush();
                         }
+                        continue;
+                    }
+                }
+
+                // CLI install / version-change notices (cli-notice.ts,
+                // shared with parseHistoryLines.ts). An install's later frame
+                // carries the same id, so it updates the "installing" row.
+                {
+                    const cliNode = parseCliNoticeFrame(rawEvent, Date.now());
+                    if (cliNode) {
+                        parser.flushPending();
+                        pushReleasedJekts();
+                        if (hasNodeId(cliNode.id)) {
+                            queue.pushUpdatedNode(cliNode);
+                        } else {
+                            addNodeId(cliNode.id);
+                            queue.pushNewNode(cliNode);
+                        }
+                        queue.scheduleFlush();
                         continue;
                     }
                 }

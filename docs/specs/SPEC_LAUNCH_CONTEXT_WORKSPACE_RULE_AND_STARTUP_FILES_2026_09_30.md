@@ -1,6 +1,6 @@
 # SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown
 
-**Status:** active — LC1 (§3) implemented (#4113); LC2-LC5 proposed.
+**Status:** active — LC1 (§3) implemented (#4113); LC4 (§6.3 steps 1-2) implemented; LC2, LC3, LC5 proposed.
 **Date:** 2026-09-30
 **Verified against:** `agentmux` `main` @ `48cc6fdbc` (§1-§4) and `3fcd1496a` (§6). Paths are relative
 to the repo root.
@@ -376,24 +376,31 @@ persisted frames in the block's output, so they replay with the
 transcript, and never read by the digest (#4034 §3.6). They are for the
 user; the agent's context is unchanged (§8 Q6).
 
-1. **Installing notice.** `CommandResolveCliData` gains an optional
-   `block_id`. When `ResolveCli` has to install, srv appends an
+1. **Installing notice.** `CommandResolveCliData` already carries the
+   pane's `block_id` (`resolveCliBin` and the launch flow send it). When
+   `ResolveCli` has to install, srv appends an
    `{"type":"system","subtype":"agentmux_cli_install"}` frame to that
    block: `state: "installing"`, `provider`, `version`, then `"installed"`
-   (with seconds taken) or `"failed"` (with the error). The pane renders
-   one row that updates in place: "Installing Claude Code 2.1.285…" →
-   "Installed Claude Code 2.1.285 (14 s)". The picker path keeps its
-   modal and gets the row too.
+   (with seconds taken) or `"failed"` (with the error), all under one
+   `install_id`. The pane renders one row that updates in place:
+   "Installing Claude Code 2.1.285…" → "Installed Claude Code 2.1.285
+   (14 s)". The picker's `AgentInstallModal` installs through
+   `install.start`, which has no pane, so it keeps its own progress UI and
+   gets no row.
 2. **Version-change notice.** srv keeps, per agent, the CLI it last ran:
-   `{provider, version, path, at}`, in the agent's existing launch-state
-   JSON (no schema change; §3.2 says why that matters).
+   `{provider, version, at}`, keyed by the block's `agentId`, in
+   `<data_dir>/agent-cli-versions.json` (`backend/cli_notice.rs`). There
+   is no free-form launch-state field on `db_agents` (its launch state is
+   typed columns), and a new column is a schema change (§3.2). A record
+   that can't be read is treated as empty: at worst a notice is missed.
    - **Source of the version:** for Claude, the `claude_code_version` of
      the CLI's own `system/init` frame, which covers every spawn path
      (Launch, restore, reconnect, eager resume) and reports the version
      that actually runs. For the others, the version `ResolveCli` /
      `find_installed` resolved at spawn (`get_cli_version`,
-     `cli_handlers.rs:787`). To confirm in LC4: every Claude spawn path
-     emits `init` before the first turn.
+     `cli_handlers.rs:787`). Confirmed: a stored Claude `init` frame
+     carries `"claude_code_version":"2.1.285"`. The persistent reader
+     (`persistent/spawn.rs`) is where every Claude spawn's stdout passes.
    - **When it differs from the record,** srv appends an
      `agentmux_cli_version_changed` frame `{provider, from, to, pinned}`
      and updates the record. The row: "Claude Code updated: 2.1.218 →

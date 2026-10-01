@@ -2475,6 +2475,70 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 }
 
+// CLI install / version-change notice (cli-notice.ts). Same rule-and-pill
+// shape as .agent-session-outcome; the tone colours the pill and the rule.
+.agent-cli-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 10px var(--space-2);
+    user-select: none;
+    --cli-notice-tone: var(--secondary-text-color, rgba(255, 255, 255, 0.45));
+
+    .agent-cli-notice-rule {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        width: 100%;
+
+        &::before,
+        &::after {
+            content: "";
+            flex: 1 1 auto;
+            height: 1px;
+            background: var(--border-color, rgba(255, 255, 255, 0.12));
+        }
+    }
+
+    .agent-cli-notice-label {
+        flex-shrink: 0;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--cli-notice-tone);
+        padding: 2px 10px;
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border-radius: 10px;
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+    }
+
+    .agent-cli-notice-detail {
+        font-size: 11px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        text-align: center;
+    }
+
+    &.agent-cli-notice-warn {
+        --cli-notice-tone: var(--warning-color, #d9a441);
+    }
+
+    &.agent-cli-notice-error {
+        --cli-notice-tone: var(--error-color, #e06c75);
+    }
+
+    &.agent-cli-notice-warn,
+    &.agent-cli-notice-error {
+        .agent-cli-notice-rule::before,
+        .agent-cli-notice-rule::after {
+            background: color-mix(in srgb, var(--cli-notice-tone) 40%, transparent);
+        }
+
+        .agent-cli-notice-label {
+            border-color: color-mix(in srgb, var(--cli-notice-tone) 40%, transparent);
+        }
+    }
+}
+
 // "Earlier conversations — Open Agent History" link row. Scrolls with the
 // transcript (a normal document row) instead of being pinned above the
 // scroll region — see SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md

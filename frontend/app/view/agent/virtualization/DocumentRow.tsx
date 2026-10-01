@@ -28,6 +28,7 @@ import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
+import { cliNoticeText } from "../cli-notice";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
@@ -662,6 +663,24 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                                 </Show>
                                 <div class="agent-node-peek-tooltip-body">{bodyText}</div>
                             </PeekOverlay>
+                        </div>
+                    );
+                })()}
+            </Show>
+            <Show when={props.node() && props.node().type === "cli_notice"}>
+                {(() => {
+                    // Read through the accessor, not captured once: an
+                    // install row is updated in place (installing → installed).
+                    const node = () => props.node() as Extract<DocumentNode, { type: "cli_notice" }>;
+                    const text = createMemo(() => cliNoticeText(node()));
+                    return (
+                        <div class={`agent-cli-notice agent-cli-notice-${text().tone}`} title={formatExactTime(node().timestamp)}>
+                            <div class="agent-cli-notice-rule">
+                                <span class="agent-cli-notice-label">{text().label}</span>
+                            </div>
+                            <Show when={text().detail}>
+                                <div class="agent-cli-notice-detail">{text().detail}</div>
+                            </Show>
                         </div>
                     );
                 })()}

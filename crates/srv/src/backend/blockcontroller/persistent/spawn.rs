@@ -839,6 +839,26 @@ impl PersistentSubprocessController {
                             now_ms,
                         );
                     }
+                    // The CLI version this agent now runs, from Claude's own
+                    // `system/init` frame: every spawn path passes here, and
+                    // it is the version that actually runs, so a self-update
+                    // shows too. A change from the agent's last run puts a
+                    // notice in the pane (`backend::cli_notice`).
+                    if parsed.get("subtype").and_then(|v| v.as_str()) == Some("init") {
+                        if let (Some(version), Some(store), Some(broker), Some(filestore)) = (
+                            parsed.get("claude_code_version").and_then(|v| v.as_str()),
+                            mstore_read.clone(),
+                            broker_read.clone(),
+                            filestore_read.clone(),
+                        ) {
+                            let (block_id, version) = (block_id_read.clone(), version.to_string());
+                            tokio::task::spawn_blocking(move || {
+                                crate::backend::cli_notice::observe_and_notify(
+                                    &broker, &filestore, &store, &block_id, "claude", &version,
+                                );
+                            });
+                        }
+                    }
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");
                     // Claude's turn-ending marker. Persistent mode never exits
