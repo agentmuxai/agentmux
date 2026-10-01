@@ -7,13 +7,11 @@
 // Order (§4.3):
 // 1. Resolve who the agent is while it is still registered — shutdown
 //    unregisters the block, and a later lookup falls back to the bare id.
-// 2. Release its work claims, so the items go back to the pool now rather
-//    than when the 120 s lease expires.
-// 3. Stop the `Shell()` children it spawned. They are srv-owned, outside the
-//    block's process tracker, so the Job Object teardown doesn't reach them.
-// 4. `delete_block::run`: the graceful shutdown (`close_pane::shutdown_agents`),
-//    a stack-aware layout prune that keeps sibling tabs, and the frontend
-//    update for an already-loaded tree (§12.4).
+// 2–4. `delete_block::run_with_policy(Policy::quit())`: the one teardown
+//    (`sagas::agent_teardown`, SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md)
+//    releases its work claims, stops the `Shell()` children it spawned and
+//    shuts it down gracefully; then a stack-aware layout prune that keeps
+//    sibling tabs, and the frontend update for an already-loaded tree (§12.4).
 // 5. Audit, success or failure.
 //
 // Crons that target the agent are kept (decided Q2: a cron is a deliberate
@@ -155,39 +153,8 @@ pub struct QuitSummary {
     pub crons_targeting: Vec<String>,
 }
 
-/// Does a claim held by (`claimed_by`, `claimed_by_uid`) belong to the agent?
-/// Same holder rule as the store's release (`HOLDER_BY_UID`): by UID when
-/// both sides have one, else by name.
-pub fn holds_claim(claimed_by: &str, claimed_by_uid: &str, agent_id: &str, uid: Option<&str>) -> bool {
-    match uid.filter(|u| !u.is_empty()) {
-        Some(u) if !claimed_by_uid.is_empty() => claimed_by_uid == u,
-        _ => !agent_id.is_empty() && claimed_by == agent_id,
-    }
-}
-
-/// Does a cron job aimed at (`target`, `target_uid`) deliver to the agent?
-/// By UID when the job has one, else by name (case-insensitive, like agent
-/// addressing).
-pub fn cron_targets(target: &str, target_uid: &str, agent_id: &str, uid: Option<&str>) -> bool {
-    match uid.filter(|u| !u.is_empty()) {
-        Some(u) if !target_uid.is_empty() => target_uid == u,
-        _ => !agent_id.is_empty() && target.eq_ignore_ascii_case(agent_id),
-    }
-}
-
-fn claims_held_by<'a>(items: &'a [WorkItem], agent_id: &str, uid: Option<&str>) -> Vec<&'a WorkItem> {
-    items
-        .iter()
-        .filter(|w| w.state == work_state::CLAIMED && holds_claim(&w.claimed_by, &w.claimed_by_uid, agent_id, uid))
-        .collect()
-}
-
-fn crons_targeting(jobs: &[CronJob], agent_id: &str, uid: Option<&str>) -> Vec<String> {
-    jobs.iter()
-        .filter(|j| cron_targets(&j.target, &j.target_uid, agent_id, uid))
-        .map(|j| j.name.clone())
-        .collect()
-}
+// Moved to the one inventory (spec §6.1); re-exported for existing callers.
+pub use crate::server::agent_resources::{cron_targets, holds_claim};
 
 pub async fn run(state: &AppState, block_id: &str, origin: QuitOrigin) -> Result<QuitSummary, String> {
     run_with(state, block_id, origin, None).await
@@ -207,50 +174,22 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
         }
     };
 
-    // 1. Identity, before anything unregisters the block.
-    let reg = state.reactive_handler.get_agent_by_block(block_id);
-    let agent_id = reg.as_ref().map(|a| a.agent_id.clone()).unwrap_or_default();
-    let uid = reg.as_ref().and_then(|a| a.uid.clone());
-    let agent = if agent_id.is_empty() { block_id.to_string() } else { agent_id.clone() };
-
-    // 2 + crons: SQLite reads and writes, off the async workers.
-    let (identity_store, shared_store) = (state.identity_store.clone(), state.shared_store.clone());
-    let (a, u) = (agent_id.clone(), uid.clone());
-    let (released_claims, crons) = tokio::task::spawn_blocking(move || {
-        let now = agentmux_common::time::now_ms();
-        let items = identity_store.work_queue_claimed_by(&a, u.as_deref().unwrap_or("")).unwrap_or_default();
-        let released = claims_held_by(&items, &a, u.as_deref())
-            .into_iter()
-            .filter(|w| {
-                matches!(
-                    identity_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, "agent quit", now),
-                    Ok(Some(_))
-                )
-            })
-            .count();
-        let crons = shared_store
-            .and_then(|s| s.cron_list().ok())
-            .map(|jobs| crons_targeting(&jobs, &a, u.as_deref()))
-            .unwrap_or_default();
-        (released, crons)
-    })
-    .await
-    .map_err(|e| format!("QuitAgent: {e}"))?;
-    if released_claims > 0 {
-        crate::server::work_queue::publish_changed(state);
-    }
-
-    // 3. Srv-spawned shells this block owns.
-    let stopped_shells = state
-        .shell_sessions
-        .list_active()
-        .into_iter()
-        .filter(|s| s.block_id == block_id)
-        .filter(|s| state.shell_sessions.stop(&s.shell_id))
-        .count();
-
-    // 4. The graceful close of this tab only.
-    let result = crate::sagas::delete_block::run(state, tab_id, block_id.to_string()).await;
+    // 1. Identity, before anything unregisters the block (the audit names
+    //    the agent even if the close fails).
+    let agent = crate::server::agent_resources::AgentIdentity::of(state, block_id).label(block_id);
+    // 2–4. One teardown with the quit policy: releases claims, stops its
+    //      shells and shuts it down, then the block is closed.
+    let (result, report) = crate::sagas::delete_block::run_with_policy(
+        state,
+        tab_id,
+        block_id.to_string(),
+        crate::sagas::agent_teardown::Policy::quit(),
+    )
+    .await;
+    // The real counts even when the close failed after the teardown ran.
+    let report = report.unwrap_or_default();
+    let (released_claims, stopped_shells, crons) =
+        (report.released_claims, report.stopped_shells, report.crons_targeting.clone());
 
     // 5. Audit.
     let request_id = uuid::Uuid::new_v4().to_string();

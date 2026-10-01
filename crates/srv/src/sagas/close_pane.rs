@@ -10,7 +10,8 @@
 // `ClosePane` MCP tool had the same gap (#3202). This saga takes the whole set.
 //
 // **Steps (§4.2, §9.2):**
-// 1. `shutdown_agents` over every block at once, one deadline: refuse
+// 1. `agent_teardown::run_many(.., Policy::close())` over every block at
+//    once, one deadline (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md): refuse
 //    respawn and messaging delivery, interrupt any turn, let the process
 //    exit (force-kill at the deadline), THEN drop its process tracker, then
 //    save final state (`session:active_pid` cleared, instance row `stopped`
@@ -151,7 +152,7 @@ async fn run_inner(
 ) -> Result<Value, String> {
     let mut failures = Vec::new();
     let mut failed_ids: Vec<&String> = Vec::new();
-    shutdown_agents(ctx.state, &block_ids).await;
+    super::agent_teardown::run_many(ctx.state, &block_ids, super::agent_teardown::Policy::close()).await;
     for block_id in &block_ids {
         if let Err(reason) = ctx
             .dispatch(Command::DeleteBlock {
@@ -266,85 +267,6 @@ pub(crate) async fn workspace_close_lock(workspace_id: &str) -> tokio::sync::Own
     lock.lock_owned().await
 }
 
-/// Stop every block in `block_ids` — concurrently, under ONE deadline — while
-/// their records still exist (spec §9.2). Every close path runs this before
-/// deleting records: a pane tab's × (`delete_block`), a pane's ×
-/// (`close_pane`), a window tab (`delete_tab`) and a window
-/// (`delete_workspace`). Ten agents take one grace period, not ten.
-pub(crate) async fn shutdown_agents(state: &AppState, block_ids: &[String]) {
-    let deadline = std::time::Instant::now() + blockcontroller::SHUTDOWN_GRACE;
-    futures_util::future::join_all(
-        block_ids.iter().map(|id| shutdown_one(state, id, deadline)),
-    )
-    .await;
-}
-
-async fn shutdown_one(state: &AppState, block_id: &str, deadline: std::time::Instant) {
-    let started = std::time::Instant::now();
-    // Named while still registered; step 1 unregisters it.
-    let label = state
-        .reactive_handler
-        .get_agent_by_block(block_id)
-        .map(|a| a.agent_id)
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "agent".to_string());
-    // The processes the agent itself started, before anything stops them.
-    let processes_before = state.process_tracker.list_block(block_id);
-    // 1. Stop routing input: no respawn (resync_controller refuses), no
-    //    jekt/muxbus delivery, and — once out of CONTROLLER_REGISTRY — no
-    //    AgentInput either.
-    blockcontroller::mark_closing(block_id);
-    state.reactive_handler.unregister_block(block_id);
-    let ctrl = blockcontroller::take_controller(block_id);
-    // 2–4. End the turn, ask the process to exit, force-kill at the deadline;
-    //      resolves once it has actually exited.
-    let (controller_type, outcome) = match ctrl {
-        Some(ctrl) => {
-            if ctrl.get_runtime_status().turn_active {
-                publish_shutdown(state, block_id, "interrupt", "turn interrupted".into(), serde_json::json!({}));
-            }
-            let outcome = ctrl.shutdown(deadline).await;
-            (ctrl.controller_type().to_string(), outcome)
-        }
-        None => (String::new(), blockcontroller::StopOutcome::NotRunning),
-    };
-    let (step, text, extra) = exit_line(&label, &outcome, started.elapsed());
-    publish_shutdown(state, block_id, step, text, extra);
-    // 5. Only now drop the process tracker — anything the agent itself
-    //    started dies with it, but the agent got to exit first. Whatever is
-    //    still alive at this point is what the release kills.
-    let alive: std::collections::HashSet<u32> =
-        state.process_tracker.list_block(block_id).into_iter().map(|p| p.pid).collect();
-    blockcontroller::release_block_processes(block_id);
-    for p in &processes_before {
-        let killed = alive.contains(&p.pid);
-        publish_shutdown(
-            state,
-            block_id,
-            "process",
-            process_line(&p.command, p.pid, killed),
-            serde_json::json!({ "process": {
-                "pid": p.pid,
-                "name": short_command(&p.command),
-                "outcome": if killed { "killed" } else { "stopped" },
-            } }),
-        );
-    }
-    blockcontroller::mark_closing_stopped(block_id);
-    crate::backend::container_credential::revoke_block(block_id);
-    // 6. Save final state.
-    save_final_state(state, block_id);
-    publish_shutdown(state, block_id, "saved", "conversation saved".into(), serde_json::json!({}));
-    publish_shutdown(state, block_id, "done", "closing".into(), serde_json::json!({}));
-    tracing::info!(
-        block_id = %block_id,
-        controller_type = %controller_type,
-        outcome = outcome.as_str(),
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "agent_shutdown"
-    );
-}
-
 /// The requested ids that no longer existed when this close began.
 fn gone_before(requested: &[String], present: &[String]) -> Vec<String> {
     requested.iter().filter(|id| !present.contains(id)).cloned().collect()
@@ -385,7 +307,7 @@ fn clip(s: &str, max: usize) -> String {
 }
 
 /// The program and its first arguments — enough to recognise it.
-fn short_command(command: &str) -> String {
+pub(crate) fn short_command(command: &str) -> String {
     let command = command.trim();
     if command.is_empty() {
         return "process".to_string();
@@ -393,12 +315,12 @@ fn short_command(command: &str) -> String {
     clip(command, 48)
 }
 
-fn process_line(command: &str, pid: u32, killed: bool) -> String {
+pub(crate) fn process_line(command: &str, pid: u32, killed: bool) -> String {
     clip(&format!("{} (pid {pid}) — {}", short_command(command), if killed { "killed" } else { "stopped" }), SHUTDOWN_LINE_MAX)
 }
 
 /// The agent-process line for a shutdown outcome: `(step, text, extra)`.
-fn exit_line(
+pub(crate) fn exit_line(
     label: &str,
     outcome: &blockcontroller::StopOutcome,
     elapsed: std::time::Duration,
@@ -452,7 +374,7 @@ pub(crate) fn publish_shutdown_error(state: &AppState, block_id: &str, reason: &
 /// interrupted session) and mark the local instance row stopped. The session
 /// id itself is left everywhere it is — block meta, instance row, shared
 /// registry — so reopening the agent resumes it (spec §4.2 step 6).
-fn save_final_state(state: &AppState, block_id: &str) {
+pub(crate) fn save_final_state(state: &AppState, block_id: &str) {
     use crate::backend::blockcontroller::session_recovery;
 
     let has_active_pid = state
@@ -828,7 +750,7 @@ mod tests {
             .unwrap();
 
         // Run only the pre-delete half and observe the block while it exists.
-        shutdown_agents(&state, std::slice::from_ref(&a)).await;
+        crate::sagas::agent_teardown::run_many(&state, std::slice::from_ref(&a), crate::sagas::agent_teardown::Policy::close()).await;
         let block = state.mstore.get::<Block>(&a).unwrap().expect("block still exists");
         assert!(
             block
@@ -945,7 +867,7 @@ mod tests {
             ids.push(id);
         }
         let started = std::time::Instant::now();
-        shutdown_agents(&state, &ids).await;
+        crate::sagas::agent_teardown::run_many(&state, &ids, crate::sagas::agent_teardown::Policy::close()).await;
         let elapsed = started.elapsed();
         assert!(elapsed < std::time::Duration::from_millis(2500), "sequential? took {elapsed:?}");
         for id in &ids {
