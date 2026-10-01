@@ -11,7 +11,7 @@
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import { getProvider } from "./providers";
-import { effectiveModel, effortApplies } from "./runtime-capabilities";
+import { effectiveModel, effortApplies, modelTakesEffort } from "./runtime-capabilities";
 import { selectLaunchArgs, withoutOverriddenFlags, withProviderFlags, type LaunchArgsProvider } from "./launch-args";
 
 /**
@@ -235,8 +235,9 @@ export function buildPaneArgs(
     // An `--effort` among the agent's own flags would be appended after the
     // runtime's. If the model that runs takes none (Haiku), it would be HTTP 400
     // on every turn, whichever way the definition got there.
-    const flags = effortApplies(provider.id, model)
-        ? providerFlags
-        : withoutOverriddenFlags(providerFlags, { effort: true });
+    // Only for Claude: other providers' own `--effort` is theirs to interpret,
+    // and `effortApplies` is false for all of them (ReAgent P2 on #4161).
+    const claudeRejectsEffort = (!provider.id || provider.id === "claude") && !modelTakesEffort(model);
+    const flags = claudeRejectsEffort ? withoutOverriddenFlags(providerFlags, { effort: true }) : providerFlags;
     return withProviderFlags(buildRuntimeArgs(selectLaunchArgs(provider, agentMode), runtime, provider.id, model), flags);
 }

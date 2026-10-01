@@ -167,7 +167,9 @@ export function patchRuntime(
             // A model that takes no --effort (Haiku) must not be left with the
             // definition's: it is appended after the runtime's flags and Haiku
             // answers HTTP 400 on it (ReAgent P1 on #4161).
-            effort: patch.effort !== undefined || (patch.model !== undefined && !modelTakesEffort(patch.model)),
+            effort:
+                patch.effort !== undefined ||
+                ((!provider || provider.id === "claude") && patch.model !== undefined && !modelTakesEffort(patch.model)),
             permissionMode: patch.permissionMode !== undefined,
         });
         if (flags !== current) {

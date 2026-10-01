@@ -177,6 +177,12 @@ describe("patchRuntime — a pick wins over the agent definition's own flags", (
         expect(lastFlag(args, "--model")).toBe("haiku");
     });
 
+    it("…only for Claude: another provider's own --effort is left alone", async () => {
+        const codex = { id: "codex", controllerType: "persistent", launchArgs: ["exec", "-"], persistentLaunchArgs: ["exec", "-"] } as unknown as ProviderDefinition;
+        await patchRuntime("b1", codex, { model: "haiku" }, withFlags("--effort high"));
+        expect(flagWrites()).toEqual([]); // nothing to take out: "--effort" is not the model's to remove
+    });
+
     it("…and a pick of a model that does take effort keeps the definition's --effort", async () => {
         await patchRuntime("b1", claude, { model: "sonnet" }, withFlags("--model opus --effort max"));
         expect(flagWrites()).toEqual(["--effort max"]);

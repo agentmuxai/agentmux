@@ -126,6 +126,15 @@ describe("buildRuntimeArgs", () => {
             expect(buildPaneArgs(CLAUDE_PROVIDER, "host", cfg({ model: "sonnet" }), "--model opus --effort max")).toContain("max");
         });
 
+        it("leaves another provider's own --effort alone (ReAgent P2 on #4161): only Claude rejects it on Haiku", () => {
+            for (const id of ["codex", "gemini", "kimi", "qwen"]) {
+                const p = getProvider(id)!;
+                const out = buildPaneArgs(p, "host", cfg({ model: "haiku" }), "--effort high --add-dir /tmp");
+                expect(out, id).toContain("--effort");
+                expect(out[out.indexOf("--effort") + 1], id).toBe("high");
+            }
+        });
+
         it("omits --effort for a CONCRETE Haiku id too (it used to match only the alias)", () => {
             const out = buildRuntimeArgs(CLAUDE_BASE, cfg({ model: "claude-haiku-4-5-20251001" }), "claude");
             expect(out[out.indexOf("--model") + 1]).toBe("claude-haiku-4-5-20251001");
