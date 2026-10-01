@@ -160,6 +160,22 @@ impl CloudSubscriber {
     pub fn init_global(mstore: Arc<Store>) {
         let (ctrl_tx, ctrl_rx) = mpsc::unbounded_channel::<CtrlMsg>();
         let agents = Arc::new(Mutex::new(HashSet::<String>::new()));
+        // Agents that registered before this subscriber existed (an isolated
+        // channel creates it lazily at `muxbus.login`) were never told to it.
+        let handler = get_global_handler();
+        let registered: Vec<String> = handler
+            .list_agents()
+            .into_iter()
+            .map(|r| r.agent_id)
+            .collect();
+        let seed = agents_to_seed(&registered, |a| handler.has_live_name(a));
+        if !seed.is_empty() {
+            tracing::info!(
+                count = seed.len(),
+                "cloud_subscriber: subscribing agents that registered before it started"
+            );
+            agents.lock().unwrap().extend(seed);
+        }
         let subscriber = CloudSubscriber {
             ctrl_tx,
             agents: agents.clone(),
@@ -591,6 +607,14 @@ async fn connect_and_run(
         .await
         .map_err(|e| format!("send subscribe: {e}"))?;
 
+    // Pull anything that reached the relay before this connection existed, or
+    // before its agents were subscribed: the relay only wakes us for what
+    // arrives from now on. A wake is a best-effort broadcast, and this loop
+    // pulled only on one (CATCH_UP_EVERY, `agents_to_seed`).
+    if catch_up(base, token, http, &agents, mstore).await {
+        return Ok(());
+    }
+
     let mut ping_interval = tokio::time::interval(Duration::from_secs(CLIENT_PING_INTERVAL_SECS));
     // Keeps every registered agent's relay lease renewed between wake
     // signals (the relay's lease TTL is 60 s; wakes can be far apart).
@@ -598,6 +622,10 @@ async fn connect_and_run(
     lease_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ping_interval.tick().await; // first tick fires immediately — consume it, we just connected
+    // The safety net under the wake signal: pull on a timer too.
+    let mut catch_up_interval = tokio::time::interval(CATCH_UP_EVERY);
+    catch_up_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    catch_up_interval.tick().await; // the connect-time pull above was the first
 
     loop {
         tokio::select! {
@@ -649,6 +677,12 @@ async fn connect_and_run(
                 .await;
             }
 
+            _ = catch_up_interval.tick() => {
+                if catch_up(base, token, http, &agents, mstore).await {
+                    return Ok(());
+                }
+            }
+
             _ = ping_interval.tick() => {
                 let ping_msg = serde_json::to_string(&ClientMsg::Ping)
                     .map_err(|e| format!("serialize ping: {e}"))?;
@@ -693,6 +727,11 @@ async fn connect_and_run(
                         let msg = serde_json::to_string(&ClientMsg::SubscribeAdd { agents: vec![id] })
                             .unwrap_or_default();
                         let _ = write.send(Message::Text(msg.into())).await;
+                        // A message may already be waiting for this agent (it
+                        // reached the relay before the agent was subscribed).
+                        if catch_up(base, token, http, &agents, mstore).await {
+                            return Ok(());
+                        }
                     }
                     Some(CtrlMsg::RemoveAgent(id)) => {
                         // The agent went away here: let another instance have it.
@@ -718,6 +757,58 @@ async fn connect_and_run(
                     }
                 }
             }
+        }
+    }
+}
+
+/// How often the subscriber pulls for every registered agent whether or not a
+/// wake signal arrived. The relay's wake is a best-effort broadcast
+/// (`muxbus/server/src/broadcast.ts`: a lost one "just means that sidecar
+/// catches the injection on its own poll interval"), but this client had no
+/// poll interval, so a jekt that reached the relay before its agent was
+/// subscribed waited for the next unrelated wake: 8m46s on 2026-09-30. The
+/// lease is already renewed every [`super::wan_lease::RENEW_EVERY`], so a
+/// catch-up costs about one pending GET per agent: roughly 0.5 requests a
+/// minute per agent at this interval.
+const CATCH_UP_EVERY: Duration = Duration::from_secs(120);
+
+/// The agents to put in the subscription when it is created: every locally
+/// registered agent that a live pane still holds, lowercased and deduplicated.
+/// Registered agents used to be missed. On an isolated channel the subscriber
+/// is created lazily at `muxbus.login`, with an empty set, and an agent that
+/// registered earlier (while there was no subscriber to tell) joined only on
+/// its next input turn, so nothing reached it until then.
+fn agents_to_seed(registered: &[String], is_live: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut seed: Vec<String> = registered
+        .iter()
+        .map(|a| a.to_lowercase())
+        .filter(|a| is_live(a))
+        .collect();
+    seed.sort();
+    seed.dedup();
+    seed
+}
+
+/// Pull pending injections for every registered agent now. The same work an
+/// `InjectAvailable` wake does, run on connect, when an agent is added, and on
+/// a timer ([`CATCH_UP_EVERY`]) so a missed wake costs minutes at worst.
+/// Returns true when the session should reconnect (the shared token expired).
+async fn catch_up(
+    base: &str,
+    token: &str,
+    http: &reqwest::Client,
+    agents: &Arc<Mutex<HashSet<String>>>,
+    mstore: &Arc<Store>,
+) -> bool {
+    match handle_server_msg(ServerMsg::InjectAvailable, base, token, http, agents, mstore).await {
+        Ok(()) => false,
+        Err(e) if e.starts_with("reconnect:") => {
+            tracing::info!("cloud_subscriber: {e}, reconnecting");
+            true
+        }
+        Err(e) => {
+            tracing::warn!("cloud_subscriber: catch-up pull error: {e}");
+            false
         }
     }
 }
@@ -2003,5 +2094,142 @@ mod tests {
             ["POST /agents/lease", pending.as_str(), "POST /reactive/ack"],
             "nothing delivered, so nothing released"
         );
+    }
+
+    // ── Catch-up pull: a message must not wait for an unrelated wake ──────
+    use super::{agents_to_seed, catch_up, CATCH_UP_EVERY};
+    use std::collections::HashSet;
+    use std::time::Duration;
+
+    // (2026-09-30: a jekt to manoz reached the relay at 23:12:14 and was
+    // delivered at 23:21:00, when someone else's traffic woke the subscriber.)
+
+    #[test]
+    fn the_seed_is_every_live_registered_agent_lowercased_and_deduplicated() {
+        let registered: Vec<String> = ["Alice", "alice", "Bob", "Carol"].map(String::from).to_vec();
+        let got = agents_to_seed(&registered, |a| a != "carol");
+        assert_eq!(got, ["alice", "bob"], "Carol has no live pane; Alice appears once, lowercased");
+    }
+
+    #[test]
+    fn an_empty_registry_seeds_nothing() {
+        assert!(agents_to_seed(&[], |_| true).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_pulls_pending_for_every_registered_agent() {
+        let (a, b) = (format!("agent-{}", uuid::Uuid::new_v4()), format!("agent-{}", uuid::Uuid::new_v4()));
+        let (pa, pb) = (format!("GET /reactive/pending/{a}"), format!("GET /reactive/pending/{b}"));
+        let (base, seen) = fake_relay(vec![
+            lease_granted(),
+            (pa.clone(), 200, serde_json::json!({ "injections": [] })),
+            (pb.clone(), 200, serde_json::json!({ "injections": [] })),
+        ])
+        .await;
+        let agents = Arc::new(Mutex::new(HashSet::from([a.clone(), b.clone()])));
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+
+        let reconnect = catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await;
+
+        assert!(!reconnect, "nothing went wrong, so no reconnect");
+        let seen = seen.lock().unwrap();
+        assert!(seen.contains(&pa), "pulled for {a}: {seen:?}");
+        assert!(seen.contains(&pb), "pulled for {b}: {seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_with_no_registered_agents_asks_the_relay_for_nothing() {
+        let (base, seen) = fake_relay(vec![lease_granted()]).await;
+        let agents = Arc::new(Mutex::new(HashSet::new()));
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+
+        assert!(!catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await);
+
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_fallback_interval_is_short_enough_to_matter_and_long_enough_to_be_cheap() {
+        assert!(CATCH_UP_EVERY >= Duration::from_secs(30), "faster than this is polling");
+        assert!(CATCH_UP_EVERY <= Duration::from_secs(300), "slower than this is the 8m46s we are fixing");
+    }
+
+    /// The real session loop, against a local fake relay and WebSocket, for the
+    /// exact failure of 2026-09-30: a jekt is already waiting for an agent
+    /// when the session starts, and NO wake signal ever arrives. The relay
+    /// never sends one here, so any pull is the catch-up, not a wake.
+    #[tokio::test]
+    async fn a_session_pulls_what_is_waiting_on_connect_and_when_an_agent_is_added() {
+        use futures_util::StreamExt;
+        // Process-global env, shared with the pkce tests that set the same URL.
+        let _serial = crate::muxbus::pkce::TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let (a, b) = (format!("agent-{}", uuid::Uuid::new_v4()), format!("agent-{}", uuid::Uuid::new_v4()));
+        let (pa, pb) = (format!("GET /reactive/pending/{a}"), format!("GET /reactive/pending/{b}"));
+        let (rest, seen) = fake_relay(vec![
+            lease_granted(),
+            (pa.clone(), 200, serde_json::json!({ "injections": [] })),
+            (pb.clone(), 200, serde_json::json!({ "injections": [] })),
+        ])
+        .await;
+
+        // A WebSocket relay that accepts, records what the client says, and
+        // never sends a wake.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ws_url = format!("ws://{}", listener.local_addr().unwrap());
+        let frames: Seen = Arc::default();
+        let server = tokio::spawn({
+            let frames = Arc::clone(&frames);
+            async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                while let Some(Ok(msg)) = ws.next().await {
+                    if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
+                        frames.lock().unwrap().push(t.to_string());
+                    }
+                }
+            }
+        });
+
+        std::env::set_var("AGENTMUX_MUXBUS_REST_URL", &rest);
+        std::env::set_var("AGENTMUX_MUXBUS_WS_URL", &ws_url);
+
+        let agents = Arc::new(Mutex::new(HashSet::from([a.clone()])));
+        let (ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::unbounded_channel::<super::CtrlMsg>();
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let session = tokio::spawn({
+            let (agents, mstore) = (Arc::clone(&agents), Arc::clone(&mstore));
+            async move {
+                super::connect_and_run("test-token", agents, &mut ctrl_rx, &mstore, &reqwest::Client::new()).await
+            }
+        });
+
+        async fn within_5s(what: &str, mut cond: impl FnMut() -> bool) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !cond() {
+                assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+
+        // 1. Connected, subscribed, and pulled for the agent with no wake sent.
+        within_5s(&pa, || seen.lock().unwrap().contains(&pa)).await;
+        assert!(
+            frames.lock().unwrap().iter().any(|f| f.contains("\"subscribe\"") && f.contains(&a)),
+            "subscribed {a}: {:?}",
+            frames.lock().unwrap()
+        );
+
+        // 2. An agent added later is pulled for at once, again with no wake.
+        agents.lock().unwrap().insert(b.clone());
+        ctrl_tx.send(super::CtrlMsg::AddAgent(b.clone())).unwrap();
+        within_5s(&pb, || seen.lock().unwrap().contains(&pb)).await;
+
+        session.abort();
+        server.abort();
+        std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
+        std::env::remove_var("AGENTMUX_MUXBUS_WS_URL");
     }
 }
