@@ -36,8 +36,10 @@ import type { MemoryEntryInput } from "./memory-reinjection";
  * left nothing to send, and a fresh session got no reinjection at all
  * (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §4, §7 P1).
  */
-export async function fetchGlobalMemoryEntries(client: RpcClient): Promise<MemoryEntryInput[]> {
-    const sections = await BundleApi.GlobalMemorySectionsCommand(client);
+export async function fetchGlobalMemoryEntries(client: RpcClient, blockId?: string): Promise<MemoryEntryInput[]> {
+    // The block lets srv leave out Operator Config meant for another agent
+    // kind, as that pane's startup file does.
+    const sections = await BundleApi.GlobalMemorySectionsCommand(client, { block_id: blockId });
     return sections.map((s) => ({
         label: `${s.is_system ? "[AgentMux System]" : "[Workspace]"} ${s.name}`,
         source: "global" as const,
@@ -78,9 +80,13 @@ export async function fetchPersonalMemoryEntries(client: RpcClient, agentId: str
 }
 
 /** Combines both sources into the single entry list `shouldReinject`/`buildMemoryReinjectionNode` expect. */
-export async function fetchMemoryReinjectionEntries(client: RpcClient, agentId: string): Promise<MemoryEntryInput[]> {
+export async function fetchMemoryReinjectionEntries(
+    client: RpcClient,
+    agentId: string,
+    blockId?: string
+): Promise<MemoryEntryInput[]> {
     const [global, personal] = await Promise.all([
-        fetchGlobalMemoryEntries(client),
+        fetchGlobalMemoryEntries(client, blockId),
         fetchPersonalMemoryEntries(client, agentId),
     ]);
     return [...global, ...personal];

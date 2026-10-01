@@ -63,14 +63,31 @@ pub async fn bind_listeners_and_network(
     // API surface (see Config::lan_key's doc comment).
     // Loopback, OS-chosen ports — or, headless only, the fixed ports it was
     // given (`--web-port` / `--ws-port`, SPEC_SRV_HEADLESS_MODE_2026_09_26.md).
-    let web_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Web);
-    let ws_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Ws);
-    let web_listener = TcpListener::bind(&web_bind)
-        .await
-        .unwrap_or_else(|e| panic!("failed to bind web listener on {web_bind}: {e}"));
-    let ws_listener = TcpListener::bind(&ws_bind)
-        .await
-        .unwrap_or_else(|e| panic!("failed to bind ws listener on {ws_bind}: {e}"));
+    //
+    // Not headless: the next two free ports of `lan_ports::LAN_PORT_RANGE`, so
+    // one firewall rule on that range covers every build and update
+    // (SPEC_LAN_FIREWALL_SETUP_2026_10_01.md §4.1); OS-chosen only if the range
+    // is exhausted. Headless keeps the fixed ports it was given.
+    let (web_listener, ws_listener) = if crate::headless::active() {
+        let web_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Web);
+        let ws_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Ws);
+        let web = TcpListener::bind(&web_bind)
+            .await
+            .unwrap_or_else(|e| panic!("failed to bind web listener on {web_bind}: {e}"));
+        let ws = TcpListener::bind(&ws_bind)
+            .await
+            .unwrap_or_else(|e| panic!("failed to bind ws listener on {ws_bind}: {e}"));
+        (web, ws)
+    } else {
+        let bound = backend::lan_ports::bind_startup_listeners().await;
+        if !bound.in_range {
+            tracing::warn!(
+                range = ?backend::lan_ports::LAN_PORT_RANGE,
+                "LAN port range exhausted: listening on OS-chosen ports, which a firewall rule on the range does not cover"
+            );
+        }
+        (bound.web, bound.ws)
+    };
 
     let web_addr = web_listener.local_addr().unwrap();
     let ws_addr = ws_listener.local_addr().unwrap();

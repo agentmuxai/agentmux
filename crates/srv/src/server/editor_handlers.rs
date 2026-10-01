@@ -90,8 +90,11 @@ fn list_drives() -> Vec<EditorDrive> {
 /// CLAUDE.md string, mirroring the injection done by `write_agent_config_files`
 /// in the `agent.open` RPC path.  If the file has no `BUNDLE_SECTION_HEADING` section, a new
 /// one is inserted before `# Available Skills` (or at the end of the file).
-fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
-    let bundles = id_store.bundle_list_global().unwrap_or_default();
+fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>, agent_mode: &str) -> String {
+    let bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
+        id_store.bundle_list_global().unwrap_or_default(),
+        agent_mode,
+    );
     let bundle_block = crate::backend::storage::format_global_bundle_block(&bundles);
     if bundle_block.is_empty() {
         return claude_md.to_string();
@@ -212,8 +215,10 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     working_dir = %cmd.working_dir,
                     file_count = cmd.files.len(),
                     auto_allocate = cmd.auto_allocate,
+                    agent_type = cmd.agent_type.as_deref().unwrap_or("host"),
                     "WriteAgentConfig"
                 );
+                let agent_mode = cmd.agent_type.clone().unwrap_or_else(|| "host".to_string());
 
                 // Host-tier + LAN-tier jekt sender signing keys — see
                 // `agent_config::inject_jekt_signing_keys_into_mcp_json`'s doc
@@ -323,7 +328,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // pre-existing, non-AgentMux-authored file's
                         // content. See
                         // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
-                        let content = inject_global_bundles(&file.content, &id_store);
+                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode);
                         crate::backend::agent_config::write_claude_md_respecting_ownership(
                             base_path, &content,
                         )
@@ -344,7 +349,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // agent launched from the picker would silently
                         // receive no workspace-wide Global Bundle content at
                         // all.
-                        let content = inject_global_bundles(&file.content, &id_store);
+                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode);
                         // Never overwrites a pre-existing file (codex P1, PR
                         // #2788) — a simpler exists-guard than CLAUDE.md's
                         // full ownership-aware materialization above; see

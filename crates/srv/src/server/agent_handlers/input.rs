@@ -253,6 +253,34 @@ pub(crate) fn split_agent_identity_env(
     }
 }
 
+/// `AGENTMUX_AGENT_WORKDIR`: the agent's own workspace, which the host-only
+/// "Your workspace" Operator Config entry tells it to clone and work in
+/// (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §3.4).
+/// Server-set, like `AGENTMUX_AUTH_KEY`: it is the launch cwd (`cmd:cwd`),
+/// not user configuration, so a `cmd:env` copy never wins. Host agents only —
+/// a container's cwd is a host path that means nothing inside the image (the
+/// key is also on `CONTAINER_ENV_DENYLIST`).
+///
+/// Exported as the absolute path the process actually starts in: `~` is
+/// expanded and a relative `cmd:cwd` is resolved against srv's own cwd, as
+/// `core::apply_working_dir` does, so `cd "$AGENTMUX_AGENT_WORKDIR"` works
+/// from anywhere (Codex on #4113).
+pub(crate) fn carry_agent_workdir_env(
+    env_vars: &mut std::collections::HashMap<String, String>,
+    block_meta: &crate::backend::obj::MetaMapType,
+) {
+    const KEY: &str = "AGENTMUX_AGENT_WORKDIR";
+    let agent_mode = crate::backend::obj::meta_get_string(block_meta, "agentMode", "host");
+    let work_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
+    if crate::backend::operator_config_seed::agent_kind(&agent_mode) == "host" && !work_dir.trim().is_empty() {
+        let expanded = crate::backend::blockcontroller::core::expand_home_dir(&work_dir);
+        let absolute = std::path::absolute(&expanded).map_or(expanded, |p| p.to_string_lossy().into_owned());
+        env_vars.insert(KEY.to_string(), absolute);
+    } else {
+        env_vars.remove(KEY);
+    }
+}
+
 /// What the server knows about the agent on a block, read from its
 /// `db_agents` row: the identity that will be carried into the process.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -638,6 +666,7 @@ pub(crate) async fn build_persistent_spawn_env(
         );
         carry_agent_uid_env(&mut env_vars, identity.as_ref());
     }
+    carry_agent_workdir_env(&mut env_vars, block_meta);
     // Per-agent git commit identity -- see git_identity_env_vars() doc
     // comment. Still overridable per the same "user-provided values take
     // precedence" rule as every other var here.
@@ -747,6 +776,10 @@ pub async fn run_agent_turn(
             "stream-json".to_string(),
         ],
     };
+    // A pane stored without --model/--effort (saved before the launch fixes, or
+    // written by a path that forgot) would spawn on the CLI default; fill what
+    // its `agent:runtime` says. Never overrides a flag already there.
+    let cli_args = crate::backend::agent_runtime::with_runtime_flags(&block.meta, cli_args);
     let working_dir = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
     let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
         Some(serde_json::Value::Object(obj)) => obj
@@ -1987,6 +2020,48 @@ mod tests {
     /// block's row UID and token into their own env, overwriting a stale
     /// token, and strips both for a block with no row — outside a runtime
     /// and, through `block_in_place`, on a multi-thread runtime worker.
+    #[test]
+    fn carry_agent_workdir_env_is_the_launch_cwd_for_host_agents_only() {
+        let meta = |pairs: &[(&str, &str)]| -> crate::backend::obj::MetaMapType {
+            pairs.iter().map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string()))).collect()
+        };
+        let stale = || {
+            std::collections::HashMap::from([("AGENTMUX_AGENT_WORKDIR".to_string(), "C:/stale".to_string())])
+        };
+
+        let workdir = |e: &std::collections::HashMap<String, String>| std::path::PathBuf::from(&e["AGENTMUX_AGENT_WORKDIR"]);
+        let ws = std::env::temp_dir().join("clamk-0612a");
+        let ws_str = ws.to_string_lossy().into_owned();
+
+        for mode in ["host", "standalone"] {
+            let mut e = stale();
+            super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", mode), ("cmd:cwd", &ws_str)]));
+            assert_eq!(workdir(&e), ws, "{mode}");
+        }
+        // No agentMode is a host agent, srv's default.
+        let mut e = stale();
+        super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", &ws_str)]));
+        assert_eq!(workdir(&e), ws);
+
+        // Exported as the absolute path the process starts in: a relative
+        // cwd resolves against srv's own cwd, `~` against the home dir.
+        let mut e = stale();
+        super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", "projects/foo")]));
+        assert_eq!(workdir(&e), std::env::current_dir().unwrap().join("projects/foo"));
+        if let Some(home) = dirs::home_dir() {
+            let mut e = stale();
+            super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", "~/.agentmux/agents/x-0930a")]));
+            assert_eq!(workdir(&e), home.join(".agentmux/agents/x-0930a"));
+        }
+
+        let mut e = stale();
+        super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", "container"), ("cmd:cwd", &ws_str)]));
+        assert!(!e.contains_key("AGENTMUX_AGENT_WORKDIR"), "container");
+        let mut e = stale();
+        super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", "host"), ("cmd:cwd", "  ")]));
+        assert!(!e.contains_key("AGENTMUX_AGENT_WORKDIR"), "no cwd");
+    }
+
     #[test]
     fn carry_block_identity_env_carries_or_strips() {
         let store = Store::open_in_memory().unwrap();

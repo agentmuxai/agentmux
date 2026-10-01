@@ -3,7 +3,7 @@
 **Date:** 2026-09-30 (UTC; the evening of 2026-09-29 Pacific)
 **Found by:** the owner, on AgentX's pane in a local v0.58.3 portable build
 **Investigated by:** AgentX (narko)
-**Status:** retro — root cause identified; fix 1 (launch applies the runtime) implemented, fixes 2–5 open (see §5). Every binding and remaining gap: `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`
+**Status:** retro — root cause identified; fixes 1 and 2 (launch applies the runtime; srv fills missing flags at spawn) implemented, fixes 3–5 open (see §5). Every binding and remaining gap: `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`
 
 ## 1. What happened
 
@@ -101,7 +101,7 @@ updated to match.
 
 ## 5. Fix plan
 
-1. **Apply the runtime config at launch.** *Done:* `launchAgentDefinition` now resolves `agent:runtime` first and builds `cmd:args` with `buildPaneArgs` — the same function the per-send rebuild and `applyRuntimeChange` use — so the three cannot drift. `agent_open.rs` (the MCP `OpenAgent` path) is **not** fixed; it is gap G3 in the bindings report and needs fix 2. In `launchAgentDefinition`, build
+1. **Apply the runtime config at launch.** *Done:* `launchAgentDefinition` now resolves `agent:runtime` first and builds `cmd:args` with `buildPaneArgs` — the same function the per-send rebuild and `applyRuntimeChange` use — so the three cannot drift. `agent_open.rs` (the MCP `OpenAgent` path) is also fixed for new panes (`backend/agent_runtime.rs`); panes restored with old `cmd:args` are covered by fix 2 below. In `launchAgentDefinition`, build
    `cmd:args` with the same helpers the per-send path uses
    (`withProviderFlags(buildRuntimeArgs(base, runtimeConfig, provider.id), flags)`),
    then append the one-shot `--fork-session`. The meta commit then carries
@@ -109,7 +109,7 @@ updated to match.
    (`agent-model.ts:277-357`) and srv's `agent_open.rs:528`
    (`resolve_cli_args` + `provider_flags`, used by the MCP `OpenAgent` path) for
    the same gap. Neither applies `agent:runtime` today.
-2. **Make the srv spawn authoritative.** When the persistent controller spawns
+2. **Make the srv spawn authoritative.** *Done for `--model`/`--effort`:* `with_runtime_flags` fills what `cmd:args` lacks from `agent:runtime` at all three spawn sites; it does not override a flag already present, and it logs nothing yet. When the persistent controller spawns
    (including eager resume), derive `--model` / `--effort` from `agent:runtime`
    if `cmd:args` lack them, or at least log a warning that they're missing.
    Then a missing frontend rebuild can't silently fall back to CLI defaults.
