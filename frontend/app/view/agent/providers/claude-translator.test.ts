@@ -636,4 +636,75 @@ describe("ClaudeTranslator", () => {
             expect(resultOf(plain[0])).toEqual({ content: "hello" });
         });
     });
+
+    // ── An Edit's or Write's patch ──────────────────────────────────────────
+    describe("an Edit's or Write's structured result", () => {
+        const resultOf = (e: unknown): Record<string, unknown> => (e as { result: Record<string, unknown> }).result;
+        const resultEvent = (toolUseResult: unknown) => ({
+            type: "user",
+            message: {
+                role: "user",
+                content: [{ type: "tool_result", tool_use_id: "e1", content: "The file a.ts has been updated successfully." }],
+            },
+            tool_use_result: toolUseResult,
+        });
+
+        it("keeps where the change landed, without the diff text or the old file", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate(
+                resultEvent({
+                    filePath: "a.ts",
+                    originalFile: "THE WHOLE OLD FILE",
+                    structuredPatch: [
+                        {
+                            oldStart: 106,
+                            oldLines: 7,
+                            newStart: 106,
+                            newLines: 8,
+                            lines: [" c1", " c2", " c3", "-old", "+new1", "+new2", " c4", " c5", " c6"],
+                        },
+                    ],
+                })
+            );
+            // Three context lines come first (106-108), so the change starts at 109.
+            expect(resultOf(events[0]).patch).toEqual([{ start: 109, end: 110, added: 2, removed: 1 }]);
+            expect(resultOf(events[0]).content).toBe("The file a.ts has been updated successfully.");
+            const json = JSON.stringify(events[0]);
+            expect(json).not.toContain("THE WHOLE OLD FILE");
+            expect(json).not.toContain("+new1");
+        });
+
+        it("places a deletion where the next line now sits, and reports each hunk", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate(
+                resultEvent({
+                    structuredPatch: [
+                        { oldStart: 10, oldLines: 3, newStart: 10, newLines: 2, lines: [" a", "-b", " c"] },
+                        { oldStart: 40, oldLines: 1, newStart: 39, newLines: 2, lines: ["+x", " y", "\\ No newline at end of file"] },
+                    ],
+                })
+            );
+            expect(resultOf(events[0]).patch).toEqual([
+                { start: 11, end: 11, added: 0, removed: 1 },
+                { start: 39, end: 39, added: 1, removed: 0 },
+            ]);
+        });
+
+        it("notes whether a Write created the file or replaced one", () => {
+            const t = new ClaudeTranslator();
+            const created = t.translate(resultEvent({ type: "create", filePath: "a.ts", content: "x", structuredPatch: [] }));
+            expect(resultOf(created[0])).toMatchObject({ patch: [], writeKind: "create" });
+            const updated = t.translate(
+                resultEvent({ type: "update", structuredPatch: [{ newStart: 1, lines: ["-a", "+b"] }] })
+            );
+            expect(resultOf(updated[0])).toMatchObject({ writeKind: "update", patch: [{ start: 1, end: 1, added: 1, removed: 1 }] });
+        });
+
+        it("adds nothing for a result with no patch", () => {
+            const t = new ClaudeTranslator();
+            expect(resultOf(t.translate(resultEvent({ type: "other" }))[0])).toEqual({
+                content: "The file a.ts has been updated successfully.",
+            });
+        });
+    });
 });

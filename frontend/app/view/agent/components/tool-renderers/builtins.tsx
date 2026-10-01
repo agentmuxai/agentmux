@@ -22,7 +22,7 @@ import { HighlightedCode } from "../HighlightedCode";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES, type CappedText } from "../output-cap";
 import { terminalText } from "../terminal-text";
-import { formatReadRangeLong, readRangeOf } from "../../tool-meta/read-range";
+import { fileRangeOf, formatFileRangeLong } from "../../tool-meta/file-range";
 import { anyTool, byKind, type ToolRendererEntry } from "./registry";
 
 // Per-tool result renderers, registered through BUILTIN_RENDERERS so the open-ended tool universe can be routed by name/shape rather than
@@ -31,7 +31,17 @@ import { anyTool, byKind, type ToolRendererEntry } from "./registry";
 // SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md (Phase 1).
 
 function renderEdit(node: ToolNode): JSX.Element {
-    return <DiffViewer params={node.params as any} result={node.result as any} status={node.status} />;
+    const range = fileRangeOf(node);
+    return (
+        <div class="agent-tool-edit">
+            <Show when={range}>
+                <div class="agent-tool-edit-range">
+                    <span class="agent-tool-read-range">{formatFileRangeLong(range!)}</span>
+                </div>
+            </Show>
+            <DiffViewer params={node.params as any} result={node.result as any} status={node.status} />
+        </div>
+    );
 }
 
 function renderBash(node: ToolNode): JSX.Element {
@@ -108,14 +118,14 @@ function renderRead(node: ToolNode): JSX.Element {
     // took at every digit-count boundary (9→10, 999→1000) — see dedent.ts's
     // module header and docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
     const preview = capped ? formatReadPreview(capped.text) : null;
-    const range = readRangeOf(node);
+    const range = fileRangeOf(node);
     return (
         <div class="agent-tool-read">
             <div class="agent-tool-file-path-row">
-                <span class="agent-tool-file-path">{filePath}</span>
                 <Show when={range}>
-                    <span class="agent-tool-read-range">{formatReadRangeLong(range!)}</span>
+                    <span class="agent-tool-read-range">{formatFileRangeLong(range!)}</span>
                 </Show>
+                <span class="agent-tool-file-path">{filePath}</span>
             </div>
             <Show
                 when={capped}
@@ -152,9 +162,13 @@ function renderWrite(node: ToolNode): JSX.Element {
     const content: string | undefined = (node.params as any).content;
     const bytes: number | undefined = (node.result as any)?.bytesWritten;
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    const range = fileRangeOf(node);
     return (
         <div class="agent-tool-write">
             <div class="agent-tool-file-path-row">
+                <Show when={range}>
+                    <span class="agent-tool-read-range">{formatFileRangeLong(range!)}</span>
+                </Show>
                 <span class="agent-tool-file-path">{filePath}</span>
                 <Show when={bytes != null}>
                     <span class="agent-tool-write-bytes">{formatBytes(bytes!)}</span>
