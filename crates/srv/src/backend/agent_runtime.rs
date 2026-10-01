@@ -154,20 +154,28 @@ pub(crate) struct SeededLaunch {
     pub runtime: Option<Value>,
 }
 
-/// The value of `--flag value` or `--flag=value` in `flags`, if present.
+/// The value of `--flag value` or `--flag=value` in `flags`, if present; the last one when it repeats.
 fn flag_value<'a>(flags: &'a [String], names: &[&str]) -> Option<&'a str> {
+    // The LAST occurrence wins, as on the command line (and in the frontend's
+    // `modelFromFlags`): `--model opus --model haiku` runs Haiku. Returning the
+    // first decided on Opus and handed Haiku an `--effort` it rejects.
+    let mut found = None;
     let mut it = flags.iter();
     while let Some(f) = it.next() {
         for n in names {
             if f == n {
-                return it.next().map(String::as_str);
+                if let Some(v) = it.next() {
+                    found = Some(v.as_str());
+                }
+                break;
             }
             if let Some(v) = f.strip_prefix(&format!("{n}=")) {
-                return Some(v);
+                found = Some(v);
+                break;
             }
         }
     }
-    None
+    found
 }
 
 /// `base` without any of [`OWNED_FLAGS`] (and their values).
@@ -490,19 +498,64 @@ mod tests {
         }
     }
 
+    // ReAgent P2 on #4152. A repeated flag: the LAST wins, as on the command line
+    // and in the frontend's modelFromFlags. flag_value used to return the first,
+    // so `--model opus --model haiku` was decided as Opus (and given --effort) while
+    // the CLI ran Haiku, which answers HTTP 400 on every turn.
+    #[test]
+    fn a_repeated_flag_is_decided_on_the_last_one_as_the_cli_reads_it() {
+        let out = seed_launch("claude", s(&[]), "--model opus --model haiku");
+        assert!(
+            !out.cli_args.iter().any(|a| a == "--effort"),
+            "{:?}",
+            out.cli_args
+        );
+        assert_eq!(out.runtime.unwrap()["model"], "haiku");
+
+        let meta = meta_with("claude", None);
+        let filled = with_runtime_flags(&meta, s(&["--model", "opus", "--model", "haiku"]));
+        assert!(!filled.iter().any(|a| a == "--effort"), "{filled:?}");
+
+        // and the other way round: the last model takes effort
+        let out = seed_launch("claude", s(&[]), "--model haiku --model opus");
+        assert_eq!(after(&out.cli_args, "--effort").as_deref(), Some("high"));
+
+        // a repeated --effort: the last one is the definition's choice
+        let out = seed_launch("claude", s(&[]), "--effort low --effort max");
+        assert_eq!(out.runtime.unwrap()["effort"], "max");
+    }
+
     #[test]
     fn effort_is_for_models_that_take_it_whatever_the_haiku_id_looks_like() {
-        for haiku in ["haiku", "Haiku", "claude-haiku-4-5", "claude-haiku-4-5-20251001"] {
+        for haiku in [
+            "haiku",
+            "Haiku",
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+        ] {
             assert!(!model_takes_effort(haiku), "{haiku}");
             // seeded
             let seeded = seed_launch("claude", s(&[]), &format!("--model {haiku}"));
-            assert!(!seeded.cli_args.iter().any(|a| a == "--effort"), "{haiku}: {:?}", seeded.cli_args);
+            assert!(
+                !seeded.cli_args.iter().any(|a| a == "--effort"),
+                "{haiku}: {:?}",
+                seeded.cli_args
+            );
             // filled into a stored pane
             let meta = meta_with("claude", Some(json!({"model": haiku})));
             let filled = with_runtime_flags(&meta, s(&["-p"]));
-            assert!(!filled.iter().any(|a| a == "--effort"), "{haiku}: {filled:?}");
+            assert!(
+                !filled.iter().any(|a| a == "--effort"),
+                "{haiku}: {filled:?}"
+            );
         }
-        for other in ["sonnet", "opus", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"] {
+        for other in [
+            "sonnet",
+            "opus",
+            "claude-sonnet-5-5",
+            "claude-opus-5-5",
+            "claude-fable-5-1",
+        ] {
             assert!(model_takes_effort(other), "{other}");
         }
     }
