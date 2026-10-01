@@ -36,22 +36,26 @@ vi.mock("./services", () => ({
         CreateTab: async () => "t",
     },
 }));
+const reveal = vi.hoisted(() => ({ shown: true, held: [] as string[], lifts: 0 }));
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ keepInactiveTabsLaidOut: () => true }));
 vi.mock("./tab-reveal", () => ({
-    holdRevealGate: () => {},
-    scheduleRevealLift: () => {},
+    holdRevealGate: (id: string) => reveal.held.push(id),
+    scheduleRevealLift: () => reveal.lifts++,
     logUngatedReveal: () => {},
-    tabWasShown: () => true,
+    tabWasShown: () => reveal.shown,
 }));
 vi.mock("./focusManager", () => ({ focusManager: { refocusNode: () => {} } }));
 
-import { setActiveTab, switchIntentTabId } from "./tab-actions";
+import { beginClosePromotion, setActiveTab, switchIntentTabId } from "./tab-actions";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("setActiveTab switch intent", () => {
     beforeEach(async () => {
         rpc.calls.length = 0;
+        reveal.shown = true;
+        reveal.held.length = 0;
+        reveal.lifts = 0;
         committed.set("tab-a");
         await settle();
     });
@@ -111,6 +115,44 @@ describe("setActiveTab switch intent", () => {
         rpc.calls[1].resolve();
         await Promise.all([first, second]);
         committed.set("tab-c");
+        expect(switchIntentTabId()).toBeNull();
+    });
+});
+
+// Closing the active tab: CloseTab promotes a neighbor itself. A warm one
+// used to be held behind the reveal gate anyway, blanking the content area
+// for ~110 ms — the flash on close.
+describe("beginClosePromotion", () => {
+    beforeEach(async () => {
+        reveal.shown = true;
+        reveal.held.length = 0;
+        reveal.lifts = 0;
+        committed.set("tab-a");
+        await settle();
+    });
+
+    it("shows a warm neighbor at once, without the gate", () => {
+        const settleClose = beginClosePromotion("tab-b");
+        expect(switchIntentTabId()).toBe("tab-b");
+        expect(reveal.held).toEqual([]);
+        settleClose(true);
+        committed.set("tab-b");
+        expect(switchIntentTabId()).toBeNull();
+        expect(reveal.lifts).toBe(0);
+    });
+
+    it("still gates a neighbor never shown, and lifts it when the close returns", () => {
+        reveal.shown = false;
+        const settleClose = beginClosePromotion("tab-b");
+        expect(switchIntentTabId()).toBeNull();
+        expect(reveal.held).toEqual(["tab-b"]);
+        settleClose(true);
+        expect(reveal.lifts).toBe(1);
+    });
+
+    it("shows the closing tab again when the close fails", () => {
+        const settleClose = beginClosePromotion("tab-b");
+        settleClose(false);
         expect(switchIntentTabId()).toBeNull();
     });
 });

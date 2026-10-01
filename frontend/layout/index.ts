@@ -7,6 +7,7 @@ import {
     installLayoutModelEviction,
     getLayoutModelForStaticTab,
     getLayoutModelForTabById,
+    peekLayoutModelForTab,
     useDebouncedNodeInnerRect,
 } from "./lib/layoutModelHooks";
 import { newLayoutNode } from "./lib/layoutNode";
@@ -39,6 +40,7 @@ export {
     installLayoutModelEviction,
     getLayoutModelForStaticTab,
     getLayoutModelForTabById,
+    peekLayoutModelForTab,
     installWindowEdgeResizeListener,
     LayoutTreeActionType,
     markBlockRecentlyCreated,

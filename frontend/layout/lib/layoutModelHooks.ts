@@ -46,6 +46,11 @@ function getLayoutModelForTab(tabAtom: () => Tab): LayoutModel {
     return layoutModel;
 }
 
+/** The tab's layout model if one exists; never creates one. */
+export function peekLayoutModelForTab(tabId: string): LayoutModel | undefined {
+    return layoutModelMap.get(tabId);
+}
+
 export function getLayoutModelForTabById(tabId: string) {
     const tabOref = MOS.makeORef("tab", tabId);
     const tabAtom = MOS.getMuxObjectAtom<Tab>(tabOref);
