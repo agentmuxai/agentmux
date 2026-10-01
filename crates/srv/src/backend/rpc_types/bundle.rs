@@ -148,6 +148,39 @@ pub struct MemoryDeliveryClaimFallbackResult {
     pub deliver: bool,
 }
 
+/// `memorydelivery:compose` — srv composes the hidden memory re-delivery the
+/// frontend's fallback sends, and keeps its item list (SPEC_CONTEXT_DELIVERY_
+/// 2026_09_30.md §3.4 step 2, CD2b).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandMemoryDeliveryComposeData {
+    pub block_id: String,
+    /// `compaction` or `fresh_session`.
+    pub reason: String,
+}
+
+/// Reply to `memorydelivery:compose`. All three are absent when there is no
+/// memory to deliver.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MemoryDeliveryComposeResult {
+    /// Send it back on the hidden `AgentInput` (`delivery_id`): srv then
+    /// writes `frame` to the pane, so it replays as a card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub delivery_id: Option<String>,
+    /// The hidden message: `<system-reminder>`, the reinjection signature,
+    /// the memory sections. The fallback's wire format, unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text: Option<String>,
+    /// The `agentmux_memory_injected` frame srv writes when it accepts the
+    /// message: the card, item by item, as the hook path's notice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "Record<string, unknown>")]
+    pub frame: Option<serde_json::Value>,
+}
+
 /// `globalmemory:sections`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

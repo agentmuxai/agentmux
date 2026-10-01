@@ -32,6 +32,11 @@ message_id?: string,
  */
 hidden?: boolean, 
 /**
+ * A hidden memory re-delivery srv composed (`memorydelivery:compose`):
+ * accepting the message, srv writes that delivery's card to the pane.
+ */
+delivery_id?: string, 
+/**
  * Images from the composer's attachment tray, in tray order (ids from
  * `attachments.ingest` / the upload route). The backend appends a
  * numbered `<attached_images>` list of their send-copies to the

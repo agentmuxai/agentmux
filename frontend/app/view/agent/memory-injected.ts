@@ -36,6 +36,8 @@ const REASON: Record<string, ContextDeliveryNode["reason"]> = {
     startup: "startup",
     clear: "clear",
     compact: "compaction",
+    // A fallback re-delivery after AgentMux couldn't resume the prior session.
+    resume_fresh: "resume_fresh",
 };
 
 const KINDS: ReadonlyArray<ContextItem["kind"]> = ["global_memory", "personal_memory", "running_summary", "startup_file"];

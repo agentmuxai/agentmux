@@ -178,10 +178,27 @@ pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<
         reason.clause()
     ));
     let mut spans = Vec::new();
+    let wrote_section = push_sections(&mut b, entries, &global, &personal, &mut spans);
+    if let Some(summary) = summary {
+        if wrote_section {
+            b.push("\n");
+        }
+        let (start, end) = b.push(summary);
+        spans.push(ItemSpan { entry: None, start, end });
+    }
+    Some(Composed { text: b.out, spans })
+}
+
+/// `# Global Memory (n entries)` and `# Personal Memory (…)`, each item's
+/// text whole, sections separated by a blank line; empty sections left out.
+/// The frontend's `composeReinjectionMessage` writes the same, so a
+/// re-delivery carries the startup block's sections byte for byte. Returns
+/// whether anything was written.
+fn push_sections(b: &mut Tracked, entries: &[Entry], global: &[usize], personal: &[usize], spans: &mut Vec<ItemSpan>) -> bool {
     let mut wrote_section = false;
     let sections = [
-        ("Global Memory", &global, crate::backend::storage::bundles::GLOBAL_SECTION_SEPARATOR),
-        ("Personal Memory", &personal, "\n---\n"),
+        ("Global Memory", global, crate::backend::storage::bundles::GLOBAL_SECTION_SEPARATOR),
+        ("Personal Memory", personal, "\n---\n"),
     ];
     for (heading, list, separator) in sections {
         if list.is_empty() {
@@ -202,13 +219,70 @@ pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<
         b.push("\n");
         wrote_section = true;
     }
-    if let Some(summary) = summary {
-        if wrote_section {
-            b.push("\n");
+    wrote_section
+}
+
+/// The sentence every hidden memory re-delivery opens with, whatever the
+/// reason: what `is_hidden_reinjection_text` (srv) and
+/// `isMemoryReinjectionMessage` (frontend) recognise it by.
+pub const REINJECTION_SIGNATURE: &str = "Your memory was reinjected because your working context was just reset.";
+
+/// Why the frontend's fallback re-delivers memory
+/// (`memory-reinjection.ts`'s `ReinjectionReason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FallbackReason {
+    /// The conversation was compacted.
+    Compaction,
+    /// AgentMux couldn't resume the prior session, so a fresh one started.
+    FreshSession,
+}
+
+impl FallbackReason {
+    pub fn from_wire(reason: &str) -> Option<Self> {
+        match reason {
+            "compaction" => Some(Self::Compaction),
+            "fresh_session" => Some(Self::FreshSession),
+            _ => None,
         }
-        let (start, end) = b.push(summary);
-        spans.push(ItemSpan { entry: None, start, end });
     }
+
+    /// The second sentence — the frontend's `REASON_CLAUSE`, verbatim.
+    pub fn clause(self) -> &'static str {
+        match self {
+            Self::Compaction => "Your recent conversation was just compacted into a summary.",
+            Self::FreshSession => {
+                "AgentMux could not resume this agent's prior session, so a fresh one was started. Any record \
+                 of the prior conversation AgentMux had came with your first message, in an \
+                 <agentmux-continuation> block."
+            }
+        }
+    }
+}
+
+/// The fallback's hidden message, composed on srv
+/// (SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.4 step 2, CD2b). Its wire format
+/// is the frontend's `composeReinjectionMessage`, unchanged: the
+/// `<system-reminder>` envelope and [`REINJECTION_SIGNATURE`] are how srv's
+/// digest, the continuation packet and replay recognise a hidden turn. No
+/// part cap: the fallback is one message. `None` when there is no memory.
+/// A compaction's running summary is not here: srv's input handler appends
+/// it (`continuity_state::with_state_after_compaction`).
+pub fn compose_fallback(entries: &[Entry], reason: FallbackReason) -> Option<Composed> {
+    let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
+    let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
+    if global.is_empty() && personal.is_empty() {
+        return None;
+    }
+    let mut b = Tracked { out: String::new(), chars: 0 };
+    b.push(&format!(
+        "<system-reminder>\n{REINJECTION_SIGNATURE} {} Below is your\n\
+         complete Global Memory and Personal Memory content — read all of it now,\n\
+         not just the index.\n\n",
+        reason.clause()
+    ));
+    let mut spans = Vec::new();
+    push_sections(&mut b, entries, &global, &personal, &mut spans);
+    b.push("</system-reminder>\n");
     Some(Composed { text: b.out, spans })
 }
 
@@ -469,5 +543,72 @@ mod tests {
         let e = entry("a", Tier::Personal, "12345");
         assert_eq!(e.size_bytes(), 5);
         assert_eq!(e.estimated_tokens(), 2);
+    }
+
+    /// The fallback's wire format is the frontend's `composeReinjectionMessage`
+    /// byte for byte (CD2b). `memory-reinjection.test.ts` pins this same
+    /// literal for the same entries, so the two can't drift.
+    #[test]
+    fn compose_fallback_writes_the_frontends_exact_message() {
+        let entries = vec![
+            Entry {
+                label: "[AgentMux System] App API".into(),
+                tier: Tier::Global,
+                text: "# [AgentMux System] App API\n\nG1".into(),
+                name: "App API".into(),
+                system: true,
+                bundle_id: Some("b1".into()),
+                path: None,
+            },
+            Entry {
+                label: "[Workspace] Rules".into(),
+                tier: Tier::Global,
+                text: "# [Workspace] Rules\n\nG2".into(),
+                name: "Rules".into(),
+                system: false,
+                bundle_id: Some("b2".into()),
+                path: None,
+            },
+            Entry {
+                label: "notes.md".into(),
+                tier: Tier::Personal,
+                text: "P1".into(),
+                name: "notes.md".into(),
+                system: false,
+                bundle_id: None,
+                path: Some("/m/notes.md".into()),
+            },
+        ];
+        let c = compose_fallback(&entries, FallbackReason::Compaction).unwrap();
+        assert_eq!(
+            c.text,
+            "<system-reminder>\n\
+             Your memory was reinjected because your working context was just reset. Your recent conversation was just compacted into a summary. Below is your\n\
+             complete Global Memory and Personal Memory content — read all of it now,\n\
+             not just the index.\n\n\
+             # Global Memory (2 entries)\n\
+             # [AgentMux System] App API\n\nG1\n\n---\n\n# [Workspace] Rules\n\nG2\n\
+             \n\
+             # Personal Memory (1 entry)\n\
+             P1\n\
+             </system-reminder>\n"
+        );
+        assert_eq!(c.spans.len(), 3);
+        assert!(crate::server::app_api::session::is_hidden_reinjection_text(&c.text));
+
+        let fresh = compose_fallback(&entries[2..], FallbackReason::FreshSession).unwrap();
+        assert!(fresh.text.contains(
+            "AgentMux could not resume this agent's prior session, so a fresh one was started. Any record of the prior \
+             conversation AgentMux had came with your first message, in an <agentmux-continuation> block. Below is your\n"
+        ));
+        assert!(!fresh.text.contains("# Global Memory"), "an empty section is left out");
+        assert_eq!(compose_fallback(&[], FallbackReason::Compaction), None);
+    }
+
+    #[test]
+    fn fallback_reasons_are_the_frontends() {
+        assert_eq!(FallbackReason::from_wire("compaction"), Some(FallbackReason::Compaction));
+        assert_eq!(FallbackReason::from_wire("fresh_session"), Some(FallbackReason::FreshSession));
+        assert_eq!(FallbackReason::from_wire("startup"), None);
     }
 }

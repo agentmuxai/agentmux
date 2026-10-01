@@ -393,6 +393,11 @@ pub struct CommandAgentInputData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hidden: Option<bool>,
+    /// A hidden memory re-delivery srv composed (`memorydelivery:compose`):
+    /// accepting the message, srv writes that delivery's card to the pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub delivery_id: Option<String>,
     /// Images from the composer's attachment tray, in tray order (ids from
     /// `attachments.ingest` / the upload route). The backend appends a
     /// numbered `<attached_images>` list of their send-copies to the
