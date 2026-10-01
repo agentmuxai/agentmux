@@ -32,6 +32,8 @@ pub(crate) mod gl_probe;
 mod gpu;
 mod monitor;
 mod window_settings;
+#[cfg(target_os = "linux")]
+mod xauthority;
 
 #[cfg(target_os = "linux")]
 pub(crate) use gpu::{detect_gpu_tier, GpuTier};
@@ -702,6 +704,20 @@ wrap_app! {
                         // property applies; opaque users keep native Wayland.
                         // An explicit AGENTMUX_OZONE_PLATFORM still wins above.
                         if read_window_transparent_setting() {
+                            // Only the browser process probes; CEF passes its
+                            // --ozone-platform choice on to the child processes.
+                            // Without an X cookie Chromium exits before any
+                            // window opens (#4011), so stay on native Wayland
+                            // rather than fail to start.
+                            if process_type.is_none() {
+                                xauthority::ensure_xauthority();
+                                if !xauthority::xwayland_reachable() {
+                                    tracing::warn!(
+                                        "window:transparent=true but XWayland is unreachable → staying on native Wayland; window opacity won't apply"
+                                    );
+                                    return Some("wayland".to_string());
+                                }
+                            }
                             tracing::info!(
                                 "window:transparent=true → ozone-platform=x11 (XWayland) for _NET_WM_WINDOW_OPACITY"
                             );
@@ -711,6 +727,9 @@ wrap_app! {
                         }
                     });
                     if let Some(platform) = ozone {
+                        if platform == "x11" && process_type.is_none() {
+                            xauthority::ensure_xauthority();
+                        }
                         let oz_key = CefString::from("ozone-platform");
                         let oz_val = CefString::from(platform.as_str());
                         cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
