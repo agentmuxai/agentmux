@@ -10,7 +10,7 @@
 //!   `installed` or `failed`, under one `install_id` so the row updates in
 //!   place. A pane restored at startup used to install silently.
 //! - **Version change:** each agent's last-run CLI version is kept in
-//!   [`RECORD_FILE`]. When the agent's CLI next starts on a different
+//!   [`RECORD_FILE`], in the channel directory ([`record_dir`]). When the agent's CLI next starts on a different
 //!   version, an `agentmux_cli_version_changed` frame tells the user
 //!   (`from`, `to`, and the version AgentMux pins).
 //!
@@ -29,9 +29,20 @@ use serde_json::{json, Value};
 pub const INSTALL_SUBTYPE: &str = "agentmux_cli_install";
 pub const VERSION_CHANGED_SUBTYPE: &str = "agentmux_cli_version_changed";
 
-/// Per-agent last-run CLI versions, in the srv data dir (no schema change:
-/// a new column would lock older builds out of a shared store.db).
+/// Per-agent last-run CLI versions, in [`record_dir`] (no schema change: a
+/// new column would lock older builds out of a shared store.db).
 pub const RECORD_FILE: &str = "agent-cli-versions.json";
+
+/// Where [`RECORD_FILE`] lives: the channel directory
+/// (`~/.agentmux/channels/<channel>/`, or a dev build's own root), next to
+/// the shared store that holds the agents it is keyed by. Not `data_dir`:
+/// an installed build's data dir is per AgentMux version
+/// (`channels/<ch>/versions/<v>/data/`), so after an upgrade every agent
+/// would read as a first run and the upgrade this exists to report would
+/// go unnoticed (ReAgent P1 on #4128).
+pub fn record_dir(paths: &agentmux_common::DataPaths) -> &Path {
+    &paths.instance_dir
+}
 
 /// Where an install stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,9 +151,9 @@ static RECORD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// A first run, or a switch to another provider, records and returns `None`.
 /// A record that can't be read or written is logged and treated as empty:
 /// at worst a notice is missed, never a launch.
-pub fn observe_version(data_dir: &Path, agent_key: &str, provider: &str, version: &str) -> Option<String> {
+pub fn observe_version(dir: &Path, agent_key: &str, provider: &str, version: &str) -> Option<String> {
     let _guard = RECORD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let path = data_dir.join(RECORD_FILE);
+    let path = dir.join(RECORD_FILE);
     let mut records: BTreeMap<String, LastCli> = std::fs::read(&path)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -187,8 +198,8 @@ pub fn observe_and_notify(
     version: &str,
 ) {
     let Some(agent_key) = agent_key_of_block(mstore, block_id) else { return };
-    let Some(data_dir) = agentmux_common::DataPaths::from_env().map(|p| p.data_dir) else { return };
-    if let Some(from) = observe_version(&data_dir, &agent_key, provider, version) {
+    let Some(paths) = agentmux_common::DataPaths::from_env() else { return };
+    if let Some(from) = observe_version(record_dir(&paths), &agent_key, provider, version) {
         let pinned = crate::backend::providers::get_provider(provider).map(|p| p.pinned_version);
         tracing::info!(block_id, provider, from = %from, to = version, "cli notice: agent's CLI version changed");
         append_to_pane(broker, filestore, mstore, block_id, &version_changed_frame(provider, &from, version, pinned));

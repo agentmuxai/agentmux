@@ -389,7 +389,11 @@ user; the agent's context is unchanged (§8 Q6).
    gets no row.
 2. **Version-change notice.** srv keeps, per agent, the CLI it last ran:
    `{provider, version, at}`, keyed by the block's `agentId`, in
-   `<data_dir>/agent-cli-versions.json` (`backend/cli_notice.rs`). There
+   `agent-cli-versions.json` in the channel directory, next to the shared
+   store that holds the agents (`backend/cli_notice.rs`, `record_dir`).
+   Not `data_dir`: an installed build's is per AgentMux version, so an
+   upgrade would start from an empty record and miss the very upgrade
+   this reports (ReAgent P1 on #4128). There
    is no free-form launch-state field on `db_agents` (its launch state is
    typed columns), and a new column is a schema change (§3.2). A record
    that can't be read is treated as empty: at worst a notice is missed.
