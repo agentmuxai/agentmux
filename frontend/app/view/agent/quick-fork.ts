@@ -35,6 +35,9 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { resolveEffectiveLaunchProvider } from "./agent-launch-env";
+import { getRuntimeConfig } from "./buildRuntimeArgs";
+import { PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { effectiveRuntime } from "./runtime-capabilities";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
@@ -228,6 +231,9 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
                     bundleId: "",
                     continueSessionId: sessionId,
                     forkSession: true,
+                    // The fork starts as the source is RUNNING (its effective
+                    // model/effort/mode), not on the defaults.
+                    carryOverRuntime: effectiveRuntime(getRuntimeConfig(meta), meta?.[PROVIDER_FLAGS_META_KEY]),
                 },
                 paneOpenResult.block_id,
                 ownerTabId,

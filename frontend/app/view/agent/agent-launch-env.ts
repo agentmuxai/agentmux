@@ -206,15 +206,23 @@ export function resolveInitialRuntimeConfig(
      * An explicit model chosen at launch still wins.
      */
     providerFlags?: unknown,
+    /**
+     * A runtime to carry over from another pane (a fork of a running agent): the
+     * fork should start as the source was running, not on the defaults. Applies
+     * to each setting it names; a model chosen at launch still wins over it.
+     */
+    carryOver?: Partial<AgentRuntimeConfig>,
 ): AgentRuntimeConfig {
     const flags = parseProviderFlags(providerFlags);
     const model =
         overridesModel ||
+        carryOver?.model ||
         modelFromFlags(flags) ||
         providerModels?.find((m) => m.default)?.value ||
         DEFAULT_RUNTIME_CONFIG.model;
-    const effort = effortFromFlags(flags) ?? DEFAULT_RUNTIME_CONFIG.effort;
-    const permissionMode = permissionModeFromFlags(flags) ?? DEFAULT_RUNTIME_CONFIG.permissionMode;
+    const effort = carryOver?.effort ?? effortFromFlags(flags) ?? DEFAULT_RUNTIME_CONFIG.effort;
+    const permissionMode =
+        carryOver?.permissionMode ?? permissionModeFromFlags(flags) ?? DEFAULT_RUNTIME_CONFIG.permissionMode;
     return {
         ...DEFAULT_RUNTIME_CONFIG,
         model,
