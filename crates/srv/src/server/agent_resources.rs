@@ -36,6 +36,8 @@ pub struct BackgroundTaskEntry {
     pub pid: Option<i64>,
     /// Unix ms, when bashwrap first saw it.
     pub started_at_ms: i64,
+    /// Unix ms, the last time bashwrap saw it still running.
+    pub last_seen_ms: i64,
 }
 
 /// A srv-spawned `Shell()` session the agent started.
@@ -110,7 +112,7 @@ pub fn snapshot(state: &AppState, block_id: &str) -> AgentResources {
         .unwrap_or_default()
         .into_iter()
         .filter(|t| t.ended_at_ms.is_none())
-        .map(|t| BackgroundTaskEntry { id: t.id, label: t.label, pid: t.pid, started_at_ms: t.started_at_ms })
+        .map(|t| BackgroundTaskEntry { id: t.id, label: t.label, pid: t.pid, started_at_ms: t.started_at_ms, last_seen_ms: t.last_seen_ms })
         .collect();
     let shell_sessions = state
         .shell_sessions
@@ -176,9 +178,14 @@ pub fn survivors(before: &[ProcessEntry]) -> Vec<ProcessEntry> {
         .collect()
 }
 
-/// The PIDs of `tasks` that are still that task: running, and started no
-/// later than the task was first seen (a PID the OS reused since started
-/// after it). Spec §8, PID reuse.
+/// The PIDs of `tasks` that are still that task (spec §8, PID reuse).
+///
+/// A process that was already running when bashwrap last saw the task
+/// running IS the task's process: the OS can't reuse a PID while its owner is
+/// alive. So the test is "started no later than `last_seen_ms`", which also
+/// holds for a task that started long after it was declared (a tool call
+/// waiting on a permission prompt). A reused PID started after the task was
+/// last seen, and is left alone.
 pub fn live_background_pids(tasks: &[BackgroundTaskEntry]) -> Vec<u32> {
     let pids: Vec<u32> = tasks.iter().filter_map(|t| t.pid.and_then(|p| u32::try_from(p).ok())).filter(|p| *p > 1).collect();
     let live = start_times(&pids);
@@ -187,11 +194,36 @@ pub fn live_background_pids(tasks: &[BackgroundTaskEntry]) -> Vec<u32> {
         .filter_map(|t| {
             let pid = u32::try_from(t.pid?).ok()?;
             let started = *live.get(&pid)?;
-            // bashwrap reports a task a moment after it starts; allow for that
-            // and the OS's one-second resolution.
-            (started <= (t.started_at_ms.max(0) as u64) + 5_000).then_some(pid)
+            // The OS reports start times in whole seconds.
+            (started <= (t.last_seen_ms.max(t.started_at_ms).max(0) as u64) + 1_000).then_some(pid)
         })
         .collect()
+}
+
+/// Kill `pid` and every descendant at once (SIGKILL on Unix, TerminateProcess
+/// on Windows), leaves first, after re-checking that `pid` is still the
+/// process started at `started_at_ms` (0 = unknown, judged by PID alone).
+/// One OS snapshot. Returns how many processes it signalled.
+pub fn force_kill_tree(pid: u32, started_at_ms: u64) -> usize {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, true, sysinfo::ProcessRefreshKind::nothing());
+    let root = sysinfo::Pid::from_u32(pid);
+    match sys.process(root) {
+        Some(p) if same_start(started_at_ms, p.start_time() * 1000) => {}
+        _ => return 0, // gone, or the PID now belongs to another process
+    }
+    // Breadth-first over parent links, then kill deepest first.
+    let mut tree = vec![root];
+    let mut i = 0;
+    while i < tree.len() {
+        let parent = tree[i];
+        tree.extend(sys.processes().iter().filter(|(_, p)| p.parent() == Some(parent)).map(|(id, _)| *id));
+        i += 1;
+    }
+    tree.iter()
+        .rev()
+        .filter(|id| sys.process(**id).is_some_and(|p| p.kill_with(sysinfo::Signal::Kill).unwrap_or_else(|| p.kill())))
+        .count()
 }
 
 /// `recorded` 0 means the start time wasn't known; the OS reports seconds.
@@ -254,16 +286,63 @@ mod tests {
     fn a_background_task_pid_counts_only_while_it_is_that_task() {
         let me = std::process::id();
         let started = *start_times(&[me]).get(&me).unwrap() as i64;
-        let task = |started_at_ms| BackgroundTaskEntry {
+        let task = |started_at_ms, last_seen_ms| BackgroundTaskEntry {
             id: "t".into(),
             label: "task dev".into(),
             pid: Some(me as i64),
             started_at_ms,
+            last_seen_ms,
         };
-        assert_eq!(live_background_pids(&[task(started + 500)]), vec![me], "seen just after it started");
-        assert!(live_background_pids(&[task(started - 60_000)]).is_empty(), "the PID was reused after the task was seen");
-        let no_pid = BackgroundTaskEntry { pid: None, ..task(started) };
+        assert_eq!(live_background_pids(&[task(started + 500, started + 500)]), vec![me], "seen just after it started");
+        assert_eq!(
+            live_background_pids(&[task(started - 60_000, started + 10_000)]),
+            vec![me],
+            "declared a minute before it started (a permission prompt), seen running since: still the task"
+        );
+        assert!(
+            live_background_pids(&[task(started - 60_000, started - 30_000)]).is_empty(),
+            "last seen before this process started: the PID was reused"
+        );
+        let no_pid = BackgroundTaskEntry { pid: None, ..task(started, started) };
         assert!(live_background_pids(&[no_pid]).is_empty());
+    }
+
+    /// The verify step's forced kill takes the whole tree, and a child that
+    /// would ignore a polite signal still dies.
+    #[test]
+    fn force_kill_tree_takes_the_child_too() {
+        #[cfg(windows)]
+        let mut parent = std::process::Command::new("cmd").args(["/C", "ping -n 30 127.0.0.1 > nul"]).spawn().unwrap();
+        #[cfg(unix)]
+        let mut parent = std::process::Command::new("sh").args(["-c", "trap '' TERM; sleep 30 & wait"]).spawn().unwrap();
+        let pid = parent.id();
+        // Let the shell start its child.
+        let child_of = |pid: u32| {
+            let mut sys = sysinfo::System::new();
+            sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, true, sysinfo::ProcessRefreshKind::nothing());
+            sys.processes()
+                .iter()
+                .find(|(_, p)| p.parent() == Some(sysinfo::Pid::from_u32(pid)))
+                .map(|(id, _)| id.as_u32())
+        };
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut child = None;
+        while child.is_none() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            child = child_of(pid);
+        }
+        let child = child.expect("the shell started a child");
+
+        assert_eq!(force_kill_tree(pid, 60_000), 0, "a start time that doesn't match: not this process, nothing killed");
+        // Children go first; a shell whose child died may exit on its own
+        // before its turn, so count >= 1 and check both are gone below.
+        assert!(force_kill_tree(pid, 0) >= 1);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while (start_times(&[pid, child]).len() > 0) && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let _ = parent.wait();
+        assert!(start_times(&[pid, child]).is_empty(), "the parent and its child are gone");
     }
 
     #[test]
