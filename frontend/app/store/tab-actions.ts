@@ -37,6 +37,41 @@ import { createEffect, createRoot, createSignal } from "solid-js";
 const [switchIntentTabId, setSwitchIntentTabId] = createSignal<string | null>(null);
 let switchChain = new Set<string>();
 export { switchIntentTabId };
+
+/** Publish `tabId` as the switch intent, starting or extending the switch
+ *  chain from the committed tab. Returns a cancel for when the backend
+ *  didn't move after all. */
+function showSwitchIntent(tabId: string): () => void {
+    if (switchIntentTabId() == null) switchChain = new Set([activeTabId()]);
+    switchChain.add(tabId);
+    setSwitchIntentTabId(tabId);
+    return () => {
+        if (switchIntentTabId() === tabId) setSwitchIntentTabId(null);
+    };
+}
+
+/**
+ * Closing the active window tab: CloseTab's own reducer promotes a neighbor
+ * (`promotedTabId`, the one the strip already shows) in the same transition
+ * as the removal. A warm neighbor (already shown, kept laid out) is shown
+ * from the switch intent at once, in the click's own frame, as a warm switch
+ * is; it used to be held behind the reveal gate, which blanked the whole
+ * content area for ~110 ms with nothing left to settle — the flash on close.
+ * A neighbor never shown is still gated. Call the returned function when
+ * CloseTab returns, with whether it succeeded.
+ */
+export function beginClosePromotion(promotedTabId: string): (closed: boolean) => void {
+    if (!(keepInactiveTabsLaidOut() && tabWasShown(promotedTabId))) {
+        holdRevealGate(promotedTabId);
+        return () => scheduleRevealLift();
+    }
+    logUngatedReveal(promotedTabId);
+    const cancel = showSwitchIntent(promotedTabId);
+    return (closed) => {
+        if (!closed) cancel();
+    };
+}
+
 createRoot(() =>
     createEffect(() => {
         const intent = switchIntentTabId();
@@ -165,14 +200,12 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) holdRevealGate(tabId);
-    if (switchIntentTabId() == null) switchChain = new Set([fromTabId]);
-    switchChain.add(tabId);
-    setSwitchIntentTabId(tabId);
+    const cancelIntent = showSwitchIntent(tabId);
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
     } catch (e) {
         // The backend didn't move: show the committed tab again.
-        if (mySeq === tabSwitchSeq) setSwitchIntentTabId(null);
+        if (mySeq === tabSwitchSeq) cancelIntent();
         throw e;
     } finally {
         // Pair with holdRevealGate above. Also lifts the gate on
