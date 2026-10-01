@@ -722,6 +722,43 @@ async fn connect_and_run(
     }
 }
 
+/// How often the subscriber pulls for every registered agent whether or not a
+/// wake signal arrived. The relay's wake is a best-effort broadcast
+/// (`muxbus/server/src/broadcast.ts`: a lost one "just means that sidecar
+/// catches the injection on its own poll interval"), but this client had no
+/// poll interval, so a jekt that reached the relay before its agent was
+/// subscribed waited for the next unrelated wake: 8m46s on 2026-09-30. The
+/// lease is already renewed every [`super::wan_lease::RENEW_EVERY`], so a
+/// catch-up costs about one pending GET per agent: roughly 0.5 requests a
+/// minute per agent at this interval.
+const CATCH_UP_EVERY: Duration = Duration::from_secs(120);
+
+/// The agents to put in the subscription when it is created: every locally
+/// registered agent that a live pane still holds, lowercased and deduplicated.
+/// Registered agents used to be missed. On an isolated channel the subscriber
+/// is created lazily at `muxbus.login`, with an empty set, and an agent that
+/// registered earlier (while there was no subscriber to tell) joined only on
+/// its next input turn, so nothing reached it until then.
+fn agents_to_seed(registered: &[String], is_live: impl Fn(&str) -> bool) -> Vec<String> {
+    let _ = (registered, &is_live);
+    Vec::new()
+}
+
+/// Pull pending injections for every registered agent now. The same work an
+/// `InjectAvailable` wake does, run on connect, when an agent is added, and on
+/// a timer ([`CATCH_UP_EVERY`]) so a missed wake costs minutes at worst.
+/// Returns true when the session should reconnect (the shared token expired).
+async fn catch_up(
+    base: &str,
+    token: &str,
+    http: &reqwest::Client,
+    agents: &Arc<Mutex<HashSet<String>>>,
+    mstore: &Arc<Store>,
+) -> bool {
+    let _ = (base, token, http, agents, mstore);
+    false
+}
+
 /// Handle a message from the cloud server.
 /// The WS wake signal carries zero metadata — the sidecar polls all its registered
 /// agents via REST to find pending injections, so a compromised subscriber gains nothing.
@@ -2003,5 +2040,59 @@ mod tests {
             ["POST /agents/lease", pending.as_str(), "POST /reactive/ack"],
             "nothing delivered, so nothing released"
         );
+    }
+
+    // ── Catch-up pull: a message must not wait for an unrelated wake ──────
+    // (2026-09-30: a jekt to manoz reached the relay at 23:12:14 and was
+    // delivered at 23:21:00, when someone else's traffic woke the subscriber.)
+
+    #[test]
+    fn the_seed_is_every_live_registered_agent_lowercased_and_deduplicated() {
+        let registered: Vec<String> = ["Alice", "alice", "Bob", "Carol"].map(String::from).to_vec();
+        let got = agents_to_seed(&registered, |a| a != "carol");
+        assert_eq!(got, ["alice", "bob"], "Carol has no live pane; Alice appears once, lowercased");
+    }
+
+    #[test]
+    fn an_empty_registry_seeds_nothing() {
+        assert!(agents_to_seed(&[], |_| true).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_pulls_pending_for_every_registered_agent() {
+        let (a, b) = (format!("agent-{}", uuid::Uuid::new_v4()), format!("agent-{}", uuid::Uuid::new_v4()));
+        let (pa, pb) = (format!("GET /reactive/pending/{a}"), format!("GET /reactive/pending/{b}"));
+        let (base, seen) = fake_relay(vec![
+            lease_granted(),
+            (pa.clone(), 200, serde_json::json!({ "injections": [] })),
+            (pb.clone(), 200, serde_json::json!({ "injections": [] })),
+        ])
+        .await;
+        let agents = Arc::new(Mutex::new(HashSet::from([a.clone(), b.clone()])));
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+
+        let reconnect = catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await;
+
+        assert!(!reconnect, "nothing went wrong, so no reconnect");
+        let seen = seen.lock().unwrap();
+        assert!(seen.contains(&pa), "pulled for {a}: {seen:?}");
+        assert!(seen.contains(&pb), "pulled for {b}: {seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_with_no_registered_agents_asks_the_relay_for_nothing() {
+        let (base, seen) = fake_relay(vec![lease_granted()]).await;
+        let agents = Arc::new(Mutex::new(HashSet::new()));
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+
+        assert!(!catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await);
+
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_fallback_interval_is_short_enough_to_matter_and_long_enough_to_be_cheap() {
+        assert!(CATCH_UP_EVERY >= Duration::from_secs(30), "faster than this is polling");
+        assert!(CATCH_UP_EVERY <= Duration::from_secs(300), "slower than this is the 8m46s we are fixing");
     }
 }
