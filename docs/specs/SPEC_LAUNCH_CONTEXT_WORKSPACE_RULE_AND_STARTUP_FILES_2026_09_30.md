@@ -1,6 +1,6 @@
 # SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown
 
-**Status:** active — LC1 (§3) implemented (#4113); LC4 (§6.3 steps 1-2) implemented; LC2, LC3, LC5 proposed.
+**Status:** active — LC1 (§3) implemented (#4113); LC4 (§6.3 steps 1-2) implemented (#4128); LC2 (§4.1-4.3, Claude) implemented; LC3, LC5 proposed.
 **Date:** 2026-09-30
 **Verified against:** `agentmux` `main` @ `48cc6fdbc` (§1-§4) and `3fcd1496a` (§6). Paths are relative
 to the repo root.
@@ -217,77 +217,75 @@ inside the image.
 
 ## 4. Design: every startup file in the card
 
-### 4.1 A launch manifest
+### 4.1 The startup files, as the CLI sees them
 
-When srv writes an agent's config at launch (both paths:
-`writeagentconfig` in `editor_handlers.rs:205-394` and
-`write_agent_config_files` in `agent_open.rs:1007-1245`), it also records
-a **launch manifest**: the list of startup files the provider will read,
-in the order it reads them. One item per file:
+**As built (LC2), the list is computed when the session starts, not
+recorded at launch.** Neither launch path is a good place to record it:
+`writeagentconfig` knows no block, and the two paths share only leaf
+writers keyed by the workdir. The SessionStart hook, by contrast, runs
+inside the CLI. Its stdin carries the session's `cwd`, and its env has
+`CLAUDE_CONFIG_DIR`. So `agentmux-bashwrap sessionstart` sends both with
+each part request (`crates/bashwrap/src/sessionstart.rs`), and srv lists
+the files from where the CLI actually ran (`backend/startup_files.rs`,
+`claude_startup_files`). A hook binary older than srv sends no `cwd`, and
+the card simply shows no startup files.
+
+One item per file, with the memory items' fields plus:
 
 | Field | Meaning |
 |---|---|
-| `kind` | `startup_file` (new item kind, alongside #4034's `global_memory`, `personal_memory`, …) |
-| `role` | `instructions` / `instructions_import` / `ancestor_instructions` / `user_instructions` / `skill` / `mcp_servers` |
-| `path` | absolute path |
-| `owner` | `agentmux` (managed marker or written this launch) / `user` (foreign) / `external` (no AgentMux code writes it, e.g. the shared `agents/CLAUDE.md`) |
-| `bytes`, `tokens` | size as read (tokens = chars/4, as today) |
-| `sha256` | content hash at launch |
-| `contains` | for AgentMux-written files, the sections inside: `global_memory` (with entry names), `skills_index`, `soul`, `agent_md` |
-| `duplicates` | ids of other items in the same card carrying the same content (§4.4) |
+| `kind` | `startup_file` |
+| `role` | `user_instructions` / `instructions` / `instructions_import` / `skills` / `mcp_servers` |
+| `path` | absolute path; the `name` is shortened to `~/…` |
+| `owner` | `agentmux` (the managed marker, the config-dir placeholder, or `AGENTMUX_MEMORY.md`) / `user` (in the workspace, not managed) / `external` (outside the workspace and not AgentMux's, e.g. the shared `agents/CLAUDE.md`) |
+| `size_bytes`, `tokens` | of the text as read (tokens = chars/4, as today) |
+| `count` | skills and MCP servers: how many are listed (they carry no text, size 0) |
+| `contains` | AgentMux sections the file carries: `global_memory`, `skills_index` |
 
-The list is **provider-specific**, from a new
-`startup_file_candidates(provider, workdir, config_dir)` in
-`backend/providers.rs`, next to `startup_instructions_filename`. For
-Claude:
-- `<workdir>/CLAUDE.md`, `<workdir>/CLAUDE.local.md`;
-- each ancestor directory's `CLAUDE.md` / `CLAUDE.local.md`, up to the
-  filesystem root (this is how the shared `agents/CLAUDE.md` is found);
-- `@path` imports inside any of those, followed recursively to the depth
-  Claude Code allows, relative to the importing file;
-- `<CLAUDE_CONFIG_DIR>/CLAUDE.md`;
-- the skill files AgentMux wrote, as one grouped item with a count;
-- `.mcp.json` servers, as one item: **server names and tool count only,
-  never file contents** (it holds `AGENTMUX_JEKT_KEY` and other keys).
+For Claude, in the order the CLI loads them:
+- `<CLAUDE_CONFIG_DIR>/CLAUDE.md`, else `~/.claude/CLAUDE.md`;
+- each folder from the filesystem root down to `cwd`, excluding the root
+  itself: its `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`. This
+  is how the shared `agents/CLAUDE.md` is found;
+- right after each file, its `@path` imports: relative to the importing
+  file, or `~/`; not inside fenced or inline code; up to 5 hops; each file
+  once, so a cycle ends;
+- the skill listing (`.claude/commands/*.md`, `.claude/skills/*/SKILL.md`)
+  as one item with a count;
+- `.mcp.json`'s servers as one item, **by name only**. The file holds the
+  agent's signing keys, so its text never leaves `startup_files.rs`.
 
-For codex/gemini/qwen/pi, their one instructions file
-(`providers.rs:345,377,426,555`); ancestor discovery per provider is a
-follow-up (§8 Q4). Kimi gets an empty manifest and a card that says so.
+This mirrors Claude Code's documented loading rules; it is what the CLI
+**should** have read, not proof that it did.
 
-This mirrors the provider's documented loading rules; it is what the
-provider **should** read, not proof that it did. The card says
-"files at launch", not "files read".
+**Not built: other providers.** codex, gemini, qwen and pi have no
+SessionStart hook, so they get no card at all today. Listing their one
+instructions file needs srv to emit a frame by itself on the first turn
+(§8 Q4).
 
 ### 4.2 When it is sent
 
-srv stores the manifest under the launch and emits it with the startup
-delivery:
-- if the SessionStart hook fires with `source=startup`, the manifest's
-  items are added to that delivery's `agentmux_memory_injected` frame,
-  before the hook's own items;
-- for providers without the hook (everything but Claude), srv emits the
-  frame by itself when the first turn is sent, with the manifest only.
+On a new session (`source=startup`) only. The startup items come first in
+that delivery's `agentmux_memory_injected` frame, then the hook's memory
+items. `/clear` and compaction get no startup rows: the files are still in
+context and nothing about them changed. A resume gets no card, as before.
 
-A resume (`source=resume`) gets no card today and still gets none; the
-files haven't changed the agent's context. `/clear` and compaction get a
-card with the hook items plus a single row "Startup files: unchanged
-since launch (N files)", expanding to the list, because Claude keeps
-them in context.
+Not built: a "Startup files: unchanged since launch" row on `/clear` and
+compaction. It isn't needed for the ask and can follow.
 
 ### 4.3 How the card shows it
 
-Header: "Given to the agent · new session · 11 items · 2 duplicated".
-Two groups:
+One card, "Given to the agent · new session · N items", with the startup
+files first. Each row shows:
+- 📄 and the name;
+- an owner chip, `AgentMux`, `Yours` or `Hand-maintained`, with a
+  tooltip explaining who writes the file;
+- `N listed` instead of a size for the skill and MCP listings;
+- a muted `+ Global Memory` mark on a file that carries the Global Memory,
+  since the hook delivers it too (§4.4).
 
-- **Startup files** — one row per file: name, path (shortened to `~`),
-  owner chip (`AgentMux` / `yours` / `external`), size and tokens.
-  Expanding shows the content snapshot (#4034 CD3 storage and RPC),
-  except `.mcp.json`. "Open file" opens it in an Editor pane.
-- **Memory** — the hook's items, as #4034 describes.
-
-The owner chip answers "why is this here and who can change it":
-`external` rows say where they come from ("hand-maintained, not written
-by AgentMux").
+Bodies on expand wait for #4034's CD3, which still needs the owner's
+decision.
 
 ### 4.4 Duplicates are shown, then removed
 

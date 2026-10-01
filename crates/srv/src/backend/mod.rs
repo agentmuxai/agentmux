@@ -32,6 +32,7 @@ pub mod agent_runtime;
 pub mod providers;
 pub mod cli_install;
 pub mod cli_notice;
+pub mod startup_files;
 pub mod model_catalog;
 pub mod config_watcher_fs;
 pub mod editor_file_watcher;

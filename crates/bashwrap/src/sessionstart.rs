@@ -53,6 +53,10 @@ struct SessionStartInput {
     session_id: String,
     #[serde(default)]
     source: String,
+    /// The session's working directory: where the CLI looked for its
+    /// startup files (`CLAUDE.md` up the tree, skills, `.mcp.json`).
+    #[serde(default)]
+    cwd: String,
 }
 
 #[derive(Serialize)]
@@ -61,6 +65,10 @@ struct PartRequest<'a> {
     session_id: &'a str,
     source: &'a str,
     part: usize,
+    /// So the pane's card can list the files the CLI loaded by itself.
+    cwd: &'a str,
+    /// The CLI's config dir (`CLAUDE_CONFIG_DIR`): the user's `CLAUDE.md`.
+    config_dir: &'a str,
 }
 
 /// Entry point. Always `Ok(())`: see the module doc.
@@ -78,7 +86,15 @@ pub async fn run(args: Args) -> Result<()> {
         return Ok(());
     };
     let token = std::env::var("AGENTMUX_AGENT_TOKEN").ok();
-    let req = PartRequest { block_id: &block_id, session_id: &input.session_id, source: &input.source, part: args.part };
+    let config_dir = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_default();
+    let req = PartRequest {
+        block_id: &block_id,
+        session_id: &input.session_id,
+        source: &input.source,
+        part: args.part,
+        cwd: &input.cwd,
+        config_dir: &config_dir,
+    };
 
     let reply = match client.post_json(PART_PATH, token.as_deref(), &req, PART_TIMEOUT).await {
         Ok(v) => v,
@@ -121,12 +137,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_session_id_and_source_from_stdin() {
+    fn reads_session_id_source_and_cwd_from_stdin() {
         let input: SessionStartInput = serde_json::from_str(
             r#"{"session_id":"s1","transcript_path":"/t","cwd":"/c","hook_event_name":"SessionStart","source":"compact"}"#,
         )
         .unwrap();
-        assert_eq!(input, SessionStartInput { session_id: "s1".into(), source: "compact".into() });
+        assert_eq!(input, SessionStartInput { session_id: "s1".into(), source: "compact".into(), cwd: "/c".into() });
     }
 
     #[test]
@@ -143,11 +159,18 @@ mod tests {
     }
 
     #[test]
-    fn the_request_names_block_session_source_and_part() {
-        let req = PartRequest { block_id: "b", session_id: "s", source: "startup", part: 3 };
+    fn the_request_names_block_session_source_part_and_where_the_cli_runs() {
+        let req = PartRequest {
+            block_id: "b",
+            session_id: "s",
+            source: "startup",
+            part: 3,
+            cwd: "/ws",
+            config_dir: "/cfg",
+        };
         assert_eq!(
             serde_json::to_value(&req).unwrap(),
-            serde_json::json!({"block_id": "b", "session_id": "s", "source": "startup", "part": 3})
+            serde_json::json!({"block_id": "b", "session_id": "s", "source": "startup", "part": 3, "cwd": "/ws", "config_dir": "/cfg"})
         );
     }
 }
