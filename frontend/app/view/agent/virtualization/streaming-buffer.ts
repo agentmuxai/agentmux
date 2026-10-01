@@ -220,21 +220,39 @@ function payloadBytes(value: unknown, budget: number): number {
  * a new object, so its scan is bounded separately.
  */
 export function nodeBytes(node: DocumentNode): number {
-    const cached = bytesCache.get(node);
+    return measureNode(node, NODE_BYTES_CAP, bytesCache);
+}
+
+/** Past this, a node counts as this big for the live feed's budget. */
+const FULL_NODE_BYTES_CAP = 32 * 1024 * 1024;
+const fullBytesCache = new WeakMap<DocumentNode, number>();
+
+/**
+ * nodeBytes measured up to 32 MB, not 2 MB: the live feed sums whole turns
+ * against a 15 MB budget, and the 2 MB cap let seven 10 MB nodes count as
+ * 14 MB (Codex P2 on #4121). Same bounded walk, so a node too large or too
+ * long to scan counts as over the whole budget.
+ */
+export function nodeBytesFull(node: DocumentNode): number {
+    return measureNode(node, FULL_NODE_BYTES_CAP, fullBytesCache);
+}
+
+function measureNode(node: DocumentNode, cap: number, cache: WeakMap<DocumentNode, number>): number {
+    const cached = cache.get(node);
     if (cached !== undefined) return cached;
     let n = 64;
     const { log, ...rendered } = node as unknown as { log?: { chunks?: { content?: unknown }[] } } & Record<string, unknown>;
     const chunks = log?.chunks ?? [];
     if (chunks.length > MAX_LOG_CHUNKS_SCANNED) {
-        n = NODE_BYTES_CAP;
+        n = cap;
     } else {
         for (const c of chunks) {
-            if (n >= NODE_BYTES_CAP) break;
+            if (n >= cap) break;
             if (typeof c.content === "string") n += c.content.length;
         }
     }
-    if (n < NODE_BYTES_CAP) n += payloadBytes(rendered, NODE_BYTES_CAP - n);
-    bytesCache.set(node, n);
+    if (n < cap) n += payloadBytes(rendered, cap - n);
+    cache.set(node, n);
     return n;
 }
 
