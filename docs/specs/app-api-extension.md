@@ -621,7 +621,8 @@ All commands return structured errors:
 | `TAB_NOT_FOUND` | Tab ID doesn't exist |
 | `ALREADY_RUNNING` | Agent process already active |
 | `NOT_RUNNING` | Agent process not active (can't send/stop) |
-| `CLI_NOT_AVAILABLE` | CLI binary not installed |
+| `CLI_NOT_AVAILABLE` | CLI binary not installed and could not be installed (`agent.open` installs a missing pinned npm CLI itself; this means the install failed, or the provider has no npm package) |
+| `CLI_INSTALLING` | The CLI is still being installed (HTTP 503). Retry shortly; the install carries on and the next call reuses it |
 | `AUTH_REQUIRED` | CLI not authenticated |
 | `INVALID_WIDGET` | Unknown widget type |
 | `INVALID_PROVIDER` | Unknown provider |

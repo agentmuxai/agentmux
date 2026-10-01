@@ -84,9 +84,7 @@ All three initial blockers were resolved:
 
 ### 1. CLI Auto-Install
 
-`agent.open` returns `CLI_NOT_AVAILABLE` if the npm package isn't installed. Workaround: pre-install before calling `agent.open`.
-
-**Fix planned:** Add an `auto_install: bool` field to the `agent.open` request (default `true`) that triggers the same npm install logic used by the frontend's launch flow.
+*Fixed (2026-10).* `agent.open` installs a missing pinned CLI itself, with the same routine the UI's launch flow uses (`cli_install::install_pinned_cli`), waiting up to ~150 s. If the install is still running after that it returns `CLI_INSTALLING` (HTTP 503: retry shortly; the install is not cancelled and the next call reuses it). If the install itself fails it returns `CLI_NOT_AVAILABLE` with the reason. Previously it returned `CLI_NOT_AVAILABLE` immediately, which is what a caller hit for the minute or two after an upgrade moved a provider's pin. There is no `auto_install` request field; installing is the behavior.
 
 ### 2. Slash Commands
 
