@@ -294,7 +294,7 @@ export class AgentViewModel {
         // Where the backend actually installed the CLI -- see resolveCliBin.
         let cliBin: string;
         try {
-            cliBin = await resolveCliBin(provider, this.blockId);
+            cliBin = await resolveCliBin(provider, this.blockId, this.blockId, agentId);
         } catch (e) {
             const t = translateError(e);
             this.launchError = `${t.title}: ${t.message}`;
@@ -427,7 +427,7 @@ export class AgentViewModel {
         // Where the backend actually installed the CLI -- see resolveCliBin.
         let cliBin: string;
         try {
-            cliBin = await resolveCliBin(provider, this.blockId, targetBlockId ?? this.blockId);
+            cliBin = await resolveCliBin(provider, this.blockId, targetBlockId ?? this.blockId, agent.id);
         } catch (e) {
             const t = translateError(e);
             this.launchError = `${t.title}: ${t.message}`;

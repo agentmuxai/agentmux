@@ -318,9 +318,20 @@ describe("resolveCliBin", () => {
             windows_install_command: provider.windowsInstallCommand,
             unix_install_command: provider.unixInstallCommand,
             block_id: "block-1",
+            notice_block_id: "block-1",
+            agent_id: undefined,
         });
         // A first launch may npm-install; same budget as launch-flow.ts.
         expect(opts).toEqual({ timeout: 300000 });
+    });
+
+    it("sends CLI notices to the pane being launched, for the agent being launched", async () => {
+        // A quick fork resolves from its source pane but launches into a new
+        // one, before that pane's agentId meta exists (cli_notice.rs).
+        resolveCli.mockResolvedValue({ cli_path: channelCli, version: "x", source: "local_install" });
+        await resolveCliBin(provider, "source-block", "fork-block", "agent-uid");
+        const [, data] = resolveCli.mock.calls[0];
+        expect(data).toMatchObject({ block_id: "source-block", notice_block_id: "fork-block", agent_id: "agent-uid" });
     });
 
     it("throws instead of returning an empty path", async () => {

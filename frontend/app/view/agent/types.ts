@@ -55,7 +55,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
+export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
 
 /**
  * Raw markdown text block
@@ -597,6 +597,33 @@ export interface SessionOutcomeNode {
     actualSid: string | null;
     /** A `fresh` session given AgentMux's record of the conversation (see `SessionOutcomeData.continued`). */
     continued?: boolean;
+    timestamp: number;
+}
+
+/**
+ * A notice about the agent's CLI, from srv's own `agentmux_cli_install` /
+ * `agentmux_cli_version_changed` frames (`cli-notice.ts`;
+ * SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §6.3).
+ * For the user only: the model never sees it.
+ */
+export interface CliNoticeNode {
+    type: "cli_notice";
+    id: string;
+    kind: "install" | "version_changed";
+    /** Provider id, e.g. `"claude"`. */
+    provider: string;
+    /** `install`: the version being installed. */
+    version?: string;
+    state?: "installing" | "installed" | "failed";
+    /** `install`, once installed: how long it took. */
+    seconds?: number;
+    /** `install`, when it failed. */
+    error?: string;
+    /** `version_changed`: the version the agent last ran, and now runs. */
+    from?: string;
+    to?: string;
+    /** `version_changed`: the version AgentMux pins, when known. */
+    pinned?: string | null;
     timestamp: number;
 }
 
