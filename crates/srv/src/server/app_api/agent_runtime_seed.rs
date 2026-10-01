@@ -105,6 +105,15 @@ pub(super) fn seed_launch(
     let effort = flag_effort.unwrap_or(DEFAULT_EFFORT).to_string();
 
     let mut cli_args = without_owned_flags(base);
+    // Codex reads its prompt from stdin via a trailing `-`, so it must stay last
+    // however many flags land after the catalog args: held back here, put back
+    // after the definition's own flags below. (The spawn path re-normalizes it
+    // too, `build_codex_argv`, but the stored `cmd:args` should be right as is.)
+    let marker = if provider_id == "codex" && cli_args.last().map(String::as_str) == Some("-") {
+        cli_args.pop()
+    } else {
+        None
+    };
     match provider_id {
         "claude" => {
             if flag_model.is_none() {
@@ -117,17 +126,13 @@ pub(super) fn seed_launch(
         }
         "codex" => {
             if flag_model.is_none() {
-                // The prompt marker `-` must stay last; the flag goes before it.
-                let marker = (cli_args.last().map(String::as_str) == Some("-"))
-                    .then(|| cli_args.pop())
-                    .flatten();
                 cli_args.extend(["--model".to_string(), model.clone()]);
-                cli_args.extend(marker);
             }
         }
         _ => {}
     }
     cli_args.extend(flags);
+    cli_args.extend(marker);
 
     SeededLaunch {
         cli_args,
@@ -258,6 +263,44 @@ mod tests {
             out.cli_args,
             s(&["exec", "--json", "--model", "gpt-5.5", "-"])
         );
+    }
+
+    #[test]
+    fn codex_keeps_its_stdin_marker_last_whatever_the_definition_adds() {
+        // ReAgent P1 on #4114: a definition's own --model (flag_model is Some)
+        // skipped the old marker handling and left `-` mid-argv.
+        for flags in [
+            "--model gpt-5.4",
+            "-m gpt-5.4",
+            "--model=gpt-5.4",
+            "--add-dir /tmp",
+            "--model gpt-5.4 --add-dir /tmp",
+            "",
+        ] {
+            let out = seed_launch("codex", s(&["exec", "--json", "-"]), flags);
+            assert_eq!(
+                out.cli_args.last().map(String::as_str),
+                Some("-"),
+                "{flags:?}: {:?}",
+                out.cli_args
+            );
+            assert_eq!(
+                out.cli_args.iter().filter(|a| *a == "-").count(),
+                1,
+                "{flags:?}: {:?}",
+                out.cli_args
+            );
+        }
+    }
+
+    #[test]
+    fn a_codex_definitions_model_is_the_runtime_with_the_marker_last() {
+        let out = seed_launch("codex", s(&["exec", "--json", "-"]), "--model gpt-5.4");
+        assert_eq!(
+            out.cli_args,
+            s(&["exec", "--json", "--model", "gpt-5.4", "-"])
+        );
+        assert_eq!(out.runtime.unwrap()["model"], "gpt-5.4");
     }
 
     #[test]
