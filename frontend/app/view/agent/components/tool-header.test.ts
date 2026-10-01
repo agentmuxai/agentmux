@@ -66,8 +66,8 @@ describe("toolHeaderText", () => {
 describe("a Read's range in the header", () => {
     it("is its own part, and ends the plain-text form", () => {
         const read = node({ tool: "Read", toolName: "Read", params: { file_path: "a.ts", offset: 5, limit: 3 } });
-        expect(toolHeaderParts(read)).toEqual({ icon: "📖", label: "Read", detail: "a.ts", range: "L5–7" });
-        expect(toolHeaderText(read)).toBe("📖 Read a.ts L5–7");
+        expect(toolHeaderParts(read)).toEqual({ icon: "📖", label: "Read", detail: "a.ts", range: "5:7" });
+        expect(toolHeaderText(read)).toBe("📖 Read 5:7 a.ts");
     });
 });
 

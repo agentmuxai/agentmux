@@ -53,6 +53,70 @@ function readFileRange(
     };
 }
 
+interface PatchSpan {
+    start: number;
+    end: number;
+    added: number;
+    removed: number;
+}
+
+/**
+ * The changed stretches of an Edit or Write, from the CLI's `structuredPatch`
+ * (unified-diff hunks), in the file as it is after the change. A hunk carries
+ * three lines of context either side, so the span is the first to the last
+ * `+`/`-` line, not the hunk's own bounds. Only these numbers are kept: never
+ * the diff text, and never `originalFile` beside it (the whole old file).
+ */
+function patchSpans(structuredPatch: unknown): PatchSpan[] | null {
+    if (!Array.isArray(structuredPatch)) return null;
+    const spans: PatchSpan[] = [];
+    for (const hunk of structuredPatch) {
+        if (!hunk || typeof hunk !== "object") continue;
+        const { newStart, lines } = hunk as { newStart?: unknown; lines?: unknown };
+        if (typeof newStart !== "number" || !Number.isFinite(newStart) || !Array.isArray(lines)) continue;
+        let line = newStart;
+        let first: number | null = null;
+        let last = 0;
+        let added = 0;
+        let removed = 0;
+        for (const raw of lines) {
+            const c = typeof raw === "string" ? raw[0] : "";
+            if (c === "+") {
+                added++;
+                first ??= line;
+                last = line;
+                line++;
+            } else if (c === "-") {
+                // A removed line has no line of its own in the new file: it sits
+                // where the line that follows it now is.
+                removed++;
+                first ??= line;
+                last = Math.max(last, line);
+            } else if (c !== "\\") {
+                line++;
+            }
+        }
+        if (first != null) spans.push({ start: first, end: Math.max(first, last), added, removed });
+    }
+    return spans;
+}
+
+/**
+ * The small, kept part of a structured file result: where a Read's text sits in
+ * the file, or where an Edit or Write changed it. Null for any other result.
+ */
+function fileResultExtras(structured: unknown): Record<string, unknown> | null {
+    const range = readFileRange(structured);
+    if (range) return { range };
+    const s = structured && typeof structured === "object" ? (structured as Record<string, unknown>) : null;
+    const patch = s ? patchSpans(s.structuredPatch) : null;
+    if (!s || !patch) return null;
+    return {
+        patch,
+        ...(s.type === "create" || s.type === "update" ? { writeKind: s.type } : {}),
+    };
+}
+
 export class ClaudeTranslator implements OutputTranslator {
     /**
      * `replay`: translating stored history. A replayed user line has no wire
@@ -450,12 +514,15 @@ export class ClaudeTranslator implements OutputTranslator {
                       ? { content: blockText }
                       : block.content;
                 const useStructured = canApplyStructured && blockContentIsString;
-                // A Read's structured result carries where the text sits in the
-                // file: `startLine`, `numLines`, `totalLines`, and whether the
-                // CLI's token cap cut it short. Keep those numbers (never the
-                // file text or base64 beside them) so the row can say which lines
-                // were read (tool-meta/read-range.ts).
-                const range = !useStructured && toolResultBlocks.length === 1 ? readFileRange(structuredResult) : null;
+                // A file tool's structured result says which lines it touched: a
+                // Read's `startLine` / `numLines` / `totalLines` (and whether the
+                // token cap cut it short), an Edit's or Write's patch hunks. Keep
+                // those numbers (never the file text, base64 or old file beside
+                // them) so the row can show the range (tool-meta/file-range.ts).
+                const extras =
+                    !useStructured && toolResultBlocks.length === 1 && blockContentIsString
+                        ? fileResultExtras(structuredResult)
+                        : null;
                 results.push({
                     type: "tool_result",
                     tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
@@ -463,8 +530,8 @@ export class ClaudeTranslator implements OutputTranslator {
                     status: isError ? "failed" : "success",
                     result: useStructured
                         ? structuredResult
-                        : range && blockContentIsString
-                          ? { content: block.content, range }
+                        : extras
+                          ? { content: block.content, ...extras }
                           : fallback,
                 });
             }

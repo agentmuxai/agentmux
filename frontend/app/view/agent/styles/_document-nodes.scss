@@ -365,14 +365,19 @@ $transcript-preview-max-height: calc(50vh / 3);
                 font-weight: 400;
             }
 
-            // A reducer-set note on a status (e.g. "cleared via muxspect"),
-            // and a Read's line range ("L120–179 of 456"), which must stay
-            // visible when a long path is ellipsized beside it.
+            // A reducer-set note on a status (e.g. "cleared via muxspect").
             .agent-tool-status-note,
-            .agent-tool-duration,
-            .agent-tool-range {
+            .agent-tool-duration {
                 flex-shrink: 0;
                 color: var(--secondary-text-color);
+                font-size: 11px;
+            }
+
+            // A Read's line range ("120:179 of 456"), inside the name run
+            // before the path, so the path is what an ellipsis cuts.
+            .agent-tool-range {
+                color: var(--secondary-text-color);
+                font-family: var(--font-mono);
                 font-size: 11px;
             }
 
@@ -2125,20 +2130,41 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 }
 
+// Edit: which lines changed, above the diff.
+.agent-tool-edit {
+    .agent-tool-edit-range {
+        margin-bottom: var(--space-0-5);
+    }
+
+    .agent-tool-read-range {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        font-family: var(--font-mono);
+    }
+}
+
 // Write tool file-path row with byte count badge (ToolOverlayLog renderWrite).
 .agent-tool-write {
     .agent-tool-file-path-row {
         display: flex;
         align-items: baseline;
-        justify-content: space-between;
-        gap: var(--space-1);
+        gap: var(--space-2);
         margin-bottom: var(--space-0-5);
+    }
+
+    // Which lines the write covers, before the path.
+    .agent-tool-read-range {
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        font-family: var(--font-mono);
     }
 
     .agent-tool-write-bytes {
         font-size: 10px;
         opacity: 0.5;
         flex-shrink: 0;
+        margin-left: auto;
         font-family: var(--font-mono);
     }
 

@@ -19,6 +19,8 @@ import type { ToolNode } from "../types";
 import { isContentFirstTool, startsAtTop, toolActivityArg } from "./tool-descriptors";
 
 interface Row {
+    /** The line-range chip (tool-meta/file-range.ts); none unless the row sets one. */
+    range?: string;
     name: string;
     params: Record<string, any>;
     icon: string;
@@ -34,7 +36,7 @@ interface Row {
 // prettier-ignore
 const ROWS: Row[] = [
     { name: "Read", params: { file_path: "src/a.ts" }, icon: "📖", label: "Read", detail: "src/a.ts", summary: "📖 Read src/a.ts", contentFirst: false, top: true, activity: "src/a.ts", arg: "src/a.ts" },
-    { name: "Write", params: { file_path: "src/b.md", content: "x" }, icon: "📝", label: "Write", detail: "src/b.md", summary: "📝 Write src/b.md", contentFirst: false, top: true, activity: "src/b.md", arg: "src/b.md" },
+    { range: "1:1", name: "Write", params: { file_path: "src/b.md", content: "x" }, icon: "📝", label: "Write", detail: "src/b.md", summary: "📝 Write src/b.md", contentFirst: false, top: true, activity: "src/b.md", arg: "src/b.md" },
     { name: "Edit", params: { file_path: "src/c.ts" }, icon: "✏️", label: "Edit", detail: "src/c.ts", summary: "✏️ Edit src/c.ts", contentFirst: false, top: true, activity: "src/c.ts", arg: "src/c.ts" },
     { name: "Bash", params: { command: "ls -la" }, icon: "🔧", label: "Bash", detail: "ls -la", summary: "🔧 Bash ls -la", contentFirst: false, top: false, activity: "ls -la", arg: "ls -la" },
     { name: "Grep", params: { pattern: "foo" }, icon: "🔍", label: "Grep", detail: "foo", summary: "🔍 Grep foo", contentFirst: false, top: false, activity: "foo", arg: "foo" },
@@ -69,8 +71,8 @@ describe("tool descriptors — parity with the pre-migration facts", () => {
             const p = new ClaudeCodeStreamParser();
             const call = p.parseStreamEvent({ type: "tool_call", tool: r.name, id: "x", params: r.params } as any) as ToolNode;
             const done: ToolNode = { ...call, status: "success" };
-            // `range` is a Read's line range (tool-meta/read-range.ts): none of these rows set one.
-            expect(toolHeaderParts(done)).toEqual({ icon: r.icon, label: r.label, detail: r.detail, range: null });
+            // `range` is the line-range chip (tool-meta/file-range.ts): only a Write has one before its result.
+            expect(toolHeaderParts(done)).toEqual({ icon: r.icon, label: r.label, detail: r.detail, range: r.range ?? null });
             expect(call.summary).toBe(r.summary);
             expect(isContentFirstTool(done)).toBe(r.contentFirst);
             expect(startsAtTop(done)).toBe(r.top);
