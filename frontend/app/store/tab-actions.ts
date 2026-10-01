@@ -92,8 +92,25 @@ createRoot(() =>
 // unselected pill. Dropped as soon as the committed tab moves anywhere but
 // the tab this creation started from (the user went elsewhere meanwhile), or
 // the creation fails or is abandoned.
-type Creation = { tabId: string | null; from: string; existing: ReadonlySet<string> };
+//
+// Only the latest creation holds the selection, and only it activates its
+// tab: a newer New Tab, or any click in the strip while one is building
+// (cancelTabCreation), cancels it — that tab is still created, left
+// inactive. A click on the source tab would otherwise be a no-op switch to
+// the committed tab, after which this selection came straight back and the
+// built tab activated anyway (Codex on #4140).
+type Creation = {
+    tabId: string | null;
+    from: string;
+    existing: ReadonlySet<string>;
+    /** Earlier creations whose tabs weren't in `existing`: their pills arrive
+     *  before this one's, so they come first among the unknown ids. */
+    ahead: number;
+    cancelled: boolean;
+};
 const [creatingTab, setCreatingTab] = createSignal<Creation | null>(null);
+/** Creations not yet resolved (CreateTab hasn't replied or failed). */
+const unresolvedCreations = new Set<Creation>();
 /** The tab being created, for the strip to show as selected. */
 export function creatingTabId(): string | null {
     const creating = creatingTab();
@@ -101,7 +118,16 @@ export function creatingTabId(): string | null {
     if (creating.tabId != null) return creating.tabId;
     const ws = workspace();
     const ids = [...(ws?.pinnedtabids ?? []), ...(ws?.tabids ?? [])];
-    return ids.find((id) => !creating.existing.has(id)) ?? null;
+    const unknown = ids.filter((id) => !creating.existing.has(id));
+    return unknown[creating.ahead] ?? null;
+}
+/** Stop the current creation from holding the selection or activating its
+ *  tab: the user chose a tab in the strip while it was building. */
+export function cancelTabCreation(): void {
+    const creating = creatingTab();
+    if (creating == null) return;
+    creating.cancelled = true;
+    setCreatingTab(null);
 }
 createRoot(() =>
     createEffect(() => {
@@ -124,11 +150,11 @@ export function createTab() {
     // get yanked back to the new tab out from under whatever they
     // navigated to meanwhile (codex P2, PR #3300).
     const startingActiveTabId = activeTabId();
-    let creation: Creation = {
-        tabId: null,
-        from: startingActiveTabId,
-        existing: new Set([...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]),
-    };
+    const existing = new Set([...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]);
+    const ahead = [...unresolvedCreations].filter((c) => c.tabId == null || !existing.has(c.tabId)).length;
+    cancelTabCreation();
+    const creation: Creation = { tabId: null, from: startingActiveTabId, existing, ahead, cancelled: false };
+    unresolvedCreations.add(creation);
     setCreatingTab(creation);
     fireAndForget(async () => {
         try {
@@ -147,8 +173,11 @@ export function createTab() {
             // re-trigger the gate on an already-revealed tab — the
             // flash a user reported.
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", false, false);
+            unresolvedCreations.delete(creation);
+            creation.tabId = tabId;
             if (creatingTab() === creation) {
-                creation = { ...creation, tabId };
+                // Same object, new content: notify readers explicitly.
+                setCreatingTab(null);
                 setCreatingTab(creation);
             }
             // New tabs intentionally start with no `tab:color` — see
@@ -187,7 +216,7 @@ export function createTab() {
             // can't hold the new tab back for long.
             const { whenTabContentSettled } = await import("@/app/tab/tab-content-settled");
             await whenTabContentSettled(tabId, NEW_TAB_SETTLE_CAP_MS);
-            if (activeTabId() === startingActiveTabId) {
+            if (!creation.cancelled && activeTabId() === startingActiveTabId) {
                 // Built while hidden, and kept laid out: the same state as a
                 // tab already shown, so it takes the same one-frame switch —
                 // no reveal gate, no cross-fade, no wait for the round trip
@@ -203,6 +232,7 @@ export function createTab() {
             // Activated, the committed tab catches up (switchIntent is set
             // until it does) and the effect above drops this. Left inactive
             // or failed, nothing will: drop it here.
+            unresolvedCreations.delete(creation);
             const activating = creation.tabId != null && switchIntentTabId() === creation.tabId;
             if (creatingTab() === creation && !activating) setCreatingTab(null);
         }

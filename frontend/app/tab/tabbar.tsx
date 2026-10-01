@@ -8,7 +8,7 @@ import { settingsAtom } from "@/store/config-signals";
 import { atoms, setActiveTab } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
-import { beginClosePromotion, creatingTabId } from "@/store/tab-actions";
+import { beginClosePromotion, cancelTabCreation, creatingTabId } from "@/store/tab-actions";
 import { isMacOS } from "@/util/platformutil";
 import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
@@ -115,6 +115,11 @@ function TabBar(props: TabBarProps): JSX.Element {
         // silent no-op — the in-flight switch then won over the user's newer
         // click (Codex P2 on PR #2993).
         if (tabId === displayActiveTabId()) return;
+        // Any choice in the strip while a new tab builds wins over it: the
+        // new tab stays created but isn't selected or activated (Codex on
+        // #4140). Without this a click on the source tab — already the
+        // committed one — was a no-op, and the new tab took over anyway.
+        cancelTabCreation();
         // Commit the highlight BEFORE issuing the RPC so the pill paints on
         // its own cheap schedule rather than behind the destination's reveal.
         setPendingSelectedTabId(tabId);
