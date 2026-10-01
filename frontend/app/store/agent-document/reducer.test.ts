@@ -1662,3 +1662,45 @@ describe("agent document reducer", () => {
         });
     });
 });
+
+describe("UnloadToolResults / ResultLoaded (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01 §3.3–§3.4)", () => {
+    const BIG = { stdout: "y".repeat(20_000), stderr: "", exitCode: 0 };
+    const SRC = { stream: "g:agent", gen: "g1", line: 3 };
+    const user = (id: string): DocumentNode => ({ type: "user_message", id, message: id, timestamp: 0 });
+    const finished = (id: string, extra: Partial<ToolNode> = {}) =>
+        tool(id, { status: "success", result: BIG, resultSource: SRC, ...extra });
+
+    it("unloads planned results into stubs and reports what was freed", () => {
+        const s = seed([user("u0"), finished("t1"), finished("t2"), user("u1")]);
+        const r = update(s, { type: "UnloadToolResults", keepIds: new Set(["t2"]) });
+        const [t1, t2] = [r.state.nodes[1] as ToolNode, r.state.nodes[2] as ToolNode];
+        expect(t1.result).toBeUndefined();
+        expect(t1.resultUnloaded?.bytes).toBeGreaterThan(20_000);
+        expect(t2.result).toBe(BIG); // kept
+        expect(r.events).toEqual([{ type: "tool-results-unloaded", count: 1, bytes: t1.resultUnloaded!.bytes }]);
+        expect(r.state.nodeIndexById.get("t1")).toBe(1);
+    });
+
+    it("is a no-op when nothing qualifies", () => {
+        const s = seed([user("u0"), finished("t1", { resultSource: undefined }), user("u1")]);
+        const r = update(s, { type: "UnloadToolResults", keepIds: new Set() });
+        expect(r.state).toBe(s);
+        expect(r.events).toEqual([]);
+    });
+
+    it("ResultLoaded restores the result and clears the stub", () => {
+        let s = seed([user("u0"), finished("t1"), user("u1")]);
+        s = update(s, { type: "UnloadToolResults", keepIds: new Set() }).state;
+        const r = update(s, { type: "ResultLoaded", nodeId: "t1", result: BIG });
+        const t1 = r.state.nodes[1] as ToolNode;
+        expect(t1.result).toEqual(BIG);
+        expect(t1.resultUnloaded).toBeUndefined();
+        expect(r.events).toEqual([{ type: "tool-result-loaded", nodeId: "t1" }]);
+    });
+
+    it("ResultLoaded for an unknown or not-unloaded node changes nothing", () => {
+        const s = seed([user("u0"), finished("t1"), user("u1")]);
+        expect(update(s, { type: "ResultLoaded", nodeId: "nope", result: BIG }).state).toBe(s);
+        expect(update(s, { type: "ResultLoaded", nodeId: "t1", result: BIG }).state).toBe(s);
+    });
+});

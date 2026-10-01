@@ -20,6 +20,8 @@ const B = "b:blk";
 function harness(opts: { lines?: string[]; gen?: string; stream?: string } = {}) {
     const disk = { lines: opts.lines ?? [], gen: opts.gen ?? "g1", stream: opts.stream ?? G };
     const delivered: string[] = [];
+    /** Each delivered line's transcript position, null when not given. */
+    const positions: Array<number | null> = [];
     const echoed: string[] = [];
     const resets: string[] = [];
     const reads: Array<[number, number, string]> = [];
@@ -27,7 +29,11 @@ function harness(opts: { lines?: string[]; gen?: string; stream?: string } = {})
     const ownEchoes = new Set<string>();
     let gate: Promise<void> | null = null;
     const cursor = new TranscriptCursor({
-        deliver: (text) => delivered.push(...text.split("\n").filter((l) => l !== "")),
+        deliver: (text, from) => {
+            const lines = text.split("\n").filter((l) => l !== "");
+            delivered.push(...lines);
+            lines.forEach((_, i) => positions.push(from ? from.line + i : null));
+        },
         echo: (text) => echoed.push(...text.split("\n").filter((l) => l !== "")),
         isOwnEcho: (line) => ownEchoes.delete(line),
         reset: (op) => resets.push(op),
@@ -43,6 +49,7 @@ function harness(opts: { lines?: string[]; gen?: string; stream?: string } = {})
         cursor,
         disk,
         delivered,
+        positions,
         echoed,
         resets,
         reads,
@@ -79,6 +86,25 @@ describe("TranscriptCursor", () => {
         expect(h.delivered).toEqual(["r2"]);
         expect(h.cursor.stats.duplicates).toBe(1);
         expect(h.cursor.position()).toEqual({ stream: G, gen: "g1", next: 3 });
+    });
+
+    it("tells the parser each delivered line's transcript position (tool-result unloading §3.2)", () => {
+        const h = harness();
+        h.cursor.settle({ stream: G, gen: "g1", next: 0 });
+        h.cursor.push(append(["a", "b"], [[G, 0]]));
+        h.cursor.push(append(["a", "b", "c"], [[G, 0]])); // overlaps: only "c" is new
+        expect(h.delivered).toEqual(["a", "b", "c"]);
+        expect(h.positions).toEqual([0, 1, 2]);
+    });
+
+    it("keeps positions exact across a gap read that drops the user's own echo", async () => {
+        const h = harness({ lines: ["l0", "echo", "l2", "l3"] });
+        h.ownEchoes.add("echo");
+        h.cursor.settle({ stream: G, gen: "g1", next: 0 });
+        h.cursor.push(append(["l3"], [[G, 3]]));
+        await flush();
+        expect(h.delivered).toEqual(["l0", "l2", "l3"]);
+        expect(h.positions).toEqual([0, 2, 3]);
     });
 
     it("drops duplicates and delivers in-order events synchronously", () => {

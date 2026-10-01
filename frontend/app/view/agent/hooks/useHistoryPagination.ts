@@ -182,6 +182,12 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     const parseOpts = {
         onTaskFrame: (frame: Record<string, unknown>, at: number | undefined) => noteTaskFrame(opts.blockId, frame, at),
     };
+    // With where the read's first line sits in the transcript, so each tool
+    // node records its result's line and the pane can unload it
+    // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2). Without a
+    // stream and generation the line can't be read back reliably: no source.
+    const parseOptsAt = (resp: { stream?: string; gen?: string }, firstLine: number) =>
+        resp.stream && resp.gen ? { ...parseOpts, source: { stream: resp.stream, gen: resp.gen, firstLine } } : parseOpts;
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
@@ -211,7 +217,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 limit: loadLimit,
             }, { timeout: 15000 });
 
-            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.(), resp.stamps, parseOpts);
+            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.(), resp.stamps, parseOptsAt(resp, newOffset));
             if (newNodes.length > 0) {
                 // batch() ensures HistoryLoaded's documentAtom write is not a
                 // standalone runUpdates frame that could interleave with a
@@ -395,7 +401,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         // (an older srv ignores the field and returns the window).
                         const readStart = typeof rangeResp.offset === "number" ? rangeResp.offset : windowStart;
                         markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
-                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOpts);
+                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, readStart));
                         markAgentOpen(opts.blockId, "parsed");
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Right after the dispatch, before anything else can
@@ -548,7 +554,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (!mounted) return;
                 markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
 
-                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOpts);
+                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, rangeResp.offset ?? offset));
                 markAgentOpen(opts.blockId, "parsed");
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));

@@ -693,3 +693,21 @@ describe("parseHistoryLines — Claude Code's compaction summary (SPEC_CONTEXT_D
         expect(parser.nodes.map((n) => n.type)).toEqual(["context_compacted", "context_delivery"]);
     });
 });
+
+describe("parseHistoryLines — tool result source line (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01 §3.2)", () => {
+    const toolUse = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } }] } });
+    const toolResult = JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu1", content: "a\nb" }] } });
+
+    it("records the transcript line a tool's result came from", () => {
+        const { nodes } = parseHistoryLines(["", toolUse, toolResult], "claude-stream-json", undefined, undefined, {
+            source: { stream: "b:blk", gen: "g1", firstLine: 100 },
+        });
+        const tool = nodes.find((n) => n.type === "tool") as any;
+        expect(tool.resultSource).toEqual({ stream: "b:blk", gen: "g1", line: 102 });
+    });
+
+    it("leaves it unset when the caller doesn't know the source", () => {
+        const { nodes } = parseHistoryLines([toolUse, toolResult], "claude-stream-json");
+        expect((nodes.find((n) => n.type === "tool") as any).resultSource).toBeUndefined();
+    });
+});
