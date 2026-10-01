@@ -53,6 +53,10 @@ fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 /// `--listen stdio://` args. The spawned child would never complete the App
 /// Server handshake once the provider registry flips a provider's controller
 /// type to `AppServer`.
+/// How long `agent.open` waits for a missing pinned CLI to install before telling
+/// the caller to retry. The install is not cancelled when this elapses.
+const AGENT_OPEN_INSTALL_WAIT_SECS: u64 = 150;
+
 fn resolve_cli_args(provider: &providers::ProviderConfig, controller_type: &str) -> Vec<String> {
     let args: &[&str] = match controller_type {
         "persistent" => provider.persistent_launch_args.unwrap_or(provider.launch_args),
@@ -505,10 +509,45 @@ async fn open_agent_inner(
                         }
                     }
                     if !std::path::Path::new(&resolved_cli_path).exists() {
-                        return Err(format!(
-                            "CLI_NOT_AVAILABLE: {} not installed at {}. Open an agent pane in the UI to trigger installation.",
-                            provider.cli_command, npm_bin
-                        ));
+                        // An npm-backed provider whose pinned CLI isn't there yet
+                        // (a fresh install, or the minute or two after an upgrade
+                        // moved the pin): install it, as the UI's launch flow does,
+                        // instead of making the caller go and do that first.
+                        if provider.npm_package.is_empty() || provider.pinned_version.is_empty() {
+                            return Err(format!(
+                                "CLI_NOT_AVAILABLE: {} not found at {}. Install it, then try again.",
+                                provider.cli_command, npm_bin
+                            ));
+                        }
+                        let req = crate::backend::cli_install::NpmInstallRequest {
+                            provider_id: provider.id.to_string(),
+                            npm_package: provider.npm_package.to_string(),
+                            pinned_version: provider.pinned_version.to_string(),
+                            cli_command: provider.cli_command.to_string(),
+                            background: false,
+                        };
+                        match crate::backend::cli_install::ensure_installed(
+                            paths.clone(),
+                            req,
+                            std::time::Duration::from_secs(AGENT_OPEN_INSTALL_WAIT_SECS),
+                        )
+                        .await
+                        {
+                            Ok(bin) => resolved_cli_path = bin.to_string_lossy().to_string(),
+                            Err(crate::backend::cli_install::EnsureError::StillInstalling) => {
+                                return Err(format!(
+                                    "CLI_INSTALLING: {} {} is still being installed. Try again in a minute; \
+                                     the install carries on in the background.",
+                                    provider.cli_command, provider.pinned_version
+                                ));
+                            }
+                            Err(crate::backend::cli_install::EnsureError::Failed(why)) => {
+                                return Err(format!(
+                                    "CLI_NOT_AVAILABLE: {} {} could not be installed: {why}",
+                                    provider.cli_command, provider.pinned_version
+                                ));
+                            }
+                        }
                     }
                 }
 

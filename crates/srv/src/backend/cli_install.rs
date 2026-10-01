@@ -452,6 +452,61 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
     })
 }
 
+// ─── install on demand ──────────────────────────────────────────────────────
+
+/// Why [`ensure_installed`] did not hand back a CLI.
+#[derive(Debug)]
+pub enum EnsureError {
+    /// The install ran and failed (no npm, offline, npm exited non-zero, ...).
+    Failed(String),
+    /// It is still running after the wait. The install is NOT cancelled: it keeps
+    /// the cross-instance lock until npm returns, and a later call waits on that
+    /// lock and then reuses the result.
+    StillInstalling,
+}
+
+/// The pinned CLI for a provider whose install is missing: install it, waiting
+/// up to `wait`. `install` is injected so tests don't need npm.
+///
+/// This is what the UI's launch flow does on a pin bump (`ResolveCli` installs
+/// and waits). `agent.open` used to refuse instead, with `CLI_NOT_AVAILABLE`,
+/// for the minute or two after an upgrade while the new pin downloaded.
+pub async fn ensure_installed_with<F>(
+    paths: DataPaths,
+    req: NpmInstallRequest,
+    wait: std::time::Duration,
+    install: F,
+) -> Result<PathBuf, EnsureError>
+where
+    F: FnOnce(&DataPaths, &NpmInstallRequest) -> Result<InstallOutcome, InstallError>
+        + Send
+        + 'static,
+{
+    let task = tokio::task::spawn_blocking(move || install(&paths, &req));
+    match tokio::time::timeout(wait, task).await {
+        Ok(Ok(Ok(InstallOutcome::Installed(bin) | InstallOutcome::AlreadyInstalled(bin)))) => {
+            Ok(bin)
+        }
+        Ok(Ok(Err(e))) => Err(EnsureError::Failed(e.to_string())),
+        Ok(Err(join)) => Err(EnsureError::Failed(format!(
+            "the install task failed: {join}"
+        ))),
+        Err(_elapsed) => Err(EnsureError::StillInstalling),
+    }
+}
+
+/// [`ensure_installed_with`] running the real npm install.
+pub async fn ensure_installed(
+    paths: DataPaths,
+    req: NpmInstallRequest,
+    wait: std::time::Duration,
+) -> Result<PathBuf, EnsureError> {
+    ensure_installed_with(paths, req, wait, |p, r| {
+        install_pinned_cli(p, r, &|_, _| {})
+    })
+    .await
+}
+
 // ─── startup warm-up ────────────────────────────────────────────────────────
 
 /// How long after srv start the warm-up begins: after the first IPC traffic,
@@ -1060,5 +1115,116 @@ mod tests {
         assert!(!shared_cli_dir(&paths, "claude", live.pinned_version)
             .unwrap()
             .exists());
+    }
+
+    // ── installing on demand (agent.open) ──────────────────────────────────
+
+    fn live_req() -> NpmInstallRequest {
+        live_claude_req(false)
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_installs_the_missing_pin_and_returns_the_shim() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        let live = crate::backend::providers::get_provider("claude").unwrap();
+        let want = npm_bin(
+            &shared_cli_dir(&paths, "claude", live.pinned_version).unwrap(),
+            "claude",
+        );
+        let bin = ensure_installed_with(
+            paths.clone(),
+            live_req(),
+            std::time::Duration::from_secs(30),
+            |p, r| install_pinned_cli_with(p, r, &|_, _| {}, fake_npm(true, true)),
+        )
+        .await
+        .expect("installs");
+        assert_eq!(bin, want);
+        assert!(bin.is_file());
+        assert_eq!(find_installed_for_provider(&paths, "claude"), Some(bin));
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_reuses_an_install_that_finished_meanwhile() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        install_pinned_cli_with(
+            &paths,
+            &live_claude_req(true),
+            &|_, _| {},
+            fake_npm(true, true),
+        )
+        .unwrap();
+        let bin = ensure_installed_with(
+            paths,
+            live_req(),
+            std::time::Duration::from_secs(30),
+            |p, r| {
+                install_pinned_cli_with(
+                    p,
+                    r,
+                    &|_, _| {},
+                    |_: &Path, _: &str, _: bool| -> std::io::Result<NpmRun> {
+                        panic!("npm must not run again")
+                    },
+                )
+            },
+        )
+        .await
+        .expect("reuses");
+        assert!(bin.is_file());
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_reports_a_failed_install_with_its_reason() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        let err = ensure_installed_with(
+            paths.clone(),
+            live_req(),
+            std::time::Duration::from_secs(30),
+            |p, r| install_pinned_cli_with(p, r, &|_, _| {}, fake_npm(false, false)),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, EnsureError::Failed(m) if m.contains("npm install exited 1")),
+            "{err:?}"
+        );
+        assert_eq!(find_installed_for_provider(&paths, "claude"), None);
+    }
+
+    #[tokio::test]
+    async fn ensure_installed_stops_waiting_but_does_not_cancel_a_slow_install() {
+        let (_tmp, paths, _prev, _old) = with_previous_pin_installed();
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = finished.clone();
+        let err = ensure_installed_with(
+            paths.clone(),
+            live_req(),
+            std::time::Duration::from_millis(50),
+            move |p, r| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                let out = install_pinned_cli_with(p, r, &|_, _| {}, fake_npm(true, true));
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                out
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, EnsureError::StillInstalling), "{err:?}");
+        // The caller got its answer quickly; the install carries on and lands.
+        for _ in 0..100 {
+            if finished.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            finished.load(std::sync::atomic::Ordering::SeqCst),
+            "the install must keep running"
+        );
+        assert!(
+            find_installed_for_provider(&paths, "claude").is_some(),
+            "and a later open finds it"
+        );
     }
 }
