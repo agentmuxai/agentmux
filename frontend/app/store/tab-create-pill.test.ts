@@ -143,6 +143,25 @@ describe("new tab pill selection", () => {
         await settle();
     });
 
+    // ReAgent on #4140: the first pill has arrived, its reply hasn't, when
+    // the second New Tab starts.
+    it("selects the second pill at once when the first one had already arrived", async () => {
+        createTab();
+        state.setTabIds(["tab-a", "tab-1"]);
+        expect(creatingTabId()).toBe("tab-1");
+        createTab();
+        state.setTabIds(["tab-a", "tab-1", "tab-2"]);
+        expect(creatingTabId()).toBe("tab-2");
+        state.create[0].resolve("tab-1");
+        state.create[1].resolve("tab-2");
+        await vi.waitFor(() => expect(state.settled.length).toBeGreaterThan(0));
+        state.settled.forEach((f) => f());
+        await settle();
+        state.settled.forEach((f) => f());
+        state.setActive("tab-2");
+        await settle();
+    });
+
     it("a newer New Tab takes over: the older one is left inactive", async () => {
         // setActiveTab publishes its destination as the switch intent at once.
         const intents: (string | null)[] = [];
