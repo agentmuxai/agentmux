@@ -22,7 +22,7 @@ import { isNodeInProgress, nodeBytes } from "./virtualization/streaming-buffer";
  * (below) — the turn count doesn't matter for performance, since rows are
  * virtualized and memory follows bytes. `agent:livefeedturns` is an optional
  * cap on top. (Was 6 turns / 2 MB, which sent most of an active session to
- * History; docs/reports/REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30.md.)
+ * History; REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30 (docs/reports).)
  */
 export const LIVE_FEED_DEFAULT_TURNS = Number.POSITIVE_INFINITY;
 /** Finished turns kept are capped by size; at least one always stays. */
@@ -102,6 +102,25 @@ export function splitTurns(nodes: readonly DocumentNode[]): Turn[] {
  */
 export function blocksRollOff(node: DocumentNode): boolean {
     return node.type === "shell";
+}
+
+/**
+ * Whether the feed clearly holds more than it keeps, so a roll-off pass is
+ * due: more turns than an explicit cap (+3), more rows than the row cap, or
+ * more than 1.1× the byte budget. Bytes and rows are checked on their own,
+ * so a pane with no turn cap — the default — still gets a pass when a
+ * restore or scroll-up paging grows it (Codex on #4121). The headroom keeps
+ * a feed sitting at its limit from re-triggering on every flush.
+ */
+export function feedOverLimits(nodes: readonly DocumentNode[], keepTurns: number): boolean {
+    if (nodes.length > LIVE_FEED_MAX_ROWS) return true;
+    let turns = 0;
+    let bytes = 0;
+    for (const n of nodes) {
+        if (n.type === "user_message") turns++;
+        bytes += nodeBytes(n);
+    }
+    return turns > keepTurns + 3 || bytes > LIVE_FEED_MAX_FINISHED_BYTES * 1.1;
 }
 
 export interface RollOffInput {

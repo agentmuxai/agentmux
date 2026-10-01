@@ -7,7 +7,7 @@ import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store"
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
-import { liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "../live-feed";
+import { feedOverLimits, liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "../live-feed";
 import type { AgentAtoms } from "../state";
 import { userIsInteracting } from "../stream-scheduler";
 
@@ -123,12 +123,7 @@ export function useLiveFeedRollOff(opts: {
     // send (a restore, a large history load): a pass whenever the feed first
     // holds clearly more turns than it keeps. A memo, so it fires on the
     // transition, not on every flush.
-    const feedOverBudget = createMemo(() => {
-        if (!liveFeedOn()) return false;
-        let turns = 0;
-        for (const n of paneModel.document()) if (n.type === "user_message") turns++;
-        return turns > liveFeedTurns + 3;
-    });
+    const feedOverBudget = createMemo(() => liveFeedOn() && feedOverLimits(paneModel.document(), liveFeedTurns));
     createEffect(
         on(feedOverBudget, (over) => {
             if (over) scheduleRollOff();
