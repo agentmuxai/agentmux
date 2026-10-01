@@ -17,7 +17,7 @@ export function sysinfoPaneTab(view: "sysinfo" | "cpuplot"): PaneTabManifest {
         view,
         label: "Sysinfo",
         icon: "chart-line",
-        capabilities: { connection: true },
+        capabilities: { connection: true, noPadding: true },
         create: (ctx) => {
             const model = new SysinfoViewModel(ctx, view);
             return {
