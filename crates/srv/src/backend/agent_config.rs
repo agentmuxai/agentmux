@@ -996,12 +996,6 @@ const CLAUDE_MD_OWNERSHIP_MARKER_PATH: &str = ".claude/.agentmux-claude-md-owner
 /// Where an adopted legacy `CLAUDE.md` is kept (`is_legacy_agentmux_claude_md`).
 pub const CLAUDE_MD_PRE_ADOPT_BACKUP: &str = ".claude/CLAUDE.md.pre-adopt";
 
-/// Whether `content` is exactly what an older AgentMux wrote as `CLAUDE.md`,
-/// in its order, ignoring blank lines: the `# Available Skills` heading, its
-/// usage line, at least one skill row (`- **…`; AgentMux wrote the section
-/// only when there were skills), then optionally the managed import (its
-/// comment and line, or the line alone). Anything else means a person wrote
-/// there, and it stays theirs.
 /// A skills-index row exactly as `build_config_files` renders it:
 /// `- **<name>**`, then optionally ` (trigger: /<trigger>)`, then optionally
 /// ` — <description>` (Codex on #4131: a bare `- **note` is a person's).
@@ -1022,6 +1016,13 @@ fn is_generated_skill_row(line: &str) -> bool {
     rest.is_empty() || rest.strip_prefix(" \u{2014} ").is_some_and(|d| !d.is_empty())
 }
 
+
+/// Whether `content` is exactly what an older AgentMux wrote as `CLAUDE.md`,
+/// in its order, ignoring blank lines: the `# Available Skills` heading, its
+/// usage line, at least one skill row (`- **…`; AgentMux wrote the section
+/// only when there were skills), then optionally the managed import (its
+/// comment and line, or the line alone). Anything else means a person wrote
+/// there, and it stays theirs.
 pub fn is_legacy_agentmux_claude_md(content: &str) -> bool {
     let import_line = format!("@{AGENTMUX_MEMORY_FILENAME}");
     let mut lines = content.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).peekable();
