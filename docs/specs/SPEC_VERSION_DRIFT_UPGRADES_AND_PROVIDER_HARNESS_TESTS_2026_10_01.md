@@ -1,6 +1,6 @@
 # Version drift upgrades (2026-10-01 report) and provider harness tests
 
-**Status:** active. Phase 1a ships with this spec. Later phases each land as their own PR, and §7 tracks them.
+**Status:** active. Phase 1a (five CLI pins) shipped in #4166 alongside this spec. Phases 1b–5 remain, each as its own PR, tracked in §7.
 **Date:** 2026-10-01
 **Owner:** Manoz
 **Source:** `a5af/shared-infrastructure` `provider-reporter`, "AgentMux Version Drift Report - Oct 01, 2026 - 6 CLI(s) behind, 15 version(s) behind".
@@ -115,6 +115,17 @@ After that:
 
 The old version's directory stays until the new one has been verified live.
 
+**Status as of 2026-10-01: started, blocked on live capture.** What's done:
+- **Schema:** the procedure reproduces. Regenerating at 0.154.0 gives byte-identical hashes to the committed snapshot. The 0.160.0 snapshot and manifest are built, and the experimental bundle hash is now actually recorded (it was `null` for 0.154.0).
+- **Stable surface change:**
+  - six client requests added (`account/gatewayOAuth/*`, `thread/attachment/*`) and one removed, `thread/rollback`, which AgentMux doesn't use;
+  - two server notifications added;
+  - field-level changes under required methods are additive, except that `UserInput`'s `image` variant and `FunctionCallOutputContentItem.input_image` dropped their URL fields. AgentMux sends only text input, so neither affects it.
+- **Flags and features:** all `codex exec` flags and all 12 tool-adding features `argv.rs` disables are unchanged.
+- **Default model:** the bundled model catalog still lists `gpt-5.5`.
+
+What blocks the PR: `codex-version-fixture-gate.test.ts` requires all five live smoke fixtures for the exact pin, `docker-resume` included. Those need a signed-in codex (ChatGPT account) and a running Docker. Neither is available on Area54 today (no `~/.codex/auth.json`; the Docker daemon is down). The work is parked on branch `manoz/codex-0.160` until the owner signs in.
+
 ### 4.3 Phase 2 notes
 
 - **cef-dll-sys:** rebase the `agentmuxai/cef-rs` patch onto the 154.3.0 tag and bump the `rev`. The runtime pin (`scripts/cef-build/windows-runtime-pin.sh`) doesn't change, because the binding moves within milestone 154.
@@ -169,7 +180,7 @@ The results go in a `REPORT_PROVIDER_HARNESS_PASS_<date>.md` next to this spec. 
 | Phase | Item | PR | State |
 |---|---|---|---|
 | 1a | claude 2.1.287, gemini 0.62.0, qwen 0.24.7, openclaw 2026.9.7, copilot 1.0.91 | this PR | in review |
-| 1b | codex 0.160.0 | — | not started |
+| 1b | codex 0.160.0 | branch `manoz/codex-0.160` | schema done; blocked on live fixture capture (§4.2) |
 | 2 | cef-dll-sys, Node, jq, ripgrep, rustls, toolchain | — | not started |
 | 3 | ed25519-dalek, marked | — | not started |
 | 4 | reqwest, rusqlite, keyring, katex, shiki, mermaid, vite, typescript | — | not started |
