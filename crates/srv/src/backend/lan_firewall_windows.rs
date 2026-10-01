@@ -29,7 +29,7 @@ use windows::Win32::System::Ole::IEnumVARIANT;
 use windows::Win32::System::Variant::VARIANT;
 
 use super::lan_firewall::{
-    Adapter, Category, FwRule, PortSpec, ProfileSettings, Profiles, Proto, Remote, Snapshot,
+    Adapter, Category, FwRule, LocalScope, PortSpec, ProfileSettings, Profiles, Proto, Remote, Snapshot,
 };
 
 /// Read the firewall rules, the adapters and their network categories.
@@ -138,6 +138,13 @@ fn rule_from_variant(v: &VARIANT) -> windows::core::Result<FwRule> {
             proto: Proto::from_win(rule.Protocol()?),
             local_ports: PortSpec::parse(&rule.LocalPorts().map(|b| b.to_string()).unwrap_or_default()),
             remote: Remote::parse(&rule.RemoteAddresses().map(|b| b.to_string()).unwrap_or_default()),
+            // A rule limited to one of our own addresses must not count for every
+            // adapter in the profile (Codex P2 on #4151). Unreadable is `Any` only
+            // when the property is absent; a read error is the cautious `Unparseable`.
+            local_addresses: match rule.LocalAddresses() {
+                Ok(b) => LocalScope::parse(&b.to_string()),
+                Err(_) => LocalScope::Unparseable,
+            },
             // "All" (or empty) means every interface type; anything narrower, or a
             // named-interface list, limits where the rule applies.
             interface_scoped: interfaces_set
@@ -355,11 +362,13 @@ mod tests {
         println!("status for this binary: {}", report.status.wire());
         for need in super::super::lan_firewall::lan_needs(web, ws) {
             for (allow, label) in [(true, "allow"), (false, "BLOCK")] {
+                let ips: Vec<std::net::Ipv4Addr> = snap.adapters.iter().flat_map(|a| a.ipv4.clone()).collect();
                 let hits = super::super::lan_firewall::matching_rules(
                     &snap.rules,
                     &exe,
                     need,
                     Category::Private,
+                    &ips,
                     allow,
                 );
                 for r in hits.iter().take(4) {

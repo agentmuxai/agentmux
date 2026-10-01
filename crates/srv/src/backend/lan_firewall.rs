@@ -153,6 +153,78 @@ impl Remote {
     }
 }
 
+/// A rule's `LocalAddresses`: which of OUR addresses it applies to. A rule
+/// limited to one local IP must only count for the adapter that owns it (Codex P2
+/// on #4151); treating it as "every adapter in the profile" could make an
+/// uncovered adapter look covered, or turn an address-scoped block into a false
+/// global block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalScope {
+    /// `*`, empty or `LocalSubnet`: every address we have.
+    Any,
+    /// Explicit IPv4 addresses, subnets and ranges, as inclusive `(low, high)`.
+    /// Empty when the list names only IPv6 addresses (it matches no IPv4 adapter).
+    Addrs(Vec<(Ipv4Addr, Ipv4Addr)>),
+    /// Windows keywords we cannot resolve here (`DHCP`, `DNS`, `Defaultgateway`,
+    /// `WINS`, ...). Matches nothing, like every spec we cannot read exactly.
+    Unparseable,
+}
+
+impl LocalScope {
+    pub fn parse(spec: &str) -> LocalScope {
+        let spec = spec.trim();
+        if spec.is_empty() || spec == "*" {
+            return LocalScope::Any;
+        }
+        let mut out = Vec::new();
+        for part in spec.split(',') {
+            let part = part.trim();
+            if part == "*" || part.eq_ignore_ascii_case("LocalSubnet") {
+                return LocalScope::Any;
+            }
+            if part.contains(':') {
+                continue; // IPv6: cannot match an IPv4 adapter
+            }
+            match Self::parse_v4(part) {
+                Some(r) => out.push(r),
+                None => return LocalScope::Unparseable,
+            }
+        }
+        LocalScope::Addrs(out)
+    }
+
+    fn parse_v4(part: &str) -> Option<(Ipv4Addr, Ipv4Addr)> {
+        if let Some((a, b)) = part.split_once('-') {
+            let (lo, hi) = (a.trim().parse::<Ipv4Addr>().ok()?, b.trim().parse::<Ipv4Addr>().ok()?);
+            return (u32::from(lo) <= u32::from(hi)).then_some((lo, hi));
+        }
+        if let Some((a, m)) = part.split_once('/') {
+            let ip = u32::from(a.trim().parse::<Ipv4Addr>().ok()?);
+            let m = m.trim();
+            // `/24` or `/255.255.255.0`
+            let mask = match m.parse::<u32>() {
+                Ok(len) if len <= 32 => if len == 0 { 0 } else { u32::MAX << (32 - len) },
+                _ => u32::from(m.parse::<Ipv4Addr>().ok()?),
+            };
+            return Some((Ipv4Addr::from(ip & mask), Ipv4Addr::from(ip | !mask)));
+        }
+        let ip = part.parse::<Ipv4Addr>().ok()?;
+        Some((ip, ip))
+    }
+
+    /// Does the rule apply to any of these adapter addresses?
+    pub fn applies_to(&self, ips: &[Ipv4Addr]) -> bool {
+        match self {
+            LocalScope::Any => true,
+            LocalScope::Unparseable => false,
+            LocalScope::Addrs(ranges) => ips.iter().any(|ip| {
+                let n = u32::from(*ip);
+                ranges.iter().any(|&(lo, hi)| u32::from(lo) <= n && n <= u32::from(hi))
+            }),
+        }
+    }
+}
+
 /// One firewall rule, with the fields that decide whether it affects us.
 #[derive(Debug, Clone)]
 pub struct FwRule {
@@ -167,6 +239,8 @@ pub struct FwRule {
     pub proto: Proto,
     pub local_ports: PortSpec,
     pub remote: Remote,
+    /// Which of our own addresses the rule applies to.
+    pub local_addresses: LocalScope,
     /// Restricted to particular adapters or interface types. Such a rule may not
     /// cover the adapter we care about, so it is skipped rather than assumed.
     pub interface_scoped: bool,
@@ -200,17 +274,20 @@ pub struct Need {
     pub port: u16,
 }
 
-/// The inbound traffic a LAN peer needs: our web and ws ports (TCP) and the
-/// mDNS port (UDP 5353).
+/// The inbound traffic a LAN peer needs: our web and ws ports (TCP), the mDNS
+/// port (UDP 5353) and the UDP broadcast-probe responder that mobile clients
+/// use when mDNS is filtered (`lan_discovery::UDP_DISCOVERY_PORT`, spec 4.1 puts
+/// it in the same rule as 5353; Codex P2 on #4151).
 pub fn lan_needs(web_port: u16, ws_port: u16) -> Vec<Need> {
     vec![
         Need { proto: Proto::Tcp, port: web_port },
         Need { proto: Proto::Tcp, port: ws_port },
         Need { proto: Proto::Udp, port: 5353 },
+        Need { proto: Proto::Udp, port: super::lan_discovery::UDP_DISCOVERY_PORT },
     ]
 }
 
-fn rule_applies(rule: &FwRule, exe: &str, need: Need, category: Category) -> bool {
+fn rule_applies(rule: &FwRule, exe: &str, need: Need, category: Category, local_ips: &[Ipv4Addr]) -> bool {
     rule.enabled
         && rule.inbound
         && rule.profiles & category.bit() != 0
@@ -219,6 +296,7 @@ fn rule_applies(rule: &FwRule, exe: &str, need: Need, category: Category) -> boo
         && rule.proto.covers(need.proto)
         && rule.local_ports.contains(need.port)
         && rule.remote.reaches_lan_peers()
+        && rule.local_addresses.applies_to(local_ips)
         && rule.program.as_deref().is_none_or(|p| same_path(p, exe))
 }
 
@@ -229,11 +307,12 @@ pub fn matching_rules<'a>(
     exe: &str,
     need: Need,
     category: Category,
+    local_ips: &[Ipv4Addr],
     allow: bool,
 ) -> Vec<&'a FwRule> {
     rules
         .iter()
-        .filter(|r| r.allow == allow && rule_applies(r, exe, need, category))
+        .filter(|r| r.allow == allow && rule_applies(r, exe, need, category, local_ips))
         .collect()
 }
 
@@ -286,9 +365,10 @@ pub enum Coverage {
     Missing,
 }
 
-/// [`coverage_with`] under Windows' default profile settings.
+/// [`coverage_with`] under Windows' default profile settings, for an adapter
+/// whose addresses are unknown (only rules open to every local address match).
 pub fn coverage(rules: &[FwRule], exe: &str, needs: &[Need], category: Category) -> Coverage {
-    coverage_with(rules, exe, needs, category, ProfileSettings::default())
+    coverage_with(rules, exe, needs, category, ProfileSettings::default(), &[])
 }
 
 /// Does `category`'s profile let LAN peers reach `exe` on every need?
@@ -303,6 +383,7 @@ pub fn coverage_with(
     needs: &[Need],
     category: Category,
     settings: ProfileSettings,
+    local_ips: &[Ipv4Addr],
 ) -> Coverage {
     if !settings.enabled {
         return Coverage::Covered;
@@ -313,7 +394,7 @@ pub fn coverage_with(
     let applies = |allow: bool, need: Need| {
         rules
             .iter()
-            .any(|r| r.allow == allow && rule_applies(r, exe, need, category))
+            .any(|r| r.allow == allow && rule_applies(r, exe, need, category, local_ips))
     };
     if needs.iter().any(|&n| applies(false, n)) {
         return Coverage::Blocked;
@@ -362,7 +443,7 @@ pub fn adapter_state_with(
     let Some(category) = adapter.category else {
         return AdapterState::Unknown;
     };
-    match coverage_with(rules, exe, needs, category, profiles.get(category)) {
+    match coverage_with(rules, exe, needs, category, profiles.get(category), &adapter.ipv4) {
         Coverage::Covered => AdapterState::Covered,
         Coverage::Blocked => AdapterState::Blocked,
         Coverage::Missing if category == Category::Public => AdapterState::PublicNotTrusted,
@@ -634,6 +715,7 @@ mod tests {
             proto: Proto::Any,
             local_ports: PortSpec::Any,
             remote: Remote::Any,
+            local_addresses: LocalScope::Any,
             interface_scoped: false,
             restricted: false,
         }
@@ -927,25 +1009,25 @@ mod tests {
     #[test]
     fn a_profile_with_the_firewall_off_needs_no_rule_and_blocks_nothing() {
         let off = ProfileSettings { enabled: false, ..ProfileSettings::default() };
-        assert_eq!(coverage_with(&[], EXE, &needs(), Category::Private, off), Coverage::Covered);
+        assert_eq!(coverage_with(&[], EXE, &needs(), Category::Private, off, &[]), Coverage::Covered);
         // Block rules are not enforced either when the firewall is off.
         let blocked = vec![program_rule(EXE, Proto::Any, ALL, false)];
-        assert_eq!(coverage_with(&blocked, EXE, &needs(), Category::Private, off), Coverage::Covered);
+        assert_eq!(coverage_with(&blocked, EXE, &needs(), Category::Private, off, &[]), Coverage::Covered);
     }
 
     #[test]
     fn a_default_inbound_allow_needs_no_allow_rule_but_a_block_still_wins() {
         let open = ProfileSettings { default_inbound_allow: true, ..ProfileSettings::default() };
-        assert_eq!(coverage_with(&[], EXE, &needs(), Category::Private, open), Coverage::Covered);
+        assert_eq!(coverage_with(&[], EXE, &needs(), Category::Private, open, &[]), Coverage::Covered);
         let blocked = vec![program_rule(EXE, Proto::Tcp, PROFILE_PRIVATE, false)];
-        assert_eq!(coverage_with(&blocked, EXE, &needs(), Category::Private, open), Coverage::Blocked);
+        assert_eq!(coverage_with(&blocked, EXE, &needs(), Category::Private, open, &[]), Coverage::Blocked);
     }
 
     #[test]
     fn block_all_incoming_beats_every_allow_rule() {
         let all = ProfileSettings { block_all_inbound: true, ..ProfileSettings::default() };
         let rules = vec![program_rule(EXE, Proto::Any, ALL, true)];
-        assert_eq!(coverage_with(&rules, EXE, &needs(), Category::Private, all), Coverage::Blocked);
+        assert_eq!(coverage_with(&rules, EXE, &needs(), Category::Private, all, &[]), Coverage::Blocked);
     }
 
     #[test]
@@ -967,6 +1049,70 @@ mod tests {
         assert_eq!(r.per_adapter[0].1, AdapterState::Covered, "Private firewall is off");
         assert_eq!(r.per_adapter[1].1, AdapterState::PublicNotTrusted, "Public still defaults to block");
         assert_eq!(r.status, FirewallStatus::Ok);
+    }
+
+    // Codex P2 on #4151: the UDP broadcast responder is a need too.
+    #[test]
+    fn the_udp_broadcast_responder_port_is_a_need() {
+        let port = crate::backend::lan_discovery::UDP_DISCOVERY_PORT;
+        assert!(needs().iter().any(|n| n.proto == Proto::Udp && n.port == port));
+        // TCP plus mDNS but not the responder port: not covered.
+        let tcp = FwRule { proto: Proto::Tcp, local_ports: PortSpec::parse("29700-29799"), ..rule("t") };
+        let mdns = FwRule { proto: Proto::Udp, local_ports: PortSpec::parse("5353"), ..rule("u") };
+        assert_eq!(coverage(&[tcp.clone(), mdns], EXE, &needs(), Category::Private), Coverage::Missing);
+        let both = FwRule { proto: Proto::Udp, local_ports: PortSpec::parse("5353,47891"), ..rule("u") };
+        assert_eq!(coverage(&[tcp, both], EXE, &needs(), Category::Private), Coverage::Covered);
+    }
+
+    // Codex P2 on #4151: a rule limited to one local IP counts only for its adapter.
+    #[test]
+    fn local_address_scopes_parse_the_forms_windows_uses() {
+        assert_eq!(LocalScope::parse(""), LocalScope::Any);
+        assert_eq!(LocalScope::parse("*"), LocalScope::Any);
+        assert_eq!(LocalScope::parse("LocalSubnet"), LocalScope::Any);
+        let ip = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        let one = LocalScope::parse("192.168.1.26");
+        assert!(one.applies_to(&[ip("192.168.1.26")]) && !one.applies_to(&[ip("192.168.1.27")]));
+        let net = LocalScope::parse("192.168.1.0/24, 10.0.0.5");
+        assert!(net.applies_to(&[ip("192.168.1.200")]) && net.applies_to(&[ip("10.0.0.5")]));
+        assert!(!net.applies_to(&[ip("192.168.2.1")]));
+        let masked = LocalScope::parse("172.17.16.0/255.255.255.0");
+        assert!(masked.applies_to(&[ip("172.17.16.1")]) && !masked.applies_to(&[ip("172.17.17.1")]));
+        let range = LocalScope::parse("192.168.1.10-192.168.1.20");
+        assert!(range.applies_to(&[ip("192.168.1.15")]) && !range.applies_to(&[ip("192.168.1.21")]));
+        // Keywords and junk match nothing; an IPv6-only list matches no IPv4 adapter.
+        for bad in ["DHCP", "Defaultgateway", "192.168.1", "1.2.3.4/33", "9-1", "10.0.0.1-bad"] {
+            assert_eq!(LocalScope::parse(bad), LocalScope::Unparseable, "{bad}");
+        }
+        assert!(!LocalScope::parse("fe80::1").applies_to(&[ip("192.168.1.26")]));
+        // The adapter's own addresses decide, any one is enough.
+        assert!(one.applies_to(&[ip("10.9.9.9"), ip("192.168.1.26")]));
+        assert!(!one.applies_to(&[]));
+    }
+
+    #[test]
+    fn an_address_scoped_allow_covers_only_the_adapter_that_owns_the_address() {
+        let scoped = |name: &str| FwRule {
+            local_addresses: LocalScope::parse("192.168.1.26"),
+            program: Some(EXE.to_string()),
+            ..rule(name)
+        };
+        let rules = vec![scoped("a")];
+        let owner = adapter("Ethernet", Some(Category::Private)); // 192.168.1.26
+        let other = Adapter { ipv4: vec!["10.0.0.5".parse().unwrap()], ..adapter("Wi-Fi", Some(Category::Private)) };
+        assert_eq!(adapter_state(&rules, EXE, &needs(), &owner), AdapterState::Covered);
+        assert_eq!(adapter_state(&rules, EXE, &needs(), &other), AdapterState::NeedsSetup);
+    }
+
+    #[test]
+    fn an_address_scoped_block_does_not_block_other_adapters() {
+        let allow = program_rule(EXE, Proto::Any, ALL, true);
+        let block = FwRule { local_addresses: LocalScope::parse("10.0.0.5"), ..program_rule(EXE, Proto::Any, ALL, false) };
+        let rules = vec![allow, block];
+        let ethernet = adapter("Ethernet", Some(Category::Private)); // 192.168.1.26
+        let wifi = Adapter { ipv4: vec!["10.0.0.5".parse().unwrap()], ..adapter("Wi-Fi", Some(Category::Private)) };
+        assert_eq!(adapter_state(&rules, EXE, &needs(), &ethernet), AdapterState::Covered);
+        assert_eq!(adapter_state(&rules, EXE, &needs(), &wifi), AdapterState::Blocked);
     }
 
     #[test]

@@ -41,10 +41,13 @@ export interface LanIndicatorInput {
     discoverability?: "healthy" | "degraded" | "undiscoverable" | "off" | null;
     /** `lanFirewallAtom().status` — what the OS firewall would do to a peer
      *  trying to reach this machine (Windows only for now; `null` elsewhere).
-     *  `"blocked"` is a fact (an enabled Block rule matches us, and Windows
-     *  enforces it over any Allow), so it outranks peers. The other three are
-     *  inferred from the ABSENCE of an allow rule and can be wrong for unusual
-     *  rules, so seeing peers outranks them: a peer proves discovery works.
+     *  Every problem verdict OUTRANKS peers. A peer count proves only that this
+     *  process received discovery traffic; it does not prove other machines can
+     *  connect to its listeners, and "hear but not heard" is the failure this
+     *  indicator exists to expose (Codex P1 on #4151). The label keeps both
+     *  facts ("2 on LAN. ...") and the glyph stays filled while peers exist.
+     *  The inferred verdicts can be wrong for rules we cannot read, which is why
+     *  their wording says what is missing rather than that LAN is broken.
      *  See SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.3. */
     firewall?: "ok" | "needs-setup" | "blocked" | "public-network" | "managed" | "unknown" | "off" | null;
     /** Number of DISCOVERED peers — excludes this instance, post-#3025. */
@@ -67,17 +70,13 @@ export const FIREWALL_MESSAGES = {
     managed: "LAN: your administrator manages the firewall for this device, so AgentMux cannot open it",
 } as const;
 
-/**
- * Whether the popover should show the firewall warning. Mirrors the status-bar
- * ranking in `resolveLanIndicator`: a `blocked` verdict is a fact and always
- * shows; the inferred ones (`needs-setup`, `public-network`, `managed`) come from
- * a MISSING rule and yield to peers, because seeing a peer proves discovery
- * works. Without this the bar read "N on LAN" while the popover warned that
- * other devices cannot reach the machine (ReAgent P2 on #4151).
- */
-export function shouldShowFirewallWarning(status: string | null | undefined, peerCount: number): boolean {
-    if (firewallMessage(status) == null) return false;
-    return status === "blocked" || peerCount <= 0;
+/** The firewall verdicts that are problems (everything but ok/unknown/off/none). */
+function firewallProblemState(
+    status: string | null | undefined,
+): "blocked" | "needs-setup" | "public-network" | "managed" | null {
+    return status === "blocked" || status === "needs-setup" || status === "public-network" || status === "managed"
+        ? status
+        : null;
 }
 
 export function firewallMessage(status: string | null | undefined): string | null {
@@ -109,13 +108,19 @@ export function resolveLanIndicator(input: LanIndicatorInput): LanIndicator {
             label: "LAN: other machines can't see this one. Another program may be using the mDNS port (5353). Turn LAN off and on to retry",
         };
     }
-    // A matching Block rule is a fact, not a guess: Windows drops inbound
-    // traffic for us on that profile whatever else is allowed.
-    if (input.firewall === "blocked") {
+    // The firewall verdicts rank above peers. See `LanIndicatorInput.firewall`:
+    // hearing peers does not show that anyone can reach us. `blocked` is a fact (an
+    // enabled Block rule matches us and Windows enforces it over any Allow); the
+    // others are inferred from a missing rule or a Public network. With peers
+    // present the glyph stays filled and the label says both things.
+    const firewallProblem = firewallProblemState(input.firewall);
+    if (firewallProblem) {
+        const peers = input.peerCount > 0 ? input.peerCount : 0;
+        const message = FIREWALL_MESSAGES[firewallProblem];
         return {
-            state: "blocked",
-            glyph: "◇",
-            label: FIREWALL_MESSAGES.blocked,
+            state: firewallProblem,
+            glyph: peers > 0 ? "◆" : "◇",
+            label: peers > 0 ? `${peers} on LAN. ${message}` : message,
         };
     }
     // Peers outrank an error, mirroring the popover, whose peers rows are NOT
@@ -128,31 +133,6 @@ export function resolveLanIndicator(input: LanIndicatorInput): LanIndicator {
     // the popover lists none.
     if (input.peerCount > 0) {
         return { state: "peers", glyph: "◆", label: `${input.peerCount} on LAN` };
-    }
-    // No peers, and the firewall has no rule letting them in. This is the state
-    // narko was in on 2026-09-30: LAN on, listeners up, mDNS registered, nothing
-    // logged, no peer ever seen. Inferred from a missing rule, which is why
-    // peers (above) outrank it.
-    if (input.firewall === "needs-setup") {
-        return {
-            state: "needs-setup",
-            glyph: "◇",
-            label: FIREWALL_MESSAGES["needs-setup"],
-        };
-    }
-    if (input.firewall === "public-network") {
-        return {
-            state: "public-network",
-            glyph: "◇",
-            label: FIREWALL_MESSAGES["public-network"],
-        };
-    }
-    if (input.firewall === "managed") {
-        return {
-            state: "managed",
-            glyph: "◇",
-            label: FIREWALL_MESSAGES.managed,
-        };
     }
     // Enabled, nothing found, and the daemon reported a failure: the reason
     // there are no peers is that discovery never started. Must not render as

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { FIREWALL_MESSAGES, firewallMessage, resolveLanIndicator, shouldShowFirewallWarning } from "./lan-indicator";
+import { FIREWALL_MESSAGES, firewallMessage, resolveLanIndicator } from "./lan-indicator";
 
 describe("resolveLanIndicator", () => {
     it("shows the accent-filled diamond when real peers exist", () => {
@@ -119,12 +119,22 @@ describe("resolveLanIndicator", () => {
             expect(r.label).toBe(FIREWALL_MESSAGES["needs-setup"]);
         });
 
-        it("ranks a block above peers (a fact) but peers above inferred problems", () => {
-            expect(resolveLanIndicator({ enabled: true, peerCount: 3, firewall: "blocked" }).state).toBe("blocked");
-            for (const f of ["needs-setup", "public-network", "managed"] as const) {
-                // A peer proves discovery works; a missing-rule inference can be wrong.
-                expect(resolveLanIndicator({ enabled: true, peerCount: 3, firewall: f }).state).toBe("peers");
-                expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).state).toBe(f);
+        // Codex P1 on #4151: a peer count proves only that we RECEIVED discovery
+        // traffic. It does not prove other machines can connect to our listeners,
+        // which is the one-way failure this indicator exists to expose. So every
+        // firewall problem outranks peers; the label keeps both facts and the glyph
+        // stays filled because peers do exist.
+        it("ranks every firewall problem above peers, keeping both facts", () => {
+            for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
+                const withPeers = resolveLanIndicator({ enabled: true, peerCount: 3, firewall: f });
+                expect(withPeers.state).toBe(f);
+                expect(withPeers.glyph).toBe("◆");
+                expect(withPeers.label).toBe(`3 on LAN. ${FIREWALL_MESSAGES[f]}`);
+
+                const alone = resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f });
+                expect(alone.state).toBe(f);
+                expect(alone.glyph).toBe("◇");
+                expect(alone.label).toBe(FIREWALL_MESSAGES[f]);
             }
         });
 
@@ -151,31 +161,14 @@ describe("resolveLanIndicator", () => {
             }
         });
 
-        // ReAgent P2 on #4151: the popover must not warn while the bar shows peers.
-        it("shows the popover warning on the same terms as the indicator", () => {
-            for (const f of ["needs-setup", "public-network", "managed"] as const) {
-                expect(shouldShowFirewallWarning(f, 0)).toBe(true);
-                expect(shouldShowFirewallWarning(f, 2)).toBe(false);
-            }
-            // A block is a fact: it shows even with peers listed.
-            expect(shouldShowFirewallWarning("blocked", 0)).toBe(true);
-            expect(shouldShowFirewallWarning("blocked", 3)).toBe(true);
-            for (const f of ["ok", "unknown", "off", null, undefined]) {
-                expect(shouldShowFirewallWarning(f, 0)).toBe(false);
-            }
-            // Same inputs, same answer as the indicator.
-            for (const peers of [0, 2]) {
-                for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
-                    const flagged = resolveLanIndicator({ enabled: true, peerCount: peers, firewall: f }).state === f;
-                    expect(shouldShowFirewallWarning(f, peers)).toBe(flagged);
-                }
-            }
-        });
-
         it("has one wording shared by the tooltip and the popover", () => {
             for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
                 expect(firewallMessage(f)).toBe(FIREWALL_MESSAGES[f]);
+                // With peers the same sentence follows the count, so the two surfaces agree.
                 expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).label).toBe(firewallMessage(f));
+                expect(resolveLanIndicator({ enabled: true, peerCount: 2, firewall: f }).label).toContain(
+                    firewallMessage(f) as string,
+                );
             }
             for (const f of ["ok", "unknown", "off", null, undefined, "nonsense"]) {
                 expect(firewallMessage(f)).toBeNull();

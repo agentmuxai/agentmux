@@ -259,22 +259,19 @@ describe("HostPopoverPanel — firewall warning", () => {
         expect(row).toHaveTextContent("Windows Firewall");
     });
 
-    // ReAgent P2 on #4151: with peers listed the bar says "N on LAN", so the
-    // popover must not warn about an inferred problem; a block still shows.
-    it("hides an inferred warning when peers are listed, but still shows a block", () => {
-        renderPanel(muxbus, {
-            lanDiscoveryEnabled: () => true,
-            lanCount: () => 2,
-            lanFirewall: () => ({ status: "needs-setup", adapters: [], localRulesIgnored: false }),
-        });
-        expect(screen.queryByTestId("lan-firewall")).not.toBeInTheDocument();
-        cleanup();
-        renderPanel(muxbus, {
-            lanDiscoveryEnabled: () => true,
-            lanCount: () => 2,
-            lanFirewall: () => ({ status: "blocked", adapters: [], localRulesIgnored: false }),
-        });
-        expect(screen.getByTestId("lan-firewall")).toHaveTextContent("blocking AgentMux");
+    // Codex P1 on #4151: peers prove we received discovery traffic, not that anyone
+    // can connect to us, so the warning shows with peers listed too, matching the
+    // status bar, which keeps both facts.
+    it("shows the firewall warning even when peers are listed", () => {
+        for (const status of ["needs-setup", "blocked"] as const) {
+            renderPanel(muxbus, {
+                lanDiscoveryEnabled: () => true,
+                lanCount: () => 2,
+                lanFirewall: () => ({ status, adapters: [], localRulesIgnored: false }),
+            });
+            expect(screen.getByTestId("lan-firewall")).toBeInTheDocument();
+            cleanup();
+        }
     });
 
     it("names a Public network and a managed firewall", () => {
