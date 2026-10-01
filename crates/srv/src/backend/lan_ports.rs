@@ -26,12 +26,24 @@ use std::ops::RangeInclusive;
 
 use tokio::net::TcpListener;
 
-/// TCP ports srv's web and ws listeners are taken from. Sits just above the
-/// UDP broadcast fallback (`lan_discovery::UDP_DISCOVERY_PORT`, 47891), inside
-/// the IANA registered range and below the Windows/Linux dynamic ranges
-/// (49152+, 32768+ on older Linux), so the OS does not hand these out for
-/// ephemeral connections. One hundred ports hold about fifty instances.
-pub const LAN_PORT_RANGE: RangeInclusive<u16> = 47892..=47991;
+/// TCP ports srv's web and ws listeners are taken from.
+///
+/// **It must sit below 32768.** The OS hands ephemeral ports to *outbound*
+/// connections, and the defaults are 49152-65535 on Windows and macOS but
+/// 32768-60999 on Linux. A port in either range can be in use as the local end
+/// of an outgoing connection on a LAN address while it is free on loopback, and
+/// the startup bind only tests loopback: the LAN listener would then fail to
+/// bind that address later and LAN would stay partly off until the connection
+/// closed (Codex P2 on #4120; the first draft used 47892-47991, inside Linux's
+/// range). Below 32768 is outside all three defaults.
+///
+/// Within that, the block is chosen away from well-known neighbours: Syncthing
+/// (21027, 22000), Synergy (24800), Minecraft (25565), Steam and Source games
+/// (27000s), MongoDB (27017) and Kubernetes NodePorts (30000-32767). One
+/// hundred ports hold about fifty instances. Another program that happens to
+/// listen in the range is not harmed, but a firewall rule on the range would
+/// expose it to the local subnet, which is why the block is not larger.
+pub const LAN_PORT_RANGE: RangeInclusive<u16> = 29700..=29799;
 
 /// The two startup listeners, plus where they came from.
 pub struct StartupListeners {
@@ -187,14 +199,17 @@ mod tests {
     #[test]
     fn the_range_is_one_a_rule_can_rely_on() {
         let (start, end) = (*LAN_PORT_RANGE.start(), *LAN_PORT_RANGE.end());
+        assert!(start >= 1024, "not a well-known port");
         assert!(
-            start > crate::backend::lan_discovery::UDP_DISCOVERY_PORT,
-            "must not overlap the UDP broadcast fallback port"
+            end < 32768,
+            "must stay below Linux's default ephemeral start (32768); Windows and macOS start at 49152"
         );
-        assert!(
-            end < 49152,
-            "must stay below the dynamic port range, or the OS hands these out"
-        );
+        for neighbour in [21027, 22000, 24800, 25565, 27015, 27017, 28015, 30000] {
+            assert!(
+                !LAN_PORT_RANGE.contains(&neighbour),
+                "{neighbour} is a well-known neighbour; a rule on the range would expose it"
+            );
+        }
         assert!(
             usize::from(end - start) + 1 >= 100,
             "room for about fifty instances (two ports each)"
