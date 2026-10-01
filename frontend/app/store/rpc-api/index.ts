@@ -161,6 +161,7 @@ export type {
 } from "./file";
 export type {
     AgentContent,
+    AgentOpenPane,
     AgentDefinition,
     AgentDefinitionCreateInput,
     AgentDefinitionUpdateInput,

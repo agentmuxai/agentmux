@@ -638,3 +638,44 @@ describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression
 // formatRelative was migrated to frontend/util/format-time.ts's formatTimeAgo
 // (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2) — its tests moved with
 // it, see format-time.test.ts.
+
+// SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md §4.0 — an
+// agent open only in another (floating) window. The rendered map can lag srv's
+// answer (Codex P1 on #4127), so the click decides from a fresh read.
+describe("MyAgentsList — agent open in another window", () => {
+    it("shows the 'already open' prompt instead of reattaching when the fresh read finds it", async () => {
+        const onReattach = vi.fn();
+        const row = makeRow({ definition_id: "def-korp", instance_name: "Korp" });
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([row]));
+        const resolve = vi.fn(async () => new Map([["def-korp", "floating-block"]]));
+        render(() => (
+            <MyAgentsList
+                onReattach={onReattach}
+                openDefinitions={() => new Map()}
+                openLocations={() =>
+                    new Map([["def-korp", { blockId: "floating-block", here: false, label: "open in another window" }]])
+                }
+                resolveOpenDefinitions={resolve}
+            />
+        ));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
+        expect(resolve).toHaveBeenCalledTimes(1);
+        expect(onReattach).not.toHaveBeenCalled();
+        const prompt = await screen.findByTestId("agent-fork-prompt");
+        expect(prompt.textContent).toContain("already open in another window");
+    });
+
+    it("still reattaches when the fresh read finds the agent closed", async () => {
+        const onReattach = vi.fn();
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow()]));
+        render(() => (
+            <MyAgentsList
+                onReattach={onReattach}
+                openDefinitions={() => new Map()}
+                resolveOpenDefinitions={async () => new Map()}
+            />
+        ));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
+        await waitFor(() => expect(onReattach).toHaveBeenCalledTimes(1));
+    });
+});
