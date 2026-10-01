@@ -31,6 +31,7 @@ vi.mock("@/store/global", () => ({
     lanInstancesAtom: () => [],
     lanDiscoveryErrorAtom: () => null,
     lanDiscoverabilityAtom: () => null,
+    lanFirewallAtom: () => null,
     setLanDiscoveryErrorAtom: vi.fn(),
     settingsAtom: () => ({}),
 }));
@@ -88,6 +89,7 @@ function renderPanel(mux = muxbus, extra: Record<string, unknown> = {}) {
             lanDiscoveryEnabled={() => false}
             lanDiscoveryError={() => null}
             lanDiscoverability={() => null}
+            lanFirewall={() => null}
             onLanToggle={() => {}}
             muxbus={mux}
             {...(extra as any)}
@@ -239,5 +241,69 @@ describe("HostPopoverPanel — undiscoverable warning", () => {
 
         renderPanel(muxbus, { lanDiscoveryEnabled: () => true, lanDiscoverability: () => null });
         expect(screen.queryByTestId("lan-undiscoverable")).not.toBeInTheDocument();
+    });
+});
+
+describe("HostPopoverPanel — firewall warning", () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    it("explains a missing firewall rule while LAN is on", () => {
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => true,
+            lanFirewall: () => ({ status: "needs-setup", adapters: [], localRulesIgnored: false }),
+        });
+        const row = screen.getByTestId("lan-firewall");
+        expect(row).toHaveTextContent("one-time setup");
+        expect(row).toHaveTextContent("Windows Firewall");
+    });
+
+    // Codex P1 on #4151: peers prove we received discovery traffic, not that anyone
+    // can connect to us, so the warning shows with peers listed too, matching the
+    // status bar, which keeps both facts.
+    it("shows the firewall warning even when peers are listed", () => {
+        for (const status of ["needs-setup", "blocked"] as const) {
+            renderPanel(muxbus, {
+                lanDiscoveryEnabled: () => true,
+                lanCount: () => 2,
+                lanFirewall: () => ({ status, adapters: [], localRulesIgnored: false }),
+            });
+            expect(screen.getByTestId("lan-firewall")).toBeInTheDocument();
+            cleanup();
+        }
+    });
+
+    it("names a Public network and a managed firewall", () => {
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => true,
+            lanFirewall: () => ({ status: "public-network", adapters: [], localRulesIgnored: false }),
+        });
+        expect(screen.getByTestId("lan-firewall")).toHaveTextContent("Public");
+        cleanup();
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => true,
+            lanFirewall: () => ({ status: "managed", adapters: [], localRulesIgnored: true }),
+        });
+        expect(screen.getByTestId("lan-firewall")).toHaveTextContent("administrator");
+    });
+
+    it("shows nothing when the firewall is fine, unknown, off, absent, or LAN is off", () => {
+        for (const status of ["ok", "unknown", "off"] as const) {
+            renderPanel(muxbus, {
+                lanDiscoveryEnabled: () => true,
+                lanFirewall: () => ({ status, adapters: [], localRulesIgnored: false }),
+            });
+            expect(screen.queryByTestId("lan-firewall")).not.toBeInTheDocument();
+            cleanup();
+        }
+        renderPanel(muxbus, { lanDiscoveryEnabled: () => true, lanFirewall: () => null });
+        expect(screen.queryByTestId("lan-firewall")).not.toBeInTheDocument();
+        cleanup();
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => false,
+            lanFirewall: () => ({ status: "blocked", adapters: [], localRulesIgnored: false }),
+        });
+        expect(screen.queryByTestId("lan-firewall")).not.toBeInTheDocument();
     });
 });

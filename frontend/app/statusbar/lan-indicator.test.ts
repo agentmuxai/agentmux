@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { resolveLanIndicator } from "./lan-indicator";
+import { FIREWALL_MESSAGES, firewallMessage, resolveLanIndicator } from "./lan-indicator";
 
 describe("resolveLanIndicator", () => {
     it("shows the accent-filled diamond when real peers exist", () => {
@@ -104,6 +104,82 @@ describe("resolveLanIndicator", () => {
             for (const d of ["healthy", "degraded", "off", null, undefined] as const) {
                 expect(resolveLanIndicator({ enabled: true, peerCount: 2, discoverability: d }).state).toBe("peers");
                 expect(resolveLanIndicator({ enabled: true, peerCount: 0, discoverability: d }).state).toBe("idle");
+            }
+        });
+    });
+
+    // SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.3. On 2026-09-30 narko had LAN on,
+    // listeners up, mDNS registered and nothing logged, because Windows had no
+    // inbound rule for it: it saw no peer and said nothing.
+    describe("firewall", () => {
+        it("says needs-setup when no peers can be found and no rule lets them in", () => {
+            const r = resolveLanIndicator({ enabled: true, peerCount: 0, firewall: "needs-setup" });
+            expect(r.state).toBe("needs-setup");
+            expect(r.glyph).toBe("◇");
+            expect(r.label).toBe(FIREWALL_MESSAGES["needs-setup"]);
+        });
+
+        // Codex P1 on #4151: a peer count proves only that we RECEIVED discovery
+        // traffic. It does not prove other machines can connect to our listeners,
+        // which is the one-way failure this indicator exists to expose. So every
+        // firewall problem outranks peers; the label keeps both facts and the glyph
+        // stays filled because peers do exist.
+        it("ranks every firewall problem above peers, keeping both facts", () => {
+            for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
+                const withPeers = resolveLanIndicator({ enabled: true, peerCount: 3, firewall: f });
+                expect(withPeers.state).toBe(f);
+                expect(withPeers.glyph).toBe("◆");
+                expect(withPeers.label).toBe(`3 on LAN. ${FIREWALL_MESSAGES[f]}`);
+
+                const alone = resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f });
+                expect(alone.state).toBe(f);
+                expect(alone.glyph).toBe("◇");
+                expect(alone.label).toBe(FIREWALL_MESSAGES[f]);
+            }
+        });
+
+        it("ranks undiscoverable above a firewall block, and off above everything", () => {
+            expect(
+                resolveLanIndicator({ enabled: true, peerCount: 0, discoverability: "undiscoverable", firewall: "blocked" })
+                    .state,
+            ).toBe("undiscoverable");
+            for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
+                expect(resolveLanIndicator({ enabled: false, peerCount: 0, firewall: f }).state).toBe("off");
+            }
+        });
+
+        it("outranks a start-up error and the idle state", () => {
+            const r = resolveLanIndicator({ enabled: true, peerCount: 0, error: "bind failed", firewall: "needs-setup" });
+            expect(r.state).toBe("needs-setup");
+            expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: "ok" }).state).toBe("idle");
+        });
+
+        it("ignores ok, unknown, off and no verdict", () => {
+            for (const f of ["ok", "unknown", "off", null, undefined] as const) {
+                expect(resolveLanIndicator({ enabled: true, peerCount: 2, firewall: f }).state).toBe("peers");
+                expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).state).toBe("idle");
+            }
+        });
+
+        // ReAgent on #4151: `blocked` also covers "Block all incoming connections",
+        // where no rule exists, so the wording must not tell the user to find a rule.
+        it("words a block so it fits both a Block rule and the block-all setting", () => {
+            const m = FIREWALL_MESSAGES.blocked;
+            expect(m).toContain("Block rule");
+            expect(m).toContain("Block all incoming connections");
+        });
+
+        it("has one wording shared by the tooltip and the popover", () => {
+            for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
+                expect(firewallMessage(f)).toBe(FIREWALL_MESSAGES[f]);
+                // With peers the same sentence follows the count, so the two surfaces agree.
+                expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).label).toBe(firewallMessage(f));
+                expect(resolveLanIndicator({ enabled: true, peerCount: 2, firewall: f }).label).toContain(
+                    firewallMessage(f) as string,
+                );
+            }
+            for (const f of ["ok", "unknown", "off", null, undefined, "nonsense"]) {
+                expect(firewallMessage(f)).toBeNull();
             }
         });
     });

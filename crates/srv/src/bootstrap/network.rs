@@ -145,6 +145,14 @@ pub async fn bind_listeners_and_network(
     // every reconcile so we never advertise an address nothing is listening on,
     // and it performs the boot-time setting read too (via `main.rs`).
     lan_listeners.set_discovery(lan_discovery.clone());
+    // Tells the status bar whether the OS firewall would let LAN peers in
+    // (Windows only for now). Read-only.
+    backend::lan_firewall::spawn_watcher(
+        lan_discovery.clone(),
+        web_addr.port(),
+        ws_addr.port(),
+        event_bus.clone(),
+    );
 
     // LSP supervisor — owns LSP server child processes. Nothing spawned
     // until the editor pane calls `lspstart`. Spec:
