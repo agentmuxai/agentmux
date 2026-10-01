@@ -19,7 +19,16 @@
  *
  * Pure so the state table can be tested without mounting the status bar.
  */
-export type LanIndicatorState = "peers" | "idle" | "error" | "undiscoverable" | "off";
+export type LanIndicatorState =
+    | "peers"
+    | "idle"
+    | "error"
+    | "undiscoverable"
+    | "blocked"
+    | "needs-setup"
+    | "public-network"
+    | "managed"
+    | "off";
 
 export interface LanIndicatorInput {
     /** The `network:lan_discovery` setting. */
@@ -30,6 +39,14 @@ export interface LanIndicatorInput {
      *  2026-10-01). It outranks "peers": hearing peers says nothing about being
      *  heard, which is the whole failure. */
     discoverability?: "healthy" | "degraded" | "undiscoverable" | "off" | null;
+    /** `lanFirewallAtom().status` — what the OS firewall would do to a peer
+     *  trying to reach this machine (Windows only for now; `null` elsewhere).
+     *  `"blocked"` is a fact (an enabled Block rule matches us, and Windows
+     *  enforces it over any Allow), so it outranks peers. The other three are
+     *  inferred from the ABSENCE of an allow rule and can be wrong for unusual
+     *  rules, so seeing peers outranks them: a peer proves discovery works.
+     *  See SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.3. */
+    firewall?: "ok" | "needs-setup" | "blocked" | "public-network" | "managed" | "unknown" | "off" | null;
     /** Number of DISCOVERED peers — excludes this instance, post-#3025. */
     peerCount: number;
     /** `lanDiscoveryErrorAtom` — set when the mDNS daemon could not be
@@ -37,6 +54,21 @@ export interface LanIndicatorInput {
      *  setting stays enabled in that case, so without this the failure would
      *  render as the muted, documented-as-healthy idle state [codex P2]. */
     error?: string | null;
+}
+
+/** The one wording for each firewall problem, shared by the status-bar tooltip
+ *  and the popover so the two cannot disagree. */
+export const FIREWALL_MESSAGES = {
+    blocked: "LAN: Windows Firewall is blocking AgentMux (a Block rule matches it). Other devices can't reach this one",
+    "needs-setup":
+        "LAN needs one-time setup: Windows Firewall has no rule letting other devices reach this AgentMux",
+    "public-network":
+        "LAN: Windows treats this network as Public, which blocks incoming connections. Mark it Private to use LAN",
+    managed: "LAN: your administrator manages the firewall for this device, so AgentMux cannot open it",
+} as const;
+
+export function firewallMessage(status: string | null | undefined): string | null {
+    return status != null && status in FIREWALL_MESSAGES ? FIREWALL_MESSAGES[status as keyof typeof FIREWALL_MESSAGES] : null;
 }
 
 export interface LanIndicator {
@@ -64,6 +96,15 @@ export function resolveLanIndicator(input: LanIndicatorInput): LanIndicator {
             label: "LAN: other machines can't see this one. Another program may be using the mDNS port (5353). Turn LAN off and on to retry",
         };
     }
+    // A matching Block rule is a fact, not a guess: Windows drops inbound
+    // traffic for us on that profile whatever else is allowed.
+    if (input.firewall === "blocked") {
+        return {
+            state: "blocked",
+            glyph: "◇",
+            label: FIREWALL_MESSAGES.blocked,
+        };
+    }
     // Peers outrank an error, mirroring the popover, whose peers rows are NOT
     // gated on the error while its "no peers" row IS (`!lanDiscoveryError()`).
     // Reaching a peer is direct proof discovery works, which makes a lingering
@@ -74,6 +115,31 @@ export function resolveLanIndicator(input: LanIndicatorInput): LanIndicator {
     // the popover lists none.
     if (input.peerCount > 0) {
         return { state: "peers", glyph: "◆", label: `${input.peerCount} on LAN` };
+    }
+    // No peers, and the firewall has no rule letting them in. This is the state
+    // narko was in on 2026-09-30: LAN on, listeners up, mDNS registered, nothing
+    // logged, no peer ever seen. Inferred from a missing rule, which is why
+    // peers (above) outrank it.
+    if (input.firewall === "needs-setup") {
+        return {
+            state: "needs-setup",
+            glyph: "◇",
+            label: FIREWALL_MESSAGES["needs-setup"],
+        };
+    }
+    if (input.firewall === "public-network") {
+        return {
+            state: "public-network",
+            glyph: "◇",
+            label: FIREWALL_MESSAGES["public-network"],
+        };
+    }
+    if (input.firewall === "managed") {
+        return {
+            state: "managed",
+            glyph: "◇",
+            label: FIREWALL_MESSAGES.managed,
+        };
     }
     // Enabled, nothing found, and the daemon reported a failure: the reason
     // there are no peers is that discovery never started. Must not render as

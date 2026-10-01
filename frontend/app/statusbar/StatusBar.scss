@@ -611,6 +611,19 @@
     &--undiscoverable {
         color: var(--warning-color);
     }
+
+    // The OS firewall keeps peers out. `blocked` is a fact (a Block rule matches
+    // us) so it is an error; the others are inferred from a missing rule or a
+    // Public network, so they are warnings.
+    &--blocked {
+        color: var(--error-color);
+    }
+
+    &--needs-setup,
+    &--public-network,
+    &--managed {
+        color: var(--warning-color);
+    }
 }
 
 // ── MuxBus session dot (on the network pill, next to the LAN diamond) ──────

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { resolveLanIndicator } from "./lan-indicator";
+import { FIREWALL_MESSAGES, firewallMessage, resolveLanIndicator } from "./lan-indicator";
 
 describe("resolveLanIndicator", () => {
     it("shows the accent-filled diamond when real peers exist", () => {
@@ -104,6 +104,60 @@ describe("resolveLanIndicator", () => {
             for (const d of ["healthy", "degraded", "off", null, undefined] as const) {
                 expect(resolveLanIndicator({ enabled: true, peerCount: 2, discoverability: d }).state).toBe("peers");
                 expect(resolveLanIndicator({ enabled: true, peerCount: 0, discoverability: d }).state).toBe("idle");
+            }
+        });
+    });
+
+    // SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.3. On 2026-09-30 narko had LAN on,
+    // listeners up, mDNS registered and nothing logged, because Windows had no
+    // inbound rule for it: it saw no peer and said nothing.
+    describe("firewall", () => {
+        it("says needs-setup when no peers can be found and no rule lets them in", () => {
+            const r = resolveLanIndicator({ enabled: true, peerCount: 0, firewall: "needs-setup" });
+            expect(r.state).toBe("needs-setup");
+            expect(r.glyph).toBe("◇");
+            expect(r.label).toBe(FIREWALL_MESSAGES["needs-setup"]);
+        });
+
+        it("ranks a block above peers (a fact) but peers above inferred problems", () => {
+            expect(resolveLanIndicator({ enabled: true, peerCount: 3, firewall: "blocked" }).state).toBe("blocked");
+            for (const f of ["needs-setup", "public-network", "managed"] as const) {
+                // A peer proves discovery works; a missing-rule inference can be wrong.
+                expect(resolveLanIndicator({ enabled: true, peerCount: 3, firewall: f }).state).toBe("peers");
+                expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).state).toBe(f);
+            }
+        });
+
+        it("ranks undiscoverable above a firewall block, and off above everything", () => {
+            expect(
+                resolveLanIndicator({ enabled: true, peerCount: 0, discoverability: "undiscoverable", firewall: "blocked" })
+                    .state,
+            ).toBe("undiscoverable");
+            for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
+                expect(resolveLanIndicator({ enabled: false, peerCount: 0, firewall: f }).state).toBe("off");
+            }
+        });
+
+        it("outranks a start-up error and the idle state", () => {
+            const r = resolveLanIndicator({ enabled: true, peerCount: 0, error: "bind failed", firewall: "needs-setup" });
+            expect(r.state).toBe("needs-setup");
+            expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: "ok" }).state).toBe("idle");
+        });
+
+        it("ignores ok, unknown, off and no verdict", () => {
+            for (const f of ["ok", "unknown", "off", null, undefined] as const) {
+                expect(resolveLanIndicator({ enabled: true, peerCount: 2, firewall: f }).state).toBe("peers");
+                expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).state).toBe("idle");
+            }
+        });
+
+        it("has one wording shared by the tooltip and the popover", () => {
+            for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
+                expect(firewallMessage(f)).toBe(FIREWALL_MESSAGES[f]);
+                expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).label).toBe(firewallMessage(f));
+            }
+            for (const f of ["ok", "unknown", "off", null, undefined, "nonsense"]) {
+                expect(firewallMessage(f)).toBeNull();
             }
         });
     });

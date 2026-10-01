@@ -213,6 +213,7 @@ dependencies = [
  "uuid",
  "which 7.0.3",
  "whoami",
+ "windows 0.61.3",
  "windows-sys 0.59.0",
  "winres",
  "zeroize",

@@ -198,6 +198,22 @@ Symptom: Area54 listed narko, starpower and charlie; none of them listed Area54.
 
 What is **proven**: the IPv4 socket was missing, its absence alone explains every symptom, and rebuilding the daemon restored it. What is **not**: what made the IPv4 bind fail at 03:15:20Z (a process that held the port then and has since gone, or a Windows multicast quirk). One further observation is also unexplained: after the toggle srv held the IPv4 socket and had *lost* the IPv6 one to a Chrome process, so on this machine each address family seems to end up with srv or Chrome, not both. Neither changes the requirement: the failure is silent and the indicator cannot see it (4.7).
 
+### 8.2 The firewall reader, checked against real rules (2026-10-01)
+
+Reading the firewall needs no admin: `INetFwPolicy2` for the rules and `INetworkListManager` for each connection's category, joined to adapters by GUID (`backend/lan_firewall_windows.rs`, read-only). On narko it read 1,286 rules in about 60 ms and mapped the Ethernet adapter to its Private profile; the VMware and WSL adapters have no connected-network category and come out `unknown`, which is why one covered adapter is enough for `ok` (`lan_firewall::overall`).
+
+Judged against the real rules, the decision logic gave the answer the spec predicts:
+
+| Binary | Rules naming it | Verdict |
+|---|---|---|
+| the running 0.59.1 srv (LAN works, rules added by hand on 2026-09-30) | 2 (TCP, UDP) | covered, and exactly those two rules were the evidence |
+| the 0.58.2 build also on narko | 0 | `needs-setup` (R7: path-bound rules do not follow a new path) |
+| a freshly built test binary | 0 | `needs-setup` |
+
+**What the real data found that the design had not anticipated.** The first version reported Ethernet as *covered* for a binary no rule named. Twenty-five rules ("Solitaire & Casual Games", "Microsoft Store", ...) have an empty `ApplicationName` and ports `*`, so they look like "any program", but they are bound to a Store app package. The same applies to rules bound to a service, to particular users or machines, or to secure (authenticated) traffic only. The reader now marks any such rule `restricted` and the decision skips it (`FwRule::restricted`). Without this a machine with ordinary Store apps would never be told it needs setup, which is the failure this spec exists to remove. It is a test (`a_rule_bound_to_a_service_or_store_app_is_not_an_any_program_rule`), but it was found by running the reader on a real machine, not by thinking about the cases.
+
+Indicator order, set by how certain each verdict is: off, then undiscoverable, then `blocked` (a matching Block rule is a fact Windows enforces), then peers (seeing one proves discovery works), then the inferred states (`needs-setup`, `public-network`, `managed`), then a start-up error, then idle.
+
 ## 9. Delivery plan
 
 One spec, separate PRs, in this order. Windows is the failing path and should not wait on macOS or Linux verification; each platform needs its own hardware to prove it.
@@ -205,7 +221,9 @@ One spec, separate PRs, in this order. Windows is the failing path and should no
 | PR | Scope | Verified on |
 |---|---|---|
 | **A: core** | Fixed LAN port range with fallback; advertise the actual port; a firewall-status interface that reports coverage **per interface**; the new indicator states (`needs-setup`, `blocked`, `public-network`, `managed`, `undiscoverable`), and the mDNS self-probe and automatic daemon rebuild of 4.7 (items 1 and 2). No OS-specific code. | unit tests; narko ↔ starpower |
-| **B: Windows** | The elevated helper, the two port rules, Public-network consent, per-interface coverage gating of the LAN listeners and a decision on mDNS interface selection (4.2 caveat, settled by the measurement in section 6), installer step and uninstall cleanup. | a fresh Windows machine |
+| **B1: Windows, read-only detection** | The firewall reader, the pure coverage decision, the watcher that publishes `laninstances:firewall`, and the status-bar states `blocked`, `needs-setup`, `public-network`, `managed` (4.3). Changes no rule and gates nothing. Done in the PR that adds this line; checked against narko's real rules (8.2). | narko |
+| **B2: Windows, setup and gating** | The rest of B below: the elevated helper, the two port rules, Public-network consent, per-interface gating of the listeners and mDNS, installer step and uninstall cleanup. Needs the clean Windows machine. | a fresh Windows machine |
+| **B (original scope)** | The elevated helper, the two port rules, Public-network consent, per-interface coverage gating of the LAN listeners and a decision on mDNS interface selection (4.2 caveat, settled by the measurement in section 6), installer step and uninstall cleanup. | a fresh Windows machine |
 | **C: macOS** | Verify first; change code only if the Local Network prompt does not appear with our current discovery. | starpower |
 | **E: discovery fallback** | A desktop-to-desktop announce that does not depend on mDNS (4.7 item 3); moves the UDP port into the fixed block. | a host where another program holds UDP 5353 |
 | **D: Linux** | Detect an active `ufw` or `firewalld` and show the exact command. | charlie, once it is a bridged LAN member |

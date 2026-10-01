@@ -95,6 +95,18 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 cron = "0.12"
 
 [target.'cfg(windows)'.dependencies]
+# Read-only COM access to Windows Defender Firewall and the network list, to
+# tell whether LAN peers can reach us (backend/lan_firewall_windows.rs,
+# SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.2). Already in the tree at this
+# version via sysinfo, so declaring it adds no new supply-chain surface.
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_NetworkManagement_WindowsFirewall",
+    "Win32_Networking_NetworkListManager",
+] }
 # Out-of-process crash dump capture via VEH + named-pipe IPC.
 # Catches AV, heap corruption, and non-__fastfail aborts.
 # __fastfail (0xC0000409) is handled separately by WER LocalDumps.
