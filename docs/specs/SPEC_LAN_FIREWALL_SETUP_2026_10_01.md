@@ -88,7 +88,7 @@ Extend `resolveLanIndicator` with states for what a user can act on:
 | State | When | Message / action |
 |---|---|---|
 | `needs-setup` | LAN on, rule missing or points at another path | "LAN needs one-time setup" → run the helper |
-| `blocked` | a Block rule exists for AgentMux | "Windows is blocking AgentMux on this network" → helper removes it |
+| `blocked` | a Block rule matches AgentMux, **or** the profile has "Block all incoming connections" on (no rule involved) | "Windows Firewall is blocking incoming connections to AgentMux, through a Block rule or the \"Block all incoming connections\" setting" → helper removes a Block rule; the setting is the user's to change |
 | `public-network` | the only connected adapter(s) are Public | "Windows treats this network as Public, so incoming connections are blocked. Mark it Private" + `ms-settings:network` |
 | `managed` | policy ignores local rules | "Your administrator manages the firewall for this device" |
 | `undiscoverable` | LAN on, firewall fine, but this instance holds no usable IPv4 mDNS socket (4.7), so no other machine can find it | "Other machines can't see this one. Another program may be using the mDNS port (5353)" -> Retry |

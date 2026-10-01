@@ -161,6 +161,14 @@ describe("resolveLanIndicator", () => {
             }
         });
 
+        // ReAgent on #4151: `blocked` also covers "Block all incoming connections",
+        // where no rule exists, so the wording must not tell the user to find a rule.
+        it("words a block so it fits both a Block rule and the block-all setting", () => {
+            const m = FIREWALL_MESSAGES.blocked;
+            expect(m).toContain("Block rule");
+            expect(m).toContain("Block all incoming connections");
+        });
+
         it("has one wording shared by the tooltip and the popover", () => {
             for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
                 expect(firewallMessage(f)).toBe(FIREWALL_MESSAGES[f]);

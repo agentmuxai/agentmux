@@ -62,7 +62,11 @@ export interface LanIndicatorInput {
 /** The one wording for each firewall problem, shared by the status-bar tooltip
  *  and the popover so the two cannot disagree. */
 export const FIREWALL_MESSAGES = {
-    blocked: "LAN: Windows Firewall is blocking AgentMux (a Block rule matches it). Other devices can't reach this one",
+    // Two different causes reach this state: a Block rule that matches AgentMux, or
+    // the profile's "Block all incoming connections" setting (no rule involved, so
+    // "delete the rule" would be the wrong fix). The sentence names both.
+    blocked:
+        "LAN: Windows Firewall is blocking incoming connections to AgentMux, through a Block rule or the \"Block all incoming connections\" setting. Other devices can't reach this one",
     "needs-setup":
         "LAN needs one-time setup: Windows Firewall has no rule letting other devices reach this AgentMux",
     "public-network":
