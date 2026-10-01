@@ -87,10 +87,13 @@ impl Workdir {
 
     /// Replace `rel` with `bytes`, atomically. Parent folders are created
     /// inside the workdir. `owner_only` makes the file 0600 on Unix (for
-    /// files holding keys, such as `.mcp.json`).
+    /// files holding keys, such as `.mcp.json`); otherwise a file being
+    /// replaced keeps its mode, as an in-place write would.
     pub fn write(&self, rel: &str, bytes: &[u8], owner_only: bool) -> io::Result<()> {
         let path = self.resolve(rel)?;
         self.ensure_parent(&path)?;
+        #[cfg(unix)]
+        let keep_mode = if owner_only { None } else { std::fs::metadata(&path).ok().map(|m| m.permissions()) };
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
         let tmp = path.with_file_name(format!(".{file_name}.{}.agentmux-tmp", uuid::Uuid::new_v4()));
         let mut opts = std::fs::OpenOptions::new();
@@ -104,6 +107,10 @@ impl Workdir {
         let _ = owner_only;
         let written = (|| {
             let mut f = opts.open(&tmp)?;
+            #[cfg(unix)]
+            if let Some(perms) = keep_mode {
+                f.set_permissions(perms)?;
+            }
             f.write_all(bytes)?;
             f.sync_all()
         })();
@@ -231,6 +238,20 @@ mod tests {
         wd.write(".mcp.json", b"{}", true).unwrap();
         let mode = std::fs::metadata(dir.path().join(".mcp.json")).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    /// ReAgent on #4141: a user's 0600 `CLAUDE.md` must not come back 0644.
+    #[cfg(unix)]
+    #[test]
+    fn a_replaced_file_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (dir, wd) = workdir();
+        let path = dir.path().join("CLAUDE.md");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        wd.write("CLAUDE.md", b"new", false).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
     }
 
     #[test]

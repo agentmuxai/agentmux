@@ -380,9 +380,17 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     // Atomic, parents created inside the workdir, never
                     // through a symlinked file (SPEC_WORKDIR_SAFE_WRITES_2026_10_01).
-                    wd.write(&file.path, file.content.as_bytes(), false)
-                        .map_err(|e| format!("failed to write {}: {e}", file.path))?;
-                    tracing::debug!(path = %file_path.display(), "wrote config file");
+                    // A refusal skips that one file, as agent.open does
+                    // (ReAgent on #4141); any other failure fails the launch.
+                    match wd.write(&file.path, file.content.as_bytes(), false) {
+                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                            tracing::warn!(path = %file.path, error = %e, "writeagentconfig: not writing a config file");
+                        }
+                        other => {
+                            other.map_err(|e| format!("failed to write {}: {e}", file.path))?;
+                            tracing::debug!(path = %file_path.display(), "wrote config file");
+                        }
+                    }
                 }
 
                 crate::backend::agent_config::write_managed_skill_file_manifest(

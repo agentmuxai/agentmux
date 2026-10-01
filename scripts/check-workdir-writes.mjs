@@ -22,7 +22,8 @@ import { fileURLToPath } from "node:url";
 // fileURLToPath, not `.pathname`: on Windows the latter is "/C:/…".
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-// `region`: only the lines from `start` up to the next `end` are checked
+// `region`: only the lines from `start` (directly after a line matching
+// `after`) up to the next `end` are checked
 // (editor_handlers.rs also holds the editor pane's own saves, which write
 // wherever the user points them, not into a workdir).
 const FILES = [
@@ -30,12 +31,15 @@ const FILES = [
     { path: "crates/srv/src/server/app_api/agent_open.rs" },
     {
         path: "crates/srv/src/server/editor_handlers.rs",
-        region: { start: /COMMAND_WRITE_AGENT_CONFIG,/, end: /engine\.register_typed\(/ },
+        // The handler's registration, not the `use` list naming the constant.
+        region: { start: /^\s+COMMAND_WRITE_AGENT_CONFIG,\s*$/, after: /engine\.register_typed\(/, end: /engine\.register_typed\(/ },
     },
 ];
 
+// Any `fs::` call that creates, changes or removes something, and the
+// `OpenOptions`/`File::create` openers.
 const RAW =
-    /\b(?:fs::write|File::create|OpenOptions|fs::rename|fs::remove_file|fs::remove_dir|fs::copy|create_dir_all)\b/;
+    /\b(?:fs::(?:write|rename|copy|create_dir\w*|remove_\w+|set_permissions|hard_link|symlink\w*)|File::create\w*|OpenOptions)\b/;
 const ESCAPE = /\/\/\s*workdir-fs:\s*\S/;
 
 const problems = [];
@@ -48,7 +52,7 @@ for (const { path, region } of FILES) {
     lines.forEach((line, i) => {
         const code = line.replace(/\/\/.*$/, "");
         if (region) {
-            if (!inRegion && region.start.test(line)) inRegion = true;
+            if (!inRegion && region.start.test(line) && i > 0 && region.after.test(lines[i - 1])) inRegion = true;
             else if (inRegion && region.end.test(line)) inRegion = false;
         }
         if (/#\[cfg\(test\)\]/.test(line)) pendingTest = true;

@@ -71,8 +71,11 @@ impl Workdir {
 
 - **Refusals** are `io::ErrorKind::PermissionDenied` with a message naming
   the path and the reason ("links outside the workspace", "is a symlink").
-  The callers keep today's handling: a hard error where they error, a
-  logged warning where they're best-effort.
+  A refusal never fails a launch: the caller logs a warning and skips
+  that one file, on both launch paths (`.mcp.json` included; a symlinked
+  one is left as it is). Any other I/O error keeps today's handling.
+- **A replaced file keeps its mode** on Unix, unless `owner_only` asks for
+  0600, as an in-place write would have.
 - **Atomic replace on Windows:** `rename` over a file another process holds
   open without delete-sharing can fail. Retry a few times briefly, then
   return the error. Never fall back to a non-atomic write.
