@@ -71,14 +71,39 @@ function base64ToBlob(b64: string, type: string): Blob {
     return new Blob([bytes], { type });
 }
 
+/**
+ * Captures still running, including ones nobody will take (a newer prewarm
+ * replaced them, or the take gave up). Tracked so a test can wait for work it
+ * didn't await (`settleTearOffSnapshotForTests`).
+ */
+const pendingCaptures = new Set<Promise<unknown>>();
+
+function track<T>(capture: Promise<T>): Promise<T> {
+    pendingCaptures.add(capture);
+    const forget = () => pendingCaptures.delete(capture);
+    capture.then(forget, forget);
+    return capture;
+}
+
+/** Base64 of `bytes`, in chunks so a large picture doesn't overflow the call stack. */
+function bytesToBase64(bytes: Uint8Array): string {
+    const CHUNK = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+}
+
+/**
+ * Not `FileReader.readAsDataURL`: under jsdom that finishes in a later
+ * `setImmediate` and can throw "Expected an Uint8Array" from inside jsdom, out
+ * of reach of any handler (the intermittent CI failure in
+ * docs/reports/REPORT_CI_VITEST_TEAROFF_SNAPSHOT_UNCAUGHT_2026_09_30.md).
+ * `arrayBuffer()` is equivalent here, and in Chromium no slower.
+ */
 async function blobToBase64(blob: Blob): Promise<string> {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result as string);
-        r.onerror = () => reject(r.error);
-        r.readAsDataURL(blob);
-    });
-    return dataUrl.slice(dataUrl.indexOf(",") + 1);
+    return bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
 }
 
 function ownWindowLabel(): string {
@@ -165,7 +190,7 @@ export function prewarmWindowTabSnapshot(tabId: string): void {
     }
     const at = Date.now();
     const key = windowTabKey(tabId);
-    const picture = captureWindow().then(
+    const picture = track(captureWindow()).then(
         (b64) => {
             Logger.debug("dnd", "tear-off window snapshot captured", { tabId, ms: Date.now() - at });
             return b64;
@@ -201,7 +226,7 @@ export function prewarmTearOffSnapshot(blockId: string): void {
               .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
               .then((shot) => shot?.png_base64 || null)
         : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height });
-    const picture = capture.then(
+    const picture = track(capture).then(
         (b64) => {
             Logger.debug("dnd:cross", "tear-off snapshot captured", { blockId, ms: Date.now() - at });
             return b64;
@@ -247,4 +272,9 @@ export function paneDragCandidate(target: EventTarget | null): string | null {
 /** Test hook. */
 export function resetTearOffSnapshotForTests(): void {
     held = null;
+}
+
+/** Waits for every capture still running, including ones no test awaited. */
+export async function settleTearOffSnapshotForTests(): Promise<void> {
+    while (pendingCaptures.size > 0) await Promise.allSettled([...pendingCaptures]);
 }
