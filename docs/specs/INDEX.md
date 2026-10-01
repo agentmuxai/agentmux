@@ -142,6 +142,7 @@ See also:
 | [SPEC_OBJ_UPDATE_BRIDGE_2026-05-14](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | Obj-update bridge (sidecar↔renderer) |
 | [SPEC_CROSS_PROCESS_DISPATCH_2026-05-01](SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md) | Cross-process dispatch architecture |
 | [SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_21](SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_21.md) | Mirrored agent panes across channels/LAN/WAN — reuses the jekt trust model for input authorization |
+| [SPEC_LAN_FIREWALL_SETUP_2026_10_01](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) | LAN that works on a fresh install: one stable firewall rule via an elevated one-time helper, rule before listeners, a truthful LAN indicator (research + design) |
 
 ## Packaging / Build
 
