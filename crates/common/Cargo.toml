@@ -31,7 +31,7 @@ base64 = "0.22"
 # because the verifying population is every AgentMux instance on WAN, not a
 # single srv that minted its own key — see
 # docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum.
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 
 # `process::kill_pid` / `kill_process_group` — SIGTERM/SIGKILL by pid and
 # process group. Same pin as agentmux-srv.
