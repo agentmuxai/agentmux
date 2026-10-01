@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.59.3 — 2026-10-01
+
+- fix(agent): an agent opened by MCP OpenAgent or a layout starts on the model and effort its menu shows, not the CLI default
+- fix(agent): a saved agent that was stored without its model and effort starts on the ones its menu shows, not the CLI default
+- fix(lan): AgentMux now listens on a fixed port range (29700–29799, the next free pair per instance) instead of random ports, so one firewall rule can cover every build and update — the first step towards LAN working on a fresh install without manual firewall steps
+- Agent pane keeps about 15 MB of conversation (no turn limit) before older turns move to History, and scrolling up loads older turns again; was 6 turns / 2 MB
+- fix(muxbus): WAN jekts waiting before an agent subscribed are now pulled on connect, on adding an agent, and every 2 minutes, instead of waiting for an unrelated wake
+- Agent pane: your own message appears in place when you send it, instead of the pane jumping and the message fading in grey
+- Agent pane: a finished tool's live output log is freed from memory once its result arrives (nothing showed it again)
+- Agent pane: large results of collapsed tool calls are unloaded from memory and read back from the transcript when you open the row
+- fix(agent-picker): My agents sees agents open in any window, floating ones included — an agent torn off into a floating window no longer shows as closed and gets reopened into a second pane that can't run
+- fix(ui): no blank flash when closing a window tab, or on the first switch to each window tab after a load
+- docs(lan): root cause of Area54 being heard but never heard (silent missing IPv4 mDNS socket), and the requirements it adds
+- fix(ui): System Info charts run edge to edge with tight axis numbers; CPU follows the theme's primary colour and Mem is green
+- docs(spec): cross-host agent access, a gated way for any agent to work on any AgentMux host
+- fix(ui): a new window tab's pill appears already selected, in the first frame after the click
+
 ## 0.59.2 — 2026-10-01
 
 - feat(srv): stream-local-file serves byte ranges, so inline videos show a poster frame; agents are told about video and audio
