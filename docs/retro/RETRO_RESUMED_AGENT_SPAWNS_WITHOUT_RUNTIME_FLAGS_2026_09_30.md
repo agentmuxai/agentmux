@@ -101,7 +101,7 @@ updated to match.
 
 ## 5. Fix plan
 
-1. **Apply the runtime config at launch.** *Done:* `launchAgentDefinition` now resolves `agent:runtime` first and builds `cmd:args` with `buildPaneArgs` — the same function the per-send rebuild and `applyRuntimeChange` use — so the three cannot drift. `agent_open.rs` (the MCP `OpenAgent` path) is **not** fixed; it is gap G3 in the bindings report and needs fix 2. In `launchAgentDefinition`, build
+1. **Apply the runtime config at launch.** *Done:* `launchAgentDefinition` now resolves `agent:runtime` first and builds `cmd:args` with `buildPaneArgs` — the same function the per-send rebuild and `applyRuntimeChange` use — so the three cannot drift. `agent_open.rs` (the MCP `OpenAgent` path) is also fixed for new panes (`agent_runtime_seed.rs`); panes restored with old `cmd:args` still need fix 2. In `launchAgentDefinition`, build
    `cmd:args` with the same helpers the per-send path uses
    (`withProviderFlags(buildRuntimeArgs(base, runtimeConfig, provider.id), flags)`),
    then append the one-shot `--fork-session`. The meta commit then carries

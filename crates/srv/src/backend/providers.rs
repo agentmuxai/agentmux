@@ -198,6 +198,23 @@ pub struct InstructionDirScan {
     pub recursive: bool,
 }
 
+/// The model a freshly opened pane of this provider starts on, or `None` for a
+/// provider whose model the runtime menu does not wire (it passes no `--model`).
+///
+/// Mirrors the `default: true` row of the frontend catalog
+/// (`frontend/app/view/agent/providers/catalog.ts`), which is where the menu's
+/// default comes from; `pin-consistency.test.ts` fails when the two disagree.
+/// srv needs its own copy because `agent.open` builds a pane without going
+/// through the frontend, and a pane opened with no `--model` runs on the CLI's
+/// own default while its menu reads this one.
+pub fn default_model_for(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "claude" => Some("sonnet"),
+        "codex" => Some("gpt-5.5"),
+        _ => None,
+    }
+}
+
 impl ProviderConfig {
     /// Return the controller type as the string used in block metadata.
     pub fn controller_type_str(&self) -> &'static str {

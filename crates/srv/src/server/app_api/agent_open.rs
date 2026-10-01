@@ -522,11 +522,15 @@ async fn open_agent_inner(
                 } else {
                     controller_type
                 };
-                let mut cli_args = resolve_cli_args(&provider, controller_type);
-                // Append definition-level flags (e.g. --model <value>) stored in provider_flags.
-                if !agent.provider_flags.is_empty() {
-                    cli_args.extend(agent.provider_flags.split_whitespace().map(str::to_string));
-                }
+                // Catalog args, the runtime the menu will show applied on top, then the
+                // definition's own flags. Without the middle step a pane opened here
+                // ran on the CLI's default model while its menu read Sonnet — see
+                // agent_runtime_seed.rs.
+                let seeded = super::agent_runtime_seed::seed_launch(
+                    provider.id,
+                    resolve_cli_args(&provider, controller_type),
+                    &agent.provider_flags,
+                );
 
                 let agent_slug = agentmux_common::slug::path_slug(&agent.name);
                 // Shared with native-memory resolution so the two can never
@@ -777,7 +781,8 @@ async fn open_agent_inner(
                 meta.insert("agentOutputFormat".to_string(), json!(output_format));
                 meta.insert("controller".to_string(), json!(controller_type));
                 meta.insert("cmd".to_string(), json!(&resolved_cli_path));
-                meta.insert("cmd:args".to_string(), json!(cli_args));
+                // cmd:args + agent:runtime + agent:provider_flags, written together.
+                super::agent_runtime_seed::apply_to_meta(&mut meta, seeded, &agent.provider_flags);
                 meta.insert("cmd:cwd".to_string(), json!(&work_dir));
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
