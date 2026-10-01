@@ -31,6 +31,10 @@ fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
         .clone()
 }
 
+/// How long `agent.open` waits for a missing pinned CLI to install before telling
+/// the caller to retry. The install is not cancelled when this elapses.
+const AGENT_OPEN_INSTALL_WAIT_SECS: u64 = 150;
+
 /// Resolve the `(env_var, value)` pair to inject for this agent's model
 /// vendor override, if any — redirects the harness at a non-default
 /// backend (e.g. `ANTHROPIC_BASE_URL` for a `claude`-provider agent).
@@ -53,10 +57,6 @@ fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 /// `--listen stdio://` args. The spawned child would never complete the App
 /// Server handshake once the provider registry flips a provider's controller
 /// type to `AppServer`.
-/// How long `agent.open` waits for a missing pinned CLI to install before telling
-/// the caller to retry. The install is not cancelled when this elapses.
-const AGENT_OPEN_INSTALL_WAIT_SECS: u64 = 150;
-
 fn resolve_cli_args(provider: &providers::ProviderConfig, controller_type: &str) -> Vec<String> {
     let args: &[&str] = match controller_type {
         "persistent" => provider.persistent_launch_args.unwrap_or(provider.launch_args),
