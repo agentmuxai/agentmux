@@ -68,7 +68,15 @@ Public is **not** in the base rules; see 4.4.
 Enabling LAN becomes:
 
 1. Read the firewall state **without admin** (`INetFwPolicy2` read, `INetworkListManager` for profiles).
-2. **Per interface, not per machine.** `LanListenerSupervisor` binds every non-loopback address, and each adapter has its own connection profile. For each interface it would bind, require an *applicable* allow rule: the Private/Domain rules cover an adapter only if that adapter's profile is Private or Domain, and a Public adapter is covered only by a consented, interface-scoped Public copy (4.4). Also require that srv's ports are inside the range and that no block rule exists. Bind the LAN listeners **only on the covered interfaces**, and start mDNS only if at least one is covered. **No OS dialog can appear** for a covered interface, because a matching allow rule exists. An uncovered interface simply stays unbound; the indicator reports why (`needs-setup` or `public-network`, 4.3). This also keeps sockets off a Public adapter that nobody agreed to trust.
+2. **Per interface, not per machine.** `LanListenerSupervisor` binds every non-loopback address, and each adapter has its own connection profile. For each interface it would bind, require an *applicable* allow rule: the Private/Domain rules cover an adapter only if that adapter's profile is Private or Domain, and a Public adapter is covered only by a consented, interface-scoped Public copy (4.4). Also require that srv's ports are inside the range and that no block rule exists. Bind the LAN listeners **only on the covered interfaces**, and start mDNS only on the covered interfaces (see the caveat below). **No OS dialog can appear** for a covered interface, because a matching allow rule exists. An uncovered interface simply stays unbound; the indicator reports why (`needs-setup` or `public-network`, 4.3). This also keeps sockets off a Public adapter that nobody agreed to trust.
+**Caveat, verified in the source: mDNS cannot be limited to covered interfaces *after* the daemon exists.** `mdns-sd` 0.12.0 (our version) binds a socket on **every** interface when the daemon is constructed (`Zeroconf::new`, `service_daemon.rs:899-945`, via `my_ip_interfaces()` and `new_socket_bind`). `disable_interface` / `enable_interface` only close or reopen sockets afterwards, so selecting interfaces after construction cannot prevent a first bind on an uncovered one. The bind on an uncovered interface is what could raise Windows' alert. PR B therefore has to pick one of:
+
+- **(a)** construct the daemon only when *every* non-loopback interface it would bind is covered (safe, but a host with an uncovered virtual adapter, such as VMware or WSL, would then get no mDNS at all);
+- **(b)** use a version or patch of `mdns-sd` that applies interface selection *before* the first bind;
+- **(c)** discover over our own per-interface sockets (the UDP broadcast fallback already is one).
+
+Which is needed depends on a fact not yet measured: does binding on an uncovered interface raise the alert *when an allow rule already exists for another profile*? That is measured on the clean Windows machine first (section 6, and acceptance case 8), before choosing.
+
 3. Otherwise show one explanatory sentence ("AgentMux will ask Windows for permission to accept connections from other devices on your private network"), then launch the helper with `runas` (R6, R7). On success go to step 2. On cancel: stay loopback-only, show "LAN needs one-time setup" (4.3), do **not** retry on every start.
 
 The srv must not bind a non-loopback socket before step 2, or Windows raises its own dialog and, on cancel, plants a block rule.
@@ -131,6 +139,7 @@ On a clean Windows 11 VM with no AgentMux rules, per-user install, standard (non
 - Which binary does the UAC prompt show? It should be the signed host exe, not the sidecar, so the publisher reads AgentMux.
 - Is `RemoteAddresses = LocalSubnet` enough on this fleet, or do some hosts (VPN, WSL, Hyper-V adapters, as on narko) need an explicit range? Narko lists four LAN listeners, three on virtual adapters.
 - IPv6 link-local: `Area54.local` resolved to an `fe80::` address. Confirm the rule and the listeners cover it.
+- **Does an uncovered interface raise the alert once an allow rule exists for another profile?** Windows decides when to show its Security Alert, and the documented behaviour (R1) only says an existing *matching* rule suppresses it. If it does fire, 4.2 needs option (a), (b) or (c); if not, the per-interface listener gate alone is enough and mDNS can stay as it is. Narko already runs four LAN listeners, three on virtual adapters, so this is a real configuration, not a corner case. Measure it first on the clean Windows machine.
 - **Virtual machines.** A guest is a normal LAN member only on a **bridged** adapter (ideally wired). On NAT, mDNS multicast does not leave the host's private subnet and other machines cannot reach the guest; host-only is isolated. Check the hypervisor's adapter mode before diagnosing a guest. Bridging over Wi-Fi is unreliable on some hypervisors.
 - Port-range collisions: fifty instances per host is plenty for a person, but a CI or test host running many `task dev` builds could exhaust it; the OS-chosen fallback plus `needs-setup` is the safety net, but confirm the failure is legible.
 - The product currently treats a failed LAN start as an error only when the mDNS daemon itself fails; confirm what `lan_discovery_error` should add.
@@ -168,7 +177,7 @@ One spec, separate PRs, in this order. Windows is the failing path and should no
 | PR | Scope | Verified on |
 |---|---|---|
 | **A: core** | Fixed LAN port range with fallback; advertise the actual port; a firewall-status interface that reports coverage **per interface**; the new indicator states (`needs-setup`, `blocked`, `public-network`, `managed`). No OS-specific code. | unit tests; narko ↔ starpower |
-| **B: Windows** | The elevated helper, the two port rules, Public-network consent, per-interface coverage gating of the LAN listeners, installer step and uninstall cleanup. | a fresh Windows machine |
+| **B: Windows** | The elevated helper, the two port rules, Public-network consent, per-interface coverage gating of the LAN listeners and a decision on mDNS interface selection (4.2 caveat, settled by the measurement in section 6), installer step and uninstall cleanup. | a fresh Windows machine |
 | **C: macOS** | Verify first; change code only if the Local Network prompt does not appear with our current discovery. | starpower |
 | **D: Linux** | Detect an active `ufw` or `firewalld` and show the exact command. | charlie, once it is a bridged LAN member |
 
