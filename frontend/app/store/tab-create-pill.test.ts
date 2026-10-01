@@ -5,7 +5,7 @@
 // before CreateTab replies — instead of ~150 ms later when the built tab is
 // activated. `creatingTabId` is what it shows.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
     setActive: (() => {}) as (tabId: string) => void,
@@ -48,11 +48,18 @@ vi.mock("@/app/tab/tab-content-settled", () => ({
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ keepInactiveTabsLaidOut: () => true }));
 vi.mock("./focusManager", () => ({ focusManager: { refocusNode: () => {} } }));
 
-import { createTab, creatingTabId } from "./tab-actions";
+import { cancelTabCreation, createTab, creatingTabId, switchIntentTabId } from "./tab-actions";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("new tab pill selection", () => {
+    // createTab imports these lazily; load them up front so two overlapping
+    // creations don't race vitest's resolution of the same mocked module.
+    beforeAll(async () => {
+        await import("@/app/tab/tab-presets");
+        await import("@/app/tab/tab-content-settled");
+    });
+
     beforeEach(async () => {
         state.create.length = 0;
         state.settled.length = 0;
@@ -99,5 +106,61 @@ describe("new tab pill selection", () => {
         state.create[0].reject(new Error("rpc down"));
         await settle();
         expect(creatingTabId()).toBeNull();
+    });
+
+    // Codex on #4140: a click on the source tab while the new one builds.
+    it("a click in the strip cancels the creation's selection and its activation", async () => {
+        createTab();
+        state.setTabIds(["tab-a", "tab-new"]);
+        expect(creatingTabId()).toBe("tab-new");
+        cancelTabCreation();
+        expect(creatingTabId()).toBeNull();
+        state.create[0].resolve("tab-new");
+        await vi.waitFor(() => expect(state.settled).toHaveLength(1));
+        expect(creatingTabId()).toBeNull();
+        state.settled[0]();
+        await settle();
+        // Never activated: setActiveTab would have published it as the intent.
+        expect(switchIntentTabId()).toBeNull();
+    });
+
+    // Codex on #4140: two New Tabs before either pill arrives.
+    it("selects the newest of two overlapping creations", async () => {
+        createTab();
+        createTab();
+        state.setTabIds(["tab-a", "tab-1"]);
+        expect(creatingTabId()).toBeNull();
+        state.setTabIds(["tab-a", "tab-1", "tab-2"]);
+        expect(creatingTabId()).toBe("tab-2");
+        // Let both creations finish so nothing carries into the next test.
+        state.create[0].resolve("tab-1");
+        state.create[1].resolve("tab-2");
+        await vi.waitFor(() => expect(state.settled.length).toBeGreaterThan(0));
+        state.settled.forEach((f) => f());
+        await settle();
+        state.settled.forEach((f) => f());
+        state.setActive("tab-2");
+        await settle();
+    });
+
+    it("a newer New Tab takes over: the older one is left inactive", async () => {
+        // setActiveTab publishes its destination as the switch intent at once.
+        const intents: (string | null)[] = [];
+        createTab();
+        state.setTabIds(["tab-a", "tab-1"]);
+        state.create[0].resolve("tab-1");
+        await vi.waitFor(() => expect(state.settled).toHaveLength(1));
+        createTab();
+        expect(creatingTabId()).toBeNull();
+        state.setTabIds(["tab-a", "tab-1", "tab-2"]);
+        expect(creatingTabId()).toBe("tab-2");
+        state.settled[0]();
+        await settle();
+        intents.push(switchIntentTabId());
+        state.create[1].resolve("tab-2");
+        await vi.waitFor(() => expect(state.settled).toHaveLength(2));
+        state.settled[1]();
+        await vi.waitFor(() => expect(switchIntentTabId()).toBe("tab-2"));
+        expect(intents).toEqual([null]);
     });
 });
