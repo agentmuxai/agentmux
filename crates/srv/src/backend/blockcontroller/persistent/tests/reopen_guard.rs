@@ -216,4 +216,16 @@ async fn a_candidate_respawn_refused_by_the_guard_discards_and_reports_the_queue
         5,
     );
     assert!(!statuses.is_empty(), "a controller status must be published after the refusal");
+    // ReAgent P1 on #4149: this arm moves the status to done itself, so it must
+    // also say no process runs, or the menu goes on judging the last one.
+    let runtime = broker.read_event_history(
+        crate::backend::mps::EVENT_AGENT_RUNTIME,
+        &format!("block:{block_id}"),
+        5,
+    );
+    assert_eq!(
+        runtime.last().and_then(|e| e.data.as_ref()).map(|d| d["running"].clone()),
+        Some(serde_json::json!(false)),
+        "the refusal must announce that no process is running"
+    );
 }

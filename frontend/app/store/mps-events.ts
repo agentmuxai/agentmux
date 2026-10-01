@@ -11,6 +11,9 @@ export const WpsEvent = {
     ConnChange: "connchange",
     SysInfo: "sysinfo",
     ControllerStatus: "controllerstatus",
+    // What an agent process was spawned with (model, effort, permission) and
+    // whether a restart is pending. Mirrors EVENT_AGENT_RUNTIME in mps.rs.
+    AgentRuntime: "agentruntime",
     MuxObjUpdate: "waveobj:update",
     // One WS frame carrying an ARRAY of MuxObjUpdates from a single atomic
     // backend transition (e.g. CloseTab's [update workspace, delete tab]

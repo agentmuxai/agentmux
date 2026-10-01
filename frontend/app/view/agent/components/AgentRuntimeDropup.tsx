@@ -28,10 +28,12 @@
 
 import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
 import { autoUpdate } from "@floating-ui/dom";
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, type ProviderModel } from "../providers";
+import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
+import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
@@ -120,6 +122,53 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
             setApplyError(err?.message ?? String(err));
         }
     };
+
+    // What the process was actually spawned with, against what is selected. The
+    // label above shows the selection; this says when the agent is NOT running it.
+    const processRuntime = useProcessRuntime(props.blockId);
+    const agreement = createMemo(() => {
+        const meta = props.blockAtom()?.meta;
+        return compareRuntime(
+            getProvider(props.providerId),
+            meta?.["agentMode"] as string | undefined,
+            runtime(),
+            meta?.[PROVIDER_FLAGS_META_KEY],
+            processRuntime(),
+        );
+    });
+    // A difference is shown only once it has held for a moment. Right after any
+    // change the old process is still alive for a beat before it is replaced;
+    // that is the change landing, not a mismatch.
+    const DIFFERENCE_SETTLE_MS = 1500;
+    const [shownAgreement, setShownAgreement] = createSignal<RuntimeAgreement>({ kind: "unknown" });
+    createEffect(() => {
+        const a = agreement();
+        if (a.kind !== "differs") {
+            setShownAgreement(a);
+            return;
+        }
+        const t = setTimeout(() => setShownAgreement(a), DIFFERENCE_SETTLE_MS);
+        onCleanup(() => clearTimeout(t));
+    });
+    const driftOf = (): AxisDrift[] => {
+        const a = shownAgreement();
+        return a.kind === "differs" || a.kind === "pending" ? a.drift : [];
+    };
+    const describeDrift = (d: AxisDrift): string => {
+        const show = (v: string | undefined, axis: AxisDrift["axis"]) =>
+            v === undefined
+                ? "the CLI default"
+                : axis === "model"
+                  ? modelLabel(v)
+                  : axis === "effort"
+                    ? effortLabel(v)
+                    : modeLabel(v);
+        const name = d.axis === "permissionMode" ? "Mode" : d.axis === "model" ? "Model" : "Effort";
+        return `${name}: selected ${show(d.wanted, d.axis)}, running ${show(d.running, d.axis)}`;
+    };
+    const driftSummary = (): string => driftOf().map(describeDrift).join("; ");
+    // Re-applies the current selection: rebuilds the args and restarts the agent.
+    const restartToApply = () => void updateRuntime({});
 
     const modelOptions = (): ProviderModel[] => getProvider(props.providerId)?.models ?? FALLBACK_MODEL_OPTIONS;
 
@@ -317,22 +366,41 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                 type="button"
                 ref={referenceEl}
                 class="agent-runtime-dropup-trigger"
-                classList={{ "agent-runtime-dropup-trigger--error": applyError() != null }}
+                classList={{
+                    "agent-runtime-dropup-trigger--error": applyError() != null,
+                    "agent-runtime-dropup-trigger--differs": shownAgreement().kind === "differs",
+                    "agent-runtime-dropup-trigger--pending": shownAgreement().kind === "pending",
+                }}
                 style={{ "border-left": `3px solid ${PERMISSION_COLORS[runtime().permissionMode]}` }}
                 title={
                     applyError() != null
                         ? `Couldn't apply that change — the agent may still be running the previous settings. ${applyError()}`
-                        : "Mode / Model / Effort — applies on the next turn"
+                        : shownAgreement().kind === "differs"
+                          ? `The agent is not running what is selected. ${driftSummary()}. Open this menu to restart it with your selection.`
+                          : shownAgreement().kind === "pending"
+                            ? `Applies after the current turn. ${driftSummary()}.`
+                            : "Mode / Model / Effort — applies on the next turn"
                 }
                 aria-haspopup="listbox"
                 aria-expanded={open()}
-                aria-label={`Runtime settings: ${compactSummary()}${applyError() != null ? " — last change failed to apply" : ""}`}
+                aria-label={`Runtime settings: ${compactSummary()}${applyError() != null ? " — last change failed to apply" : ""}${
+                    shownAgreement().kind === "differs"
+                        ? " — the agent is not running this selection"
+                        : shownAgreement().kind === "pending"
+                          ? " — applies after the current turn"
+                          : ""
+                }`}
                 onClick={() => toggleOpen()}
             >
                 <span class="agent-runtime-dropup-trigger-label">{compactSummary()}</span>
-                <Show when={applyError() != null}>
+                <Show when={applyError() != null || shownAgreement().kind === "differs"}>
                     <span class="agent-runtime-dropup-trigger-warn" aria-hidden="true">
                         {" ⚠"}
+                    </span>
+                </Show>
+                <Show when={applyError() == null && shownAgreement().kind === "pending"}>
+                    <span class="agent-runtime-dropup-trigger-warn" aria-hidden="true">
+                        {" …"}
                     </span>
                 </Show>
             </button>
@@ -359,6 +427,21 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                         >
                             {"✕"}
                         </button>
+                        <Show when={driftOf().length > 0}>
+                            <div class="agent-runtime-dropup-drift" role="status" data-kind={shownAgreement().kind}>
+                                <div class="agent-runtime-dropup-drift-text">
+                                    {shownAgreement().kind === "pending"
+                                        ? "Applies after the current turn."
+                                        : "The agent is not running what is selected."}
+                                    <For each={driftOf()}>{(d) => <div>{describeDrift(d)}</div>}</For>
+                                </div>
+                                <Show when={shownAgreement().kind === "differs"}>
+                                    <button type="button" class="agent-runtime-dropup-drift-btn" onClick={restartToApply}>
+                                        Restart to apply
+                                    </button>
+                                </Show>
+                            </div>
+                        </Show>
                         <div role="listbox" aria-label="Runtime settings">
                             <For each={build().rows}>
                                 {(row) => {

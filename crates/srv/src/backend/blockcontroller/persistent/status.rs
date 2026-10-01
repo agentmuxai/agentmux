@@ -10,6 +10,11 @@ impl PersistentSubprocessController {
     pub(super) fn set_status(inner: &mut PersistentInner, status: &str) {
         inner.proc_status = status.to_string();
         inner.status_version += 1;
+        // The argv belongs to a live process; once it is gone there is nothing
+        // to compare a selection against.
+        if status != STATUS_RUNNING {
+            inner.spawn_runtime = None;
+        }
     }
 
     pub(super) fn get_status_snapshot(&self) -> BlockControllerRuntimeStatus {
@@ -32,6 +37,19 @@ impl PersistentSubprocessController {
         if let Some(ref broker) = self.broker {
             let status = self.get_status_snapshot();
             super::super::publish_controller_status(broker, &status);
+            // Alongside every status change, so the two cannot disagree about
+            // whether a process is running: what it was spawned with, and
+            // whether a restart is already on its way.
+            publish_runtime_event(&self.inner, broker, &self.block_id);
+        }
+    }
+
+    /// Announce only what the process runs (or that none does), without
+    /// repeating the controller status. For the paths that move the status off
+    /// "running" without publishing it themselves (`stop`).
+    pub(super) fn publish_runtime(&self) {
+        if let Some(ref broker) = self.broker {
+            publish_runtime_event(&self.inner, broker, &self.block_id);
         }
     }
 
@@ -129,4 +147,28 @@ impl PersistentSubprocessController {
         }
         self.publish_status();
     }
+}
+
+/// Announce what the process runs, from state the caller already holds locked.
+/// `restart_pending` covers both a restart deferred to the end of the turn and
+/// one already committed.
+pub(super) fn announce_runtime(broker: &crate::backend::mps::Broker, block_id: &str, inner: &PersistentInner) {
+    crate::backend::agent_runtime::publish_agent_runtime(
+        broker,
+        block_id,
+        inner.spawn_runtime.as_ref(),
+        inner.restart_when_idle || inner.restart_pending,
+    );
+}
+
+/// [`announce_runtime`], taking the lock itself. EVERY path that moves the
+/// status off "running" must call one of the two: the menu judges its
+/// selection against the LAST announcement, so a process that ended without
+/// one would go on being judged (ReAgent P1 on #4149).
+pub(super) fn publish_runtime_event(
+    inner: &Mutex<PersistentInner>,
+    broker: &crate::backend::mps::Broker,
+    block_id: &str,
+) {
+    announce_runtime(broker, block_id, &inner.lock().unwrap());
 }

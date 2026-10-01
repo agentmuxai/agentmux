@@ -346,6 +346,12 @@ struct PersistentInner {
     /// Set under the same lock that consumes `restart_when_idle`, cleared when
     /// the replacement process spawns.
     restart_pending: bool,
+    /// The runtime flags (model, effort, permission) in the argv of the process
+    /// that is running now; `None` when no process is. What the menu compares
+    /// its selection against: the menu shows what was asked for, this is what
+    /// the process was given. Set at spawn, cleared when the status leaves
+    /// "running" (`set_status`).
+    spawn_runtime: Option<crate::backend::agent_runtime::SpawnRuntime>,
     /// A kill has been requested for the current process (`request_stop_on`).
     /// `stdin_tx` stays live until it actually exits. Writing an automated
     /// message then would put it into the dying process and lose it (codex
@@ -1167,6 +1173,7 @@ impl PersistentSubprocessController {
                 fork_next: false,
                 restart_when_idle: false,
                 restart_pending: false,
+                spawn_runtime: None,
                 stop_pending: false,
                 config_restart_generation: None,
                 restart_spawn_for: None,
@@ -1452,6 +1459,10 @@ impl Controller for PersistentSubprocessController {
         if inner.proc_status != new_status {
             Self::set_status(&mut inner, new_status);
         }
+        drop(inner);
+        // Leaving "running" clears what the process was spawned with; the menu
+        // must hear that too, or it keeps judging a process that is gone.
+        self.publish_runtime();
         Ok(())
     }
 

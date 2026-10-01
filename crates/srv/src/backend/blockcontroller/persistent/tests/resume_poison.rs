@@ -26,6 +26,7 @@ fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
         fork_next: false,
         restart_when_idle: false,
         restart_pending: false,
+        spawn_runtime: None,
         stop_pending: false,
         config_restart_generation: None,
         restart_spawn_for: None,

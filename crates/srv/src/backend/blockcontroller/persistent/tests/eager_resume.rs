@@ -516,6 +516,167 @@ async fn a_stored_pane_without_runtime_flags_spawns_with_the_ones_its_menu_shows
     assert!(argv.windows(2).any(|w| w[0] == "--resume" && w[1] == "sid-to-resume"), "{argv:?}");
 }
 
+// The menu compares its selection with what the process was actually GIVEN.
+// The controller records that at spawn, from the final argv (so it includes
+// anything the fill-in added), and forgets it once the process is gone.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_controller_records_the_runtime_its_process_was_spawned_with() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let stub = std::env::temp_dir().join(format!("agentmux-spawnrt-{}.js", uuid::Uuid::new_v4()));
+    std::fs::write(
+        &stub,
+        r#"process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: "s" }) + "\n"); setInterval(() => {}, 1000);"#,
+    )
+    .unwrap();
+    let mut meta = meta_with_session("sid-to-resume", &[stub.to_string_lossy().as_ref(), "--permission-mode", "default"]);
+    meta.insert("agentProvider".to_string(), serde_json::json!("claude"));
+    meta.insert(
+        "agent:runtime".to_string(),
+        serde_json::json!({"permissionMode": "bypass", "model": "opus", "effort": "max"}),
+    );
+    let store = make_store();
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        "blk-spawnrt".to_string(),
+        Some(broker.clone()),
+        None,
+        None,
+        None,
+    )
+    .with_identity_stores(Some(store.clone()), Some(store.clone()), "key".to_string());
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    let _kill_on_drop = KillOnDrop(&c);
+
+    assert_eq!(c.inner.lock().unwrap().spawn_runtime, None, "nothing runs yet");
+    Controller::start(&c, meta, None, false).unwrap();
+    assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+    let rt = c.inner.lock().unwrap().spawn_runtime.clone().expect("recorded at spawn");
+    assert_eq!(rt.model.as_deref(), Some("opus"), "{rt:?}");
+    assert_eq!(rt.effort.as_deref(), Some("max"), "{rt:?}");
+    assert_eq!(rt.permission_mode.as_deref(), Some("default"), "{rt:?}");
+
+    // The menu hears it: published, with the process's own argv values.
+    let published = broker.read_event_history(crate::backend::mps::EVENT_AGENT_RUNTIME, "block:blk-spawnrt", 5);
+    let last = published.last().expect("an agentruntime event is published at spawn");
+    let data = last.data.clone().expect("with a payload");
+    assert_eq!(data["running"], true, "{data}");
+    assert_eq!(data["model"], "opus", "{data}");
+    assert_eq!(data["effort"], "max", "{data}");
+    assert_eq!(data["restart_pending"], false, "{data}");
+
+    // Leaving "running" forgets it. That it is also ANNOUNCED, through each real
+    // way a process ends, is covered by the `announced_as_gone` tests below — a
+    // hand-called `publish_status` here is what once hid that it was not.
+    PersistentSubprocessController::set_status(&mut c.inner.lock().unwrap(), STATUS_DONE);
+    assert_eq!(c.inner.lock().unwrap().spawn_runtime, None);
+}
+
+/// A persistent controller wired to a real broker, running a stub that stays up
+/// (`exit_after_ms: None`) or exits on its own. Returns the broker to read the
+/// published `agentruntime` history from.
+async fn controller_with_broker(
+    block_id: &str,
+    exit_after_ms: Option<u32>,
+) -> (PersistentSubprocessController, Arc<crate::backend::mps::Broker>) {
+    let stub = std::env::temp_dir().join(format!("agentmux-rt-exit-{}.js", uuid::Uuid::new_v4()));
+    let tail = match exit_after_ms {
+        Some(ms) => format!("setTimeout(() => process.exit(0), {ms});"),
+        None => "setInterval(() => {}, 1000);".to_string(),
+    };
+    std::fs::write(
+        &stub,
+        format!(
+            r#"process.stdout.write(JSON.stringify({{ type: "system", subtype: "init", session_id: "s" }}) + "\n"); {tail}"#
+        ),
+    )
+    .unwrap();
+    let mut meta = meta_with_session("sid-to-resume", &[stub.to_string_lossy().as_ref(), "--permission-mode", "default"]);
+    meta.insert("agentProvider".to_string(), serde_json::json!("claude"));
+    let store = make_store();
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        block_id.to_string(),
+        Some(broker.clone()),
+        None,
+        None,
+        None,
+    )
+    .with_identity_stores(Some(store.clone()), Some(store.clone()), "key".to_string());
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    Controller::start(&c, meta, None, false).unwrap();
+    assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+    (c, broker)
+}
+
+/// The latest `running` the menu would have heard for `block_id`.
+fn last_announced_running(broker: &crate::backend::mps::Broker, block_id: &str) -> Option<bool> {
+    broker
+        .read_event_history(crate::backend::mps::EVENT_AGENT_RUNTIME, &format!("block:{block_id}"), 50)
+        .last()
+        .and_then(|e| e.data.as_ref())
+        .and_then(|d| d["running"].as_bool())
+}
+
+async fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !cond() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+}
+
+// ReAgent P1 on #4149. The menu compares its selection with the LAST announced
+// runtime, so a process that is gone must be announced as gone through EVERY
+// way it can end — not only the ones that happen to call `publish_status`.
+// Otherwise the menu goes on judging a dead process: a stopped or crashed pane
+// turns amber and offers to "restart" something that does not exist.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_process_that_exits_on_its_own_is_announced_as_gone() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let (c, broker) = controller_with_broker("blk-rt-exit", Some(600)).await;
+    let _kill_on_drop = KillOnDrop(&c);
+    wait_until("the announcement that it is running", || last_announced_running(&broker, "blk-rt-exit") == Some(true)).await;
+    wait_until("the process to exit", || c.inner.lock().unwrap().proc_status == STATUS_DONE).await;
+    wait_until("the announcement that it is gone", || last_announced_running(&broker, "blk-rt-exit") == Some(false)).await;
+}
+
+// A kill request reaches the process through the wait task's kill arm, not
+// through `stop()` — so this is the path `stop()`'s own announcement cannot cover.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_killed_process_is_announced_as_gone() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let (c, broker) = controller_with_broker("blk-rt-kill", None).await;
+    let _kill_on_drop = KillOnDrop(&c);
+    wait_until("the announcement that it is running", || last_announced_running(&broker, "blk-rt-kill") == Some(true)).await;
+    c.stop_process(true);
+    wait_until("the announcement that it is gone", || last_announced_running(&broker, "blk-rt-kill") == Some(false)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stopped_controller_is_announced_as_gone() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let (c, broker) = controller_with_broker("blk-rt-stop", None).await;
+    let _kill_on_drop = KillOnDrop(&c);
+    wait_until("the announcement that it is running", || last_announced_running(&broker, "blk-rt-stop") == Some(true)).await;
+    Controller::stop(&c, true, STATUS_DONE).unwrap();
+    wait_until("the announcement that it is gone", || last_announced_running(&broker, "blk-rt-stop") == Some(false)).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stored_pane_that_already_has_its_flags_is_not_changed_by_the_fill_in() {
     if !has_node() {
