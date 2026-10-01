@@ -660,6 +660,23 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("+ Global Memory")).toHaveAttribute("title", "The Global Memory reached the agent through this file");
     });
 
+    it("still marks a duplicate when two loaded startup files carry the Global Memory", () => {
+        renderMemory({
+            type: "context_delivery",
+            id: "memory-injected-s1-startup-3",
+            reason: "startup",
+            timestamp: 0,
+            items: [
+                { kind: "startup_file", name: "~/agents/CLAUDE.md", owner: "agentmux", contains: ["global_memory"], sizeBytes: 12, tokens: 3 },
+                { kind: "startup_file", name: "CLAUDE.md", owner: "agentmux", contains: ["global_memory"], sizeBytes: 12, tokens: 3 },
+                { kind: "global_memory", name: "Rules", tier: "workspace", via: "startup_file", sizeBytes: 0, tokens: 0 },
+            ],
+        });
+        for (const mark of screen.getAllByText("+ Global Memory")) {
+            expect(mark).toHaveAttribute("title", "This file also carries the Global Memory, so a new session gets it twice");
+        }
+    });
+
     it("shows the size advice when Personal Memory is large", () => {
         renderMemory(memoryCard("high"));
         expect(screen.getByText(/Personal memory has grown large/)).toBeInTheDocument();
