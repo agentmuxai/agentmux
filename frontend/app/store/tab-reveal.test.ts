@@ -391,3 +391,40 @@ describe("shown-tab tracking", () => {
         expect(tabWasShown("tab-closed")).toBe(false);
     });
 });
+
+describe("tabs a window loaded with", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    const stubIdle = () => {
+        const idle: { cb: () => void; opts?: IdleRequestOptions }[] = [];
+        const cancelled: number[] = [];
+        vi.stubGlobal("requestIdleCallback", (cb: () => void, opts?: IdleRequestOptions) => idle.push({ cb, opts }));
+        vi.stubGlobal("cancelIdleCallback", (h: number) => cancelled.push(h));
+        return { idle, cancelled };
+    };
+
+    test("count as shown at the first idle moment, at most 2 s on", async () => {
+        const { markLoadedTabsShownWhenIdle, tabWasShown } = await import("./tab-reveal");
+        const { idle } = stubIdle();
+        markLoadedTabsShownWhenIdle(["load-a", "load-b"], () => true);
+        expect(tabWasShown("load-a")).toBe(false);
+        expect(idle[0].opts).toEqual({ timeout: 2000 });
+        idle[0].cb();
+        expect(tabWasShown("load-a") && tabWasShown("load-b")).toBe(true);
+    });
+
+    test("stay unshown if inactive tabs stopped being kept laid out meanwhile", async () => {
+        const { markLoadedTabsShownWhenIdle, tabWasShown } = await import("./tab-reveal");
+        const { idle } = stubIdle();
+        markLoadedTabsShownWhenIdle(["load-c"], () => false);
+        idle[0].cb();
+        expect(tabWasShown("load-c")).toBe(false);
+    });
+
+    test("can be cancelled before the idle moment", async () => {
+        const { markLoadedTabsShownWhenIdle } = await import("./tab-reveal");
+        const { cancelled } = stubIdle();
+        markLoadedTabsShownWhenIdle(["load-d"], () => true)();
+        expect(cancelled).toEqual([1]);
+    });
+});

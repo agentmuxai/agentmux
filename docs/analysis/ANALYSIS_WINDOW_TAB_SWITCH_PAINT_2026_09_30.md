@@ -168,3 +168,16 @@ The way past it is to give each window tab its own compositor layer (`will-chang
 - GPU memory, roughly one window-sized layer per tab;
 - raster of hidden layers while agents stream (they are dormant, so probably small);
 - keyboard focus and hit-testing, since `opacity: 0` content is still focusable. `inert` would bring back the subtree restyle, so this needs its own design.
+
+## 8. Two paths that still flashed (2026-10-01)
+
+After §7 the repo owner reported one flash left in two places: closing a window tab, and the first switch to each tab after a window loads. Both were the reveal gate hiding a destination that had nothing left to settle. The same per-frame trace (4 closes, then 8 switches after a reload):
+
+| | Before | After |
+|---|---|---|
+| Close the active tab | blank content area at ~40 ms, neighbor at ~150 ms (26% of the area each way), 4 / 4 | neighbor in one frame at ~31 ms, 0 / 4 blank |
+| First switch to each tab after load | blank at ~90 ms, tab at ~155 ms, 3 / 3 cold tabs | one frame at 29–41 ms, 0 / 4 |
+
+**Close.** `tabbar.tsx`'s close path always held the gate on the neighbor that `CloseTab` promotes. It never went through `setActiveTab`, so it missed #4107's warm path. `beginClosePromotion` (tab-actions.ts) now shows a warm neighbor from the switch intent in the click's frame. A neighbor that was never shown is still gated, and a failed close drops the intent.
+
+**First switch after load.** No tab counted as shown until it had been displayed once, so each first visit was gated and cross-faded. Kept laid out, every tab a window loads with is mounted and laid out behind the displayed one, which is the warm state. So `markLoadedTabsShownWhenIdle` (tab-reveal.ts) marks them shown at the window's first idle moment (at most 2 s on). A tab arriving later is still gated on its first reveal.
