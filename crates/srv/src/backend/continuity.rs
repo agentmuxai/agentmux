@@ -41,7 +41,7 @@ pub(crate) fn turns_from_stream(tail: &[u8], starts_mid_line: bool) -> Vec<Turn>
         match v.get("type").and_then(Value::as_str) {
             Some("user") => {
                 let Some(said) = user_text(&v["message"]["content"]) else { continue };
-                if crate::server::app_api::session::is_hidden_reinjection_text(&said) {
+                if crate::ambient::digest::is_hidden_reinjection_text(&said) {
                     hiding = true;
                     continue;
                 }

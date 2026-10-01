@@ -8,7 +8,7 @@
 //!
 //! Fallback preview text for the AgentPicker's "My Agents" rows whose
 //! instance has no structured `output.state.json` conversation snapshot —
-//! generated once, lazily, via `app_api::session::generate_definition_activity_summary`,
+//! generated once, lazily, via `crate::ambient::tasks::generate_definition_activity_summary`,
 //! and cached here forever (never regenerated once non-empty). An absent
 //! row IS the "not generated yet" state; there is no separate pending flag.
 

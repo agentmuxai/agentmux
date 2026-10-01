@@ -616,7 +616,7 @@ mod tests {
              </system-reminder>\n"
         );
         assert_eq!(c.spans.len(), 3);
-        assert!(crate::server::app_api::session::is_hidden_reinjection_text(&c.text));
+        assert!(crate::ambient::digest::is_hidden_reinjection_text(&c.text));
 
         let fresh = compose_fallback(&entries[2..], FallbackReason::FreshSession).unwrap();
         assert!(fresh.text.contains(

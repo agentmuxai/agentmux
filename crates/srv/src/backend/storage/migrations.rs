@@ -275,7 +275,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        from the instance's raw `"output"` filestore file (present even
 ///        when the newer structured snapshot isn't) via the same shared
 ///        Ambient Model Call gateway `dispatch_name`/`term:ambient_summary`
-///        already use (`invoke_ambient_haiku_call`,
+///        already use (`invoke_haiku`,
 ///        `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`).
 ///        Generated lazily (first picker load that needs it, not on every
 ///        turn) and cached forever once non-empty — mirrors

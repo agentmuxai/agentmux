@@ -19,14 +19,14 @@ message: string,
 message_id?: string, 
 /**
  * Set only by the hidden memory-reinjection turn (see
- * `memory-reinjection-controller.ts` / `session::set_hidden_reinjection_active`).
+ * `memory-reinjection-controller.ts` / `crate::ambient::digest::set_hidden_reinjection_active`).
  * Marks the block as suppressed for ambient digest reads
  * (`extract_digest_text`'s next_prompt_suggestion / activity_summary /
  * activity_watcher callers) until the NEXT `AgentInputCommand` for the
  * same block, hidden or not. Authoritative and set at RPC-dispatch
  * time — unlike the marker-text detection inside `extract_digest_text`,
  * it doesn't depend on the reinjection marker line still being inside
- * that function's 32 KB / ~30-line tail window, which large Personal
+ * that function's tail window, which large Personal
  * memory content routinely scrolls past.
  * SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md finding #8.
  */

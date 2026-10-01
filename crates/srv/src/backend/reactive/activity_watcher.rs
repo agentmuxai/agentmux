@@ -7,7 +7,7 @@
 //! result as an `agent:summary` MuxEvent — so panes (the swarm feed, in
 //! particular) can show a live one-liner without polling.
 //!
-//! Each call goes through `app_api::session::generate_pushed_activity_summary`,
+//! Each call goes through `crate::ambient::tasks::generate_pushed_activity_summary`,
 //! which routes it through the Ambient Model Call gateway (`crate::ambient`)
 //! under its own purpose tag — distinct from the pull RPC's, so a periodic
 //! background summary never contends with a live, user-facing pane-header
@@ -132,7 +132,7 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                     return;
                 };
 
-                let result = crate::server::app_api::session::generate_pushed_activity_summary(
+                let result = crate::ambient::tasks::generate_pushed_activity_summary(
                     &mstore, &filestore, &block_id, tick, WORD_TARGET,
                 ).await;
 

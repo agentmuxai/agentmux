@@ -64,7 +64,7 @@ pub(crate) struct StateVersion {
     pub sha256: String,
     pub text: String,
     /// What the summarizer call cost, kept with the version it produced so
-    /// ambient usage stays auditable (`invoke_ambient_haiku_call`'s
+    /// ambient usage stays auditable (`invoke_haiku`'s
     /// accounting contract). `None` when the CLI reported no usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens: Option<crate::agents::TokenCounts>,
@@ -251,7 +251,7 @@ const COMPACTION_CLAUSE: &str = "Your recent conversation was just compacted int
 /// backstop. Any other message, or an agent with no summary yet, comes back
 /// unchanged.
 pub(crate) fn with_state_after_compaction(mstore: &Store, block_id: &str, message: String) -> String {
-    if !(crate::server::app_api::session::is_hidden_reinjection_text(&message) && message.contains(COMPACTION_CLAUSE)) {
+    if !(crate::ambient::digest::is_hidden_reinjection_text(&message) && message.contains(COMPACTION_CLAUSE)) {
         return message;
     }
     match latest_state_for_block(mstore, block_id) {
@@ -351,7 +351,7 @@ async fn update(mstore: &Store, block_id: &str) -> Result<Option<StateVersion>, 
         crate::ambient::Admission::StaleOnArrival => return Ok(None),
     };
     let prompt = summarizer_prompt(latest.as_ref().map(|v| v.text.as_str()), &turns);
-    let (raw, tokens) = crate::server::app_api::session::invoke_ambient_haiku_call_with_timeout(
+    let (raw, tokens) = crate::ambient::cli::invoke_haiku_with_timeout(
         &cli_path,
         &prompt,
         &block.meta,
@@ -561,7 +561,7 @@ mod tests {
         assert!(out.contains("goal 3"));
         assert!(out.ends_with("</system-reminder>\n"));
         assert_eq!(out.matches("</system-reminder>").count(), 1);
-        assert!(crate::server::app_api::session::is_hidden_reinjection_text(&out), "still recognized as hidden");
+        assert!(crate::ambient::digest::is_hidden_reinjection_text(&out), "still recognized as hidden");
     }
 
     #[test]
