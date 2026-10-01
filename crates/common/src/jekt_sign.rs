@@ -1773,3 +1773,74 @@ mod tests {
         assert_eq!(wan_instance_display_label("narko~abcdefgh", V_INSTANCE_ID), "?~gr2q7gf5");
     }
 }
+
+/// Cross-version wire compatibility for jekt signatures. The fleet never
+/// upgrades all at once, so a signature made by one ed25519-dalek major must
+/// verify on another. Ed25519 signing is deterministic (RFC 8032), so the
+/// strongest check is byte equality: these goldens were produced by
+/// ed25519-dalek 2.2.0 (2026-10-01) and must stay identical across upgrades.
+/// If one changes, older peers would reject the new signatures — that is a
+/// fleet-breaking change, not a test to update.
+#[cfg(test)]
+mod cross_version_goldens {
+    use super::*;
+
+    const SEED: [u8; 32] = [42u8; 32];
+    const TS: i64 = 1_790_000_000;
+    const PK: &str = "GX9rI+FshTLGq8g4+s1ep4m+DHaykgM0A5v6iz02jWE=";
+    const LAN: &str = "EXTYmZi7R4FlXQU5olRQng9i3JvoyPaNk+5hsgz/pwLVYBoIP5/fKSlN8YCAViv/j18Gr9fCp0W9fS2NYrFrAQ==";
+    const CHAN: &str = "lSTM+FmFR/QsqzmTiVvO8KLa5jmFrnQhpuQ7i543/ezCoeOMaAll+N2NEs2wfL727/vwzOYFDt3Exkk6h7yKCw==";
+    const WAN: &str = "IeNtT8Ivh6k84poizAS0a1oBzBQsDRteO72vlsviWieBDHu/ET8XZNwjLNlZGFyjMWA4GnbZbOn9S02pvbYjCw==";
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    #[test]
+    fn rfc8032_test_1_matches() {
+        let seed: [u8; 32] = hex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+            .try_into()
+            .unwrap();
+        let key = ed25519_dalek::SigningKey::from_bytes(&seed);
+        assert_eq!(
+            key.verifying_key().to_bytes().to_vec(),
+            hex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+        );
+        let sig = ed25519_dalek::Signer::sign(&key, b"");
+        assert_eq!(
+            sig.to_bytes().to_vec(),
+            hex("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+        );
+    }
+
+    #[test]
+    fn public_key_matches_golden() {
+        assert_eq!(BASE64.encode(generate_lan_keypair(SEED).0), PK);
+    }
+
+    #[test]
+    fn lan_signature_is_byte_identical_and_verifies() {
+        let sig = sign_lan_jekt(&SEED, "msg-golden", "agentx", "manoz", TS, "hello fleet").unwrap();
+        assert_eq!(sig, LAN);
+        let pk = BASE64.decode(PK).unwrap();
+        assert!(verify_lan_jekt(&pk, "msg-golden", "agentx", "manoz", TS, "hello fleet", LAN));
+        assert!(!verify_lan_jekt(&pk, "msg-golden", "agentx", "manoz", TS, "hello fleet!", LAN));
+    }
+
+    #[test]
+    fn channel_signature_is_byte_identical_and_verifies() {
+        let sig = sign_channel_jekt(&SEED, "msg-golden", "agentx", "local-main", "manoz", TS, "hello fleet").unwrap();
+        assert_eq!(sig, CHAN);
+        let pk = BASE64.decode(PK).unwrap();
+        assert!(verify_channel_jekt(&pk, "msg-golden", "agentx", "local-main", "manoz", TS, "hello fleet", CHAN));
+    }
+
+    #[test]
+    fn wan_signature_is_byte_identical_and_verifies() {
+        let sig =
+            sign_wan_jekt(&SEED, "msg-golden", "agentx", "narko", "stable", "manoz", TS, "hello fleet").unwrap();
+        assert_eq!(sig, WAN);
+        let pk = BASE64.decode(PK).unwrap();
+        assert!(verify_wan_jekt(&pk, "msg-golden", "agentx", "narko", "stable", "manoz", TS, "hello fleet", WAN));
+    }
+}
