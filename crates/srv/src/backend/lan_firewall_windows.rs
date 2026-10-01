@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 
 use windows::core::{Interface, GUID};
-use windows::Win32::Foundation::VARIANT_BOOL;
 use windows::Win32::NetworkManagement::WindowsFirewall::{
     INetFwPolicy2, INetFwRule, INetFwRule3, NetFwPolicy2, NET_FW_ACTION_ALLOW, NET_FW_MODIFY_STATE_OK,
     NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC, NET_FW_PROFILE_TYPE2, NET_FW_RULE_DIR_IN,
@@ -58,7 +57,7 @@ fn read_on_this_thread() -> Result<Snapshot, String> {
 }
 
 fn read_inner() -> Result<Snapshot, String> {
-    let (rules, local_rules_ignored, profiles) =
+    let (rules, local_rules_ignored, profiles, unreadable_rules) =
         read_rules().map_err(|e| format!("reading firewall rules: {e}"))?;
     let categories = read_categories().map_err(|e| format!("reading network categories: {e}"))?;
     Ok(Snapshot {
@@ -66,10 +65,11 @@ fn read_inner() -> Result<Snapshot, String> {
         adapters: adapters(&categories),
         local_rules_ignored,
         profiles,
+        unreadable_rules,
     })
 }
 
-fn read_rules() -> windows::core::Result<(Vec<FwRule>, bool, Profiles)> {
+fn read_rules() -> windows::core::Result<(Vec<FwRule>, bool, Profiles, u32)> {
     // SAFETY: COM is initialised on this thread by the caller.
     let policy: INetFwPolicy2 = unsafe { CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)? };
     let ignored = unsafe { policy.LocalPolicyModifyState()? } != NET_FW_MODIFY_STATE_OK;
@@ -82,21 +82,30 @@ fn read_rules() -> windows::core::Result<(Vec<FwRule>, bool, Profiles)> {
     let enumerator: IEnumVARIANT = unsafe { collection._NewEnum()? }.cast()?;
 
     let mut rules = Vec::new();
+    let mut unreadable = 0u32;
     loop {
         let mut item = [VARIANT::default()];
         let mut fetched = 0u32;
         // SAFETY: `item` and `fetched` outlive the call.
         let hr = unsafe { enumerator.Next(&mut item, &mut fetched) };
-        if hr.is_err() || fetched == 0 {
+        // `S_FALSE` with nothing fetched is the normal end. A FAILURE is not: treating
+        // it as the end returned a partial snapshot, which could hold an allow rule
+        // and miss the block that overrides it, for a false `ok` (Codex P2 on #4151).
+        if hr.is_err() {
+            return Err(windows::core::Error::from(hr));
+        }
+        if fetched == 0 {
             break;
         }
-        // A rule that cannot be read is skipped, not fatal: coverage is only
-        // ever claimed from rules we could read.
-        if let Ok(rule) = rule_from_variant(&item[0]) {
-            rules.push(rule);
+        // A rule that cannot be read is COUNTED, not silently dropped. It may have
+        // been the block, or the allow, that decides the verdict, so a snapshot with
+        // any unreadable rule cannot claim `ok` (see `lan_firewall::report`).
+        match rule_from_variant(&item[0]) {
+            Ok(rule) => rules.push(rule),
+            Err(_) => unreadable += 1,
         }
     }
-    Ok((rules, ignored, profiles))
+    Ok((rules, ignored, profiles, unreadable))
 }
 
 /// One profile's switches. A value that cannot be read keeps Windows' default
@@ -124,27 +133,28 @@ fn rule_from_variant(v: &VARIANT) -> windows::core::Result<FwRule> {
     let rule: INetFwRule = dispatch.cast()?;
     // SAFETY: plain property reads on a live COM object.
     unsafe {
-        let app = rule.ApplicationName().map(|b| b.to_string()).unwrap_or_default();
-        let interface_types = rule.InterfaceTypes().map(|b| b.to_string()).unwrap_or_default();
-        let interfaces_set = rule.Interfaces().map(|i| !i.is_empty()).unwrap_or(false);
+        // Every property below decides whether the rule applies to us. A read
+        // failure used to fall back to an empty string, which every parser reads as
+        // "unrestricted": an enabled allow rule whose ports could not be read counted
+        // as allowing everything (Codex P2 on #4151). Now a failure makes the whole
+        // rule unreadable, which `read_rules` counts.
+        let app = rule.ApplicationName()?.to_string();
+        let interface_types = rule.InterfaceTypes()?.to_string();
+        let interfaces_set = !rule.Interfaces()?.is_empty();
         let restricted = is_restricted(&rule, !app.trim().is_empty());
         Ok(FwRule {
             name: rule.Name().map(|b| b.to_string()).unwrap_or_default(),
-            enabled: rule.Enabled().unwrap_or(VARIANT_BOOL(0)).as_bool(),
+            enabled: rule.Enabled()?.as_bool(),
             inbound: rule.Direction()? == NET_FW_RULE_DIR_IN,
             allow: rule.Action()? == NET_FW_ACTION_ALLOW,
             profiles: rule.Profiles()? as u32,
             program: if app.trim().is_empty() { None } else { Some(app) },
             proto: Proto::from_win(rule.Protocol()?),
-            local_ports: PortSpec::parse(&rule.LocalPorts().map(|b| b.to_string()).unwrap_or_default()),
-            remote: Remote::parse(&rule.RemoteAddresses().map(|b| b.to_string()).unwrap_or_default()),
+            local_ports: PortSpec::parse(&rule.LocalPorts()?.to_string()),
+            remote: Remote::parse(&rule.RemoteAddresses()?.to_string()),
             // A rule limited to one of our own addresses must not count for every
-            // adapter in the profile (Codex P2 on #4151). Unreadable is `Any` only
-            // when the property is absent; a read error is the cautious `Unparseable`.
-            local_addresses: match rule.LocalAddresses() {
-                Ok(b) => LocalScope::parse(&b.to_string()),
-                Err(_) => LocalScope::Unparseable,
-            },
+            // adapter in the profile (Codex P2 on #4151).
+            local_addresses: LocalScope::parse(&rule.LocalAddresses()?.to_string()),
             // "All" (or empty) means every interface type; anything narrower, or a
             // named-interface list, limits where the rule applies.
             interface_scoped: interfaces_set
@@ -160,7 +170,8 @@ fn rule_from_variant(v: &VARIANT) -> windows::core::Result<FwRule> {
 /// `INetFwRule3` (Windows 8 and later); where that is unavailable the extra
 /// restrictions cannot be read, and only the service name is checked.
 fn is_restricted(rule: &INetFwRule, names_a_program: bool) -> bool {
-    let non_empty = |r: windows::core::Result<windows::core::BSTR>| r.map(|b| !b.to_string().trim().is_empty()).unwrap_or(false);
+    // An unreadable restriction counts as one: the cautious reading.
+    let non_empty = |r: windows::core::Result<windows::core::BSTR>| r.map(|b| !b.to_string().trim().is_empty()).unwrap_or(true);
     // SAFETY: plain property reads on a live COM object.
     unsafe {
         if non_empty(rule.ServiceName()) {
@@ -180,7 +191,7 @@ fn is_restricted(rule: &INetFwRule, names_a_program: bool) -> bool {
             || non_empty(r3.LocalUserAuthorizedList())
             || non_empty(r3.RemoteUserAuthorizedList())
             || non_empty(r3.RemoteMachineAuthorizedList())
-            || r3.SecureFlags().map(|f| f != 0).unwrap_or(false)
+            || r3.SecureFlags().map(|f| f != 0).unwrap_or(true)
     }
 }
 
@@ -196,7 +207,10 @@ fn read_categories() -> windows::core::Result<HashMap<String, Category>> {
         let mut fetched = 0u32;
         // SAFETY: `slot` and `fetched` outlive the call.
         let hr = unsafe { connections.Next(&mut slot, Some(&mut fetched)) };
-        if hr.is_err() || fetched == 0 {
+        // `Next` here returns a `Result`: a failure is an error, `S_FALSE` (the end)
+        // is `Ok` with nothing fetched.
+        hr?;
+        if fetched == 0 {
             break;
         }
         let Some(connection) = slot[0].take() else { break };
@@ -336,7 +350,7 @@ mod tests {
     fn reads_and_reports() {
         let snap = read_snapshot().expect("snapshot");
         println!("rules: {} (local rules ignored: {})", snap.rules.len(), snap.local_rules_ignored);
-        println!("profiles: {:?}", snap.profiles);
+        println!("profiles: {:?} (unreadable rules: {})", snap.profiles, snap.unreadable_rules);
         for a in &snap.adapters {
             println!("adapter {} {} {:?} {:?}", a.id, a.name, a.ipv4, a.category);
         }

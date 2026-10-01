@@ -510,6 +510,9 @@ pub struct Snapshot {
     pub local_rules_ignored: bool,
     /// Each profile's own on/off, block-all and default-inbound settings.
     pub profiles: Profiles,
+    /// Rules that could not be read. One of them may be the block or the allow
+    /// that decides the verdict, so while any exist coverage cannot be proven.
+    pub unreadable_rules: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -525,10 +528,15 @@ pub fn report(snapshot: &Snapshot, exe: &str, needs: &[Need]) -> Report {
         .map(|a| (a.clone(), adapter_state_with(&snapshot.rules, exe, needs, a, snapshot.profiles)))
         .collect();
     let states: Vec<AdapterState> = per_adapter.iter().map(|(_, s)| *s).collect();
-    Report {
-        status: overall(&states, snapshot.local_rules_ignored),
-        per_adapter,
+    let mut status = overall(&states, snapshot.local_rules_ignored);
+    // Never claim coverage that cannot be proven (Codex P2 on #4151): with an
+    // unreadable rule there may be a block we did not see, so `ok` becomes
+    // `unknown`. The problem verdicts stand: they are warnings, and a rule we
+    // could not read does not make a missing allow less missing.
+    if status == FirewallStatus::Ok && snapshot.unreadable_rules > 0 {
+        status = FirewallStatus::Unknown;
     }
+    Report { status, per_adapter }
 }
 
 /// Whether this status goes to the windows on this tick. A standing problem is
@@ -960,6 +968,7 @@ mod tests {
             ],
             local_rules_ignored: false,
             profiles: Profiles::default(),
+            unreadable_rules: 0,
         };
         let r = report(&snap, EXE, &needs());
         assert_eq!(r.status, FirewallStatus::Ok);
@@ -1044,6 +1053,7 @@ mod tests {
             ],
             local_rules_ignored: false,
             profiles,
+            unreadable_rules: 0,
         };
         let r = report(&snap, EXE, &needs());
         assert_eq!(r.per_adapter[0].1, AdapterState::Covered, "Private firewall is off");
@@ -1113,6 +1123,28 @@ mod tests {
         let wifi = Adapter { ipv4: vec!["10.0.0.5".parse().unwrap()], ..adapter("Wi-Fi", Some(Category::Private)) };
         assert_eq!(adapter_state(&rules, EXE, &needs(), &ethernet), AdapterState::Covered);
         assert_eq!(adapter_state(&rules, EXE, &needs(), &wifi), AdapterState::Blocked);
+    }
+
+    // Codex P2 on #4151: an unreadable rule may be the block that decides the verdict.
+    #[test]
+    fn an_unreadable_rule_stops_the_snapshot_from_claiming_ok() {
+        let snap = Snapshot {
+            rules: vec![program_rule(EXE, Proto::Any, PROFILE_PRIVATE, true)],
+            adapters: vec![adapter("Ethernet", Some(Category::Private))],
+            local_rules_ignored: false,
+            profiles: Profiles::default(),
+            unreadable_rules: 0,
+        };
+        assert_eq!(report(&snap, EXE, &needs()).status, FirewallStatus::Ok);
+
+        let hidden = Snapshot { unreadable_rules: 1, ..snap.clone() };
+        let r = report(&hidden, EXE, &needs());
+        assert_eq!(r.status, FirewallStatus::Unknown, "coverage cannot be proven");
+        assert_eq!(r.per_adapter[0].1, AdapterState::Covered, "the adapter-level reading is unchanged");
+
+        // A missing allow stays a warning: an unreadable rule does not make it less missing.
+        let none = Snapshot { rules: vec![], unreadable_rules: 3, ..snap };
+        assert_eq!(report(&none, EXE, &needs()).status, FirewallStatus::NeedsSetup);
     }
 
     #[test]
