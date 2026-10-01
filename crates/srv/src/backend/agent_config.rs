@@ -971,16 +971,27 @@ const CLAUDE_MD_OWNERSHIP_MARKER_PATH: &str = ".claude/.agentmux-claude-md-owner
 /// Where an adopted legacy `CLAUDE.md` is kept (`is_legacy_agentmux_claude_md`).
 pub const CLAUDE_MD_PRE_ADOPT_BACKUP: &str = ".claude/CLAUDE.md.pre-adopt";
 
-/// Whether `content` is exactly what an older AgentMux wrote as `CLAUDE.md`:
-/// ignoring blank lines, the `# Available Skills` heading, its usage line,
-/// skill lines (`- **…`), and optionally the managed import comment and
-/// line. Anything else in it means a person wrote there, and it stays theirs.
+/// Whether `content` is exactly what an older AgentMux wrote as `CLAUDE.md`,
+/// in its order, ignoring blank lines: the `# Available Skills` heading, its
+/// usage line, at least one skill row (`- **…`; AgentMux wrote the section
+/// only when there were skills), then optionally the managed import (its
+/// comment and line, or the line alone). Anything else means a person wrote
+/// there, and it stays theirs.
 pub fn is_legacy_agentmux_claude_md(content: &str) -> bool {
     let import_line = format!("@{AGENTMUX_MEMORY_FILENAME}");
-    let mut lines = content.lines().map(str::trim_end).filter(|l| !l.trim().is_empty());
-    lines.next() == Some("# Available Skills")
-        && lines.next() == Some("Use `/<trigger>` to invoke a skill.")
-        && lines.all(|l| l.starts_with("- **") || l == CLAUDE_MD_IMPORT_MARKER_COMMENT || l == import_line)
+    let mut lines = content.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).peekable();
+    if lines.next() != Some("# Available Skills") || lines.next() != Some("Use `/<trigger>` to invoke a skill.") {
+        return false;
+    }
+    let mut skill_rows = 0;
+    while lines.next_if(|l| l.starts_with("- **")).is_some() {
+        skill_rows += 1;
+    }
+    let tail: Vec<&str> = lines.collect();
+    skill_rows > 0
+        && (tail.is_empty()
+            || tail == [import_line.as_str()]
+            || tail == [CLAUDE_MD_IMPORT_MARKER_COMMENT, import_line.as_str()])
 }
 
 /// Comment wrapping the `@import` line so its origin — and how to remove
@@ -1003,6 +1014,15 @@ struct ClaudeMdOwnershipMarker {
 /// Returns `None` (having already logged why) if either check fails —
 /// callers treat that as "skip the foreign-file side effects this
 /// launch," not a hard error.
+/// `relative` under `base_path`, refused when it would land outside it,
+/// including through a symlinked ancestor such as a linked `.claude`.
+fn resolve_within_workdir(base_path: &std::path::Path, relative: &str) -> Option<std::path::PathBuf> {
+    let base_canonical = base_path.canonicalize().ok()?;
+    let path = crate::backend::base::safe_join_within_base(base_path, relative).ok()?;
+    crate::backend::base::verify_no_symlink_escape(&path, &base_canonical).ok()?;
+    Some(path)
+}
+
 fn resolve_claude_md_side_paths(
     base_path: &std::path::Path,
     base_canonical: &std::path::Path,
@@ -1449,25 +1469,36 @@ pub fn write_claude_md_respecting_ownership(
     // SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4.4).
     if let Some(Ok(content)) = &existing {
         if !agentmux_owns_it && is_legacy_agentmux_claude_md(content) {
-            let backup = base_path.join(CLAUDE_MD_PRE_ADOPT_BACKUP);
-            let backed_up = backup.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
-                match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
-                    Ok(mut f) => std::io::Write::write_all(&mut f, content.as_bytes()),
-                    // An earlier adoption's copy is the original: keep it.
-                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-                    Err(e) => Err(e),
-                }
-            });
-            match backed_up {
-                Ok(()) => {
-                    tracing::info!(path = %claude_md_path.display(), "CLAUDE.md written by an older AgentMux: adopting it as managed");
-                    agentmux_owns_it = true;
-                }
-                Err(e) => tracing::warn!(
-                    path = %backup.display(),
-                    error = %e,
-                    "write_claude_md_respecting_ownership: couldn't back up a legacy CLAUDE.md; leaving it as is"
+            // Resolved and symlink-checked like the other `.claude` side
+            // files: a `.claude` that links outside the workspace must not
+            // get the backup written through it (Codex on #4131). No safe
+            // path: not adopted, handled as a foreign file below.
+            match resolve_within_workdir(base_path, CLAUDE_MD_PRE_ADOPT_BACKUP) {
+                None => tracing::warn!(
+                    path = %claude_md_path.display(),
+                    "write_claude_md_respecting_ownership: no safe place to back up a legacy CLAUDE.md; leaving it as is"
                 ),
+                Some(backup) => {
+                    let backed_up = backup.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
+                        match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
+                            Ok(mut f) => std::io::Write::write_all(&mut f, content.as_bytes()),
+                            // An earlier adoption's copy is the original: keep it.
+                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                            Err(e) => Err(e),
+                        }
+                    });
+                    match backed_up {
+                        Ok(()) => {
+                            tracing::info!(path = %claude_md_path.display(), "CLAUDE.md written by an older AgentMux: adopting it as managed");
+                            agentmux_owns_it = true;
+                        }
+                        Err(e) => tracing::warn!(
+                            path = %backup.display(),
+                            error = %e,
+                            "write_claude_md_respecting_ownership: couldn't back up a legacy CLAUDE.md; leaving it as is"
+                        ),
+                    }
+                }
             }
         }
     }
@@ -1986,6 +2017,15 @@ mod tests {
     #[test]
     fn recognises_only_exactly_what_an_older_agentmux_wrote() {
         assert!(is_legacy_agentmux_claude_md(LEGACY_CLAUDE_MD));
+        // AgentMux wrote the section only with skills: no rows, not ours (Codex on #4131).
+        assert!(!is_legacy_agentmux_claude_md("# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n"));
+        // Its order: skill rows after the import mean someone rearranged it.
+        assert!(!is_legacy_agentmux_claude_md(
+            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n@.claude/AGENTMUX_MEMORY.md\n- **A** x\n"
+        ));
+        assert!(is_legacy_agentmux_claude_md(
+            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n- **A** x\n@.claude/AGENTMUX_MEMORY.md\n"
+        ));
         assert!(is_legacy_agentmux_claude_md("# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n- **A** x\n"));
         assert!(!is_legacy_agentmux_claude_md(&format!("{LEGACY_CLAUDE_MD}\nAlways run the tests.\n")), "a person's line");
         assert!(!is_legacy_agentmux_claude_md(&format!("{CLAUDE_MD_MANAGED_MARKER}\n\n# Memory\n")));
@@ -2009,6 +2049,28 @@ mod tests {
         write_claude_md_respecting_ownership(dir.path(), "# Memory\nnewer\n").unwrap();
         assert!(std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap().contains("newer"));
         assert_eq!(std::fs::read_to_string(dir.path().join(CLAUDE_MD_PRE_ADOPT_BACKUP)).unwrap(), LEGACY_CLAUDE_MD);
+    }
+
+    /// A `.claude` linked outside the workspace gets no backup written
+    /// through it, and the file isn't adopted (Codex on #4131).
+    #[test]
+    fn a_legacy_claude_md_is_not_adopted_through_a_symlinked_claude_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(outside.path(), dir.path().join(".claude")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(outside.path(), dir.path().join(".claude")).is_ok();
+        if !made {
+            // Windows needs privilege for symlinks; the guard is exercised
+            // wherever one can be made.
+            return;
+        }
+        std::fs::write(dir.path().join("CLAUDE.md"), LEGACY_CLAUDE_MD).unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
+        assert!(!outside.path().join("CLAUDE.md.pre-adopt").exists(), "no backup outside the workspace");
+        let now = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(!now.starts_with(CLAUDE_MD_MANAGED_MARKER), "not adopted: {now}");
     }
 
     #[test]
