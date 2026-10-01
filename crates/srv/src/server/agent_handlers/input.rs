@@ -1483,8 +1483,9 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             async move {
                 tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
                 match blockcontroller::get_controller(&cmd.blockid) {
-                    Some(ctrl) => {
-                        ctrl.stop(!cmd.force, blockcontroller::STATUS_DONE)?;
+                    Some(_) => {
+                        // The one teardown path, Stop policy (SPEC_AGENT_TEARDOWN_SINGLE_PATH §5).
+                        crate::sagas::agent_teardown::stop_now(&cmd.blockid, !cmd.force)?;
                         // Deregister: unregister_block cleans up both agent_to_block and
                         // block_to_agent maps; remove_agent then removes the cloud poll entry
                         // using the logical agent_id recovered from block_to_agent.
