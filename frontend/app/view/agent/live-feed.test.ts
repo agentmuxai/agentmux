@@ -266,14 +266,21 @@ describe("RollOff reducer command", () => {
 describe("feedOverLimits (Codex on #4121)", () => {
     it("fires on rows or bytes even with no turn cap", () => {
         expect(feedOverLimits(turns(10), LIVE_FEED_DEFAULT_TURNS)).toBe(false);
-        // Bytes: a finished turn over 1.1× the budget. nodeBytes caps one node
-        // at 2 MB, so it takes several large nodes.
+        // Bytes: a finished turn over 1.1× the budget.
         const huge: DocumentNode[] = [
             user("u0"),
             ...Array.from({ length: 10 }, (_, i) => md(`a${i}`, "x".repeat(1_900_000))),
             user("u1"),
         ];
         expect(feedOverLimits(huge, LIVE_FEED_DEFAULT_TURNS)).toBe(true);
+        // Nodes over 2 MB count in full (Codex P2 on #4121): seven 10 MB nodes
+        // are 70 MB, not 14.
+        const big: DocumentNode[] = [
+            user("u0"),
+            ...Array.from({ length: 7 }, (_, i) => md(`b${i}`, "x".repeat(10_000_000))),
+            user("u1"),
+        ];
+        expect(feedOverLimits(big, LIVE_FEED_DEFAULT_TURNS)).toBe(true);
         // Rows: more than the row cap.
         const many: DocumentNode[] = Array.from({ length: LIVE_FEED_MAX_ROWS + 1 }, (_, i) => md(`m${i}`));
         expect(feedOverLimits(many, LIVE_FEED_DEFAULT_TURNS)).toBe(true);

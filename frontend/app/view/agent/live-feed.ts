@@ -15,7 +15,7 @@
 import type { AgentPaneLayoutState } from "@/app/store/agent-pane-layout/types";
 import { positions, windowRangeOf } from "@/app/store/agent-pane-layout/reducer";
 import type { DocumentNode } from "./types";
-import { isNodeInProgress, nodeBytes } from "./virtualization/streaming-buffer";
+import { isNodeInProgress, nodeBytesFull } from "./virtualization/streaming-buffer";
 
 /**
  * Finished turns kept by default: no turn limit. The pane is bounded by size
@@ -118,7 +118,7 @@ export function feedOverLimits(nodes: readonly DocumentNode[], keepTurns: number
     let bytes = 0;
     for (const n of nodes) {
         if (n.type === "user_message") turns++;
-        bytes += nodeBytes(n);
+        bytes += nodeBytesFull(n);
     }
     return turns > keepTurns + 3 || bytes > LIVE_FEED_MAX_FINISHED_BYTES * 1.1;
 }
@@ -172,7 +172,7 @@ export function planRollOff(nodes: readonly DocumentNode[], input: RollOffInput)
     };
     const turnBytes = (t: Turn): number => {
         let b = 0;
-        for (let i = t.start; i < t.end; i++) b += nodeBytes(nodes[i]);
+        for (let i = t.start; i < t.end; i++) b += nodeBytesFull(nodes[i]);
         return b;
     };
 
