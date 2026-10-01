@@ -39,6 +39,7 @@ import { getFileSubject } from "@/app/store/mps";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
+import { mainAgentUsage } from "./main-agent-usage";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -728,58 +729,46 @@ export function useAgentStream({
                 // the translator discards them. message_start carries input_tokens
                 // for this turn; message_delta carries the running output_tokens.
                 {
-                    const inner = rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
                     // Whether the main agent's model has ended its turn, for the
                     // busy predicate (`modelEndedTurn` on the Streaming phase).
                     const turnCommand = modelTurnCommand(rawEvent);
                     if (turnCommand) model.dispatchPane(turnCommand);
-                    if (inner?.type === "message_start") {
-                        // input_tokens is only the uncached prompt; cache_creation/
-                        // cache_read carry the rest of the real prompt size. Keep
-                        // the split (not just the sum) so downstream state can
-                        // tell a cheap cache-served turn from an expensive fresh
-                        // one — see TurnTokens' doc comment in ../types.ts.
-                        const u = inner.message?.usage;
-                        const freshInput = u?.input_tokens as number | undefined;
-                        const cacheCreation = u?.cache_creation_input_tokens as number | undefined;
-                        const cacheRead = u?.cache_read_input_tokens as number | undefined;
-                        const inputTok =
-                            freshInput != null
-                                ? freshInput + (cacheCreation ?? 0) + (cacheRead ?? 0)
-                                : undefined;
-                        if (inputTok != null) {
-                            // message.model is the resolved model id (e.g.
-                            // "claude-opus-4-8") — used to seed the context-window
-                            // meter per model (Opus/Sonnet 1M, Haiku 200K).
-                            const modelId = inner.message?.model as string | undefined;
-                            // Also feeds memoryReinjectionController's own
-                            // contextWindow lookup (§3.4.2) — kept as a
-                            // simple last-seen value rather than threaded
-                            // through TokensIn's dispatch, since the
-                            // controller needs it read synchronously at
-                            // trigger() time, not as reactive pane state.
-                            if (modelId) lastSeenModelId = modelId;
-                            const paneEvents = model.dispatchPane({
-                                type: "TokensIn",
-                                input: inputTok,
-                                model: modelId,
-                                freshInput,
-                                cacheCreation: cacheCreation ?? 0,
-                                cacheRead: cacheRead ?? 0,
-                            });
-                            // Detect context compaction from the reducer's event output.
-                            // Primary signal for Claude is the real CompactionBoundary
-                            // path above; this heuristic (≥50% token drop from a >10k
-                            // baseline) is suppressed by the reducer itself shortly
-                            // after a real boundary landed, and remains the ONLY signal
-                            // for providers with no structured event (codex/gemini/copilot).
-                            pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
-                        }
-                    } else if (inner?.type === "message_delta") {
-                        const outputTok = inner.usage?.output_tokens as number | undefined;
-                        if (outputTok != null) {
-                            model.dispatchPane({ type: "TokensOut", output: outputTok });
-                        }
+                    // MAIN-agent usage only: a subagent's lines carry a
+                    // parent_tool_use_id and have their own context and model
+                    // (main-agent-usage.ts).
+                    const usage = mainAgentUsage(rawEvent);
+                    if (usage?.kind === "in") {
+                        // message.model is the resolved model id (e.g.
+                        // "claude-opus-4-8") — used to seed the context-window
+                        // meter per model (Opus/Sonnet 1M, Haiku 200K).
+                        // Also feeds memoryReinjectionController's own
+                        // contextWindow lookup (§3.4.2) — kept as a
+                        // simple last-seen value rather than threaded
+                        // through TokensIn's dispatch, since the
+                        // controller needs it read synchronously at
+                        // trigger() time, not as reactive pane state.
+                        if (usage.model) lastSeenModelId = usage.model;
+                        // input_tokens is only the uncached prompt; the cache
+                        // split is kept (not just the sum) so downstream state
+                        // can tell a cheap cache-served turn from an expensive
+                        // fresh one — see TurnTokens' doc comment in ../types.ts.
+                        const paneEvents = model.dispatchPane({
+                            type: "TokensIn",
+                            input: usage.input,
+                            model: usage.model,
+                            freshInput: usage.freshInput,
+                            cacheCreation: usage.cacheCreation,
+                            cacheRead: usage.cacheRead,
+                        });
+                        // Detect context compaction from the reducer's event output.
+                        // Primary signal for Claude is the real CompactionBoundary
+                        // path above; this heuristic (≥50% token drop from a >10k
+                        // baseline) is suppressed by the reducer itself shortly
+                        // after a real boundary landed, and remains the ONLY signal
+                        // for providers with no structured event (codex/gemini/copilot).
+                        pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                    } else if (usage?.kind === "out") {
+                        model.dispatchPane({ type: "TokensOut", output: usage.output });
                     }
                 }
 
