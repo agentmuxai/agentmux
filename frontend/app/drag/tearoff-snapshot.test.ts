@@ -196,14 +196,13 @@ describe("tear-off snapshot", () => {
     it("gives up on a capture still in flight after the budget", async () => {
         vi.useFakeTimers();
         mountPane("b1");
-        let release!: () => void;
-        shots.next = new Promise((resolve) => (release = () => resolve({ jpeg_base64: btoa("late") })));
+        // Never answers. afterEach's settle must not wait on it: a stalled
+        // RPC is never tracked (Codex P2 on #4110).
+        shots.next = new Promise(() => {});
         prewarmTearOffSnapshot("b1");
         const taken = takeTearOffSnapshot("b1");
         await vi.advanceTimersByTimeAsync(60);
         expect(await taken).toBeUndefined();
-        // Let the stalled capture finish, so afterEach's settle doesn't wait on it forever.
-        release();
     });
 
     it("drops a stale picture", async () => {

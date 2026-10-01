@@ -72,9 +72,11 @@ function base64ToBlob(b64: string, type: string): Blob {
 }
 
 /**
- * Captures still running, including ones nobody will take (a newer prewarm
- * replaced them, or the take gave up). Tracked so a test can wait for work it
- * didn't await (`settleTearOffSnapshotForTests`).
+ * Decode/crop/encode work still running, including work nobody will take (a
+ * newer prewarm replaced it, or the take gave up). Tracked so a test can wait
+ * for work it didn't await (`settleTearOffSnapshotForTests`). Only the work
+ * after the capture RPC answers, which always finishes: a stalled RPC is
+ * never tracked, so it can't be retained here forever (Codex P2 on #4110).
  */
 const pendingCaptures = new Set<Promise<unknown>>();
 
@@ -113,6 +115,10 @@ function ownWindowLabel(): string {
 /** The window's viewport, cropped to `rect`, as a base64 JPEG. */
 async function capturePane(rect: CssRect): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
+    return track(cropToPane(jpeg_base64, rect));
+}
+
+async function cropToPane(jpeg_base64: string, rect: CssRect): Promise<string | null> {
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
         const crop = cropRectInImage(rect, window.innerWidth, full);
@@ -136,6 +142,10 @@ const SHRINK_SCALES = [0.5, 0.35, 0.25];
 async function captureWindow(): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
     if (jpeg_base64.length <= MAX_SNAPSHOT_CHARS) return jpeg_base64;
+    return track(shrinkToFit(jpeg_base64));
+}
+
+async function shrinkToFit(jpeg_base64: string): Promise<string | null> {
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
         for (const scale of SHRINK_SCALES) {
@@ -190,7 +200,7 @@ export function prewarmWindowTabSnapshot(tabId: string): void {
     }
     const at = Date.now();
     const key = windowTabKey(tabId);
-    const picture = track(captureWindow()).then(
+    const picture = captureWindow().then(
         (b64) => {
             Logger.debug("dnd", "tear-off window snapshot captured", { tabId, ms: Date.now() - at });
             return b64;
@@ -226,7 +236,7 @@ export function prewarmTearOffSnapshot(blockId: string): void {
               .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
               .then((shot) => shot?.png_base64 || null)
         : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height });
-    const picture = track(capture).then(
+    const picture = capture.then(
         (b64) => {
             Logger.debug("dnd:cross", "tear-off snapshot captured", { blockId, ms: Date.now() - at });
             return b64;
@@ -274,7 +284,14 @@ export function resetTearOffSnapshotForTests(): void {
     held = null;
 }
 
-/** Waits for every capture still running, including ones no test awaited. */
+/**
+ * Waits for every decode/encode still running, including ones no test
+ * awaited. Lets a task pass first, so a capture whose RPC has already
+ * answered gets to register its work before the set is checked.
+ */
 export async function settleTearOffSnapshotForTests(): Promise<void> {
-    while (pendingCaptures.size > 0) await Promise.allSettled([...pendingCaptures]);
+    do {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await Promise.allSettled([...pendingCaptures]);
+    } while (pendingCaptures.size > 0);
 }
