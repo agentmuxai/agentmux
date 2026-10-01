@@ -96,12 +96,11 @@ impl Policy {
 }
 
 /// App exit's overall cap (spec §11 O3), the leftover-shell sweep included:
-/// every agent closes concurrently under it. It sits a second inside the
-/// launcher's wait for srv ([`agentmux_common::process::SRV_EXIT_GRACE`]),
-/// after which the launcher's backstop (Windows J0 / Unix group kill) takes
-/// whatever is left.
-pub const APP_EXIT_CAP: std::time::Duration =
-    agentmux_common::process::SRV_EXIT_GRACE.saturating_sub(std::time::Duration::from_secs(1));
+/// every agent closes concurrently under it. It fits inside the launcher's
+/// upgrade quiesce (10 s, pinned there). On a normal quit the launcher's
+/// backstop (Windows J0 / Unix group kill) may end srv sooner; whatever this
+/// hasn't closed by then, the backstop takes, as before.
+pub const APP_EXIT_CAP: std::time::Duration = agentmux_common::process::SRV_APP_EXIT_CAP;
 
 /// The grace the leftover-shell sweep gives its kill tasks. [reagent #1422 P2]
 const SHELL_SWEEP_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
@@ -382,10 +381,8 @@ mod tests {
         assert!(!Policy::stop(true).release_claims && !Policy::stop(true).stop_shell_sessions);
         assert_eq!(Policy::replace(), Policy { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false });
         assert_eq!(Policy::app_exit(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true });
-        // App exit covers the CLI's own grace and the shell sweep, and ends
-        // before the launcher stops waiting for srv.
+        // App exit covers the CLI's own grace and the shell sweep.
         assert!(APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE) > blockcontroller::SHUTDOWN_GRACE);
-        assert!(APP_EXIT_CAP < agentmux_common::process::SRV_EXIT_GRACE);
     }
 
     /// The single path (spec §3 G1, §9.1): outside this module and the

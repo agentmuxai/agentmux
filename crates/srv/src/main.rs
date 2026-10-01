@@ -278,8 +278,9 @@ async fn main() {
     // Shutdown cleanup: close every agent through the one teardown
     // (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md, `Policy::app_exit()`),
     // so each gets to end its turn and exit and nothing it started (`task dev`
-    // → task.exe/node, `Shell()` sessions) orphans on srv exit. Capped at 10 s;
-    // the launcher's backstop takes whatever is left.
+    // → task.exe/node, `Shell()` sessions) orphans on srv exit. Capped at
+    // `agent_teardown::APP_EXIT_CAP`; the launcher's backstop takes whatever
+    // is left.
     let closed = sagas::agent_teardown::app_exit(&state_for_exit).await;
     tracing::info!(agents = closed, "shutdown: agents closed");
 }
