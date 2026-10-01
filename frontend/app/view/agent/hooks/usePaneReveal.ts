@@ -3,7 +3,9 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 8).
 
+import { trackPaneContent } from "@/app/store/pane-content-holds";
 import { createPaneReadiness, type PaneReadiness } from "@/app/store/pane-readiness";
+import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "../open-trace";
@@ -72,7 +74,14 @@ export function usePaneReveal(opts: {
     //   live       → unmounted                  (was: !showOverlay)
     beginAgentOpenOnMount(opts.blockId, opts.agentName());
     onCleanup(() => finishAgentOpen(opts.blockId, "closed"));
-    const readiness = createPaneReadiness({ label: `block:${opts.blockId}` });
+    const windowTabDisplayed = useWindowTabDisplayed();
+    // The agent view's loading is all behind this reveal (pane-content-holds.ts).
+    onCleanup(trackPaneContent(opts.blockId));
+    const readiness = createPaneReadiness({
+        label: `block:${opts.blockId}`,
+        holdFor: opts.blockId,
+        hidden: () => !windowTabDisplayed(),
+    });
     const releaseHistoryGate = readiness.gate("history");
     const releaseAuthGate = readiness.gate("auth");
     // Separate from `historyLoaded` below: this only means "the transcript

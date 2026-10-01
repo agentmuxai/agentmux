@@ -8,7 +8,7 @@ import { settingsAtom } from "@/store/config-signals";
 import { atoms, setActiveTab } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
-import { holdRevealGate, scheduleRevealLift } from "@/store/tab-reveal";
+import { beginClosePromotion } from "@/store/tab-actions";
 import { isMacOS } from "@/util/platformutil";
 import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
@@ -178,14 +178,18 @@ function TabBar(props: TabBarProps): JSX.Element {
         // "the" next active tab — gating the tab the user actually clicked is
         // at least as good a guess as the inferred neighbor, and the gate's
         // own 800ms cap bounds the cost of guessing wrong either way.
-        const promotedTabId = closingActiveTab ? displayActiveTabId() : null;
+        //
+        // A warm neighbor isn't gated at all: it shows at once, from the
+        // switch intent (`beginClosePromotion`, tab-actions.ts).
+        const settlePromotion = closingActiveTab ? beginClosePromotion(displayActiveTabId()) : null;
         fireAndForget(async () => {
-            if (closingActiveTab) holdRevealGate(promotedTabId);
+            let closed = false;
             try {
                 await WorkspaceService.CloseTab(props.workspace.oid, tabId);
+                closed = true;
                 deleteLayoutModelForTab(tabId);
             } finally {
-                if (closingActiveTab) scheduleRevealLift();
+                settlePromotion?.(closed);
                 // Success: the RPC response applied the workspace update
                 // synchronously before the await resolved, so the id is no
                 // longer in allTabIds() and unhiding cannot resurrect it.

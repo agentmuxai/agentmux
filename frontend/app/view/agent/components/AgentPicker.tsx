@@ -33,7 +33,9 @@
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
+import { trackPaneContent } from "@/app/store/pane-content-holds";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
+import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -328,7 +330,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // unmount timer, while agent-view.tsx rendered the SAME class with its own —
     // two covers for one pane, whichever unmounted last winning. Both now go
     // through <PaneLoadingCover>, so the class has a single owner.
-    const pickerReadiness = createPaneReadiness({ label: "agent-picker" });
+    const windowTabDisplayed = useWindowTabDisplayed();
+    // The picker's loading is all behind this cover (pane-content-holds.ts).
+    onCleanup(trackPaneContent(props.model.blockId));
+    const pickerReadiness = createPaneReadiness({
+        label: "agent-picker",
+        holdFor: props.model.blockId,
+        hidden: () => !windowTabDisplayed(),
+    });
     const releasePickerGate = pickerReadiness.gate("picker-content");
     let pickerOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
     onCleanup(() => clearTimeout(pickerOverlayFadeTimeout));

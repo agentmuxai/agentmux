@@ -37,6 +37,41 @@ import { createEffect, createRoot, createSignal } from "solid-js";
 const [switchIntentTabId, setSwitchIntentTabId] = createSignal<string | null>(null);
 let switchChain = new Set<string>();
 export { switchIntentTabId };
+
+/** Publish `tabId` as the switch intent, starting or extending the switch
+ *  chain from the committed tab. Returns a cancel for when the backend
+ *  didn't move after all. */
+function showSwitchIntent(tabId: string): () => void {
+    if (switchIntentTabId() == null) switchChain = new Set([activeTabId()]);
+    switchChain.add(tabId);
+    setSwitchIntentTabId(tabId);
+    return () => {
+        if (switchIntentTabId() === tabId) setSwitchIntentTabId(null);
+    };
+}
+
+/**
+ * Closing the active window tab: CloseTab's own reducer promotes a neighbor
+ * (`promotedTabId`, the one the strip already shows) in the same transition
+ * as the removal. A warm neighbor (already shown, kept laid out) is shown
+ * from the switch intent at once, in the click's own frame, as a warm switch
+ * is; it used to be held behind the reveal gate, which blanked the whole
+ * content area for ~110 ms with nothing left to settle — the flash on close.
+ * A neighbor never shown is still gated. Call the returned function when
+ * CloseTab returns, with whether it succeeded.
+ */
+export function beginClosePromotion(promotedTabId: string): (closed: boolean) => void {
+    if (!(keepInactiveTabsLaidOut() && tabWasShown(promotedTabId))) {
+        holdRevealGate(promotedTabId);
+        return () => scheduleRevealLift();
+    }
+    logUngatedReveal(promotedTabId);
+    const cancel = showSwitchIntent(promotedTabId);
+    return (closed) => {
+        if (!closed) cancel();
+    };
+}
+
 createRoot(() =>
     createEffect(() => {
         const intent = switchIntentTabId();
@@ -45,6 +80,9 @@ createRoot(() =>
         if (committed === intent || !switchChain.has(committed)) setSwitchIntentTabId(null);
     })
 );
+
+/** How long a new tab may wait, hidden, for its panes' first data. */
+const NEW_TAB_SETTLE_CAP_MS = 800;
 
 export function createTab() {
     const ws = workspace();
@@ -100,6 +138,14 @@ export function createTab() {
             // the new tab is left created but inactive; the user reaches
             // it via the tab bar whenever they actually want it, same as
             // any other background tab.
+            // Its panes exist now, but their first data (the picker's agents,
+            // the sysinfo history, the swarm list) is still arriving. Showing
+            // the tab now put that loading on screen: covers, an empty chart,
+            // "Loading…", then content popping in. Wait until it has settled,
+            // hidden, then show it in one frame — bounded, so a slow pane
+            // can't hold the new tab back for long.
+            const { whenTabContentSettled } = await import("@/app/tab/tab-content-settled");
+            await whenTabContentSettled(tabId, NEW_TAB_SETTLE_CAP_MS);
             if (activeTabId() === startingActiveTabId) {
                 // Built while hidden, and kept laid out: the same state as a
                 // tab already shown, so it takes the same one-frame switch —
@@ -165,14 +211,12 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) holdRevealGate(tabId);
-    if (switchIntentTabId() == null) switchChain = new Set([fromTabId]);
-    switchChain.add(tabId);
-    setSwitchIntentTabId(tabId);
+    const cancelIntent = showSwitchIntent(tabId);
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
     } catch (e) {
         // The backend didn't move: show the committed tab again.
-        if (mySeq === tabSwitchSeq) setSwitchIntentTabId(null);
+        if (mySeq === tabSwitchSeq) cancelIntent();
         throw e;
     } finally {
         // Pair with holdRevealGate above. Also lifts the gate on
