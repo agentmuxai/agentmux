@@ -1091,11 +1091,14 @@ impl LanDiscovery {
         if self.started_at.elapsed() < lan_mdns_health::GRACE {
             return lan_mdns_health::MdnsHealth::Pending;
         }
-        let expected = lan_mdns_health::expected_ipv4(
-            crate::backend::lan_listeners::cached_local_addresses()
-                .iter()
-                .copied(),
-        );
+        // Grouped by interface: `mdns-sd` announces on one address per
+        // interface and IP version, so an interface with two IPv4 addresses is
+        // covered by either one (ReAgent P2 on #4148).
+        let local = if_addrs::get_if_addrs()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| (i.name.clone(), i.ip()));
+        let expected = lan_mdns_health::expected_by_interface(local);
         let announced = self.announced_v4.lock().clone();
         lan_mdns_health::evaluate(&expected, &announced)
     }
@@ -1166,14 +1169,6 @@ impl Drop for LanDiscovery {
     }
 }
 
-/// Controller for live start/stop of `LanDiscovery` in response to setting changes.
-///
-/// Owns the daemon slot plus the start arguments, so toggling
-/// `network:lan_discovery` from the UI (or from an external edit of
-/// `settings.json`) can start or stop the daemon without restarting the
-/// process.
-///
-/// Spec: docs/specs/lan-discovery-toggle.md
 /// How often the watchdog looks at discoverability. Two consecutive
 /// undiscoverable ticks are needed before a rebuild
 /// (`lan_mdns_health::STRIKES_BEFORE_REBUILD`).
@@ -1211,6 +1206,14 @@ fn record_daemon_event(event: mdns_sd::DaemonEvent, announced: &Mutex<BTreeSet<I
     }
 }
 
+/// Controller for live start/stop of `LanDiscovery` in response to setting changes.
+///
+/// Owns the daemon slot plus the start arguments, so toggling
+/// `network:lan_discovery` from the UI (or from an external edit of
+/// `settings.json`) can start or stop the daemon without restarting the
+/// process.
+///
+/// Spec: docs/specs/lan-discovery-toggle.md
 pub struct LanDiscoveryController {
     slot: Arc<RwLock<Option<Arc<LanDiscovery>>>>,
     instance_id: String,
@@ -1540,14 +1543,7 @@ impl LanDiscoveryController {
         let is_running = slot.is_some();
         match (enabled, is_running) {
             (true, false) => {
-                match LanDiscovery::start(
-                    self.instance_id.clone(),
-                    self.hostname.clone(),
-                    self.version.clone(),
-                    self.port,
-                    self.auth_key.clone(),
-                    self.event_bus.clone(),
-                ) {
+                match self.start_daemon() {
                     Ok(d) => {
                         *slot = Some(d);
                         tracing::info!("LAN discovery enabled via setting");
@@ -1592,6 +1588,57 @@ impl LanDiscoveryController {
         }
     }
 
+    fn start_daemon(&self) -> Result<Arc<LanDiscovery>, String> {
+        LanDiscovery::start(
+            self.instance_id.clone(),
+            self.hostname.clone(),
+            self.version.clone(),
+            self.port,
+            self.auth_key.clone(),
+            self.event_bus.clone(),
+        )
+    }
+
+    /// Replace a RUNNING mDNS daemon with a fresh one, atomically.
+    ///
+    /// Only ever replaces: if no daemon is running (LAN was switched off, or the
+    /// supervisor's `enabled && reachable` gate in `bootstrap/network.rs` stopped
+    /// it) this does nothing and returns `false`, so a rebuild can never start
+    /// advertising on its own. The whole swap happens under one write lock, so
+    /// `apply(false)` from the supervisor cannot interleave between the stop and
+    /// the start (ReAgent P1 on #4148). The first draft called `apply(false)` then
+    /// `apply(true)`, which released the lock in between and would have restarted
+    /// a daemon the setting had just turned off.
+    pub fn rebuild(&self) -> bool {
+        let mut slot = self.slot.write();
+        let Some(old) = slot.take() else {
+            return false;
+        };
+        old.shutdown();
+        match self.start_daemon() {
+            Ok(fresh) => {
+                *slot = Some(fresh);
+                // The peer list starts over with the new daemon.
+                self.event_bus.broadcast_event(&WSEventType {
+                    eventtype: "laninstances".to_string(),
+                    oref: String::new(),
+                    data: Some(json!([])),
+                });
+                tracing::info!("mDNS daemon rebuilt");
+                true
+            }
+            Err(e) => {
+                tracing::warn!("mDNS daemon rebuild failed: {e}");
+                self.event_bus.broadcast_event(&WSEventType {
+                    eventtype: "laninstances:error".to_string(),
+                    oref: String::new(),
+                    data: Some(json!({ "error": e.to_string() })),
+                });
+                false
+            }
+        }
+    }
+
     /// The running daemon's discoverability, or `None` when LAN discovery is
     /// off or failed to start.
     pub fn health(&self) -> Option<lan_mdns_health::MdnsHealth> {
@@ -1627,8 +1674,7 @@ impl LanDiscoveryController {
                             attempt = watchdog.rebuilds(),
                             "mDNS announced on none of this host's IPv4 addresses, so other machines cannot find it; rebuilding the mDNS daemon"
                         );
-                        self.apply(false);
-                        self.apply(true);
+                        self.rebuild();
                     }
                     lan_mdns_health::Action::GiveUp => {
                         tracing::warn!(
@@ -1942,6 +1988,31 @@ mod tests {
             found,
             "an independent mDNS client must be able to discover a freshly-registered LanDiscovery instance within 5s"
         );
+    }
+
+    /// ReAgent P1 on #4148: a rebuild may only REPLACE a running daemon. With none
+    /// running (LAN switched off, or the supervisor's `enabled && reachable` gate
+    /// stopped it) it must do nothing, never start advertising on its own.
+    #[tokio::test]
+    async fn a_rebuild_never_starts_a_daemon_that_is_not_running() {
+        let controller = super::LanDiscoveryController::new(
+            "test-instance".to_string(),
+            "test-host".to_string(),
+            "0.0.0-test".to_string(),
+            54323,
+            Arc::new(crate::backend::eventbus::EventBus::new()),
+            "test-key".to_string(),
+        );
+        assert!(controller.health().is_none());
+        assert!(!controller.rebuild(), "nothing to rebuild");
+        assert!(controller.health().is_none(), "and it must not have started one");
+        assert!(controller.get_instances().is_empty());
+
+        // The same after LAN was on and has been switched off again.
+        controller.apply(true);
+        controller.apply(false);
+        assert!(!controller.rebuild());
+        assert!(controller.health().is_none());
     }
 
     /// The daemon's announcements, in the two payload shapes `mdns-sd` 0.12 uses,

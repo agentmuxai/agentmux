@@ -19,7 +19,7 @@
 //! `mdns-sd` always answers by multicast, so a legacy-unicast probe from an
 //! ephemeral port would never get an answer.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
@@ -88,32 +88,45 @@ pub fn ipv4_in(payload: &str) -> Vec<Ipv4Addr> {
         .collect()
 }
 
-/// The IPv4 addresses a LAN peer could reach us on: not loopback, not
-/// unspecified, not link-local (169.254/16), not multicast or broadcast.
-pub fn expected_ipv4(local: impl IntoIterator<Item = IpAddr>) -> BTreeSet<Ipv4Addr> {
-    local
-        .into_iter()
-        .filter_map(|a| match a {
-            IpAddr::V4(v4) => Some(v4),
-            IpAddr::V6(_) => None,
-        })
-        .filter(|a| {
-            !(a.is_loopback()
-                || a.is_unspecified()
-                || a.is_link_local()
-                || a.is_multicast()
-                || a.is_broadcast())
-        })
-        .collect()
+/// The IPv4 addresses a LAN peer could reach us on, **grouped by interface**:
+/// not loopback, unspecified, link-local (169.254/16), multicast or broadcast.
+///
+/// Grouped because `mdns-sd` announces on ONE address per interface and IP
+/// version (`send_unsolicited_response`), so an interface with two IPv4
+/// addresses never announces its second. Counting each address would leave such
+/// a host `Degraded` for good. An interface is covered when any one of its
+/// addresses was announced.
+pub fn expected_by_interface(
+    local: impl IntoIterator<Item = (String, IpAddr)>,
+) -> Vec<BTreeSet<Ipv4Addr>> {
+    let mut by_name: BTreeMap<String, BTreeSet<Ipv4Addr>> = BTreeMap::new();
+    for (name, addr) in local {
+        let IpAddr::V4(v4) = addr else { continue };
+        if v4.is_loopback()
+            || v4.is_unspecified()
+            || v4.is_link_local()
+            || v4.is_multicast()
+            || v4.is_broadcast()
+        {
+            continue;
+        }
+        by_name.entry(name).or_default().insert(v4);
+    }
+    by_name.into_values().collect()
 }
 
 /// The verdict. Only addresses we expected count: an announcement on an address
-/// we do not listen on proves nothing about the ones we do.
-pub fn evaluate(expected: &BTreeSet<Ipv4Addr>, announced: &BTreeSet<Ipv4Addr>) -> MdnsHealth {
+/// we do not listen on proves nothing about the ones we do. `missing` names one
+/// address (the lowest) per uncovered interface.
+pub fn evaluate(expected: &[BTreeSet<Ipv4Addr>], announced: &BTreeSet<Ipv4Addr>) -> MdnsHealth {
     if expected.is_empty() {
         return MdnsHealth::Healthy;
     }
-    let missing: Vec<Ipv4Addr> = expected.difference(announced).copied().collect();
+    let missing: Vec<Ipv4Addr> = expected
+        .iter()
+        .filter(|iface| iface.is_disjoint(announced))
+        .filter_map(|iface| iface.iter().next().copied())
+        .collect();
     if missing.is_empty() {
         MdnsHealth::Healthy
     } else if missing.len() == expected.len() {
@@ -192,6 +205,10 @@ mod tests {
     fn set(v: &[&str]) -> BTreeSet<Ipv4Addr> {
         v.iter().map(|s| ip(s)).collect()
     }
+    /// One entry per interface, one address each.
+    fn ifaces(v: &[&str]) -> Vec<BTreeSet<Ipv4Addr>> {
+        v.iter().map(|s| set(&[s])).collect()
+    }
     fn undiscoverable() -> MdnsHealth {
         MdnsHealth::Undiscoverable { missing: vec![ip("192.168.1.26")] }
     }
@@ -214,49 +231,67 @@ mod tests {
     #[test]
     fn expected_drops_everything_a_peer_could_not_use() {
         let local = [
-            "127.0.0.1",
-            "0.0.0.0",
-            "169.254.21.81",
-            "224.0.0.251",
-            "255.255.255.255",
-            "192.168.1.26",
-            "172.17.16.1",
-            "fe80::1",
+            ("lo", "127.0.0.1"),
+            ("any", "0.0.0.0"),
+            ("apipa", "169.254.21.81"),
+            ("mc", "224.0.0.251"),
+            ("bc", "255.255.255.255"),
+            ("Ethernet", "192.168.1.26"),
+            ("vEthernet", "172.17.16.1"),
+            ("v6only", "fe80::1"),
         ]
-        .map(|s| s.parse::<IpAddr>().unwrap());
-        assert_eq!(expected_ipv4(local), set(&["192.168.1.26", "172.17.16.1"]));
+        .map(|(n, a)| (n.to_string(), a.parse::<IpAddr>().unwrap()));
+        assert_eq!(expected_by_interface(local), vec![set(&["192.168.1.26"]), set(&["172.17.16.1"])]);
+    }
+
+    #[test]
+    fn two_addresses_on_one_interface_are_one_group() {
+        let local = [("Ethernet", "192.168.1.26"), ("Ethernet", "192.168.1.27"), ("Wi-Fi", "10.0.0.5")]
+            .map(|(n, a)| (n.to_string(), a.parse::<IpAddr>().unwrap()));
+        assert_eq!(
+            expected_by_interface(local),
+            vec![set(&["192.168.1.26", "192.168.1.27"]), set(&["10.0.0.5"])]
+        );
     }
 
     #[test]
     fn nothing_to_announce_on_is_not_a_fault() {
-        assert_eq!(evaluate(&set(&[]), &set(&[])), MdnsHealth::Healthy);
+        assert_eq!(evaluate(&[], &set(&[])), MdnsHealth::Healthy);
     }
 
     #[test]
     fn announced_on_all_expected_is_healthy() {
-        let e = set(&["192.168.1.26", "172.17.16.1"]);
-        assert_eq!(evaluate(&e, &e), MdnsHealth::Healthy);
+        let e = ifaces(&["192.168.1.26", "172.17.16.1"]);
+        assert_eq!(evaluate(&e, &set(&["192.168.1.26", "172.17.16.1"])), MdnsHealth::Healthy);
+    }
+
+    // ReAgent P2 on #4148: mdns-sd announces one address per interface, so the
+    // second address of a NIC is never announced and must not count as missing.
+    #[test]
+    fn an_interface_is_covered_by_any_one_of_its_addresses() {
+        let e = vec![set(&["192.168.1.26", "192.168.1.27"])];
+        assert_eq!(evaluate(&e, &set(&["192.168.1.26"])), MdnsHealth::Healthy);
+        assert_eq!(evaluate(&e, &set(&["192.168.1.27"])), MdnsHealth::Healthy);
     }
 
     #[test]
     fn announcements_outside_the_expected_set_prove_nothing() {
-        let e = set(&["192.168.1.26"]);
-        let a = set(&["10.9.9.9"]);
-        assert!(evaluate(&e, &a).is_undiscoverable());
+        let e = ifaces(&["192.168.1.26"]);
+        assert!(evaluate(&e, &set(&["10.9.9.9"])).is_undiscoverable());
     }
 
     #[test]
     fn the_area54_case_is_undiscoverable() {
         // Both IPv4 interfaces expected; the daemon announced on neither.
-        let e = set(&["192.168.1.26", "172.17.16.1"]);
+        let e = ifaces(&["192.168.1.26", "172.17.16.1"]);
         let h = evaluate(&e, &set(&[]));
         assert_eq!(h.wire_state(), "undiscoverable");
-        assert_eq!(h.missing(), &[ip("172.17.16.1"), ip("192.168.1.26")]);
+        assert_eq!(h.missing(), &[ip("192.168.1.26"), ip("172.17.16.1")]);
     }
 
     #[test]
     fn a_missing_virtual_adapter_alone_is_only_degraded() {
-        let e = set(&["192.168.1.26", "172.17.16.1"]);
+        let e = ifaces(&["192.168.1.26", "172.17.16.1"]);
         let h = evaluate(&e, &set(&["192.168.1.26"]));
         assert_eq!(h, MdnsHealth::Degraded { missing: vec![ip("172.17.16.1")] });
         assert!(!h.is_undiscoverable());
