@@ -37,6 +37,29 @@ pub const STRIKES_BEFORE_REBUILD: u32 = 2;
 /// cleared the fault on Area54.
 pub const MAX_REBUILDS: u32 = 3;
 
+/// Ticks the watchdog will keep trying to bring the daemon back when LAN is
+/// wanted but no daemon is running (a rebuild whose new daemon failed to start).
+/// Without this a transient failure inside a rebuild would leave LAN dead until
+/// the user toggled it (ReAgent P2 on #4148).
+pub const MAX_DOWN_RETRIES: u32 = 6;
+
+/// Whether this verdict should be sent to the windows on this tick.
+///
+/// The frontend learns the verdict only from `laninstances:health` events, and
+/// a window opened (or a WebSocket reconnected) after the event has no way to
+/// ask. So a standing problem is **re-sent every tick**; sending it only on
+/// change left a late window showing `peers` for as long as the fault lasted
+/// (ReAgent P1 on #4148). `Healthy` is sent only on change: no news is the
+/// frontend's default for a window with nothing recorded. `Pending` is a gap
+/// between verdicts, never news.
+pub fn should_publish(health: &MdnsHealth, changed: bool) -> bool {
+    match health {
+        MdnsHealth::Pending => false,
+        MdnsHealth::Healthy => changed,
+        MdnsHealth::Degraded { .. } | MdnsHealth::Undiscoverable { .. } => true,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum MdnsHealth {
     /// Too soon after start to say.
@@ -151,6 +174,7 @@ pub struct Watchdog {
     strikes: u32,
     rebuilds: u32,
     gave_up: bool,
+    down_retries: u32,
 }
 
 impl Watchdog {
@@ -163,7 +187,21 @@ impl Watchdog {
         *self = Watchdog::default();
     }
 
+    /// LAN is wanted but no daemon is running. Returns whether to try starting
+    /// one again this tick. Deliberately does not touch the rebuild budget: a
+    /// failed rebuild must not wipe the count of rebuilds already spent.
+    pub fn observe_down(&mut self) -> bool {
+        if self.down_retries < MAX_DOWN_RETRIES {
+            self.down_retries += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn observe(&mut self, health: &MdnsHealth) -> Action {
+        // A daemon exists again, so the "down" retries start over.
+        self.down_retries = 0;
         match health {
             // No verdict yet: neither a strike nor a recovery.
             MdnsHealth::Pending => Action::Nothing,
@@ -295,6 +333,54 @@ mod tests {
         let h = evaluate(&e, &set(&["192.168.1.26"]));
         assert_eq!(h, MdnsHealth::Degraded { missing: vec![ip("172.17.16.1")] });
         assert!(!h.is_undiscoverable());
+    }
+
+    #[test]
+    fn a_standing_problem_is_resent_every_tick_so_a_late_window_learns_of_it() {
+        // ReAgent P1 on #4148.
+        let bad = undiscoverable();
+        for _ in 0..3 {
+            assert!(should_publish(&bad, false), "unchanged but still broken: resend");
+        }
+        let degraded = MdnsHealth::Degraded { missing: vec![ip("172.17.16.1")] };
+        assert!(should_publish(&degraded, false));
+    }
+
+    #[test]
+    fn healthy_is_only_sent_on_change_and_pending_never() {
+        assert!(should_publish(&MdnsHealth::Healthy, true), "recovery must clear a warning");
+        assert!(!should_publish(&MdnsHealth::Healthy, false));
+        assert!(!should_publish(&MdnsHealth::Pending, true));
+        assert!(!should_publish(&MdnsHealth::Pending, false));
+    }
+
+    #[test]
+    fn a_down_daemon_is_retried_a_bounded_number_of_times() {
+        let mut w = Watchdog::default();
+        let tries = (0..20).filter(|_| w.observe_down()).count() as u32;
+        assert_eq!(tries, MAX_DOWN_RETRIES);
+    }
+
+    #[test]
+    fn a_failed_rebuild_does_not_wipe_the_rebuild_budget() {
+        // ReAgent P2 on #4148: rebuild, the new daemon fails to start, the watchdog
+        // sees "down" and retries. The spent rebuild must still be counted.
+        let mut w = Watchdog::default();
+        w.observe(&undiscoverable());
+        assert_eq!(w.observe(&undiscoverable()), Action::Rebuild);
+        assert_eq!(w.rebuilds(), 1);
+        assert!(w.observe_down());
+        assert!(w.observe_down());
+        assert_eq!(w.rebuilds(), 1, "still counted while the daemon is down");
+    }
+
+    #[test]
+    fn a_daemon_coming_back_restores_the_retries() {
+        let mut w = Watchdog::default();
+        while w.observe_down() {}
+        assert!(!w.observe_down(), "exhausted");
+        w.observe(&MdnsHealth::Pending); // a daemon exists again
+        assert!(w.observe_down(), "retries start over");
     }
 
     #[test]

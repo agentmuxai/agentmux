@@ -1216,6 +1216,11 @@ fn record_daemon_event(event: mdns_sd::DaemonEvent, announced: &Mutex<BTreeSet<I
 /// Spec: docs/specs/lan-discovery-toggle.md
 pub struct LanDiscoveryController {
     slot: Arc<RwLock<Option<Arc<LanDiscovery>>>>,
+    /// What the last `apply` asked for: LAN discovery should be running. Set
+    /// under the slot's write lock, so it never disagrees with the slot for
+    /// longer than one `apply`. It stays `true` when a start fails, which is how
+    /// the watchdog tells "wanted but down" (retry) from "off" (leave alone).
+    desired: std::sync::atomic::AtomicBool,
     instance_id: String,
     hostname: String,
     version: String,
@@ -1334,6 +1339,7 @@ impl LanDiscoveryController {
     ) -> Self {
         Self {
             slot: Arc::new(RwLock::new(None)),
+            desired: std::sync::atomic::AtomicBool::new(false),
             instance_id,
             hostname,
             version,
@@ -1540,6 +1546,7 @@ impl LanDiscoveryController {
     /// daemon construction + service register/unregister are local socket ops).
     pub fn apply(&self, enabled: bool) {
         let mut slot = self.slot.write();
+        self.desired.store(enabled, std::sync::atomic::Ordering::SeqCst);
         let is_running = slot.is_some();
         match (enabled, is_running) {
             (true, false) => {
@@ -1597,6 +1604,40 @@ impl LanDiscoveryController {
             self.auth_key.clone(),
             self.event_bus.clone(),
         )
+    }
+
+    /// Should a daemon be running right now, per the last `apply`?
+    pub fn is_wanted(&self) -> bool {
+        self.desired.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Start a daemon when one is wanted but none is running: the recovery for a
+    /// rebuild whose new daemon failed to start (ReAgent P2 on #4148). Does
+    /// nothing, and returns `false`, when LAN is not wanted or a daemon is
+    /// already up, checked under the same write lock `apply` uses, so it cannot
+    /// race a switch-off.
+    pub fn restart_if_wanted(&self) -> bool {
+        let mut slot = self.slot.write();
+        if slot.is_some() || !self.is_wanted() {
+            return false;
+        }
+        match self.start_daemon() {
+            Ok(fresh) => {
+                *slot = Some(fresh);
+                // Clears the error a failed rebuild showed, and resets the peer list.
+                self.event_bus.broadcast_event(&WSEventType {
+                    eventtype: "laninstances".to_string(),
+                    oref: String::new(),
+                    data: Some(json!([])),
+                });
+                tracing::info!("mDNS daemon restarted after a failed rebuild");
+                true
+            }
+            Err(e) => {
+                tracing::warn!("mDNS daemon restart failed: {e}");
+                false
+            }
+        }
     }
 
     /// Replace a RUNNING mDNS daemon with a fresh one, atomically.
@@ -1659,6 +1700,14 @@ impl LanDiscoveryController {
             loop {
                 tick.tick().await;
                 let Some(health) = self.health() else {
+                    if self.is_wanted() {
+                        // Wanted but no daemon: a rebuild whose new daemon failed to
+                        // start. Retry, and keep the rebuild budget (no `reset`).
+                        if watchdog.observe_down() {
+                            self.restart_if_wanted();
+                        }
+                        continue;
+                    }
                     watchdog.reset();
                     // LAN went off: clear whatever the indicator was showing.
                     if last_sent.as_ref().is_some_and(|(state, _, _)| state != "off") {
@@ -1700,8 +1749,10 @@ impl LanDiscoveryController {
                     health.missing().to_vec(),
                     watchdog.rebuilds(),
                 );
-                // `Pending` is a gap between verdicts, not news.
-                if health != lan_mdns_health::MdnsHealth::Pending && last_sent.as_ref() != Some(&sent) {
+                // A standing problem is re-sent every tick so a window opened later
+                // (or a reconnected WebSocket) learns of it; see `should_publish`.
+                let changed = last_sent.as_ref() != Some(&sent);
+                if lan_mdns_health::should_publish(&health, changed) {
                     self.publish_health(&sent.0, &sent.1, sent.2);
                     last_sent = Some(sent);
                 }
@@ -2012,6 +2063,31 @@ mod tests {
         controller.apply(true);
         controller.apply(false);
         assert!(!controller.rebuild());
+        assert!(controller.health().is_none());
+    }
+
+    /// ReAgent P2 on #4148: the controller remembers that LAN is wanted even when
+    /// the start failed, so the watchdog can retry; and it never restarts a
+    /// daemon the setting has switched off.
+    #[tokio::test]
+    async fn a_restart_only_happens_while_lan_is_wanted() {
+        let controller = super::LanDiscoveryController::new(
+            "test-instance".to_string(),
+            "test-host".to_string(),
+            "0.0.0-test".to_string(),
+            54324,
+            Arc::new(crate::backend::eventbus::EventBus::new()),
+            "test-key".to_string(),
+        );
+        assert!(!controller.is_wanted());
+        assert!(!controller.restart_if_wanted(), "not wanted: nothing to restart");
+        assert!(controller.health().is_none());
+
+        controller.apply(true); // wanted whether or not this host can start mDNS
+        assert!(controller.is_wanted());
+        controller.apply(false);
+        assert!(!controller.is_wanted());
+        assert!(!controller.restart_if_wanted(), "switched off again: must not restart");
         assert!(controller.health().is_none());
     }
 
