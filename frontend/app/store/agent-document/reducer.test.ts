@@ -1604,6 +1604,20 @@ describe("agent document reducer", () => {
             expect(r.events.some((e) => e.type === "orphans-scrubbed")).toBe(true);
         });
 
+        it("a live fresh boundary cancels the old session's open thought and unanswered question (ReAgent P1 on #4147)", () => {
+            const thought: DocumentNode = { ...md("think"), metadata: { thinking: true } } as DocumentNode;
+            const start = seed([tool("q", { status: "awaiting_answer" }), thought]);
+            const r = update(start, {
+                type: "StreamFlush",
+                newNodes: [boundary("b1", "fresh")],
+                updatedNodes: [],
+            });
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            const md0 = r.state.nodes[1] as Extract<DocumentNode, { type: "markdown" }>;
+            expect(md0.metadata?.thinking).toBe(false);
+            expect(md0.metadata?.canceled).toBe(true);
+        });
+
         it("a running tool after the boundary is left alone", () => {
             const start = seed([md("pre1")]);
             const r = update(start, {

@@ -619,9 +619,9 @@ export function useAgentStream({
                     // same rule and rationale as parseHistoryLines.ts
                     // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_
                     // HISTORY_VIEW_2026_08_09.md §3.5). A `fresh` node that
-                    // does get pushed also triggers the reducer's
-                    // session-scope clamp inside the same StreamFlush that
-                    // lands it (reducer.ts, StreamFlush handler).
+                    // does get pushed ends the old session's in-progress rows
+                    // inside the same StreamFlush that lands it (reducer.ts,
+                    // StreamFlush handler); the rows themselves stay.
                     if (sessionOutcome && sessionOutcome.outcome !== "resumed") {
                         const node: SessionOutcomeNode = {
                             type: "session_outcome",

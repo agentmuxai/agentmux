@@ -27,6 +27,45 @@ import {
 } from "./types";
 
 /**
+ * Retire the nodes of a session that has ended: everything before a live
+ * `fresh` divider. Running tools are canceled (scrubOrphanedInProgress), and
+ * — unlike a restore, which only trusts the tail — every open thought and
+ * every unanswered question is canceled wherever it sits: the new session
+ * can't finish or answer any of them (ReAgent P1 on #4147). In-pane shells
+ * are AgentMux's, not the session's, and are left alone.
+ */
+function endOldSession(
+    nodes: DocumentNode[],
+    at: number
+): {
+    nodes: DocumentNode[];
+    counts: {
+        markdownCanceled: number;
+        toolsCanceled: number;
+        resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string; run_in_background?: boolean }>;
+    };
+} | null {
+    const scrub = scrubOrphanedInProgress(nodes, at, { toolsOnly: true });
+    const out = scrub ? scrub.nodes : nodes.slice();
+    let markdownCanceled = 0;
+    let toolsCanceled = scrub?.toolsCanceled ?? 0;
+    const resolvedToolNodes = [...(scrub?.resolvedToolNodes ?? [])];
+    for (let i = 0; i < out.length; i++) {
+        const n = out[i];
+        if (n.type === "markdown" && n.metadata?.thinking === true) {
+            out[i] = { ...n, metadata: { ...n.metadata, thinking: false, canceled: true, canceledAt: at } };
+            markdownCanceled++;
+        } else if (n.type === "tool" && n.status === "awaiting_answer") {
+            out[i] = { ...n, status: "canceled", question: undefined };
+            toolsCanceled++;
+            resolvedToolNodes.push({ id: n.id, status: "canceled", toolName: n.toolName ?? n.tool });
+        }
+    }
+    if (markdownCanceled === 0 && toolsCanceled === 0) return null;
+    return { nodes: out, counts: { markdownCanceled, toolsCanceled, resolvedToolNodes } };
+}
+
+/**
  * Walk the document and mark orphaned in-progress nodes as canceled.
  *
  * Returns `null` if nothing changed (so the caller can skip the
@@ -508,25 +547,16 @@ export function update(
             ];
             // A new session started live: the conversation before its divider
             // stays on screen (the agent just doesn't have it), but nothing of
-            // the old session is still in progress — its running tools and
-            // open thoughts are canceled, as a restore would. Gated on this
-            // batch carrying a fresh boundary, so the per-chunk hot path pays
-            // one scan of the (small) batch.
+            // the old session is still in progress. Gated on this batch
+            // carrying a fresh boundary, so the per-chunk hot path pays one
+            // scan of the (small) batch.
             // SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §3 (revised 2026-10-01).
             if (command.newNodes.some((n) => n.type === "session_outcome" && n.outcome === "fresh")) {
                 const boundary = lastFreshBoundaryIndex(next);
-                const scrub =
-                    boundary > 0
-                        ? scrubOrphanedInProgress(next.slice(0, boundary), Date.now(), { hasContentAfter: true })
-                        : null;
-                if (scrub) {
-                    for (let i = 0; i < boundary; i++) next[i] = scrub.nodes[i];
-                    flushEvents.push({
-                        type: "orphans-scrubbed",
-                        markdownCanceled: scrub.markdownCanceled,
-                        toolsCanceled: scrub.toolsCanceled,
-                        resolvedToolNodes: scrub.resolvedToolNodes,
-                    });
+                const ended = boundary > 0 ? endOldSession(next.slice(0, boundary), Date.now()) : null;
+                if (ended) {
+                    for (let i = 0; i < boundary; i++) next[i] = ended.nodes[i];
+                    flushEvents.push({ type: "orphans-scrubbed", ...ended.counts });
                 }
             }
             return {
