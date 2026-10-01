@@ -46,6 +46,7 @@ import {
     prewarmTearOffSnapshot,
     prewarmWindowTabSnapshot,
     resetTearOffSnapshotForTests,
+    settleTearOffSnapshotForTests,
     takeTearOffSnapshot,
     takeWindowTabSnapshot,
 } from "./tearoff-snapshot";
@@ -89,8 +90,12 @@ beforeEach(() => {
     resetTearOffSnapshotForTests();
     stubImagePipeline();
 });
-afterEach(() => {
+afterEach(async () => {
     vi.useRealTimers();
+    // No capture a test didn't await may finish after it: one that did used to
+    // throw inside jsdom after teardown (docs/reports/
+    // REPORT_CI_VITEST_TEAROFF_SNAPSHOT_UNCAUGHT_2026_09_30.md).
+    await settleTearOffSnapshotForTests();
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
 });
@@ -140,6 +145,48 @@ describe("tear-off snapshot", () => {
         expect(shots.calls).toEqual([]);
     });
 
+    // The CI flake's throw site was jsdom's FileReader; the encode must not use it.
+    it("encodes without FileReader", async () => {
+        vi.stubGlobal(
+            "FileReader",
+            class {
+                readAsDataURL() {
+                    throw new Error("FileReader must not be used");
+                }
+            }
+        );
+        mountPane("b1");
+        prewarmTearOffSnapshot("b1");
+        expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
+    });
+
+    it("settling waits for an encode the test didn't await", async () => {
+        let encoded = false;
+        vi.stubGlobal(
+            "OffscreenCanvas",
+            class {
+                getContext() {
+                    return { drawImage: () => {} };
+                }
+                async convertToBlob() {
+                    const blob = new Blob(["slow"], { type: "image/jpeg" });
+                    const read = blob.arrayBuffer.bind(blob);
+                    blob.arrayBuffer = async () => {
+                        await new Promise((r) => setTimeout(r, 30));
+                        encoded = true;
+                        return read();
+                    };
+                    return blob;
+                }
+            }
+        );
+        mountPane("b1");
+        prewarmTearOffSnapshot("b1");
+        expect(await takeTearOffSnapshot("b2")).toBeUndefined();
+        await settleTearOffSnapshotForTests();
+        expect(encoded).toBe(true);
+    });
+
     it("ignores a picture of a different pane", async () => {
         mountPane("b1");
         prewarmTearOffSnapshot("b1");
@@ -149,11 +196,14 @@ describe("tear-off snapshot", () => {
     it("gives up on a capture still in flight after the budget", async () => {
         vi.useFakeTimers();
         mountPane("b1");
-        shots.next = new Promise(() => {});
+        let release!: () => void;
+        shots.next = new Promise((resolve) => (release = () => resolve({ jpeg_base64: btoa("late") })));
         prewarmTearOffSnapshot("b1");
         const taken = takeTearOffSnapshot("b1");
         await vi.advanceTimersByTimeAsync(60);
         expect(await taken).toBeUndefined();
+        // Let the stalled capture finish, so afterEach's settle doesn't wait on it forever.
+        release();
     });
 
     it("drops a stale picture", async () => {
