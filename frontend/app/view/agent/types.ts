@@ -537,7 +537,13 @@ export interface MemoryReinjectionNode {
  * docs/specs/SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.1.
  */
 export interface ContextItem {
-    kind: "global_memory" | "personal_memory" | "running_summary" | "compaction_summary" | "continuation_packet";
+    kind:
+        | "global_memory"
+        | "personal_memory"
+        | "running_summary"
+        | "compaction_summary"
+        | "continuation_packet"
+        | "startup_file";
     /** Entry name, file name, or a fixed label for the kind. */
     name: string;
     /** Global Memory only: AgentMux's own system entry, or the workspace's. */
@@ -558,6 +564,19 @@ export interface ContextItem {
     excerpt?: string;
     /** The full text, when the transcript already holds it (the compaction summary). */
     body?: string;
+    /**
+     * `startup_file` only: a file the CLI read by itself at session start
+     * (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §4).
+     * `role`: `user_instructions`, `instructions`, `instructions_import`,
+     * `skills` or `mcp_servers`.
+     */
+    role?: string;
+    /** `startup_file` only: who writes it. `external` = outside the workspace, not AgentMux's. */
+    owner?: "agentmux" | "user" | "external";
+    /** `startup_file` skills / MCP servers: how many are listed (they carry no size). */
+    count?: number;
+    /** `startup_file` only: AgentMux sections it carries, e.g. `global_memory`. */
+    contains?: string[];
 }
 
 /**

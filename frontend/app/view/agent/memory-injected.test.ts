@@ -66,6 +66,57 @@ const oldFrame = {
     timestamp: "2026-09-27T07:00:00+00:00",
 };
 
+describe("buildMemoryInjectedNode — startup files (LC2)", () => {
+    const startupFrame = {
+        type: "system",
+        subtype: "agentmux_memory_injected",
+        id: "memory-injected-s1-startup-1",
+        reason: "startup",
+        entries: [
+            {
+                label: "~/.agentmux/agents/CLAUDE.md",
+                source: "startup",
+                kind: "startup_file",
+                name: "~/.agentmux/agents/CLAUDE.md",
+                path: "C:/Users/u/.agentmux/agents/CLAUDE.md",
+                size_bytes: 24000,
+                tokens: 6000,
+                delivered: "full",
+                role: "instructions",
+                owner: "external",
+            },
+            {
+                label: "~/.agentmux/agents/a/.claude/AGENTMUX_MEMORY.md",
+                source: "startup",
+                kind: "startup_file",
+                name: "~/.agentmux/agents/a/.claude/AGENTMUX_MEMORY.md",
+                size_bytes: 10000,
+                tokens: 2500,
+                role: "instructions_import",
+                owner: "agentmux",
+                contains: ["global_memory", "skills_index"],
+            },
+            { label: "MCP servers: agentmux", source: "startup", kind: "startup_file", name: "MCP servers: agentmux", size_bytes: 0, tokens: 0, role: "mcp_servers", owner: "agentmux", count: 1 },
+            { label: "[AgentMux System] App API", source: "global", kind: "global_memory", name: "App API", tier: "system", size_bytes: 3400, tokens: 850 },
+        ],
+        timestamp: "2026-10-01T07:00:00+00:00",
+    };
+
+    it("reads each startup file's role, owner, count and what it carries", () => {
+        const items = buildMemoryInjectedNode(startupFrame, { now: 0 })!.items;
+        expect(items.map((i) => i.kind)).toEqual(["startup_file", "startup_file", "startup_file", "global_memory"]);
+        expect(items[0]).toMatchObject({ role: "instructions", owner: "external", path: "C:/Users/u/.agentmux/agents/CLAUDE.md" });
+        expect(items[1].contains).toEqual(["global_memory", "skills_index"]);
+        expect(items[2]).toMatchObject({ role: "mcp_servers", count: 1 });
+        expect(items[3].owner).toBeUndefined();
+    });
+
+    it("ignores an owner it doesn't know", () => {
+        const odd = { ...startupFrame, entries: [{ ...startupFrame.entries[0], owner: "someone" }] };
+        expect(buildMemoryInjectedNode(odd, { now: 0 })!.items[0].owner).toBeUndefined();
+    });
+});
+
 describe("buildMemoryInjectedNode", () => {
     it("recognises only the memory-injected frame", () => {
         expect(isMemoryInjectedFrame(frame)).toBe(true);

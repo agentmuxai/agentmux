@@ -611,6 +611,35 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(onTogglePin).not.toHaveBeenCalled();
     });
 
+    it("lists startup files with their owner, a count for listings, and the Global Memory they repeat (LC2)", () => {
+        renderMemory({
+            type: "context_delivery",
+            id: "memory-injected-s1-startup-1",
+            reason: "startup",
+            timestamp: 0,
+            items: [
+                { kind: "startup_file", name: "~/.agentmux/agents/CLAUDE.md", role: "instructions", owner: "external", sizeBytes: 24000, tokens: 6000 },
+                {
+                    kind: "startup_file",
+                    name: "AGENTMUX_MEMORY.md",
+                    role: "instructions_import",
+                    owner: "agentmux",
+                    contains: ["global_memory"],
+                    sizeBytes: 10000,
+                    tokens: 2500,
+                },
+                { kind: "startup_file", name: "MCP servers: agentmux", role: "mcp_servers", owner: "agentmux", count: 1, sizeBytes: 0, tokens: 0 },
+                { kind: "global_memory", name: "App API", tier: "system", sizeBytes: 3400, tokens: 850 },
+            ],
+        });
+        expect(screen.getByText("Given to the agent · new session · 4 items")).toBeInTheDocument();
+        expect(screen.getByText("Hand-maintained")).toBeInTheDocument();
+        expect(screen.getAllByText("AgentMux")).toHaveLength(2);
+        expect(screen.getByText("+ Global Memory")).toBeInTheDocument();
+        expect(screen.getByText("1 listed")).toBeInTheDocument();
+        expect(screen.getByText("AgentMux system")).toBeInTheDocument();
+    });
+
     it("shows the size advice when Personal Memory is large", () => {
         renderMemory(memoryCard("high"));
         expect(screen.getByText(/Personal memory has grown large/)).toBeInTheDocument();

@@ -38,7 +38,8 @@ const REASON: Record<string, ContextDeliveryNode["reason"]> = {
     compact: "compaction",
 };
 
-const KINDS: ReadonlyArray<ContextItem["kind"]> = ["global_memory", "personal_memory", "running_summary"];
+const KINDS: ReadonlyArray<ContextItem["kind"]> = ["global_memory", "personal_memory", "running_summary", "startup_file"];
+const OWNERS: ReadonlyArray<NonNullable<ContextItem["owner"]>> = ["agentmux", "user", "external"];
 
 const SYSTEM_PREFIX = "[AgentMux System] ";
 const WORKSPACE_PREFIX = "[Workspace] ";
@@ -80,6 +81,19 @@ function toItem(x: RawFrame): ContextItem {
         sizeBytes: num(x.size_bytes),
         tokens: num(x.tokens),
         ...(typeof x.source_tokens === "number" ? { sourceTokens: num(x.source_tokens) } : {}),
+        ...(kind === "startup_file" ? startupFields(x) : {}),
+    };
+}
+
+/** A `startup_file` item's role, owner, count and what it contains. */
+function startupFields(x: RawFrame): Partial<ContextItem> {
+    const owner = OWNERS.find((o) => o === x.owner);
+    const contains = Array.isArray(x.contains) ? x.contains.filter((c): c is string => typeof c === "string") : [];
+    return {
+        ...(str(x.role) ? { role: str(x.role) } : {}),
+        ...(owner ? { owner } : {}),
+        ...(typeof x.count === "number" ? { count: x.count } : {}),
+        ...(contains.length > 0 ? { contains } : {}),
     };
 }
 

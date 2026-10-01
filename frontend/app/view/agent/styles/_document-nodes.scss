@@ -1222,6 +1222,13 @@ $transcript-preview-max-height: calc(50vh / 3);
             white-space: nowrap;
         }
 
+        // A startup file that also carries the Global Memory (it reaches the
+        // agent twice); informational, so muted rather than a warning.
+        .agent-context-delivery-item-dup {
+            color: var(--secondary-text-color);
+            border-style: dashed;
+        }
+
         // An item the part cap cut: say so, and dim what never went out.
         .agent-context-delivery-item-cut {
             font-size: 11px;

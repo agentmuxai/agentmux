@@ -83,6 +83,26 @@ pub(crate) struct EntrySize {
     /// Memory size band measures, so a cut delivery still warns.
     pub source_size_bytes: usize,
     pub source_tokens: usize,
+    /// A file the CLI read by itself at startup (`kind: "startup_file"`).
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub startup: Option<StartupDetail>,
+}
+
+/// What a `startup_file` item adds (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_
+/// STARTUP_FILES_2026_09_30.md §4.1, `backend::startup_files`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct StartupDetail {
+    /// `user_instructions`, `instructions`, `instructions_import`, `skills`
+    /// or `mcp_servers`.
+    pub role: &'static str,
+    /// `agentmux`, `user` or `external`.
+    pub owner: &'static str,
+    /// Skills and MCP servers: how many are listed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<usize>,
+    /// AgentMux sections the file carries: `global_memory`, `skills_index`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub contains: Vec<&'static str>,
 }
 
 /// How long a claim on one event (a session start, a compaction) holds: the
@@ -182,6 +202,13 @@ pub(crate) struct PartRequest {
     source: String,
     /// 1-based.
     part: usize,
+    /// The session's working directory and Claude's config dir, from the
+    /// hook (its stdin `cwd`, its env `CLAUDE_CONFIG_DIR`): where the CLI
+    /// looked for its startup files. Empty from an older hook binary.
+    #[serde(default)]
+    cwd: String,
+    #[serde(default)]
+    config_dir: String,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -226,10 +253,13 @@ pub(crate) async fn handle_session_start_part(
         Some(d) => d,
         None => {
             let uid = caller.as_ref().and_then(|c| c.uid()).map(str::to_string);
+            let launch = LaunchDirs::from_request(&req);
             let composed = {
                 let state = state.clone();
                 let block_id = req.block_id.clone();
-                tokio::task::spawn_blocking(move || compose_delivery(&state, &block_id, uid.as_deref(), reason, now))
+                tokio::task::spawn_blocking(move || {
+                    compose_delivery(&state, &block_id, uid.as_deref(), reason, launch.as_ref(), now)
+                })
                     .await
                     .unwrap_or_else(|e| {
                         tracing::warn!(error = %e, "memory delivery: composing failed");
@@ -337,7 +367,58 @@ pub(crate) fn register_memory_delivery_handlers(engine: &std::sync::Arc<crate::b
 
 /// Reads the memory and composes the delivery. `None` when there is nothing
 /// to deliver.
-fn compose_delivery(state: &AppState, block_id: &str, agent_uid: Option<&str>, reason: Reason, now: i64) -> Option<Delivery> {
+/// Where a session's CLI looked for its startup files.
+#[derive(Debug, Clone)]
+struct LaunchDirs {
+    cwd: std::path::PathBuf,
+    config_dir: Option<std::path::PathBuf>,
+}
+
+impl LaunchDirs {
+    fn from_request(req: &PartRequest) -> Option<Self> {
+        let cwd = req.cwd.trim();
+        (!cwd.is_empty()).then(|| Self {
+            cwd: cwd.into(),
+            config_dir: Some(req.config_dir.trim()).filter(|c| !c.is_empty()).map(Into::into),
+        })
+    }
+}
+
+/// The files the CLI read by itself at session start, as card items. Only
+/// for a new session: on `/clear` and compaction they are still in context.
+fn startup_items(launch: &LaunchDirs) -> Vec<EntrySize> {
+    let home = dirs::home_dir();
+    crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
+        .into_iter()
+        .map(|f| {
+            let (size_bytes, tokens) = (f.text.len(), f.text.chars().count().div_ceil(4));
+            EntrySize {
+                label: f.name.clone(),
+                source: "startup",
+                size_bytes,
+                tokens,
+                kind: "startup_file",
+                name: f.name,
+                tier: None,
+                bundle_id: None,
+                path: Some(f.path.to_string_lossy().into_owned()),
+                delivered: "full",
+                source_size_bytes: size_bytes,
+                source_tokens: tokens,
+                startup: Some(StartupDetail { role: f.role, owner: f.owner.as_str(), count: f.count, contains: f.contains }),
+            }
+        })
+        .collect()
+}
+
+fn compose_delivery(
+    state: &AppState,
+    block_id: &str,
+    agent_uid: Option<&str>,
+    reason: Reason,
+    launch: Option<&LaunchDirs>,
+    now: i64,
+) -> Option<Delivery> {
     let mut entries = global_entries(state, block_id);
     if let Some(uid) = agent_uid {
         entries.extend(personal_entries(uid));
@@ -349,8 +430,14 @@ fn compose_delivery(state: &AppState, block_id: &str, agent_uid: Option<&str>, r
     let (parts, delivered_chars) =
         memory_delivery::split_into_parts_counted(&composed.text, memory_delivery::MAX_PART_CHARS, memory_delivery::HOOK_PARTS);
     let acked = vec![false; parts.len()];
+    // What the CLI loaded itself comes first, then what the hook carried.
+    let mut items = match (reason, launch) {
+        (Reason::Startup, Some(launch)) => startup_items(launch),
+        _ => Vec::new(),
+    };
+    items.extend(delivery_items(&entries, &composed, delivered_chars));
     Some(Delivery {
-        entries: delivery_items(&entries, &composed, delivered_chars),
+        entries: items,
         summary_bytes: summary.map_or(0, |s| s.len()),
         parts,
         acked,
@@ -444,6 +531,7 @@ fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, deliv
                     delivered: delivered.as_str(),
                     source_size_bytes,
                     source_tokens,
+                    startup: None,
                 },
                 None => EntrySize {
                     label: "Running summary".into(),
@@ -458,6 +546,7 @@ fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, deliv
                     delivered: delivered.as_str(),
                     source_size_bytes,
                     source_tokens,
+                    startup: None,
                 },
             }
         })
@@ -520,6 +609,7 @@ mod tests {
                 delivered: "full",
                 source_size_bytes: 5,
                 source_tokens: 2,
+                startup: None,
             }],
             summary_bytes: 0,
             acked: vec![false; parts],
@@ -622,6 +712,49 @@ mod tests {
         assert_eq!(f["entries"][0]["size_bytes"], 5);
         assert_eq!(f["entries"][0]["tokens"], 2);
         assert_eq!(f["id"], "memory-injected-s1-startup-1790000000000");
+    }
+
+    /// A new session's card lists the files the CLI loaded by itself, as
+    /// `startup_file` items with their role and owner flattened onto the item
+    /// (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30 §4).
+    #[test]
+    fn startup_items_carry_role_owner_and_what_the_file_contains() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("ws");
+        std::fs::create_dir_all(cwd.join(".claude")).unwrap();
+        std::fs::write(cwd.join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md\n").unwrap();
+        std::fs::write(cwd.join(".claude/AGENTMUX_MEMORY.md"), "# [AgentMux System] App API\n").unwrap();
+        std::fs::write(cwd.join(".mcp.json"), r#"{"mcpServers":{"agentmux":{}}}"#).unwrap();
+        let launch = LaunchDirs { cwd: cwd.clone(), config_dir: None };
+
+        let items: Vec<serde_json::Value> =
+            startup_items(&launch).iter().map(|i| serde_json::to_value(i).unwrap()).collect();
+        let memory = items.iter().find(|i| i["role"] == "instructions_import").expect("the import");
+        assert_eq!(memory["kind"], "startup_file");
+        assert_eq!(memory["owner"], "agentmux");
+        assert_eq!(memory["contains"], serde_json::json!(["global_memory"]));
+        assert_eq!(memory["delivered"], "full");
+        assert!(memory.get("startup").is_none(), "flattened, not nested");
+        let own = items.iter().find(|i| i["role"] == "instructions").unwrap();
+        assert_eq!(own["owner"], "user");
+        assert!(own.get("contains").is_none(), "empty lists are left out");
+        let mcp = items.iter().find(|i| i["role"] == "mcp_servers").unwrap();
+        assert_eq!((mcp["count"].as_u64(), mcp["size_bytes"].as_u64()), (Some(1), Some(0)));
+    }
+
+    #[test]
+    fn launch_dirs_need_a_cwd_and_ignore_an_empty_config_dir() {
+        let req = |cwd: &str, config_dir: &str| PartRequest {
+            block_id: "b".into(),
+            session_id: "s".into(),
+            source: "startup".into(),
+            part: 1,
+            cwd: cwd.into(),
+            config_dir: config_dir.into(),
+        };
+        assert!(LaunchDirs::from_request(&req("", "/cfg")).is_none(), "an older hook sends no cwd");
+        let l = LaunchDirs::from_request(&req("/ws", " ")).unwrap();
+        assert_eq!((l.cwd, l.config_dir), ("/ws".into(), None));
     }
 
     #[test]
