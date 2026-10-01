@@ -243,10 +243,11 @@ work without them.
 
 **Verification beyond the tracker:** the before/after snapshot (§6.2 step 8)
 walks descendants by parent PID, independent of the tracker. So a process that
-escaped the job or group (e.g. via `Start-Process`, still unverified per
-`RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`) is still found,
-stopped and reported. Escaping the tracker should no longer mean escaping
-teardown.
+escaped the job or group (the Windows assignment race, a job-creation failure,
+a Unix `setsid` the tracker didn't record) is still found, stopped and
+reported. Escaping the tracker should no longer mean escaping teardown.
+`Start-Process` is not such an escape on today's Windows build (verified,
+§11 O4).
 
 ### 6.5 srv-spawned processes join the agent's tracker
 
@@ -379,7 +380,14 @@ for teardown. A lint test pins it (§9).
 - **Phase 1: one inventory, one path, no behaviour change.**
   - Add `AgentResources` and `agent_teardown::run` with today's behaviour for
     each consumer, encoded as policies.
-  - Route every consumer through it (§6.8).
+  - Route every user-facing consumer through it (§6.8): `/quit`, `QuitSelf`,
+    `ClosePane` (all forms), pane, tab, window-tab and window ×, Stop /
+    `agent.stop` / `FleetBulkStop`, and the orphan reaper (which closes via
+    `close_pane`).
+  - Controller replace (`stop_for_replace`, below the saga layer in
+    `blockcontroller`) and app exit (`main.rs`) move in Phase 2, together with
+    their behaviour changes. The structural test allow-lists exactly those two
+    until then.
   - Add the structural tests (§9.1–2).
   - The close dialog and `/quit` summary read the inventory.
 - **Phase 2: close the gaps on Windows.**
