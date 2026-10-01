@@ -1181,9 +1181,11 @@ pub(super) fn write_agent_config_files(
 
     let base_path = std::path::Path::new(&expanded_dir);
     if !base_path.exists() {
-        std::fs::create_dir_all(base_path)
+        std::fs::create_dir_all(base_path) // workdir-fs: creates the workdir itself
             .map_err(|e| format!("failed to create working dir: {e}"))?;
     }
+    let wd = crate::backend::workdir_fs::Workdir::open(base_path)
+        .map_err(|e| format!("failed to open working dir {}: {e}", base_path.display()))?;
 
     // Remove skill-derived files (.claude/commands/*.md, .claude/skills/*/SKILL.md)
     // that WE wrote on a previous launch but aren't part of this run's output --
@@ -1209,17 +1211,6 @@ pub(super) fn write_agent_config_files(
             }
             continue;
         }
-        // Same defense-in-depth join as the cleanup pass above.
-        let Ok(file_path) = crate::backend::base::safe_join_within_base(base_path, &file.filename)
-        else {
-            tracing::warn!(
-                work_dir = %expanded_dir,
-                path = %file.filename,
-                "write_agent_config_files: refusing to write a config path that \
-                 escapes the working directory"
-            );
-            continue;
-        };
         // Every OTHER provider's startup-instructions filename (AGENTS.md,
         // GEMINI.md, QWEN.md, .pi/APPEND_SYSTEM.md) never overwrites a
         // pre-existing file — codex P1, PR #2788: unlike CLAUDE.md's full
@@ -1242,13 +1233,20 @@ pub(super) fn write_agent_config_files(
                 .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
             continue;
         }
-        if let Some(parent) = file_path.parent() {
-            if !parent.exists() {
-                let _ = std::fs::create_dir_all(parent);
+        // Through the workdir (SPEC_WORKDIR_SAFE_WRITES_2026_10_01): a path
+        // outside it, under a folder linking out of it, or onto a symlink is
+        // refused and skipped, like an escaping path always was here.
+        match wd.write(&file.filename, file.content.as_bytes(), false) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                tracing::warn!(
+                    work_dir = %expanded_dir,
+                    path = %file.filename,
+                    error = %e,
+                    "write_agent_config_files: refusing to write a config path outside the working directory"
+                );
             }
+            other => other.map_err(|e| format!("failed to write {}: {e}", file.filename))?,
         }
-        std::fs::write(&file_path, &file.content)
-            .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
     }
 
     crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &new_managed_skill_paths);
@@ -1478,6 +1476,47 @@ mod write_agent_config_files_tests {
         write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
 
         assert!(sentinel.exists(), "file outside the working directory must never be deleted");
+    }
+
+    /// A `.claude` that links outside the workdir: the generic file loop
+    /// (skill files, settings) used to write straight through it, with only
+    /// a lexical check (SPEC_WORKDIR_SAFE_WRITES_2026_10_01 §1). Now refused
+    /// and skipped, and the launch still succeeds.
+    #[test]
+    fn config_files_are_never_written_through_a_claude_folder_linking_outside() {
+        let mstore = make_store();
+        let id_store = make_store();
+        let work_dir = tempfile::tempdir().unwrap();
+        let work_dir_str = work_dir.path().to_str().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(outside.path(), work_dir.path().join(".claude")).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(outside.path(), work_dir.path().join(".claude")).is_ok();
+        if !linked {
+            return; // this OS user can't create links
+        }
+
+        let mut agent = make_agent("agent-1", work_dir_str);
+        mstore.agent_def_insert(&mut agent).unwrap();
+        mstore.skill_upsert_unique(&mstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+
+        let leaked: Vec<_> = walkdir_files(outside.path());
+        assert!(leaked.is_empty(), "nothing may be written outside the workdir, found {leaked:?}");
+    }
+
+    fn walkdir_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                out.extend(walkdir_files(&p));
+            } else {
+                out.push(p);
+            }
+        }
+        out
     }
 
     /// reagentx P1 on PR #2639: a bundle referencing a private MCP server
