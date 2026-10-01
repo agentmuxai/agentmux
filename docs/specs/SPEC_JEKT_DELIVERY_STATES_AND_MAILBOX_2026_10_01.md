@@ -9,6 +9,7 @@
 - `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md` — the relay lease, so one instance at a time owns an agent.
 - `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` — trust fields a stored jekt must keep (§8).
 - `docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md` — four jekts sat "QUEUED… starting up" for an hour.
+- `SPEC_LAN_FIREWALL_SETUP_2026_10_01.md` (AgentX, proposed) — the same afternoon, LAN jekts between two machines failed with no warning anywhere because a Windows Firewall rule covered only the Public profile. The LAN tier fails silently in the same way the relay tier does (§3.4).
 - Superseded, kept for history: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`, `SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10.md`.
 
 ## 1. The incident that prompted this (2026-10-01, UTC)
@@ -95,7 +96,8 @@ or the failures.
 | starting / restarting / stopping | in-memory `deferred_deliveries` (cap 64) | QUEUED "don't resend" | flushed by a 500 ms watchdog; with no process and no spawn for ~10 s the queue is dropped with a log line only | **silent** (G5) |
 | defined, no process (pane not loaded or stopped) | relay **first**, local hold second | QUEUED via relay (signed-in sender) or HELD | relay: pulled only on a wake (§1), expires at 30 min; hold: replayed on registration or every 30 s, dropped after 20 failed attempts or 24 h | **silent** (G1, G2, G6) |
 | defined, **spawn gate refuses** (no credentials, deleted account) | none | `Message delivery failed: identity spawn gate…` | not held, not queued; for host/LAN senders the jekt is dropped; for WAN it is released back to pending | the sender is told it failed, but not that retrying later would work (G4) |
-| other machine (LAN/WAN) | forward / relay | Delivered or QUEUED per the peer / relay | WAN `delivered` on the relay = the receiver's srv claimed it, not that the model has it | **silent** on expiry (G9) |
+| other machine, LAN | mDNS lookup, then forward | Delivered or QUEUED per the peer | a peer that never resolved (firewall, mDNS) is simply not found, so the jekt falls to the next tier (relay, then hold) and the sender sees QUEUED via the relay, with nothing saying the LAN tier is down | **silent** (§3.4) |
+| other machine, WAN | relay | QUEUED per the relay | WAN `delivered` on the relay = the receiver's srv claimed it, not that the model has it | **silent** on expiry (G9) |
 
 ### 3.3 Gaps
 
@@ -108,7 +110,12 @@ or the failures.
 - **G7. There is no mailbox to read.** No MCP tool or RPC lists held, deferred or relay-pending messages. An agent coming online cannot ask "what did I miss?".
 - **G8. Presence is only "registered".** `DiscoverAgents.addressable` means "in the handler's name map" (`handler.rs:616-623`); a CLI that is up but unauthenticated is `addressable: true`. No auth state, no queue depth.
 - **G9. The sender never learns the end of the story.** The relay's `status` endpoint exists (`GET /reactive/status/:id`) but nothing calls it; `expired` is declared and never set; after 30 min the row is simply filtered out.
+- **G11. A broken LAN tier is invisible to the sender.** `SPEC_LAN_FIREWALL_SETUP_2026_10_01.md` records two machines on one LAN where each saw a different peer list and no LAN jekt could be sent, with no warning in either log. A send to a LAN peer that never resolved looks the same as a send to a name that does not exist.
 - **G10. `SendMessage`'s description is stale** (omits `HELD` and the errors, still says an unknown name "also returns QUEUED" as the only caveat).
+
+### 3.4 Silent failure is the common thread
+
+The relay (G1), the deferred queue (G5), the held row (G6), the spawn gate (G4) and now the LAN tier (G11) each lose or strand a message without telling the sender. They were found one at a time, over six months, each after a person noticed a missing message. The design below treats "every path reports its end state" as the requirement rather than fixing the paths individually.
 
 ## 4. Principles
 
@@ -190,6 +197,8 @@ holds the row (local mailbox) or the relay record (relayed); an instance that is
 notice on its next sync, like any relay message. This is what makes "Do not resend" safe to say.
 
 ### 5.6 Presence
+
+Where a LAN peer was expected but not resolved, the result says so (`QUEUED via the cloud relay (LAN peer not found — LAN may be unavailable here)`). The indicator and reasons from `SPEC_LAN_FIREWALL_SETUP_2026_10_01.md` (§ on the status-bar LAN state) are the source for "LAN unavailable"; this spec only asks that the send result use them rather than duplicate the check.
 
 `DiscoverAgents` adds, per agent: `state` (§5.2), `mailbox_pending`, and `last_turn_at`. `addressable` stays
 (back-compat) but is documented as "registered". A sender that cares can check `needs_login` before sending;
