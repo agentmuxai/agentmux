@@ -148,10 +148,18 @@ pub struct MemoryDeliveryClaimFallbackResult {
     pub deliver: bool,
 }
 
-/// `globalmemory:sections` — no arguments.
+/// `globalmemory:sections`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct CommandGlobalMemorySectionsData {}
+pub struct CommandGlobalMemorySectionsData {
+    /// The agent pane the sections are for. Its `agentMode` decides which
+    /// Operator Config entries are included, as for its startup file
+    /// (`operator_config_seed::global_bundles_for_agent`). Absent: every
+    /// entry, as a host agent gets them.
+    #[serde(default)]
+    #[ts(optional)]
+    pub block_id: Option<String>,
+}
 
 /// `globalmemory:import_sources` — no arguments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]

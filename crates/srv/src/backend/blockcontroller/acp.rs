@@ -688,6 +688,8 @@ impl AcpController {
                 &mut env_vars,
             );
         }
+        // The workspace the "Your workspace" Operator Config entry points at.
+        crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
         crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
         crate::backend::account_login_guard::strip_account_login(&mut env_vars);
         env_vars
@@ -959,6 +961,18 @@ mod tests {
             std::path::PathBuf::from(&env["GH_CONFIG_DIR"]),
             crate::backend::gh_guard::guard_config_home().join("gh-acpy")
         );
+    }
+
+    /// A host ACP agent is told where its workspace is, like every other
+    /// host spawn path (`carry_agent_workdir_env`).
+    #[test]
+    fn an_acp_spawn_env_carries_the_agent_workdir() {
+        let ws = std::env::temp_dir().join("acpy-0930a");
+        let mut meta = super::super::super::obj::MetaMapType::new();
+        meta.insert("cmd:cwd".to_string(), serde_json::json!(ws.to_string_lossy()));
+        meta.insert("cmd:env".to_string(), serde_json::json!({"AGENTMUX_AGENT_WORKDIR": "stale"}));
+        let ctrl = AcpController::new("tab".to_string(), "block-acp-workdir".to_string(), None, None, None, None);
+        assert_eq!(std::path::PathBuf::from(&ctrl.spawn_env(&meta)["AGENTMUX_AGENT_WORKDIR"]), ws);
     }
 
     /// No agent env carries the account's cloud login, even from a

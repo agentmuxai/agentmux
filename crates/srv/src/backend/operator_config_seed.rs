@@ -70,6 +70,74 @@ struct SeedEntry {
     id: String,
     name: String,
     instructions: String,
+    /// The agent kinds this entry is delivered to: `"host"` and/or
+    /// `"container"` (see [`agent_kind`]). Absent or empty means every agent.
+    /// Lives only in the manifest, not in `db_bundles`: a new column would
+    /// bump the schema version, and `check_schema_compat` then locks every
+    /// older build out of a shared store.db
+    /// (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md
+    /// §3.2). A local edit of the entry keeps its id, so it keeps its target.
+    #[serde(default)]
+    agent_types: Vec<String>,
+}
+
+/// The kind of agent a Global Memory entry can be targeted at: `"container"`
+/// for a Docker agent, `"host"` for everything else (`agent_type` is
+/// `"host"`, `"standalone"` or `"container"`; the block's `agentMode` carries
+/// the same value, defaulting to `"host"`).
+pub fn agent_kind(agent_mode: &str) -> &'static str {
+    if agent_mode == "container" { "container" } else { "host" }
+}
+
+/// The `agentMode` of the agent on `block_id`, for the delivery paths that
+/// know only the block (the SessionStart hook, `globalmemory:sections`).
+/// `"host"` when the block or the key is missing — srv's default for
+/// `agentMode` everywhere else.
+pub fn agent_mode_of_block(mstore: &Store, block_id: &str) -> String {
+    match mstore.get::<crate::backend::obj::Block>(block_id) {
+        Ok(Some(block)) => crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host"),
+        Ok(None) => "host".to_string(),
+        Err(e) => {
+            tracing::warn!(block_id, error = %e, "operator config: block lookup failed — delivering as a host agent");
+            "host".to_string()
+        }
+    }
+}
+
+/// The embedded manifest, parsed once for [`global_bundles_for_agent`].
+/// `None` if it doesn't parse — `embedded_manifest_parses` pins that it does.
+fn embedded_manifest() -> Option<&'static SeedManifest> {
+    static MANIFEST: std::sync::OnceLock<Option<SeedManifest>> = std::sync::OnceLock::new();
+    MANIFEST.get_or_init(|| serde_json::from_str(SEED_MANIFEST).ok()).as_ref()
+}
+
+/// Global Memory narrowed to what an agent of `agent_mode` is given: drops a
+/// system entry whose manifest entry targets other agent kinds. Workspace
+/// entries and system entries this build's manifest doesn't know always stay.
+///
+/// Every place that composes Global Memory for an agent calls this before
+/// `format_global_bundle_block`/`global_bundle_sections` — the startup file
+/// (both launch paths), the SessionStart hook and `globalmemory:sections` —
+/// so they stay the same block byte for byte.
+pub fn global_bundles_for_agent(bundles: Vec<Bundle>, agent_mode: &str) -> Vec<Bundle> {
+    match embedded_manifest() {
+        Some(manifest) => filter_for_kind(bundles, manifest, agent_kind(agent_mode)),
+        None => bundles,
+    }
+}
+
+fn filter_for_kind(bundles: Vec<Bundle>, manifest: &SeedManifest, kind: &str) -> Vec<Bundle> {
+    bundles
+        .into_iter()
+        .filter(|b| {
+            !b.is_system
+                || manifest
+                    .entries
+                    .iter()
+                    .find(|e| e.id == b.id)
+                    .is_none_or(|e| e.agent_types.is_empty() || e.agent_types.iter().any(|t| t == kind))
+        })
+        .collect()
 }
 
 /// Run Operator Config seeding on startup. Unconditional, every boot, no
@@ -323,6 +391,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             instructions: instructions.to_string(),
+            agent_types: Vec::new(),
         }
     }
 
@@ -827,5 +896,68 @@ mod tests {
             let bundle = store.bundle_get(&e.id).unwrap().expect("seeded");
             assert!(bundle.is_system);
         }
+    }
+
+    fn global(id: &str, is_system: bool) -> Bundle {
+        Bundle {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: format!("{id} body"),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system,
+        }
+    }
+
+    fn ids(bundles: &[Bundle]) -> Vec<&str> {
+        bundles.iter().map(|b| b.id.as_str()).collect()
+    }
+
+    #[test]
+    fn agent_kind_is_container_only_for_container() {
+        assert_eq!(agent_kind("container"), "container");
+        for mode in ["host", "standalone", "", "anything"] {
+            assert_eq!(agent_kind(mode), "host", "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn targeted_system_entry_reaches_only_its_kind() {
+        let mut host_only = entry("op-host", "Host", "h");
+        host_only.agent_types = vec!["host".to_string()];
+        let manifest = SeedManifest { version: 1, entries: vec![entry("op-all", "All", "a"), host_only] };
+        let bundles = || vec![global("op-all", true), global("op-host", true), global("ws", false)];
+
+        assert_eq!(ids(&filter_for_kind(bundles(), &manifest, "host")), ["op-all", "op-host", "ws"]);
+        assert_eq!(ids(&filter_for_kind(bundles(), &manifest, "container")), ["op-all", "ws"]);
+    }
+
+    #[test]
+    fn unknown_system_entries_and_workspace_entries_always_stay() {
+        // A system row this build's manifest doesn't list (a newer build
+        // seeded it on a shared store) is delivered, not silently dropped.
+        let manifest = SeedManifest { version: 1, entries: vec![] };
+        let kept = filter_for_kind(vec![global("op-newer", true), global("ws", false)], &manifest, "container");
+        assert_eq!(ids(&kept), ["op-newer", "ws"]);
+    }
+
+    #[test]
+    fn workspace_entry_is_host_only_in_the_real_manifest() {
+        let workspace = global("operator-config-workspace", true);
+        let app_api = global("operator-config-app-api", true);
+        let host = global_bundles_for_agent(vec![app_api.clone(), workspace.clone()], "standalone");
+        assert_eq!(ids(&host), ["operator-config-app-api", "operator-config-workspace"]);
+        let container = global_bundles_for_agent(vec![app_api, workspace], "container");
+        assert_eq!(ids(&container), ["operator-config-app-api"]);
     }
 }
