@@ -66,6 +66,10 @@ vi.mock("@/app/tab/tab-presets", () => ({
     DEFAULT_TAB_PRESET: {},
 }));
 
+// The new tab's content counts as settled at once here;
+// tab-content-settled.test.ts covers the wait itself.
+vi.mock("@/app/tab/tab-content-settled", () => ({ whenTabContentSettled: async () => true }));
+
 let keepLaidOut = true;
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ keepInactiveTabsLaidOut: () => keepLaidOut }));
 
