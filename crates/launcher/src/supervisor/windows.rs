@@ -1234,6 +1234,14 @@ pub(crate) async fn run_windows(
     // by the OS, so we have to terminate them ourselves to avoid
     // orphans. (gemini PR #570 round-1 MEDIUM L105 / round-2 P1
     // backstop pattern.)
+    // Let srv close its agents first (agent_teardown::app_exit): EOF on its
+    // stdin is its shutdown signal, and dropping J0 below kills it outright.
+    // Bounded; srv caps its own teardown inside this.
+    drop(srv_stdin_keepalive.take());
+    match tokio::time::timeout(agentmux_common::process::SRV_EXIT_GRACE, srv_child.wait()).await {
+        Ok(_) => log("srv exited"),
+        Err(_) => log("srv still running after its exit grace — the job takes it"),
+    }
     if job.is_none() {
         log("WARN: J0 absent — explicitly killing surviving children");
         let _ = host_child.start_kill();

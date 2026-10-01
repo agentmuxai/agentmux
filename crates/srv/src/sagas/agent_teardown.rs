@@ -95,9 +95,16 @@ impl Policy {
     }
 }
 
-/// App exit's overall cap (spec §11 O3): every agent closes concurrently under
-/// it, then the launcher's backstop (Windows J0 / Unix group kill) takes over.
-pub const APP_EXIT_CAP: std::time::Duration = std::time::Duration::from_secs(10);
+/// App exit's overall cap (spec §11 O3), the leftover-shell sweep included:
+/// every agent closes concurrently under it. It sits a second inside the
+/// launcher's wait for srv ([`agentmux_common::process::SRV_EXIT_GRACE`]),
+/// after which the launcher's backstop (Windows J0 / Unix group kill) takes
+/// whatever is left.
+pub const APP_EXIT_CAP: std::time::Duration =
+    agentmux_common::process::SRV_EXIT_GRACE.saturating_sub(std::time::Duration::from_secs(1));
+
+/// The grace the leftover-shell sweep gives its kill tasks. [reagent #1422 P2]
+const SHELL_SWEEP_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
 
 /// What a teardown did, for the consumer's summary and the audit.
 #[derive(Clone, Debug, Default, Serialize)]
@@ -160,8 +167,15 @@ pub fn replace_now(ctrl: &dyn blockcontroller::Controller) -> Result<(), String>
 /// any `Shell()` session left over (one whose agent is already gone, or whose
 /// teardown hit the cap). Returns how many controllers it closed.
 pub async fn app_exit(state: &AppState) -> usize {
-    let ids: Vec<String> = blockcontroller::get_all_controllers().into_keys().collect();
-    if tokio::time::timeout(APP_EXIT_CAP, run_many(state, &ids, Policy::app_exit())).await.is_err() {
+    let all: Vec<String> = blockcontroller::get_all_controllers().into_keys().collect();
+    // A drawer is closed by its parent's teardown (`close_sub_blocks`); listing
+    // it here too would run two teardowns of one block at once.
+    let ids = {
+        let (st, ids) = (state.clone(), all.clone());
+        tokio::task::spawn_blocking(move || without_sub_blocks(&st, ids)).await.unwrap_or(all)
+    };
+    let cap = APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE);
+    if tokio::time::timeout(cap, run_many(state, &ids, Policy::app_exit())).await.is_err() {
         tracing::warn!(agents = ids.len(), "app exit: teardown hit the cap; the launcher's backstop takes the rest");
     }
     // The kill tasks run taskkill/killpg asynchronously; give them a brief
@@ -169,9 +183,20 @@ pub async fn app_exit(state: &AppState) -> usize {
     let live = state.shell_sessions.stop_all();
     if live > 0 {
         tracing::info!(count = live, "app exit: stopping leftover persistent shells");
-        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        tokio::time::sleep(SHELL_SWEEP_GRACE).await;
     }
     ids.len()
+}
+
+/// `ids` minus any that is a sub-block (PtyShell drawer) of another block in
+/// it. Store reads: call off the async workers.
+pub(crate) fn without_sub_blocks(state: &AppState, ids: Vec<String>) -> Vec<String> {
+    let subs: std::collections::HashSet<String> = ids
+        .iter()
+        .filter_map(|id| state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten())
+        .flat_map(|b| b.subblockids.unwrap_or_default())
+        .collect();
+    ids.into_iter().filter(|id| !subs.contains(id)).collect()
 }
 
 async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std::time::Instant) -> TeardownReport {
@@ -357,8 +382,10 @@ mod tests {
         assert!(!Policy::stop(true).release_claims && !Policy::stop(true).stop_shell_sessions);
         assert_eq!(Policy::replace(), Policy { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false });
         assert_eq!(Policy::app_exit(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true });
-        // App exit covers the CLI's own grace, plus margin for the rest.
-        assert!(APP_EXIT_CAP > blockcontroller::SHUTDOWN_GRACE);
+        // App exit covers the CLI's own grace and the shell sweep, and ends
+        // before the launcher stops waiting for srv.
+        assert!(APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE) > blockcontroller::SHUTDOWN_GRACE);
+        assert!(APP_EXIT_CAP < agentmux_common::process::SRV_EXIT_GRACE);
     }
 
     /// The single path (spec §3 G1, §9.1): outside this module and the

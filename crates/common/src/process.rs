@@ -169,6 +169,12 @@ fn taskkill_tree(pid: i32) -> std::process::Command {
     cmd
 }
 
+/// How long the launcher waits, on a normal quit, for srv to exit after
+/// asking it to (EOF on its stdin; SIGTERM on Unix) before its backstop kills
+/// it. srv's own app-exit teardown (`agent_teardown::app_exit`) is capped to
+/// fit inside, so every agent gets to close before the backstop fires.
+pub const SRV_EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(9);
+
 #[cfg(test)]
 mod tests {
     use super::*;

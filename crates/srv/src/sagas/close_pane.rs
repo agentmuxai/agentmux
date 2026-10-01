@@ -898,6 +898,22 @@ mod tests {
         finish_close(&state, &a).await;
     }
 
+    /// App exit lists every controller; a drawer is left to its parent's
+    /// cascade, not torn down twice at once (ReAgent P2 on #4164).
+    #[tokio::test]
+    async fn app_exit_leaves_drawers_to_their_parent() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        let b = seed_block(&state, &tab_id).await;
+        let drawer = format!("drawer-of-{a}");
+        let mut block = state.mstore.must_get::<crate::backend::obj::Block>(&a).unwrap();
+        block.subblockids = Some(vec![drawer.clone()]);
+        state.mstore.update(&mut block).unwrap();
+        let ids = crate::sagas::agent_teardown::without_sub_blocks(&state, vec![a.clone(), drawer, b.clone()]);
+        assert_eq!(ids, vec![a, b]);
+    }
+
     /// Spec §9.5: closing the last window tab is refused BEFORE any agent in
     /// it is stopped — otherwise a refused close leaves a tab of stopped
     /// agents.

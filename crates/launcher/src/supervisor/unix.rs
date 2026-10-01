@@ -773,15 +773,16 @@ pub(crate) async fn run_unix(
     saga_coord.cancel_all_in_flight("launcher shutting down").await;
 
     // 6. Cleanup. SIGTERM both children so the host reaps its render
-    //    subprocesses (and srv shuts down cleanly), wait a short grace
-    //    window, then SIGKILL any survivor. Dropping the stdin keepalive
-    //    is srv's secondary shutdown trigger (parent-watch EOF).
+    //    subprocesses (and srv shuts down cleanly, closing its agents —
+    //    agent_teardown::app_exit), wait a bounded grace (srv caps its own
+    //    teardown inside it), then SIGKILL any survivor. Dropping the stdin
+    //    keepalive is srv's secondary shutdown trigger (parent-watch EOF).
     log("terminating children (SIGTERM → grace → SIGKILL)");
     terminate_child_gracefully(&host_child);
     terminate_child_gracefully(&srv_child);
     drop(_srv_stdin_keepalive);
     let _ = tokio::time::timeout(
-        std::time::Duration::from_millis(1500),
+        agentmux_common::process::SRV_EXIT_GRACE,
         async {
             let _ = host_child.wait().await;
             let _ = srv_child.wait().await;
