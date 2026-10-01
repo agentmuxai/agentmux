@@ -1,7 +1,7 @@
 # SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent
 
 **Date:** 2026-10-01
-**Status:** active. Phase 0 (an instance-wide open-agent map for My agents, §4.0) ships with this spec; see §11.
+**Status:** active — Phase 0 (an instance-wide open-agent map for My agents, §4.0) shipped in PR #4127; see §11.
 Phases 0.5–3 are not yet built. §8's decisions are proposed at their recommended option and await the repo owner.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: Korp's pane accepted typed messages and did nothing. Asked for a permanent fix so
