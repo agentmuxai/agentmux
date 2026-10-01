@@ -16,7 +16,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Accessor, createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
-import { firewallMessage, resolveLanIndicator } from "./lan-indicator";
+import { firewallMessage, resolveLanIndicator, shouldShowFirewallWarning } from "./lan-indicator";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
@@ -290,7 +290,13 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         <span>⚠ {props.lanDiscoveryError()}</span>
                     </div>
                 </Show>
-                <Show when={props.lanDiscoveryEnabled() && firewallMessage(props.lanFirewall()?.status)}>
+                <Show
+                    when={
+                        props.lanDiscoveryEnabled() &&
+                        shouldShowFirewallWarning(props.lanFirewall()?.status, props.lanCount()) &&
+                        firewallMessage(props.lanFirewall()?.status)
+                    }
+                >
                     {(message) => (
                         <div
                             class="status-bar-popover-row"

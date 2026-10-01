@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { FIREWALL_MESSAGES, firewallMessage, resolveLanIndicator } from "./lan-indicator";
+import { FIREWALL_MESSAGES, firewallMessage, resolveLanIndicator, shouldShowFirewallWarning } from "./lan-indicator";
 
 describe("resolveLanIndicator", () => {
     it("shows the accent-filled diamond when real peers exist", () => {
@@ -148,6 +148,27 @@ describe("resolveLanIndicator", () => {
             for (const f of ["ok", "unknown", "off", null, undefined] as const) {
                 expect(resolveLanIndicator({ enabled: true, peerCount: 2, firewall: f }).state).toBe("peers");
                 expect(resolveLanIndicator({ enabled: true, peerCount: 0, firewall: f }).state).toBe("idle");
+            }
+        });
+
+        // ReAgent P2 on #4151: the popover must not warn while the bar shows peers.
+        it("shows the popover warning on the same terms as the indicator", () => {
+            for (const f of ["needs-setup", "public-network", "managed"] as const) {
+                expect(shouldShowFirewallWarning(f, 0)).toBe(true);
+                expect(shouldShowFirewallWarning(f, 2)).toBe(false);
+            }
+            // A block is a fact: it shows even with peers listed.
+            expect(shouldShowFirewallWarning("blocked", 0)).toBe(true);
+            expect(shouldShowFirewallWarning("blocked", 3)).toBe(true);
+            for (const f of ["ok", "unknown", "off", null, undefined]) {
+                expect(shouldShowFirewallWarning(f, 0)).toBe(false);
+            }
+            // Same inputs, same answer as the indicator.
+            for (const peers of [0, 2]) {
+                for (const f of ["blocked", "needs-setup", "public-network", "managed"] as const) {
+                    const flagged = resolveLanIndicator({ enabled: true, peerCount: peers, firewall: f }).state === f;
+                    expect(shouldShowFirewallWarning(f, peers)).toBe(flagged);
+                }
             }
         });
 

@@ -67,6 +67,19 @@ export const FIREWALL_MESSAGES = {
     managed: "LAN: your administrator manages the firewall for this device, so AgentMux cannot open it",
 } as const;
 
+/**
+ * Whether the popover should show the firewall warning. Mirrors the status-bar
+ * ranking in `resolveLanIndicator`: a `blocked` verdict is a fact and always
+ * shows; the inferred ones (`needs-setup`, `public-network`, `managed`) come from
+ * a MISSING rule and yield to peers, because seeing a peer proves discovery
+ * works. Without this the bar read "N on LAN" while the popover warned that
+ * other devices cannot reach the machine (ReAgent P2 on #4151).
+ */
+export function shouldShowFirewallWarning(status: string | null | undefined, peerCount: number): boolean {
+    if (firewallMessage(status) == null) return false;
+    return status === "blocked" || peerCount <= 0;
+}
+
 export function firewallMessage(status: string | null | undefined): string | null {
     return status != null && status in FIREWALL_MESSAGES ? FIREWALL_MESSAGES[status as keyof typeof FIREWALL_MESSAGES] : null;
 }
