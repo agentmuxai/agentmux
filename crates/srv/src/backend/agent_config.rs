@@ -1293,8 +1293,17 @@ pub fn write_mcp_json_respecting_user_servers(
 
     let wd = crate::backend::workdir_fs::Workdir::open(base_path)?;
     // Refused (a symlink, or outside the workdir) before anything is read
-    // or locked: this file carries the agent's signing keys.
-    let path = wd.resolve(".mcp.json")?;
+    // or locked: this file carries the agent's signing keys. A refusal
+    // leaves the link alone and the launch goes on, as for `CLAUDE.md`
+    // (ReAgent on #4141).
+    let path = match wd.resolve(".mcp.json") {
+        Ok(path) => path,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            tracing::warn!(error = %e, "write_mcp_json_respecting_user_servers: not writing .mcp.json");
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
     let generated: Value = serde_json::from_str(generated_content).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("generated .mcp.json is not JSON: {e}"))
     })?;
@@ -2988,6 +2997,25 @@ mod mcp_json_tests {
         write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
         let servers = mcp_servers_of(dir.path());
         assert_eq!(servers.keys().collect::<Vec<_>>(), vec!["agentmux", "github"]);
+    }
+
+    /// ReAgent on #4141: a symlinked `.mcp.json`, even one pointing inside
+    /// the workdir, is left alone and the launch goes on.
+    #[test]
+    fn mcp_json_a_symlinked_file_is_left_alone_without_failing_the_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("my-mcp.json");
+        std::fs::write(&target, r#"{"mcpServers":{}}"#).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join(".mcp.json")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join(".mcp.json")).is_ok();
+        if !made {
+            return;
+        }
+        write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
+        assert!(std::fs::symlink_metadata(dir.path().join(".mcp.json")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), r#"{"mcpServers":{}}"#);
     }
 
     #[test]
