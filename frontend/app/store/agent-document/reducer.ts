@@ -14,7 +14,7 @@
  */
 
 import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
-import { isAcceptedBackgroundLaunch } from "../../view/agent/activity/tool-adapter";
+import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../view/agent/activity/tool-adapter";
 import { planRollOff } from "../../view/agent/live-feed";
 import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
 import {
@@ -626,6 +626,10 @@ export function update(
                 };
             }
             const tool = state.nodes[idx] as ToolNode;
+            // A tool that finished with a result never shows its log again
+            // (U1): a late or replayed chunk is dropped, not buffered. Expected,
+            // so no tool-chunk-dropped event: that one flags ordering bugs.
+            if (freesLog(tool)) return { state, events: [] };
             // Dedup against the last-stored chunk on (timestamp + kind +
             // content). This matters during history replay where the
             // backend rebroadcasts the chunk stream and we mustn't
@@ -910,6 +914,26 @@ function findToolIndex(state: AgentDocumentState, toolId: string): number {
     return findNodeIndex(state, toolId, "tool");
 }
 
+const FINISHED_TOOL_STATUSES = new Set<ToolNode["status"]>(["success", "failed", "denied", "canceled"]);
+
+/**
+ * Whether a tool's live log can be freed: it finished WITH a result, so its
+ * body renders the result and never the chunks again. Not an accepted
+ * background launch, whose activity row keeps following its log after the
+ * launching call returns; a call that only asked for the background (and
+ * ran synchronously, or was refused) is an ordinary finished call. Nor a
+ * long call with a dock row, which shows the log in stream order.
+ * SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.1 (U1).
+ */
+export function freesLog(tool: ToolNode): boolean {
+    return (
+        FINISHED_TOOL_STATUSES.has(tool.status) &&
+        tool.result != null &&
+        !isAcceptedBackgroundLaunch(tool) &&
+        !isFinishedDockedTool(tool)
+    );
+}
+
 function nodeReasonFor(
     state: AgentDocumentState,
     toolId: string,
@@ -991,6 +1015,14 @@ function mergeReplacement(existing: DocumentNode, replacement: DocumentNode): Do
         };
     }
     const existingLog = (existing as ToolNode).log;
+    // Finished with a result: the body renders the result (ToolOverlayLog's
+    // "result" branch) and nothing reads the chunks again, so they're freed
+    // instead of carried (U1).
+    if (freesLog(replacement as ToolNode)) {
+        return existingLog || (replacement as ToolNode).log
+            ? { ...(replacement as ToolNode), log: { chunks: [], open: false } }
+            : replacement;
+    }
     if (!existingLog || existingLog.chunks.length === 0) {
         // No buffer to carry. If the replacement is terminal, keep
         // the parser's view (likely undefined). Otherwise nothing

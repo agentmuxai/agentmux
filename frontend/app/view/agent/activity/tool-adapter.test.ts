@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { DocumentNode, ToolNode } from "../types";
-import { hasRunningPromotedTool, nextToolPromotionAt, TOOL_PROMOTION_MS, toolActivities, toolToActivity } from "./tool-adapter";
+import { hasRunningPromotedTool, nextToolPromotionAt, TOOL_PROMOTION_MS, toolActivities, toolOutputChunks, toolToActivity } from "./tool-adapter";
 
 function mkBash(overrides: Partial<ToolNode> = {}): ToolNode {
     return {
@@ -364,5 +364,27 @@ describe("whole-command sleeps promote immediately (sleep-detect.ts)", () => {
     it("ignores a micro-delay sleep entirely", () => {
         const micro = mkBash({ id: "m1", timestamp: 1000, params: { command: "sleep 2" }, status: "success", duration: 2 });
         expect(toolActivities([micro], 1000 + 60_000)).toEqual([]);
+    });
+});
+
+describe("toolOutputChunks (ReAgent P1 on #4125)", () => {
+    const base = { type: "tool", id: "t", tool: "Bash", params: { command: "make" }, collapsed: true, summary: "make" } as const;
+
+    it("uses the live log while it has chunks", () => {
+        const t = { ...base, status: "running", log: { open: true, chunks: [{ kind: "stdout", content: "building", timestamp: 1 }] } } as any;
+        expect(toolOutputChunks(t).map((c) => c.content)).toEqual(["building"]);
+    });
+
+    it("falls back to the result's stdout and stderr once the log was freed", () => {
+        const t = { ...base, status: "success", log: { open: false, chunks: [] }, result: { stdout: "done\n", stderr: "warn\n", exitCode: 0 } } as any;
+        expect(toolOutputChunks(t)).toEqual([
+            { kind: "stdout", content: "done\n", timestamp: 0 },
+            { kind: "stderr", content: "warn\n", timestamp: 0 },
+        ]);
+    });
+
+    it("falls back to a content-shaped result, and is empty with no result", () => {
+        expect(toolOutputChunks({ ...base, status: "success", result: { content: "ok" } } as any).map((c) => c.content)).toEqual(["ok"]);
+        expect(toolOutputChunks({ ...base, status: "running" } as any)).toEqual([]);
     });
 });
