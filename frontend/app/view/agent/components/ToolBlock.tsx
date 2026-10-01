@@ -153,6 +153,9 @@ interface ToolBlockProps {
 // Ctrl+wheel over a preview now simply zooms the pane, which already
 // scales previews correctly, hardcoded pixels included.
 
+/** How recent a finished row's call stamp must be for it to count as a live completion. */
+const LIVE_ARRIVAL_WINDOW_MS = 5000;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Drives the peek tooltip's live "time ago" text (§2.3 of
     // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md). Unconditional, same
@@ -174,14 +177,34 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // transition baseline.
     let prevStatus: ToolNode["status"] = props.node.status;
     let prevNodeId: string = props.node.id;
+    let arrivalChecked = false;
     const isActive = (s: ToolNode["status"]): boolean => TOOL_STATUS[s]?.active === true;
+    // A fast tool (a Read is a few ms) can start and finish inside one stream
+    // flush, so its row is first drawn already finished and there is no
+    // transition to see: it came out collapsed, sometimes. Live tool calls are
+    // stamped when the call arrives and replayed ones have no stamp
+    // (stream-parser `isReplay`), so a finished row stamped within the last few
+    // seconds is a live completion we missed, and is held like one we saw. A
+    // loaded transcript has no stamps, so it still opens collapsed
+    // (codex P1 round 2 on #988).
+    const holdIfFinishedOnArrival = (): void => {
+        const n = props.node;
+        if (isActive(n.status) || TOOL_STATUS[n.status]?.dismissed) return;
+        if (n.timestamp == null || Date.now() - n.timestamp > LIVE_ARRIVAL_WINDOW_MS) return;
+        props.onHoldOpen?.();
+    };
     createEffect(() => {
         const s = props.node.status;
         const id = props.node.id;
         if (id !== prevNodeId) {
             prevNodeId = id;
             prevStatus = s;
+            untrack(holdIfFinishedOnArrival);
             return;
+        }
+        if (!arrivalChecked) {
+            arrivalChecked = true;
+            untrack(holdIfFinishedOnArrival);
         }
         if (isActive(prevStatus) && !isActive(s)) {
             props.onHoldOpen?.();
@@ -431,6 +454,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                             </span>
                         </Show>
                     </span>
+                    <Show when={!authoredSummary() && header().range}>
+                        <span class="agent-tool-range">{header().range}</span>
+                    </Show>
                     {/* Composed headers only: an authored summary already
                         carries the note (the muxspect force-cancel writes
                         both, for any tool — AskUserQuestion included). */}

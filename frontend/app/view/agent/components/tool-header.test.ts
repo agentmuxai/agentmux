@@ -20,14 +20,14 @@ const node = (over: Partial<ToolNode>): ToolNode => ({
 describe("toolHeaderParts", () => {
     it("core tools keep their name next to the icon", () => {
         const parts = toolHeaderParts(node({ tool: "Bash", toolName: "Bash", params: { command: "ls -la" } }));
-        expect(parts).toEqual({ icon: "🔧", label: "Bash", detail: "ls -la" });
+        expect(parts).toEqual({ icon: "🔧", label: "Bash", detail: "ls -la", range: null });
     });
 
     it("web tools drop the name: the globe plus a query or URL already says what it is", () => {
         const search = toolHeaderParts(node({ toolName: "WebSearch", params: { query: "solid docs" } }));
-        expect(search).toEqual({ icon: "🌐", label: null, detail: "solid docs" });
+        expect(search).toEqual({ icon: "🌐", label: null, detail: "solid docs", range: null });
         const fetch = toolHeaderParts(node({ toolName: "WebFetch", params: { url: "https://example.com/a/b" } }));
-        expect(fetch).toEqual({ icon: "🌐", label: null, detail: "example.com/a/b" });
+        expect(fetch).toEqual({ icon: "🌐", label: null, detail: "example.com/a/b", range: null });
     });
 
     it("a web tool with no detail keeps its name, or the row would be a bare globe", () => {
@@ -41,12 +41,12 @@ describe("toolHeaderParts", () => {
 
     it("MCP tools show `server · Tool` instead of the raw mcp__ name", () => {
         const parts = toolHeaderParts(node({ toolName: "mcp__agentmux__WhoAmI" }));
-        expect(parts).toEqual({ icon: "🛠️", label: "agentmux · WhoAmI", detail: "" });
+        expect(parts).toEqual({ icon: "🛠️", label: "agentmux · WhoAmI", detail: "", range: null });
     });
 
     it("falls back to the coarse kind for nodes without a raw name", () => {
         const parts = toolHeaderParts(node({ tool: "Read", toolName: undefined, params: { file_path: "a.ts" } }));
-        expect(parts).toEqual({ icon: "📖", label: "Read", detail: "a.ts" });
+        expect(parts).toEqual({ icon: "📖", label: "Read", detail: "a.ts", range: null });
     });
 });
 
@@ -60,6 +60,14 @@ describe("toolHeaderText", () => {
     it("joins the parts with single spaces and no status glyph or duration", () => {
         expect(toolHeaderText(node({ toolName: "mcp__agentmux__WhoAmI" }))).toBe("🛠️ agentmux · WhoAmI");
         expect(toolHeaderText(node({ toolName: "WebSearch", params: { query: "solid docs" } }))).toBe("🌐 solid docs");
+    });
+});
+
+describe("a Read's range in the header", () => {
+    it("is its own part, and ends the plain-text form", () => {
+        const read = node({ tool: "Read", toolName: "Read", params: { file_path: "a.ts", offset: 5, limit: 3 } });
+        expect(toolHeaderParts(read)).toEqual({ icon: "📖", label: "Read", detail: "a.ts", range: "L5–7" });
+        expect(toolHeaderText(read)).toBe("📖 Read a.ts L5–7");
     });
 });
 

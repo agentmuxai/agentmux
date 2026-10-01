@@ -22,6 +22,7 @@ import { HighlightedCode } from "../HighlightedCode";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES, type CappedText } from "../output-cap";
 import { terminalText } from "../terminal-text";
+import { formatReadRangeLong, readRangeOf } from "../../tool-meta/read-range";
 import { anyTool, byKind, type ToolRendererEntry } from "./registry";
 
 // Per-tool result renderers, registered through BUILTIN_RENDERERS so the open-ended tool universe can be routed by name/shape rather than
@@ -107,9 +108,15 @@ function renderRead(node: ToolNode): JSX.Element {
     // took at every digit-count boundary (9→10, 999→1000) — see dedent.ts's
     // module header and docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
     const preview = capped ? formatReadPreview(capped.text) : null;
+    const range = readRangeOf(node);
     return (
         <div class="agent-tool-read">
-            <div class="agent-tool-file-path">{filePath}</div>
+            <div class="agent-tool-file-path-row">
+                <span class="agent-tool-file-path">{filePath}</span>
+                <Show when={range}>
+                    <span class="agent-tool-read-range">{formatReadRangeLong(range!)}</span>
+                </Show>
+            </div>
             <Show
                 when={capped}
                 fallback={
