@@ -84,6 +84,13 @@ export interface HistoryParserOptions {
      * (activity/task-outcomes.ts).
      */
     onTaskFrame?: (frame: Record<string, unknown>, at: number | undefined) => void;
+    /**
+     * Where `lines[0]` sits in the transcript, when known: each tool node
+     * built from a tool_result records its line, so the pane can unload the
+     * result and read it back
+     * (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2).
+     */
+    source?: { stream: string; gen: string; firstLine: number };
 }
 
 /**
@@ -177,10 +184,12 @@ export class HistoryParser {
             return { ...replacement, timestamp: pts } as DocumentNode;
         };
 
+        const source = opts?.source;
         for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             const line = lines[lineIdx];
             const trimmed = line.trim();
             if (!trimmed || !trimmed.startsWith("{")) continue;
+            parser.setSourceLine(source ? { stream: source.stream, gen: source.gen, line: source.firstLine + lineIdx } : null);
 
             let rawEvent: any;
             try {
@@ -372,6 +381,7 @@ export class HistoryParser {
         // never be shown: release it at the end of every batch.
         parser.releaseHeld();
         putReleased();
+        parser.setSourceLine(null);
         return changed;
     }
 }

@@ -124,6 +124,14 @@ $transcript-preview-max-height: calc(50vh / 3);
     // 600px, even for an already-completed, unrelated tool call (reagent
     // P2 on PR #1975). The ref only adds this class at genuine Solid
     // mount time, so resizing never retriggers it.
+    // A tool body whose result is being read back from the transcript, or
+    // can't be (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01 §3.4).
+    .agent-tool-result-unloaded {
+        padding: var(--space-1) var(--space-2);
+        font-size: 12px;
+        color: var(--secondary-text-color);
+    }
+
     .agent-tool-fade-in-once {
         animation: agent-tool-summary-fade-in 160ms ease-out;
 

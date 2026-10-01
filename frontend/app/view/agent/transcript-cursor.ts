@@ -63,8 +63,13 @@ export interface CursorReadResult {
 }
 
 export interface TranscriptCursorDeps {
-    /** Parse complete records (newline-terminated) as live input. */
-    deliver(text: string): void;
+    /**
+     * Parse complete records (newline-terminated) as live input. `from`:
+     * where the first record sits in the transcript, when the cursor knows
+     * (a positioned event or a gap read), so tool nodes can record their
+     * result's line (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2).
+     */
+    deliver(text: string, from?: { stream: string; gen: string; line: number }): void;
     /**
      * An echo's records (the user's own message, already on screen). Not
      * parsed; handed over so the pane can pair it with the node it echoes.
@@ -302,6 +307,7 @@ export class TranscriptCursor {
             return;
         }
         let text = decode(ev.data64!);
+        const firstLine = Math.max(p.line, pin.next);
         if (p.line < pin.next) {
             const records = splitRecords(text).slice(pin.next - p.line);
             text = records.length > 0 ? records.join("\n") + "\n" : "";
@@ -313,7 +319,7 @@ export class TranscriptCursor {
             this.deps.echo(text);
             return;
         }
-        this.deliver(text);
+        this.deliver(text, { stream: p.stream, gen: p.gen, line: firstLine });
     }
 
     /** Reads and delivers lines `[from, to)` of the pinned generation. */
@@ -351,12 +357,15 @@ export class TranscriptCursor {
                 skip("read returned no lines");
                 return;
             }
-            const keep: string[] = [];
-            for (const line of res.lines) {
+            // Each kept line with its own number: dropping an echo would
+            // otherwise shift the numbers of every line after it.
+            const keep: Array<{ line: string; at: number }> = [];
+            for (let i = 0; i < res.lines.length; i++) {
+                const line = res.lines[i];
                 if (this.deps.isOwnEcho(line)) {
                     this.stats.ownEchoesDropped++;
                 } else {
-                    keep.push(line);
+                    keep.push({ line, at: at + i });
                 }
             }
             // An event delivered meanwhile can't have moved `next`: events
@@ -365,15 +374,15 @@ export class TranscriptCursor {
             at += lines;
             filled += lines;
             pin.next = Math.max(pin.next, at);
-            if (keep.length > 0) this.deliver(keep.join("\n") + "\n");
+            for (const k of keep) this.deliver(k.line + "\n", { stream, gen, line: k.at });
         }
         this.stats.gapsFilled++;
         this.stats.gapLinesFilled += filled;
     }
 
-    private deliver(text: string): void {
+    private deliver(text: string, from?: { stream: string; gen: string; line: number }): void {
         this.stats.delivered++;
-        this.deps.deliver(text);
+        this.deps.deliver(text, from);
     }
 
     /**

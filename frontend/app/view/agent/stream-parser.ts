@@ -28,6 +28,7 @@ import {
     ToolLogChunk,
     ToolNode,
     ToolResultEvent,
+    ToolResultSource,
     UserMessageEvent,
 } from "./types";
 import { buildMemoryReinjectionNodeFromReplay } from "./memory-reinjection";
@@ -166,6 +167,11 @@ export class ClaudeCodeStreamParser {
     // and useAgentStream.ts's generic backfill stamped Date.now() at
     // *result* time instead).
     private pendingToolTimestamps: Map<string, number> = new Map();
+    // The transcript line the record being parsed came from, when the caller
+    // knows it: stamped on a tool node built from a tool_result, so an
+    // unloaded result can be read back
+    // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2).
+    private sourceLine: ToolResultSource | null = null;
     private currentAgentId?: string;
     // Mutable node objects for accumulated text/thinking — content is appended in-place
     private currentTextNode: { type: "markdown"; id: string; content: string } | null = null;
@@ -657,6 +663,7 @@ export class ClaudeCodeStreamParser {
             status: event.status,
             duration: event.duration,
             result: event.result,
+            ...(this.sourceLine ? { resultSource: this.sourceLine } : {}),
             // Collapse on EVERY terminal state (success or failure).
             // The ✗ icon + red border-left in ToolBlock signal
             // failure at a glance; the user's feedback was that
@@ -668,6 +675,14 @@ export class ClaudeCodeStreamParser {
             summary,
             timestamp: callTimestamp,
         };
+    }
+
+    /**
+     * The transcript line of the record about to be parsed, or null when it
+     * isn't known. Callers set it before each record and clear it after.
+     */
+    setSourceLine(source: ToolResultSource | null): void {
+        this.sourceLine = source;
     }
 
     /**

@@ -16,6 +16,7 @@
 import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
 import { isAcceptedBackgroundLaunch } from "../../view/agent/activity/tool-adapter";
 import { planRollOff } from "../../view/agent/live-feed";
+import { planUnload, unloadResult } from "../../view/agent/tool-result-unload";
 import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
 import {
     AgentDocumentCommand,
@@ -796,6 +797,35 @@ export function update(
                     },
                 ],
             };
+        }
+
+        case "UnloadToolResults": {
+            const ids = planUnload(state.nodes, command);
+            if (ids.length === 0) return { state, events: [] };
+            const nodes = state.nodes.slice();
+            let bytes = 0;
+            for (const id of ids) {
+                const idx = state.nodeIndexById.get(id);
+                if (idx == null) continue;
+                const unloaded = unloadResult(nodes[idx] as ToolNode);
+                bytes += unloaded.resultUnloaded?.bytes ?? 0;
+                nodes[idx] = unloaded;
+            }
+            return {
+                state: { ...state, nodes },
+                events: [{ type: "tool-results-unloaded", count: ids.length, bytes }],
+            };
+        }
+
+        case "ResultLoaded": {
+            const idx = state.nodeIndexById.get(command.nodeId);
+            const node = idx == null ? undefined : state.nodes[idx];
+            if (idx == null || node?.type !== "tool" || !node.resultUnloaded) return { state, events: [] };
+            const nodes = state.nodes.slice();
+            const { resultUnloaded: _stub, ...rest } = node;
+            void _stub;
+            nodes[idx] = { ...rest, result: command.result };
+            return { state: { ...state, nodes }, events: [{ type: "tool-result-loaded", nodeId: command.nodeId }] };
         }
 
         case "RollOff": {

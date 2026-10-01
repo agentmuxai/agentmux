@@ -171,7 +171,7 @@ export interface GlobResult {
     files: string[];
 }
 
-type ToolResult = ReadResult | EditResult | WriteResult | BashResult | GrepResult | GlobResult | Record<string, unknown>;
+export type ToolResult = ReadResult | EditResult | WriteResult | BashResult | GrepResult | GlobResult | Record<string, unknown>;
 
 /**
  * Kind of a live log chunk. `stdout`/`stderr` are bash-style streams,
@@ -296,6 +296,34 @@ export interface ToolNode {
      *  instead of only ever showing the answer half. Undefined for a
      *  legacy transcript answered before this field existed. */
     questionText?: string;
+    /**
+     * The transcript line this tool's `tool_result` record was read from,
+     * so an unloaded result can be read back. Unset when the line isn't
+     * known (an unpinned stream), and then the result is never unloaded.
+     * SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2.
+     */
+    resultSource?: ToolResultSource;
+    /**
+     * Set while `result` is unloaded from memory: what the collapsed row
+     * still needs. Opening the row reads the result back (§3.3–§3.4).
+     */
+    resultUnloaded?: UnloadedResult;
+}
+
+/** Where a tool's result lives in the transcript. */
+export interface ToolResultSource {
+    stream: string;
+    gen: string;
+    line: number;
+}
+
+/** What a collapsed tool row keeps while its result is unloaded. */
+export interface UnloadedResult {
+    /** The header pill the full result produced (e.g. "3 matches"). */
+    pill: { label: string; variant: string } | null;
+    /** The result's size in bytes, and estimated tokens, for display. */
+    bytes: number;
+    tokens: number;
 }
 
 /**
