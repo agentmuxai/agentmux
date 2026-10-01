@@ -109,8 +109,31 @@ type Creation = {
     cancelled: boolean;
 };
 const [creatingTab, setCreatingTab] = createSignal<Creation | null>(null);
-/** Creations not yet resolved (CreateTab hasn't replied or failed). */
+/** Creations not yet resolved (CreateTab hasn't replied or failed), oldest first. */
 const unresolvedCreations = new Set<Creation>();
+/** Tabs of creations that have resolved while others were still unresolved. */
+const resolvedCreationTabIds = new Set<string>();
+
+/** Mark `creation` resolved; once none are left, forget what was claimed. */
+function resolveCreation(creation: Creation): void {
+    unresolvedCreations.delete(creation);
+    if (creation.tabId != null) resolvedCreationTabIds.add(creation.tabId);
+    if (unresolvedCreations.size === 0) resolvedCreationTabIds.clear();
+}
+
+/**
+ * How many earlier, still-unresolved creations will add a pill after a new
+ * creation's `existing` snapshot. Their pills already in the snapshot don't
+ * count: a tab that appeared since the oldest of them started and isn't
+ * claimed by a resolved creation is one of theirs (ReAgent on #4140).
+ */
+function creationsAhead(existing: ReadonlySet<string>): number {
+    const earlier = [...unresolvedCreations];
+    if (earlier.length === 0) return 0;
+    const oldest = earlier[0];
+    const arrived = [...existing].filter((id) => !oldest.existing.has(id) && !resolvedCreationTabIds.has(id)).length;
+    return Math.max(0, earlier.length - arrived);
+}
 /** The tab being created, for the strip to show as selected. */
 export function creatingTabId(): string | null {
     const creating = creatingTab();
@@ -151,7 +174,7 @@ export function createTab() {
     // navigated to meanwhile (codex P2, PR #3300).
     const startingActiveTabId = activeTabId();
     const existing = new Set([...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]);
-    const ahead = [...unresolvedCreations].filter((c) => c.tabId == null || !existing.has(c.tabId)).length;
+    const ahead = creationsAhead(existing);
     cancelTabCreation();
     const creation: Creation = { tabId: null, from: startingActiveTabId, existing, ahead, cancelled: false };
     unresolvedCreations.add(creation);
@@ -173,8 +196,8 @@ export function createTab() {
             // re-trigger the gate on an already-revealed tab — the
             // flash a user reported.
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", false, false);
-            unresolvedCreations.delete(creation);
             creation.tabId = tabId;
+            resolveCreation(creation);
             if (creatingTab() === creation) {
                 // Same object, new content: notify readers explicitly.
                 setCreatingTab(null);
@@ -232,7 +255,7 @@ export function createTab() {
             // Activated, the committed tab catches up (switchIntent is set
             // until it does) and the effect above drops this. Left inactive
             // or failed, nothing will: drop it here.
-            unresolvedCreations.delete(creation);
+            resolveCreation(creation);
             const activating = creation.tabId != null && switchIntentTabId() === creation.tabId;
             if (creatingTab() === creation && !activating) setCreatingTab(null);
         }
