@@ -160,9 +160,13 @@ export function useLiveFeedRollOff(opts: {
         )
     );
 
+    // Scrolling up pages older lines in while the pane's range is contiguous:
+    // once turns have rolled off the front, the lines just before the loaded
+    // range no longer join what's on screen, so History takes over.
+    const canPageOlder = (): boolean => !liveFeedOn() || rolledOffTurns() === 0;
     const earlierHistoryAvailable = createMemo(() => {
         if (history.scopeClamped()) return true;
-        if (liveFeedOn() && (rolledOffTurns() > 0 || history.historyOffset() > 0)) return true;
+        if (liveFeedOn() && rolledOffTurns() > 0) return true;
         const first = paneModel.document()[0];
         return first?.type === "session_outcome" && first.outcome === "fresh";
     });
@@ -176,6 +180,7 @@ export function useLiveFeedRollOff(opts: {
     return {
         liveFeedOn,
         liveFeedTurns,
+        canPageOlder,
         scheduleRollOff,
         gapsBefore,
         earlierHistoryAvailable,

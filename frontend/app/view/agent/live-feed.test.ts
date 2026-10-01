@@ -10,6 +10,8 @@ import { update } from "../../store/agent-document/reducer";
 import {
     blocksRollOff,
     LIVE_FEED_DEFAULT_TURNS,
+    LIVE_FEED_MAX_FINISHED_BYTES,
+    LIVE_FEED_MAX_ROWS,
     liveFeedSupported,
     planRollOff,
     resolveLiveFeedTurns,
@@ -45,6 +47,45 @@ describe("splitTurns", () => {
 });
 
 describe("planRollOff", () => {
+    it("by default keeps every finished turn that fits the size budget", () => {
+        // No turn limit: 200 small finished turns all stay.
+        const nodes = turns(201);
+        expect(planRollOff(nodes, { keepTurns: LIVE_FEED_DEFAULT_TURNS, visibleIds: none, pinned: true })).toBeNull();
+    });
+
+    it("rolls off the oldest turns once the finished turns exceed the size budget", () => {
+        // 4 finished turns of ~1 MB each plus one in flight, with a 2.5 MB budget.
+        const big = (i: number) => md(`a${i}`, "x".repeat(1_000_000));
+        const nodes: DocumentNode[] = [];
+        for (let i = 0; i < 5; i++) nodes.push(user(`u${i}`), big(i));
+        const plan = planRollOff(nodes, {
+            keepTurns: LIVE_FEED_DEFAULT_TURNS,
+            maxFinishedBytes: 2_500_000,
+            visibleIds: none,
+            pinned: true,
+        })!;
+        // Turns 2 and 3 fit; 0 and 1 go.
+        expect(plan.ranges).toEqual([{ start: 0, end: 4, turns: 2 }]);
+    });
+
+    it("rolls off the oldest turns once the finished turns exceed the row cap", () => {
+        const nodes = turns(11); // 10 finished turns of 2 rows each, + 1 in flight
+        const plan = planRollOff(nodes, { keepTurns: LIVE_FEED_DEFAULT_TURNS, maxRows: 9, visibleIds: none, pinned: true })!;
+        // 4 turns (8 rows) fit under 9; the 6 oldest go.
+        expect(plan.turns).toBe(6);
+        expect(plan.ranges).toEqual([{ start: 0, end: 12, turns: 6 }]);
+    });
+
+    it("always keeps at least one finished turn, even over budget", () => {
+        const nodes = [user("u0"), md("a0", "x".repeat(3_000_000)), user("u1"), md("a1")];
+        expect(planRollOff(nodes, { keepTurns: LIVE_FEED_DEFAULT_TURNS, maxFinishedBytes: 1_000_000, visibleIds: none, pinned: true })).toBeNull();
+    });
+
+    it("defaults to a 15 MB budget and a 20,000-row cap", () => {
+        expect(LIVE_FEED_MAX_FINISHED_BYTES).toBe(15_000_000);
+        expect(LIVE_FEED_MAX_ROWS).toBe(20_000);
+    });
+
     it("keeps the turn in flight plus the newest K finished turns while pinned", () => {
         const nodes = turns(8); // 7 finished + 1 in flight
         const plan = planRollOff(nodes, { keepTurns: 3, visibleIds: none, pinned: true })!;
@@ -132,16 +173,17 @@ describe("blocksRollOff", () => {
 });
 
 describe("settings and providers", () => {
-    it("resolves the kept-turn count", () => {
+    it("resolves the kept-turn count: unset means no turn limit", () => {
+        expect(LIVE_FEED_DEFAULT_TURNS).toBe(Number.POSITIVE_INFINITY);
         expect(resolveLiveFeedTurns(5)).toBe(5);
         expect(resolveLiveFeedTurns(0)).toBe(LIVE_FEED_DEFAULT_TURNS);
         expect(resolveLiveFeedTurns(2.5)).toBe(LIVE_FEED_DEFAULT_TURNS);
         expect(resolveLiveFeedTurns(undefined)).toBe(LIVE_FEED_DEFAULT_TURNS);
     });
 
-    it("the settings schema advertises the same default the pane uses", () => {
-        // agent:livefeedturns is read with this constant as its fallback; the
-        // schema's default is what the settings UI shows. They must agree.
+    it("the settings schema advertises no turn default (size bounds the pane)", () => {
+        // agent:livefeedturns is an optional cap; unset is "no limit", which a
+        // JSON schema default can't express, so the schema must not claim one.
         const schema = JSON.parse(
             readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../schema/settings.json"), "utf8")
         );
@@ -155,7 +197,7 @@ describe("settings and providers", () => {
             }
             return undefined;
         };
-        expect((find(schema) as { default?: number } | undefined)?.default).toBe(LIVE_FEED_DEFAULT_TURNS);
+        expect((find(schema) as { default?: number } | undefined)?.default).toBeUndefined();
     });
 
     it("rolls off only for providers whose transcript holds the user's messages", () => {

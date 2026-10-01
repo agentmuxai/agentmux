@@ -17,10 +17,21 @@ import { positions, windowRangeOf } from "@/app/store/agent-pane-layout/reducer"
 import type { DocumentNode } from "./types";
 import { isNodeInProgress, nodeBytes } from "./virtualization/streaming-buffer";
 
-/** Finished turns kept by default (`agent:livefeedturns`). */
-export const LIVE_FEED_DEFAULT_TURNS = 6;
-/** Finished turns kept are also capped by size; at least one always stays. */
-export const LIVE_FEED_MAX_FINISHED_BYTES = 2_000_000;
+/**
+ * Finished turns kept by default: no turn limit. The pane is bounded by size
+ * (below) — the turn count doesn't matter for performance, since rows are
+ * virtualized and memory follows bytes. `agent:livefeedturns` is an optional
+ * cap on top. (Was 6 turns / 2 MB, which sent most of an active session to
+ * History; docs/reports/REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30.md.)
+ */
+export const LIVE_FEED_DEFAULT_TURNS = Number.POSITIVE_INFINITY;
+/** Finished turns kept are capped by size; at least one always stays. */
+export const LIVE_FEED_MAX_FINISHED_BYTES = 15_000_000;
+/**
+ * And by rows: the layout keeps a position and height per row, so a budget of
+ * many tiny rows is bounded too. At least one finished turn always stays.
+ */
+export const LIVE_FEED_MAX_ROWS = 20_000;
 
 /**
  * Panes whose transcript carries everything the feed shows, user messages
@@ -40,7 +51,7 @@ export function liveFeedSupported(outputFormat: string | undefined, controller?:
     return outputFormat != null && ROLL_OFF_FORMATS.has(outputFormat);
 }
 
-/** Setting → finished turns kept; anything but a positive integer is the default. */
+/** Setting → finished turns kept; anything but a positive integer is the default (no limit). */
 export function resolveLiveFeedTurns(setting: unknown): number {
     return typeof setting === "number" && Number.isInteger(setting) && setting >= 1
         ? setting
@@ -94,9 +105,10 @@ export function blocksRollOff(node: DocumentNode): boolean {
 }
 
 export interface RollOffInput {
-    /** Finished turns to keep (≥ 1). */
+    /** Finished turns to keep (≥ 1; `Infinity` for no turn limit). */
     keepTurns: number;
     maxFinishedBytes?: number;
+    maxRows?: number;
     /** Ids of nodes intersecting the viewport. */
     visibleIds: ReadonlySet<string>;
     /** Ids whose turns stay regardless (nodes the user pinned). */
@@ -132,6 +144,7 @@ export function planRollOff(nodes: readonly DocumentNode[], input: RollOffInput)
     const turns = splitTurns(nodes);
     if (turns.length < 2) return null;
     const maxBytes = input.maxFinishedBytes ?? LIVE_FEED_MAX_FINISHED_BYTES;
+    const maxRows = input.maxRows ?? LIVE_FEED_MAX_ROWS;
     const keepTurns = Math.max(1, input.keepTurns);
 
     const holds = (t: Turn, pred: (n: DocumentNode) => boolean): boolean => {
@@ -149,11 +162,14 @@ export function planRollOff(nodes: readonly DocumentNode[], input: RollOffInput)
     let firstKept = turns.length - 1;
     let kept = 0;
     let bytes = 0;
+    let rows = 0;
     for (let k = turns.length - 2; k >= 0 && kept < keepTurns; k--) {
         const b = turnBytes(turns[k]);
-        if (kept > 0 && bytes + b > maxBytes) break;
+        const r = turns[k].end - turns[k].start;
+        if (kept > 0 && (bytes + b > maxBytes || rows + r > maxRows)) break;
         kept++;
         bytes += b;
+        rows += r;
         firstKept = k;
     }
 

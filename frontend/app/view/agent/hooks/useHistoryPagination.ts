@@ -146,14 +146,27 @@ export interface UseHistoryPagination {
 
 const PAGE_SIZE = 200;
 
+/**
+ * Lines a scroll-up page loads. Most transcript lines are streaming deltas
+ * (~83%), so a 200-line page showed almost nothing; 2,000 lines parse in
+ * ~7 ms (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5).
+ */
+export const OLDER_PAGE_LINES = 2_000;
+
 /** Schema versions. v1 = nodes[] embedded; v2 = overlay only + NDJSON replay. */
 export const SNAPSHOT_SCHEMA_VERSION_V1 = 1;
 export const SNAPSHOT_SCHEMA_VERSION_V2 = 2;
 /** Version written by writeSnapshotNow. */
 export const SNAPSHOT_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION_V2;
 
-/** Render viewport: lines loaded on restore. Not a storage cap — see §2 of spec. */
-export const RESTORE_WINDOW_LINES = 5_000;
+/**
+ * Render viewport: lines loaded on restore. Not a storage cap — see §2 of spec.
+ * At most srv's per-read cap (`blockfile:read_range` returns ≤ 10,000 lines
+ * from `offset`, so a larger window would drop the NEWEST lines). 10,000
+ * lines parse in ~33 ms and the read time doesn't grow with the line count
+ * (open-latency spec §4.5). Older turns page in by scrolling up.
+ */
+export const RESTORE_WINDOW_LINES = 10_000;
 
 const DEFAULT_FILTER_STATE: FilterState = {
     showThinking: false,
@@ -188,7 +201,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
         setLoadingOlder(true);
         try {
-            const newOffset = Math.max(0, currentOffset - PAGE_SIZE);
+            const newOffset = Math.max(0, currentOffset - OLDER_PAGE_LINES);
             const loadLimit = currentOffset - newOffset;
 
             const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
