@@ -86,9 +86,26 @@ export function buildConfigFiles(
     const resolvedForIndex = providerId ?? "claude";
     const isClaude =
         (PROVIDERS[resolvedForIndex] ?? PROVIDERS[resolveProviderAlias(resolvedForIndex)])?.id === "claude";
-    const hasNativeFile = (skill: (typeof skills)[number]): boolean =>
-        !!skill.content && (skill.skill_type === SKILL_TYPE_AGENT_SKILL || !!sanitizeTrigger(skill.trigger));
-    const indexed = skills.filter((skill) => !isClaude || !hasNativeFile(skill));
+    // A command a later skill's command overwrites (same trigger, compared
+    // case-insensitively as a case-insensitive filesystem would) has no file
+    // of its own — the same rule as Rust's skills_with_their_own_file.
+    const commandKey = (skill: (typeof skills)[number]): string | null => {
+        if (!skill.content || skill.skill_type === SKILL_TYPE_AGENT_SKILL) return null;
+        const trigger = sanitizeTrigger(skill.trigger);
+        return trigger ? trigger.toLowerCase() : null;
+    };
+    const lastWriter = new Map<string, number>();
+    skills.forEach((skill, i) => {
+        const key = commandKey(skill);
+        if (key) lastWriter.set(key, i);
+    });
+    const hasOwnFile = (skill: (typeof skills)[number], i: number): boolean => {
+        if (!skill.content) return false;
+        if (skill.skill_type === SKILL_TYPE_AGENT_SKILL) return true;
+        const key = commandKey(skill);
+        return key != null && lastWriter.get(key) === i;
+    };
+    const indexed = skills.filter((skill, i) => !isClaude || !hasOwnFile(skill, i));
     if (indexed.length > 0) {
         instructionsParts.push("\n# Available Skills\n\n");
         instructionsParts.push("Use `/<trigger>` to invoke a skill.\n\n");

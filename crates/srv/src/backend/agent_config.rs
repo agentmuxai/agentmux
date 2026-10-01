@@ -102,7 +102,8 @@ pub fn build_config_files(
     // so for it the index carries only those without one (LC3, §4.4).
     // By the resolved provider, so an alias (`claude-code`) counts as Claude.
     let is_claude = crate::backend::providers::get_provider(provider_id).is_some_and(|p| p.id == "claude");
-    let indexed: Vec<_> = skills.iter().filter(|s| !is_claude || !skill_has_native_file(s)).collect();
+    let own_file = skills_with_their_own_file(skills);
+    let indexed: Vec<_> = skills.iter().enumerate().filter(|(i, _)| !is_claude || !own_file[*i]).map(|(_, s)| s).collect();
     if !indexed.is_empty() {
         instructions_parts.push("\n# Available Skills\n\n".to_string());
         instructions_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
@@ -746,10 +747,32 @@ pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> Stri
     format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
 }
 
-/// Whether `build_config_files` writes `skill` as a file Claude Code lists
-/// natively: an Agent Skill's `SKILL.md`, or a command with a usable trigger.
-fn skill_has_native_file(skill: &AgentSkill) -> bool {
-    !skill.content.is_empty() && (skill.skill_type == SKILL_TYPE_AGENT_SKILL || sanitize_trigger(&skill.trigger).is_some())
+/// For each skill, whether `build_config_files` leaves it a file of its own
+/// that Claude Code lists natively: an Agent Skill's `SKILL.md` (slugs are
+/// made unique), or a command with a usable trigger that no later skill's
+/// command overwrites. Triggers are compared case-insensitively, as a
+/// case-insensitive filesystem would. Trigger uniqueness isn't enforced by
+/// the skill store (Codex on #4131).
+fn skills_with_their_own_file(skills: &[AgentSkill]) -> Vec<bool> {
+    let command_key = |s: &AgentSkill| {
+        (!s.content.is_empty() && s.skill_type != SKILL_TYPE_AGENT_SKILL)
+            .then(|| sanitize_trigger(&s.trigger).map(str::to_lowercase))
+            .flatten()
+    };
+    let mut last_writer: HashMap<String, usize> = HashMap::new();
+    for (i, s) in skills.iter().enumerate() {
+        if let Some(key) = command_key(s) {
+            last_writer.insert(key, i);
+        }
+    }
+    skills
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            !s.content.is_empty()
+                && (s.skill_type == SKILL_TYPE_AGENT_SKILL || command_key(s).is_some_and(|k| last_writer.get(&k) == Some(&i)))
+        })
+        .collect()
 }
 
 /// Validate a skill's `trigger` is safe to use as a single path segment in
@@ -979,6 +1002,26 @@ pub const CLAUDE_MD_PRE_ADOPT_BACKUP: &str = ".claude/CLAUDE.md.pre-adopt";
 /// only when there were skills), then optionally the managed import (its
 /// comment and line, or the line alone). Anything else means a person wrote
 /// there, and it stays theirs.
+/// A skills-index row exactly as `build_config_files` renders it:
+/// `- **<name>**`, then optionally ` (trigger: /<trigger>)`, then optionally
+/// ` — <description>` (Codex on #4131: a bare `- **note` is a person's).
+fn is_generated_skill_row(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("- **") else { return false };
+    let Some(close) = rest.find("**") else { return false };
+    if close == 0 {
+        return false;
+    }
+    let mut rest = &rest[close + 2..];
+    if let Some(after) = rest.strip_prefix(" (trigger: /") {
+        let Some(end) = after.find(')') else { return false };
+        if end == 0 {
+            return false;
+        }
+        rest = &after[end + 1..];
+    }
+    rest.is_empty() || rest.strip_prefix(" \u{2014} ").is_some_and(|d| !d.is_empty())
+}
+
 pub fn is_legacy_agentmux_claude_md(content: &str) -> bool {
     let import_line = format!("@{AGENTMUX_MEMORY_FILENAME}");
     let mut lines = content.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).peekable();
@@ -986,7 +1029,7 @@ pub fn is_legacy_agentmux_claude_md(content: &str) -> bool {
         return false;
     }
     let mut skill_rows = 0;
-    while lines.next_if(|l| l.starts_with("- **")).is_some() {
+    while lines.next_if(|l| is_generated_skill_row(l)).is_some() {
         skill_rows += 1;
     }
     let tail: Vec<&str> = lines.collect();
@@ -2054,6 +2097,34 @@ mod tests {
         <!-- agentmux:managed-import (safe to delete this line to opt out) -->\n\
         @.claude/AGENTMUX_MEMORY.md\n";
 
+    /// Two skills on one trigger write one command file, the later winning:
+    /// the earlier one has no file and stays in the index (Codex on #4131).
+    #[test]
+    fn a_skill_whose_command_file_a_later_one_overwrites_stays_indexed() {
+        let skills = vec![
+            make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all"),
+            make_skill("Deploy Staging", "Deploy", "Deploy staging", "Run: deploy staging"),
+        ];
+        let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
+        let md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(md.content.contains("**Deploy**"), "the overwritten one is indexed");
+        assert!(!md.content.contains("**Deploy Staging**"), "the one that owns the file isn't");
+    }
+
+    #[test]
+    fn only_rows_as_agentmux_rendered_them_count() {
+        assert!(is_generated_skill_row("- **TDD** (trigger: /tdd) \u{2014} write the test first."));
+        assert!(is_generated_skill_row("- **TDD** (trigger: /tdd)"));
+        assert!(is_generated_skill_row("- **TDD** \u{2014} write it first"));
+        assert!(is_generated_skill_row("- **TDD**"));
+        assert!(!is_generated_skill_row("- **this is my hand-written note"));
+        assert!(!is_generated_skill_row("- **TDD** and also a note"));
+        assert!(!is_generated_skill_row("- **TDD** (trigger: /tdd"));
+        assert!(!is_legacy_agentmux_claude_md(
+            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n- **this is my hand-written note\n"
+        ));
+    }
+
     #[test]
     fn recognises_only_exactly_what_an_older_agentmux_wrote() {
         assert!(is_legacy_agentmux_claude_md(LEGACY_CLAUDE_MD));
@@ -2064,9 +2135,9 @@ mod tests {
             "# Available Skills\nUse `/<trigger>` to invoke a skill.\n@.claude/AGENTMUX_MEMORY.md\n- **A** x\n"
         ));
         assert!(is_legacy_agentmux_claude_md(
-            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n- **A** x\n@.claude/AGENTMUX_MEMORY.md\n"
+            "# Available Skills\nUse `/<trigger>` to invoke a skill.\n- **A** \u{2014} x\n@.claude/AGENTMUX_MEMORY.md\n"
         ));
-        assert!(is_legacy_agentmux_claude_md("# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n- **A** x\n"));
+        assert!(is_legacy_agentmux_claude_md("# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n- **A** \u{2014} x\n"));
         assert!(!is_legacy_agentmux_claude_md(&format!("{LEGACY_CLAUDE_MD}\nAlways run the tests.\n")), "a person's line");
         assert!(!is_legacy_agentmux_claude_md(&format!("{CLAUDE_MD_MANAGED_MARKER}\n\n# Memory\n")));
         assert!(!is_legacy_agentmux_claude_md("# Project\n\n# Available Skills\n"));

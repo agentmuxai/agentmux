@@ -101,6 +101,22 @@ describe("buildConfigFiles — skills index (LC3)", () => {
         expect(files.some((f) => f.path === "CLAUDE.md")).toBe(true);
     });
 
+    it("keeps a skill indexed when a later skill's command overwrites its file", () => {
+        const md =
+            buildConfigFiles(
+                {},
+                [
+                    makeSkill({ name: "Deploy", trigger: "deploy", content: "a" }),
+                    makeSkill({ name: "Deploy Staging", trigger: "Deploy", content: "b" }),
+                ],
+                undefined,
+                undefined,
+                "claude",
+            ).find((f) => f.path === "CLAUDE.md")?.content ?? "";
+        expect(md).toContain("**Deploy**");
+        expect(md).not.toContain("**Deploy Staging**");
+    });
+
     it("treats an alias of Claude as Claude", () => {
         const md = instructions("claude-code");
         expect(md).toContain("**Notes**");
