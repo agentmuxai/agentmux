@@ -1244,6 +1244,18 @@ pub fn write_startup_instructions_respecting_existing(
     let agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(STARTUP_INSTRUCTIONS_MANAGED_MARKER));
 
+    // Never written through a symlink (dangling or not), nor under a folder
+    // that links out of the workspace (`.pi/` for pi): the write would land
+    // outside it. Codex on #4131, the same guard as `CLAUDE.md`'s.
+    let is_symlink = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
+    if is_symlink || resolve_within_workdir(base_path, filename).is_none() {
+        tracing::warn!(
+            path = %path.display(),
+            "write_startup_instructions_respecting_existing: a symlink, or outside the workspace; not writing"
+        );
+        return Ok(());
+    }
+
     if agentmux_owns_it || existing.is_none() {
         if let Some(parent) = path.parent() {
             if !parent.exists() {
@@ -2254,6 +2266,46 @@ mod tests {
         }
         write_claude_md_respecting_ownership(dir.path(), "# Memory\nfresh\n").unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), managed, "the outside file is untouched");
+    }
+
+    /// A symlinked non-Claude instructions file is never written through,
+    /// dangling or pointing at an already-managed file (Codex on #4131).
+    #[test]
+    fn a_symlinked_startup_instructions_file_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("AGENTS.md");
+        let managed = format!("{STARTUP_INSTRUCTIONS_MANAGED_MARKER}\n\nold\n");
+        std::fs::write(&target, &managed).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, dir.path().join("AGENTS.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&target, dir.path().join("AGENTS.md")).is_ok();
+        if !made {
+            return; // Windows needs privilege for symlinks.
+        }
+        write_startup_instructions_respecting_existing(dir.path(), "AGENTS.md", "fresh").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), managed, "the outside file is untouched");
+
+        // Dangling: nothing is created at the link's target either.
+        let gone = outside.path().join("GEMINI.md");
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&gone, dir.path().join("GEMINI.md")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&gone, dir.path().join("GEMINI.md")).is_ok();
+        if made {
+            write_startup_instructions_respecting_existing(dir.path(), "GEMINI.md", "fresh").unwrap();
+            assert!(!gone.exists(), "no file created through a dangling link");
+        }
+    }
+
+    #[test]
+    fn a_plain_startup_instructions_file_is_still_written() {
+        let dir = tempfile::tempdir().unwrap();
+        write_startup_instructions_respecting_existing(dir.path(), "AGENTS.md", "fresh").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap().contains("fresh"));
+        write_startup_instructions_respecting_existing(dir.path(), ".pi/APPEND_SYSTEM.md", "pi").unwrap();
+        assert!(std::fs::read_to_string(dir.path().join(".pi/APPEND_SYSTEM.md")).unwrap().contains("pi"));
     }
 
     #[test]
