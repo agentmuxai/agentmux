@@ -37,32 +37,38 @@ The owner approved the OS prompt. That is the point: **the prompt cannot be reli
 
 ## 3. Where we stand
 
-- srv binds **loopback, OS-chosen ports** at startup and `LanListenerSupervisor` adds LAN listeners on the *same* ports when LAN is enabled (`bootstrap/network.rs`). No fixed port, so a port rule is impossible; a **program rule** is the natural fit (R9).
+- srv binds **loopback, OS-chosen ports** at startup and `LanListenerSupervisor` adds LAN listeners on the *same* ports when LAN is enabled (`bootstrap/network.rs`, `lan_listeners.rs`). With ports chosen per run, no port rule can be written, and a program rule is the only option today (R9). Section 4.1 changes the ports so that it stops being the only option.
 - mDNS uses the `mdns-sd` crate: raw sockets on UDP 5353, i.e. exactly the app-owned responder that needs its own UDP rule (R8).
 - Windows ships three ways: **portable zip** (no installer), **Inno Setup per-user installer** (`packaging/windows/agentmux.iss`, no admin), and **MSIX**. A fresh install has no admin and no rules.
 - LAN is **opt-in** (HostPopover toggle). `windows-firewall-fix.md` kept the prompt away by keeping mDNS off. That avoided the dialog but left LAN unusable until the owner hunted for a toggle, and gave no help when it broke.
 - macOS already declares both Local Network keys (`scripts/package-macos.sh:386`). Whether raw-socket mDNS triggers the prompt is unverified (R10).
+- **The sidecar's filename embeds its version** (`runtime\agentmux-srv-0.59.1-windows.x64.exe`), and portable and dev builds live at a new path each time. A program rule therefore stops matching on every update, and re-registering it needs another elevation: the repeating-prompt failure R7 warns about. This is why the first draft of 4.1 (one rule per exe path) cannot deliver "one prompt, ever".
 - The indicator has `off | idle | peers | error`. A firewall block lands in `idle`, the "healthy" state.
 
 ## 4. Design
 
-### 4.1 One stable rule, owned by an elevated helper (Windows)
+### 4.1 Fixed LAN ports, and port rules that survive updates
 
-A small mode of the existing binary (proposed: `agentmux.exe --configure-lan-firewall`, so the UAC prompt names AgentMux) that does, via `INetFwPolicy2`, in one elevated run:
+**Core (cross-platform).** srv chooses its web and ws listener ports from a fixed range, `47892..=47991` (first free pair; the existing UDP broadcast fallback already owns `47891`). The loopback and LAN listeners keep sharing a port, as `lan_listeners.rs` requires, and mDNS advertises the actual port. Several instances on one host (channels, portable builds, `task dev`) take successive pairs, so the range holds about fifty. If the range is exhausted srv falls back to an OS-chosen port, and the indicator reports `needs-setup` because that port is not covered by the rule. Headless mode keeps `--web-port` / `--ws-port`.
 
-1. Ensure **one** inbound **Allow** rule, fixed `Name = "AgentMux LAN"`: program = the **current** `agentmux-srv` exe path, protocol Any, profiles **Private + Domain**, `RemoteAddresses = LocalSubnet`, edge traversal off. Update the program path in place if it already exists (R4, R5).
+**Windows rules.** A small mode of the signed host exe (proposed: `agentmux.exe --configure-lan-firewall`, so the UAC prompt names AgentMux) does, via `INetFwPolicy2`, in **one** elevated run:
+
+1. Ensure **two** inbound Allow rules with fixed names, **not tied to any program**: `AgentMux LAN (TCP)` on local ports `47892-47991`, and `AgentMux LAN (UDP)` on `5353,47891` (mDNS and the broadcast fallback). Profiles **Private + Domain**, `RemoteAddresses = LocalSubnet`, edge traversal off. (Two rules because a port range needs a concrete protocol.)
 2. **Delete any Block rules** whose program is an AgentMux binary (left behind by a cancelled prompt, R2).
-3. **Prune** AgentMux rules whose program no longer exists (the 606), keeping ours.
-4. Exit codes: `0` ok, `1223`-style cancel, `2` policy-managed (R11), `3` other. Idempotent; running it twice changes nothing.
+3. **Prune** the legacy per-program AgentMux rules (the 606).
+4. If the user accepted a Public network (4.4), add the scoped Public copies.
+5. Exit codes: `0` ok, `1223`-style cancel, `2` policy-managed (R11), `3` other. Idempotent; running it twice changes nothing.
 
-Public is **not** in the rule. Opening a listener to a Public network is the wrong default; see 4.4.
+Port rules are what make this **once per machine**: they match through updates, new builds at new paths, and reinstalls (R4, R7). The cost is that any local program that listens in the range is reachable from the subnet. The range is small, `LocalSubnet` narrows who can reach it, and the LAN routes are still gated by the scoped LAN key. Predictable *loopback* ports are no new exposure, since they are authenticated already.
+
+Public is **not** in the base rules; see 4.4.
 
 ### 4.2 Order: rule first, then listeners (R1)
 
 Enabling LAN becomes:
 
 1. Read the firewall state **without admin** (`INetFwPolicy2` read, `INetworkListManager` for profiles).
-2. If the rule for the current srv exe is present and enabled and no block rule exists: bind the LAN listeners and start mDNS. **No OS dialog can appear**, because a matching allow rule exists.
+2. If both rules are present and enabled, srv's ports are inside the range, and no block rule exists: bind the LAN listeners and start mDNS. **No OS dialog can appear**, because matching allow rules exist.
 3. Otherwise show one explanatory sentence ("AgentMux will ask Windows for permission to accept connections from other devices on your private network"), then launch the helper with `runas` (R6, R7). On success go to step 2. On cancel: stay loopback-only, show "LAN needs one-time setup" (4.3), do **not** retry on every start.
 
 The srv must not bind a non-loopback socket before step 2, or Windows raises its own dialog and, on cancel, plants a block rule.
@@ -81,14 +87,22 @@ Extend `resolveLanIndicator` with states for what a user can act on:
 
 A silent `idle` with a blocked firewall (section 1) is the bug this removes.
 
-### 4.4 Network profile is a message, not a rule
+### 4.4 Public networks need the user's consent, per network
 
-If the adapter is Public, do **not** quietly open Public. Detect it (no admin) and explain it (4.3). This is the case that bit narko when the prompt's default profile did not match the network later in use.
+A new Windows network is typically classed **Public**, and many home users never change it, so a Private-only rule would leave LAN dead on a default install. But opening Public silently is wrong: the scoped LAN key is broadcast in the mDNS TXT record (`bootstrap/network.rs`), so anyone on the segment, a café for instance, could read it and call the LAN routes.
+
+So, when the active LAN adapter is Public (detected without admin through `INetworkListManager`):
+
+1. An in-app screen: *"Windows treats 'asaf_5G' as a Public network, which blocks incoming connections. Trust this network for AgentMux LAN? [Trust this network] [Not now]"*, naming the network and its subnet.
+2. Accepting adds, in the same single elevated run, Public-profile copies of the two rules **scoped to that adapter and that network's subnet** (`Interfaces` plus `RemoteAddresses = <CIDR>`). The network (name and CIDR) is recorded so the UI can show and revoke it. The residual risk is stated on the screen: the same adapter on a *different* network that happens to use the same private range (192.168.1.0/24 is common) would match.
+3. Declining keeps AgentMux loopback-only and the indicator reads `public-network`, with a link to Windows' network settings. Marking the network Private in Windows also works, but it changes more than AgentMux needs (it turns on file and printer sharing and network discovery), so it is offered as an alternative and is not the default.
+
+It is never done silently.
 
 ### 4.5 Installers
 
 - **Inno per-user installer:** an optional task, "Allow LAN access (asks for administrator permission)", that runs the helper with `runas`. Unticked or declined, the first LAN enable does it (4.2). Uninstall runs the helper's remove mode.
-- **Portable / dev builds:** no installer, so 4.2 is the whole mechanism. Path changes per build are handled by 4.1 (update in place, prune old).
+- **Portable / dev builds:** no installer, so 4.2 is the whole mechanism. The rules are port-based, so a new build at a new path needs **nothing**.
 - **MSIX:** verify separately whether the package identity changes the prompt behaviour; not assumed here.
 
 ### 4.6 Hardening, phase 2 (separate PRs)
@@ -104,16 +118,20 @@ On a clean Windows 11 VM with no AgentMux rules, per-user install, standard (non
 1. Enable LAN → one explanatory sentence, **one** UAC prompt, **no** "Windows Security Alert". Within 60 s the peer list fills **in both directions**, and a LAN jekt arrives `lan-verified`.
 2. Decline UAC → AgentMux keeps working loopback-only; the indicator reads `needs-setup`; no prompt on the next start.
 3. Cancel the *Windows* dialog in a build that predates this (block rule present) → helper removes the block; LAN works.
-4. Network marked Public → indicator reads `public-network` with the Settings link; marking it Private makes LAN work with no further action.
-5. A second build at a new path → the rule follows the new path; the old rule is gone; the rule count does not grow.
+4. Network classed Public → the in-app consent screen appears. Accepting adds the scoped rules in the same single UAC run and LAN works; declining leaves loopback-only with the `public-network` indicator and a Settings link.
+5. **An update, or a second build at a new path → LAN keeps working with no prompt and no new rule** (the port rules still match; the rule count does not grow).
 6. Uninstall → no AgentMux rule remains.
-7. Two machines on different Windows versions, one per direction, exchange a plain and a keyword jekt over LAN.
+7. Two machines, one per direction, exchange a plain and a keyword jekt over LAN (done for Windows ↔ macOS on 2026-10-01, section 8).
+8. Range exhausted → srv falls back to an OS-chosen port, nothing crashes, and the indicator reads `needs-setup`.
+9. A Linux guest on a **bridged** adapter appears as a normal peer; on **NAT** it does not, and the docs say so (section 6).
 
 ## 6. Open questions
 
 - Which binary does the UAC prompt show? It should be the signed host exe, not the sidecar, so the publisher reads AgentMux.
 - Is `RemoteAddresses = LocalSubnet` enough on this fleet, or do some hosts (VPN, WSL, Hyper-V adapters, as on narko) need an explicit range? Narko lists four LAN listeners, three on virtual adapters.
 - IPv6 link-local: `Area54.local` resolved to an `fe80::` address. Confirm the rule and the listeners cover it.
+- **Virtual machines.** A guest is a normal LAN member only on a **bridged** adapter (ideally wired). On NAT, mDNS multicast does not leave the host's private subnet and other machines cannot reach the guest; host-only is isolated. Check the hypervisor's adapter mode before diagnosing a guest. Bridging over Wi-Fi is unreliable on some hypervisors.
+- Port-range collisions: fifty instances per host is plenty for a person, but a CI or test host running many `task dev` builds could exhaust it; the OS-chosen fallback plus `needs-setup` is the safety net, but confirm the failure is legible.
 - The product currently treats a failed LAN start as an error only when the mDNS daemon itself fails; confirm what `lan_discovery_error` should add.
 
 ## 7. Immediate unblocker (not the fix)
@@ -125,3 +143,32 @@ netsh advfirewall firewall add rule name="AgentMux LAN" dir=in action=allow prot
 ```
 
 It has to be repeated for every new build path, which is exactly why 4.1 exists.
+
+## 8. Evidence from the LAN tests (2026-10-01)
+
+narko (Windows 11, v0.59.1) and starpower (macOS 26.5.2, v0.59.1), LAN only, default OS settings on the macOS side:
+
+| Check | Result |
+|---|---|
+| narko → starpower, plain | `DELIVERY=lan`, `TRUST=lan-verified`, `TIER=coord` |
+| starpower → narko, plain | `DELIVERY=lan`, `TRUST=lan-verified`, `TIER=coord`, within seconds |
+| keyword, starpower → narko | `TIER=sensitive`, `TRUST=lan-verified`, `ESCALATE=none`, informational banner only |
+| keyword, narko → starpower | same on the receiving side |
+| discovery | both directions; each host lists the other (narko `192.168.1.230:57319`, starpower `192.168.1.195`) |
+
+Not yet known: whether macOS showed a Local Network permission prompt on starpower (the agent cannot see the screen; the operator must say), and how LAN was enabled there. **Area54** and **charlie** (a Linux VM on gamerlove, see section 6) were not on narko's LAN list at the time.
+
+The same session also showed the failure this spec exists for: narko saw nothing while Area54 saw narko, until the Private profile was added by hand.
+
+## 9. Delivery plan
+
+One spec, separate PRs, in this order. Windows is the failing path and should not wait on macOS or Linux verification; each platform needs its own hardware to prove it.
+
+| PR | Scope | Verified on |
+|---|---|---|
+| **A: core** | Fixed LAN port range with fallback; advertise the actual port; a firewall-status interface; the new indicator states (`needs-setup`, `blocked`, `public-network`, `managed`). No OS-specific code. | unit tests; narko ↔ starpower |
+| **B: Windows** | The elevated helper, the two port rules, Public-network consent, rule-before-listeners ordering, installer step and uninstall cleanup. | a fresh Windows machine |
+| **C: macOS** | Verify first; change code only if the Local Network prompt does not appear with our current discovery. | starpower |
+| **D: Linux** | Detect an active `ufw` or `firewalld` and show the exact command. | charlie, once it is a bridged LAN member |
+
+Separate from this spec: WAN delivery has no catch-up pull (a message that arrives before an agent subscribes waits for the next unrelated wake). Tracked on its own.
