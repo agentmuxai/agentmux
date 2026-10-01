@@ -36,6 +36,13 @@ const ITEM_ICON: Record<ContextItem["kind"], string> = {
     running_summary: "🧭",
     compaction_summary: "📋",
     continuation_packet: "🔁",
+    startup_file: "📄",
+};
+
+const OWNER_CHIP: Record<NonNullable<ContextItem["owner"]>, { text: string; title: string }> = {
+    agentmux: { text: "AgentMux", title: "Written by AgentMux; regenerated at launch" },
+    user: { text: "Yours", title: "In the agent's workspace, not managed by AgentMux" },
+    external: { text: "Hand-maintained", title: "Outside the workspace and not written by AgentMux" },
 };
 
 /** The chip after an item's name, or null. */
@@ -43,7 +50,14 @@ function chip(item: ContextItem): string | null {
     if (item.tier === "system") return "AgentMux system";
     if (item.tier === "workspace") return "Workspace";
     if (item.kind === "personal_memory") return "Personal";
+    if (item.owner) return OWNER_CHIP[item.owner].text;
     return null;
+}
+
+/** What the size column says: a count for the skill and MCP listings, which carry no file text. */
+function sizeText(item: ContextItem): string {
+    if (item.count != null) return `${item.count} listed`;
+    return `${fmt(item.sizeBytes)} B · ~${fmt(item.tokens)} tok (est.)`;
 }
 
 /** A long body scrolls inside its own box and hands scroll to the pane at its edges. */
@@ -63,7 +77,20 @@ const ItemHead = (props: { item: ContextItem }): JSX.Element => (
             {props.item.name}
         </span>
         <Show when={chip(props.item)}>
-            <span class="agent-context-delivery-item-chip">{chip(props.item)}</span>
+            <span
+                class="agent-context-delivery-item-chip"
+                title={props.item.owner ? OWNER_CHIP[props.item.owner].title : undefined}
+            >
+                {chip(props.item)}
+            </span>
+        </Show>
+        <Show when={props.item.contains?.includes("global_memory")}>
+            <span
+                class="agent-context-delivery-item-chip agent-context-delivery-item-dup"
+                title="This file also carries the Global Memory, so a new session gets it twice"
+            >
+                + Global Memory
+            </span>
         </Show>
         <Show when={props.item.delivered === "partial" || props.item.delivered === "omitted"}>
             <span
@@ -77,9 +104,7 @@ const ItemHead = (props: { item: ContextItem }): JSX.Element => (
                 {props.item.delivered === "omitted" ? "not sent" : "cut"}
             </span>
         </Show>
-        <span class="agent-context-delivery-item-size">
-            {fmt(props.item.sizeBytes)} B · ~{fmt(props.item.tokens)} tok (est.)
-        </span>
+        <span class="agent-context-delivery-item-size">{sizeText(props.item)}</span>
     </div>
 );
 

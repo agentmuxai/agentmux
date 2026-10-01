@@ -6745,6 +6745,55 @@ async fn memory_session_start_serves_parts_then_one_notice_after_every_ack() {
     assert_eq!(output().unwrap().lines().count(), 1);
 }
 
+/// LC2 (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md
+/// §4): through the real router, a new session's notice lists the files the
+/// CLI loaded from the `cwd` the hook reports, before the memory items.
+#[tokio::test]
+async fn memory_session_start_notice_lists_the_startup_files_of_the_hooks_cwd() {
+    let (state, token) = m4c1_state();
+    let bundle: crate::backend::storage::store::Bundle = serde_json::from_value(serde_json::json!({
+        "id": "g-rules", "name": "Rules", "is_global": true, "instructions": "workspace rules",
+    }))
+    .unwrap();
+    state.id_store.bundle_upsert(&bundle).unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "project rules").unwrap();
+    std::fs::write(ws.path().join(".mcp.json"), r#"{"mcpServers":{"agentmux":{}}}"#).unwrap();
+    let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+    let session = format!("sess-{}", uuid::Uuid::new_v4());
+    let cwd = ws.path().to_string_lossy().into_owned();
+    let req = |part: usize| {
+        serde_json::json!({"block_id": block_id, "session_id": session, "source": "startup", "part": part, "cwd": cwd, "config_dir": ""})
+    };
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req(1)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let of = v["of"].as_u64().unwrap() as usize;
+    for part in 2..=of {
+        m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req(part)).await;
+    }
+    for part in 1..=of {
+        m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/ack", req(part)).await;
+    }
+    let written = state
+        .filestore
+        .read_file(&block_id, crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .map(|b| String::from_utf8(b).unwrap())
+        .expect("the notice");
+    let frame: serde_json::Value = serde_json::from_str(written.trim()).unwrap();
+    let kinds: Vec<&str> = frame["entries"].as_array().unwrap().iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    let startup: Vec<&serde_json::Value> =
+        frame["entries"].as_array().unwrap().iter().filter(|e| e["kind"] == "startup_file").collect();
+    assert!(
+        startup.iter().any(|e| e["role"] == "instructions" && e["size_bytes"] == "project rules".len()),
+        "the workspace CLAUDE.md: {kinds:?}"
+    );
+    assert!(startup.iter().any(|e| e["role"] == "mcp_servers"), "{kinds:?}");
+    let first_memory = kinds.iter().position(|k| *k != "startup_file").unwrap_or(kinds.len());
+    assert!(kinds[..first_memory].iter().all(|k| *k == "startup_file"), "startup files first: {kinds:?}");
+}
+
 // ---- Container-agent credential (REPORT_AGENT_FILE_ACCESS_2026_09_29.md) ----
 
 async fn status_with_key(method: &str, uri: &str, key: &str) -> StatusCode {
