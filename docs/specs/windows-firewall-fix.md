@@ -1,6 +1,6 @@
 # Windows Firewall Popup — Root Cause & Fix
 
-**Status:** proposed — Root cause identified, fix is trivial
+**Status:** historical — Phase 1 (LAN discovery off by default, opt-in toggle) shipped; the root-cause analysis below still stands. Its premise, that keeping discovery off is the answer to the firewall problem, is replaced by [SPEC_LAN_FIREWALL_SETUP_2026_10_01.md](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md): turning LAN on must work on a fresh install without the OS prompt.
 **Impact:** Annoying UX — user can click Cancel and app works fine
 
 ---
