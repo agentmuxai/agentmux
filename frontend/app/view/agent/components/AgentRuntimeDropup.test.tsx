@@ -402,3 +402,20 @@ describe("AgentRuntimeDropup — shows what the agent really runs, and a pick ho
         expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "sonnet" });
     });
 });
+
+describe("AgentRuntimeDropup — the mode a definition pins is the mode shown (ReAgent P2 on #4161)", () => {
+    const meta = {
+        "agent:runtime": { model: "sonnet", permissionMode: "bypass", effort: "high" },
+        "agent:provider_flags": "--permission-mode plan",
+    };
+    it("the label and the selected Mode row show Plan, not the stored Bypass", async () => {
+        render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={() => ({ meta }) as any} providerId="claude" />);
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(trigger.textContent).toMatch(/Plan/);
+        expect(trigger.textContent).not.toMatch(/Bypass/);
+        await userEvent.click(trigger);
+        const selected = screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true").map((o) => o.textContent ?? "");
+        expect(selected.some((t) => /^Plan/.test(t))).toBe(true);
+        expect(selected.some((t) => /^Bypass/.test(t))).toBe(false);
+    });
+});

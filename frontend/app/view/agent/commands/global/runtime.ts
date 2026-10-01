@@ -144,7 +144,7 @@ const effortCommand: SlashCommand = {
 // ── /permission-mode ──────────────────────────────────────────────────
 
 function permissionChoices(ctx: SlashCommandContext): SlashChoice[] {
-    const current = getRuntimeConfig(ctx.block()?.meta).permissionMode;
+    const current = shownRuntime(ctx).permissionMode;
     const make = (
         value: string,
         label: string,

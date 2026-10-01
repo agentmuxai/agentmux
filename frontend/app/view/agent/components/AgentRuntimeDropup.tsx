@@ -396,7 +396,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     "agent-runtime-dropup-trigger--differs": shownAgreement().kind === "differs",
                     "agent-runtime-dropup-trigger--pending": shownAgreement().kind === "pending",
                 }}
-                style={{ "border-left": `3px solid ${PERMISSION_COLORS[runtime().permissionMode]}` }}
+                style={{ "border-left": `3px solid ${PERMISSION_COLORS[shown().permissionMode] ?? PERMISSION_COLORS.default}` }}
                 title={
                     applyError() != null
                         ? `Couldn't apply that change — the agent may still be running the previous settings. ${applyError()}`

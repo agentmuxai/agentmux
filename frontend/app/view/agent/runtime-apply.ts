@@ -38,6 +38,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { staticTabId } from "@/app/store/global";
 import { buildPaneArgs, getRuntimeConfig } from "./buildRuntimeArgs";
+import { modelTakesEffort } from "./runtime-capabilities";
 import { isPersistentLaunch, parseProviderFlags, PROVIDER_FLAGS_META_KEY, withoutOverriddenFlags } from "./launch-args";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
@@ -163,7 +164,10 @@ export function patchRuntime(
         const current = recent?.flags ?? parseProviderFlags(meta?.[PROVIDER_FLAGS_META_KEY]).join(" ");
         const flags = withoutOverriddenFlags(current, {
             model: patch.model !== undefined,
-            effort: patch.effort !== undefined,
+            // A model that takes no --effort (Haiku) must not be left with the
+            // definition's: it is appended after the runtime's flags and Haiku
+            // answers HTTP 400 on it (ReAgent P1 on #4161).
+            effort: patch.effort !== undefined || (patch.model !== undefined && !modelTakesEffort(patch.model)),
             permissionMode: patch.permissionMode !== undefined,
         });
         if (flags !== current) {

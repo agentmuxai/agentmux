@@ -166,6 +166,23 @@ describe("patchRuntime — a pick wins over the agent definition's own flags", (
         expect(flagWrites()).toEqual([]);
     });
 
+    it("picking a model that takes no --effort also takes the definition's --effort out (ReAgent P1 on #4161)", async () => {
+        // The definition pins Opus + max effort; the user picks Haiku. The
+        // definition's --effort would otherwise stay in the flags, be appended
+        // after the runtime's, and Haiku answers HTTP 400 on it.
+        await patchRuntime("b1", claude, { model: "haiku" }, withFlags("--model opus --effort max --add-dir /tmp"));
+        expect(flagWrites()).toEqual(["--add-dir /tmp"]);
+        const args = argWrites().at(-1)!;
+        expect(args).not.toContain("--effort");
+        expect(lastFlag(args, "--model")).toBe("haiku");
+    });
+
+    it("…and a pick of a model that does take effort keeps the definition's --effort", async () => {
+        await patchRuntime("b1", claude, { model: "sonnet" }, withFlags("--model opus --effort max"));
+        expect(flagWrites()).toEqual(["--effort max"]);
+        expect(lastFlag(argWrites().at(-1)!, "--effort")).toBe("max");
+    });
+
     it("a restart with no pick ({}) does not touch the flags", async () => {
         await patchRuntime("b1", claude, {}, withFlags("--model opus"));
         expect(flagWrites()).toEqual([]);

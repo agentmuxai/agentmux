@@ -17,7 +17,7 @@ import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 import { parseProviderFlags } from "./launch-args";
-import { effortFromFlags, modelFromFlags } from "./runtime-capabilities";
+import { effortFromFlags, modelFromFlags, permissionModeFromFlags } from "./runtime-capabilities";
 
 /**
  * Check that Node.js and npm are available for a provider installed via
@@ -201,6 +201,8 @@ export function resolveInitialRuntimeConfig(
      * The agent definition's own `provider_flags`. Its `--model` / `--effort` are
      * what the agent is DEFINED to run, so they seed the menu: otherwise the menu
      * would start on the catalog default while the process runs the definition's.
+     * Its `--permission-mode` (and `--dangerously-skip-permissions` / `--yolo`,
+     * which read as "bypass") seeds the mode the same way.
      * An explicit model chosen at launch still wins.
      */
     providerFlags?: unknown,
@@ -212,7 +214,13 @@ export function resolveInitialRuntimeConfig(
         providerModels?.find((m) => m.default)?.value ||
         DEFAULT_RUNTIME_CONFIG.model;
     const effort = effortFromFlags(flags) ?? DEFAULT_RUNTIME_CONFIG.effort;
-    return { ...DEFAULT_RUNTIME_CONFIG, model, effort: effort as AgentRuntimeConfig["effort"] };
+    const permissionMode = permissionModeFromFlags(flags) ?? DEFAULT_RUNTIME_CONFIG.permissionMode;
+    return {
+        ...DEFAULT_RUNTIME_CONFIG,
+        model,
+        effort: effort as AgentRuntimeConfig["effort"],
+        permissionMode: permissionMode as AgentRuntimeConfig["permissionMode"],
+    };
 }
 
 /**

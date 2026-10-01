@@ -120,6 +120,12 @@ describe("resolveInitialRuntimeConfig", () => {
         expect(r).toMatchObject({ model: "opus", effort: "max" });
     });
 
+    it("seeds the permission mode from the definition's flags too", () => {
+        const m = models({ value: "sonnet", default: true });
+        expect(resolveInitialRuntimeConfig(undefined, m, "--permission-mode plan").permissionMode).toBe("plan");
+        expect(resolveInitialRuntimeConfig(undefined, m, "--add-dir /tmp").permissionMode).toBe("bypass");
+    });
+
     it("a model chosen at launch still wins over the definition's", () => {
         const r = resolveInitialRuntimeConfig("haiku", models({ value: "sonnet", default: true }), "--model opus");
         expect(r.model).toBe("haiku");
