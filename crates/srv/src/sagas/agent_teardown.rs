@@ -476,8 +476,8 @@ async fn verify_gone(before: &[agent_resources::ProcessEntry]) -> Vec<agent_reso
     }
     for p in &left {
         tracing::warn!(pid = p.pid, command = %p.command, "agent_teardown: forcing a survivor");
-        let pid = p.pid;
-        let _ = tokio::task::spawn_blocking(move || agentmux_common::process::kill_pid(pid)).await;
+        let (pid, started) = (p.pid, p.started_at_ms);
+        let _ = tokio::task::spawn_blocking(move || agent_resources::force_kill_tree(pid, started)).await;
     }
     left = wait_gone(left).await;
     left
