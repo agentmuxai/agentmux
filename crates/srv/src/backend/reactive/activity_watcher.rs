@@ -7,7 +7,7 @@
 //! result as an `agent:summary` MuxEvent — so panes (the swarm feed, in
 //! particular) can show a live one-liner without polling.
 //!
-//! Each call goes through `app_api::session::generate_pushed_activity_summary`,
+//! Each call goes through `crate::ambient::tasks::generate_pushed_activity_summary`,
 //! which routes it through the Ambient Model Call gateway (`crate::ambient`)
 //! under its own purpose tag — distinct from the pull RPC's, so a periodic
 //! background summary never contends with a live, user-facing pane-header
@@ -132,13 +132,13 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                     return;
                 };
 
-                let result = crate::server::app_api::session::generate_pushed_activity_summary(
+                let result = crate::ambient::tasks::generate_pushed_activity_summary(
                     &mstore, &filestore, &block_id, tick, WORD_TARGET,
                 ).await;
 
                 in_flight.lock().unwrap().remove(&block_id);
 
-                let Some((summary, _tokens)) = result else {
+                let Some(generated) = result else {
                     // Leave last_seen_size untouched so a future tick retries
                     // this block — whether the failure was transient (CLI
                     // hiccup, stale-on-arrival via the Ambient Model Call
@@ -146,6 +146,13 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                     return;
                 };
                 last_seen_size.lock().unwrap().insert(block_id.clone(), current_size);
+
+                // The model had nothing usable to say about this output (its reply
+                // failed validation). That attempt is finished and billed: record the
+                // size so it is not retried every tick, and publish nothing.
+                let Some(summary) = generated.text else {
+                    return;
+                };
 
                 let ts = agentmux_common::time::now_ms_u64();
 

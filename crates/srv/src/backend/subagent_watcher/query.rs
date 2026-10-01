@@ -241,19 +241,19 @@ impl SubagentWatcher {
         };
         tokio::spawn(async move {
             if is_workflow {
-                crate::server::app_api::session::generate_dispatch_name(
+                crate::ambient::tasks::generate_dispatch_name(
                     &watcher.mstore,
                     &watcher,
                     &dispatch_id,
                     &first_member_agent_id,
-                    crate::server::app_api::session::pull_call_semaphore(),
+                    crate::ambient::limits::pull_call_semaphore(),
                 ).await;
             } else {
-                crate::server::app_api::session::generate_subagent_name(
+                crate::ambient::tasks::generate_subagent_name(
                     &watcher.mstore,
                     &watcher,
                     &first_member_agent_id,
-                    crate::server::app_api::session::pull_call_semaphore(),
+                    crate::ambient::limits::pull_call_semaphore(),
                 ).await;
             }
         });
@@ -356,21 +356,21 @@ impl SubagentWatcher {
             tokio::spawn(async move {
                 match item {
                     BacklogNamingItem::Solo { agent_id } => {
-                        crate::server::app_api::session::generate_subagent_name(
+                        crate::ambient::tasks::generate_subagent_name(
                             &watcher.mstore,
                             &watcher,
                             &agent_id,
-                            crate::server::app_api::session::backlog_naming_semaphore(),
+                            crate::ambient::limits::backlog_naming_semaphore(),
                         )
                         .await;
                     }
                     BacklogNamingItem::Workflow { dispatch_id, representative_agent_id } => {
-                        crate::server::app_api::session::generate_dispatch_name(
+                        crate::ambient::tasks::generate_dispatch_name(
                             &watcher.mstore,
                             &watcher,
                             &dispatch_id,
                             &representative_agent_id,
-                            crate::server::app_api::session::backlog_naming_semaphore(),
+                            crate::ambient::limits::backlog_naming_semaphore(),
                         )
                         .await;
                     }

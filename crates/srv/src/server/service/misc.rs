@@ -156,15 +156,15 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            let result = super::super::app_api::session::generate_subagent_name(
+            let result = crate::ambient::tasks::generate_subagent_name(
                 &state.mstore,
                 &state.subagent_watcher,
                 &agent_id,
-                super::super::app_api::session::pull_call_semaphore(),
+                crate::ambient::limits::pull_call_semaphore(),
             )
             .await;
             let (display_name, tokens) = match result {
-                Some((name, tokens)) => (Some(name), tokens),
+                Some(generated) => (generated.text, generated.tokens),
                 None => (None, None),
             };
             WebReturnType::success(serde_json::json!({ "displayName": display_name, "tokens": tokens }))
