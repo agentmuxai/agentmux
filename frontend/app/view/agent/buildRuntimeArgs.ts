@@ -11,6 +11,7 @@
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import { getProvider } from "./providers";
+import { effortApplies } from "./runtime-capabilities";
 import { selectLaunchArgs, withProviderFlags, type LaunchArgsProvider } from "./launch-args";
 
 /**
@@ -146,9 +147,9 @@ export function buildRuntimeArgs(
         args.push("--model", config.model);
     }
     // --effort: claude only, and NOT on Haiku — `--effort` 400s on Haiku 4.5
-    // (effort is supported on Opus/Sonnet only). Skip it so a `haiku` pane
-    // doesn't error out on every turn.
-    if ((!providerId || providerId === "claude") && config.model !== "haiku") {
+    // (effort is supported on Opus/Sonnet only). Skip it so a Haiku pane
+    // doesn't error out on every turn. Matches a concrete Haiku id too.
+    if (effortApplies(providerId, config.model)) {
         args.push("--effort", config.effort);
     }
 

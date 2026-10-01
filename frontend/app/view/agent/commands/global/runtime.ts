@@ -18,6 +18,7 @@
 
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
 import { patchRuntime } from "../../runtime-apply";
+import { effortNotUsedReason } from "../../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -117,6 +118,12 @@ const effortCommand: SlashCommand = {
     handler: async (ctx, arg): Promise<SlashResult> => {
         const result = await updateRuntime(ctx, { effort: arg as EffortLevel });
         if (result.ok === false) return runtimeError(result.error);
+        // Recorded either way (it is remembered for when the model takes it),
+        // but say plainly when it changes nothing now.
+        const notUsed = effortNotUsedReason(ctx.provider()?.id, result.updated.model);
+        if (notUsed !== null) {
+            return { kind: "ok", message: `effort recorded as ${result.updated.effort}, but it has no effect now — ${notUsed}` };
+        }
         return { kind: "ok", message: `effort set to ${result.updated.effort} (applies to next turn)` };
     },
 };

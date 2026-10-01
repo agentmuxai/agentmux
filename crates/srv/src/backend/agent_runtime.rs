@@ -233,7 +233,7 @@ pub(crate) fn seed_launch(
                 cli_args.extend(["--model".to_string(), model.clone()]);
             }
             // `--effort` 400s on Haiku 4.5; the frontend skips it the same way.
-            if flag_effort.is_none() && model != "haiku" {
+            if flag_effort.is_none() && model_takes_effort(&model) {
                 cli_args.extend(["--effort".to_string(), effort.clone()]);
             }
         }
@@ -255,6 +255,14 @@ pub(crate) fn seed_launch(
             "effort": effort,
         })),
     }
+}
+
+/// Whether `--effort` is passed for `model`. Haiku 4.5 rejects it (HTTP 400 on
+/// every turn). Matches the model id as well as the alias, case-insensitively —
+/// this was `model == "haiku"`, so a concrete Haiku id still got the flag.
+/// Mirrors `modelTakesEffort` in frontend/app/view/agent/runtime-capabilities.ts.
+pub(crate) fn model_takes_effort(model: &str) -> bool {
+    !model.to_ascii_lowercase().contains("haiku")
 }
 
 /// Claude model names: the aliases and concrete ids. A pane carried over from
@@ -307,7 +315,7 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
             if have_model.is_none() {
                 out.extend(["--model".to_string(), model.clone()]);
             }
-            if !have_effort && model != "haiku" {
+            if !have_effort && model_takes_effort(&model) {
                 let effort = runtime("effort").unwrap_or_else(|| DEFAULT_EFFORT.to_string());
                 out.extend(["--effort".to_string(), effort]);
             }
@@ -479,6 +487,23 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(rt["model"], in_args, "{provider} {flags:?}");
+        }
+    }
+
+    #[test]
+    fn effort_is_for_models_that_take_it_whatever_the_haiku_id_looks_like() {
+        for haiku in ["haiku", "Haiku", "claude-haiku-4-5", "claude-haiku-4-5-20251001"] {
+            assert!(!model_takes_effort(haiku), "{haiku}");
+            // seeded
+            let seeded = seed_launch("claude", s(&[]), &format!("--model {haiku}"));
+            assert!(!seeded.cli_args.iter().any(|a| a == "--effort"), "{haiku}: {:?}", seeded.cli_args);
+            // filled into a stored pane
+            let meta = meta_with("claude", Some(json!({"model": haiku})));
+            let filled = with_runtime_flags(&meta, s(&["-p"]));
+            assert!(!filled.iter().any(|a| a == "--effort"), "{haiku}: {filled:?}");
+        }
+        for other in ["sonnet", "opus", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"] {
+            assert!(model_takes_effort(other), "{other}");
         }
     }
 

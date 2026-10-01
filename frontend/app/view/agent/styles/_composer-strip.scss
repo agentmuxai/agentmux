@@ -732,3 +732,11 @@
     padding: 1px var(--space-1-5);
     cursor: pointer;
 }
+
+// A section whose options do not apply to this pane (e.g. effort on Haiku).
+.agent-runtime-dropup-note {
+    padding: 2px var(--space-2);
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    font-style: italic;
+}

@@ -97,6 +97,12 @@ describe("buildRuntimeArgs", () => {
             expect(out[out.indexOf("--model") + 1]).toBe("haiku");
             expect(out).not.toContain("--effort");
         });
+
+        it("omits --effort for a CONCRETE Haiku id too (it used to match only the alias)", () => {
+            const out = buildRuntimeArgs(CLAUDE_BASE, cfg({ model: "claude-haiku-4-5-20251001" }), "claude");
+            expect(out[out.indexOf("--model") + 1]).toBe("claude-haiku-4-5-20251001");
+            expect(out).not.toContain("--effort");
+        });
     });
 
     describe("gemini", () => {
