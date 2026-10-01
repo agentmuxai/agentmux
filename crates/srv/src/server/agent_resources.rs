@@ -102,9 +102,17 @@ pub fn snapshot(state: &AppState, block_id: &str) -> AgentResources {
     let missing: Vec<u32> = processes.iter().filter(|p| p.started_at_ms == 0).map(|p| p.pid).collect();
     if !missing.is_empty() {
         let times = start_times(&missing);
-        for p in processes.iter_mut().filter(|p| p.started_at_ms == 0) {
-            p.started_at_ms = times.get(&p.pid).copied().unwrap_or(0);
-        }
+        // One that already exited has no start time to record; keeping it
+        // with 0 ("unknown") would let a later check match a reused PID.
+        processes.retain_mut(|p| {
+            if p.started_at_ms == 0 {
+                match times.get(&p.pid) {
+                    Some(t) => p.started_at_ms = *t,
+                    None => return false,
+                }
+            }
+            true
+        });
     }
     let background_tasks = state
         .mstore

@@ -138,6 +138,10 @@ pub struct TeardownReport {
     pub crons_targeting: Vec<String>,
     /// Background tasks stopped explicitly (Stop with `stop_background`).
     pub stopped_background: usize,
+    /// Stop only: the CLI stop failed. Nothing else was touched (claims and
+    /// background tasks stay), and [`stop`] returns this as its error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_error: Option<String>,
     /// The container agent's container that was stopped, if any.
     pub stopped_container: Option<String>,
     /// Processes from `before` still running after the teardown and one more
@@ -182,7 +186,11 @@ pub async fn stop(state: &AppState, block_id: &str, graceful: bool, stop_backgro
         return Err(format!("NOT_RUNNING: no controller for block {block_id}"));
     }
     let stop_background = stop_background.unwrap_or_else(|| !stop_keeps_background(state));
-    Ok(run(state, block_id, Policy::stop(graceful, stop_background)).await)
+    let report = run(state, block_id, Policy::stop(graceful, stop_background)).await;
+    match report.stop_error {
+        Some(e) => Err(e),
+        None => Ok(report),
+    }
 }
 
 fn stop_keeps_background(state: &AppState) -> bool {
@@ -268,6 +276,16 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
         ..Default::default()
     };
 
+    // Stop: the CLI first. If it fails the agent is still running, so its
+    // claims and background tasks must stay too (ReAgent P1 on #4174).
+    if let CliStop::StopOnly { graceful } = policy.cli {
+        if let Err(e) = stop_now(block_id, graceful) {
+            tracing::warn!(block_id = %block_id, error = %e, "agent_teardown: stop failed; nothing else touched");
+            report.stop_error = Some(e);
+            return report;
+        }
+    }
+
     // Step 3: non-process resources, so nothing new reaches a dying agent.
     if policy.release_claims {
         let reason = if matches!(policy.cli, CliStop::StopOnly { .. }) { "agent stopped" } else { "agent quit" };
@@ -288,11 +306,7 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
     }
 
     match policy.cli {
-        CliStop::StopOnly { graceful } => {
-            if let Err(e) = stop_now(block_id, graceful) {
-                tracing::debug!(block_id = %block_id, error = %e, "agent_teardown: stop");
-            }
-        }
+        CliStop::StopOnly { .. } => {} // done first, above
         CliStop::Replace => {
             if let Some(ctrl) = blockcontroller::get_controller(block_id) {
                 if let Err(e) = replace_now(ctrl.as_ref()) {
