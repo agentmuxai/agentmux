@@ -57,18 +57,19 @@ jobs:
     # §3): a superset of the reviewer's own filter
     # (sns_consumer.should_process_pull_request / _build_mention_task), so it
     # never skips an event the reviewer would act on, but it drops the ones
-    # it would certainly drop: PR body/title edits, closed PRs, and comments
-    # with no @-mention from humans, ReAgent itself and Codex. On 2026-09-30
-    # that was ~half of all runs. a5af/reagent's tests read THIS expression
-    # from main and check it against the reviewer's filter; keep the
-    # chatgpt-codex-connector[bot] exclusion (the test uses it as a marker).
+    # it would certainly drop: PR body/title edits, closed PRs, ReAgent's own
+    # comments, and comments from humans with no @-mention. Codex's comments
+    # are NOT dropped: the reviewer reads them for its Codex quota breaker
+    # (reviewer_handler.handle_codex_comment). a5af/reagent's tests read THIS
+    # expression from main and check it against the reviewer's filter; keep
+    # the `pull_request.state == 'open'` clause (the test uses it as a marker
+    # of this gate).
     if: >-
       (github.event_name == 'pull_request_target' &&
        github.event.pull_request.state == 'open' &&
        (github.event.action != 'edited' || github.event.changes.base)) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
        github.event.comment.user.login != 'reagentx-workflow[bot]' &&
-       github.event.comment.user.login != 'chatgpt-codex-connector[bot]' &&
        (contains(github.event.comment.body, '@reagentx-workflow') ||
         endsWith(github.event.comment.user.login, '[bot]') ||
         startsWith(github.event.comment.user.login, 'GenericAgentX-')))
