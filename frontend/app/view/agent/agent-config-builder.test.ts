@@ -117,6 +117,14 @@ describe("buildConfigFiles — skills index (LC3)", () => {
         expect(md).not.toContain("**Deploy Staging**");
     });
 
+    it("keeps a skill with a non-ASCII trigger indexed", () => {
+        const md =
+            buildConfigFiles({}, [makeSkill({ name: "Café", trigger: "café", content: "brew" })], undefined, undefined, "claude").find(
+                (f) => f.path === "CLAUDE.md",
+            )?.content ?? "";
+        expect(md).toContain("**Café**");
+    });
+
     it("treats an alias of Claude as Claude", () => {
         const md = instructions("claude-code");
         expect(md).toContain("**Notes**");

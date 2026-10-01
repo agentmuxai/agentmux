@@ -89,10 +89,13 @@ export function buildConfigFiles(
     // A command a later skill's command overwrites (same trigger, compared
     // case-insensitively as a case-insensitive filesystem would) has no file
     // of its own — the same rule as Rust's skills_with_their_own_file.
+    // A non-ASCII trigger never counts as owning its file: macOS folds
+    // Unicode-equivalent names together (Rust's skills_with_their_own_file).
     const commandKey = (skill: (typeof skills)[number]): string | null => {
         if (!skill.content || skill.skill_type === SKILL_TYPE_AGENT_SKILL) return null;
         const trigger = sanitizeTrigger(skill.trigger);
-        return trigger ? trigger.toLowerCase() : null;
+        // eslint-disable-next-line no-control-regex
+        return trigger && /^[\x00-\x7f]*$/.test(trigger) ? trigger.toLowerCase() : null;
     };
     const lastWriter = new Map<string, number>();
     skills.forEach((skill, i) => {
