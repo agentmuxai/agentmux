@@ -56,6 +56,7 @@ import { openOrFocusHistoryTab } from "../open-history-tab";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import { resolveDrift, type PinDrift } from "../providers/version-drift";
+import { needsProbe, prereqShortfall, shortfallLabel, type PrereqProbe } from "../providers/prereq-check";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
@@ -655,7 +656,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md. Caches per-tool
     // probe results for the session (PATH doesn't change mid-session
     // unless the user installs a new tool — `Refresh` clears).
-    const prereqCache = new Map<string, boolean>();
+    const prereqCache = new Map<string, PrereqProbe>();
     const platformKey = (): "windows" | "macos" | "linux" => {
         // Read from the CEF host's authoritative `getPlatform()` IPC
         // rather than the deprecated `window.navigator.platform` —
@@ -678,30 +679,44 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         const prov = getProvider(providerId);
         const reqs = prov?.systemPrereqs ?? [];
         if (reqs.length === 0) return [];
-        const uncached = reqs.filter((r) => !prereqCache.has(r.tool));
+        const uncached = reqs.filter((r) => needsProbe(r, prereqCache.get(r.tool)));
         if (uncached.length > 0) {
             try {
+                const versions = uncached.filter((u) => u.minVersion).map((u) => u.tool);
                 const r = await RpcApi.ResolvePrereqsCommand(TabRpcClient, {
                     tools: uncached.map((u) => u.tool),
+                    ...(versions.length > 0 ? { versions } : {}),
                 });
                 for (const result of r.results) {
-                    prereqCache.set(result.tool, result.found);
+                    const wanted = uncached.some((u) => u.tool === result.tool && u.minVersion);
+                    prereqCache.set(result.tool, {
+                        found: result.found,
+                        version: wanted ? (result.version ?? null) : undefined,
+                    });
                 }
             } catch {
                 // If the probe fails (e.g. backend not ready), treat
                 // all as found — don't block launch on probe failure.
-                for (const u of uncached) prereqCache.set(u.tool, true);
+                for (const u of uncached) prereqCache.set(u.tool, { found: true, version: null });
             }
         }
         const platform = platformKey();
-        return reqs
-            .filter((r) => prereqCache.get(r.tool) === false)
-            .map((r) => ({
-                tool: r.tool,
-                label: r.label ?? r.tool,
-                installUrl: r.installUrls[platform],
-                installLinkText: r.installLinkText?.[platform] ?? `Install ${r.label ?? r.tool}`,
-            }));
+        return reqs.flatMap((r) => {
+            const shortfall = prereqShortfall(r, prereqCache.get(r.tool));
+            if (!shortfall) return [];
+            const label = r.label ?? r.tool;
+            return [
+                {
+                    tool: r.tool,
+                    label: shortfallLabel(r, shortfall),
+                    installUrl: r.installUrls[platform],
+                    installLinkText:
+                        shortfall.kind === "too-old"
+                            ? `Update ${label}`
+                            : (r.installLinkText?.[platform] ?? `Install ${label}`),
+                },
+            ];
+        });
     };
 
     // Option E (PR 2 of 2): when an agent has an in-progress session

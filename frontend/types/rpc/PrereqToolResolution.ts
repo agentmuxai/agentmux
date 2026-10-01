@@ -7,4 +7,10 @@ export type PrereqToolResolution = { tool: string, found: boolean,
 /**
  * Always present, null when the tool was not found.
  */
-path: string | null, };
+path: string | null, 
+/**
+ * The tool's version, when the request asked for it (`versions`) and
+ * it could be read. Null means "not asked" or "unknown" — never
+ * "new enough"; the caller decides how to treat an unknown version.
+ */
+version: string | null, };

@@ -36,6 +36,10 @@ export interface SystemPrereq {
         macos?: string;
         linux?: string;
     };
+    /** Lowest version the provider's CLI runs on, e.g. "24.16.0". When set,
+     *  the pre-launch check also reads the installed version and treats an
+     *  older one like a missing tool. See prereq-check.ts. */
+    minVersion?: string;
 }
 
 /** One selectable model for a provider's `--model` flag. */

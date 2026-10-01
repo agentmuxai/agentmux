@@ -390,7 +390,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         // Same git dependency as Claude Code — OpenClaw uses git for
         // project-context features when invoking the Codex harness.
-        systemPrereqs: [GIT_PREREQ, NODE_PREREQ, NPM_PREREQ],
+        // Node 24.16+: OpenClaw's preinstall and the CLI itself refuse older
+        // Node ("node:sqlite truncates TEXT at embedded NUL", nodejs/node#61954),
+        // checked at 2026.9.4 and 2026.9.7.
+        systemPrereqs: [GIT_PREREQ, { ...NODE_PREREQ, minVersion: "24.16.0" }, NPM_PREREQ],
         contextWindow: 200_000,
     },
     // Kimi Code CLI — Moonshot AI's coding agent.
