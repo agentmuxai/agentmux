@@ -20,6 +20,26 @@
  *  the session boundary with the title (useBlockActivity.ts). */
 export const META_HUMAN_TURNS = "term:human_turns";
 
+/** The count each block has reached in this app session. The block meta copy is
+ *  what survives a restart, but it only updates after a server round trip, so two
+ *  messages sent before it lands would both read the same value (ReAgent P2 on
+ *  #4238). The local copy moves synchronously; the meta copy seeds it. */
+const localTurns = new Map<string, number>();
+
+/** Count a human message for `blockId` and return its 1-based turn number.
+ *  `stored` is the block meta's `term:human_turns`, whatever it holds. */
+export function nextHumanTurn(blockId: string, stored: unknown): number {
+    const fromMeta = typeof stored === "number" && Number.isInteger(stored) && stored > 0 ? stored : 0;
+    const next = Math.max(localTurns.get(blockId) ?? 0, fromMeta) + 1;
+    localTurns.set(blockId, next);
+    return next;
+}
+
+/** Forget a block's count: its session ended, and the next one starts at 1. */
+export function resetHumanTurns(blockId: string): void {
+    localTurns.delete(blockId);
+}
+
 /** Is human turn `n` (1-based) one where an existing title is re-evaluated? */
 export function isReevaluationTurn(n: number): boolean {
     if (!Number.isInteger(n) || n < 2) return false;

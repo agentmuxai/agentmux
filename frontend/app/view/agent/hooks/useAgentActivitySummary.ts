@@ -58,7 +58,7 @@ import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
-import { isTitleNews, META_HUMAN_TURNS, shouldRequestTitle } from "@/app/store/title-schedule";
+import { isTitleNews, META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
 import { MOS } from "@/app/store/global";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 
@@ -94,8 +94,6 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
         // top of, not instead of, never putting real content in
         // `pendingContent` for a hidden turn in the first place.
         if (phase.hidden) return;
-        activeTurnId++;
-        const myTurnId = activeTurnId;
         // Remember what the user asked, for the swarm row's fallback line when no
         // generated title exists (store/swarm-line.ts). Only a message with a goal
         // in it is kept, so "u there" never overwrites the real one. Written now,
@@ -107,8 +105,7 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
         // (store/title-schedule.ts). Read from block meta, not a local counter, so
         // a remount (tab switch) does not restart the schedule.
         const meta = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta;
-        const priorTurns = meta?.[META_HUMAN_TURNS];
-        const turn = (typeof priorTurns === "number" && priorTurns > 0 ? priorTurns : 0) + 1;
+        const turn = nextHumanTurn(blockId, meta?.[META_HUMAN_TURNS]);
         const currentTitle = meta?.["term:ambient_summary"];
         const hasTitle = typeof currentTitle === "string" && isUsableTitle(currentTitle);
         fireAndForget(() =>
@@ -118,6 +115,11 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
             } as any)
         );
         if (!shouldRequestTitle(hasTitle, turn)) return;
+        // Only a turn that issues a request may supersede one in flight: a
+        // message on a non-scheduled turn must not discard the scheduled turn's
+        // result (ReAgent P2 on #4238).
+        activeTurnId++;
+        const myTurnId = activeTurnId;
         const rootWidth = getRootWidth() ?? 400;
         const textWidth = Math.max(0, rootWidth - 280);
         const wordTarget = Math.max(5, Math.min(12, Math.floor(textWidth / 48)));

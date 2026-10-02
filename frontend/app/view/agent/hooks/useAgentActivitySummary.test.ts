@@ -35,6 +35,7 @@ vi.mock("@/app/store/global", () => ({
     MOS: { getMuxObjectAtom: () => () => ({ meta: hub.meta }) },
 }));
 
+import { resetHumanTurns } from "@/app/store/title-schedule";
 import { useAgentActivitySummary } from "./useAgentActivitySummary";
 
 const BLOCK_ID = "b";
@@ -42,6 +43,7 @@ const BLOCK_ID = "b";
 beforeEach(() => {
     hub.activitySummary.mockReset();
     hub.meta = {};
+    resetHumanTurns(BLOCK_ID);
     hub.updateMeta.mockReset().mockImplementation((_oref: string, patch: Record<string, unknown>) => {
         for (const [k, v] of Object.entries(patch)) {
             if (v === null) delete hub.meta[k];
@@ -239,6 +241,37 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
         hub.meta["term:human_turns"] = 4;
         hub.activitySummary.mockResolvedValueOnce({ summary: "Set up CI for the docs site", tokens: null });
         submit(setPhase, 5);
+        await flush();
+        expect(hub.meta["term:ambient_summary"]).toBe("Set up CI for the docs site");
+        dispose();
+    });
+
+    it("counts messages sent before the meta write lands (ReAgent P2 on #4238)", async () => {
+        // The real write is a server round trip; until it lands the block meta
+        // still shows the old count.
+        hub.updateMeta.mockImplementation(() => new Promise(() => {}));
+        hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
+        hub.meta = { "term:ambient_summary": "Fix the login race" };
+        const { setPhase, dispose } = setup();
+        for (let n = 1; n <= 5; n++) submit(setPhase, n);
+        await flush();
+        const turns = hub.updateMeta.mock.calls.map(([, patch]) => patch["term:human_turns"]);
+        expect(turns).toEqual([1, 2, 3, 4, 5]);
+        // So the schedule held: turns 2 and 5 asked, the others did not.
+        expect(hub.activitySummary).toHaveBeenCalledTimes(2);
+        dispose();
+    });
+
+    it("a message on an unscheduled turn does not discard the scheduled turn's result (ReAgent P2 on #4238)", async () => {
+        let resolveTurn5!: (v: unknown) => void;
+        hub.activitySummary.mockImplementationOnce(() => new Promise((res) => { resolveTurn5 = res; }));
+        hub.meta = { "term:ambient_summary": "Fix the login race", "term:human_turns": 4 };
+        const { setPhase, dispose } = setup();
+        submit(setPhase, 5); // scheduled: asks
+        submit(setPhase, 6); // not scheduled: no request
+        await flush();
+        expect(hub.activitySummary).toHaveBeenCalledTimes(1);
+        resolveTurn5({ summary: "Set up CI for the docs site", tokens: null });
         await flush();
         expect(hub.meta["term:ambient_summary"]).toBe("Set up CI for the docs site");
         dispose();
