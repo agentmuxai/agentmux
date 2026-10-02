@@ -17,8 +17,10 @@
 use std::path::{Path, PathBuf};
 
 /// Make sure XAUTHORITY points at a readable cookie, setting it from the
-/// session when it's missing. Must run before CefInitialize so the GPU and
-/// renderer processes inherit it.
+/// session when it's missing. Sets the process environment, so call it while
+/// the process is still single-threaded and before spawning anything that must
+/// inherit it: the host before CefInitialize (GPU and renderer processes), the
+/// launcher before the splash's X probe (and the host it spawns later).
 pub fn ensure_xauthority() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("XAUTHORITY").map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
