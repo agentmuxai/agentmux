@@ -453,6 +453,17 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
         expect(v.getByText("Open Documents")).toBeTruthy();
     });
 
+    it("Try again works after macOS denies the folder (ReAgent on #4201)", async () => {
+        h.state.errors.set("/Users/a/Documents", { kind: "os_blocked", message: "Operation not permitted" });
+        const v = mount({ "files:path": "/Users/a/Documents" });
+        await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
+        fireEvent.click(v.getByText("Open Documents"));
+        await waitFor(() => expect(v.container.querySelector(".files-notice-error")?.textContent).toContain("macOS blocked AgentMux"));
+        h.state.errors.clear();
+        fireEvent.click(v.getByText("Try again"));
+        await waitFor(() => expect(v.names()).toEqual(["cv.pdf"]));
+    });
+
     it("ignores case, as APFS does (ReAgent on #4201)", async () => {
         const v = mount({ "files:path": "~/documents" });
         await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
