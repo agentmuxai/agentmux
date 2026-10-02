@@ -308,7 +308,11 @@
         // underline immediately below. Every non-PaneChrome consumer
         // (editor file tabs, the agent History strip) never sets
         // --pane-tab-bg at all and so keeps the old value byte-for-byte.
-        background: var(--pane-tab-bg, var(--block-bg-color));
+        // A coloured selected tab is its hue a step stronger than its
+        // inactive pills (--pane-tab-bg-active, pane-color-scheme.ts
+        // `pillActive`), so selection reads by lightness and the underline,
+        // not by hue alone (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §6 P4).
+        background: var(--pane-tab-bg-active, var(--pane-tab-bg, var(--block-bg-color)));
         color: var(--main-text-color);
 
         // The base `&:hover` above is `.pane-tab:hover` — specificity
@@ -324,7 +328,7 @@
         // an affordance for "you can select this", and this one already is
         // selected.
         &:hover {
-            background: var(--pane-tab-bg, var(--block-bg-color));
+            background: var(--pane-tab-bg-active, var(--pane-tab-bg, var(--block-bg-color)));
         }
         // Subtle bottom-border that visually connects the active tab to the
         // pane content below (the strip's own border-bottom is hidden under
