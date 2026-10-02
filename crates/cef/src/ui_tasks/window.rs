@@ -1129,22 +1129,31 @@ wrap_task! {
             // CEF behaviour that broke GetWindowPositionTask — see the
             // state.windows fallback there). state.windows is populated at
             // on_window_created and stays valid for the window's lifetime.
+            // Native Wayland has no uniform-alpha protocol, but every window
+            // there is alpha-capable (app.rs `alpha_capable`), so the page can
+            // fade itself: CSS `opacity` on the body (theme.scss
+            // `am-uniform-fade`) gives the same uniform whole-window fade as
+            // _NET_WM_WINDOW_OPACITY below. Fading the
+            // translucent `--window-opacity` backgrounds instead compounds
+            // through nested panes (three 0.8 layers ≈ 0.99 opaque), so
+            // `am-uniform-fade` makes theme.scss keep them opaque (#4011).
+            if crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) == Some("wayland") {
+                let Some(frame) = self.state.get_browser(&self.label).and_then(|b| b.main_frame()) else {
+                    tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: no browser for label");
+                    return;
+                };
+                let code = CefString::from(uniform_fade_js(self.alpha).as_str());
+                frame.execute_java_script(Some(&code), Some(&CefString::from("")), 0);
+                tracing::info!(label = %self.label, alpha = self.alpha, "[opacity] applied page fade (native Wayland)");
+                return;
+            }
             let window = get_window_on_ui(&self.state, &self.label)
                 .or_else(|| self.state.windows.lock().get(&self.label).cloned());
             let Some(window) = window else {
                 tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: no window for label");
                 return;
             };
-            // Under ozone-x11 `window_handle()` is the X11 Window XID. Under
-            // native Wayland it is not an XID and there is no uniform-alpha
-            // protocol at all; transparency there is per-pixel instead (every
-            // window is alpha-capable and the page's CSS background carries
-            // `window:opacity`, app.rs `alpha_capable`), so there is nothing
-            // to do here.
-            if crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) == Some("wayland") {
-                tracing::debug!("[opacity] native Wayland: per-pixel transparency, no window alpha to set");
-                return;
-            }
+            // Under ozone-x11 `window_handle()` is the X11 Window XID.
             let xid = window.window_handle() as u32;
             if xid == 0 {
                 tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: null X11 window handle");
@@ -1155,6 +1164,22 @@ wrap_task! {
                 Err(e) => tracing::warn!(label = %self.label, "[opacity] X11 property set failed: {e}"),
             }
         }
+    }
+}
+
+/// Script that fades the whole page to `alpha` (or clears the fade at 1.0).
+#[cfg(target_os = "linux")]
+fn uniform_fade_js(alpha: f64) -> String {
+    let alpha = alpha.clamp(0.0, 1.0);
+    if alpha >= 1.0 {
+        "(function(){var r=document.documentElement;r.classList.remove('am-uniform-fade');\
+         r.style.removeProperty('--am-window-fade');})()"
+            .to_string()
+    } else {
+        format!(
+            "(function(){{var r=document.documentElement;r.classList.add('am-uniform-fade');\
+             r.style.setProperty('--am-window-fade','{alpha}');}})()"
+        )
     }
 }
 
@@ -2086,4 +2111,24 @@ wrap_task! {
 pub fn post_hang_ui_thread(_state: &Arc<AppState>) {
     let mut task = HangUiThreadTask::new();
     post_task(ThreadId::UI, Some(&mut task));
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::uniform_fade_js;
+
+    #[test]
+    fn uniform_fade_js_sets_and_clears_the_fade() {
+        let on = uniform_fade_js(0.6);
+        assert!(on.contains("classList.add('am-uniform-fade')"));
+        assert!(on.contains("setProperty('--am-window-fade','0.6')"));
+
+        for alpha in [1.0, 1.5] {
+            let off = uniform_fade_js(alpha);
+            assert!(off.contains("classList.remove('am-uniform-fade')"));
+            assert!(off.contains("removeProperty('--am-window-fade')"));
+        }
+
+        assert!(uniform_fade_js(-1.0).contains("'--am-window-fade','0'"));
+    }
 }
