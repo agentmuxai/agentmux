@@ -20,6 +20,7 @@ import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-hold
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsGitState } from "@/types/rpc/FsGitState";
 import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
+import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched-files";
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { errorText, type FilesModel, windowsNames } from "./files-model";
@@ -37,7 +38,7 @@ import {
 } from "@/app/drag/file-drop";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
-import { crumbsOf, joinPath, nameProblem, stemLength } from "./files-path";
+import { crumbsOf, joinPath, nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
@@ -140,7 +141,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             onNoPaths: () => model.setStatus({ text: "Those files have no path on disk, so they can't be copied here.", tone: "error" }),
             accept(drag) {
                 if (model.phase() !== "ready") return { ok: false, reason: "Open a folder first" };
-                if (pathDragSource() === model.blockId) return { ok: false, reason: "Already in this folder" };
+                // From this same pane only a folder row is somewhere new; the
+                // verdict is asked once per drag, so the drop itself checks.
+                if (pathDragSource() === model.blockId) return { ok: true, message: "Drop on a folder to move it there", icon: "fa-folder-open" };
                 const what = drag.count === 1 ? (drag.names?.[0] ?? "1 item") : `${drag.count} items`;
                 const inApp = pathDragPaths();
                 const kind = inApp ? model.dropKind(inApp, pathDragSource() != null) : "copy";
@@ -149,12 +152,32 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     : { ok: true, message: `Copy ${what} here`, icon: "fa-copy" };
             },
             async drop({ paths }) {
+                // Onto a folder row: into that folder; anywhere else: here.
+                const row = dropRow();
+                setDropRow(null);
                 if (paths.length === 0) return;
-                await model.transfer(model.dropKind(paths, pathDragSource() != null), paths);
+                if (!row && pathDragSource() === model.blockId) return; // Already here.
+                const dest = row ? model.pathOf(row) : model.path();
+                // A folder dropped onto itself goes nowhere.
+                const sources = paths.filter((p) => !samePath(p, dest));
+                if (sources.length === 0) return;
+                await model.transfer(model.dropKind(sources, pathDragSource() != null, dest), sources, dest);
             },
         });
         onCleanup(dispose);
     });
+
+    // The folder row under a drag, which a drop goes into (§8.2).
+    const [dropRow, setDropRow] = createSignal<string | null>(null);
+    const clearDropRow = () => setDropRow(null);
+    window.addEventListener("dragend", clearDropRow, true);
+    onCleanup(() => window.removeEventListener("dragend", clearDropRow, true));
+    const onRowDragOver = (entry: FsEntry): void => {
+        const dragged = pathDragPaths();
+        // Not onto a folder that is itself being dragged.
+        const self = dragged?.some((p) => samePath(p, model.pathOf(entry.name)));
+        setDropRow(entry.is_dir && !self ? entry.name : null);
+    };
 
     const onRowDragStart = (e: DragEvent, entry: FsEntry): void => {
         if (!e.dataTransfer) return;
@@ -237,6 +260,16 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         return order().slice(first, last);
     });
     const byName = createMemo(() => new Map(entries().map((e) => [e.name, e])));
+    // Files an agent changed in the last half hour (§8.4), by child name.
+    // A minute's tick lets an old badge go without waiting for a change.
+    const [minute, setMinute] = createSignal(Date.now());
+    const minuteTimer = setInterval(() => setMinute(Date.now()), 60_000);
+    onCleanup(() => clearInterval(minuteTimer));
+    const touches = createMemo(() => {
+        touched();
+        return touchesUnder(model.path(), minute());
+    });
+    const touchOf = (name: string) => touches().get(childKey(model.path(), name));
 
     /** The one selected entry the preview shows (none for several). */
     const previewEntry = createMemo(() => {
@@ -672,6 +705,15 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     tabIndex={0}
                     onKeyDown={onKeyDown}
                     onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+                    // Over blank space, the header or a notice: no folder row is
+                    // the target any more (ReAgent on #4224). A row's own
+                    // dragover runs first and sets or clears it.
+                    onDragOver={(e) => {
+                        if (!(e.target instanceof Element && e.target.closest(".files-rows .files-row"))) setDropRow(null);
+                    }}
+                    onDragLeave={(e) => {
+                        if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
+                    }}
                     onContextMenu={onListContextMenu}
                     onClick={(e) => {
                         if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });
@@ -750,10 +792,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                                 focused={model.selection().focus === name}
                                                 renaming={model.renaming() === name}
                                                 git={model.gitStateOf().get(name)}
+                                                touch={touchOf(name)}
                                                 onClick={(e) => onRowClick(e, entry())}
                                                 onOpen={() => openEntry(entry())}
                                                 onContextMenu={(e) => onRowContextMenu(e, entry())}
                                                 onDragStart={(e) => onRowDragStart(e, entry())}
+                                                onDragOver={() => onRowDragOver(entry())}
+                                                dropTarget={dropRow() === name}
                                                 onDragEnd={() => endPathDrag()}
                                                 onRenameDone={() => listEl?.focus()}
                                             />
@@ -904,6 +949,9 @@ function FileRow(props: {
     onDragStart: (e: DragEvent) => void;
     onDragEnd: () => void;
     git?: FsGitState;
+    touch?: Touch;
+    onDragOver: () => void;
+    dropTarget: boolean;
 }): JSX.Element {
     return (
         <div
@@ -914,6 +962,7 @@ function FileRow(props: {
                 "files-row-focused": props.focused,
                 "files-row-hidden": props.entry.hidden,
                 "files-row-ignored": props.git === "ignored",
+                "files-row-droptarget": props.dropTarget,
             }}
             role="row"
             aria-rowindex={props.index + 2}
@@ -924,6 +973,7 @@ function FileRow(props: {
             onContextMenu={props.onContextMenu}
             draggable={!props.renaming}
             onDragStart={props.onDragStart}
+            onDragOver={props.onDragOver}
             onDragEnd={props.onDragEnd}
             title={props.entry.error ?? (props.entry.link_target ? `→ ${props.entry.link_target}` : undefined)}
         >
@@ -931,6 +981,16 @@ function FileRow(props: {
                 <i class={`fa fa-${iconOf(props.entry)} files-icon`} classList={{ "files-icon-dir": props.entry.is_dir }} aria-hidden="true" />
                 <Show when={props.entry.is_symlink}>
                     <i class="fa fa-share files-link-mark" aria-label="link" />
+                </Show>
+                <Show when={props.touch}>
+                    {(t) => (
+                        <span
+                            class="files-touch"
+                            style={t().color ? { "background-color": t().color } : undefined}
+                            title={`${props.entry.is_dir ? "Something inside was changed" : "Changed"} by ${t().agentName}, ${formatModified(t().at)} (${t().tool})`}
+                            aria-label={`changed by ${t().agentName}`}
+                        />
+                    )}
                 </Show>
                 <Show when={props.renaming} fallback={<span class="files-name">{props.entry.name}</span>}>
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />

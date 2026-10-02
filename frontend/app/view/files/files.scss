@@ -204,6 +204,13 @@
             background: var(--highlight-bg-color);
         }
 
+        // A drop goes into this folder.
+        &.files-row-droptarget {
+            outline: 1px solid var(--accent-color);
+            outline-offset: -1px;
+            background: var(--highlight-bg-color);
+        }
+
         &.files-row-hidden .files-name {
             opacity: 0.6;
         }
@@ -636,4 +643,15 @@
     i {
         margin-right: 2px;
     }
+}
+
+// ── Touched by an agent (§8.4) ──────────────────────────────────────────────
+
+.files-touch {
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    margin-left: -2px;
+    border-radius: 50%;
+    background-color: var(--accent-color);
 }
