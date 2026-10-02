@@ -722,6 +722,16 @@ export const AgentApi = {
         return client.rpcCall("agent.tracked-blocks", data, opts);
     },
 
+    // The agents of other AgentMux instances this one knows about (Swarm
+    // sections below its own tree). Shape: view/swarm/swarm-remote.ts.
+    SwarmOtherInstancesCommand(
+        client: RpcClient,
+        data: Record<string, never>,
+        opts?: RpcOpts,
+    ): Promise<import("@/app/view/swarm/swarm-remote").SwarmOtherInstances> {
+        return client.rpcCall("swarm.other-instances", data, opts);
+    },
+
     // Every agent pane open in this instance — all tabs, all windows
     // (floating included) — with its agent id and where it is.
     AgentOpenPanesCommand(

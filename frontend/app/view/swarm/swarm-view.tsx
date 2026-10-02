@@ -27,6 +27,7 @@ import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks }
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { swarmLineTooltip } from "@/app/store/swarm-line";
+import { remoteSections, seenAgo } from "./swarm-remote";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -155,8 +156,56 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                         </For>
                     </div>
                 </Show>
+                {/* Below this instance's own tree, whether or not it has agents. */}
+                <OtherInstanceSections model={model} />
             </Show>
         </div>
+    );
+}
+
+/**
+ * The agents of other AgentMux instances: one section per host and channel, read
+ * only, names only (Phase 1 of SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md).
+ * No checkbox and no actions, so they never join a fleet action, and no status
+ * phrase, since nothing is known about these agents beyond their names.
+ */
+export function OtherInstanceSections(props: { model: SwarmViewModel }): JSX.Element {
+    const sections = createMemo(() => remoteSections(props.model.otherInstancesAtom()));
+    return (
+        <Show when={sections().length > 0}>
+            <div class="swarm-remote">
+                <For each={sections()}>
+                    {(section) => {
+                        const collapsed = () => props.model.isRemoteCollapsed(section.key);
+                        return (
+                            <div classList={{ "swarm-remote-section": true, "swarm-remote-section--stale": section.stale }}>
+                                <button
+                                    type="button"
+                                    class="swarm-remote-header"
+                                    aria-expanded={!collapsed()}
+                                    onClick={() => props.model.toggleRemoteCollapsed(section.key)}
+                                >
+                                    <i classList={{ "fa-solid": true, "fa-chevron-down": !collapsed(), "fa-chevron-right": collapsed() }} />
+                                    <span class="swarm-remote-title">{section.title}</span>
+                                    <span class="swarm-remote-badge">{section.badge}</span>
+                                    <Show when={collapsed()}>
+                                        <span class="swarm-agent-collapsed-count">{section.agents.length}</span>
+                                    </Show>
+                                    <Show when={section.stale}>
+                                        <span class="swarm-remote-seen">{seenAgo(section.seenAtMs, Date.now())}</span>
+                                    </Show>
+                                </button>
+                                <Show when={!collapsed()}>
+                                    <For each={section.agents}>
+                                        {(agent) => <div class="swarm-remote-agent">{agent.name}</div>}
+                                    </For>
+                                </Show>
+                            </div>
+                        );
+                    }}
+                </For>
+            </div>
+        </Show>
     );
 }
 
