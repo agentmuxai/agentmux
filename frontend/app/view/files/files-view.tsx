@@ -26,6 +26,9 @@ import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMo
 import { errorText, type FilesModel, windowsNames } from "./files-model";
 import { openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
+import { paneWorkdir } from "@/app/drag/file-drop-actions";
+import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
+import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
 import { clipboard, opProgressText } from "./files-ops";
 import {
     beginPathDrag,
@@ -38,13 +41,16 @@ import {
 } from "@/app/drag/file-drop";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
-import { crumbsOf, joinPath, nameProblem, samePath, stemLength } from "./files-path";
+import { crumbsOf, isWithin, joinPath, nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
 
 export const ROW_HEIGHT = 24;
+/** A grid tile's box (thumbnail and a two-line name). */
+export const TILE_W = 112;
+export const TILE_H = 132;
 const OVERSCAN = 8;
 
 const COLUMNS: { key: SortKey; label: string; class: string }[] = [
@@ -89,6 +95,34 @@ function iconOf(e: FsEntry): string {
     return "file";
 }
 
+/** The agent pane the user last worked in, for Alt+K: Hangar has the focus
+ *  when the key is pressed, so it is remembered as focus moves. */
+let lastAgentBlock: string | null = null;
+let focusTracking = false;
+function trackAgentFocus(): void {
+    if (focusTracking || typeof window === "undefined") return;
+    focusTracking = true;
+    window.addEventListener(
+        "focusin",
+        (e) => {
+            const pane = e.target instanceof Element ? e.target.closest('[data-role="pane"][data-blockid]') : null;
+            const id = pane?.getAttribute("data-blockid");
+            if (id && getObjectValue<Block>(makeORef("block", id))?.meta?.view === "agent") lastAgentBlock = id;
+        },
+        true
+    );
+}
+
+/** `@path` for an agent's composer: relative to its working folder when
+ *  inside it, quoted when it has a space. */
+export function mentionToken(path: string, workdir: string | undefined): string {
+    let p = path;
+    if (workdir && isWithin(path, workdir) && !samePath(path, workdir)) {
+        p = path.slice(workdir.replace(/[\\/]+$/, "").length + 1);
+    }
+    return /\s/.test(p) ? `@"${p}"` : `@${p}`;
+}
+
 type Confirm = { title: string; message: string; confirmLabel: string; onConfirm: () => void };
 
 export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext }): JSX.Element {
@@ -104,6 +138,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     const [scrollTop, setScrollTop] = createSignal(0);
     const [viewHeight, setViewHeight] = createSignal(400);
+    const [viewWidth, setViewWidth] = createSignal(600);
     const [editingPath, setEditingPath] = createSignal(false);
     const [filterOpen, setFilterOpen] = createSignal(false);
     let filterInput: HTMLInputElement | undefined;
@@ -188,13 +223,17 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         beginPathDrag(e.dataTransfer, paths, model.blockId);
     };
 
+    trackAgentFocus();
     model.focusList = () => listEl?.focus();
     onCleanup(() => (model.focusList = null));
 
     onMount(() => {
         void model.start();
         if (listEl) {
-            const ro = new ResizeObserver(() => setViewHeight(listEl?.clientHeight ?? 400));
+            const ro = new ResizeObserver(() => {
+                setViewHeight(listEl?.clientHeight ?? 400);
+                setViewWidth(listEl?.clientWidth ?? 600);
+            });
             ro.observe(listEl);
             onCleanup(() => ro.disconnect());
         }
@@ -243,8 +282,18 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const order = model.order;
     // The window only changes when a row crosses an edge, not on every
     // scroll event (ReAgent on #4201).
+    /** Tiles per grid row. */
+    const gridCols = createMemo(() => Math.max(1, Math.floor((viewWidth() - 8) / TILE_W)));
+    const grid = () => model.viewMode() === "grid";
     const range = createMemo(
         () => {
+            if (grid()) {
+                // Whole rows of tiles, a couple either side.
+                const cols = gridCols();
+                const firstRow = Math.max(0, Math.floor(scrollTop() / TILE_H) - 2);
+                const rows = Math.ceil(viewHeight() / TILE_H) + 4;
+                return { first: firstRow * cols, last: Math.min(entries().length, (firstRow + rows) * cols) };
+            }
             const first = Math.max(0, Math.floor(scrollTop() / ROW_HEIGHT) - OVERSCAN);
             const count = Math.ceil(viewHeight() / ROW_HEIGHT) + OVERSCAN * 2;
             return { first, last: Math.min(entries().length, first + count) };
@@ -287,11 +336,12 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     /** Keeps the focused row inside the scrolled view. */
     const reveal = (index: number): void => {
         if (!listEl || index < 0) return;
-        const top = index * ROW_HEIGHT;
+        const height = grid() ? TILE_H : ROW_HEIGHT;
+        const top = grid() ? Math.floor(index / gridCols()) * TILE_H : index * ROW_HEIGHT;
         const header = ROW_HEIGHT;
         if (top < listEl.scrollTop) listEl.scrollTop = top;
-        else if (top + ROW_HEIGHT > listEl.scrollTop + listEl.clientHeight - header)
-            listEl.scrollTop = top + ROW_HEIGHT - listEl.clientHeight + header;
+        else if (top + height > listEl.scrollTop + listEl.clientHeight - header)
+            listEl.scrollTop = top + height - listEl.clientHeight + header;
         // Move the window now rather than on the scroll event, so the row
         // (and a rename box on it) mounts in this same update.
         setScrollTop(listEl.scrollTop);
@@ -353,7 +403,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const onKeyDown = (e: KeyboardEvent): void => {
         if (model.renaming() || editingPath()) return;
         const sel = model.selection();
-        const page = Math.max(1, Math.floor((listEl?.clientHeight ?? 400) / ROW_HEIGHT) - 2);
+        // In the grid, up and down move a row of tiles, left and right one.
+        const step = grid() ? gridCols() : 1;
+        const page = grid()
+            ? Math.max(1, Math.floor((listEl?.clientHeight ?? 400) / TILE_H) - 1) * gridCols()
+            : Math.max(1, Math.floor((listEl?.clientHeight ?? 400) / ROW_HEIGHT) - 2);
         const move = (m: { delta?: number; to?: number }) => {
             model.setSelection(moveFocus(sel, order(), m, { extend: e.shiftKey, focusOnly: isMod(e) && !e.shiftKey }));
             reveal(order().indexOf(model.selection().focus ?? ""));
@@ -362,8 +416,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         if (e.altKey && e.key === "ArrowLeft") model.goBack();
         else if (e.altKey && e.key === "ArrowRight") model.goForward();
         else if (e.altKey && e.key === "ArrowUp") model.goUp();
-        else if (e.key === "ArrowDown") move({ delta: 1 });
-        else if (e.key === "ArrowUp") move({ delta: -1 });
+        else if (e.key === "ArrowDown") move({ delta: step });
+        else if (e.key === "ArrowUp") move({ delta: -step });
+        else if (grid() && e.key === "ArrowRight" && !e.altKey) move({ delta: 1 });
+        else if (grid() && e.key === "ArrowLeft" && !e.altKey) move({ delta: -1 });
         else if (e.key === "PageDown") move({ delta: page });
         else if (e.key === "PageUp") move({ delta: -page });
         else if (e.key === "Home") move({ to: 0 });
@@ -387,6 +443,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         } else if (isMod(e) && e.key.toLowerCase() === "x") model.copyToClipboard("cut", model.selectedEntries());
         else if (isMod(e) && e.key.toLowerCase() === "v") void model.paste();
         else if (isMod(e) && e.key.toLowerCase() === "l") startEditingPath();
+        // By key code: on macOS Option+K types a character instead.
+        else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyK") mentionIn(model.selectedEntries());
         else if (isMod(e) && e.shiftKey && e.key.toLowerCase() === "n") void model.createNew("dir");
         else if (isMod(e) && e.key.toLowerCase() === "f") openFilter();
         else if (e.key === "/" && !typeahead.active()) openFilter();
@@ -432,6 +490,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         items.push(
             { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(path).catch(fail) },
             // One item per agent pane on screen (the DOM menu has no submenus).
+            {
+                type: "action",
+                label: "Mention in agent",
+                shortcut: isMacOS() ? "⌥K" : "Alt+K",
+                disabled: agentTargets().length === 0,
+                onSelect: () => mentionIn(many ? list : [entry]),
+            },
             ...agentTargets().map((t): ContextMenuItem => ({
                 type: "action",
                 label: `Attach to ${t.name}`,
@@ -461,6 +526,49 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             .map((blockId) => ({ blockId, meta: getObjectValue<Block>(makeORef("block", blockId))?.meta }))
             .filter((t) => t.meta?.view === "agent")
             .map((t) => ({ blockId: t.blockId, name: (t.meta?.["agentName"] as string | undefined)?.trim() || "agent" }));
+
+    /**
+     * Alt+K (spec §8.2, route 3): an `@path` mention of each selected entry
+     * in the composer of the agent the user was last working with, as
+     * Claude Code's own editor integrations do. Relative to the agent's
+     * working folder when inside it.
+     */
+    const mentionIn = (list: FsEntry[]): void => {
+        if (list.length === 0) return;
+        const agents = agentTargets();
+        const target = agents.find((t) => t.blockId === lastAgentBlock) ?? (agents.length === 1 ? agents[0] : undefined);
+        if (!target) {
+            model.setStatus(
+                {
+                    text: agents.length === 0 ? "No agent pane is open to mention these in." : "Click into the agent you mean first, then Alt+K here.",
+                    tone: "info",
+                },
+                4000
+            );
+            return;
+        }
+        const workdir = paneWorkdir(target.blockId);
+        // A container agent sees only its working folder (bind-mounted), so a
+        // host path outside it means nothing to it (ReAgent on #4225).
+        if (isContainerPane(target.blockId)) {
+            const outside = list.filter((e) => !workdir || !isWithin(model.pathOf(e.name), workdir));
+            if (outside.length > 0) {
+                model.setStatus(
+                    {
+                        text: `${target.name} runs in a container and sees only its working folder. Drop ${outside.length === 1 ? outside[0].name : "those files"} on it to copy ${outside.length === 1 ? "it" : "them"} in.`,
+                        tone: "info",
+                    },
+                    6000
+                );
+                return;
+            }
+        }
+        const tokens = list.map((e) => mentionToken(model.pathOf(e.name), workdir));
+        const root = document.querySelector<HTMLElement>(`[data-role="pane"][data-blockid="${CSS.escape(target.blockId)}"]`);
+        if (!root || !spliceComposerTokens(root, tokens)) {
+            model.setStatus({ text: `${target.name}'s message box isn't open.`, tone: "error" }, 4000);
+        }
+    };
 
     const attachTo = (target: { blockId: string; name: string }, list: FsEntry[]): void => {
         const paths = list.map((e) => model.pathOf(e.name));
@@ -651,6 +759,19 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 <button
                     type="button"
                     class="files-tool"
+                    title={grid() ? "Show as a list" : "Show as thumbnails"}
+                    aria-pressed={grid()}
+                    onClick={() => {
+                        model.toggleViewMode();
+                        if (listEl) listEl.scrollTop = 0;
+                        setScrollTop(0);
+                    }}
+                >
+                    <i class={`fa ${grid() ? "fa-list" : "fa-table-cells-large"}`} />
+                </button>
+                <button
+                    type="button"
+                    class="files-tool"
                     classList={{ "files-tool-on": model.showPreview() }}
                     title={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"}
                     aria-pressed={model.showPreview()}
@@ -712,7 +833,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     // the target any more (ReAgent on #4224). A row's own
                     // dragover runs first and sets or clears it.
                     onDragOver={(e) => {
-                        if (!(e.target instanceof Element && e.target.closest(".files-rows .files-row"))) setDropRow(null);
+                        if (!(e.target instanceof Element && e.target.closest(".files-rows .files-row, .files-tile"))) setDropRow(null);
                     }}
                     onDragLeave={(e) => {
                         if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
@@ -781,7 +902,42 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         </Match>
                     </Switch>
 
-                    <Show when={model.phase() === "ready"}>
+                    <Show when={model.phase() === "ready" && grid()}>
+                        <div class="files-grid" style={{ height: `${Math.ceil(entries().length / gridCols()) * TILE_H}px` }}>
+                            <For each={visibleNames()}>
+                                {(name, i) => (
+                                    <Show when={byName().get(name)}>
+                                        {(entry) => {
+                                            const index = () => range().first + i();
+                                            return (
+                                                <GridTile
+                                                    model={model}
+                                                    entry={entry()}
+                                                    index={index()}
+                                                    left={(index() % gridCols()) * TILE_W}
+                                                    top={Math.floor(index() / gridCols()) * TILE_H}
+                                                    selected={model.selection().names.has(name)}
+                                                    focused={model.selection().focus === name}
+                                                    renaming={model.renaming() === name}
+                                                    git={model.gitStateOf().get(name)}
+                                                    touch={touchOf(name)}
+                                                    dropTarget={dropRow() === name}
+                                                    onClick={(e) => onRowClick(e, entry())}
+                                                    onOpen={() => openEntry(entry())}
+                                                    onContextMenu={(e) => onRowContextMenu(e, entry())}
+                                                    onDragStart={(e) => onRowDragStart(e, entry())}
+                                                    onDragOver={() => onRowDragOver(entry())}
+                                                    onDragEnd={() => endPathDrag()}
+                                                    onRenameDone={() => listEl?.focus()}
+                                                />
+                                            );
+                                        }}
+                                    </Show>
+                                )}
+                            </For>
+                        </div>
+                    </Show>
+                    <Show when={model.phase() === "ready" && !grid()}>
                         <div class="files-rows" style={{ height: `${entries().length * ROW_HEIGHT}px` }}>
                             <For each={visibleNames()}>
                                 {(name, i) => (
@@ -1018,6 +1174,100 @@ function FileRow(props: {
             <div class="files-cell files-col-kind" role="gridcell">
                 {kindOf(props.entry)}
             </div>
+        </div>
+    );
+}
+
+/** One tile of the grid view: a thumbnail for an image, else a big icon,
+ *  and the name below it. Same handlers as a details row. */
+function GridTile(props: {
+    model: FilesModel;
+    entry: FsEntry;
+    index: number;
+    left: number;
+    top: number;
+    selected: boolean;
+    focused: boolean;
+    renaming: boolean;
+    git?: FsGitState;
+    touch?: Touch;
+    dropTarget: boolean;
+    onClick: (e: MouseEvent) => void;
+    onOpen: () => void;
+    onContextMenu: (e: MouseEvent) => void;
+    onDragStart: (e: DragEvent) => void;
+    onDragOver: () => void;
+    onDragEnd: () => void;
+    onRenameDone: () => void;
+}): JSX.Element {
+    const path = () => props.model.pathOf(props.entry.name);
+    const [thumb, setThumb] = createSignal<string | undefined>(cachedThumbnail(path(), props.entry.mtime));
+    createEffect(
+        on(
+            () => [path(), props.entry.mtime, props.entry.size] as const,
+            ([p, mtime, size]) => {
+                if (!hasThumbnail(props.entry.name, size)) {
+                    setThumb(undefined);
+                    return;
+                }
+                const hit = cachedThumbnail(p, mtime);
+                setThumb(hit);
+                if (hit) return;
+                // Scrolled past before it was made: stop asking for it.
+                const gone = new AbortController();
+                onCleanup(() => gone.abort());
+                void thumbnail(p, mtime, gone.signal).then((url) => {
+                    if (!gone.signal.aborted && url) setThumb(url);
+                });
+            }
+        )
+    );
+    return (
+        <div
+            id={`files-${props.model.blockId}-row-${props.index}`}
+            class="files-tile"
+            classList={{
+                "files-row-selected": props.selected,
+                "files-row-focused": props.focused,
+                "files-row-hidden": props.entry.hidden,
+                "files-row-ignored": props.git === "ignored",
+                "files-row-droptarget": props.dropTarget,
+            }}
+            role="gridcell"
+            aria-selected={props.selected}
+            style={{ left: `${props.left}px`, top: `${props.top}px` }}
+            onClick={props.onClick}
+            onDblClick={props.onOpen}
+            onContextMenu={props.onContextMenu}
+            draggable={!props.renaming}
+            onDragStart={props.onDragStart}
+            onDragOver={props.onDragOver}
+            onDragEnd={props.onDragEnd}
+            title={props.entry.name}
+        >
+            <div class="files-tile-art">
+                <Show
+                    when={thumb()}
+                    fallback={<i class={`fa fa-${iconOf(props.entry)} files-tile-icon`} classList={{ "files-icon-dir": props.entry.is_dir }} aria-hidden="true" />}
+                >
+                    {(src) => <img class="files-tile-thumb" src={src()} alt="" draggable={false} />}
+                </Show>
+                <Show when={props.touch}>
+                    {(t) => (
+                        <span
+                            class="files-touch files-tile-touch"
+                            style={t().color ? { "background-color": t().color } : undefined}
+                            title={`Changed by ${t().agentName}, ${formatModified(t().at)} (${t().tool})`}
+                        />
+                    )}
+                </Show>
+                <Show when={props.git && props.git !== "ignored" && GIT_MARKS[props.git]}>
+                    {(mark) => <span class={`files-git files-tile-git files-git-${props.git}`} title={mark().title}>{mark().letter}</span>}
+                </Show>
+            </div>
+            <Show when={props.renaming} fallback={<div class="files-tile-name">{props.entry.name}</div>}>
+                <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
+            </Show>
         </div>
     );
 }
