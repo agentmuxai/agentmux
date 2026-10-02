@@ -1,0 +1,244 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! The agents of other AgentMux instances, for the Swarm's sections below this
+//! instance's own tree (`docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md`).
+//!
+//! Phase 1: other channels on this machine, read from the host-global shared
+//! registry (`reactive::registry::list_all_shared`), the same source the
+//! `/agentmux/discovery` endpoint's `host.cross_channel` uses. Names only: the
+//! registry carries no status, provider or summary. LAN hosts and cloud installs
+//! are later phases and arrive as more `RemoteHost`s with their own `tier`.
+//!
+//! Nothing here carries a credential to the frontend: the registry's `auth_key`
+//! and `local_url` are dropped.
+
+use serde::Serialize;
+
+use crate::backend::reactive::registry::AgentEntry;
+
+/// A registry entry not rewritten for this long is shown as stale. The registry
+/// heartbeat rewrites every live agent's entry every 20 s, so this is three
+/// missed beats.
+pub const STALE_AFTER_MS: u64 = 60_000;
+
+/// Past this an entry is not shown at all. The registry's own startup sweep only
+/// drops entries older than 4 h, and a crashed channel should not look present
+/// for that long.
+pub const HIDE_AFTER_MS: u64 = 10 * 60_000;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RemoteAgent {
+    pub name: String,
+    /// The agent's block in its own instance. Not usable from this one; kept so a
+    /// later phase can address it (the cross-channel fleet forwarder does).
+    pub block_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RemoteChannel {
+    pub channel: String,
+    /// Newest `updated_at` among the channel's entries, Unix ms.
+    pub seen_at_ms: u64,
+    /// No entry of this channel rewritten within [`STALE_AFTER_MS`].
+    pub stale: bool,
+    /// Sorted by name, case-insensitively.
+    pub agents: Vec<RemoteAgent>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RemoteHost {
+    /// Stable id for UI state (collapse): `host:<hostname>` for this machine.
+    pub host_id: String,
+    pub display_name: String,
+    /// How it was found: `host` (this machine), later `lan` or `cloud`.
+    pub tier: &'static str,
+    /// Sorted by channel name.
+    pub channels: Vec<RemoteChannel>,
+}
+
+/// Response of `swarm.other-instances`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SwarmOtherInstancesResult {
+    /// This machine's name and this instance's channel, for the naming rule
+    /// ("name the channel only when a host has more than one").
+    pub hostname: String,
+    pub channel: String,
+    pub hosts: Vec<RemoteHost>,
+}
+
+/// Group the shared registry's entries into this machine's other channels.
+///
+/// Skips this instance's own channel and URL (a stale self-entry after a crash),
+/// entries past [`HIDE_AFTER_MS`], and entries with no channel (per-channel
+/// registry rows, which never belong in the shared directory). An agent listed
+/// twice in one channel (two files racing) appears once.
+pub fn other_channels(
+    entries: &[AgentEntry],
+    own_channel: &str,
+    own_url: &str,
+    now_ms: u64,
+) -> Vec<RemoteChannel> {
+    use std::collections::BTreeMap;
+    let mut by_channel: BTreeMap<String, (u64, BTreeMap<String, RemoteAgent>)> = BTreeMap::new();
+    for e in entries {
+        if e.channel.is_empty()
+            || e.channel == own_channel
+            || (!own_url.is_empty() && e.local_url == own_url)
+        {
+            continue;
+        }
+        if now_ms.saturating_sub(e.updated_at) > HIDE_AFTER_MS {
+            continue;
+        }
+        let slot = by_channel.entry(e.channel.clone()).or_default();
+        slot.0 = slot.0.max(e.updated_at);
+        slot.1
+            .entry(e.agent_id.to_lowercase())
+            .or_insert_with(|| RemoteAgent {
+                name: e.agent_id.clone(),
+                block_id: e.block_id.clone(),
+            });
+    }
+    by_channel
+        .into_iter()
+        .map(|(channel, (seen_at_ms, agents))| RemoteChannel {
+            channel,
+            seen_at_ms,
+            stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,
+            agents: agents.into_values().collect(),
+        })
+        .collect()
+}
+
+/// The full answer: this machine's other channels as one host, or no host at all
+/// when there are none.
+pub fn snapshot(
+    entries: &[AgentEntry],
+    hostname: &str,
+    own_channel: &str,
+    own_url: &str,
+    now_ms: u64,
+) -> SwarmOtherInstancesResult {
+    let channels = other_channels(entries, own_channel, own_url, now_ms);
+    let hosts = if channels.is_empty() {
+        Vec::new()
+    } else {
+        vec![RemoteHost {
+            host_id: format!("host:{hostname}"),
+            display_name: hostname.to_string(),
+            tier: "host",
+            channels,
+        }]
+    };
+    SwarmOtherInstancesResult {
+        hostname: hostname.to_string(),
+        channel: own_channel.to_string(),
+        hosts,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: u64 = 1_000_000_000;
+
+    fn entry(name: &str, channel: &str, age_ms: u64) -> AgentEntry {
+        AgentEntry {
+            agent_id: name.to_string(),
+            local_url: format!("http://127.0.0.1:{}", 29700 + channel.len()),
+            block_id: format!("blk-{name}"),
+            pid: 1,
+            updated_at: NOW - age_ms,
+            auth_key: "secret".to_string(),
+            channel: channel.to_string(),
+            registration_nonce: 0,
+            jekt_public_key: String::new(),
+        }
+    }
+
+    #[test]
+    fn groups_other_channels_and_leaves_this_one_out() {
+        let entries = [
+            entry("Korp", "dev-fix-lan", 5_000),
+            entry("Loap", "dev-fix-lan", 1_000),
+            entry("AgentX", "stable", 0),
+        ];
+        let chans = other_channels(&entries, "stable", "", NOW);
+        assert_eq!(chans.len(), 1);
+        assert_eq!(chans[0].channel, "dev-fix-lan");
+        assert_eq!(
+            chans[0]
+                .agents
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Korp", "Loap"]
+        );
+        assert_eq!(chans[0].seen_at_ms, NOW - 1_000, "newest entry");
+        assert!(!chans[0].stale);
+    }
+
+    #[test]
+    fn a_stale_self_entry_by_url_is_left_out() {
+        let mut me = entry("AgentX", "old-name", 0);
+        me.local_url = "http://127.0.0.1:29706".to_string();
+        assert!(other_channels(&[me], "stable", "http://127.0.0.1:29706", NOW).is_empty());
+    }
+
+    #[test]
+    fn freshness_marks_stale_then_hides() {
+        let stale = other_channels(
+            &[entry("Korp", "dev", STALE_AFTER_MS + 1)],
+            "stable",
+            "",
+            NOW,
+        );
+        assert!(stale[0].stale);
+        assert!(other_channels(
+            &[entry("Korp", "dev", HIDE_AFTER_MS + 1)],
+            "stable",
+            "",
+            NOW
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn an_agent_listed_twice_in_a_channel_appears_once() {
+        let chans = other_channels(
+            &[entry("Korp", "dev", 0), entry("korp", "dev", 10)],
+            "stable",
+            "",
+            NOW,
+        );
+        assert_eq!(chans[0].agents.len(), 1);
+    }
+
+    #[test]
+    fn entries_without_a_channel_are_not_another_channel() {
+        assert!(other_channels(&[entry("Korp", "", 0)], "stable", "", NOW).is_empty());
+    }
+
+    #[test]
+    fn the_snapshot_names_this_machine_and_carries_no_credentials() {
+        let snap = snapshot(&[entry("Korp", "dev", 0)], "narko", "stable", "", NOW);
+        assert_eq!(
+            (snap.hostname.as_str(), snap.channel.as_str()),
+            ("narko", "stable")
+        );
+        assert_eq!(snap.hosts.len(), 1);
+        assert_eq!(
+            (snap.hosts[0].display_name.as_str(), snap.hosts[0].tier),
+            ("narko", "host")
+        );
+        let json = serde_json::to_string(&snap).unwrap();
+        assert!(
+            !json.contains("secret") && !json.contains("local_url") && !json.contains("127.0.0.1"),
+            "{json}"
+        );
+        // No other channel: no host section at all.
+        assert!(snapshot(&[], "narko", "stable", "", NOW).hosts.is_empty());
+    }
+}

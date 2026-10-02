@@ -582,6 +582,7 @@ partial list.
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
+| [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_TEAROFF_PAINT_LATENCY_2026_09_30`](SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md) | SPEC: Tear-off paint latency: show the torn-off content as fast as the window |
 | [`SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16`](SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md) | SPEC: Terminal I/O Has Complete Priority Over Perf Monitoring |
 | [`SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17`](SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17.md) | SPEC: Terminal CPU%/Mem badge — fix top-right offset, add a Settings toggle |
@@ -729,7 +730,6 @@ partial list.
 | [`SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11`](SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md) | SPEC: srv supervision via host recycle (#942 Phase 2) |
 | [`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) | SPEC — Strong Reducer-Authority for Layout (Intent-Driven srv Reducer) |
 | [`SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30`](SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md) | Spec: Never request OS credential / keychain access (all runtime modes) |
-| [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25`](SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md) | SPEC: Swarm rows use the agent's own pane-tab color, and selecting a row focuses its pane instead of the Swarm pane |
 | [`SPEC_SYSINFO_CHART_ROBUSTNESS_2026_06_21`](SPEC_SYSINFO_CHART_ROBUSTNESS_2026_06_21.md) | Spec: Sysinfo CPU Chart Robustness |
 | [`SPEC_SYSINFO_GPU_RENDERING_AND_3D_CHARTS_2026_09_26`](SPEC_SYSINFO_GPU_RENDERING_AND_3D_CHARTS_2026_09_26.md) | SPEC: GPU-accelerated rendering and 3D charts for Sysinfo |

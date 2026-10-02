@@ -95,6 +95,7 @@ pub mod account_login_guard;
 pub mod pane_env;
 pub mod posix_shell;
 pub mod shellintegration;
+pub mod swarm_remote;
 pub mod sysinfo;
 pub mod storage;
 pub mod subagent_watcher;
