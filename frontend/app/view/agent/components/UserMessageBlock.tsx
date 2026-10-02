@@ -66,6 +66,12 @@ interface UserMessageBlockProps {
     onTogglePin: () => void;
 }
 
+/** "Broadcast · 7 agents", or just "Broadcast" when the count is unknown or 1. */
+export function broadcastNoteLabel(broadcast: { recipients?: number }): string {
+    const n = broadcast.recipients;
+    return n != null && n > 1 ? `Broadcast · ${n} agents` : "Broadcast";
+}
+
 export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
@@ -197,6 +203,12 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                 >
                     {props.pinned ? "✕" : "📌"}
                 </button>
+            </Show>
+            <Show when={props.node.broadcast}>
+                <div class="agent-user-message-broadcast-note" title="Typed once in Swarm and sent to several agents">
+                    <i class="fa-solid fa-bullhorn" aria-hidden="true" />{" "}
+                    <span>{broadcastNoteLabel(props.node.broadcast!)}</span>
+                </div>
             </Show>
             <Show when={props.node.attachments?.length}>
                 <AttachmentStrip attachments={props.node.attachments!} />

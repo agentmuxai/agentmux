@@ -1,7 +1,7 @@
 # Spec: a Swarm broadcast reaches agents as the user's own message, marked as a broadcast
 
 **Date:** 2026-10-01
-**Status:** proposed
+**Status:** Implemented — #4176
 **Author:** agent1
 **Related:**
 - `SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md` (the broadcast feature; it fans out over the
@@ -243,3 +243,23 @@ capability, not just a label. See open question 2, which the owner has not answe
 - An Operator signing key or any claim that srv can prove a request came from the human.
   That needs the hardened-host work in the identity spec.
 - Moving the chat bridges or agent-initiated broadcast off the jekt path.
+
+## 9. As built (#4176)
+
+- P1-P3 as specified. `RECIPIENTS` counts resolved targets. Delivery starts up to 8 turns at a
+  time and returns outcomes in target order; each target is audited as `fleet.broadcast` under
+  the shared `MSGID`.
+- P4: the agent guidance shipped as the Operator Config entry `operator-config-swarm-broadcast`
+  (manifest v8, every agent kind). The `CLAUDE.md` jekt section lives in `~/.agentmux/agents/`,
+  outside this repository; the proposed wording is in the PR description for the owner to apply.
+- Still open: question 2 (self-quit by broadcast stays refused), question 3 (whether `UIClick`
+  can press Broadcast), questions 4 and 5.
+- Delivery routing (review on #4176): the first cut called `run_agent_turn` for every target,
+  which handles only subprocess, persistent and App Server controllers and so failed every ACP
+  agent. Delivery now reuses the reactive sender's own routing, extracted as
+  `bootstrap::route_agent_message`: persistent (including steering a turn already running), ACP and
+  App Server take the text on their own channel; a subprocess agent, or a persistent agent that is
+  registered but not yet spawned, gets `run_agent_turn` with `BROADCAST_TURN_ORIGIN`; a
+  PTY-based pane is refused with a per-target error, because typing prose into a shell prompt
+  would run it as a command. So §4.4's "calls `run_agent_turn` directly" reads: only for the
+  targets that need a turn started.

@@ -506,3 +506,31 @@ describe("UserMessageBlock — startup row does not expand mid-drag", () => {
         }
     });
 });
+
+describe("UserMessageBlock — swarm broadcast note", () => {
+    const broadcastNode: UserMessageNode = {
+        ...baseNode,
+        id: "user_bcast",
+        message: "great, merge on approval",
+        broadcast: { recipients: 7, msgId: "m1" },
+    };
+
+    it("shows the broadcast note with the recipient count above the body", () => {
+        render(() => <UserMessageBlock node={broadcastNode} pinned={false} onTogglePin={() => {}} />);
+        expect(screen.queryByText("Broadcast · 7 agents")).not.toBeNull();
+        expect(screen.queryByText("great, merge on approval")).not.toBeNull();
+    });
+
+    it("says just Broadcast for one recipient or an unknown count", () => {
+        render(() => <UserMessageBlock node={{ ...broadcastNode, broadcast: { recipients: 1 } }} pinned={false} onTogglePin={() => {}} />);
+        expect(screen.queryByText("Broadcast")).not.toBeNull();
+        cleanup();
+        render(() => <UserMessageBlock node={{ ...broadcastNode, broadcast: {} }} pinned={false} onTogglePin={() => {}} />);
+        expect(screen.queryByText("Broadcast")).not.toBeNull();
+    });
+
+    it("a plain message has no broadcast note", () => {
+        render(() => <UserMessageBlock node={baseNode} pinned={false} onTogglePin={() => {}} />);
+        expect(screen.queryByText(/Broadcast/)).toBeNull();
+    });
+});
