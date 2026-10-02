@@ -1,7 +1,7 @@
 # SPEC: The swarm always shows a useful line for every agent — hardening the ambient summary
 
 **Date:** 2026-10-02
-**Status:** active — PR 1 shipped in #4185 and PR 2 in #4234; PRs 3 and 4 not started. The section 9 decisions were answered on 2026-10-02 (the recommendations, see 9.1).
+**Status:** active — PR 1 shipped in #4185, PR 2 in #4234, PR 3 in #4238; PR 4 not started. The section 9 decisions were answered on 2026-10-02 (the recommendations, see 9.1).
 **Author:** AgentX (narko), at the owner's request
 **Affects:** `crates/srv/src/ambient/` (`prompt.rs`, `validate.rs`, `tasks.rs`), `crates/srv/src/server/app_api/session.rs`, `crates/srv/src/backend/reactive/activity_watcher.rs`, `frontend/app/store/activitySummary.ts`, `frontend/app/view/agent/hooks/useAgentActivitySummary.ts` and `useBlockActivity.ts`, `frontend/app/view/swarm/swarm-model.ts` and `swarm-view.tsx`.
 **Builds on:** `docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md` (the title prompt this spec corrects), `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md` (the gateway), `docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md`.
@@ -115,6 +115,8 @@ Today: only when a human submission enters `Submitting`, not for hidden turns, d
 - **Schedule, not every turn.** Once a title exists, re-evaluate on the `muxterm` shape (after completed human turns 2, 5, 8, then every third), replacing only if the new title passes the predicate, is not `KEEP`, and differs enough from the old one to be news (a minimum-distance check), so the title is stable.
 - **Fast first title.** The first title for a fresh session is computed right after the first completed turn, from the user message and the first reply, not left to wait for a later submission.
 
+**Built in #4238.** The schedule and the news check are in `store/title-schedule.ts` (turn count in `term:human_turns`, cleared at session end; a new title replaces the old only when topic-word overlap is under 0.5, so an expanded goal that keeps most of the old words keeps the old title). The fast first title is covered by the recovery of 5.7, which runs within one 20 s sweep of the first output when no title exists, rather than by a separate turn-end trigger.
+
 ### 5.7 The backend sweep: wire it or remove it
 
 The sweep (`activity_watcher.rs`) already produces a digest-based summary every 20 s for running agents and publishes `agent:summary`, with no subscriber. Decide one of:
@@ -123,6 +125,8 @@ The sweep (`activity_watcher.rs`) already produces a digest-based summary every 
 - **Remove it.** Its calls are pure cost today.
 
 The recommendation is the first (section 9). Whichever is chosen, its digest must carry conversation, not only the cost line (the 2026-10-01 report, defect 7): skip the call when the digest has no human or assistant text.
+
+**Built in #4238, with one change:** the backend writes the recovered title to `term:ambient_summary` itself (one transaction that keeps any title that appeared meanwhile, then `waveobj:update`), instead of a frontend subscriber accepting it. The Swarm shows agents whose panes are not mounted, which a frontend subscriber could not reach. The sweep now attempts only running agents with no usable title and new output, at most 3 completed attempts while the title stays empty, with a title prompt (`build_session_title_from_activity_prompt`) rather than the old "what is being worked on" summary; `agent:summary` and its prompt are removed.
 
 ### 5.8 Observability
 

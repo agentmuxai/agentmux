@@ -40,6 +40,7 @@ import { fireAndForget } from "@/util/util";
 import { MOS } from "@/app/store/global";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { META_AWAITING_USER, META_LAST_PROMPT, META_RESTORED } from "@/app/store/swarm-line";
+import { META_HUMAN_TURNS, resetHumanTurns } from "@/app/store/title-schedule";
 
 export interface UseBlockActivityOptions {
     blockId: string;
@@ -54,6 +55,7 @@ function clearActivity(blockId: string): void {
     // docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.5.
     const ended = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta?.["term:ambient_summary"];
     const restored = typeof ended === "string" && isUsableTitle(ended) ? ended.trim() : null;
+    resetHumanTurns(blockId);
     fireAndForget(() =>
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
             "term:osc_title": null,
@@ -65,6 +67,8 @@ function clearActivity(blockId: string): void {
             // (ReAgent P2 on #4234).
             [META_LAST_PROMPT]: null,
             [META_AWAITING_USER]: null,
+            // The title schedule counts this session's human turns from one.
+            [META_HUMAN_TURNS]: null,
             // Only replaced by a title that was actually worth keeping: a session
             // that never got one leaves the previous restored title in place.
             ...(restored ? { [META_RESTORED]: restored } : {}),
