@@ -12,6 +12,7 @@ import solid from "vite-plugin-solid";
 import { defineConfig, type Plugin } from "vite";
 import svgr from "vite-plugin-svgr";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { shikiPrebundleDeps } from "./scripts/shiki-prebundle.mjs";
 
 /**
  * Maps Taskfile {{OS}} values to Node.js process.platform equivalents.
@@ -129,6 +130,21 @@ function stripKatexLegacyFonts(): Plugin {
 
 export default defineConfig({
     root: ".",
+    optimizeDeps: {
+        // The Shiki grammars are loaded lazily, one `import("shiki/langs/x.mjs")` per
+        // language. Left to discovery, the dev server finds each one when a code block
+        // in that language first reaches the page, optimizes it, and reloads the whole
+        // page: a blank window mid-session. Pre-bundling them at startup avoids that.
+        // The list is derived from shiki-highlighter.ts so it cannot drift from the
+        // grammars. Dev-server only; a production build is unaffected.
+        // scripts/shiki-prebundle.mjs has the full reasoning.
+        include: shikiPrebundleDeps(
+            fs.readFileSync(
+                path.resolve(__dirname, "frontend/app/view/agent/components/shiki-highlighter.ts"),
+                "utf8",
+            ),
+        ),
+    },
     build: {
         // No `safari13`. It is a leftover from the Tauri/WebKitGTK era — the
         // frontend has rendered in CEF (bundled Chromium) on every platform
