@@ -5,7 +5,7 @@ import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { baseName } from "./files-path";
 import { FilesModel, META_PATH } from "./files-model";
-import { FilesPane, FilesPaneModel } from "./files-pane";
+import { FilesView } from "./files-view";
 
 /** The pane's title: the folder's name, or "Hangar" before one is shown. */
 export function filesTitle(meta: MetaType | undefined): string {
@@ -16,9 +16,8 @@ export function filesTitle(meta: MetaType | undefined): string {
 
 /**
  * The Files pane, branded Hangar (docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md
- * §13): a native pane tab, kept mounted while another pane tab of its pane is
- * in front, so scroll and selection survive a switch (§6.2). Its folders are
- * document tabs inside it.
+ * §13): a native pane tab, kept mounted while another tab of its pane is in
+ * front, so scroll and selection survive a switch (§6.2).
  */
 export const filesPaneTab: PaneTabManifest = {
     apiVersion: 1,
@@ -36,20 +35,17 @@ export const filesPaneTab: PaneTabManifest = {
             return typeof path === "string" && path !== "" ? { [META_PATH]: path } : undefined;
         },
     }),
-    // Its folders are document tabs inside the pane
-    // (SPEC_DOCUMENT_TABS_2026_10_02.md §6.2).
     create: (ctx) => {
-        const pane = new FilesPaneModel(ctx);
+        const model = new FilesModel(ctx);
         return {
-            component: () => <FilesPane pane={pane} ctx={ctx} />,
-            liveTitle: () => ({ text: pane.title() }),
+            component: () => <FilesView model={model} ctx={ctx} />,
+            liveTitle: () => ({ text: filesTitle(ctx.meta()) }),
             // The host calls this when the tab shows in a focused pane.
             focus: () => {
-                const model = pane.activeModel();
-                model?.focusList?.();
-                return model?.focusList != null;
+                model.focusList?.();
+                return model.focusList != null;
             },
-            dispose: () => pane.dispose(),
+            dispose: () => model.dispose(),
         };
     },
 };

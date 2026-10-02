@@ -1,13 +1,13 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) the grid view (§12.5) and tabs (§12.6, since moved to document tabs); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) the grid view (§12.5) and tabs (§12.6, pane tabs); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
 **Related:** `SPEC_EDITOR_FILE_TREE_2026-05-26.md` (the editor's tree, which this builds on), `SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12.md`, `SPEC_MEDIA_PANE_2026_07_26.md` (the directory watcher), `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (how a view registers), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (drops into panes), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (attaching files to an agent), `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` §9 (the settled-content contract a new pane must follow).
 
 > [!IMPORTANT]
-> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** Hangar's tabs move from pane tabs (§12.6, #4227) to Document Tabs: one Hangar pane holds several folders as document tabs (its §6.2). The §3 table's "we get tabs for free (pane tabs, window tabs)" is corrected the same way.
+> **2026-10-02, settled:** Hangar's tabs are **pane tabs** (§12.6, #4227). `SPEC_DOCUMENT_TABS_2026_10_02.md` moved them to document tabs (#4231), and the repo owner then kept document tabs for the Editor and Media only (*"which make semantic sense"*), so Hangar went back to pane tabs (that spec's §6.2).
 
 ---
 
@@ -50,7 +50,7 @@ Condensed from the sources in §15. Each item becomes a requirement in §5–§9
 | Don't watch everything. Exclude heavy folders; coalesce bursts; treat watcher overflow or a lagging consumer as "rescan this folder", never as "I saw every event" | VS Code (`files.watcherExclude`, inotify exhaustion on `node_modules`); `notify`/ReadDirectoryChangesW (16 KB buffer overflows under bursts; no guaranteed `Create` per file) | Our pool already says "wake signal, not a delivery log". |
 | Delete moves to the OS Trash with no confirmation and an undo; permanent delete gets a specific, named confirmation | Nielsen's *user control and freedom*; Files app discussion; UX literature on destructive actions | Our `deleteeditorfile` is **permanent** (`remove_file` / `remove_dir_all`), scoped to home. Fine for a scratch file, wrong for a browser. |
 | Preview pane / Quick Look on Space, async, so selecting a 50 MB file never stalls navigation | Finder, Files (Windows), Yazi, ForkLift | We already have the Editor and Media renderers. |
-| Dual-pane or tabs for move/copy between places | Marta, ForkLift, Files, Total Commander | We get tabs from the shared Document Tabs layer (`SPEC_DOCUMENT_TABS_2026_10_02.md`; earlier: "for free (pane tabs, window tabs)") and two panes by tiling. Drag between two panes is Wave's winning feature. |
+| Dual-pane or tabs for move/copy between places | Marta, ForkLift, Files, Total Commander | We get tabs for free (pane tabs, window tabs; §12.6) and two panes by tiling. Drag between two panes is Wave's winning feature. |
 | Respect `.gitignore`, show git status | VS Code, JetBrains, Zed project panels; ripgrep's `ignore` crate | Developers browse repos far more than home folders. |
 | Coding tools offer three routes from a file to the agent: an `@` mention, drag from the sidebar, a context-menu item. Drag is the most discoverable and the most fragile (it needs Shift in VS Code, regressed in Cursor on Windows) | Cursor, Claude Code (VS Code and Desktop), Kiro | We own both ends of this drag. Make it reliable and add the other two routes. |
 | Windows: `\\?\` long paths, reserved names (`CON`, `NUL`…), stripped trailing dots and spaces, case-insensitive collisions, junction and symlink loops | Microsoft docs on file naming and paths | AgentMux's primary platform. §9. |
@@ -365,7 +365,7 @@ A toolbar toggle switches the folder between the details list and a grid of tile
 
 ### 12.6 Tabs: Hangar on pane tabs
 
-> **Superseded 2026-10-02:** these tabs moved to Document Tabs, one Hangar pane holding several folders (`SPEC_DOCUMENT_TABS_2026_10_02.md` §6.2, Phase 1, built). `Ctrl+T`, `Ctrl+W`, `Ctrl+Enter`, middle-click and *Open in new tab* now act on document tabs; *Open in new pane* keeps the pane-tab behaviour below. The section below records what #4227 built.
+> **Current (2026-10-02).** For a few hours these tabs were document tabs (#4231, `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.2); the repo owner then kept document tabs for the Editor and Media only, and Hangar is back on pane tabs, as below. The paragraph below predates that spec: the Editor's files did *not* move onto pane tabs (they are document tabs), but Hangar's folders are pane tabs.
 
 AgentMux has three kinds of tab: window tabs, pane tabs (several blocks stacked in one pane, `blockStack`), and inner-pane tabs (the Editor's open files, its own store). Pane tabs and the Editor's file tabs draw with the same `PaneTabStrip`; their state is separate, and SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md (resolution 3) has decided the Editor's should move onto pane tabs. Hangar therefore uses **pane tabs**, not tabs of its own: each tab is a whole Hangar with its own folder, history, selection and view, and gets reordering, dragging between panes, tear-off and layout persistence for free.
 
