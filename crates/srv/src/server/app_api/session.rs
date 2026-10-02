@@ -372,12 +372,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // Nothing to anchor a title on AND nothing new to evaluate —
                 // matches the old digest-empty early return.
                 if user_message.is_none() && current_title.is_empty() {
-                    ambient::outcome::record(
-                        ambient::purpose::ACTIVITY_SUMMARY,
-                        &cmd.block_id,
-                        ambient::outcome::Outcome::EmptyDigest,
-                        None,
-                    );
+                    slot.abandon(ambient::outcome::Outcome::EmptyDigest);
                     return Ok(empty_summary_result());
                 }
 

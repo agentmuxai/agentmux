@@ -16,11 +16,14 @@ export type AmbientOutcomes = Record<string, Record<string, number>>;
 export const TITLE_PURPOSES = ["activity_summary", "activity_summary_pushed"];
 
 export interface TitleOutcomeSummary {
-    /** e.g. "12 new · 30 kept · 2 refused · 1 failed". */
+    /** e.g. "12 accepted · 30 kept · 2 refused · 1 failed". "Accepted" is a
+     *  candidate the validator took, not a title change: the pane may still keep
+     *  the old title as a rewording, and recovery may lose a race (Codex P2 on
+     *  #4243). */
     text: string;
     /** Every purpose and label, one per line, for the hover. */
     detail: string;
-    /** True when refusals and failures outnumber new titles: worth a look. */
+    /** True when refusals and failures outnumber accepted candidates. */
     unhealthy: boolean;
 }
 
@@ -40,11 +43,11 @@ export function summarizeTitleOutcomes(outcomes: AmbientOutcomes | null | undefi
             if (label === "accepted") accepted += n;
             else if (label === "kept") kept += n;
             else if (label.startsWith("rejected")) refused += n;
-            else if (label === "cli_failed" || label === "timeout") failed += n;
+            else if (label === "cli_failed" || label === "timeout" || label === "not_run") failed += n;
         }
     }
     if (lines.length === 0) return null;
-    const parts = [`${accepted} new`, `${kept} kept`];
+    const parts = [`${accepted} accepted`, `${kept} kept`];
     if (refused > 0) parts.push(`${refused} refused`);
     if (failed > 0) parts.push(`${failed} failed`);
     return { text: parts.join(" · "), detail: lines.join("\n"), unhealthy: refused + failed > accepted && refused + failed > 0 };

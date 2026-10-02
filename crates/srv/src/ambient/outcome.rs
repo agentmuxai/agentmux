@@ -36,6 +36,10 @@ pub enum Outcome {
     CliFailed,
     /// The CLI ran past its time limit.
     Timeout,
+    /// Admitted, then given up before any model call: the block or its CLI path
+    /// could not be resolved, or a purpose found nothing to do. Recorded when an
+    /// admitted call is dropped without running (`call::Slot`'s `Drop`).
+    NotRun,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +71,7 @@ impl Outcome {
             Outcome::Superseded => "superseded",
             Outcome::CliFailed => "cli_failed",
             Outcome::Timeout => "timeout",
+            Outcome::NotRun => "not_run",
         }
     }
 }
@@ -182,8 +187,14 @@ mod tests {
         assert_eq!(classify_reply("KEEP", false), Outcome::Kept);
         assert_eq!(classify_reply("  keep. ", false), Outcome::Kept);
         // An explained abstain is still an abstain, not a refusal.
-        assert_eq!(classify_reply("KEEP — the title still fits", false), Outcome::Kept);
-        assert_eq!(classify_reply("Keep the current title", false), Outcome::Kept);
+        assert_eq!(
+            classify_reply("KEEP — the title still fits", false),
+            Outcome::Kept
+        );
+        assert_eq!(
+            classify_reply("Keep the current title", false),
+            Outcome::Kept
+        );
         // A real title starting with the word was accepted, so it never gets here.
         assert_eq!(classify_reply("Keep alive pings", true), Outcome::Accepted);
         assert_eq!(

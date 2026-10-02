@@ -87,12 +87,7 @@ pub(crate) async fn generate_recovered_title(
 
     let block: Block = mstore.get(block_id).ok().flatten()?;
     let Some(digest) = digest::read_recent_activity_digest(filestore, block_id) else {
-        super::outcome::record(
-            purpose::ACTIVITY_SUMMARY_PUSHED,
-            block_id,
-            super::outcome::Outcome::EmptyDigest,
-            None,
-        );
+        slot.abandon(super::outcome::Outcome::EmptyDigest);
         return None;
     };
     let target = CliTarget::from_meta(&block.meta)?;

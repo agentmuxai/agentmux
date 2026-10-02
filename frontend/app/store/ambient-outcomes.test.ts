@@ -11,15 +11,15 @@ describe("summarizeTitleOutcomes", () => {
             activity_summary_pushed: { accepted: 2, "rejected:refusal": 1, timeout: 1, empty_digest: 3 },
             next_prompt_suggestion: { accepted: 99 },
         })!;
-        expect(s.text).toBe("12 new · 30 kept · 2 refused · 1 failed");
+        expect(s.text).toBe("12 accepted · 30 kept · 2 refused · 1 failed");
         expect(s.detail).toContain("activity_summary_pushed rejected:refusal: 1");
         expect(s.detail).not.toContain("next_prompt_suggestion");
         expect(s.unhealthy).toBe(false);
     });
 
     it("flags a pipeline that refuses or fails more than it produces", () => {
-        const s = summarizeTitleOutcomes({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 3 } })!;
-        expect(s.text).toBe("1 new · 0 kept · 2 refused · 3 failed");
+        const s = summarizeTitleOutcomes({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 2, not_run: 1 } })!;
+        expect(s.text).toBe("1 accepted · 0 kept · 2 refused · 3 failed");
         expect(s.unhealthy).toBe(true);
     });
 
