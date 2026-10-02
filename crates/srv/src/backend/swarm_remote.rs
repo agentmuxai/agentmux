@@ -125,6 +125,26 @@ fn fnv1a32(text: &str) -> u32 {
     })
 }
 
+/// A host's instances as channels, with a channel name that appears more than
+/// once suffixed by its port ("stable :29702"), so the sections stay apart.
+fn label_repeated_channels(by_instance: BTreeMap<String, RemoteChannel>) -> Vec<RemoteChannel> {
+    let mut count: BTreeMap<String, usize> = BTreeMap::new();
+    for c in by_instance.values() {
+        *count.entry(c.channel.clone()).or_default() += 1;
+    }
+    by_instance
+        .into_iter()
+        .map(|(key, mut c)| {
+            if count[&c.channel] > 1 {
+                if let Some((_, port)) = key.rsplit_once('@') {
+                    c.channel = format!("{} :{port}", c.channel);
+                }
+            }
+            c
+        })
+        .collect()
+}
+
 /// LAN hosts from the discovery peer list. A peer at one of this machine's own
 /// addresses is another channel on this host, which the registry already lists
 /// (with more detail), so it is left out here. A peer that did not advertise its
@@ -174,15 +194,18 @@ pub fn lan_hosts(
         let host = hosts
             .entry(format!("{}@{}", display.to_lowercase(), p.address))
             .or_insert_with(|| (display.clone(), BTreeMap::new()));
-        // Two records for the same instance (mDNS and UDP before they merge)
-        // keep the fresher one.
+        // One entry per instance, which on a machine is its port: two records
+        // for the same instance (mDNS and UDP before they merge) keep the fresher
+        // one, while two instances on one channel (an installed and a portable
+        // build, say) both stay (Codex P2 on #4241).
+        let instance_key = format!("{channel}@{}", p.port);
         let keep = host
             .1
-            .get(&channel)
+            .get(&instance_key)
             .is_none_or(|c| c.seen_at_ms < seen_at_ms);
         if keep {
             host.1.insert(
-                channel.clone(),
+                instance_key,
                 RemoteChannel {
                     channel,
                     seen_at_ms,
@@ -218,7 +241,7 @@ pub fn lan_hosts(
                 host_id,
                 display_name,
                 tier: "lan",
-                channels: channels.into_values().collect(),
+                channels: label_repeated_channels(channels),
             }
         })
         .collect()
@@ -516,5 +539,33 @@ mod tests {
             NOW,
         );
         assert_eq!(hosts[0].display_name, "unnamed host");
+    }
+
+    /// Codex P2 on #4241: two instances on one machine and channel (an installed
+    /// and a portable build) host different agents; neither may replace the other.
+    #[test]
+    fn two_instances_on_one_channel_both_stay() {
+        let peers = [
+            peer("narko2", "stable", "192.168.1.50", 29700, &["A"], 5),
+            peer("narko2", "stable", "192.168.1.50", 29702, &["B"], 5),
+        ];
+        let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
+        assert_eq!(hosts.len(), 1);
+        let chans: Vec<&str> = hosts[0]
+            .channels
+            .iter()
+            .map(|c| c.channel.as_str())
+            .collect();
+        assert_eq!(chans, ["stable :29700", "stable :29702"]);
+    }
+
+    #[test]
+    fn the_same_instance_seen_twice_is_listed_once() {
+        let older = peer("Area54", "stable", "192.168.1.26", 29700, &["Old"], 50);
+        let newer = peer("Area54", "stable", "192.168.1.26", 29700, &["New"], 5);
+        let hosts = lan_hosts(&[older, newer], &HashSet::new(), NOW);
+        assert_eq!(hosts[0].channels.len(), 1);
+        assert_eq!(hosts[0].channels[0].channel, "stable");
+        assert_eq!(hosts[0].channels[0].agents[0].name, "New");
     }
 }
