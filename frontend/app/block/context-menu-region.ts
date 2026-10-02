@@ -7,8 +7,8 @@
  *
  * blockframe.tsx's onBodyContextMenu builds one menu for the whole pane body.
  * That is wrong for a sub-region with its own semantics — e.g. the agent pane's
- * shell drawer is a terminal, where Split/Replace With… (which act on the whole
- * agent pane) make no sense and Paste does. A region registers on its own
+ * shell drawer is a terminal, where Split (which acts on the whole
+ * agent pane) makes no sense and Paste does. A region registers on its own
  * element; the body handler resolves the nearest one from the event target.
  *
  * A registry rather than a `data-` attribute because a region contributes items
