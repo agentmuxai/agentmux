@@ -360,6 +360,28 @@ describe("the Files pane: rows (ReAgent on #4201)", () => {
     });
 });
 
+describe("the Files pane: scrolling to a row (ReAgent on #4201)", () => {
+    const many = () => Array.from({ length: 200 }, (_, i) => f(`file${String(i).padStart(3, "0")}.txt`));
+
+    it("scrolls a new item into view so its rename box mounts", async () => {
+        h.state.dirs.set(HOME, many());
+        const v = mount();
+        await waitFor(() => expect(v.names().length).toBeGreaterThan(0));
+        // Lists after the create include the new file, which sorts last.
+        h.state.dirs.set(HOME, [...many(), f("New file.txt")]);
+        await v.model.createNew("file");
+        await waitFor(() => expect(v.container.querySelector(".files-rename-input")).not.toBeNull());
+        expect(v.list().scrollTop).toBeGreaterThan(0);
+    });
+
+    it("scrolls OpenFiles' selection into view", async () => {
+        h.state.dirs.set(HOME, many());
+        const v = mount({ "files:path": HOME, "files:select": ["file180.txt"] });
+        await waitFor(() => expect(v.model.selection().focus).toBe("file180.txt"));
+        await waitFor(() => expect(v.list().scrollTop).toBeGreaterThan(0));
+    });
+});
+
 describe("the Files pane: live", () => {
     it("re-lists when srv says the folder changed", async () => {
         const v = mount();

@@ -137,6 +137,11 @@ export class FilesModel {
     /** The row being renamed, by name. */
     readonly renaming: () => string | null;
     readonly setRenaming: (n: string | null) => void;
+    /** A row the model wants scrolled into view (a new item about to be
+     *  renamed, OpenFiles' selection, the folder Up came out of); the view
+     *  follows it. A fresh object each time, so the same name asks again. */
+    readonly revealRequest: () => { name: string } | null;
+    private readonly setRevealRequest: (r: { name: string } | null) => void;
     readonly status: () => StatusMessage | null;
     private readonly setStatusSignal: (s: StatusMessage | null) => void;
     readonly places: () => FsPlace[];
@@ -186,6 +191,7 @@ export class FilesModel {
         [this.selection, this.setSelection] = createSignal<Selection>(EMPTY_SELECTION);
         [this.renaming, this.setRenaming] = createSignal<string | null>(null);
         [this.status, this.setStatusSignal] = createSignal<StatusMessage | null>(null);
+        [this.revealRequest, this.setRevealRequest] = createSignal<{ name: string } | null>(null, { equals: false });
         [this.places, this.setPlaces] = createSignal<FsPlace[]>([]);
         [this.agents, this.setAgents] = createSignal<AgentPlace[]>([]);
         const [historyVersion, setHistoryVersion] = createSignal(0);
@@ -370,7 +376,10 @@ export class FilesModel {
         const child = baseName(this.path());
         void this.navigate(parent).then(() => {
             // Land on the folder we came out of.
-            if (this.order().includes(child)) this.setSelection({ names: new Set([child]), focus: child, anchor: child });
+            if (this.order().includes(child)) {
+                this.setSelection({ names: new Set([child]), focus: child, anchor: child });
+                this.setRevealRequest({ name: child });
+            }
         });
     }
 
@@ -484,7 +493,11 @@ export class FilesModel {
             .filter((v): v is string => typeof v === "string")
             .map((v) => (/[\\/]/.test(v) ? baseName(v) : v))
             .filter((n) => present.has(n));
-        if (names.length > 0) this.setSelection({ names: new Set(names), focus: names[0], anchor: names[0] });
+        if (names.length > 0) {
+            this.setSelection({ names: new Set(names), focus: names[0], anchor: names[0] });
+            // Show the user where the agent pointed (ReAgent on #4201).
+            this.setRevealRequest({ name: names[0] });
+        }
         void this.ctx.setMeta({ [META_SELECT]: null });
     }
 
@@ -572,6 +585,9 @@ export class FilesModel {
             await this.list(this.path(), { silent: true });
             batch(() => {
                 this.setSelection({ names: new Set([name]), focus: name, anchor: name });
+                // Scrolled into view first: the rename box only exists on a
+                // mounted row, and the keyboard waits on it (ReAgent on #4201).
+                this.setRevealRequest({ name });
                 this.setRenaming(name);
             });
         } catch (err) {
