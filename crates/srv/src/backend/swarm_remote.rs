@@ -119,6 +119,12 @@ pub fn other_channels(
         .collect()
 }
 
+fn fnv1a32(text: &str) -> u32 {
+    text.bytes().fold(0x811c_9dc5u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    })
+}
+
 /// LAN hosts from the discovery peer list. A peer at one of this machine's own
 /// addresses is another channel on this host, which the registry already lists
 /// (with more detail), so it is left out here. A peer that did not advertise its
@@ -158,8 +164,12 @@ pub fn lan_hosts(
             .collect();
         agents.sort_by_key(|a| a.name.to_lowercase());
         agents.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
+        // A machine is its hostname AND its address: two machines that share a
+        // name (cloned VMs both called `ubuntu`) must not merge, or one would hide
+        // the other's agents (Codex P2 on #4241). Two channels on one machine
+        // share the address, so they still group.
         let host = hosts
-            .entry(display.to_lowercase())
+            .entry(format!("{}@{}", display.to_lowercase(), p.address))
             .or_insert_with(|| (display.clone(), BTreeMap::new()));
         // Two records for the same instance (mDNS and UDP before they merge)
         // keep the fresher one.
@@ -179,13 +189,30 @@ pub fn lan_hosts(
             );
         }
     }
+    // A name shared by two machines gets each one's address, so the sections
+    // can be told apart; a unique name stays bare.
+    let mut name_count: BTreeMap<String, usize> = BTreeMap::new();
+    for (display, _) in hosts.values() {
+        *name_count.entry(display.to_lowercase()).or_default() += 1;
+    }
     hosts
         .into_iter()
-        .map(|(key, (display_name, channels))| RemoteHost {
-            host_id: format!("lan:{key}"),
-            display_name,
-            tier: "lan",
-            channels: channels.into_values().collect(),
+        .map(|(key, (display, channels))| {
+            let address = key.rsplit_once('@').map(|(_, a)| a).unwrap_or_default();
+            // Stable for the UI's collapse state, without putting the address
+            // in every answer: a short hash of name and address.
+            let host_id = format!("lan:{}#{:08x}", display.to_lowercase(), fnv1a32(&key));
+            let display_name = if name_count[&display.to_lowercase()] > 1 && display != address {
+                format!("{display} ({address})")
+            } else {
+                display
+            };
+            RemoteHost {
+                host_id,
+                display_name,
+                tier: "lan",
+                channels: channels.into_values().collect(),
+            }
         })
         .collect()
 }
@@ -390,6 +417,25 @@ mod tests {
             .map(|a| a.name.as_str())
             .collect();
         assert_eq!(names, ["korp", "Opaz"]);
+    }
+
+    /// Codex P2 on #4241: cloned VMs that share a hostname are two machines.
+    #[test]
+    fn two_machines_with_the_same_hostname_stay_apart() {
+        let peers = [
+            peer("ubuntu", "stable", "192.168.1.40", 29700, &["A"], 5),
+            peer("ubuntu", "stable", "192.168.1.41", 29700, &["B"], 5),
+        ];
+        let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
+        assert_eq!(hosts.len(), 2, "neither hides the other");
+        let names: Vec<&str> = hosts.iter().map(|h| h.display_name.as_str()).collect();
+        assert_eq!(names, ["ubuntu (192.168.1.40)", "ubuntu (192.168.1.41)"]);
+        assert_ne!(hosts[0].host_id, hosts[1].host_id);
+        let agents: Vec<&str> = hosts
+            .iter()
+            .map(|h| h.channels[0].agents[0].name.as_str())
+            .collect();
+        assert_eq!(agents, ["A", "B"]);
     }
 
     #[test]
