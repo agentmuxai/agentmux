@@ -64,17 +64,10 @@
     align-items: center;
     flex: 1;
     min-width: 0;
+    // Scrolled to its end by the view, so a long path hides its start.
     overflow: hidden;
     padding: 0 4px;
     white-space: nowrap;
-    // The last segments matter most: when the path is too long, the start
-    // scrolls out of view, not the end.
-    direction: rtl;
-    justify-content: flex-start;
-
-    > * {
-        direction: ltr;
-    }
 }
 
 .files-crumb {

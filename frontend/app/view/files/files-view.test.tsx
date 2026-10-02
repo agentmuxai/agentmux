@@ -403,11 +403,27 @@ describe("the Files pane: deliberate selection (ReAgent on #4201)", () => {
         fireEvent.keyDown(v.list(), { key: "F2" });
         const input = v.container.querySelector(".files-rename-input") as HTMLInputElement;
         input.value = "a:b";
-        fireEvent.blur(input);
+        // Focus moves elsewhere: a real blur, with the box no longer active.
+        v.list().focus();
         await waitFor(() => expect(v.model.renaming()).toBeNull());
         expect(h.rpc.FsRenameCommand).not.toHaveBeenCalled();
         fireEvent.keyDown(v.list(), { key: "ArrowUp" });
         expect(v.model.selection().focus).toBe("a10.md");
+    });
+
+    it("keeps renaming when only the window loses focus (Alt+Tab)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "F2" });
+        const input = v.container.querySelector(".files-rename-input") as HTMLInputElement;
+        expect(document.activeElement).toBe(input);
+        input.value = "c.txt";
+        // A window blur: the event fires, but the box stays the active element.
+        fireEvent.blur(input);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(v.model.renaming()).toBe("b.txt");
+        expect(h.rpc.FsRenameCommand).not.toHaveBeenCalled();
     });
 
     it("watches again after a failed watch", async () => {

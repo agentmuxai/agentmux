@@ -94,6 +94,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const typeahead = new TypeAhead();
     let listEl: HTMLDivElement | undefined;
     let pathInput: HTMLInputElement | undefined;
+    let crumbsEl: HTMLElement | undefined;
 
     model.focusList = () => listEl?.focus();
     onCleanup(() => (model.focusList = null));
@@ -114,6 +115,16 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 if (v === "active") model.onShown();
             }
         )
+    );
+
+    // A long path shows its end: the folder you're in matters more than the
+    // drive it's on.
+    createEffect(
+        on(model.path, () => {
+            queueMicrotask(() => {
+                if (crumbsEl) crumbsEl.scrollLeft = crumbsEl.scrollWidth;
+            });
+        })
     );
 
     // A new folder starts at the top.
@@ -394,7 +405,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         />
                     }
                 >
-                    <nav class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title="Double-click or Ctrl+L to type a path">
+                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title="Double-click or Ctrl+L to type a path">
                         <For each={crumbsOf(model.path())}>
                             {(crumb, i) => (
                                 <>
@@ -742,7 +753,13 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
                     if (e.key === "Enter") void finish(true);
                     else if (e.key === "Escape") void finish(false);
                 }}
-                onBlur={() => void finish(true, true)}
+                onBlur={() => {
+                    // The window losing focus (Alt+Tab) blurs the box but
+                    // leaves it the active element: the user hasn't left the
+                    // rename, so keep it open for when they come back.
+                    if (document.activeElement === input) return;
+                    void finish(true, true);
+                }}
             />
             <Show when={problem()}>
                 <span class="files-rename-problem" role="alert">
