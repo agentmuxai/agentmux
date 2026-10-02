@@ -28,7 +28,7 @@
     }
 
     .agent-recent-sessions-title {
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         letter-spacing: 0.04em;
         text-transform: uppercase;
@@ -36,13 +36,13 @@
     }
 
     .agent-recent-sessions-count {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: color-mix(in srgb, var(--secondary-text-color) 60%, transparent);
         font-variant-numeric: tabular-nums;
     }
 
     .agent-recent-sessions-empty {
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: color-mix(in srgb, var(--secondary-text-color) 75%, transparent);
         padding: var(--space-2) var(--space-3);
         border: 1px dashed var(--border-color);
@@ -61,7 +61,7 @@
         flex-direction: column;
         align-items: center;
         gap: var(--space-2);
-        font-size: 12px;
+        font-size: var(--text-sm);
         padding: var(--space-2) var(--space-3);
         border: 1px solid var(--error-color);
         background: color-mix(in srgb, var(--error-color) 10%, transparent);
@@ -73,7 +73,7 @@
     }
 
     .agent-recent-sessions-retry {
-        font-size: 12px;
+        font-size: var(--text-sm);
         padding: var(--space-1) var(--space-3);
         border: 1px solid var(--error-color);
         border-radius: 0;
@@ -296,7 +296,7 @@
     // squeezed into it via `flex: 1` next to the name anymore. See
     // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2.
     .agent-recent-sessions-account {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: color-mix(in srgb, var(--secondary-text-color) 85%, transparent);
         white-space: nowrap;
         overflow: hidden;
@@ -305,7 +305,7 @@
     }
 
     .agent-recent-sessions-preview {
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--secondary-text-color);
         white-space: nowrap;
         overflow: hidden;
@@ -449,7 +449,7 @@
         align-items: center;
         gap: var(--space-2);
         padding: var(--space-2) 10px;
-        font-size: 12px;
+        font-size: var(--text-sm);
         font-family: inherit;
         text-align: left;
         color: var(--main-text-color);
@@ -515,7 +515,7 @@
     }
 
     .agent-fork-prompt-msg {
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--secondary-text-color);
         line-height: 1.4;
     }
@@ -533,7 +533,7 @@
         align-items: center;
         justify-content: center;
         padding: 3px 10px;
-        font-size: 12px;
+        font-size: var(--text-sm);
         font-family: inherit;
         border-radius: 0;
         border: 1px solid transparent;
@@ -592,7 +592,7 @@
     }
 
     .agent-fork-label {
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--secondary-text-color);
         text-transform: uppercase;
@@ -634,7 +634,7 @@
     }
 
     .agent-fork-error {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--error-color, #f87171);
     }
 }

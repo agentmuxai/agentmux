@@ -13,7 +13,7 @@
     background: color-mix(in srgb, var(--warning-color) 8%, var(--main-bg-color));
     border: 1px solid color-mix(in srgb, var(--warning-color) 50%, transparent);
     border-radius: 0;
-    font-size: 12px;
+    font-size: var(--text-sm);
     flex-shrink: 0;
 
     // Visual escalation when the gated tool is high-risk. Reads as
@@ -44,7 +44,7 @@
     border-radius: 0;
     color: var(--warning-color);
     font-family: inherit;
-    font-size: 11px;
+    font-size: var(--text-xs);
     cursor: default;
     text-align: left;
     transition: background 80ms ease, border-color 80ms ease;
@@ -138,7 +138,7 @@
 
         code {
             font-family: var(--font-mono);
-            font-size: 11px;
+            font-size: var(--text-xs);
             color: var(--accent-color);
             background: color-mix(in srgb, var(--accent-color) 8%, transparent);
             padding: 1px 4px;
@@ -156,7 +156,7 @@
     max-height: 160px;
     overflow-y: auto;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 1.4;
 
     code {
@@ -210,7 +210,7 @@
 
 .agent-decision-panel-scope-hint {
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
 }
 
 .agent-decision-panel-feedback {
@@ -228,7 +228,7 @@
 
 .agent-decision-panel-feedback-input {
     font-family: inherit;
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1.4;
     color: var(--main-text-color);
     background: var(--main-bg-color);
@@ -248,7 +248,7 @@
 }
 
 .agent-decision-panel-feedback-error {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--error-color);
     margin-top: var(--space-0-5);
 }
@@ -262,7 +262,7 @@
 .agent-decision-panel-btn {
     padding: var(--space-1) var(--space-3);
     font-family: inherit;
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 500;
     border-radius: 0;
     cursor: default;

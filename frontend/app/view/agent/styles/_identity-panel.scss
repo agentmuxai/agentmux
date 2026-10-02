@@ -10,7 +10,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--main-text-color);
 }
 
@@ -20,7 +20,7 @@
 }
 
 .agent-identity-title {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
 }
 
@@ -85,7 +85,7 @@
 
 .agent-identity-provider-label {
     grid-area: label;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
     // nowrap is safe today (short labels, fixed 72px column at the wide
     // breakpoint) but doesn't truncate — pair with ellipsis so a future
@@ -105,7 +105,7 @@
 }
 
 .agent-identity-account-name {
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
@@ -113,13 +113,13 @@
 }
 
 .agent-identity-username {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
     font-family: var(--font-mono);
 }
 
 .agent-identity-none {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: color-mix(in srgb, var(--secondary-text-color) 50%, transparent);
     font-style: italic;
 }
@@ -133,7 +133,7 @@
 }
 
 .agent-identity-select {
-    font-size: 11px;
+    font-size: var(--text-xs);
     background: var(--panel-bg-color, var(--main-bg-color));
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
@@ -155,7 +155,7 @@
 
 .agent-identity-new-btn,
 .agent-identity-unassign-btn {
-    font-size: 11px;
+    font-size: var(--text-xs);
     background: none;
     border: 1px solid var(--border-color);
     border-radius: 0;
@@ -190,7 +190,7 @@
     display: flex;
     align-items: flex-start;
     gap: var(--space-1);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--error-color);
     padding: var(--space-1) var(--space-1-5);
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
@@ -223,7 +223,7 @@
 
 .agent-identity-unsaved {
     padding: var(--space-3);
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
     text-align: center;
     font-style: italic;

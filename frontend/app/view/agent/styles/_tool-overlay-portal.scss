@@ -29,7 +29,7 @@
     // the panel's color-mix background exactly in the states most likely
     // to be scrutinized.
     background: transparent;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
 
     .agent-tool-overlay-status-label {
@@ -57,7 +57,7 @@
         margin: 0;
         padding: 0;
         font-family: var(--font-mono);
-        font-size: 12px;
+        font-size: var(--text-sm);
         line-height: 1.4;
         // Stays `pre`, deliberately — must match the viewer the completed tool
         // actually renders through.

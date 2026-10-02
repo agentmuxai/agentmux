@@ -33,7 +33,7 @@
         background: color-mix(in srgb, var(--error-color) 10%, transparent);
         border: 1px solid var(--error-color);
         color: var(--main-text-color);
-        font-size: 12px;
+        font-size: var(--text-sm);
         line-height: 1.5;
 
         .agent-auth-notice-text {
@@ -46,7 +46,7 @@
             border: none;
             color: var(--secondary-text-color);
             cursor: pointer;
-            font-size: 12px;
+            font-size: var(--text-sm);
             padding: 0 2px;
 
             &:hover {
