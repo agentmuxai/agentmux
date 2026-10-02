@@ -246,6 +246,7 @@ export const AgentBottomPanels = (props: {
                         return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
                     })()}
                     compacting={props.paneModel.state.compacting}
+                    compactionContextTokens={props.paneModel.state.lastContextTokens}
                     reconnecting={props.paneModel.state.reconnecting}
                 />
             </Show>

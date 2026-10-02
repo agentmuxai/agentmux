@@ -151,6 +151,7 @@
             // plain per-theme hex literal with no window-opacity coupling —
             // see theme.scss) — same dark value, genuinely always opaque.
             background: color-mix(in srgb, var(--accent-color) 4%, var(--elevated-bg-color));
+            position: relative; // anchors the compaction progress bar below
 
             .agent-working-row-left {
                 flex: 1;
@@ -220,6 +221,49 @@
                 flex-shrink: 0;
                 opacity: 0.7;
                 margin-left: var(--space-2);
+            }
+
+            // Estimated compaction progress (Tier 4,
+            // SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md):
+            // a thin bar along the row's bottom edge. The fill is a time-based
+            // ESTIMATE, held at 95% by the logic; once the run overshoots,
+            // `.is-over` swaps it for an indeterminate sweep so the bar never
+            // reads as "stuck at the end". (The row is `position: relative`
+            // for it — set with the row's other declarations above.)
+            .agent-working-row-progress {
+                position: absolute;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                height: 2px;
+                overflow: hidden;
+                pointer-events: none;
+                background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+            }
+
+            .agent-working-row-progress-fill {
+                display: block;
+                height: 100%;
+                background: var(--accent-color);
+                transition: width 1s linear;
+            }
+
+            .agent-working-row-progress.is-over .agent-working-row-progress-fill {
+                width: 33% !important; // beats the inline estimate width
+                transition: none;
+                animation: agent-compaction-indeterminate 1.6s ease-in-out infinite;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .agent-working-row-progress-fill {
+                    transition: none;
+                }
+
+                .agent-working-row-progress.is-over .agent-working-row-progress-fill {
+                    width: 100% !important;
+                    opacity: 0.5;
+                    animation: none;
+                }
             }
 
             .agent-working-row-cancel-login {
@@ -324,6 +368,11 @@
         // Subtle halo that breathes with the pulse — gives the dot
         // a little more life without interfering with the spotlight.
         box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);
+    }
+
+    @keyframes agent-compaction-indeterminate {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(300%); }
     }
 
     @keyframes agent-pulse {
