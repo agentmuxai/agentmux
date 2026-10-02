@@ -1,6 +1,6 @@
 # MuxBus cloud sign-in: scope the keychain tokens to the channel
 
-**Status:** implemented in the PR that adds this spec.
+**Status:** implemented in #4190 (spec and fix together).
 **Date:** 2026-10-02
 **Owner:** Manoz
 **Related:** `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (isolated auth is the default for every non-`stable` channel), `PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md` (the chunked Windows layout).
