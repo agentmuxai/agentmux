@@ -86,7 +86,10 @@ pub(crate) async fn generate_recovered_title(
     let slot = call::admit(AmbientCallKey::new(block_id, purpose::ACTIVITY_SUMMARY_PUSHED), generation, None).await?;
 
     let block: Block = mstore.get(block_id).ok().flatten()?;
-    let digest = digest::read_recent_activity_digest(filestore, block_id)?;
+    let Some(digest) = digest::read_recent_activity_digest(filestore, block_id) else {
+        slot.abandon(super::outcome::Outcome::EmptyDigest);
+        return None;
+    };
     let target = CliTarget::from_meta(&block.meta)?;
 
     let prompt = prompt::build_session_title_from_activity_prompt(word_target, &digest);

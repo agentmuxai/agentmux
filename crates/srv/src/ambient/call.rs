@@ -74,6 +74,18 @@ pub struct Slot {
     cancel: CancellationToken,
     _permit: Option<SemaphorePermit<'static>>,
     _guard: AmbientCallGuard<'static>,
+    /// Set once this call's outcome is recorded, so `Drop` records `NotRun` only
+    /// for a call given up without one: every admitted call ends in exactly one
+    /// outcome (Codex P2 on #4243).
+    recorded: bool,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        if !self.recorded {
+            super::outcome::record(self.purpose, &self.entity_id, super::outcome::Outcome::NotRun, None);
+        }
+    }
 }
 
 /// Admit a call for `key` at `generation`; `None` if it is stale on arrival, or
@@ -89,7 +101,10 @@ pub async fn admit(
     let entity_id = key.entity_id.clone();
     let guard = match gateway().admit(key, generation) {
         Admission::Proceed(guard) => guard,
-        Admission::StaleOnArrival => return None,
+        Admission::StaleOnArrival => {
+            super::outcome::record(purpose, &entity_id, super::outcome::Outcome::Superseded, None);
+            return None;
+        }
     };
     let cancel = guard.cancellation();
     let permit = match limit {
@@ -100,10 +115,14 @@ pub async fn admit(
                 _ = cancel.cancelled() => None,
                 permit = sem.acquire() => permit.ok(),
             };
+            if permit.is_none() {
+                // Superseded while queued for a permit: never spawned.
+                super::outcome::record(purpose, &entity_id, super::outcome::Outcome::Superseded, None);
+            }
             Some(permit?)
         }
     };
-    Some(Slot { purpose, entity_id, cancel, _permit: permit, _guard: guard })
+    Some(Slot { purpose, entity_id, cancel, _permit: permit, _guard: guard, recorded: false })
 }
 
 impl Slot {
@@ -112,11 +131,18 @@ impl Slot {
         self.cancel.clone()
     }
 
+    /// Give the call up without running it, recording why (for example
+    /// `EmptyDigest`), instead of the `NotRun` a plain drop records.
+    pub fn abandon(mut self, outcome: super::outcome::Outcome) {
+        super::outcome::record(self.purpose, &self.entity_id, outcome, None);
+        self.recorded = true;
+    }
+
     /// Run the CLI with `prompt` and keep the reply only if `accept` takes it.
     /// Never fails: a CLI error, a cancellation and a rejected reply all come
     /// back as a `Reply` with empty text.
     pub async fn run(
-        self,
+        mut self,
         target: &CliTarget,
         prompt: &str,
         accept: impl Fn(&str) -> Option<String>,
@@ -130,20 +156,17 @@ impl Slot {
         .await;
         match result {
             Err(error) => {
-                tracing::debug!(
-                    purpose = self.purpose, entity = %self.entity_id, error = %error,
-                    "ambient call: CLI failed or was superseded"
-                );
+                let outcome = super::outcome::classify_error(&error, self.cancel.is_cancelled());
+                tracing::debug!(purpose = self.purpose, entity = %self.entity_id, error = %error, "ambient call failed");
+                super::outcome::record(self.purpose, &self.entity_id, outcome, None);
+                self.recorded = true;
                 Reply { text: String::new(), tokens: None, error: Some(error) }
             }
             Ok((raw, tokens)) => {
                 let text = accept(&raw).unwrap_or_default();
-                if text.is_empty() && !raw.is_empty() {
-                    tracing::debug!(
-                        purpose = self.purpose, entity = %self.entity_id,
-                        "ambient call: reply rejected by validation"
-                    );
-                }
+                let outcome = super::outcome::classify_reply(&raw, !text.is_empty());
+                super::outcome::record(self.purpose, &self.entity_id, outcome, Some(&raw));
+                self.recorded = true;
                 Reply { text, tokens, error: None }
             }
         }
@@ -160,6 +183,28 @@ mod tests {
 
     fn leaked_semaphore(permits: usize) -> &'static Semaphore {
         Box::leak(Box::new(Semaphore::new(permits)))
+    }
+
+    /// Codex P2 on #4243: an admitted call given up before running (no block, no
+    /// CLI path) still ends in one outcome, and an explicit `abandon` records its
+    /// own outcome instead of `not_run`, never both.
+    #[tokio::test]
+    async fn every_admitted_call_ends_in_exactly_one_outcome() {
+        const P: &str = "test_purpose_slot_outcomes";
+        let count = |label: &str| {
+            crate::ambient::outcome::snapshot()
+                .get(P)
+                .and_then(|by| by.get(label).copied())
+                .unwrap_or(0)
+        };
+        let dropped = admit(key("e1", P), 1, None).await.unwrap();
+        drop(dropped);
+        assert_eq!(count("not_run"), 1);
+
+        let abandoned = admit(key("e2", P), 1, None).await.unwrap();
+        abandoned.abandon(crate::ambient::outcome::Outcome::EmptyDigest);
+        assert_eq!(count("empty_digest"), 1);
+        assert_eq!(count("not_run"), 1, "abandon records once, not twice");
     }
 
     #[tokio::test]

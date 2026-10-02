@@ -732,6 +732,16 @@ export const AgentApi = {
         return client.rpcCall("swarm.other-instances", data, opts);
     },
 
+    // How ambient calls have ended since srv started, by purpose then outcome
+    // (crates/srv/src/ambient/outcome.rs). Shape: store/ambient-outcomes.ts.
+    AmbientOutcomesCommand(
+        client: RpcClient,
+        data: Record<string, never>,
+        opts?: RpcOpts,
+    ): Promise<import("@/app/store/ambient-outcomes").AmbientOutcomes> {
+        return client.rpcCall("ambient.outcomes", data, opts);
+    },
+
     // Every agent pane open in this instance — all tabs, all windows
     // (floating included) — with its agent id and where it is.
     AgentOpenPanesCommand(

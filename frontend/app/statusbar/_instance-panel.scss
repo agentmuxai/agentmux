@@ -42,6 +42,10 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+    // Titles row: refusals and failures outnumber new titles (ambient-outcomes.ts).
+    .instance-panel-value--warn {
+        color: var(--warning-text-color, var(--warning-color));
+    }
 }
 
 .instance-panel-mono {
