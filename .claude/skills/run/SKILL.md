@@ -50,12 +50,11 @@ cd /k
 Undo when done: `cmd //c "subst K: /D"` (run from a different directory —
 you can't remove a mapping you're currently inside).
 
-## 2. Pick a port yourself; don't trust the auto-hash blindly
+## 2. The port: let the Taskfile pick it; if you must override, use `vite-port.sh`
 
 `Taskfile.yml`'s `dev` task derives `AGENTMUX_VITE_PORT` from a 200-slot hash
-of your workspace path. With several agents' clones on one host this collides
-in practice, and the task's own collision-recovery has two gaps that won't
-save you:
+of your workspace path (5173–5372). With several agents' clones on one host this
+can collide, and the task's own collision-recovery has two gaps:
 
 - Its "is this port busy" pre-check is an HTTP `curl`, which can't see a
   process that has the socket bound but is hung/not answering HTTP.
@@ -63,22 +62,27 @@ save you:
   strings — it stops working for the same clone the moment you apply the
   `subst` workaround above, because the path string changes.
 
-Do a real check yourself and pass the result explicitly, rather than relying
-on the hash or the task's own reaping:
+**Default: set nothing.** If `task dev` reports the port is held by another
+agent's Vite, override it with the script, which checks both things that matter:
 
 ```bash
-# A real TCP probe, not curl — this catches a hung listener a curl GET won't.
-port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
-port=5999
-while ! port_free "$port"; do port=$((port + 1)); done
-echo "using port $port"
+AGENTMUX_VITE_PORT=$(bash scripts/vite-port.sh pick) task dev TITLE="<your-agent-name>"
 ```
 
-Launch with it pinned:
+`pick` returns the first port from 5300 up that nothing is listening on **and
+that Chromium will load pages from**. The second condition is not optional: the
+dev window is a Chromium window, and Chromium refuses certain ports outright
+(`ERR_UNSAFE_PORT`) — 6000 (X11), 6665–6669 (IRC), 5060/5061 (SIP), 4045, 2049
+and a few others. A dev instance pointed at one of them starts, Vite answers
+200, and the window then flickers forever with no message. This cost an agent a
+long debugging session on 2026-10-02 (port 6000 — see
+`docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md`). `task dev` now
+refuses such a port up front, but don't walk into it.
 
-```bash
-AGENTMUX_VITE_PORT=$port task dev TITLE="<your-agent-name>"
-```
+**Do not write your own free-port probe.** The earlier recipe here used bash's
+`/dev/tcp`, which Git Bash on Windows doesn't reliably support: it reported 5999
+free while another agent's Vite held it, and the walk upward then landed on the
+blocked 6000. `vite-port.sh` uses `netstat -ano` on Windows and `lsof` elsewhere.
 
 If you still see `Error: Port <n> is already in use` / repeated
 `vite.config.ts changed, restarting server...`, that port is genuinely stuck
@@ -194,6 +198,7 @@ external interrupt.
 ## References
 
 - `docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md` — full incident, evidence, and the plan this skill implements (P1).
+- `docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md` — why §2 forbids a hand-rolled probe and a blocked port.
 - `docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md` — the `MAX_PATH` root cause.
 - `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — the `AGENTMUX_VITE_PORT` mechanism this skill works around.
 - `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` — the I1–I6 invariants this skill's guidance is careful not to violate.
