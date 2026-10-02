@@ -355,9 +355,168 @@ pub(crate) async fn take_over(base: &str, agent_id: &str, token: &str, http: &re
     outcome
 }
 
+/// The relay's answer to "which install holds `agent`'s lease?" —
+/// `GET /agents/lease/:agent_id` (agentmux-cloud#136,
+/// `docs/plans/PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md` §7.1). Asked by
+/// a *sender* about a message's target, so it never touches this
+/// instance's own lease state ([`record`], admission): a read only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Holder {
+    /// No live lease.
+    Free,
+    /// This instance holds it.
+    Yours,
+    /// Another install of the same account holds it: the agent is live there.
+    Other(String),
+    /// A lease the relay won't describe (another account, or none), or a
+    /// relay-side error.
+    Unknown,
+    /// The relay predates the route (404/405).
+    Unsupported,
+    /// No answer at all.
+    Unreachable,
+}
+
+/// How long an answer is reused. Shorter than the lease TTL (60 s), so a
+/// lease that lapsed or moved is seen within a renewal or two.
+const HOLDER_FRESH: Duration = Duration::from_secs(20);
+
+static HOLDER_CACHE: LazyLock<Mutex<HashMap<String, (Holder, Instant)>>> = LazyLock::new(Default::default);
+static HOLDER_UNSUPPORTED_UNTIL: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Default::default);
+
+/// Ask the relay who holds `agent`'s lease, as `caller` (the message's
+/// sender, whose credential `token` is). Cached for [`HOLDER_FRESH`];
+/// "unreachable" is never cached.
+pub(crate) async fn holder(base: &str, agent: &str, caller: &str, token: &str, http: &reqwest::Client) -> Holder {
+    if HOLDER_UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now()) {
+        return Holder::Unsupported;
+    }
+    if let Some((answer, at)) = HOLDER_CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&key(agent)) {
+        if at.elapsed() < HOLDER_FRESH {
+            return answer.clone();
+        }
+    }
+    let Ok(mut url) = url::Url::parse(base) else {
+        return Holder::Unknown;
+    };
+    if let Ok(mut path) = url.path_segments_mut() {
+        path.pop_if_empty().extend(["agents", "lease", agent.trim()]);
+    }
+    let resp = http
+        .get(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("X-Agent-ID", caller)
+        .header("X-Agent-Instance", instance_id())
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await;
+    let answer = match resp {
+        Ok(r) => {
+            let status = r.status().as_u16();
+            let body = r.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
+            holder_from(status, &body)
+        }
+        Err(e) => {
+            tracing::debug!(agent, error = %e, "wan_lease: holder query unreachable");
+            return Holder::Unreachable;
+        }
+    };
+    if answer == Holder::Unsupported {
+        *HOLDER_UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now() + UNSUPPORTED_BACKOFF);
+        tracing::info!("wan_lease: relay has no lease holder query yet — routing as before");
+    }
+    HOLDER_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key(agent), (answer.clone(), Instant::now()));
+    answer
+}
+
+fn holder_from(status: u16, body: &serde_json::Value) -> Holder {
+    match status {
+        200..=299 => match body.get("state").and_then(|s| s.as_str()) {
+            Some("free") => Holder::Free,
+            Some("yours") => Holder::Yours,
+            Some("other") => Holder::Other(body.get("held_by").map(describe_holder).unwrap_or_default()),
+            _ => Holder::Unknown,
+        },
+        404 | 405 => Holder::Unsupported,
+        _ => Holder::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The holder query on the wire: `GET {base}/agents/lease/{agent}` with
+    /// the sender's credential, its agent id and this instance's id; the
+    /// answer is reused for HOLDER_FRESH, and "unreachable" is not cached.
+    #[tokio::test]
+    async fn the_holder_query_asks_once_and_names_the_caller() {
+        let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, Option<String>, Option<String>, Option<String>)>::new()));
+        let sink = hits.clone();
+        let app = axum::Router::new().route(
+            "/agents/lease/:agent",
+            axum::routing::get(
+                move |axum::extract::Path(agent): axum::extract::Path<String>, headers: axum::http::HeaderMap| {
+                    let sink = sink.clone();
+                    async move {
+                        let get = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).map(str::to_string);
+                        sink.lock().unwrap().push((agent, get("authorization"), get("x-agent-id"), get("x-agent-instance")));
+                        axum::Json(serde_json::json!({ "state": "other", "held_by": { "host": "area54-holder-test", "channel": "stable" } }))
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let base = format!("http://{addr}");
+        let http = reqwest::Client::new();
+        let agent = format!("HolderTest-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+
+        let first = holder(&base, &agent, "lark", "tok", &http).await;
+        assert!(matches!(&first, Holder::Other(d) if d.contains("area54-holder-test")), "{first:?}");
+        let again = holder(&base, &agent, "lark", "tok", &http).await;
+        assert_eq!(again, first);
+        let seen = hits.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1, "the second answer came from the cache: {seen:?}");
+        let (path_agent, auth, caller, instance) = &seen[0];
+        assert_eq!(path_agent, &agent);
+        assert_eq!(auth.as_deref(), Some("Bearer tok"));
+        assert_eq!(caller.as_deref(), Some("lark"));
+        assert_eq!(instance.as_deref(), Some(instance_id().as_str()));
+
+        // Nothing listening: unreachable, and asked again next time.
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead = format!("http://{}", closed.local_addr().unwrap());
+        drop(closed);
+        let lost = format!("HolderLost-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+        assert_eq!(holder(&dead, &lost, "lark", "tok", &http).await, Holder::Unreachable);
+        assert!(HOLDER_CACHE.lock().unwrap().get(&key(&lost)).is_none());
+    }
+
+    /// The holder query's answers (agentmux-cloud#136). Anything the relay
+    /// does not say plainly is `Unknown`, which routes as before.
+    #[test]
+    fn holder_answers_map_to_routes() {
+        use serde_json::json;
+        assert_eq!(holder_from(200, &json!({ "state": "free" })), Holder::Free);
+        assert_eq!(holder_from(200, &json!({ "state": "yours" })), Holder::Yours);
+        let other = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "version": "0.59.5" } }));
+        assert!(matches!(&other, Holder::Other(d) if d.contains("area54")), "{other:?}");
+        assert_eq!(holder_from(200, &json!({ "state": "unknown" })), Holder::Unknown);
+        assert_eq!(holder_from(200, &json!({ "state": "weird" })), Holder::Unknown);
+        assert_eq!(holder_from(200, &serde_json::Value::Null), Holder::Unknown);
+        assert_eq!(holder_from(404, &serde_json::Value::Null), Holder::Unsupported);
+        assert_eq!(holder_from(405, &serde_json::Value::Null), Holder::Unsupported);
+        for status in [401, 403, 429, 500] {
+            assert_eq!(holder_from(status, &serde_json::Value::Null), Holder::Unknown, "{status}");
+        }
+    }
 
     // Codex P1 on #3899: after a successful Take over the requester's own
     // cached refusal still refused the retried turn for up to 90 s.

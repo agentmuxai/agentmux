@@ -6532,6 +6532,52 @@ async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
     .is_none());
 }
 
+/// PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md §5: an agent defined in this
+/// channel that no tier found live is held here by default, so messaging
+/// works without the relay. A `test_state()` has no muxbus login, which is
+/// exactly the no-relay case. The relay keeps it only for a name that is
+/// not an agent here, a caller the hold never serves (LAN, cron), or a
+/// target this instance heard is live on another install.
+#[tokio::test]
+async fn an_absent_agent_defined_here_is_held_here_without_the_relay() {
+    use super::reactive::{route_for_absent, AbsentRoute};
+    use crate::backend::reactive::types::{InjectionRequest, InjectionResponse};
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("absent-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Absent Y", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+
+    let req = |target: &str, source: &str| InjectionRequest {
+        target_agent: target.to_string(),
+        message: "hi".to_string(),
+        source_agent: Some(source.to_string()),
+        request_id: Some(format!("req-{target}-{source}")),
+        delivery_tier: Some("host".to_string()),
+        ..Default::default()
+    };
+    let not_found: InjectionResponse = serde_json::from_value(serde_json::json!({
+        "success": false, "request_id": "req", "error": format!("agent not found: {slug}"), "timestamp": 0,
+    }))
+    .unwrap();
+    let full = super::ReactiveAuthVia::FullAuthKey;
+
+    // Defined here, sender not signed in: hold here.
+    assert_eq!(route_for_absent(&state, full, &req(&slug, "lark"), &not_found).await, AbsentRoute::HoldHere);
+    // By its display name too.
+    assert_eq!(route_for_absent(&state, full, &req("Absent Y", "lark"), &not_found).await, AbsentRoute::HoldHere);
+    // Not an agent of this channel: only the relay can know it.
+    assert_eq!(route_for_absent(&state, full, &req(&format!("nobody-{slug}"), "lark"), &not_found).await, AbsentRoute::Relay);
+    // Callers the hold never serves keep the old order.
+    assert_eq!(route_for_absent(&state, super::ReactiveAuthVia::LanKey, &req(&slug, "lark"), &not_found).await, AbsentRoute::Relay);
+    assert_eq!(route_for_absent(&state, full, &req(&slug, "cron"), &not_found).await, AbsentRoute::Relay);
+    // This instance heard another install holds its lease: the relay.
+    crate::muxbus::wan_lease::note_not_holder(&slug, &serde_json::json!({ "held_by": { "host": "elsewhere-test", "channel": "stable" } }));
+    assert_eq!(route_for_absent(&state, full, &req(&slug, "lark"), &not_found).await, AbsentRoute::Relay);
+}
+
 // The LAN listeners (`backend::lan_listeners`) serve `build_routers().lan`,
 // not the full router: a LAN peer only ever calls the lan-key routes, so
 // nothing that requires the full `auth_key` is reachable off-host.
