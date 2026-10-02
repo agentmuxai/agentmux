@@ -11,7 +11,7 @@
 // reagent on PR #513).
 
 .agent-import-count {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
     margin-bottom: var(--space-2);
 }
@@ -27,7 +27,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--main-text-color);
     padding: var(--space-0-5) 0;
 
@@ -52,12 +52,12 @@
     .agent-import-row-desc,
     .agent-import-row-skip-label {
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 }
 
 .agent-import-summary {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
     border-top: 1px solid var(--border-color);
     padding-top: var(--space-2);

@@ -108,7 +108,7 @@
     .agent-stash-modal-panel {
         gap: var(--space-1);
         padding: var(--space-1) var(--space-1-5);
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     // NOTE: the Memory tab's own 780x520 standalone sizing needs no

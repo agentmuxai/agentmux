@@ -27,7 +27,7 @@
         gap: 3px;
         max-height: 30vh;
         overflow-y: auto;
-        font-size: 12px;
+        font-size: var(--text-sm);
         flex-shrink: 0;
 
         .agent-pending-header {
@@ -108,7 +108,7 @@
                 border-radius: 0;
                 color: var(--main-text-color);
                 font-family: inherit;
-                font-size: 12px;
+                font-size: var(--text-sm);
                 resize: none;
                 min-height: 20px;
                 max-height: 200px;
