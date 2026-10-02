@@ -54,6 +54,7 @@ pub mod lan_firewall;
 #[cfg(windows)]
 pub mod lan_firewall_windows;
 pub mod lan_listeners;
+pub mod lan_mdns_diag;
 pub mod lan_mdns_health;
 pub mod lan_ports;
 pub mod lsp;

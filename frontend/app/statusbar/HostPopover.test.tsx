@@ -221,7 +221,8 @@ describe("HostPopoverPanel — undiscoverable warning", () => {
         const row = screen.getByTestId("lan-undiscoverable");
         expect(row).toHaveTextContent("Other machines can't see this one");
         expect(row).toHaveTextContent("UDP 5353");
-        expect(row).toHaveTextContent("2 time(s)");
+        expect(row).toHaveTextContent("keeps retrying");
+        expect(row).toHaveTextContent("2 so far");
     });
 
     it("shows nothing when discoverable, when LAN is off, or when there is no verdict", () => {

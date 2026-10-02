@@ -24,6 +24,14 @@ clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
+# The `log` -> `tracing` bridge (bootstrap/logging.rs). `mdns-sd`, and every other
+# dependency that logs through the `log` crate, was SILENT in our logs because no
+# bridge was installed. All three are already in the tree, so this adds nothing new.
+tracing-log = "0.2"
+log = "0.4"
+# One-shot UDP 5353 diagnosis (backend/lan_mdns_diag.rs), the same crate `mdns-sd`
+# sets its sockets up with.
+socket2 = { version = "0.5.5", features = ["all"] }
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"
 tokio-util = { version = "0.7", features = ["io"] }
@@ -129,6 +137,9 @@ windows-sys = { version = "0.59", features = [
     # SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §4.
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
+    # Who holds UDP 5353 (backend/lan_mdns_diag.rs): GetExtendedUdpTable.
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
 ] }
 
 [target.'cfg(windows)'.build-dependencies]
