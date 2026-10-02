@@ -212,6 +212,8 @@ describe("classifyChanges — docs_index, the cross-platform specs-index job", (
             "scripts/gen-docs-index.test.mjs",
             "scripts/test-fixtures/gen-docs-index/statuses.golden",
             "scripts/test-fixtures/gen-docs-index/fixtures.mjs",
+            "scripts/cli-probe/probe.mjs",
+            "scripts/cli-probe/fake-anthropic.mjs",
         ]) {
             expect(classifyChanges([p]).docs_index, p).toBe(true);
         }
