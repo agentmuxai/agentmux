@@ -1,5 +1,7 @@
 # Report: startup console flash, and oversized "Given to the agent" card
 
+**Status:** analysis
+
 Date: 2026-10-01 · Author: Loap · Base: `main` @ `48f511ca9` (one commit past v0.59.4)
 Status: analysis only. No source files were changed. Neither issue was reproduced by running the app.
 
