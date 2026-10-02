@@ -457,6 +457,14 @@ describe("the Files pane: live", () => {
         await waitFor(() => expect(v.names()).toEqual(["new.txt"]));
     });
 
+    it("selects what OpenFiles asked for even when the request lands after the listing", async () => {
+        const v = mount({ "files:path": HOME });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await v.ctx.setMeta({ "files:select": ["a2.md"] });
+        await waitFor(() => expect([...v.model.selection().names]).toEqual(["a2.md"]));
+        expect(v.meta()["files:select"]).toBeUndefined();
+    });
+
     it("selects what OpenFiles asked for, once", async () => {
         const v = mount({ "files:path": HOME, "files:select": ["C:\\Users\\a\\b.txt", "src"] });
         await waitFor(() => expect([...v.model.selection().names].sort()).toEqual(["b.txt", "src"]));

@@ -485,7 +485,9 @@ export class FilesModel {
 
     /** `files:select` (written by the OpenFiles tool): select those entries
      *  once, then clear the request. */
-    private applyRequestedSelection(): void {
+    applyRequestedSelection(): void {
+        // Only against a complete listing of the folder it names.
+        if (this.phase() !== "ready" || this.partial()) return;
         const req = this.ctx.meta()?.[META_SELECT];
         if (!Array.isArray(req) || req.length === 0) return;
         const present = new Set(this.order());
