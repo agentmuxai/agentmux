@@ -191,3 +191,85 @@ pub(crate) fn deferred_delivery_text(to: &str) -> String {
          their agent is up. Don't resend it."
     )
 }
+
+/// What `SendMessage` tells the sender, from srv's `/agentmux/reactive/inject`
+/// body. Each answer keeps its first word (`Delivered`, `QUEUED`, `HELD`) so
+/// existing prompts keep working, and adds the message id and the receiver's
+/// condition where srv's answer already implies it
+/// (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md §5.2, Phase 0 item 3).
+pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
+    // srv echoes the sender's own msgid, or the cloud relay's injection id on
+    // the relay branch; it is the id the receiver's `MSGID=` shows.
+    let id = match result.get("request_id").and_then(|v| v.as_str()) {
+        Some(id) if !id.is_empty() => format!(" id={id}"),
+        _ => String::new(),
+    };
+    if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
+        // `success: true` spans two very different outcomes and the old
+        // message conflated them, which made agent-to-agent delivery
+        // unfalsifiable from the sender side: a name that exists on no
+        // machine anywhere reported exactly the same string as a message
+        // injected into a live conversation. Verified against a running
+        // srv — `SendMessage(to="definitely-not-a-real-agent-xyz123")`
+        // returned "Message sent to ...", and the server log showed "cloud
+        // relay: queued for WAN delivery" for it, identical to a real remote
+        // agent.
+        //
+        // The response already carries the distinction: the handler sets
+        // `block_id` to the receiving block on local/host delivery
+        // (backend/reactive/handler.rs), while the cloud-relay path leaves it
+        // `None` because no receiver has seen the message yet
+        // (server/reactive.rs, `try_cloud_relay` — "Queued is not delivered").
+        if result.get("block_id").and_then(|v| v.as_str()).is_some() {
+            // srv queues a message while the target's process is starting
+            // up, restarting or stopping (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md
+            // §2.1) and says so with `deferred`; "injected" would be untrue.
+            if result.get("deferred").and_then(|v| v.as_bool()) == Some(true) {
+                return Ok(format!("{}{id}", deferred_delivery_text(to)));
+            }
+            return Ok(format!("Delivered to {to} — injected into their running conversation.{id}"));
+        }
+        return Ok(format!(
+            "QUEUED for {to} via the cloud relay (unconfirmed, expires in 30 min) — NOT yet \
+             delivered. The relay accepted it; their AgentMux picks it up when it next syncs, \
+             and the relay drops it after 30 minutes if nothing does (which is what happens if \
+             that instance stays offline). You get this same result for an agent name that \
+             does not exist anywhere, so check the spelling against DiscoverAgents if you \
+             expected local delivery.{id}"
+        ));
+    }
+    if result.get("held").and_then(|v| v.as_bool()) == Some(true) {
+        // SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md: the target is a known
+        // agent that is not running anywhere srv can reach, so srv kept the
+        // message and delivers it when the agent starts. Since Phase 0 item 4
+        // it also holds for a receiver that is here but not signed in.
+        if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {
+            return Ok(format!(
+                "HELD for {to} (needs_login) — not delivered yet. {to}'s agent cannot start \
+                 because it is not signed in; this AgentMux instance (channel) keeps the message \
+                 and delivers it within about a minute of their signing in, for up to 24 hours. \
+                 Do not resend it.{id}"
+            ));
+        }
+        return Ok(format!(
+            "HELD for {to} (not_running) — not delivered yet. {to} is not running; this \
+             AgentMux instance (channel) keeps the message and delivers it when {to} starts \
+             here, for up to 24 hours. Do not resend it.{id}"
+        ));
+    }
+    let err = result.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
+    // Two failures the sender can act on differently. A spawn-gate refusal is
+    // recoverable (the receiver signs in). srv now holds it (`needs_login`
+    // above); this answer remains for an older srv, a cron sender or a
+    // non-host tier, which are not held.
+    if err.starts_with("identity spawn gate") {
+        anyhow::bail!(
+            "Message delivery failed (needs_login): {to}'s agent cannot start because it is not \
+             signed in, and the message was NOT kept. Send it again after they sign in. ({err})"
+        )
+    }
+    if err.starts_with("agent not found") {
+        anyhow::bail!("Message delivery failed (not_found): {err}")
+    }
+    anyhow::bail!("Message delivery failed: {err}")
+}

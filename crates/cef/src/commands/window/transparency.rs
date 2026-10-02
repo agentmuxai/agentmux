@@ -18,11 +18,11 @@
 //             (Win32 window-style ops are safe from any thread).
 //   macOS   — [NSWindow setAlphaValue:], via ui_tasks::post_set_window_alpha
 //             (AppKit → must run on the UI thread).
-//   Linux   — X11/XWayland: EWMH _NET_WM_WINDOW_OPACITY, via
-//             ui_tasks::post_set_window_alpha (CEF Views handle → must run on
-//             the UI thread). Native Wayland (the default on Wayland sessions):
-//             no protocol, so no-op here; the window is alpha-capable and the
-//             page's CSS background carries the opacity, live.
+//   Linux   — via ui_tasks::post_set_window_alpha (must run on the UI
+//             thread). X11/XWayland: EWMH _NET_WM_WINDOW_OPACITY. Native
+//             Wayland (the default on Wayland sessions) has no protocol, so
+//             the task fades the page itself with CSS on the alpha-capable
+//             window.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -127,8 +127,8 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
 
     // Linux — Track 1 (SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01): EWMH
     // _NET_WM_WINDOW_OPACITY, the X11/XWayland analogue of the Win32 layered
-    // window and NSWindow.alphaValue arms above. Native-Wayland ozone has no
-    // uniform-alpha protocol; the UI task warns and no-ops there.
+    // window and NSWindow.alphaValue arms above. Native Wayland has no
+    // uniform-alpha protocol; the UI task fades the page with CSS there.
     #[cfg(target_os = "linux")]
     {
         let alpha = if transparent { opacity.clamp(0.0, 1.0) } else { 1.0 };
@@ -249,8 +249,8 @@ pub fn set_window_opacity(
     }
 
     // Linux mirror — same reducer events, same both-arms requirement
-    // (reagent P1 on #868). Applies _NET_WM_WINDOW_OPACITY on the UI thread
-    // via SetWindowAlphaTask.
+    // (reagent P1 on #868). SetWindowAlphaTask applies it on the UI thread:
+    // _NET_WM_WINDOW_OPACITY on X11, a CSS page fade on native Wayland.
     #[cfg(target_os = "linux")]
     for ev in &out.events {
         match ev {

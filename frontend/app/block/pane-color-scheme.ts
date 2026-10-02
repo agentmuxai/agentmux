@@ -17,7 +17,7 @@
  * `PANE_COLOR_TOKENS` is the one place to tune the look.
  */
 
-export type PaneColorRole = "identity" | "pill" | "pillActive" | "headerTint";
+export type PaneColorRole = "identity" | "border" | "pill" | "pillActive" | "headerTint";
 
 export interface OklchTone {
     /** Perceived lightness, 0–1. */
@@ -28,9 +28,14 @@ export interface OklchTone {
 
 export const PANE_COLOR_TOKENS: Record<"dark" | "light", Record<PaneColorRole, OklchTone>> = {
     dark: {
-        // Active-tab underline and anything that marks "this is that agent" at
-        // full strength. Must clear 3:1 against pill, pillActive and headerTint.
+        // Active-tab underline, the focused pane's ring, a selected Swarm row:
+        // anything that marks "this is that agent" at full strength. Must
+        // clear 3:1 against pill, pillActive and headerTint.
         identity: { l: 0.75, c: 0.15 },
+        // An unfocused pane's border and a hovered Swarm row: the hue, dimmed.
+        // Fixed L, so no hue's unfocused border is as bright as any hue's
+        // focused ring (HSL had an unfocused yellow brighter than a focused blue).
+        border: { l: 0.45, c: 0.09 },
         // An inactive coloured pill: the hue, quietly.
         pill: { l: 0.33, c: 0.06 },
         // The selected pill: the same hue, a step stronger.
@@ -41,6 +46,8 @@ export const PANE_COLOR_TOKENS: Record<"dark" | "light", Record<PaneColorRole, O
     },
     light: {
         identity: { l: 0.52, c: 0.17 },
+        // On a light surface "dimmed" means lighter: quieter than the ring.
+        border: { l: 0.8, c: 0.07 },
         pill: { l: 0.91, c: 0.04 },
         pillActive: { l: 0.86, c: 0.07 },
         headerTint: { l: 0.95, c: 0.025 },

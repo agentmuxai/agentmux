@@ -210,7 +210,10 @@ function isOverChrome(target: HTMLElement): boolean {
     return (
         !!target.closest(".window-header") ||
         !!target.closest(".status-bar") ||
-        !!target.closest(".block-frame-default-header")
+        !!target.closest(".block-frame-default-header") ||
+        // An open AnchoredPopover that follows chrome zoom (portaled, so not
+        // inside the bars above): Ctrl+wheel over it zooms it with the bar.
+        !!target.closest('[data-zoom-scope="chrome"]')
     );
 }
 

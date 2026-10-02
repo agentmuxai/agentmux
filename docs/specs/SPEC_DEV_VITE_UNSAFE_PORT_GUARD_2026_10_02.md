@@ -30,7 +30,7 @@ The first `task dev` of that session ran on 5300 and loaded all 13 of its pages 
 
 The `agentmux:run` skill tells agents to pick a free port themselves and pass it in. Its recipe starts at 5999 and counts up. It has two faults:
 
-- **The probe gave a wrong answer.** It uses bash's `/dev/tcp`, which reported 5999 free while another agent's Vite held it. Git Bash on Windows does not reliably support it. The walk then moved to 6000.
+- **The probe gave a wrong answer.** It used bash's `/dev/tcp` against `127.0.0.1` only, and on Windows Vite binds `localhost` as `[::1]`, so the probe reported 5999 free while another agent's Vite held it. (Found independently in #4205, which added an IPv6 probe to the recipe; this spec first guessed at Git Bash's `/dev/tcp` support, which was wrong.) The walk then moved to 6000.
 - **It starts next to a blocked port.** Even with a correct probe, any walk upward from 5999 lands on 6000 as soon as 5999 is taken.
 
 The automatic port in `Taskfile.yml` (5173 plus a per-clone offset of 0 to 199, so 5173 to 5372) is not affected: no blocked port lies in that range. Only a manual override can reach a blocked one.
@@ -52,7 +52,7 @@ One script owns the list and the checks, so the Taskfile, the skill and the test
 |---|---|
 | `vite-port.sh blocked <port>` | Exit 0 if Chromium refuses the port. |
 | `vite-port.sh check <port>` | Exit 0 if the value is a whole number in 1024–65535 and not blocked. Otherwise print one error naming the problem and the fix, exit 1. |
-| `vite-port.sh listening <port>` | Exit 0 if something is listening on it. Uses `netstat -ano` on Windows and `lsof` elsewhere, the same tools `Taskfile.yml` already uses for its busy check. |
+| `vite-port.sh listening <port>` | Exit 0 if something is listening on it. Uses `netstat -ano` on Windows (it lists IPv4 and IPv6 listeners alike) and `lsof` elsewhere, with `ss` as the fallback; with none of them present it stops with an error rather than reporting every port free. |
 | `vite-port.sh pick [start]` | Print the first port at or above `start` (default 5300) that is allowed and not listening. |
 
 The blocked list is Chromium's restricted-ports table (`net/base/port_util.cc`), limited to the ports from 1024 up, since lower ports are already refused by the 1024 floor. As recorded in this spec at the time of writing: 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665 to 6669, 6679, 6697, 10080. Chromium has added entries to this table over the years (4190, 6679 and 6697 are recent), so the list is a snapshot, which is why layer 3 exists.

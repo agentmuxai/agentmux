@@ -84,8 +84,7 @@ export type AgentDocumentCommand =
      *
      * `fromSnapshot: true` is a discriminator field per spec §4.5 — the
      * view layer reads it from the audit event (history-restored) to
-     * distinguish snapshot restore from partial `HistoryLoaded` prepend,
-     * and suppress the "Loading older messages" affordance.
+     * distinguish snapshot restore from partial `HistoryLoaded` prepend.
      *
      * Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.5.
      */

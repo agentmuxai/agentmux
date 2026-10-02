@@ -80,9 +80,12 @@ long debugging session on 2026-10-02 (port 6000 — see
 refuses such a port up front, but don't walk into it.
 
 **Do not write your own free-port probe.** The earlier recipe here used bash's
-`/dev/tcp`, which Git Bash on Windows doesn't reliably support: it reported 5999
-free while another agent's Vite held it, and the walk upward then landed on the
-blocked 6000. `vite-port.sh` uses `netstat -ano` on Windows and `lsof` elsewhere.
+`/dev/tcp` against `127.0.0.1`. On Windows Vite binds `localhost` as `[::1]`
+only, so that IPv4-only probe reported 5999 free while another agent's Vite held
+it, and the walk upward then landed on the blocked 6000. (#4205 added an IPv6
+probe to the recipe; `vite-port.sh` makes the whole recipe unnecessary.) It uses
+`netstat -ano` on Windows, which lists listeners of both families, and `lsof`
+(or `ss`) elsewhere.
 
 If you still see `Error: Port <n> is already in use` / repeated
 `vite.config.ts changed, restarting server...`, that port is genuinely stuck

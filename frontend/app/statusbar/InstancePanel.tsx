@@ -21,7 +21,7 @@ import { isMuxBusSessionOk } from "@/app/view/accounts/muxbus-session";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/mos";
@@ -35,21 +35,14 @@ import {
 } from "@/util/window-title";
 
 interface InstancePanelProps {
-    anchorRect: DOMRect | null;
+    /** The status bar's version chip. */
+    anchor: PopoverAnchor;
     onClose: () => void;
 }
 
 const POPOVER_WIDTH = 320;
-const GUTTER = 8;
 
 export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
-    let rootRef: HTMLDivElement | undefined;
-
-    // Airspace cut so the popover paints over any browser pane HWND that
-    // the status bar overlaps. Same primitive as TokenBreakdownPopover,
-    // MoreDropdown, and `<Modal>`.
-    usePaneOverlay(() => rootRef);
-
     const about = createMemo(() => {
         const d = getApi().getAboutModalDetails();
         return {
@@ -154,14 +147,6 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             pendingFocus = null;
         }
     };
-
-    const positioning = createMemo(() => {
-        const r = props.anchorRect;
-        if (!r) return { bottom: GUTTER, right: GUTTER };
-        const rightFromViewport = Math.max(GUTTER, window.innerWidth - r.right);
-        const bottomFromViewport = Math.max(GUTTER, window.innerHeight - r.top);
-        return { bottom: bottomFromViewport, right: rightFromViewport };
-    });
 
     const handleFocusWindow = async (label: string) => {
         if (label === myLabel()) return; // already focused
@@ -411,17 +396,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
 
 
     return (
-        <div
-            ref={(el) => (rootRef = el)}
+        // Portaled through AnchoredPopover like every other status bar panel.
+        // It used to render inside `.status-bar`, inheriting its zoom while
+        // placing itself with real-pixel bottom/right, so it drifted off the
+        // chip at any zoom but 100% (REPORT_CHROME_ZOOM_POPOVERS_2026_10_02 §4).
+        <AnchoredPopover
+            anchor={props.anchor}
+            placement="top-end"
+            onDismiss={props.onClose}
             class="instance-panel"
             role="dialog"
             aria-label="AgentMux instance panel"
-            style={{
-                position: "fixed",
-                bottom: `${positioning().bottom}px`,
-                right: `${positioning().right}px`,
-                width: `${POPOVER_WIDTH}px`,
-            }}
+            style={{ width: `${POPOVER_WIDTH}px` }}
         >
             <div class="instance-panel-header">
                 <div class="instance-panel-row instance-panel-row-meta">
@@ -701,7 +687,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                     Close
                 </button>
             </div>
-        </div>
+        </AnchoredPopover>
     );
 };
 
