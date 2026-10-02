@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getApi, windowCountAtom, backendStatusAtom, isDev } from "@/store/global";
-import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
 import { GpuStatus } from "./GpuStatus";
@@ -18,48 +18,19 @@ const StatusBar = (): JSX.Element => {
     const version = getApi().getAboutModalDetails()?.version ?? "";
     const windowCount = windowCountAtom;
 
-    let versionRef!: HTMLButtonElement;
+    // The version chip: the button, or the offline span while the backend is
+    // down. The instance panel anchors to whichever is showing ("Open
+    // Maintenance" can open it while the backend is down).
+    let versionRef: HTMLElement | undefined;
     const [panelOpen, setPanelOpen] = createSignal(false);
-    const [anchorRect, setAnchorRect] = createSignal<DOMRect | null>(null);
 
-    const handleVersionClick = () => {
-        if (panelOpen()) {
-            setPanelOpen(false);
-            return;
-        }
-        setAnchorRect(versionRef?.getBoundingClientRect() ?? null);
-        setPanelOpen(true);
-    };
+    const handleVersionClick = () => setPanelOpen(!panelOpen());
 
     // BackendStatus dot can request the version panel to open (e.g. "Open Maintenance ↗").
     onMount(() => {
-        const handler = () => {
-            setAnchorRect(versionRef?.getBoundingClientRect() ?? null);
-            setPanelOpen(true);
-        };
+        const handler = () => setPanelOpen(true);
         window.addEventListener("agentmux:open-version-panel", handler);
         onCleanup(() => window.removeEventListener("agentmux:open-version-panel", handler));
-    });
-
-    // Esc + click-outside close. Mirrors TokenBreakdownPopover precedent.
-    createEffect(() => {
-        if (!panelOpen()) return;
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") setPanelOpen(false);
-        };
-        const onClick = (e: MouseEvent) => {
-            const t = e.target as Node;
-            if (versionRef?.contains(t)) return;
-            const panelEl = document.querySelector(".instance-panel");
-            if (panelEl?.contains(t)) return;
-            setPanelOpen(false);
-        };
-        document.addEventListener("keydown", onKey);
-        document.addEventListener("mousedown", onClick);
-        onCleanup(() => {
-            document.removeEventListener("keydown", onKey);
-            document.removeEventListener("mousedown", onClick);
-        });
     });
 
     return (
@@ -82,6 +53,7 @@ const StatusBar = (): JSX.Element => {
                         when={backendStatusAtom() !== "crashed"}
                         fallback={
                             <span
+                                ref={(el) => { versionRef = el; }}
                                 class="status-version status-version-offline"
                                 data-tip="Backend offline"
                                 aria-label="Backend offline"
@@ -94,7 +66,7 @@ const StatusBar = (): JSX.Element => {
                         }
                     >
                         <button
-                            ref={versionRef!}
+                            ref={(el) => { versionRef = el; }}
                             type="button"
                             class="status-version clickable"
                             onClick={handleVersionClick}
@@ -115,7 +87,7 @@ const StatusBar = (): JSX.Element => {
                 </Show>
             </div>
             <Show when={panelOpen()}>
-                <InstancePanel anchorRect={anchorRect()} onClose={() => setPanelOpen(false)} />
+                <InstancePanel anchor={versionRef} onClose={() => setPanelOpen(false)} />
             </Show>
             <StatusBarTip />
         </div>

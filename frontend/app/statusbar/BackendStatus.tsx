@@ -7,10 +7,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { getGpuInfo } from "@/util/gpuutil";
 import { Accessor, createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
-import { autoUpdate } from "@floating-ui/dom";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { formatUptime, resolveUptimeSecs } from "./backend-uptime";
 
 function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
@@ -33,7 +30,8 @@ type BackendInfo = {
 };
 
 interface BackendStatusPanelProps {
-    anchorRect: DOMRect | null;
+    /** The status bar trigger. */
+    anchor: PopoverAnchor;
     onClose: () => void;
     backendInfo: Accessor<BackendInfo | null>;
     startedAt: Accessor<number | null>;
@@ -41,26 +39,15 @@ interface BackendStatusPanelProps {
     restarting: Accessor<boolean>;
     onRestart: () => void;
     gpu: ReturnType<typeof getGpuInfo>;
-    ref?: (el: HTMLDivElement) => void;
 }
 
 /**
  * The actual popover content, split out from `BackendStatus` so it mounts
- * (and unmounts) only while open — `usePaneOverlay` and the floating-ui
- * position registration both need to run against the popover's OWN mount
- * lifecycle, not the always-mounted trigger's. Portaled to `document.body`
- * and airspace-clipped so it paints over any browser-pane HWND the status
- * bar overlaps, mirroring `TokenUsageIndicator` → `TokenBreakdownPopover`
- * (the canonical status-bar popover pattern).
- * Spec: SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md
+ * (and unmounts) only while open: AnchoredPopover's positioning, dismiss
+ * and airspace cut run for the panel's own lifetime, not the always-mounted
+ * trigger's. Spec: SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md
  */
 const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
-    let rootRef: HTMLDivElement | undefined;
-
-    // Airspace cut so the popover paints over any browser-pane HWND the
-    // status bar overlaps — same primitive as TokenBreakdownPopover.
-    usePaneOverlay(() => rootRef);
-
     const backendStatus = atoms.backendStatusAtom;
     const backendInfo = props.backendInfo;
 
@@ -73,57 +60,19 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
         }
     };
 
-    // Positioning routes through the shared primitive (mirrors
-    // TokenBreakdownPopover): anchored to the status dot's rect, placement
-    // top-start so the popover opens upward and left-aligns to it —
-    // matches the pre-migration default `.status-bar-popover { left: 0 }`
-    // CSS this replaces (BackendStatus lives in status-bar-left).
+    // Opens upward, left-aligned to the status dot. Positioning, chrome zoom, dismiss
+    // and the airspace cut are AnchoredPopover's.
     const POPOVER_WIDTH = 260;
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        rootRef = el;
-        props.ref?.(el);
-        requestAnimationFrame(() => {
-            const r = props.anchorRect;
-            if (!r || !(el instanceof Element)) return;
-            const update = async () => {
-                const cur = props.anchorRect;
-                if (!cur) return;
-                const pos = await computeMenuPosition(
-                    { anchor: cur, placement: "top-start", avoidNativePanes: false },
-                    el,
-                );
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            // anchorRect is a static DOMRect → virtual reference element.
-            cleanupAutoUpdate = autoUpdate(
-                { getBoundingClientRect: () => props.anchorRect ?? r },
-                el,
-                update,
-            );
-            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
-            // (airspace transparency cut-out), so intentional native-pane overlap
-            // would produce a false-positive [menu-guard] warning.
-        });
-    };
-
-    onCleanup(() => cleanupAutoUpdate?.());
 
     return (
-        <div
-            ref={registerFloating}
+        <AnchoredPopover
+            anchor={props.anchor}
+            placement="top-start"
+            onDismiss={props.onClose}
             class="status-bar-popover"
             role="dialog"
             aria-label="Backend status"
-            data-pane-overlay
-            style={{ ...floatingStyle(), width: `${POPOVER_WIDTH}px` }}
+            style={{ width: `${POPOVER_WIDTH}px` }}
         >
             <div class="status-bar-popover-row">
                 <span class="status-bar-popover-label">Status</span>
@@ -250,7 +199,7 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                     </button>
                 </div>
             </Show>
-        </div>
+        </AnchoredPopover>
     );
 };
 
@@ -260,7 +209,6 @@ const BackendStatus = (): JSX.Element => {
     const backendStatus = atoms.backendStatusAtom;
     const [popoverOpen, setPopoverOpen] = createSignal(false);
     const [restarting, setRestarting] = createSignal(false);
-    const [anchorRect, setAnchorRect] = createSignal<DOMRect | null>(null);
 
     const handleRestart = () => {
         setRestarting(true);
@@ -280,7 +228,6 @@ const BackendStatus = (): JSX.Element => {
     const [uptimeSecs, setUptimeSecs] = createSignal(0);
     const [backendInfo, setBackendInfo] = createSignal<BackendInfo | null>(null);
     let triggerRef: HTMLDivElement | undefined;
-    let popoverRef: HTMLDivElement | undefined;
     const gpu = getGpuInfo(); // WebGL/GPU capability — static for the renderer process
 
     // Fetch started_at when backend becomes running
@@ -354,25 +301,9 @@ const BackendStatus = (): JSX.Element => {
         } catch {
             setBackendInfo(null);
         }
-        if (triggerRef) setAnchorRect(triggerRef.getBoundingClientRect());
         setPopoverOpen(true);
     };
 
-    // Close on outside click — ignores clicks on the trigger or inside the
-    // portaled popover. Dual-ref pattern (mirrors TokenUsageIndicator):
-    // now that the popover is portaled to document.body instead of nested
-    // under the trigger, a single containment check against the trigger
-    // alone would treat every click inside the popover as "outside."
-    createEffect(() => {
-        if (!popoverOpen()) return;
-        const handleOutsideClick = (e: MouseEvent) => {
-            const t = e.target as Node;
-            if (triggerRef?.contains(t) || popoverRef?.contains(t)) return;
-            setPopoverOpen(false);
-        };
-        document.addEventListener("mousedown", handleOutsideClick);
-        return () => document.removeEventListener("mousedown", handleOutsideClick);
-    });
 
     return (
         <Show when={backendStatus() !== null && icon() !== null}>
@@ -400,9 +331,8 @@ const BackendStatus = (): JSX.Element => {
                 </Show>
             </div>
             <Show when={popoverOpen()}>
-                <Portal>
                     <BackendStatusPanel
-                        anchorRect={anchorRect()}
+                        anchor={triggerRef}
                         onClose={() => setPopoverOpen(false)}
                         backendInfo={backendInfo}
                         startedAt={startedAt}
@@ -410,9 +340,7 @@ const BackendStatus = (): JSX.Element => {
                         restarting={restarting}
                         onRestart={handleRestart}
                         gpu={gpu}
-                        ref={(el) => { popoverRef = el; }}
                     />
-                </Portal>
             </Show>
         </Show>
     );

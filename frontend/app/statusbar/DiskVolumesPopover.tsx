@@ -7,37 +7,30 @@
  * publishes per-volume capacity in the same `sysinfo`/`local` event the rest
  * of the status bar consumes (`disk:vol:<mount>:free_gb` / `:total_gb`, see
  * sysinfo.rs::get_disk_data), so this is a pure-frontend view — the sibling
- * of CpuCoresPopover's per-core panel, sharing its positioning + airspace
- * pattern (usePaneOverlay, computeMenuPosition, autoUpdate) but left-aligned
+ * of CpuCoresPopover's per-core panel, rendered through the same
+ * AnchoredPopover but left-aligned
  * to the pill (top-start) rather than CPU's right-aligned (top-end) — per
  * request, the panel's left edge lines up with the pill's left edge.
  */
 
 import { createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { autoUpdate } from "@floating-ui/dom";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { diskFreeColor, formatDiskGb, parseDiskVolumes, type DiskVolume } from "./disk-volumes";
 
 interface DiskVolumesPopoverProps {
-    anchorRect: DOMRect | null;
+    /** The status bar's Disk readout. */
+    anchor: PopoverAnchor;
+    onClose: () => void;
     /** Parent's latest parsed snapshot — seeds the list so opening the panel
      *  shows data immediately instead of "Reading drives…" until the next
      *  sysinfo tick (the MPS route suppresses event replay for this second
      *  subscription, so a fresh mount would otherwise start empty). */
     initialVolumes?: DiskVolume[];
-    ref?: (el: HTMLDivElement) => void;
 }
 
 export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element => {
-    let rootRef: HTMLDivElement | undefined;
-
-    // Airspace cut so the popover paints over any browser-pane HWND the status
-    // bar overlaps — same primitive as CpuCoresPopover / TokenBreakdownPopover.
-    usePaneOverlay(() => rootRef);
-
     const [volumes, setVolumes] = createSignal<DiskVolume[]>(props.initialVolumes ?? []);
 
     onMount(() => {
@@ -53,36 +46,6 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
         onCleanup(() => unsub?.());
     });
 
-    // ── Positioning (mirrors CpuCoresPopover / TokenBreakdownPopover) ────────
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        rootRef = el;
-        props.ref?.(el);
-        requestAnimationFrame(() => {
-            const r = props.anchorRect;
-            if (!r || !(el instanceof Element)) return;
-            const update = async () => {
-                const cur = props.anchorRect;
-                if (!cur) return;
-                const pos = await computeMenuPosition({ anchor: cur, placement: "top-start", avoidNativePanes: false }, el);
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(
-                { getBoundingClientRect: () => props.anchorRect ?? r },
-                el,
-                update,
-            );
-        });
-    };
-
-    onCleanup(() => cleanupAutoUpdate?.());
 
     const usedPct = (v: DiskVolume): number => {
         if (v.totalGb <= 0) return 0;
@@ -90,13 +53,14 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
     };
 
     return (
-        <div
-            ref={registerFloating}
+        <AnchoredPopover
+            anchor={props.anchor}
+            placement="top-start"
+            onDismiss={props.onClose}
             class="disk-volumes-popover"
             role="dialog"
             aria-label="Free space per disk drive"
-            data-pane-overlay
-            style={{ ...floatingStyle(), width: "300px" }}
+            style={{ width: "300px" }}
         >
             <div class="disk-volumes-header">
                 <span class="disk-volumes-title">Disk Space</span>
@@ -131,7 +95,7 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
                     </Index>
                 </div>
             </Show>
-        </div>
+        </AnchoredPopover>
     );
 };
 

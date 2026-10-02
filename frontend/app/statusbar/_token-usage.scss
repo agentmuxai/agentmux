@@ -4,6 +4,8 @@
 // Status-bar token-usage indicator + breakdown popover.
 // Spec: docs/specs/SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md.
 
+@use "../element/popover-frame" as popoverFrame;
+
 .token-usage-indicator {
     display: inline-flex;
     align-items: center;
@@ -52,25 +54,11 @@
     }
 }
 
+// The body of an AnchoredPopover: the shell positions it and sets its
+// z-index; the body's chrome zoom comes from anchored-popover.scss.
 .token-usage-breakdown {
-    background: var(--modal-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    color: var(--main-text-color);
+    @include popoverFrame.popover-frame;
     font-size: 12px;
-    // Deliberately NOT `zoom: var(--zoomfactor)` — this element is
-    // Portal'd (document.body) and positioned via `computeMenuPosition`
-    // from an anchor rect that's ALREADY real, post-chrome-zoom pixels
-    // (the trigger button lives under `.status-bar`, which itself
-    // legitimately self-zooms as an in-flow container). Self-zooming this
-    // element too double-applies the same factor to its own already-real
-    // `left`/`top`/`width`, offsetting AND shrinking it — see
-    // docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md.
-    // Above the status bar and above browser panes — sits in the same
-    // stacking tier as the modal overlays. pane-overlay.ts clips the
-    // pane HWND beneath this rect so the DOM content paints on top.
-    z-index: var(--zindex-modal-wrapper);
     display: flex;
     flex-direction: column;
     padding: var(--space-2) 0;
