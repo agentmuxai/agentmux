@@ -1079,6 +1079,18 @@ pub(crate) async fn deliver(
         // promised "local → LAN → cloud". Owning it here means every caller
         // inherits it. See `crate::muxbus::relay` and
         // REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md §5.
+        //
+        // Except for an agent defined here that no tier found live: that one
+        // is held here unless the relay says another install of the account
+        // runs it (PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md §5). Before
+        // this, the relay came first for it too, so a same-computer agent got
+        // the relay's 30 min expiry instead of the 24 h hold, and only a
+        // sender NOT signed in to the cloud ever reached the hold.
+        if !candidate_seen && route_for_absent(state, auth_via, &req, &resp).await == AbsentRoute::HoldHere {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+                return held;
+            }
+        }
         if let Some(body) = try_cloud_relay(&state, &req).await {
             return body;
         }
@@ -1143,11 +1155,7 @@ pub(crate) async fn hold_for_absent_target(
     reason: HoldReason,
 ) -> Option<serde_json::Value> {
     use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
-    if auth_via != super::ReactiveAuthVia::FullAuthKey
-        || req.delivery_tier.as_deref() != Some("host")
-        || req.source_agent.as_deref() == Some("cron")
-        || resp.request_id.is_empty()
-    {
+    if !hold_applies(auth_via, req, resp) {
         return None;
     }
     let now = agentmux_common::time::now_ms();
@@ -1181,14 +1189,7 @@ pub(crate) async fn hold_for_absent_target(
     };
     let mstore = state.mstore.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        let target = held.target_agent.trim().to_string();
-        let uid = match mstore.instance_get(&target) {
-            Ok(Some(row)) => Some(row.id),
-            _ => match mstore.agents_matching_name(&target) {
-                Ok(rows) if rows.len() == 1 => Some(rows[0].id.clone()),
-                _ => None,
-            },
-        }?;
+        let (uid, _slug) = defined_here(&mstore, &held.target_agent)?;
         held.target_uid = uid;
         Some(held)
     })
@@ -1257,6 +1258,107 @@ pub(crate) async fn hold_for_absent_target(
             tracing::warn!(error = %e, target = %target, "durable jekt: hold failed");
             None
         }
+    }
+}
+
+/// The conditions under which this instance may hold a jekt at all (durable
+/// jekt spec §2.1): a full-key, host-tier request (a LAN caller never fills
+/// the hold); not a periodic `cron` fire; and an id to key the row by.
+fn hold_applies(
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+) -> bool {
+    auth_via == super::ReactiveAuthVia::FullAuthKey
+        && req.delivery_tier.as_deref() == Some("host")
+        && req.source_agent.as_deref() != Some("cron")
+        && !resp.request_id.is_empty()
+}
+
+/// The UID and slug of the agent defined in this channel that `target`
+/// names, as the hold resolves it (`hold_for_absent_target`). The slug is
+/// the agent's `AGENTMUX_AGENT_ID`, which its relay lease is keyed by.
+fn defined_here(mstore: &crate::backend::storage::store::Store, target: &str) -> Option<(String, String)> {
+    let target = target.trim();
+    let uid = match mstore.instance_get(target) {
+        Ok(Some(row)) => row.id,
+        _ => match mstore.agents_matching_name(target) {
+            Ok(rows) if rows.len() == 1 => rows[0].id.clone(),
+            _ => return None,
+        },
+    };
+    let slug = match mstore.agent_def_get(&uid) {
+        Ok(Some(def)) if !def.slug.is_empty() => def.slug,
+        _ => target.to_string(),
+    };
+    Some((uid, slug))
+}
+
+/// Where a jekt goes when no tier found its target live
+/// (`PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md` §5-§6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AbsentRoute {
+    /// Hold it on this instance (24 h) and deliver when the agent opens here.
+    HoldHere,
+    /// Leave it to the cloud relay, then the hold as a fallback (the order
+    /// before this plan).
+    Relay,
+}
+
+/// Decide [`AbsentRoute`] for a target no tier found live. Holding here is
+/// the default for an agent defined in this channel, so messaging works
+/// without the relay; the relay overrides it only when it says another
+/// install of the account holds the agent's lease. Anything the relay
+/// cannot answer plainly keeps the old order (relay first), so an older
+/// relay changes nothing.
+pub(crate) async fn route_for_absent(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+) -> AbsentRoute {
+    use crate::muxbus::wan_lease;
+    if !hold_applies(auth_via, req, resp) {
+        return AbsentRoute::Relay;
+    }
+    let mstore = state.mstore.clone();
+    let target = req.target_agent.clone();
+    let Some((_uid, slug)) = tokio::task::spawn_blocking(move || defined_here(&mstore, &target)).await.ok().flatten() else {
+        // Not an agent of this channel: it can only be on another install.
+        return AbsentRoute::Relay;
+    };
+    // This instance itself recently heard the lease is held elsewhere.
+    if wan_lease::held_elsewhere(&slug).is_some() {
+        return AbsentRoute::Relay;
+    }
+    // No relay for this sender (no source agent, not signed in): hold.
+    let Some(source) = req.source_agent.as_deref().filter(|s| !s.is_empty()) else {
+        return AbsentRoute::HoldHere;
+    };
+    let Some(credential) = crate::muxbus::relay::relay_token(source, &state.id_store, &state.http_client).await else {
+        return AbsentRoute::HoldHere;
+    };
+    let answer = wan_lease::holder(
+        &crate::muxbus::relay::rest_base_url(),
+        &slug,
+        source,
+        &credential.token,
+        &state.http_client,
+    )
+    .await;
+    let route = absent_route_for(&answer);
+    tracing::debug!(target = %req.target_agent, lease = ?answer, ?route, "jekt: routing an absent local agent");
+    route
+}
+
+/// The relay's lease answer as a route: hold here unless it says another
+/// install runs the agent or cannot say; an unreachable relay holds here
+/// (there is no relay to send through anyway).
+fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
+    use crate::muxbus::wan_lease::Holder;
+    match answer {
+        Holder::Free | Holder::Yours | Holder::Unreachable => AbsentRoute::HoldHere,
+        Holder::Other(_) | Holder::Unknown | Holder::Unsupported => AbsentRoute::Relay,
     }
 }
 
@@ -2611,6 +2713,27 @@ mod is_self_registration_tests;
 #[cfg(test)]
 #[path = "tests/reactive/forward_inject_tests.rs"]
 mod forward_inject_tests;
+
+/// PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md §5-§6: the relay's lease
+/// answer as a route. Holding here is the default; only "another install
+/// runs it" or an answer the relay cannot give plainly sends it to the relay.
+#[cfg(test)]
+mod absent_route_tests {
+    use super::*;
+    use crate::muxbus::wan_lease::Holder;
+
+    #[test]
+    fn the_lease_answer_picks_the_route() {
+        assert_eq!(absent_route_for(&Holder::Free), AbsentRoute::HoldHere);
+        assert_eq!(absent_route_for(&Holder::Yours), AbsentRoute::HoldHere);
+        // No relay to send through: keep it here.
+        assert_eq!(absent_route_for(&Holder::Unreachable), AbsentRoute::HoldHere);
+        assert_eq!(absent_route_for(&Holder::Other("computer area54".into())), AbsentRoute::Relay);
+        // An older relay, or one that won't say: the order before this plan.
+        assert_eq!(absent_route_for(&Holder::Unsupported), AbsentRoute::Relay);
+        assert_eq!(absent_route_for(&Holder::Unknown), AbsentRoute::Relay);
+    }
+}
 
 /// Tier-4 (cloud relay) gating tests.
 ///
