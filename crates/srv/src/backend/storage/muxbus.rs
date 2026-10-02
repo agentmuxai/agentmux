@@ -8,10 +8,35 @@ use super::error::StoreError;
 use super::store::Store;
 use crate::identity::secret_store;
 
-/// `secret_store` is otherwise keyed by identity-account id; MuxBus has
-/// exactly one, global credential set, so it uses a fixed sentinel key —
-/// shared with the broker's credential id, see `crate::muxbus::CREDENTIAL_ID`.
-const MUXBUS_KEYCHAIN_ID: &str = crate::muxbus::CREDENTIAL_ID;
+/// The host-wide keychain namespace: the `stable` channel's (and any
+/// non-isolated channel's) MuxBus tokens. Same string as the broker's
+/// credential id, `crate::muxbus::CREDENTIAL_ID`.
+const GLOBAL_KEYCHAIN_NS: &str = crate::muxbus::CREDENTIAL_ID;
+
+/// The keychain namespace this process's MuxBus tokens live under. It follows
+/// exactly the rule that places the `db_muxbus_credentials` row
+/// (`registry::paths::resolve_shared_store_path`): with isolated auth and an
+/// instance dir, the row is in that channel's own `identity-store.db`, so the
+/// tokens are scoped to the channel too. Before this, the row was per channel
+/// but the tokens were one host-wide set, so one channel's sign-in replaced
+/// every other channel's tokens and one channel's sign-out deleted them
+/// (SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md).
+fn keychain_namespace() -> String {
+    let instance_dir = std::env::var_os("AGENTMUX_INSTANCE_DIR");
+    let channel = std::env::var("AGENTMUX_CHANNEL").ok();
+    namespace_for(
+        agentmux_common::isolated_auth_enabled(),
+        instance_dir.is_some_and(|d| !d.is_empty()),
+        channel.as_deref(),
+    )
+}
+
+fn namespace_for(isolated_auth: bool, has_instance_dir: bool, channel: Option<&str>) -> String {
+    match channel.filter(|c| !c.is_empty()) {
+        Some(ch) if isolated_auth && has_instance_dir => format!("muxbus:channel:{ch}"),
+        _ => GLOBAL_KEYCHAIN_NS.to_string(),
+    }
+}
 
 /// Single-entry key holding all three tokens as one JSON blob. Two different
 /// roles depending on platform (see `muxbus_load_tokens` / `muxbus_save`):
@@ -32,14 +57,18 @@ const MUXBUS_KEYCHAIN_ID: &str = crate::muxbus::CREDENTIAL_ID;
 ///   making the whole flow look broken (retro-macos-muxbus-keychain-prompt-
 ///   storm-2026-08-19.md). One combined blob means one prompt, that one
 ///   "Always Allow" click actually sticks.
-const LEGACY_BLOB_KEYCHAIN_ID: &str = MUXBUS_KEYCHAIN_ID;
+/// The blob lives at the namespace itself (`muxbus:global` for the host-wide
+/// set), the split fields under it (`<ns>:access`, ...).
+fn blob_key(ns: &str) -> String {
+    ns.to_string()
+}
 
 const FIELD_ACCESS: &str = "access";
 const FIELD_REFRESH: &str = "refresh";
 const FIELD_ID: &str = "id";
 
-fn field_key(field: &str) -> String {
-    format!("{MUXBUS_KEYCHAIN_ID}:{field}")
+fn field_key(ns: &str, field: &str) -> String {
+    format!("{ns}:{field}")
 }
 
 /// A first fix attempt (splitting the combined blob into one keychain entry
@@ -168,7 +197,7 @@ struct MuxBusTokens {
 }
 
 /// On-disk JSON shape for the single-blob format (macOS/Linux's preferred
-/// layout, `write_single_blob`/`LEGACY_BLOB_KEYCHAIN_ID`). Wraps
+/// layout, `write_single_blob`/`blob_key`). Wraps
 /// `MuxBusTokens` with a generation stamp — the SAME `new_generation()`
 /// nanosecond-timestamp scheme the chunked layout already uses for its own
 /// cross-field torn-write check — so a blob and split entries found
@@ -401,7 +430,7 @@ fn read_chunked_field(field_key: &str) -> Result<Option<(String, String)>, Store
 }
 
 /// Write all three tokens as one combined JSON blob under a single keychain
-/// entry (`LEGACY_BLOB_KEYCHAIN_ID` — the CURRENT preferred format on
+/// entry (`blob_key` — the CURRENT preferred format on
 /// macOS/Linux, see that constant's doc comment). One `SecItemAdd`/
 /// `SecItemUpdate` call is inherently atomic at the OS level, so this needs
 /// none of `write_split_tokens`'s cross-field generation-stamp/rollback
@@ -409,8 +438,9 @@ fn read_chunked_field(field_key: &str) -> Result<Option<(String, String)>, Store
 /// the same `Vec<(String, PriorKeychainState)>` shape `write_split_tokens`
 /// returns, so `muxbus_save`'s SQL-failure rollback branch works unchanged
 /// regardless of which one ran.
-fn write_single_blob(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
-    let prior = PriorKeychainState::capture(LEGACY_BLOB_KEYCHAIN_ID);
+fn write_single_blob(ns: &str, tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
+    let key = blob_key(ns);
+    let prior = PriorKeychainState::capture(&key);
     // Always stamps a FRESH generation, even when the caller is re-writing
     // the same token values (e.g. reconciling a coexisting blob + split
     // layout in `muxbus_load_tokens` — see `MuxBusBlob`'s doc comment) —
@@ -422,10 +452,10 @@ fn write_single_blob(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychain
     };
     let blob = serde_json::to_string(&value)
         .map_err(|e| StoreError::Other(format!("muxbus: failed to serialize tokens: {e}")))?;
-    if let Err(e) = secret_store::put(LEGACY_BLOB_KEYCHAIN_ID, &blob) {
+    if let Err(e) = secret_store::put(&key, &blob) {
         return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
     }
-    Ok(vec![(LEGACY_BLOB_KEYCHAIN_ID.to_string(), prior)])
+    Ok(vec![(key, prior)])
 }
 
 /// Delete every entry the chunked per-field layout could have written
@@ -433,13 +463,13 @@ fn write_single_blob(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychain
 /// Shared by `muxbus_clear` (unconditional logout cleanup, any platform) and
 /// the macOS/Linux migration path in `muxbus_load_tokens` (collapsing a
 /// pre-fix install's chunked entries into the single-blob format — see
-/// `LEGACY_BLOB_KEYCHAIN_ID`'s doc comment). Best-effort: `secret_store::delete`
+/// `blob_key`'s doc comment). Best-effort: `secret_store::delete`
 /// on a non-existent entry is a no-op success, and a real delete failure here
 /// just leaves an orphaned, unreadable-without-the-others chunk behind rather
 /// than losing anything live.
-fn delete_split_tokens() {
+fn delete_split_tokens(ns: &str) {
     for field in [FIELD_ACCESS, FIELD_REFRESH, FIELD_ID] {
-        let fk = field_key(field);
+        let fk = field_key(ns, field);
         // A count-read failure must NOT be treated as "0 chunks" (see
         // read_chunk_count's doc comment) — that would delete nothing here
         // while still unconditionally deleting the `:count` key below,
@@ -478,12 +508,12 @@ fn delete_split_tokens() {
 /// On success, returns every entry's PRE-call state (across all three
 /// fields) so `muxbus_save`'s SQL-write failure branch can roll all of it
 /// back together too.
-fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
+fn write_split_tokens(ns: &str, tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
     let generation = new_generation();
     let fields: [(String, &str); 3] = [
-        (field_key(FIELD_ACCESS), tokens.access_token.as_str()),
-        (field_key(FIELD_REFRESH), tokens.refresh_token.as_str()),
-        (field_key(FIELD_ID), tokens.id_token.as_str()),
+        (field_key(ns, FIELD_ACCESS), tokens.access_token.as_str()),
+        (field_key(ns, FIELD_REFRESH), tokens.refresh_token.as_str()),
+        (field_key(ns, FIELD_ID), tokens.id_token.as_str()),
     ];
     let mut all_priors: Vec<(String, PriorKeychainState)> = Vec::new();
     for (key, value) in fields {
@@ -507,6 +537,36 @@ fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychai
     Ok(all_priors)
 }
 
+/// The tokens stored under `ns` in either layout (chunked split entries or
+/// the single blob), without migrating or deleting anything. `None` when
+/// neither layout holds a complete, consistent set or a read fails. Used
+/// only to adopt the host-wide session into a channel namespace.
+///
+/// When both layouts are present, the fresher generation wins, the same
+/// rule `muxbus_load_tokens` applies: on macOS/Linux `muxbus_save` writes
+/// only the blob, so split entries left over beside it are older and must
+/// not be adopted over it. A blob without a generation (the legacy Windows
+/// format) ranks oldest, so Windows' current split layout wins over it.
+fn read_any_layout(ns: &str) -> Option<MuxBusTokens> {
+    let split = read_split_tokens(ns).ok().flatten();
+    let blob = secret_store::get_optional(&blob_key(ns))
+        .ok()
+        .flatten()
+        .and_then(|b| serde_json::from_str::<MuxBusBlob>(&b).ok());
+    match (split, blob) {
+        (Some((split_tokens, split_gen)), Some(blob)) => {
+            if generation_as_number(&split_gen) > generation_as_number(&blob.generation) {
+                Some(split_tokens)
+            } else {
+                Some(blob.tokens)
+            }
+        }
+        (Some((split_tokens, _)), None) => Some(split_tokens),
+        (None, Some(blob)) => Some(blob.tokens),
+        (None, None) => None,
+    }
+}
+
 /// Read the three split-entry (chunked) tokens. `Ok(None)` means none of the
 /// three fields exist yet (not migrated to this layout — caller falls
 /// through to the legacy-blob / legacy-plaintext sources). `Err` means a
@@ -517,10 +577,10 @@ fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychai
 /// (validated equal below) — callers that need to compare this layout's
 /// freshness against a coexisting blob use the second element; callers that
 /// don't (the common case) just ignore it.
-fn read_split_tokens() -> Result<Option<(MuxBusTokens, String)>, StoreError> {
-    let access = read_chunked_field(&field_key(FIELD_ACCESS))?;
-    let refresh = read_chunked_field(&field_key(FIELD_REFRESH))?;
-    let id = read_chunked_field(&field_key(FIELD_ID))?;
+fn read_split_tokens(ns: &str) -> Result<Option<(MuxBusTokens, String)>, StoreError> {
+    let access = read_chunked_field(&field_key(ns, FIELD_ACCESS))?;
+    let refresh = read_chunked_field(&field_key(ns, FIELD_REFRESH))?;
+    let id = read_chunked_field(&field_key(ns, FIELD_ID))?;
 
     match (access, refresh, id) {
         (None, None, None) => Ok(None),
@@ -698,14 +758,15 @@ impl Store {
             refresh_token: legacy_refresh.to_string(),
             id_token: legacy_id.to_string(),
         };
+        let ns = keychain_namespace();
 
         // Check THIS platform's preferred, current layout first — Windows
         // needs the chunked per-field layout (its 1280-char keychain entry
         // cap); macOS/Linux use the single combined blob instead (see
-        // LEGACY_BLOB_KEYCHAIN_ID's doc comment for why they differ). No
+        // `blob_key`'s doc comment for why they differ). No
         // migration needed on a hit here — it's already the right format.
         if cfg!(target_os = "windows") {
-            match read_split_tokens() {
+            match read_split_tokens(&ns) {
                 Ok(Some((tokens, _generation))) => return Ok(tokens),
                 Ok(None) => {} // not yet on the split layout — check other sources below
                 Err(e) => {
@@ -720,7 +781,7 @@ impl Store {
                 }
             }
         } else {
-            match secret_store::get_optional(LEGACY_BLOB_KEYCHAIN_ID) {
+            match secret_store::get_optional(&blob_key(&ns)) {
                 Ok(Some(blob)) => {
                     // reagent P2: a corrupted/unparseable keychain blob used
                     // to silently collapse to MuxBusTokens::default() via
@@ -750,15 +811,15 @@ impl Store {
                     //      `muxbus_save` (macOS/Linux only ever writes the
                     //      blob) then makes the blob fresher than those
                     //      leftovers.
-                    match read_split_tokens() {
+                    match read_split_tokens(&ns) {
                         Ok(Some((split_tokens, split_generation))) => {
                             if generation_as_number(&split_generation) > blob_generation {
                                 // Split is genuinely newer — finish the
                                 // interrupted migration into this fix's
                                 // preferred single-blob format.
                                 if allow_migration {
-                                    match write_single_blob(&split_tokens) {
-                                        Ok(_) => delete_split_tokens(),
+                                    match write_single_blob(&ns, &split_tokens) {
+                                        Ok(_) => delete_split_tokens(&ns),
                                         Err(_) => {
                                             tracing::warn!(
                                                 "muxbus: keychain write failed reconciling coexisting \
@@ -776,7 +837,7 @@ impl Store {
                             // that cleanup now instead of leaving it to
                             // silently mislead the NEXT load too.
                             if allow_migration {
-                                delete_split_tokens();
+                                delete_split_tokens(&ns);
                             }
                         }
                         Ok(None) => {} // no coexistence — the blob alone is authoritative
@@ -815,15 +876,15 @@ impl Store {
         // (every platform wrote it uniformly before this fix existed) — see
         // retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md.
         if cfg!(target_os = "windows") {
-            match secret_store::get_optional(LEGACY_BLOB_KEYCHAIN_ID) {
+            match secret_store::get_optional(&blob_key(&ns)) {
                 Ok(Some(blob)) => {
                     let tokens: MuxBusTokens = serde_json::from_str(&blob).map_err(|e| {
                         StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
                     })?;
                     if allow_migration {
-                        match write_split_tokens(&tokens) {
+                        match write_split_tokens(&ns, &tokens) {
                             Ok(_) => {
-                                let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
+                                let _ = secret_store::delete(&blob_key(&ns));
                             }
                             Err(_) => {
                                 tracing::warn!(
@@ -848,7 +909,7 @@ impl Store {
                 }
             }
         } else {
-            match read_split_tokens() {
+            match read_split_tokens(&ns) {
                 Ok(Some((tokens, _generation))) => {
                     // No coexisting blob was found (the branch above this
                     // one already checked and returned) — self-heal:
@@ -857,8 +918,8 @@ impl Store {
                     // consent prompt — touches exactly one entry instead of
                     // up to twelve.
                     if allow_migration {
-                        match write_single_blob(&tokens) {
-                            Ok(_) => delete_split_tokens(),
+                        match write_single_blob(&ns, &tokens) {
+                            Ok(_) => delete_split_tokens(&ns),
                             Err(_) => {
                                 tracing::warn!(
                                     "muxbus: keychain write failed migrating chunked entries to a \
@@ -896,9 +957,9 @@ impl Store {
                 // layout + blanking the SQL columns so every subsequent
                 // load hits the keychain path instead.
                 let write_result = if cfg!(target_os = "windows") {
-                    write_split_tokens(&tokens)
+                    write_split_tokens(&ns, &tokens)
                 } else {
-                    write_single_blob(&tokens)
+                    write_single_blob(&ns, &tokens)
                 };
                 match write_result {
                     Ok(_) => {
@@ -921,6 +982,36 @@ impl Store {
             return Ok(tokens);
         }
 
+        // This channel has its own SQL row (we only get here past the row
+        // gate) but nothing under its own keychain namespace: it signed in
+        // before tokens were scoped per channel, when they went to the
+        // host-wide set. Adopt that set once, read-only — the global entries
+        // are never written or deleted from here, so other channels and the
+        // `stable` channel keep theirs. From the next save on, this channel's
+        // tokens are its own.
+        if ns != GLOBAL_KEYCHAIN_NS {
+            if let Some(tokens) = read_any_layout(GLOBAL_KEYCHAIN_NS) {
+                tracing::info!(
+                    namespace = %ns,
+                    "muxbus: adopting the host-wide session for this channel (one-time, pre-per-channel sign-in)"
+                );
+                if allow_migration {
+                    let write_result = if cfg!(target_os = "windows") {
+                        write_split_tokens(&ns, &tokens)
+                    } else {
+                        write_single_blob(&ns, &tokens)
+                    };
+                    if write_result.is_err() {
+                        tracing::warn!(
+                            "muxbus: couldn't copy the adopted session into this channel's \
+                             keychain namespace — it stays readable from the host-wide set for now"
+                        );
+                    }
+                }
+                return Ok(tokens);
+            }
+        }
+
         Ok(MuxBusTokens::default())
     }
 
@@ -933,6 +1024,7 @@ impl Store {
         // call's rollback restore a stale snapshot over the OTHER call's
         // already-committed credential.
         let _save_guard = self.muxbus_save_lock.lock().unwrap();
+        let ns = keychain_namespace();
 
         // Read the outgoing account's user_sub now, before it's overwritten
         // below, so a genuine account switch (vs. a same-account token
@@ -955,7 +1047,7 @@ impl Store {
         };
 
         // Windows needs the chunked per-field layout (its 1280-char keychain
-        // entry cap — see LEGACY_BLOB_KEYCHAIN_ID's doc comment); macOS/Linux
+        // entry cap — see `blob_key`'s doc comment); macOS/Linux
         // have no such cap, so they write the single combined blob instead,
         // to avoid the ~12-separate-consent-prompts problem chunking causes
         // on macOS Keychain specifically. Either function returns each
@@ -966,9 +1058,9 @@ impl Store {
         // the FRESH tokens paired with the OLD SQL metadata, a mismatch that
         // previously only self-healed on the next successful save).
         let priors = if cfg!(target_os = "windows") {
-            write_split_tokens(&tokens)?
+            write_split_tokens(&ns, &tokens)?
         } else {
-            write_single_blob(&tokens)?
+            write_single_blob(&ns, &tokens)?
         };
 
         let sql_result = {
@@ -1030,6 +1122,7 @@ impl Store {
         // same race class muxbus_save/muxbus_load_impl already serialize
         // against each other for.
         let _clear_guard = self.muxbus_save_lock.lock().unwrap();
+        let ns = keychain_namespace();
         // Best-effort — a missing/inaccessible keychain entry must not block
         // clearing the (still-useful) SQL row. Clears every chunk + count/gen
         // entry the Windows-only chunked layout could have written (harmless
@@ -1038,8 +1131,8 @@ impl Store {
         // plus the single combined-blob key every platform's CURRENT write
         // path (`write_single_blob` on macOS/Linux) or legacy migration
         // source (Windows) uses.
-        delete_split_tokens();
-        let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
+        delete_split_tokens(&ns);
+        let _ = secret_store::delete(&blob_key(&ns));
         {
             let conn = self.conn.lock().unwrap();
             conn.execute("DELETE FROM db_muxbus_credentials WHERE id = 'global'", [])?;
@@ -1120,13 +1213,112 @@ mod tests {
 
     #[test]
     fn field_key_is_namespaced_and_distinct_per_field() {
-        let access = field_key(FIELD_ACCESS);
-        let refresh = field_key(FIELD_REFRESH);
-        let id = field_key(FIELD_ID);
+        // The host-wide names must not change: installed `stable` users'
+        // existing sign-ins live under exactly these entries.
+        let access = field_key(GLOBAL_KEYCHAIN_NS, FIELD_ACCESS);
+        let refresh = field_key(GLOBAL_KEYCHAIN_NS, FIELD_REFRESH);
+        let id = field_key(GLOBAL_KEYCHAIN_NS, FIELD_ID);
         assert_eq!(access, "muxbus:global:access");
         assert_eq!(refresh, "muxbus:global:refresh");
         assert_eq!(id, "muxbus:global:id");
-        assert_ne!(access, LEGACY_BLOB_KEYCHAIN_ID);
+        assert_eq!(blob_key(GLOBAL_KEYCHAIN_NS), "muxbus:global");
+        assert_ne!(access, blob_key(GLOBAL_KEYCHAIN_NS));
+    }
+
+    #[test]
+    fn namespace_is_per_channel_exactly_when_the_sql_row_is() {
+        // stable / non-isolated: the host-wide set, as before.
+        assert_eq!(namespace_for(false, true, Some("stable")), "muxbus:global");
+        assert_eq!(namespace_for(false, true, Some("local-main-x")), "muxbus:global");
+        // Isolated auth with an instance dir: the row is in the channel's own
+        // identity-store.db, so the tokens are the channel's own too.
+        assert_eq!(namespace_for(true, true, Some("local-main-x")), "muxbus:channel:local-main-x");
+        assert_eq!(namespace_for(true, true, Some("dev-feat-a-1234")), "muxbus:channel:dev-feat-a-1234");
+        // Isolated but no instance dir: the row falls back to the global
+        // store (resolve_shared_store_path), so the tokens must too.
+        assert_eq!(namespace_for(true, false, Some("local-main-x")), "muxbus:global");
+        // No channel known: never invent one.
+        assert_eq!(namespace_for(true, true, None), "muxbus:global");
+        assert_eq!(namespace_for(true, true, Some("")), "muxbus:global");
+    }
+
+    #[test]
+    fn channel_namespaces_never_share_an_entry_with_each_other_or_the_global_set() {
+        let a = namespace_for(true, true, Some("local-main-a"));
+        let b = namespace_for(true, true, Some("local-main-b"));
+        let g = GLOBAL_KEYCHAIN_NS.to_string();
+        let keys = |ns: &str| {
+            let mut k = vec![blob_key(ns)];
+            for f in [FIELD_ACCESS, FIELD_REFRESH, FIELD_ID] {
+                let fk = field_key(ns, f);
+                k.extend([chunk_key(&fk, 0), count_key(&fk), generation_key(&fk), fk]);
+            }
+            k
+        };
+        for (x, y) in [(&a, &b), (&a, &g), (&b, &g)] {
+            let (kx, ky) = (keys(x), keys(y));
+            assert!(kx.iter().all(|k| !ky.contains(k)), "{x} and {y} share a keychain entry");
+        }
+    }
+
+    /// Exercises the REAL OS keychain, so it's ignored in CI (no keychain
+    /// there). Run on a dev machine:
+    /// `cargo test -p agentmux-srv --bin agentmux-srv per_channel_keychain_live -- --ignored`.
+    /// Uses throwaway namespaces and cleans up after itself; never touches
+    /// `muxbus:global`.
+    #[test]
+    #[ignore]
+    fn per_channel_keychain_live() {
+        let run = new_generation();
+        let ns_a = format!("muxbus:channel:test-{run}-a");
+        let ns_b = format!("muxbus:channel:test-{run}-b");
+        let tok = |s: &str| MuxBusTokens {
+            access_token: format!("access-{s}-{}", "x".repeat(1500)),
+            refresh_token: format!("refresh-{s}"),
+            id_token: format!("id-{s}"),
+        };
+        let write = |ns: &str, t: &MuxBusTokens| {
+            if cfg!(target_os = "windows") {
+                write_split_tokens(ns, t).map(|_| ())
+            } else {
+                write_single_blob(ns, t).map(|_| ())
+            }
+        };
+        let clear = |ns: &str| {
+            delete_split_tokens(ns);
+            let _ = secret_store::delete(&blob_key(ns));
+        };
+
+        write(&ns_a, &tok("a")).expect("write a");
+        write(&ns_b, &tok("b")).expect("write b");
+        // Each channel reads back its own session, not the other's.
+        assert_eq!(read_any_layout(&ns_a).unwrap().refresh_token, "refresh-a");
+        assert_eq!(read_any_layout(&ns_b).unwrap().refresh_token, "refresh-b");
+        // Signing one channel out leaves the other signed in.
+        clear(&ns_a);
+        assert!(read_any_layout(&ns_a).is_none(), "a cleared");
+        assert_eq!(read_any_layout(&ns_b).unwrap().access_token, tok("b").access_token);
+        clear(&ns_b);
+        assert!(read_any_layout(&ns_b).is_none(), "b cleared");
+
+        // Both layouts present under one namespace: the fresher generation
+        // wins, whichever layout it's in (adoption must not pick stale
+        // leftovers).
+        // Small tokens here: a single blob over Windows Credential Manager's
+        // 2560-byte cap can't be written at all (why Windows splits).
+        let small = |s: &str| MuxBusTokens {
+            access_token: format!("access-{s}"),
+            refresh_token: format!("refresh-{s}"),
+            id_token: format!("id-{s}"),
+        };
+        let ns_c = format!("muxbus:channel:test-{run}-c");
+        write_split_tokens(&ns_c, &small("split-old")).expect("split old");
+        write_single_blob(&ns_c, &small("blob-new")).expect("blob new");
+        assert_eq!(read_any_layout(&ns_c).unwrap().refresh_token, "refresh-blob-new");
+        write_split_tokens(&ns_c, &small("split-newest")).expect("split newest");
+        assert_eq!(read_any_layout(&ns_c).unwrap().refresh_token, "refresh-split-newest");
+        clear(&ns_c);
+        assert!(read_any_layout(&ns_c).is_none(), "c cleared");
     }
 
     /// Regression guard for every bug this file has fixed in sequence: the
