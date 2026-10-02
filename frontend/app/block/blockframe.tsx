@@ -58,12 +58,13 @@ import { redactSecrets } from "@/app/errors/redact";
 const NumActiveConnColors = 8;
 
 /**
- * The darkened/muted background a block's own assigned color resolves to —
+ * The header background a block's own assigned color resolves to (a subtle
+ * tint, pane-color-scheme.ts `headerTint`) —
  * shared by BlockFrame_Header's headerStyle and PaneChrome's inactive
  * pane-tab pills (PaneTabStrip.tsx), so a pill for a background tab reads as
  * the same color its header would show if it were active. See
  * headerBgForEffectiveColor's own doc comment for the darkened-vs-bright
- * theme-polarity rule. Returns undefined when the block has no color of its
+ * rule. Returns undefined when the block has no color of its
  * own (neither frame:hue nor frame:activebordercolor set) — callers fall
  * back to their own default background.
  */
@@ -73,12 +74,11 @@ export function computeBlockColorBg(blockMeta: Block["meta"] | undefined, isLigh
     return headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
 }
 
-/** Same as computeBlockColorBg, for a pane-tab pill's own background
- * instead of the pane header's — see hueToPaneTabBg's own doc comment for
- * why a small pill needs a more visible dark-theme treatment than the
- * header's identical-looking-but-actually-distinct 16%-lightness colors,
- * which live-reproduced as pill colors appearing to collapse to one shared
- * value (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
+/** Same as computeBlockColorBg, for an inactive pane-tab pill's own
+ * background (pane-color-scheme.ts `pill`). Deliberately stronger than the
+ * header tint: on a small pill the header's subtle value is nearly
+ * indistinguishable from black and from a neighbouring uncoloured pill
+ * (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
 export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
     const hue = blockMeta?.["frame:hue"];
     const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
@@ -105,9 +105,10 @@ export function computeBlockIdentityColor(blockMeta: Block["meta"] | undefined, 
 }
 
 /** Fixed header background for every non-agent pane with no other color
- * source — see headerStyle's fallback branch. Matches the L=16% used by
- * hueToHeaderBg for visual consistency, low saturation so it reads as
- * neutral rather than tinted toward any particular hue. */
+ * source — see headerStyle's fallback branch. The single-identity header
+ * tint (pane-color-scheme.ts `headerTint`, OKLCH L 0.27) sits at this
+ * colour's lightness, so a tinted and a neutral header read as the same
+ * surface; low saturation so this one reads as neutral. */
 const NON_AGENT_DEFAULT_HEADER_BG = "hsl(220, 12%, 16%)";
 
 /** Opaque background for a pane-tab pill whose block has NO color of its
