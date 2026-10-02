@@ -17,7 +17,8 @@ vi.mock("@/app/store/global", () => ({
     MOS: { makeORef: (t: string, id: string) => `${t}:${id}` },
 }));
 
-import { headerBgForEffectiveColor, hueToActiveBorder, hueToAgentIdentityColor, hueToHeaderBg, setHue } from "./pane-color-menu";
+import { headerBgForEffectiveColor, hueToActiveBorder, hueToAgentIdentityColor, setHue } from "./pane-color-menu";
+import { contrastRatio, paneRoleColor } from "./pane-color-scheme";
 
 describe("hueToAgentIdentityColor", () => {
     it("matches hsl(hue, 65%, 52%) — the same values hueToActiveBorder uses — converted to hex", () => {
@@ -37,19 +38,25 @@ describe("hueToAgentIdentityColor", () => {
     });
 });
 
+// 2026-10-02 (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §6 P3): the
+// header is a subtle OKLCH tint of the identity in BOTH themes — no longer
+// hsl(h, 28%, 16%) on dark and the identity at full strength on light.
 describe("headerBgForEffectiveColor — dark theme (default)", () => {
-    it("uses the explicit hue pick, darkened, when one is present — regardless of any identity hex", () => {
-        expect(headerBgForEffectiveColor(120, "#3535d4", false)).toBe(hueToHeaderBg(120));
+    it("uses the explicit hue pick when one is present — regardless of any identity hex", () => {
+        expect(headerBgForEffectiveColor(120, "#3535d4", false)).toBe(paneRoleColor(120, undefined, false, "headerTint"));
     });
 
-    it("derives the SAME darkened header treatment from an agent's persisted identity hex when no explicit hue is set — the whole point of unifying the two sources (2026-09-21)", () => {
-        // "#35d435" is exactly hueToAgentIdentityColor(120)'s output — round
-        // tripping it back through hexToHue must recover hue 120, so this
-        // agent's header gets the identical darkened background an explicit
-        // pick of hue 120 would have produced.
-        expect(headerBgForEffectiveColor(undefined, "#35d435", false)).toBe(hueToHeaderBg(120));
-        expect(headerBgForEffectiveColor(undefined, "#d43535", false)).toBe(hueToHeaderBg(0)); // red
-        expect(headerBgForEffectiveColor(undefined, "#3535d4", false)).toBe(hueToHeaderBg(240)); // blue
+    it("gives an agent's persisted identity hex the same header as an explicit pick of that hue — one system for both sources", () => {
+        for (const hue of [0, 120, 240]) {
+            expect(headerBgForEffectiveColor(undefined, hueToAgentIdentityColor(hue), false)).toBe(
+                headerBgForEffectiveColor(hue, undefined, false),
+            );
+        }
+    });
+
+    it("is a subtle tint at the neutral header's lightness, not a saturated fill", () => {
+        // The neutral dark header is hsl(220, 12%, 16%) = #24272e.
+        expect(contrastRatio(headerBgForEffectiveColor(0, undefined, false)!, "#24272e")).toBeLessThan(1.15);
     });
 
     it("returns undefined when there is no color source at all", () => {
@@ -57,13 +64,17 @@ describe("headerBgForEffectiveColor — dark theme (default)", () => {
     });
 });
 
-describe("headerBgForEffectiveColor — light theme (user request 2026-09-21)", () => {
-    it("uses the full-strength hueToActiveBorder color for an explicit hue pick — matching the border instead of darkening", () => {
-        expect(headerBgForEffectiveColor(120, "#3535d4", true)).toBe(hueToActiveBorder(120));
+describe("headerBgForEffectiveColor — light theme", () => {
+    it("is a subtle tint near white, not the identity at full strength (the old light-theme header)", () => {
+        const header = headerBgForEffectiveColor(120, undefined, true)!;
+        expect(header).not.toBe(hueToActiveBorder(120));
+        expect(contrastRatio(header, "#ffffff")).toBeLessThan(1.2);
     });
 
-    it("uses the agent identity hex directly, at full strength — the pre-2026-09-21 'bright' behavior — instead of darkening it", () => {
-        expect(headerBgForEffectiveColor(undefined, "#3b82f6", true)).toBe("#3b82f6");
+    it("gives an identity hex the same header as the matching explicit hue", () => {
+        expect(headerBgForEffectiveColor(undefined, hueToAgentIdentityColor(240), true)).toBe(
+            headerBgForEffectiveColor(240, undefined, true),
+        );
     });
 
     it("returns undefined when there is no color source at all, same as the dark-theme case", () => {

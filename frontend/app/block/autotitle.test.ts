@@ -85,10 +85,10 @@ describe("pickReadableTextColor", () => {
     });
 
     // reagent P1, PR #3452: parseCssColor had no hsl() branch, so both of
-    // this feature's own hsl()-producing call sites (hueToHeaderBg,
-    // NON_AGENT_DEFAULT_HEADER_BG) silently computed no text color at all.
+    // this feature's own hsl()-producing call sites (then hueToHeaderBg, since
+    // replaced by OKLCH hex values; NON_AGENT_DEFAULT_HEADER_BG) silently computed no text color at all.
     test("handles hsl()/hsla() — the exact formats this feature's own callers produce", () => {
-        // hueToHeaderBg(H) => `hsl(${H}, 28%, 16%)` — dark regardless of hue.
+        // Dark hsl() headers of any hue (the pre-2026-10-02 header format).
         assert.equal(pickReadableTextColor("hsl(0, 28%, 16%)"), "#ffffff");
         assert.equal(pickReadableTextColor("hsl(218, 28%, 16%)"), "#ffffff");
         // NON_AGENT_DEFAULT_HEADER_BG.

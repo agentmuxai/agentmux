@@ -63,7 +63,11 @@ vi.mock("@/app/block/blockframe", () => ({
     // one tab-wide value).
     computeBlockActiveBorderColor: (meta: any) =>
         meta?.["frame:hue"] != null ? `underline-${meta["frame:hue"]}` : undefined,
+    computeBlockIdentityColor: (meta?: Record<string, unknown>) =>
+        meta?.["frame:hue"] != null ? `underline-${String(meta["frame:hue"])}` : undefined,
     computeBlockTabPillBg: (meta: any) => (meta?.["frame:hue"] != null ? `bg-${meta["frame:hue"]}` : undefined),
+    computeBlockTabPillActiveBg: (meta?: Record<string, unknown>) =>
+        meta?.["frame:hue"] != null ? `bg-active-${String(meta["frame:hue"])}` : undefined,
     // Meta-driven, NOT a fixed stub: the real one returns two different
     // dark-theme colors depending on meta.view, and a fixed stub is exactly
     // what hid reagent's P1 (the tail's neutral was keyed on the ACTIVE
@@ -353,9 +357,9 @@ describe("renderPaneChromeShell — per-tab pane color", () => {
         render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
 
         const h = headerCalls.at(-1);
-        expect(h.getColor("b1")).toEqual({ underline: "underline-10", background: "bg-10", neutralBackground: "neutral-none" });
-        expect(h.getColor("b2")).toEqual({ underline: "underline-20", background: "bg-20", neutralBackground: "neutral-none" });
-        expect(h.getColor("b3")).toEqual({ underline: undefined, background: undefined, neutralBackground: "neutral-none" });
+        expect(h.getColor("b1")).toEqual({ underline: "underline-10", background: "bg-10", activeBackground: "bg-active-10", neutralBackground: "neutral-none" });
+        expect(h.getColor("b2")).toEqual({ underline: "underline-20", background: "bg-20", activeBackground: "bg-active-20", neutralBackground: "neutral-none" });
+        expect(h.getColor("b3")).toEqual({ underline: undefined, background: undefined, activeBackground: undefined, neutralBackground: "neutral-none" });
     });
 
     it("an uncolored tab still gets an opaque neutral background, so the header's active-tab tint never shows through it", () => {
@@ -424,10 +428,21 @@ describe("renderPaneChromeShell — header tail color", () => {
         expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["mixed-default", "mixed-default"]);
     });
 
-    it("one colored + one uncolored tab overrides too — no color is the pane's color", () => {
+    // REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §6 P2: identities, not
+    // tabs. An uncoloured tab (Accounts beside AgentX) is not a second identity,
+    // so the pane keeps its one agent's tint — the SAME value whichever tab is
+    // active, so the tail still never moves on a tab switch.
+    it("one colored + one uncolored tab keeps that one identity's tint, whichever is active", () => {
         setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
         setObjectValue("block:b2", { meta: {} });
-        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["mixed-default", "mixed-default"]);
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["color-10", "color-10"]);
+    });
+
+    it("an uncoloured tab does not make two identities agree — two colours plus an uncoloured tab stay neutral", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: {} });
+        setObjectValue("block:b3", { meta: { "frame:hue": 20 } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2", "b3"])).toEqual(["mixed-default", "mixed-default", "mixed-default"]);
     });
 
     it("two of three tabs agreeing is not agreement", () => {
