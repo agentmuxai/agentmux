@@ -56,6 +56,7 @@ import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";
+import { isUsableTitle } from "@/app/store/ambient-title";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 
 export interface UseAgentActivitySummaryOptions {
@@ -110,7 +111,11 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
             if (result.tokens) {
                 recordTurn("ambient:activity_summary", result.tokens);
             }
-            if (result.summary) {
+            // Only a real title is stored. The backend already rejects placeholders and
+            // the `KEEP` abstain token, so an empty result means "no change"; this second
+            // check is defence in depth, so a build mismatch can never write `(none yet)`
+            // to the meta and have it read back as the current title.
+            if (result.summary && isUsableTitle(result.summary)) {
                 fireAndForget(() =>
                     ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
                         "term:ambient_summary": result.summary,

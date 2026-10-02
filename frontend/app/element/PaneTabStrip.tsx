@@ -189,6 +189,13 @@ export interface PaneTabStripProps<T> {
     getIcon?: (tab: T) => JSX.Element;
     /** Full tooltip text; falls back to the label when omitted. */
     getTooltip?: (tab: T) => string;
+    /**
+     * A second, wrapping line under the label (an agent's summary). When it returns
+     * text the tooltip shows the label and this line, and appears IMMEDIATELY (no
+     * hover delay, no fade): it is read at a glance, not waited for. When it returns
+     * nothing the tab's tooltip is exactly what it was.
+     */
+    getTooltipDetail?: (tab: T) => string | undefined;
     /** "Attention" tabs (unsaved changes, needs-review, …) always show
      *  their close × instead of only on hover. */
     getAttention?: (tab: T) => boolean;
@@ -527,6 +534,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             getLabel={props.getLabel}
                             getIcon={props.getIcon}
                             getTooltip={props.getTooltip}
+                            getTooltipDetail={props.getTooltipDetail}
                             getAttention={props.getAttention}
                             getTabClass={props.getTabClass}
                             getColor={props.getColor}
@@ -582,6 +590,7 @@ interface PaneTabStripItemProps<T> {
     getLabel: (tab: T) => string;
     getIcon?: (tab: T) => JSX.Element;
     getTooltip?: (tab: T) => string;
+    getTooltipDetail?: (tab: T) => string | undefined;
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
     getColor?: (tab: T) => PaneTabColors | undefined;
@@ -767,7 +776,17 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         <Tooltip
             placement="bottom"
             divClassName="pane-tab-tip"
-            content={props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}
+            immediate={!!props.getTooltipDetail?.(props.tab)}
+            content={
+                props.getTooltipDetail?.(props.tab) ? (
+                    <div class="pane-tab-tip-body" data-testid="pane-tab-tip-body">
+                        <div class="pane-tab-tip-label">{props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}</div>
+                        <div class="pane-tab-tip-summary">{props.getTooltipDetail?.(props.tab)}</div>
+                    </div>
+                ) : (
+                    (props.getTooltip?.(props.tab) ?? props.getLabel(props.tab))
+                )
+            }
         >
             <div
                 class="pane-tab"

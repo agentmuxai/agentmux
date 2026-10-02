@@ -26,15 +26,27 @@ interface TooltipProps {
     divOnClick?: (e: MouseEvent) => void;
     /** Show/hide delay in ms. Defaults to 300 (existing behavior). */
     delayMs?: number;
+    /**
+     * No delay and no fade: the panel appears the moment the pointer enters (as soon
+     * as it has been positioned, at most one frame, so it never flashes at the
+     * top-left corner) and is gone the moment the pointer leaves. For tooltips a user
+     * reads at a glance, such as an agent's summary on its pane tab. Overrides
+     * `delayMs`.
+     */
+    immediate?: boolean;
 }
 
 function TooltipInner(props: TooltipProps): JSX.Element {
     const placement: Placement = props.placement ?? "top";
     const forceOpen = () => props.forceOpen ?? false;
-    const delayMs = () => props.delayMs ?? 300;
+    const immediate = () => props.immediate ?? false;
+    const delayMs = () => (immediate() ? 0 : (props.delayMs ?? 300));
 
     const [isOpen, setIsOpen] = createSignal(forceOpen());
     const [isVisible, setIsVisible] = createSignal(false);
+    // Whether the panel has been placed at least once since it opened. `immediate`
+    // keeps it invisible until then, so it cannot show at the unpositioned corner.
+    const [isPositioned, setIsPositioned] = createSignal(false);
     const [floatingStyle, setFloatingStyle] = createSignal("position:absolute;left:0px;top:0px");
 
     let referenceEl: HTMLElement | null = null;
@@ -55,6 +67,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
             middleware: [offset(10), flip(), shift({ padding: 12 })],
         });
         setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+        setIsPositioned(true);
     };
 
     const registerFloating = (el: HTMLElement) => {
@@ -64,6 +77,9 @@ function TooltipInner(props: TooltipProps): JSX.Element {
         requestAnimationFrame(() => {
             if (referenceEl instanceof Element && floatingEl instanceof Element) {
                 cleanupAutoUpdate?.();
+                // Place it now rather than waiting for autoUpdate's first pass, so an
+                // `immediate` tooltip is visible one frame after hover, not later.
+                void updatePosition();
                 cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
             }
         });
@@ -130,15 +146,23 @@ function TooltipInner(props: TooltipProps): JSX.Element {
             // content it no longer describes for the delay's duration.
             setIsOpen(false);
             setIsVisible(false);
+            setIsPositioned(false);
         } else if (forceOpen()) {
             setIsOpen(true);
             setIsVisible(true);
         } else if (isHovering()) {
             setIsOpen(true);
-            showTimeout = setTimeout(() => { setIsVisible(true); }, delayMs());
+            if (immediate()) setIsVisible(true);
+            else showTimeout = setTimeout(() => { setIsVisible(true); }, delayMs());
         } else {
             setIsVisible(false);
-            hideTimeout = setTimeout(() => { setIsOpen(false); }, delayMs());
+            if (immediate()) {
+                // Gone the moment the pointer leaves: no grace period, no fade.
+                setIsOpen(false);
+                setIsPositioned(false);
+            } else {
+                hideTimeout = setTimeout(() => { setIsOpen(false); }, delayMs());
+            }
         }
     });
 
@@ -163,7 +187,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                 <Portal>
                     <div
                         ref={registerFloating}
-                        style={`${floatingStyle()};opacity:${isVisible() ? 1 : 0};transition:opacity 200ms ease`}
+                        style={`${floatingStyle()};opacity:${isVisible() && (!immediate() || isPositioned()) ? 1 : 0};transition:${immediate() ? "none" : "opacity 200ms ease"}`}
                         class={cn(
                             "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
                         )}
@@ -189,6 +213,7 @@ export function Tooltip(props: TooltipProps): JSX.Element {
             divStyle={props.divStyle}
             divOnClick={props.divOnClick}
             delayMs={props.delayMs}
+            immediate={props.immediate}
         />
     );
 }

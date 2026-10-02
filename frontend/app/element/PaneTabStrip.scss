@@ -472,6 +472,23 @@
     }
 }
 
+// The pill tooltip for an agent: its name, then its summary (the same line the Swarm
+// row shows). The Tooltip box itself has no width limit, so a long summary would
+// stretch it across the screen; cap it and let the summary wrap.
+.pane-tab-tip-body {
+    max-width: 320px;
+}
+
+.pane-tab-tip-label {
+    font-weight: 600;
+}
+
+.pane-tab-tip-summary {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    opacity: 0.85;
+}
+
 // Tooltip wrapper for the "+" button — same reasoning as .pane-tab-tip
 // above: the Tooltip component wraps its child in a plain unstyled <div>,
 // which would otherwise sit as the flex child instead of the button itself
