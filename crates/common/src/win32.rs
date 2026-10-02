@@ -10,12 +10,11 @@
 //! (`docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md` §2.2).
 //! The value is a Win32 ABI constant and never changes; declare it once.
 //!
-//! These are plain `u32`s rather than a helper that takes a `Command`,
-//! because callers use both `std::process::Command` (needs the
-//! `CommandExt` trait in scope) and `tokio::process::Command` (inherent
-//! method) — a single generic helper would need to abstract over both for
-//! no gain. The `#[cfg(windows)]` block at each call site stays; only the
-//! private `const` inside it goes away.
+//! The flags are plain `u32`s so a spawn that needs something other than
+//! `CREATE_NO_WINDOW` alone (`CREATE_SUSPENDED | CREATE_NO_WINDOW`,
+//! `CREATE_NEW_CONSOLE`) can still pass them to `creation_flags` directly.
+//! The common case, no console window, is [`NoWindow::no_window`], which
+//! covers both `std::process::Command` and `tokio::process::Command`.
 //!
 //! Compiled on every platform so a `use agentmux_common::win32::*` never
 //! needs its own `cfg` guard; the values are only *meaningful* on Windows.

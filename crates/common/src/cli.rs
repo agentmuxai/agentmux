@@ -32,9 +32,7 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     // (server/app_api/session.rs) and the per-check `--version`/auth probes.
     // Applied at this single chokepoint so every `make_cli_cmd` caller is
     // covered; idempotent for the agent-CLI callers (persistent/subprocess/
-    // acp) that already set it manually. `tokio::process::Command` exposes
-    // `creation_flags` as an inherent method on Windows — no `CommandExt`
-    // import needed (see crates/bashwrap/src/bash_wrap.rs's note).
+    // acp) that already set it manually.
     #[cfg(windows)]
     {
         cmd.no_window();
