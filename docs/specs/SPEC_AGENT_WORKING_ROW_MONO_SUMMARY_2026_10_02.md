@@ -1,10 +1,11 @@
-# Agent pane "Working…" row: composer typeface, pane-border color, ambient summary, no token readout
+# Agent pane "Working…" row: composer typeface, pane-border color, ambient summary, per-turn tokens that are the turn's own
 
 **Status:** implemented (spec and change together).
 **Date:** 2026-10-02
 **Owner:** Manoz
 **Component:** `AgentWorkingRow` (`frontend/app/view/agent/components/AgentFooter.tsx`)
 **Styles:** `.agent-working-row-anchor .agent-working-row--loading` (`frontend/app/view/agent/styles/_control-bar.scss`)
+**Token accounting:** `frontend/app/store/agent-pane-state/turn-contribution.ts`, `reducer.ts` (`TokensIn`, `TokensOut`, `mergeStats`)
 **Supersedes in part:** `SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md` (typeface and color) and the shimmer half of `SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md` §2.
 
 ## 1. Request, as given
@@ -13,11 +14,18 @@
 
 > it should also have the same color ... we also dont want the tool call, instead, Id like to integrate ambient haiku there
 
-Clarified in the same session:
+> but those numbers are totals, not per turn, so they need to be fixed
+
+> ah, I see...per turn is essentially total, since the context is sent back every time. For that number, we dont want the total context sent every turn, we want the diff added
+
+> keep the per-turn, but make it the actual contribution of that turn (not the total to the context)
+
+How the requests were resolved:
 
 - "Ambient haiku" means the **ambient activity summary** (the Haiku-model text the app already generates), not a new generated poem.
 - "Same color" means **the pane's border color**, as the agent pane shows it: the agent's color, with the theme accent as fallback. The faint unfocused-border grey was rejected as unreadable at 10px.
 - The shimmer sweep goes (see 3.2).
+- The token count was first to be removed on the belief that the composer already shows it. It does not (see 4), so it stays, with a corrected definition (3.4).
 
 ## 2. What the row looked like
 
@@ -28,7 +36,7 @@ Clarified in the same session:
 | Typeface | `--markdown-font-family`, the thinking-text face (chosen 2026-09-03 on the grounds that a status sentence "isn't code-shaped") |
 | Color | `--main-text-color`, with a gradient shimmer sweeping between `--secondary-text-color` (dim, most of the time) and `--main-text-color` |
 | Left zone | The cycling "Working…" phrase, or `tool · arg` (for example `Read · …/AgentFooter.tsx`) whenever a tool call was running and not yet promoted to an ActivityDock row |
-| Right zone | `↑in ↓out` turn tokens, then the elapsed time |
+| Right zone | `↑in ↓out` turn tokens, then the elapsed time. The `↑` figure was the size of the whole conversation, re-sent on every call |
 
 ## 3. Change
 
@@ -63,31 +71,55 @@ Consequences of dropping the tool text:
 - `AgentBottomPanels` no longer takes `hasPromotedTool`. `useWorkingIndicator` still returns it and keeps its tests; only the unused plumbing is gone.
 - The live tool call remains visible where it always had a better home: the ActivityDock rows and the document view.
 
-### 3.4 Right zone: elapsed time only
+### 3.4 Per-turn tokens: what the turn added, not the context it re-sent
 
-The `↑in ↓out` turn-token readout is removed from the loading row, along with the `turnTokens` prop and its call-site argument. The elapsed time stays.
+**The problem.** Every API call in a turn re-sends the whole conversation. So the `↑` figure was never "this turn": the live value was the input of the *last call* (`TokensIn` overwrites), which is the size of the context; and the "Worked" value was the result event's whole-turn `input_tokens`, which sums that context over *every* call (the reducer's own test fixture has a 70,000 result total for a turn whose last call was 2). A one-line question late in a long session read as `↑180k`. The composer's `123k / 200k` is the same kind of number on purpose: it is the context-window meter.
 
-The "✓ Worked · 42s · ↑… ↓…" completion summary is **not** touched: the request named the far right of the working row.
+**The definition.** The turn's input contribution is the growth of the context across the turn:
 
-## 4. Premise to check
+```
+added = context size at the turn's last call  -  context size before the turn began
+```
 
-The request says tokens "already appear in the composer". What the composer strip shows is **context-window usage** (`123k / 200k`, with an auto-compact warning band): a cumulative figure for the whole session. The per-turn `↑input ↓output` count was only ever in this row (the composer strip's own centered stats readout was dropped on 2026-08-31 for duplicating it). After this change the per-turn figure is visible nowhere while a turn runs; the completion row ("Worked") still prints it afterwards. If that per-turn figure is wanted somewhere, the natural home is the composer strip's stats zone, as a separate change.
+That counts the user's message, the tool results, and the assistant's earlier output that became input to the next call, and excludes everything that was merely re-sent. It needs no cache breakdown, so it works for any provider that reports a per-call input size.
+
+- **Baseline.** `TokensIn` stores `contextBaseline` on `turnTokens` at the turn's first call and carries it unchanged afterward (`TokensOut` preserves it). The value is `lastContextTokens` as it stood before the turn (the previous turn's last context size, which the resume path also seeds). When there is none (a fresh pane, or after `TurnReset`) the first call's own input stands in, so the turn is not credited with the system prompt.
+- **Never negative.** A compaction inside a turn shrinks the context; that reads as `0`, not a negative contribution.
+- **Live.** The right zone shows `↑added ↓output` and the elapsed time, computed by `turnAddedInput()` from `turnTokens`. Where a provider reports no live usage there is no baseline, and the readout falls back to the raw input rather than inventing a figure.
+- **Finished.** `mergeStats` stores `added_input_tokens` on `sessionStats` at `TurnEnd`, and the "✓ Worked · 42s · ↑… ↓…" line shows it (falling back to `input_tokens` when absent). So the live row and the completion line use the same definition.
+- **Output** is already a per-turn quantity and is shown as reported. (Live, it is the current message's running output; the completion line uses the result's whole-turn figure. That difference predates this change.)
+
+**Deliberately unchanged:** `input_tokens` on `sessionStats`, `sessionTotals` and the token-usage store keep the raw, re-sent numbers. Those feed the session-stats popover and cost/context accounting, where "what was sent" is the point. Only the *display of one turn* changed.
+
+## 4. The premise that turned out wrong
+
+The request said tokens "already appear in the composer". What the composer strip shows is **context-window usage** (`123k / 200k`, with an auto-compact warning band), a cumulative figure. Its own per-turn stats readout was dropped on 2026-08-31 for duplicating this row. So removing the count from the row would have left no per-turn figure at all, and the per-turn figure was itself mis-defined (3.4). The decision after seeing that: keep it in the row, and make it the turn's real contribution.
 
 ## 5. Not changed
 
 - Row layout, size, padding and the opaque background.
-- The `--worked` completion row and its typography.
+- The `--worked` completion row's typography.
 - The pulsing dot, the type-out reveal, and the reduced-motion handling of the reveal.
 - The ambient summary's generation (`useAgentActivitySummary.ts`) and the Swarm row.
+- Context-window meter, `sessionTotals`, and the session-stats popover.
 
 ## 6. Tests
 
-`AgentFooter.test.tsx`, "AgentWorkingRow ambient summary, elapsed-only right zone":
+`reducer.test.ts`, "Tokens: what the turn added, not the context it re-sent":
 
-- the trimmed summary shows in the left zone;
-- with no summary the cycling phrase shows;
-- a status (Stopping…) wins over the summary;
-- the right zone is elapsed time only (`/^\d+s$/`, no `↑` or `↓`);
+- the baseline is the previous turn's last context size;
+- the baseline survives the turn's later calls while `lastContextTokens` moves on;
+- with no earlier context the first call stands in (contribution 0);
+- a shrinking context is never negative;
+- no baseline gives `undefined`;
+- `TurnEnd` records `added_input_tokens` next to the re-sent result total;
+- `sessionTotals` still sums the raw input.
+
+`AgentFooter.test.tsx`, "AgentWorkingRow ambient summary and per-turn tokens":
+
+- the trimmed summary shows in the left zone, with the phrase as fallback, and a status wins;
+- the right zone shows the contribution (`↑140k`, not the `180k` re-sent) before the elapsed time, and falls back to raw input without a baseline;
+- the Worked line shows `added_input_tokens`, not the summed `840k`;
 - the left zone carries no shimmer or typing classes.
 
-The typeface and color are CSS-only and were checked by compiling `agent-view.scss` and reading the emitted rules: `.agent-working-row--loading` gets `font-family: var(--font-mono)` and `color: var(--accent-color)`, and the `.has-agent-color …--loading` rule overrides the color; no `shimmer` selector remains.
+The typeface and color are CSS-only and were checked by compiling `agent-view.scss` and reading the emitted rules: `.agent-working-row--loading` gets `font-family: var(--font-mono)` and `color: var(--accent-color)`, the `.has-agent-color …--loading` rule overrides the color, and no `shimmer` selector remains.

@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
+import { turnAddedInput } from "./turn-contribution";
 import {
     AgentPaneState,
     initialState,
@@ -245,7 +246,9 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnTokens).toBe(null);
             // Stats merged from live tokens (mergeStats fallback path).
-            expect(r.state.sessionStats).toEqual({ input_tokens: 50, output_tokens: 200 });
+            // No context before this turn, so nothing is credited to it beyond the
+            // first call's own input (added_input_tokens: 0); see turnAddedInput.
+            expect(r.state.sessionStats).toEqual({ input_tokens: 50, added_input_tokens: 0, output_tokens: 200 });
             expect(r.events[0]).toMatchObject({
                 type: "turn-ended",
                 // outcome is "stopped" because RequestStop put the phase
@@ -403,13 +406,79 @@ describe("agent-pane-state reducer", () => {
         it("TokensIn / TokensOut accumulate independently", () => {
             const s0 = update(mk(), { type: "TokensIn", input: 50 }).state;
             const s1 = update(s0, { type: "TokensOut", output: 100 }).state;
-            expect(s1.turnTokens).toEqual({ input: 50, output: 100 });
+            expect(s1.turnTokens).toMatchObject({ input: 50, output: 100 });
         });
 
         it("TokensIn preserves prior output", () => {
             const s0 = update(mk(), { type: "TokensOut", output: 100 }).state;
             const s1 = update(s0, { type: "TokensIn", input: 50 }).state;
-            expect(s1.turnTokens).toEqual({ input: 50, output: 100 });
+            expect(s1.turnTokens).toMatchObject({ input: 50, output: 100 });
+        });
+    });
+
+    // SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md §3.4 — every call
+    // re-sends the whole conversation, so a turn's raw input is the context
+    // size, not what the turn added. The per-turn figure is the context's
+    // growth across the turn.
+    describe("Tokens: what the turn added, not the context it re-sent", () => {
+        const withContext = (ctx: number) => ({ ...mk(), lastContextTokens: ctx });
+
+        it("the baseline is the previous turn's last context size", () => {
+            const s0 = update(withContext(40_000), { type: "TokensIn", input: 41_500 }).state;
+            expect(s0.turnTokens?.contextBaseline).toBe(40_000);
+            expect(turnAddedInput(s0.turnTokens)).toBe(1_500);
+        });
+
+        it("keeps the first call's baseline across the turn's later calls", () => {
+            let s = update(withContext(40_000), { type: "TokensIn", input: 41_500 }).state;
+            s = update(s, { type: "TokensOut", output: 200 }).state;
+            s = update(s, { type: "TokensIn", input: 44_000 }).state;
+            s = update(s, { type: "TokensOut", output: 90 }).state;
+            // lastContextTokens has moved on to 44_000, the baseline must not.
+            expect(s.lastContextTokens).toBe(44_000);
+            expect(s.turnTokens?.contextBaseline).toBe(40_000);
+            expect(turnAddedInput(s.turnTokens)).toBe(4_000);
+        });
+
+        it("with no earlier context the first call stands in, so the system prompt is not credited", () => {
+            const s = update(mk(), { type: "TokensIn", input: 18_000 }).state;
+            expect(turnAddedInput(s.turnTokens)).toBe(0);
+        });
+
+        it("a context that shrank (compaction) is never a negative contribution", () => {
+            let s = update(withContext(150_000), { type: "TokensIn", input: 151_000 }).state;
+            s = update(s, { type: "TokensIn", input: 30_000 }).state;
+            expect(turnAddedInput(s.turnTokens)).toBe(0);
+        });
+
+        it("is undefined when a provider reported no live usage", () => {
+            expect(turnAddedInput(null)).toBeUndefined();
+            expect(turnAddedInput({ input: 5, contextBaseline: undefined })).toBeUndefined();
+        });
+
+        it("TurnEnd records the contribution next to the (re-sent) result total", () => {
+            const s0 = ready(100);
+            const s1 = update({ ...s0, lastContextTokens: 40_000 }, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "TokensIn", input: 41_000 }).state;
+            const s3 = update(s2, { type: "TokensIn", input: 43_000 }).state;
+            const r = update(s3, {
+                type: "TurnEnd",
+                // What the result event reports: every call's input summed.
+                stats: { input_tokens: 84_000, output_tokens: 512 } as any,
+            });
+            expect(r.state.sessionStats).toMatchObject({
+                input_tokens: 84_000,
+                added_input_tokens: 3_000,
+                output_tokens: 512,
+            });
+        });
+
+        it("sessionTotals still add up the raw input (the cost/context accounting is unchanged)", () => {
+            const s0 = ready(100);
+            const s1 = update({ ...s0, lastContextTokens: 40_000 }, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "TokensIn", input: 41_000 }).state;
+            const r = update(s2, { type: "TurnEnd", stats: { input_tokens: 82_000, output_tokens: 10 } as any });
+            expect(r.state.sessionTotals?.input_tokens).toBe(82_000);
         });
     });
 

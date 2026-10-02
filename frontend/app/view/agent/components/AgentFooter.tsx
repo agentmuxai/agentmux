@@ -19,6 +19,7 @@ import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-s
 import type { AgentViewModel } from "../agent-model";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
+import { turnAddedInput } from "@/app/store/agent-pane-state/turn-contribution";
 import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
 import { SlashAutocomplete } from "./SlashAutocomplete";
@@ -38,8 +39,16 @@ function ingToEd(_phrase: string): string {
     return "Worked";
 }
 
-function fmtTokens(t: TurnTokens): string {
-    return `\u2191${formatCompactNumber(t.input)} \u2193${formatCompactNumber(t.output)}`;
+/** "\u2191in \u2193out" for ONE turn. `input` is what the turn added to the
+ *  context, not the context it re-sent on every call (see turnAddedInput). */
+function fmtTokens(input: number, output: number): string {
+    return `\u2191${formatCompactNumber(input)} \u2193${formatCompactNumber(output)}`;
+}
+
+/** Live readout: the turn's contribution, falling back to the raw input only
+ *  where there is no baseline to subtract (a provider with no live usage). */
+function fmtTurnTokens(t: TurnTokens): string {
+    return fmtTokens(turnAddedInput(t) ?? t.input, t.output);
 }
 
 // \u2500\u2500 Composer draft persistence \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -75,6 +84,10 @@ interface AgentWorkingRowProps {
      *  until one exists. */
     activitySummary?: string | null;
     sessionStats?: SessionStats | null;
+    /** Live token counts for the turn in progress; the right zone shows what
+     *  the turn has added (not the context it re-sends) next to the elapsed
+     *  time. */
+    turnTokens?: TurnTokens | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
     waitingReason?: "rate_limited" | null;
     /** Milliseconds until next retry (from provider Retry-After). Shown when waitingReason is set. */
@@ -249,7 +262,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
             parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
         }
         if (stats.input_tokens != null || stats.output_tokens != null) {
-            parts.push(fmtTokens({ input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }));
+            parts.push(fmtTokens(stats.added_input_tokens ?? stats.input_tokens ?? 0, stats.output_tokens ?? 0));
         }
         return parts.join("  ·  ");
     });
@@ -270,10 +283,10 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         // its prop doc comment above).
         if (props.reconnecting) return formatElapsedCompact(reconnectingElapsedMs());
         if (props.compacting) return formatElapsedCompact(compactingElapsedMs());
-        // Elapsed time only. The live ↑in ↓out token readout used to sit
-        // here too; the composer already carries token usage, so the
-        // duplicate was dropped from this row.
-        return formatElapsedCompact(elapsedMs());
+        const right: string[] = [];
+        if (props.turnTokens) right.push(fmtTurnTokens(props.turnTokens));
+        right.push(formatElapsedCompact(elapsedMs()));
+        return right.join("  \u00b7  ");
     });
 
     const showCancelLogin = createMemo(

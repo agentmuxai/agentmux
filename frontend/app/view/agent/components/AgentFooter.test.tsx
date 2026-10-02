@@ -651,10 +651,10 @@ describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_
 
 /**
  * SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md: the loading row shows the
- * pane's ambient summary instead of "tool · arg", no longer carries the
- * ↑in ↓out token readout, and has no shimmer overlay.
+ * pane's ambient summary instead of "tool · arg", reports the turn's own
+ * contribution in ↑in ↓out (not the context re-sent), and has no shimmer overlay.
  */
-describe("AgentWorkingRow ambient summary, elapsed-only right zone", () => {
+describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
     it("shows the ambient summary in the left zone", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={true} activitySummary="  Fix the login redirect loop " />
@@ -677,14 +677,40 @@ describe("AgentWorkingRow ambient summary, elapsed-only right zone", () => {
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
     });
 
-    it("shows only the elapsed time on the right, never a token readout", () => {
+    it("shows what the turn added, not the context it re-sent, next to the elapsed time", () => {
         const { container } = render(() => (
-            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" />
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                // 180k of context re-sent on the last call, 40k of it before the turn began.
+                turnTokens={{ input: 180_000, output: 1_200, contextBaseline: 40_000 }}
+            />
         ));
 
         const right = container.querySelector(".agent-working-row-right")?.textContent ?? "";
-        expect(right).toMatch(/^\d+s$/);
-        expect(right).not.toMatch(/[↑↓]/);
+        expect(right).toMatch(/^↑140k ↓1\.2k {2}·  \d+s$/);
+        expect(right).not.toContain("180k");
+    });
+
+    it("falls back to the raw input only where there is no baseline", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} turnTokens={{ input: 5_000, output: 300 }} />
+        ));
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^↑5\.0k ↓300 {2}·  \d+s$/);
+    });
+
+    it("the Worked summary shows the contribution, not the summed re-sent input", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ input_tokens: 840_000, added_input_tokens: 3_000, output_tokens: 512, duration_ms: 42_000 }}
+            />
+        ));
+
+        const left = container.querySelector(".agent-working-row-left")?.textContent ?? "";
+        expect(left).toContain("↑3.0k ↓512");
+        expect(left).not.toContain("840k");
     });
 
     it("renders one solid-color left zone: no shimmer or typing overlay classes", () => {
