@@ -601,6 +601,8 @@ interface AgentComposerStripProps {
     contextTokens?: number | null;
     /** Provider's max context window size. undefined = unknown. */
     contextWindow?: number;
+    /** Resolved model id on the last main-agent reply (the Runtime menu shows it). */
+    lastReplyModel?: string | null;
     /** Durable logged-in/out state (useAgentControllerStatus's authStatus) —
      *  rendered as a small red/green tag right of the context text. Hidden
      *  entirely for "unknown" (before the first auth check resolves), so the
@@ -781,6 +783,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         blockId={props.blockId ?? ""}
                         blockAtom={props.blockAtom ?? (() => undefined)}
                         providerId={props.providerId ?? ""}
+                        lastReplyModel={props.lastReplyModel}
                     />
                 ),
             });
