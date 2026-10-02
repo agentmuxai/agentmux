@@ -128,6 +128,13 @@ Source-level findings where the code is open; docs or reports otherwise.
   once when the turn's rows move into the head or the reader leaves the
   bottom.
 
+  *Update 2026-10-02:* the owner saw the room at the bottom grow and then
+  close in a few steps. Most holds ended unfilled (the agent's next row
+  usually takes longer than 700 ms), so the gap showed and then eased
+  away. The hold is now 350 ms and the ease 160 ms. This is a tuning
+  change made from reading the code, not a measured one: check it against
+  a live run (`HOLD_MS`, `HOLD_RELEASE_MS` in `AgentDocumentVirtualList.tsx`).
+
 ## 7. Sources
 
 - VS Code: `src/vs/workbench/contrib/chat/browser/widget/chatListWidget.ts`, `…/chatContentParts/chatIncrementalRendering/media/chatIncrementalRendering.css`, `src/vs/base/browser/ui/list/listView.ts`, `src/vs/base/common/scrollable.ts`
