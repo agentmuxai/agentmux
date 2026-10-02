@@ -15,6 +15,9 @@ visual/interaction reference this spec generalizes),
 `frontend/app/view/editor/editor-tab-strip.tsx` / `editor-view.scss` (the concrete component
 and styles being lifted out and reused)
 
+> [!IMPORTANT]
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** Naming: this spec called the agent/terminal strip "in-pane tabs"; those became **Pane Tabs** (`blockStack`). "Tabs inside a pane" now means **Document Tabs**, which the editor's file tabs are and which get one shared layer (its §1, §5). Note: `docs/specs/SPEC_EDITOR_TABS_2026-05-26.md`, cited below, does not exist in this repository; the editor's tabs are now specified in `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.1.
+
 > **Naming note, stated precisely up front.** This feature is **in-pane tabs** — multiple
 > tabs *within* one agent or terminal pane, exactly like the editor's existing tab strip. It is
 > **not** what this codebase already calls **"inter-pane"** (peer-to-peer MCP messaging
@@ -298,7 +301,7 @@ membership + active id persist with the rest of layout state, same durability as
 | **1** | **Extract `<PaneTabStrip>`.** Pull `.editor-tab-strip` markup/styles into `frontend/app/view/shared/PaneTabStrip.tsx` + `_pane-tab-strip.scss`; editor consumes it (pixel-identical behavior, `+` added per §3.2). | low | Pure refactor + one small addition; independently shippable, reviewable alone. |
 | **2** | **Layout-store `blockStack`/`activeBlockId`.** The shared mechanism (§4.3), tile renderer support. No UI yet — this is the piece the June spec's Phase 2 called for and that never landed. | med | Touches the layout store + tile/saga paths; needs its own focused review (tear-off interaction, persistence shape). |
 | **3** | **Agent fork tabs (read-only switch).** Wire `computeForkSet()` + `<PaneTabStrip>` into `agent-view.tsx`'s top region, consuming Phase 2's stack. Retire the unwired `ForkBar`/`PaneRegions`/`PaneRow` fork-bar path (§2.2) in favor of the new strip — `fork-set.ts`'s derivation logic is kept, its `PaneRow`-based rendering is not. | med | Mostly wiring already-built, already-tested pieces; the delta is the visual layer. |
-| **4** | **Agent fork action (`/btw` + strip `+`).** Unchanged from the June spec's Phase 3 — reuse the already-passed validation gate (§6.4 there). | med | No new risk; just hooking the existing, validated mechanism to the new `+`. |
+| **4** | **Agent fork action (`/btw` + strip `+`).** Unchanged from the June spec's Phase 3 — reuse the already-passed validation gate (its §6.4). | med | No new risk; just hooking the existing, validated mechanism to the new `+`. |
 | **5** | **Terminal tabs.** `newpanetab` RPC (§4.2), wire `<PaneTabStrip>` into `term.tsx`'s new top region, `+` spawns a shell tab on the shared stack from Phase 2. | med-high | The only genuinely new backend surface in this spec; needs its own smoke test (resize, PTY exit, tab close mid-command). |
 | **6** | **Keyboard nav + polish (both pane types).** `↓`/`↑` fork cycling (agent, gated per §6.5 of the June spec), tab-close confirmation for `attention` tabs, drag-reorder if desired, persistence smoke tests. | low | UX polish on a working base; independently deferrable. |
 

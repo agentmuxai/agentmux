@@ -30,6 +30,9 @@ redesign), `SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md` (keep-alive),
 PR fixed the last round of "one tab's state leaks into another" bugs, which
 had the same root shape as §2.4.
 
+> [!IMPORTANT]
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** Adds a planned optional manifest field, `docTabs`, through which a view type opts into Document Tabs (its §5.6). Nothing in this contract changes otherwise.
+
 ---
 
 ## 0. Summary
