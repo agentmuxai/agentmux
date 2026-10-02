@@ -25,6 +25,7 @@ pub mod call;
 pub mod cli;
 pub mod digest;
 pub mod limits;
+pub mod outcome;
 pub mod prompt;
 pub mod purpose;
 pub mod sanitize;

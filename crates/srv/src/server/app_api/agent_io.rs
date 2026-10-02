@@ -9,6 +9,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_process_list(engine, state);
     register_agent_tracked_blocks(engine, state);
     register_swarm_other_instances(engine, state);
+    register_ambient_outcomes(engine);
     register_agent_open_panes(engine, state);
     register_agent_kill_process(engine, state);
     register_agent_kill_tree(engine, state);
@@ -109,6 +110,23 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     agentmux_common::time::now_ms_u64(),
                 );
                 Ok(Some(serde_json::to_value(&snapshot).map_err(|e| format!("swarm.other-instances: {e}"))?))
+            })
+        }),
+    );
+}
+
+/// `ambient.outcomes`: how ambient calls have ended since srv started, so "the
+/// swarm has been blank for an hour" is visible without a database copy
+/// (SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.8).
+fn register_ambient_outcomes(engine: &Arc<WshRpcEngine>) {
+    engine.register_handler(
+        COMMAND_AMBIENT_OUTCOMES,
+        Box::new(move |_data, _ctx| {
+            Box::pin(async move {
+                Ok(Some(
+                    serde_json::to_value(crate::ambient::outcome::snapshot())
+                        .map_err(|e| format!("ambient.outcomes: {e}"))?,
+                ))
             })
         }),
     );

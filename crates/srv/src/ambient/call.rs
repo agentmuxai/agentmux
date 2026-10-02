@@ -89,7 +89,10 @@ pub async fn admit(
     let entity_id = key.entity_id.clone();
     let guard = match gateway().admit(key, generation) {
         Admission::Proceed(guard) => guard,
-        Admission::StaleOnArrival => return None,
+        Admission::StaleOnArrival => {
+            super::outcome::record(purpose, &entity_id, super::outcome::Outcome::Superseded, None);
+            return None;
+        }
     };
     let cancel = guard.cancellation();
     let permit = match limit {
@@ -100,6 +103,10 @@ pub async fn admit(
                 _ = cancel.cancelled() => None,
                 permit = sem.acquire() => permit.ok(),
             };
+            if permit.is_none() {
+                // Superseded while queued for a permit: never spawned.
+                super::outcome::record(purpose, &entity_id, super::outcome::Outcome::Superseded, None);
+            }
             Some(permit?)
         }
     };
@@ -130,20 +137,15 @@ impl Slot {
         .await;
         match result {
             Err(error) => {
-                tracing::debug!(
-                    purpose = self.purpose, entity = %self.entity_id, error = %error,
-                    "ambient call: CLI failed or was superseded"
-                );
+                let outcome = super::outcome::classify_error(&error, self.cancel.is_cancelled());
+                tracing::debug!(purpose = self.purpose, entity = %self.entity_id, error = %error, "ambient call failed");
+                super::outcome::record(self.purpose, &self.entity_id, outcome, None);
                 Reply { text: String::new(), tokens: None, error: Some(error) }
             }
             Ok((raw, tokens)) => {
                 let text = accept(&raw).unwrap_or_default();
-                if text.is_empty() && !raw.is_empty() {
-                    tracing::debug!(
-                        purpose = self.purpose, entity = %self.entity_id,
-                        "ambient call: reply rejected by validation"
-                    );
-                }
+                let outcome = super::outcome::classify_reply(&raw, !text.is_empty());
+                super::outcome::record(self.purpose, &self.entity_id, outcome, Some(&raw));
                 Reply { text, tokens, error: None }
             }
         }
