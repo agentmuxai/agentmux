@@ -53,7 +53,7 @@ The owner approved the OS prompt. That is the point: **the prompt cannot be reli
 
 **Windows rules.** A small mode of the signed host exe (proposed: `agentmux.exe --configure-lan-firewall`, so the UAC prompt names AgentMux) does, via `INetFwPolicy2`, in **one** elevated run:
 
-1. Ensure **two** inbound Allow rules with fixed names, **not tied to any program**: `AgentMux LAN (TCP)` on local ports `29700-29799`, and `AgentMux LAN (UDP)` on `5353,47891` (mDNS and the broadcast fallback). Profiles **Private + Domain**, `RemoteAddresses = LocalSubnet`, edge traversal off. (Two rules because a port range needs a concrete protocol.)
+1. Ensure **two** inbound Allow rules with fixed names, **not tied to any program**: `AgentMux LAN (TCP)` on local ports `29700-29799`, and `AgentMux LAN (UDP)` on `5353,29700,47891` (mDNS, desktop UDP discovery, and the mobile broadcast responder). Profiles **Private + Domain**, `RemoteAddresses = LocalSubnet`, edge traversal off. (Two rules because a port range needs a concrete protocol.)
 2. **Delete any Block rules** whose program is an AgentMux binary (left behind by a cancelled prompt, R2).
 3. **Prune** the legacy per-program AgentMux rules (the 606).
 4. If the user accepted a Public network (4.4), add the scoped Public copies.
