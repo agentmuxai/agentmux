@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-10-01
-**Status:** active — Phase 0 item 1 (pull on subscribe, connect and a timer) shipped in PR #4122 (v0.59.3); everything else is proposed. Designs what `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §3 recorded as "Phase 2" and fixes the gaps found in the 2026-10-01 incident (§1).
+**Status:** active — Phase 0 item 1 (pull on subscribe, connect and a timer) shipped in PR #4122 (v0.59.3); item 3 (`SendMessage` reports the state, the receiver's condition where known, and the id) is built (MCP side only, see §6); everything else is proposed. Designs what `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §3 recorded as "Phase 2" and fixes the gaps found in the 2026-10-01 incident (§1).
 **Related (read these first):**
 - `SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` — current policy: a live agent gets the jekt at once; only a starting, restarting or stopping process queues. Implemented.
 - `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` — the 24 h hold (`db_jekt_held`) for an absent agent. Phase 1 shipped (#3632); its Phase 2 is this spec.
@@ -213,14 +213,14 @@ a sender that doesn't is told it in the send result (§5.2).
 - **Phase 0 — truthful and unstuck (small, no schema change).**
   1. ~~Pull on `SubscribeAdd`/connect and a resync in `cloud_subscriber.rs` (G1).~~ **Done: PR #4122** (v0.59.3), with a 120 s timer rather than the 60 s proposed here. Its unit tests cover the subscription seeding; the end-to-end timing check is test 2 below and is still to be written.
   2. Local-first, **lease-aware** (G2): a known local agent is held locally only if this srv holds its lease or the relay reports it free. The relay today exposes only `claim`, `take`, `renew` and `release` for leases, so this needs a **read-only holder query** (`GET /agents/lease/:agent`, same auth as `/reactive/pending`). Until it exists, a target whose lease state srv does not know keeps going to the relay as today; 0.1 already makes that path deliver on subscribe, so the §1 scenario is fixed without 0.2.
-  3. `SendMessage` returns `id=` and the receiver condition where srv already knows it; refresh `tool_schemas.rs` (G10).
+  3. ~~`SendMessage` returns `id=` and the receiver condition where srv already knows it; refresh `tool_schemas.rs` (G10).~~ **Built (2026-10-02):** `send_message_outcome` in `crates/mcp/src/tool_helpers.rs`, MCP only, since srv's inject body already carried every fact needed. Each answer keeps its first word and ends `id=<request_id>`; conditions added: `HELD … (not_running)`, relay `(unconfirmed, expires in 30 min)`, `failed (needs_login)` for a spawn-gate refusal (says the message was not kept, until 0.4), `failed (not_found)`. Not added: `active`/`idle` on `Delivered` (srv does not know the turn state on this path) and which of starting/restarting/stopping deferred a message; both need the `receiver_state` plumbing of Phase 1.
   4. A spawn-gate refusal is reported as `HELD (needs_login)` and the jekt is kept (G4).
-  Acceptance: the §1 scenario passes (§7 test 1). With 0.1 shipped, the pull half already passes; what still fails is the sender-visible half (0.3: the sender is still told only "QUEUED via the cloud relay") and the credential-blocked half (0.4).
+  Acceptance: the §1 scenario passes (§7 test 1). With 0.1 shipped, the pull half already passes; what still fails is the sender-visible half (a same-machine target is still answered "QUEUED via the cloud relay" rather than HELD, which is 0.2; 0.3 now adds the id and the relay's expiry to that answer) and the credential-blocked half (0.4).
 - **Phase 1 — durable and drained.** Mailbox columns and states (§5.3); move `deferred_deliveries` into it (G5); `needs_login` hold with drain on sign-in (G3); attempt budget fix (G6); `receiver_state` plumbing.
 - **Phase 2 — receipts and the mailbox tools.** Sender notices (§5.5), `InboxList`, `MessageStatus`, digest (§5.4), `DiscoverAgents` presence (§5.6), relay `expired` status.
 - **Phase 3 — UI.** "N waiting" badge, list, cancel.
 
-Phase 0 is independent of the rest. Its first item removed the unbounded wait; the remaining items (0.2–0.4) are what make the sender's picture true, so they are the next thing to build.
+Phase 0 is independent of the rest. Its first item removed the unbounded wait; the remaining items (0.2 and 0.4; 0.3 is built) are what make the sender's picture true, so they are the next thing to build.
 
 ## 7. Tests
 
