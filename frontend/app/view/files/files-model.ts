@@ -23,6 +23,7 @@ import type { FsError } from "@/types/rpc/FsError";
 import type { FsOpResult } from "@/types/rpc/FsOpResult";
 import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
+import { isValidAgentColor, pickAgentColor } from "@/app/view/agent/agent-color";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
@@ -54,6 +55,8 @@ export type Phase =
 export interface AgentPlace {
     name: string;
     path: string;
+    /** The agent's identity color (#rrggbb), the one its pane border uses. */
+    color?: string;
 }
 
 type UndoEntry =
@@ -111,6 +114,23 @@ function saveSafeRoot(root: string): void {
     } catch {
         // Storage full or unavailable: the pane will just explain again.
     }
+}
+
+/** An agent's identity color: its stored `ui:color` (what seeds the pane
+ *  border), else the deterministic pick the pane would get on first open. */
+async function loadAgentColor(definitionId: string): Promise<string | undefined> {
+    if (!definitionId) return undefined;
+    try {
+        const stored = await RpcApi.GetAgentContentCommand(TabRpcClient, {
+            agent_id: definitionId,
+            content_type: "ui:color",
+        });
+        const color = stored?.content?.trim();
+        if (isValidAgentColor(color)) return color;
+    } catch {
+        // Fall through to the deterministic pick.
+    }
+    return pickAgentColor(definitionId);
 }
 
 export class FilesModel {
@@ -273,13 +293,24 @@ export class FilesModel {
         try {
             const rows = await RpcApi.ListNamedAgentsCommand(TabRpcClient, { limit: 200 });
             const seen = new Set<string>();
-            const agents: AgentPlace[] = [];
+            const picked: { name: string; path: string; definitionId: string }[] = [];
             for (const r of rows) {
                 const dir = r.working_directory;
                 if (!dir || seen.has(dir.toLowerCase())) continue;
                 seen.add(dir.toLowerCase());
-                agents.push({ name: r.instance_name || r.definition_name || baseName(dir), path: dir });
+                picked.push({
+                    name: r.instance_name || r.definition_name || baseName(dir),
+                    path: dir,
+                    definitionId: r.definition_id ?? "",
+                });
             }
+            const agents: AgentPlace[] = await Promise.all(
+                picked.map(async ({ name, path, definitionId }) => ({
+                    name,
+                    path,
+                    color: await loadAgentColor(definitionId),
+                }))
+            );
             agents.sort((a, b) => a.name.localeCompare(b.name));
             if (!this.disposed) this.setAgents(agents);
         } catch {
