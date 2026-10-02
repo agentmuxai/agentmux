@@ -129,7 +129,7 @@ export class DocTabsController<P> {
         return next.tabs.find((t) => t.key === this.spec.keyOf(payload))!.id;
     }
 
-    /** The active tab now shows `payload` (a Hangar tab navigating). */
+    /** The active tab now shows `payload` (another file in the same tab). */
     replaceActive(payload: P): void {
         const id = this.state().activeId;
         if (!id) {
