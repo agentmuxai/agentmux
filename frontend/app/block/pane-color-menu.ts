@@ -27,25 +27,6 @@ export const PANE_HUE_OPTIONS: ReadonlyArray<PaneHueOption> = [
     { label: "Pink",       hue: 330 },
 ];
 
-/** Derive the muted header background from a hue (0–360). */
-export function hueToHeaderBg(hue: number): string {
-    return `hsl(${hue}, 28%, 16%)`;
-}
-
-/** Derive a pane-tab pill's own darkened background from a hue (0–360).
- * Deliberately more saturated/lighter than hueToHeaderBg's 28%/16% — that
- * treatment was tuned for a large, full-width header bar, where even a
- * subtle tint reads clearly. On a small ~20px pane-tab pill the identical
- * value is nearly indistinguishable from black and from a neighboring
- * uncolored (fully transparent) pill, which live-reproduced as "every
- * pill's color collapses to the same one" even though the underlying
- * computed colors were, in fact, all distinct
- * (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md) — a contrast bug, not a
- * data bug. */
-export function hueToPaneTabBg(hue: number): string {
-    return `hsl(${hue}, 42%, 24%)`;
-}
-
 /** Derive the vivid active-border color from a hue (0–360). */
 export function hueToActiveBorder(hue: number): string {
     return `hsl(${hue}, 65%, 52%)`;
@@ -86,8 +67,8 @@ export function hueToAgentIdentityColor(hue: number): string {
  * this IS the "single system": an explicit "Pane Color" hue pick
  * (`frame:hue`) and an agent's passive persisted identity color
  * (`frame:activebordercolor`, a hex) now produce the header treatment the
- * SAME way, by both going through `hueToHeaderBg`. Before this, an explicit
- * hue got the darkened/muted header (`hueToHeaderBg`) while a plain agent
+ * SAME way, both resolved to one identity hue (pane-color-scheme.ts
+ * `identityOklchHue`). Before that, an explicit hue got a darkened/muted header while a plain agent
  * identity color was applied to the header at full, vivid strength — the
  * same value the border used — so only explicitly-colored panes got the
  * dark-header/vivid-border look; every other agent pane's header matched
