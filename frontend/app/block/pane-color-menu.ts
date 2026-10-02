@@ -95,12 +95,13 @@ export function hueToAgentIdentityColor(hue: number): string {
  * border side of "one system" was already correct (full-strength color from
  * either source) — only the header side needed unifying.
  *
- * `isLightTheme` (user request 2026-09-21): the darkened/muted treatment
- * above is a dark-theme look — a near-black, low-lightness header reads as
- * muddy/broken against a light UI. On a light theme this instead keeps the
- * pre-2026-09-21 "bright" behavior: the header matches the border's
- * full-strength color exactly, the same as `computeFocusRingBorderColor`'s
- * `hueToActiveBorder`/raw hex.
+ * `isLightTheme`: on 2026-09-21 the light theme was kept at the identity's
+ * full strength, because darkening it (the dark-theme treatment) read as
+ * muddy on a light UI. Since 2026-10-02 the light theme gets its own soft
+ * tint instead, lightened rather than darkened (pane-color-scheme.ts
+ * `headerTint`, OKLCH L 0.95), so a header is no longer a solid block of
+ * the agent's colour (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §4:
+ * the solid header also made the active-tab underline invisible, 1:1).
  */
 export function headerBgForEffectiveColor(
     hue: number | undefined,
