@@ -350,6 +350,7 @@ partial list.
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
 | [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
 | [`SPEC_MONOLITH_MODULE_SPLITS_2026_09_22`](SPEC_MONOLITH_MODULE_SPLITS_2026_09_22.md) | SPEC — Split the two largest `agentmux-srv` files into directory modules |
+| [`SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02`](SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md) | MuxBus cloud sign-in: scope the keychain tokens to the channel |
 | [`SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27`](SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md) | SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here" |
 | [`SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22`](SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md) | SPEC: `muxlog swarm -d/--dispatch` — a correlated dispatch-lifecycle verdict |
 | [`SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22`](SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md) | SPEC: `muxspect find` — cross-instance block/agent lookup |
