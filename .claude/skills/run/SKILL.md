@@ -68,7 +68,12 @@ on the hash or the task's own reaping:
 
 ```bash
 # A real TCP probe, not curl — this catches a hung listener a curl GET won't.
-port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+# Probe IPv6 as well: Vite on Windows binds `localhost` as [::1] only, so an
+# IPv4-only probe reports another agent's Vite port as free.
+port_free() {
+  ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null &&
+  ! (exec 3<>"/dev/tcp/::1/$1") 2>/dev/null
+}
 port=5999
 while ! port_free "$port"; do port=$((port + 1)); done
 echo "using port $port"
