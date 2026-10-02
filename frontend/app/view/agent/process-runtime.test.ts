@@ -111,3 +111,17 @@ describe("compareRuntime", () => {
         expect(cmp(DEFAULT_RUNTIME_CONFIG, run({ model: "opus" }), "host", "--model opus")).toEqual({ kind: "agrees" });
     });
 });
+
+describe("parseAgentRuntimeEvent — what the CLI reported (get_settings)", () => {
+    it("reads the effective model and effort", () => {
+        const r = parseAgentRuntimeEvent({ running: true, effective_model: "claude-sonnet-5-5", effective_effort: "high" })!;
+        expect(r.effectiveModel).toBe("claude-sonnet-5-5");
+        expect(r.effectiveEffort).toBe("high");
+    });
+    it("leaves them undefined when the CLI has not reported (or has no effort)", () => {
+        const r = parseAgentRuntimeEvent({ running: true, effective_model: "claude-haiku-4-5-20251001" })!;
+        expect(r.effectiveEffort).toBeUndefined();
+        const none = parseAgentRuntimeEvent({ running: true })!;
+        expect(none.effectiveModel).toBeUndefined();
+    });
+});

@@ -22,6 +22,8 @@
 //!  - No verify / doctor / post-install steps yet — those land in
 //!    Phase β.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -743,8 +745,7 @@ fn spawn_install_task(
             .kill_on_drop(true);
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
+            cmd.no_window(); // CREATE_NO_WINDOW
         }
 
         let mut child = match cmd.spawn() {

@@ -33,6 +33,17 @@ $tool-name-colors: (
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
 $transcript-preview-max-height: calc(50vh / 3);
 
+// The default look of a meta row: a divider, notice, pill or card that is context
+// about the conversation rather than part of it. Small and quiet. The pane's own
+// size (--font-agent-size, 15px) is for conversation text, and an element that sets
+// no size inherits it, which is how the context-delivery card ended up with a 15px
+// title next to 11px chips. A new meta component includes this instead of choosing
+// sizes again.
+@mixin meta-row-text {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
 // The ▸/▾ in a collapsible message's summary line (CollapsibleMessage.tsx),
 // shared by agent messages and jekts.
 @mixin message-chevron {
@@ -128,7 +139,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // can't be (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01 §3.4).
     .agent-tool-result-unloaded {
         padding: var(--space-1) var(--space-2);
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--secondary-text-color);
     }
 
@@ -207,7 +218,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 background: transparent;
                 border: none;
                 color: var(--secondary-text-color);
-                font-size: 11px;
+                font-size: var(--text-xs);
                 font-family: var(--font-mono);
                 cursor: default;
                 width: 100%;
@@ -323,7 +334,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 width: 12px;
                 text-align: center;
                 color: var(--secondary-text-color);
-                font-size: 11px;
+                font-size: var(--text-xs);
                 // Eases the running -> terminal color swap (warning ->
                 // success/error/etc, see the `&.success .agent-tool-status-icon`
                 // rules below) instead of an instant snap. The glyph itself
@@ -370,7 +381,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             .agent-tool-duration {
                 flex-shrink: 0;
                 color: var(--secondary-text-color);
-                font-size: 11px;
+                font-size: var(--text-xs);
             }
 
             // A Read's line range ("120:179 of 456"), inside the name run
@@ -378,7 +389,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             .agent-tool-range {
                 color: var(--secondary-text-color);
                 font-family: var(--font-mono);
-                font-size: 11px;
+                font-size: var(--text-xs);
             }
 
             // Live-tail: shows the most recent stream chunk inline
@@ -397,7 +408,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 background: rgba(43, 212, 168, 0.08);
                 border-radius: 0;
                 font-family: var(--font-mono);
-                font-size: 11px;
+                font-size: var(--text-xs);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -483,7 +494,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             min-height: 0;
             overflow: hidden;
             font-family: var(--font-mono);
-            font-size: 12px;
+            font-size: var(--text-sm);
             // Overrides the global `tab-size: 4` from reset.scss (inherited
             // by every preview here — Read/Write/Edit/Diff, Shiki and plain-
             // fallback paths alike — since nothing in between re-declares
@@ -578,7 +589,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         .agent-tool-workflow {
             .agent-tool-agent-desc {
                 color: var(--secondary-text-color);
-                font-size: 12px;
+                font-size: var(--text-sm);
                 margin-bottom: var(--space-1);
             }
 
@@ -587,7 +598,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             }
 
             .agent-tool-agent-result {
-                font-size: 12px;
+                font-size: var(--text-sm);
                 white-space: pre-wrap;
                 overflow-wrap: anywhere;
                 max-height: 200px;
@@ -607,7 +618,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             border-radius: var(--radius-2, 4px);
             background: color-mix(in srgb, var(--term-bright-magenta) 8%, transparent);
             cursor: default;
-            font-size: 12px;
+            font-size: var(--text-sm);
 
             &:hover {
                 background: color-mix(in srgb, var(--term-bright-magenta) 14%, transparent);
@@ -660,7 +671,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             border: none;
             border-radius: 0;
             cursor: default;
-            font-size: 11px;
+            font-size: var(--text-xs);
 
             &:hover {
                 opacity: 0.9;
@@ -752,7 +763,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         display: flex;
         flex-direction: column;
         gap: 1px;
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
 
         .agent-tool-glob-file {
@@ -811,7 +822,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border-left: 2px solid var(--border-color);
         border-radius: 0;
         overflow-x: auto;
-        font-size: 12px;
+        font-size: var(--text-sm);
         // Declared explicitly because the two render paths use DIFFERENT
         // elements: the plain fallback is `<pre class="agent-diff">` (UA
         // `white-space: pre`), the Shiki path is `<div class="agent-diff
@@ -972,7 +983,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
         .agent-bash-exit {
             padding: var(--space-0-5) var(--space-1-5);
-            font-size: 11px;
+            font-size: var(--text-xs);
             border-top: 1px solid var(--border-color);
             background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
 
@@ -1028,7 +1039,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-message-time {
                 color: var(--secondary-text-color);
-                font-size: 11px;
+                font-size: var(--text-xs);
             }
         }
 
@@ -1040,7 +1051,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 display: flex;
                 gap: var(--space-4);
                 padding: var(--space-1) 0 var(--space-2) 0;
-                font-size: 11px;
+                font-size: var(--text-xs);
                 color: var(--secondary-text-color);
             }
 
@@ -1097,7 +1108,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-jekt-tier-badge,
             .agent-jekt-delivery-badge {
-                font-size: 11px;
+                font-size: var(--text-xs);
                 color: var(--secondary-text-color);
                 padding: 1px var(--space-1);
                 border: 1px solid var(--border-color);
@@ -1138,12 +1149,12 @@ $transcript-preview-max-height: calc(50vh / 3);
                 flex-wrap: wrap;
                 gap: var(--space-2);
                 padding: 0 0 var(--space-1) 0;
-                font-size: 11px;
+                font-size: var(--text-xs);
                 color: var(--secondary-text-color);
             }
 
             .agent-jekt-raw {
-                font-size: 11px;
+                font-size: var(--text-xs);
                 color: var(--secondary-text-color);
 
                 summary {
@@ -1188,14 +1199,17 @@ $transcript-preview-max-height: calc(50vh / 3);
                 @include message-chevron;
             }
 
+            // Same scale as the other meta rows (outcome / notice labels are
+            // 11px secondary); the pane base of 15px is for conversation text.
             .agent-context-delivery-title {
                 flex: 1;
-                font-weight: 600;
-                color: var(--main-text-color);
+                font-size: var(--text-sm);
+                font-weight: 500;
+                color: var(--secondary-text-color);
             }
 
             .agent-context-delivery-size {
-                font-size: 11px;
+                font-size: var(--text-xs);
                 white-space: nowrap;
             }
 
@@ -1203,11 +1217,17 @@ $transcript-preview-max-height: calc(50vh / 3);
             .agent-context-delivery-excerpt {
                 flex-basis: 100%;
                 padding-left: var(--space-4);
-                font-size: 12px;
+                font-size: var(--text-sm);
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
             }
+        }
+
+        .agent-context-delivery-icon,
+        .agent-context-delivery-item-icon {
+            font-size: var(--text-xs);
+            flex-shrink: 0;
         }
 
         // A card with nothing to open has no chevron; keep its title aligned
@@ -1223,7 +1243,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         .agent-context-delivery-item-chip {
-            font-size: 11px;
+            font-size: var(--text-xs);
             padding: 0 var(--space-1);
             border: 1px solid var(--border-color);
             border-radius: 3px;
@@ -1239,7 +1259,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
         // An item the part cap cut: say so, and dim what never went out.
         .agent-context-delivery-item-cut {
-            font-size: 11px;
+            font-size: var(--text-xs);
             color: var(--warning-color);
             white-space: nowrap;
         }
@@ -1252,7 +1272,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         .agent-context-delivery-advice {
             flex-basis: 100%;
             padding: var(--space-1) 0 0 var(--space-4);
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--warning-color);
         }
 
@@ -1269,10 +1289,11 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-context-delivery-item-name {
                 flex: 1;
+                @include meta-row-text;
             }
 
             .agent-context-delivery-item-size {
-                font-size: 11px;
+                font-size: var(--text-xs);
                 color: var(--secondary-text-color);
                 white-space: nowrap;
             }
@@ -1282,6 +1303,8 @@ $transcript-preview-max-height: calc(50vh / 3);
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
             padding: var(--space-1) var(--space-1-5);
             margin: 0 0 var(--space-1) 0;
+            font-size: var(--text-xs);
+            line-height: 1.35;
             white-space: pre-wrap;
             // Same cap and scroll hand-off as a jekt body.
             max-height: $transcript-preview-max-height;
@@ -1585,7 +1608,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
         .agent-tool-read-range {
             flex-shrink: 0;
-            font-size: 11px;
+            font-size: var(--text-xs);
             color: var(--secondary-text-color);
             font-family: var(--font-mono);
         }
@@ -1598,7 +1621,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             // preview. The overlay-log's preview-zoom (`font-size: %`) must not
             // scale it — otherwise Ctrl+scroll over the body also grows the
             // filename. Pane zoom (CSS `zoom` on .agent-view) still scales it.
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
 
         .agent-tool-read-content {
@@ -1639,7 +1662,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         align-items: baseline;
         gap: var(--space-2);
         margin-bottom: var(--space-1);
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
         color: var(--secondary-text-color);
     }
@@ -1691,12 +1714,12 @@ $transcript-preview-max-height: calc(50vh / 3);
             margin-bottom: var(--space-0-5);
             font-weight: 500;
             // See Read tool: pane-owned header, immune to the preview zoom.
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
 
         .agent-tool-write-info {
             color: var(--secondary-text-color);
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
     }
 
@@ -1711,7 +1734,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             padding: var(--space-1) var(--space-1-5);
             border-radius: 0;
             margin: 0;
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
     }
 
@@ -1727,12 +1750,12 @@ $transcript-preview-max-height: calc(50vh / 3);
         padding: var(--space-1) var(--space-1-5);
         border-radius: 0;
         margin: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     // === Compact Result ===
     .agent-tool-compact-result {
-        font-size: 11px;
+        font-size: var(--text-xs);
 
         .agent-tool-compact-summary {
             display: flex;
@@ -1781,7 +1804,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             padding: var(--space-1) var(--space-1-5);
             border-radius: 0;
             margin: var(--space-1) 0 0 0;
-            font-size: 11px;
+            font-size: var(--text-xs);
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             // Hanging indent — see .agent-terminal-output > div for the
@@ -1805,7 +1828,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     table {
         border-collapse: collapse;
         width: 100%;
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
     }
 
@@ -1884,7 +1907,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border-radius: 0;
         background: transparent;
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         cursor: pointer;
 
         &:hover,
@@ -1920,7 +1943,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         gap: 6px;
         min-width: 0;
         padding: 2px var(--space-1);
-        font-size: 12px;
+        font-size: var(--text-sm);
         cursor: pointer;
 
         &:hover,
@@ -1970,7 +1993,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border: 1px solid var(--border-color);
         border-radius: 0;
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         white-space: nowrap;
     }
 }
@@ -1988,7 +2011,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         display: flex;
         align-items: center;
         gap: var(--space-1);
-        font-size: 11px;
+        font-size: var(--text-xs);
         opacity: 0.6;
         padding: 0 2px var(--space-0-5);
     }
@@ -2066,7 +2089,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-search-card-title {
         color: var(--accent-color);
-        font-size: 12px;
+        font-size: var(--text-sm);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -2076,7 +2099,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-search-card-snippet {
         color: var(--main-text-color);
         opacity: 0.8;
-        font-size: 11px;
+        font-size: var(--text-xs);
         line-height: 1.4;
         display: -webkit-box;
         -webkit-line-clamp: 3;
@@ -2096,7 +2119,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     display: flex;
     flex-direction: column;
     gap: var(--space-0-5);
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     .agent-fetch-header {
         display: flex;
@@ -2129,7 +2152,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-fetch-domain {
         color: var(--success-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -2159,7 +2182,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-fetch-title {
-        font-size: 11px;
+        font-size: var(--text-xs);
         opacity: 0.7;
         font-style: italic;
         padding: 0 var(--space-0-5);
@@ -2172,7 +2195,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         // No max-height/overflow here — see .agent-tool-record-table above.
         white-space: pre-wrap;
         word-break: break-word;
-        font-size: 11px;
+        font-size: var(--text-xs);
         line-height: 1.5;
         padding: var(--space-0-5);
         border-radius: var(--border-radius-sm);
@@ -2198,7 +2221,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-tool-read-range {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         font-family: var(--font-mono);
     }
@@ -2216,7 +2239,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // Which lines the write covers, before the path.
     .agent-tool-read-range {
         flex-shrink: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         font-family: var(--font-mono);
     }
@@ -2248,7 +2271,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-tool-write-info {
-        font-size: 11px;
+        font-size: var(--text-xs);
         opacity: 0.6;
     }
 }
@@ -2266,7 +2289,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     padding: var(--space-1) var(--space-1-5);
     margin: var(--space-1) 0 0 0;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 1.45;
 
     // AnsiLine renders one <div> per line — preserve runs of spaces and wrap
@@ -2301,13 +2324,13 @@ $transcript-preview-max-height: calc(50vh / 3);
     border-left: 2px solid var(--error-color);
     background: color-mix(in srgb, var(--error-color) 8%, transparent);
     border-radius: 0 2px 2px 0;
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1.4;
 
     .agent-error-code {
         color: var(--error-color);
         font-family: var(--font-mono);
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         white-space: nowrap;
         flex-shrink: 0;
@@ -2329,7 +2352,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border-radius: 3px;
         background: transparent;
         color: var(--error-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         white-space: nowrap;
         cursor: default;
@@ -2396,7 +2419,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-context-compacted-label {
         flex-shrink: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -2408,7 +2431,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-context-compacted-detail {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
     }
 }
@@ -2427,7 +2450,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     user-select: none;
 
     .agent-compaction-started-label {
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -2438,7 +2461,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-compaction-started-detail {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
     }
 }
@@ -2462,13 +2485,12 @@ $transcript-preview-max-height: calc(50vh / 3);
     user-select: none;
 
     .agent-memory-reinjection-label {
-        font-size: 11px;
+        @include meta-row-text;
         letter-spacing: 0.02em;
         padding: 2px 10px;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         border-radius: 10px;
         background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
-        color: var(--secondary-text-color);
     }
 
     &--low  .agent-memory-reinjection-label { color: var(--secondary-text-color); }
@@ -2564,7 +2586,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-session-outcome-label {
         flex-shrink: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -2576,7 +2598,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-session-outcome-detail {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
     }
 
@@ -2623,7 +2645,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-cli-notice-label {
         flex-shrink: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--cli-notice-tone);
         padding: 2px 10px;
@@ -2633,7 +2655,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-cli-notice-detail {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
         text-align: center;
     }
@@ -2696,13 +2718,13 @@ $transcript-preview-max-height: calc(50vh / 3);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
     }
 
     .agent-history-link-cta {
         flex-shrink: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--accent-color);
     }
@@ -2898,13 +2920,13 @@ $transcript-preview-max-height: calc(50vh / 3);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
     }
 
     .agent-resume-preflight-cta {
         flex-shrink: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--accent-color);
         cursor: var(--cursor-interactive, pointer);

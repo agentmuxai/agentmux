@@ -4,6 +4,8 @@
 // Sidecar spawning and management for the CEF host.
 // Ported from src-tauri/src/sidecar/ using std::process instead of tauri-plugin-shell.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::io::BufRead;
 use std::sync::Arc;
 
@@ -306,8 +308,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
+        cmd.no_window(); // CREATE_NO_WINDOW
     }
 
     let mut child = cmd

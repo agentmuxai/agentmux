@@ -284,13 +284,22 @@ fn build_throwaway_meta(source_meta: &MetaMapType, provider: BtwProvider, gemini
     };
     let model = source_args.as_deref().and_then(model_flag_value);
     let cli_args = match provider {
-        BtwProvider::Claude => build_side_question_argv(&source_args.unwrap_or_else(|| {
-            vec![
-                "-p".to_string(),
-                "--output-format".to_string(),
-                "stream-json".to_string(),
-            ]
-        })),
+        // A persistent pane's `cmd:args` carry the control protocol's flags
+        // (`--input-format stream-json`, `--permission-prompt-tool stdio`). This
+        // is a one-shot turn with the prompt written raw to stdin, so under them
+        // the CLI dies with "Error parsing streaming input line" (observed on
+        // 2.1.285). The same heal a container turn gets removes them and keeps the
+        // pane's model, effort and flags (G11).
+        BtwProvider::Claude => build_side_question_argv(&super::input::container_argv(
+            source_args.unwrap_or_else(|| {
+                vec![
+                    "-p".to_string(),
+                    "--output-format".to_string(),
+                    "stream-json".to_string(),
+                ]
+            }),
+            "claude",
+        )),
         BtwProvider::Codex => build_codex_side_question_argv(model.as_deref()),
         BtwProvider::Gemini => build_gemini_side_question_argv(gemini_policy, model.as_deref()),
     };
@@ -645,6 +654,38 @@ mod tests {
         assert!(args.iter().any(|a| a == "--disallowedTools"));
         assert!(args.iter().any(|a| a == "--max-turns"));
         assert!(!args.iter().any(|a| a == "--resume"));
+    }
+
+    #[test]
+    fn a_persistent_panes_control_protocol_flags_do_not_leak_into_the_one_shot_turn() {
+        // What a persistent Claude pane stores in cmd:args.
+        let mut source = MetaMapType::new();
+        source.insert(
+            "cmd:args".to_string(),
+            Value::Array(
+                strings(&[
+                    "-p", "--output-format", "stream-json", "--verbose",
+                    "--input-format", "stream-json",
+                    "--permission-prompt-tool", "stdio",
+                    "--permission-mode", "default",
+                    "--model", "opus", "--effort", "high",
+                    "--add-dir", "/x",
+                ])
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+            ),
+        );
+        let args = args_of(&build_throwaway_meta(&source, BtwProvider::Claude, ""));
+        assert!(!args.iter().any(|a| a == "--input-format"), "{args:?}");
+        assert!(!args.iter().any(|a| a == "--permission-prompt-tool"), "{args:?}");
+        assert!(args.iter().any(|a| a == "-p"), "{args:?}");
+        // the pane's own model, effort and flags stay: /btw answers as the pane would
+        let pos = |f: &str| args.iter().position(|a| a == f).unwrap();
+        assert_eq!(args[pos("--model") + 1], "opus");
+        assert_eq!(args[pos("--effort") + 1], "high");
+        assert_eq!(args[pos("--add-dir") + 1], "/x");
+        assert!(args.iter().any(|a| a == "--disallowedTools"));
     }
 
     #[test]

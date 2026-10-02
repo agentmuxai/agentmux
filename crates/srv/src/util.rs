@@ -3,6 +3,9 @@
 
 //! Small OS-level helpers shared across backend modules.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
+
 /// Open `url` in the user's default browser.
 ///
 /// On Windows this shells out via `cmd /C start`. `cmd.exe` re-parses its
@@ -32,8 +35,7 @@ pub fn open_browser(url: &str) {
         crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
         cmd.arg("/C").raw_arg(format!("start \"\" \"{url}\""));
         // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.no_window();
         let _ = cmd.spawn();
     }
     #[cfg(target_os = "macos")]

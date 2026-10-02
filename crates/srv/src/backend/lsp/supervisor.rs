@@ -16,6 +16,8 @@
 //
 // Spec: docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md (Tier 1).
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -141,8 +143,7 @@ impl LspSupervisor {
         // needed. See docs/retro/retro-windows-terminal-window-leak-2026-06-21.md.
         #[cfg(windows)]
         {
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.no_window();
         }
 
         let mut child = cmd

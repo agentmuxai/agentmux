@@ -5,6 +5,8 @@
 //! subprocesses. Reads a bundled catalog JSON, checks system/bundled/managed
 //! install paths, and can download + verify tools on demand.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -141,10 +143,9 @@ pub fn current_platform() -> Result<&'static str, String> {
 fn probe_system_path(name: &str) -> bool {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         std::process::Command::new("where")
             .arg(name)
-            .creation_flags(agentmux_common::win32::CREATE_NO_WINDOW)
+            .no_window()
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -163,10 +164,9 @@ fn probe_system_path(name: &str) -> bool {
 fn system_path_of(name: &str) -> Option<String> {
     #[cfg(windows)]
     let output = {
-        use std::os::windows::process::CommandExt;
         std::process::Command::new("where")
             .arg(name)
-            .creation_flags(agentmux_common::win32::CREATE_NO_WINDOW)
+            .no_window()
             .output()
             .ok()?
     };
@@ -200,8 +200,7 @@ pub(crate) fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<S
     command.arg(arg);
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
+        command.no_window();
     }
     let output = command.output().ok()?;
     // Some tools write version to stderr (e.g. older jq), try both.

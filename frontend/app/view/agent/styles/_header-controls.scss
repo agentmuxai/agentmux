@@ -27,7 +27,7 @@
             font-weight: 500;
 
             .agent-status-icon {
-                font-size: 12px;
+                font-size: var(--text-sm);
             }
 
             .agent-id {
@@ -35,7 +35,7 @@
             }
 
             .agent-backend-icon {
-                font-size: 12px;
+                font-size: var(--text-sm);
                 opacity: 0.6;
                 cursor: help;
             }
@@ -44,7 +44,7 @@
         .agent-header-stats {
             display: flex;
             gap: var(--space-3);
-            font-size: 11px;
+            font-size: var(--text-xs);
             color: var(--secondary-text-color);
 
             .agent-pid {
@@ -78,7 +78,7 @@
             border-radius: 0;
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
             color: var(--main-text-color);
-            font-size: 11px;
+            font-size: var(--text-xs);
             cursor: default;
             // Not `all`: that also animates the inherited `visibility` that hides
             // window and pane tabs, so this would pop in a frame late when shown
@@ -149,7 +149,7 @@
             align-items: center;
             gap: var(--space-2);
             cursor: default;
-            font-size: 12px;
+            font-size: var(--text-sm);
 
             input[type="checkbox"] {
                 cursor: default;
@@ -170,7 +170,7 @@
         border: 1px solid var(--accent-color);
         border-radius: 0;
         color: var(--accent-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         cursor: default;
         z-index: 10;
 

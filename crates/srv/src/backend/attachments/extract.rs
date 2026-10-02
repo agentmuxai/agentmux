@@ -17,6 +17,8 @@
 //! [`DEADLINE`]. Whatever a hostile file does to a parser (panic, deep
 //! recursion, a sheet that loads for minutes, memory) happens to the child.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -116,9 +118,7 @@ fn run_with_deadline(mut cmd: std::process::Command, deadline: Duration) -> Chil
         .stderr(Stdio::null());
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt as _;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.no_window();
     }
     let Ok(mut child) = cmd.spawn() else {
         return ChildRun::Failed;

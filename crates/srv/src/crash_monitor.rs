@@ -34,6 +34,8 @@
 
 #![cfg(windows)]
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -170,12 +172,19 @@ pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
 
     // Spawn monitor process. Null stdin/stdout so it doesn't inherit the sidecar's
     // stdin reader (which drives the stdin-EOF watchdog in the main process).
-    let child = match std::process::Command::new(&exe)
+    let mut monitor_cmd = std::process::Command::new(&exe);
+    monitor_cmd
         .arg("--crash-monitor")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .spawn()
+        .stdout(std::process::Stdio::null());
+    // srv is a console-subsystem binary launched windowless; without this flag
+    // the monitor (the same exe) gets a fresh console window at startup, on top
+    // of the splash. See crates/common/src/cli.rs for the same fix elsewhere.
+    #[cfg(windows)]
     {
+        monitor_cmd.no_window();
+    }
+    let child = match monitor_cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[crash-handler] failed to spawn crash monitor: {}", e);

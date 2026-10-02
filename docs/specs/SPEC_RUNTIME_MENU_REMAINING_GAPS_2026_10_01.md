@@ -247,6 +247,15 @@ Send `get_settings` after spawn and after each `result`; fold `applied.{model,ef
 as `effective`. The menu then shows effort too, which no stream source can. Old CLIs (no `get_settings`, or no
 `applied`) fall back to Stage A and show effort as "requested".
 
+*Stage B built (readback only):* a control-protocol persistent agent is sent `get_settings` right after spawn and again at
+every turn boundary (the CLI can fall back to another model under a running process); the answer is folded into the
+`agentruntime` event as `effective_model` / `effective_effort` and cleared when the process ends or is replaced. The
+Model section then says "Running `claude-sonnet-5-5` · effort high", and warns when the family or the effort is not the
+selected one. That is current for the live process, so unlike Stage A it carries no "the last reply may be old" caveat;
+Stage A remains the fallback for a CLI that does not answer. Not built: correcting a difference on the running
+process with `set_model` / `apply_flag_settings` (observed to work, §7.3), which would need a policy for when the app may
+override what the process was spawned with.
+
 ### 4.4 Testing
 
 Stage A: the family/prefix comparison table (aliases, concrete ids, dated ids, unknown shapes); the four gating
@@ -308,6 +317,17 @@ of order), so Stage B can also *correct* drift without a restart (the reconcilia
 6. **Visible:** a dry-run (`cli.prune` with `dry_run: true`) returning what *would* go and how much space, surfaced
    in the toolchain settings, so the first prune is never a surprise.
 
+### 5.3.1 As built
+
+`cli_prune` (planner `plan_prune`, guarded remover `prune`, `record_use`, `scan_process_commands`) merged in #4191.
+On top of it, an RPC `toolchain.prune` (`{dry_run?}`; **omitted means dry run**, deleting needs an explicit `false`) and a
+"Old CLI versions" section in the Toolchain view: **Check** (dry run) lists what would go and what it frees; **Remove**
+is a separate click on exactly that. This is §5.8's conservative branch (opt-in, nothing automatic, 30 days). The
+"live controller" input is every block that records a `cmd` / `cmd:args` (open panes and panes restored from a layout,
+which hold the absolute CLI path until they mount), and the process scan is `ps`; a failed scan offers nothing. Windows
+returns no scan, so nothing is offered there. The automatic daily run (§5.3 item 5) is deliberately NOT built; it needs
+the owner's answer to §5.8 first.
+
 ### 5.4 Why a 30-day age and not "keep N versions"
 
 Version counting is wrong in both directions: a user who upgrades twice in a week would lose the CLI an older channel
@@ -351,8 +371,8 @@ Each is small enough to be one PR. They are listed so they are not lost, in roug
 |---|---|---|---|
 | G1 | `muxcode` / `openclaw` / `copilot` / `pi` get `--dangerously-skip-permissions` appended on every send; antigravity's `--yolo` is replaced by it | Give each provider an explicit permission vocabulary in the catalog (none / yolo / claude-style) instead of the Claude branch being the default; the ratchet test then lists none | Run each CLI with the flag against a stub (§7) and record whether it errors |
 | G2 | Antigravity lists models but nothing applies one; `/model` says "applies to next turn" | Wire `--model` for it, or hide the picker *and* make `/model` and the stored default honour the same gate | Same stub run; the ratchet test (`KNOWN_MODELS_NOT_APPLIED`) shrinks |
-| G11 | `/btw` copies the source pane's `cmd:args` | Run it through the same container-style heal (`container_argv`) so persistent-only flags (`--input-format stream-json`, `--permission-prompt-tool`) don't leak, and decide its model explicitly | A stub that records argv for a `/btw` on a persistent pane |
-| G13 | The dropup silently restarts the agent when it migrates a superseded model id | Migrate the stored value without restarting (the next spawn picks it up), or ask | Dropup test: migration does not call the restart path |
+| G11 | **Done; and worse than listed.** `/btw` copies the source pane's `cmd:args` (observed on CLI 2.1.285: with the persistent flags and a raw stdin prompt the CLI exits 1, "Error parsing streaming input line", so `/btw` on a persistent Claude pane could not answer) | Run it through the same container-style heal (`container_argv`) so persistent-only flags (`--input-format stream-json`, `--permission-prompt-tool`) don't leak, and decide its model explicitly | A stub that records argv for a `/btw` on a persistent pane |
+| G13 | **Done.** The dropup silently restarted the agent when it migrated a superseded model id | Migrate the stored value without restarting (`patchRuntime`'s `migration` option: cmd:args rebuilt, no restart, not remembered as a pick); the drift notice covers the gap until the next spawn | Dropup test: migration does not call the restart path |
 | G14 | Only Claude panes have a runtime menu | A per-provider capability table (model? effort? mode?) drives both the menu and the slash commands; Codex gets a model-only menu | Table-driven test over the catalog |
 | G15 | srv strips no `ANTHROPIC_MODEL` / `CLAUDE_CODE_EFFORT_LEVEL`; a `model` in `settings.json` applies where no flag is passed | Only matters where a flag is missing; now narrow. Document it; consider surfacing it in the "differs" explanation | Covered by the fake CLI (§7) |
 | G16 | srv has no model list; `providers.models` is Claude-only and fetched with the account-global token | Per-provider models in the Rust registry, pinned to the frontend's by the existing consistency test; fetch with the agent's bound identity | Extend `runtime-defaults-consistency.test.ts` |

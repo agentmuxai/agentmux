@@ -218,6 +218,21 @@ describe("patchRuntime — a pick wins over the agent definition's own flags", (
     });
 });
 
+describe("patchRuntime — a migration is not a pick (G13)", () => {
+    it("rebuilds cmd:args but neither restarts the agent nor remembers the value", async () => {
+        await patchRuntime("b1", claude, { model: "opus" }, () => ({ ...meta(), agentId: "agent-7" }), { migration: true });
+        expect(argWrites().at(-1)).toContain("opus");
+        expect(resync).not.toHaveBeenCalled();
+        expect(remember).not.toHaveBeenCalled();
+    });
+
+    it("a normal change still restarts and remembers", async () => {
+        await patchRuntime("b1", claude, { model: "opus" }, () => ({ ...meta(), agentId: "agent-7" }));
+        expect(resync).toHaveBeenCalledTimes(1);
+        expect(remember).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe("patchRuntime — remembers what the user picked", () => {
     it("hands the pick (not the merged config) and the pane's agent to the memory", async () => {
         await patchRuntime("b1", claude, { effort: "max" }, () => ({ ...meta(), agentId: "agent-7" }));

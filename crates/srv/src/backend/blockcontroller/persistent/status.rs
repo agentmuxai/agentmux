@@ -14,6 +14,7 @@ impl PersistentSubprocessController {
         // to compare a selection against.
         if status != STATUS_RUNNING {
             inner.spawn_runtime = None;
+            inner.effective_runtime = None;
         }
     }
 
@@ -158,6 +159,7 @@ pub(super) fn announce_runtime(broker: &crate::backend::mps::Broker, block_id: &
         block_id,
         inner.spawn_runtime.as_ref(),
         inner.restart_when_idle || inner.restart_pending,
+        inner.effective_runtime.as_ref(),
     );
 }
 
