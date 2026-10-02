@@ -180,6 +180,33 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
         expect(patch).toEqual({ model: expect.stringMatching(/^claude-fable-5-1$/) });
     });
 
+    it("migrates quietly: no restart of the agent and not remembered as the user's pick (G13)", async () => {
+        render(() => (
+            <AgentRuntimeDropup
+                blockId="block-1"
+                blockAtom={() => ({ meta: metaWith("claude-fable-5") }) as any}
+                providerId="claude"
+            />
+        ));
+        await vi.waitFor(() => expect(patchRuntime).toHaveBeenCalled());
+        // The fourth argument is getMeta, the fifth the options.
+        expect(patchRuntime.mock.calls[0][4]).toEqual({ migration: true });
+    });
+
+    it("a migration that fails does not break the menu", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        patchRuntime.mockImplementationOnce(() => Promise.reject(new Error("rpc down")));
+        render(() => (
+            <AgentRuntimeDropup
+                blockId="block-1"
+                blockAtom={() => ({ meta: metaWith("claude-fable-5") }) as any}
+                providerId="claude"
+            />
+        ));
+        await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+        warn.mockRestore();
+    });
+
     it("leaves an alias selection untouched", async () => {
         render(() => (
             <AgentRuntimeDropup
