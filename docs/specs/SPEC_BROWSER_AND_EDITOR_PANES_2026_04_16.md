@@ -4,6 +4,9 @@
 **Status:** active — Editor pane shipped in #415 (CodeMirror 6, matching this spec's recommendation over Monaco/Ace); Browser pane shipped in #422/#423 (native CefBrowserView, matching Option A over the iframe fallback — an earlier iframe-based version (commit 03e0730ec) was superseded); LSP (this spec's optional Phase 4) landed as "LSP Phase 1" in #1074 (TypeScript diagnostics). Verified 2026-08-23 against `frontend/app/view/browser/`, `frontend/app/view/editor/` (including an `lsp/` subdirectory), `agentmux-cef/src/browser_pane/`. **What remains**: this spec's Phase 3 "Agent Integration" required both `OpenEditorPaneCommand`/`mcp__agentmux__open_editor` AND `OpenBrowserPaneCommand`/`mcp__agentmux__open_browser` (lines 257-261) — only the editor half shipped (`OpenEditor` exists in `agentmux-mcp`); no `OpenBrowser` equivalent exists. Kept as `active`, not `implemented`, until that's closed (Codex catch on this PR's first pass, which had wrongly called it `implemented` with the gap only as a footnote).
 **Priority:** Medium — enables agent workflows that need web access and file editing
 
+> [!IMPORTANT]
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** Its non-goal "Tab management in browser pane" is lifted: Browser pages become Document Tabs (its §6.4), and Editor files are specified there too (§6.1).
+
 ---
 
 ## Problem
@@ -293,6 +296,6 @@ This replaces the pattern where agents say "open this file in your editor"
 - **Full IDE.** The editor pane is for quick edits and file viewing, not a
   replacement for VS Code. Complex refactoring still happens in the agent's
   terminal or via agent tool calls.
-- **Tab management in browser pane.** Each browser pane is one page. Multiple
+- ~~**Tab management in browser pane.** Each browser pane is one page. Multiple~~ **Lifted 2026-10-02:** Browser pages become Document Tabs (`SPEC_DOCUMENT_TABS_2026_10_02.md` §6.4). Original:
   pages = multiple panes (use the existing split/tab system).
 - **Browser extensions.** CEF sub-browsers don't support Chrome extensions.

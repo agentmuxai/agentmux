@@ -42,6 +42,9 @@ limited to a new generic "add block to an existing pane's stack" reducer path (�
 and normal RPC plumbing; the difficulty of this redesign lives almost entirely in the
 frontend (chrome hoisting, tab-strip UI, focus model, interaction design).
 
+> [!IMPORTANT]
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** The repo owner set a third tab layer under pane tabs: **document tabs**, the documents inside one pane (Editor files, Hangar folders, Media files, Browser pages), on one shared system. That reverses §7 resolution 3 below (Editor files do **not** become pane tabs), adds the missing layer to §2.2, and withdraws §4.9's `Ctrl:Shift:T` (it reopens a closed document tab instead). Everything else here stands.
+
 ---
 
 ## 1. Motivation
@@ -109,6 +112,8 @@ sharpens it further with the Pane/Pane-Tab split above:
 - **Pane Tabs** (this spec's subject) — the widget instances living inside one
   Pane's tab list, switched via the strip rendered as that Pane's header (§4.1).
   This is the layer being generalized.
+
+> **2026-10-02:** there is a third layer below Pane Tabs, **Document Tabs** (the documents inside one pane: Editor files, Hangar folders, Media files, Browser pages); see `SPEC_DOCUMENT_TABS_2026_10_02.md` §1.
 
 Every mention of "tab" in this document is qualified as one of the three above
 whenever ambiguity is possible; an unqualified "tab" defaults to meaning **Pane
@@ -178,6 +183,8 @@ agent/term/editor — see §2.4).
   either migrate the editor onto real `blockStack` semantics or explicitly keep its
   existing files-tabs mechanism as a parallel, non-generalized case — a decision
   this spec defers to the implementer with a recommendation (migrate it — see §7).
+  **Decided otherwise 2026-10-02:** the editor's file tabs stay inside its block as
+  Document Tabs, on a shared layer every document-showing pane uses (`SPEC_DOCUMENT_TABS_2026_10_02.md`).
 - **Plain left-click "add widget" today** (`action-widgets-config.ts:220-222`
   `handleWidgetSelect` → `block-layout-actions.ts:68-88` `createBlock`) —
   unconditionally dispatches `LayoutTreeActionType.InsertNode`, i.e. always a new
@@ -489,7 +496,7 @@ family one level deeper, adding a modifier per action type:
 | Action | Chord | Collision check |
 |---|---|---|
 | Next/previous Pane Tab in focused Pane | `Ctrl:Shift:]` / `Ctrl:Shift:[` | Free — `Ctrl:]`/`Ctrl:[` (Pane cycle) and `Ctrl:Shift:Digit1-9` are taken; `Ctrl:Shift:]`/`[` are not |
-| New Pane Tab in focused Pane (opens §4.5 picker) | `Ctrl:Shift:T` | Free — `Cmd:t` (new Window Tab) is taken, `Ctrl:Shift:T` is not |
+| New Pane Tab in focused Pane (opens §4.5 picker) | ~~`Ctrl:Shift:T`~~ **withdrawn 2026-10-02**: `Ctrl+Shift+T` reopens a closed Document Tab (`SPEC_DOCUMENT_TABS_2026_10_02.md` §4.3); this action stays on the pane's "+" until a chord is chosen | Free — `Cmd:t` (new Window Tab) is taken, `Ctrl:Shift:T` is not |
 | Reorder active Pane Tab left/right within its strip (§4.8's Phase 3 keyboard equivalent) | `Ctrl:Alt:[` / `Ctrl:Alt:]` | Free |
 | Close active Pane Tab in focused Pane | **Reuses existing `Cmd:w`** — no new chord | Not a new binding: `Cmd:w`'s handler (`keymodel.ts:88-91`) is redefined to close the ACTIVE Pane Tab, falling through to today's "close the whole pane" behavior only when it's the last remaining Pane Tab — the same semantic `Cmd+W` already has in every browser/editor that has both tabs and windows |
 
@@ -629,7 +636,7 @@ defensible default rather than a coin-flip:
    cosmetic change with zero user-facing benefit on its own; bundling it into an
    already-large functional redesign multiplies review risk for no functional
    gain. Tracked as a legitimate, separate future cleanup, not folded in here.
-3. **Editor files-tabs migration onto `blockStack`** — **yes, migrate, as part of
+3. **REVERSED 2026-10-02 — see `SPEC_DOCUMENT_TABS_2026_10_02.md` §7: Editor files stay Document Tabs inside the editor's block; the asymmetry argued below is answered by one shared document-tab layer.** ~~**Editor files-tabs migration onto `blockStack`** — **yes, migrate, as part of
    Phase 1** (confirmed, not just recommended). Keeping the editor's bespoke
    files-tab mechanism (`editor-pane-state-store.ts`) running in parallel with the
    new generic Pane Tab strip would be exactly the kind of "some widget types work
@@ -637,7 +644,8 @@ defensible default rather than a coin-flip:
    warns against — and it would do so on day one of Phase 1, not even as a
    temporary rollout artifact. Each open file becomes its own Pane Tab (its own
    `Block`), consistent with every other widget type and with VS Code's own model
-   (an editor group's file tabs ARE the group's tabs, not a nested sub-mechanism).
+   (an editor group's file tabs ARE the group's tabs, not a nested sub-mechanism).~~
+
 4. **Exact keyboard shortcut bindings** — **resolved with a concrete, collision-checked
    table, §4.9.** Read the actual registry (`keymodel.ts`) rather than guessing;
    found and extended its existing `Cmd:`-for-Window-Tab / `Ctrl:`-for-Pane
