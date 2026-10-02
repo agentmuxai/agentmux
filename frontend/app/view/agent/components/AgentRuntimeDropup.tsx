@@ -259,7 +259,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         addSection(
             "mode",
             MODE_OPTIONS.map((o) => {
-                const t = permissionModeText(o.value, autoAnswers);
+                const t = permissionModeText(o.value, autoAnswers, props.providerId);
                 return { ...o, menuLabel: t.label, description: t.note };
             }),
             r.permissionMode,

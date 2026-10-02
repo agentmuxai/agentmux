@@ -158,7 +158,7 @@ function permissionChoices(ctx: SlashCommandContext): SlashChoice[] {
     ): SlashChoice => ({
         value,
         label,
-        description: permissionModeText(mode, autoAnswers).note ?? description,
+        description: permissionModeText(mode, autoAnswers, provider?.id ?? "").note ?? description,
         current: current === mode,
         aliases,
     });

@@ -86,23 +86,52 @@ describe("permissionModeFromFlags / effectiveRuntime's mode", () => {
 });
 
 describe("permissionModeText", () => {
-    const MODES: PermissionMode[] = ["bypass", "auto", "acceptEdits", "plan", "default"];
-
-    it("where nothing answers the prompts for the user, the mode's own wording stands", () => {
-        expect(permissionModeText("default", false)).toEqual({ label: "Default (prompt all)" });
-        expect(permissionModeText("plan", false)).toEqual({ label: "Plan (read-only)" });
-        expect(permissionModeText("auto", false)).toEqual({ label: "Auto (AI classifier)" });
-        expect(permissionModeText("bypass", false)).toEqual({ label: "Bypass (no prompts)" });
+    it("makes no claim for a provider whose CLI was not observed", () => {
+        for (const id of ["gemini", "kimi", "qwen", "codex", ""]) {
+            for (const persistent of [true, false]) {
+                for (const m of ["bypass", "default", "acceptEdits", "auto", "plan"] as const) {
+                    const t = permissionModeText(m, persistent, id);
+                    expect(t.note).toBeUndefined();
+                    expect(t.label).not.toMatch(/read-only|prompt all|refused/i);
+                }
+            }
+        }
     });
 
-    it("where the server answers every prompt, no mode promises prompting", () => {
+    const MODES: PermissionMode[] = ["bypass", "auto", "acceptEdits", "plan", "default"];
+
+    it("where nothing can be asked (a container's one-shot run), the CLI refuses what the mode does not allow", () => {
+        // Observed on CLI 2.1.285 without a permission prompt tool: Default refuses an
+        // unapproved write or command; Plan refuses writes and blocks commands.
+        expect(permissionModeText("bypass", false).label).toBe("Bypass (no prompts)");
+        expect(permissionModeText("plan", false).label).toBe("Plan (read-only)");
+        expect(permissionModeText("default", false).note).toMatch(/refused/);
+        expect(permissionModeText("default", false).label).not.toMatch(/prompt all/i);
+        expect(permissionModeText("acceptEdits", false).note).toMatch(/edits are allowed.*refused/);
+        expect(permissionModeText("auto", false).label).toBe("Auto (AI classifier)");
+    });
+
+    it("where the server answers every ask, no mode promises prompting - or read-only-ness", () => {
         for (const m of MODES) {
             const t = permissionModeText(m, true);
             expect(t.label, m).not.toMatch(/prompt all|AI classifier|read-only/i);
         }
         expect(permissionModeText("default", true).note).toMatch(/allowed automatically/);
         expect(permissionModeText("acceptEdits", true).note).toMatch(/allowed automatically/);
-        expect(permissionModeText("plan", true).note).toMatch(/approved automatically/);
+    });
+
+    it("Plan on a persistent agent does NOT stop edits: writes are asked about and allowed (observed)", () => {
+        // The first wording said "read-only while planning". Running the CLI showed a write in
+        // plan mode is ASKED about, not refused, and an "allow" lets it happen.
+        const note = permissionModeText("plan", true).note ?? "";
+        expect(note).toMatch(/does NOT stop edits/);
+        expect(note).not.toMatch(/read-only/i);
+        expect(note).toMatch(/plan is approved automatically/);
+    });
+
+    it("Bypass says nothing false either way, so it needs no note", () => {
+        expect(permissionModeText("bypass", true)).toEqual({ label: "Bypass (no prompts)" });
+        expect(permissionModeText("bypass", false)).toEqual({ label: "Bypass (no prompts)" });
     });
 
     // `Record<PermissionMode, true>` makes this a COMPILE-TIME list: adding a mode to
@@ -115,15 +144,12 @@ describe("permissionModeText", () => {
             for (const autoAnswers of [true, false]) {
                 const t = permissionModeText(mode, autoAnswers);
                 expect(t.label.length, `${mode}/${autoAnswers}`).toBeGreaterThan(0);
-                // a note exists exactly where the label alone would mislead: modes whose
-                // prompts are answered for the user, other than Bypass (already true)
-                const needsNote = autoAnswers && mode !== "bypass";
+                // Where a note exists: every persistent mode but Bypass (the server answers its
+                // asks), and a one-shot run's Default and Accept Edits (they refuse, which the
+                // label alone does not say).
+                const needsNote = autoAnswers ? mode !== "bypass" : mode === "default" || mode === "acceptEdits";
                 expect(Boolean(t.note), `${mode}/${autoAnswers}`).toBe(needsNote);
             }
         }
-    });
-
-    it("Bypass says nothing false either way, so it needs no note", () => {
-        expect(permissionModeText("bypass", true)).toEqual({ label: "Bypass (no prompts)" });
     });
 });

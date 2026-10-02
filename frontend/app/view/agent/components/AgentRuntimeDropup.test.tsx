@@ -428,19 +428,22 @@ describe("AgentRuntimeDropup — the Mode section doesn't promise prompting that
         return screen.getAllByRole("option").map((o) => o.textContent ?? "");
     };
 
-    it("a persistent agent: Default says its prompts are allowed automatically", async () => {
+    it("a persistent agent: Default says its asks are allowed automatically; Plan says it does NOT stop edits", async () => {
         const rows = await open("host");
         const text = rows.join(" | ");
         expect(text).not.toMatch(/prompt all/i);
         expect(text).not.toMatch(/AI classifier/i);
+        expect(text).not.toMatch(/read-only/i);
         expect(rows.find((r) => /^Default/.test(r))).toMatch(/allowed automatically/);
-        expect(rows.find((r) => /^Plan/.test(r))).toMatch(/approved automatically/);
+        expect(rows.find((r) => /^Plan/.test(r))).toMatch(/does NOT stop edits/);
         expect(rows.find((r) => /^Bypass/.test(r))).toContain("no prompts");
     });
 
-    it("a container agent has no such layer, so the modes keep their own wording", async () => {
+    it("a container agent has no one to ask, so the CLI refuses: Default says so, and Plan really is read-only", async () => {
         const rows = await open("container");
-        expect(rows.find((r) => /^Default/.test(r))).toContain("prompt all");
+        expect(rows.find((r) => /^Default/.test(r))).toMatch(/refused/);
+        expect(rows.find((r) => /^Default/.test(r))).not.toMatch(/prompt all/i);
         expect(rows.find((r) => /^Plan/.test(r))).toContain("read-only");
     });
+
 });

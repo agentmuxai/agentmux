@@ -200,12 +200,12 @@ live check is still outstanding (§6 item 4).
 | **G2** antigravity lists models, applies none | **Open.** Pinned by a ratchet test | `pane-args-parity.test.ts` |
 | **G3** `agent.open` / stored panes had no runtime | **Fixed.** New panes are seeded, stored panes are filled at spawn, and `agent.open` installs a missing pinned CLI instead of refusing | #4114, #4116, #4156 |
 | **G4** effort shown for Haiku, applied by exact alias only | **Fixed.** One rule (`modelTakesEffort`: any Haiku id, any case), decided on the model that actually runs (a definition's own `--model` wins; a repeated flag: the last wins, in TS and Rust), Claude only | #4152 |
-| **G5** Mode labels promised prompting that never happens | **Fixed as wording.** Making the modes actually prompt is a separate feature and is **not done** | #4163 |
+| **G5** Mode labels promised prompting that never happens | **Wording fixed, twice.** #4163's first wording called Plan "read-only"; running the CLI (spec `SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md` §7.3) showed that is **false** for a persistent agent: Plan *asks* before a write and the server's blanket "allow" lets it through. Corrected. Making the modes actually prompt or refuse is a separate feature and is **not done** | #4163, then the Plan-mode correction |
 | **G6** srv-originated turns skip the per-send rebuild | **Partly.** A turn with *no* `--model`/`--effort` gets them from `agent:runtime`; a *changed* value in an existing flag still waits for the next UI send | #4116 |
 | **G7** a running process ignores later `cmd:args` | **Mitigated.** The common cause is closed (#4098/#4114/#4116) and the menu now detects the rest and offers "Restart to apply" | #4149 |
 | **G8** a definition's `--model`/`--effort`/mode silently overrode the menu | **Fixed.** The menu shows what runs; a pick takes the overriding flag out of that pane's copy (the definition is untouched); launch seeds from the definition | #4161 |
 | **G9** runtime lost across launches | **Partly.** A fork carries its source's effective runtime. Continue / Reattach / New session start from a closed agent and need the runtime stored on the agent instance (a schema change) | #4162 |
-| **G10** the effective model is never observed | **Partly.** The menu compares its selection with what each process was *spawned with* (srv publishes the argv's runtime flags, `agentruntime`), and shows a difference, or "applies after this turn". It does not show the model the CLI *resolved* an alias to; the in-stream signal for that is now trustworthy (#4158) but is not used yet | #4149 |
+| **G10** the effective model is never observed | **Partly.** The menu compares its selection with what each process was *spawned with* (srv publishes the argv's runtime flags, `agentruntime`), and shows a difference, or "applies after this turn". It does not show the model the CLI *resolved* an alias to; the in-stream signal for that is now trustworthy (#4158) but is not used yet, and `get_settings` was **observed to work on the pinned CLI** (spec §7.3), which also reports effort | #4149 |
 | **G11** `/btw` copies the source pane's `cmd:args` | **Open** | |
 | **G12** codex app-server reads `agent:model`, which nothing writes | **Open** (dormant: that controller is not enabled) | |
 | **G13** dropup auto-migration restarts the agent silently | **Open** | |
@@ -225,5 +225,5 @@ Found after the inventory was written:
 
 - The **permission modes still do not prompt** on a persistent agent. Only the menu's description of them was corrected.
 - A definition's `--model` that is *also* in the agent's pane flags is taken out when the user picks; a user who wants the definition's model back has to pick it again (or relaunch).
-- Whether the CLI takes the **last** of two repeated `--model` flags is assumed everywhere (frontend, srv, tests) and **unverified**.
+- ~~Whether the CLI takes the last of two repeated `--model` flags~~ is now **observed** (2.1.285: the last wins, both orders), and so is what `--effort` does on Haiku: the CLI drops it, so the earlier "400s on Haiku" is **not established for the pinned CLI** (spec §7.3).
 - Whether `muxcode`, `openclaw`, `copilot`, `pi` and antigravity tolerate `--dangerously-skip-permissions` (G1) is **unverified**.

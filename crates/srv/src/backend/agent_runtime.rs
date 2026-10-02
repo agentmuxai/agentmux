@@ -156,9 +156,10 @@ pub(crate) struct SeededLaunch {
 
 /// The value of `--flag value` or `--flag=value` in `flags`, if present; the last one when it repeats.
 fn flag_value<'a>(flags: &'a [String], names: &[&str]) -> Option<&'a str> {
-    // The LAST occurrence wins, as on the command line (and in the frontend's
-    // `modelFromFlags`): `--model opus --model haiku` runs Haiku. Returning the
-    // first decided on Opus and handed Haiku an `--effort` it rejects.
+    // The LAST occurrence wins, as the CLI reads a repeated flag (observed on CLI
+    // 2.1.285: `--model opus --model haiku` sends Haiku, and the reverse sends Opus;
+    // the frontend's `modelFromFlags` agrees). Returning the first decided on Opus
+    // and handed Haiku an `--effort` it does not take.
     let mut found = None;
     let mut it = flags.iter();
     while let Some(f) = it.next() {
@@ -240,7 +241,8 @@ pub(crate) fn seed_launch(
             if flag_model.is_none() {
                 cli_args.extend(["--model".to_string(), model.clone()]);
             }
-            // `--effort` 400s on Haiku 4.5; the frontend skips it the same way.
+            // Haiku takes no `--effort` (the pinned CLI drops it; older CLIs forwarded
+            // it and the API answered 400); the frontend skips it the same way.
             if flag_effort.is_none() && model_takes_effort(&model) {
                 cli_args.extend(["--effort".to_string(), effort.clone()]);
             }
@@ -265,7 +267,8 @@ pub(crate) fn seed_launch(
     }
 }
 
-/// Whether `--effort` is passed for `model`. Haiku 4.5 rejects it (HTTP 400 on
+/// Whether `--effort` is passed for `model`. Haiku takes none (the pinned CLI drops
+/// it; older CLIs forwarded it and the API answered HTTP 400 on
 /// every turn). Matches the model id as well as the alias, case-insensitively —
 /// this was `model == "haiku"`, so a concrete Haiku id still got the flag.
 /// Mirrors `modelTakesEffort` in frontend/app/view/agent/runtime-capabilities.ts.
@@ -498,10 +501,10 @@ mod tests {
         }
     }
 
-    // ReAgent P2 on #4152. A repeated flag: the LAST wins, as on the command line
-    // and in the frontend's modelFromFlags. flag_value used to return the first,
-    // so `--model opus --model haiku` was decided as Opus (and given --effort) while
-    // the CLI ran Haiku, which answers HTTP 400 on every turn.
+    // ReAgent P2 on #4152. A repeated flag: the LAST wins, as the CLI reads it
+    // (observed on 2.1.285) and as the frontend's modelFromFlags does. flag_value
+    // used to return the first, so `--model opus --model haiku` was decided as Opus
+    // (and given --effort) while the CLI ran Haiku, which takes no effort.
     #[test]
     fn a_repeated_flag_is_decided_on_the_last_one_as_the_cli_reads_it() {
         let out = seed_launch("claude", s(&[]), "--model opus --model haiku");
