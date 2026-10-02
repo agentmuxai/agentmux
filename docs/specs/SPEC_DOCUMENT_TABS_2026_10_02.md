@@ -1,6 +1,6 @@
 # SPEC: Document tabs: one shared tab system for the documents inside a pane
 
-**Status:** active. Phase 1 is built: the shared layer and Hangar on it (§9; where the build differs from the design below, the section says so). Phases 2–5 are not. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
+**Status:** active. Phase 1 is built (#4231): the shared layer and Hangar on it (§9; where the build differs from the design below, the section says so). Phases 2–5 are not. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"there are actually 3 types: Window tabs, Pane tabs, and inner-pane tabs"*; *"The media pane tabs would also be in-pane tabs"*; *"ok document tabs. so u will create 1 document tab system that editor, hangar, media, (does browser have it too?) and whatever types"*; and *"lets also backreference old docs to this, so old stuff like that idea you found is squashed"*.
