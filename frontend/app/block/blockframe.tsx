@@ -158,8 +158,7 @@ export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
 }
 
 /**
- * Build a "Pane Color" submenu — mirrors the "Replace With..." submenu pattern
- * (pane-actions.ts). Looks and acts exactly like the rest of the context menu:
+ * Build a "Pane Color" submenu — a native submenu (`type: "submenu"`). Looks and acts exactly like the rest of the context menu:
  * expands on hover, fully clickable, consistent with every other menu. Each
  * item carries an inline color swatch in its exact hue (the context menu is a
  * DOM overlay, so `swatchColor` renders a real colored square before the label
@@ -214,7 +213,7 @@ function handleHeaderContextMenu(
         inspectAt: { x: e.clientX, y: e.clientY },
     }, viewModel);
 
-    // Header-only: pane color submenu (mirrors "Replace With...")
+    // Header-only: pane color submenu
     menu.push(...buildPaneColorSubmenu(blockData));
 
     // Header-only: view-specific settings (font size, theme, etc.)
@@ -604,9 +603,9 @@ function BlockFrame_Header(
 
     const onContextMenu = (e: MouseEvent) => {
         // Native context menu. Pane color is a native "Pane Color" submenu inside
-        // it (see handleHeaderContextMenu / buildPaneColorSubmenu) — mirroring
-        // "Replace With...". Fully native: expands on hover, clickable, no DOM
-        // overlay to conflict with the modal menu.
+        // it (see handleHeaderContextMenu / buildPaneColorSubmenu). Fully native:
+        // expands on hover, clickable, no DOM overlay to conflict with the modal
+        // menu.
         handleHeaderContextMenu(
             e,
             blockData(),

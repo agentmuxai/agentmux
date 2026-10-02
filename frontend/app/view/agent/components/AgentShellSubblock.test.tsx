@@ -1221,13 +1221,13 @@ describe("AgentShellSubblock — right-click region (SPEC_AGENT_SHELL_DRAWER_CON
         return container.querySelector(".agent-shell-subblock") as HTMLElement;
     }
 
-    it("registers a region on the terminal surface that strips Split / Replace / agent items and the generic clipboard", async () => {
+    it("registers a region on the terminal surface that strips Split / agent items and the generic clipboard", async () => {
         const surface = mountFresh();
         await waitFor(() => expect(termWrapInstances.length).toBe(1));
 
         const region = resolveContextMenuRegion(surface);
         expect(region).not.toBeNull();
-        expect(region!.omit).toEqual(expect.arrayContaining(["viewItems", "clipboard", "split", "replace"]));
+        expect(region!.omit).toEqual(expect.arrayContaining(["viewItems", "clipboard", "split"]));
         // Magnify / Close / Inspect stay.
         for (const kept of ["magnify", "close", "inspect"]) expect(region!.omit).not.toContain(kept);
     });
