@@ -710,13 +710,10 @@ function BlockFrame_Header(
         // (frame:hue) wins over the agent's passive persisted identity
         // color (SPEC_AGENT_COLOR_2026_08_08.md's `frame:activebordercolor`,
         // already seeded per-agent for the border); either way the header
-        // gets the SAME darkened/muted treatment on a dark theme
-        // (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's deferred
-        // consolidation) instead of the decommissioned env-var-driven color
-        // system, or (pre-2026-09-21) the identity color at full strength —
-        // still true on a LIGHT theme (user request 2026-09-21): darkening
-        // reads as broken/muddy against a light UI, so light themes keep
-        // matching the border's full-strength color instead.
+        // gets the SAME treatment (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's
+        // deferred consolidation): since 2026-10-02 a subtle OKLCH tint of
+        // the identity in both themes (pane-color-scheme.ts `headerTint`) —
+        // no longer the identity at full strength on a light theme.
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
         // An explicit override wins over this block's own color: the row is

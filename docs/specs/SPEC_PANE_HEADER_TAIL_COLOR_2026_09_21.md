@@ -53,7 +53,10 @@ in the pane (§3.1 defines "effective"), in tab order.
 |---|---|
 | Exactly one tab | That tab's effective color |
 | Two or more tabs, all the same effective color | That shared color |
+| Two or more tabs, exactly one identity among them, the rest uncoloured | **That identity's color** — fixed, independent of which tab is active (amended 2026-10-02, below) |
 | Two or more tabs, two or more distinct effective colors | **App default** — fixed, independent of which tab is active |
+
+> **Amended 2026-10-02** (`docs/reports/REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md` §6 P2, owner request): an uncoloured tab is no longer counted as a colour of its own. A pane with one agent plus utility tabs (the owner's example: Accounts beside AgentX) is about that agent, so its tail keeps that agent's tint. Still the same for every active tab, so the tail never moves on a tab switch, which is this spec's point. Two or more identities stay neutral, and a pane with no identity at all keeps §3.1's view-keyed rule. §3.1's "one coloured + one uncoloured = neutral" bullet is superseded by this row.
 
 Every pill keeps its own color. The **active** pill needed one follow-up
 change to make that true — see §2.2.
