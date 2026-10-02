@@ -155,6 +155,15 @@ const ABSENCE_EXACT: &[&str] = &[
     // The abstain token the title prompts tell the model to use for "no change".
     // It is not a title, so it must never be stored or shown.
     "keep",
+    // A model that abstains in its own words instead of the exact token. Exact only:
+    // "Keep alive pings" is a real title.
+    "keep the current title",
+    "keep current title",
+    "keep it",
+    "no change",
+    "no changes",
+    "no update",
+    "unchanged",
     "not set",
     "not yet",
     "no title",
@@ -233,8 +242,17 @@ fn is_wrapped_note(text: &str) -> bool {
     depth == 0
 }
 
+/// A reply that LEADS with the abstain token in capitals, "KEEP — the title still
+/// fits": the model said "no change" and explained itself. Case-sensitive on purpose:
+/// "Keep alive pings" and "Keep the swarm summary fresh" are real titles, while an
+/// upper-case KEEP is the token the prompt asked for.
+fn leads_with_abstain_token(text: &str) -> bool {
+    let first = text.trim().split_whitespace().next().unwrap_or("");
+    first.trim_matches(|c: char| !c.is_alphanumeric()) == crate::ambient::prompt::KEEP_TOKEN
+}
+
 fn is_absence(text: &str) -> bool {
-    if is_wrapped_note(text) {
+    if is_wrapped_note(text) || leads_with_abstain_token(text) {
         return true;
     }
     let form = absence_form(text);
@@ -392,6 +410,27 @@ mod tests {
         }
         for title in ["(a) b (c)", "[a] b [c]", "(a) (b)", "(a", "a)", "plain"] {
             assert!(!is_wrapped_note(title), "{title:?}");
+        }
+    }
+
+    // The real model returned the exact token in every abstain case when tried live, but
+    // a reply that abstains in its own words must not overwrite a good title either.
+    #[test]
+    fn an_abstain_in_the_models_own_words_is_not_a_title() {
+        for s in [
+            "KEEP — the title still fits",
+            "KEEP: unchanged",
+            "KEEP the current title",
+            "Keep current title",
+            "keep the current title",
+            "No change",
+            "Unchanged",
+            "No update",
+        ] {
+            assert_eq!(accept_line(s, &title_limits(7)), None, "{s:?}");
+        }
+        for s in ["Keep alive pings", "Keep the swarm summary fresh", "Unchanged files report fix"] {
+            assert!(accept_line(s, &title_limits(7)).is_some(), "{s:?}");
         }
     }
 

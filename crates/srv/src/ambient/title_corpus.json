@@ -38,7 +38,13 @@
     "I don't have enough information",
     "If you'd like me to write a title, share the conversation",
     "((none yet))",
-    "Title unavailable"
+    "Title unavailable",
+    "KEEP — the title still fits",
+    "KEEP: unchanged",
+    "Keep current title",
+    "No change",
+    "Unchanged",
+    "No update"
   ],
   "accepted": [
     "Fix the untitled-tab bug",
@@ -60,6 +66,8 @@
     "Title not updating in swarm row",
     "(WIP) Fix login redirect (again)",
     "[Windows] Fix installer crash [x64]",
-    "(Draft) Review the plan"
+    "(Draft) Review the plan",
+    "Keep alive pings",
+    "Unchanged files report fix"
   ]
 }

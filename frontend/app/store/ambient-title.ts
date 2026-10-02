@@ -40,6 +40,15 @@ const ABSENCE_EXACT = new Set([
     "pending",
     // The abstain token the title prompts give the model for "no change".
     "keep",
+    // A model that abstains in its own words instead of the exact token. Exact only:
+    // "Keep alive pings" is a real title.
+    "keep the current title",
+    "keep current title",
+    "keep it",
+    "no change",
+    "no changes",
+    "no update",
+    "unchanged",
     "not set",
     "not yet",
     "no title",
@@ -150,8 +159,18 @@ function isWrappedNote(text: string): boolean {
     return depth === 0;
 }
 
+/**
+ * A reply that LEADS with the abstain token in capitals ("KEEP — the title still fits"):
+ * the model said "no change" and explained itself. Case-sensitive on purpose: "Keep
+ * alive pings" is a real title, an upper-case KEEP is the token the prompt asked for.
+ */
+function leadsWithAbstainToken(text: string): boolean {
+    const first = text.trim().split(/\s+/)[0] ?? "";
+    return first.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "") === "KEEP";
+}
+
 function isAbsence(text: string): boolean {
-    if (isWrappedNote(text)) return true;
+    if (isWrappedNote(text) || leadsWithAbstainToken(text)) return true;
     const form = absenceForm(text);
     if (ABSENCE_EXACT.has(form)) return true;
     return ABSENCE_PREFIXES.some((p) => form === p || form.startsWith(`${p} `));
