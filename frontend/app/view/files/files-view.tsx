@@ -440,9 +440,12 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             }
         } else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "t") openInNewTab(model.path());
         else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "w") {
-            void closeOwnTab(model.blockId).then((closed) => {
-                if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
-            });
+            void closeOwnTab(model.blockId).then(
+                (closed) => {
+                    if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
+                },
+                (err) => model.setStatus({ text: `Couldn't close this tab: ${errorText(err)}`, tone: "error" })
+            );
         } else if (e.key === "Enter") {
             const list = model.selectedEntries();
             if (list.length === 1) openEntry(list[0]);
