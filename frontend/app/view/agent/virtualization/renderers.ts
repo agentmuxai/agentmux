@@ -166,9 +166,9 @@ export function estimateExpandedJekt(message: string): number {
 
 const SHELL_COLLAPSED_PX = 32;
 
-const CONTEXT_DELIVERY_TITLE_PX = 30;
+const CONTEXT_DELIVERY_TITLE_PX = 24;
 const CONTEXT_DELIVERY_EXCERPT_PX = 22;
-const CONTEXT_DELIVERY_ITEM_HEAD_PX = 24;
+const CONTEXT_DELIVERY_ITEM_HEAD_PX = 20;
 const CONTEXT_DELIVERY_ADVICE_PX = 40;
 
 /**
