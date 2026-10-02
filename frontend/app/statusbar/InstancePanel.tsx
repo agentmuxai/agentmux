@@ -27,6 +27,9 @@ import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { dispatchWindowOpacity, liveWindowOpacity } from "@/app/store/window-opacity-store";
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { summarizeTitleOutcomes, type AmbientOutcomes } from "@/app/store/ambient-outcomes";
 import {
     DISPLAY_NAME_MAX_LEN,
     DISPLAY_NAME_META_KEY,
@@ -88,6 +91,15 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const muxbus = useMuxBusStatus();
     void muxbus.refresh();
     const muxbusOk = () => isMuxBusSessionOk(muxbus.status());
+
+    // Session-title outcomes since srv started, read on open like the MuxBus
+    // status above (SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md 5.8).
+    // An older srv without the command leaves the row hidden.
+    const [ambientOutcomes, setAmbientOutcomes] = createSignal<AmbientOutcomes | null>(null);
+    RpcApi.AmbientOutcomesCommand(TabRpcClient, {})
+        .then((o) => setAmbientOutcomes(o ?? null))
+        .catch(() => {});
+    const titleOutcomes = createMemo(() => summarizeTitleOutcomes(ambientOutcomes()));
 
     // Refresh window-instance state ONLY when the launcher is silent
     // (`task dev` mode — no launcher process, no typed events). In
@@ -454,6 +466,22 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                             ⧉
                         </button>
                     </div>
+                </Show>
+                <Show when={titleOutcomes()}>
+                    {(t) => (
+                        <div class="instance-panel-row instance-panel-row-meta" title={t().detail}>
+                            <span class="instance-panel-label">Titles</span>
+                            <span
+                                classList={{
+                                    "instance-panel-value": true,
+                                    "instance-panel-mono": true,
+                                    "instance-panel-value--warn": t().unhealthy,
+                                }}
+                            >
+                                {t().text}
+                            </span>
+                        </div>
+                    )}
                 </Show>
                 <Show when={about().cefVersion}>
                     <div class="instance-panel-row instance-panel-row-meta">
