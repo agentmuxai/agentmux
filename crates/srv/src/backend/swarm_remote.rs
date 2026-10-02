@@ -119,8 +119,6 @@ pub fn other_channels(
         .collect()
 }
 
-/// The full answer: this machine's other channels as one host, or no host at all
-/// when there are none.
 /// LAN hosts from the discovery peer list. A peer at one of this machine's own
 /// addresses is another channel on this host, which the registry already lists
 /// (with more detail), so it is left out here. A peer that did not advertise its
