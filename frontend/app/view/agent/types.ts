@@ -426,6 +426,11 @@ export interface UserMessageNode {
      *  An entry without `id` was no longer available when it was sent.
      *  SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.8. */
     attachments?: { id?: string; name: string }[];
+    /** Set when this turn was one copy of a Swarm broadcast: the user typed it
+     *  once and sent it to several agents. `message` is then the body, with the
+     *  `[BROADCAST:...]` header srv prepended already removed.
+     *  SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md §4.5. */
+    broadcast?: { recipients?: number; msgId?: string };
 }
 
 /**

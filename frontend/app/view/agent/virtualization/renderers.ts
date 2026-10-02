@@ -85,6 +85,13 @@ export function estimateUnwrappedTextHeight(
 // flags any kind whose p50 actual diverges > 30% from estimate.
 const TOOL_COLLAPSED_PX = 32;
 const COLLAPSED_MESSAGE_PX = 32;
+/** The "Broadcast · N agents" note above a Swarm broadcast's body. */
+export const BROADCAST_NOTE_PX = 20;
+
+/** A user message's body height, plus the broadcast note when it has one. */
+function estimateUserMessage(node: Extract<DocumentNode, { type: "user_message" }>): number {
+    return estimateUnwrappedTextHeight(node.message) + (node.broadcast ? BROADCAST_NOTE_PX : 0);
+}
 
 /**
  * The CSS preview cap, `$transcript-preview-max-height: calc(50vh / 3)`, in
@@ -252,7 +259,7 @@ export function estimateNodeForState(
                 // Startup messages collapse; normal user input doesn't.
                 return node.isStartup
                     ? COLLAPSED_MESSAGE_PX
-                    : estimateUnwrappedTextHeight(node.message);
+                    : estimateUserMessage(node);
             case "markdown":
                 // Canceled-thinking collapses; normal markdown stays full.
                 return node.metadata?.canceled
@@ -278,7 +285,7 @@ export function estimateNodeForState(
         case "tool":              return isContentFirstTool(node) ? contentFirstToolEstimatePx() : toolExpandedPx();
         case "agent_message":     return estimateTextHeight(node.message);
         case "jekt_message":      return estimateExpandedJekt(node.message);
-        case "user_message":      return estimateUnwrappedTextHeight(node.message);
+        case "user_message":      return estimateUserMessage(node);
         case "markdown":          return estimateMarkdown(node);
         case "shell":             return SHELL_EXPANDED_PX;
         case "agent_error":       return 64;

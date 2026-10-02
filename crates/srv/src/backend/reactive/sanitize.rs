@@ -446,6 +446,30 @@ pub fn wrap_jekt_message(
     )
 }
 
+/// The text an agent receives for one target of a Swarm broadcast: a one-line
+/// header, then the body.
+///
+/// ```text
+/// [BROADCAST:FROM=user VIA=swarm TO=agent1 RECIPIENTS=7 MSGID=<id> TS=<unix secs>]
+/// <what the user typed>
+/// ```
+///
+/// This is deliberately not a jekt: a broadcast is the human typing once to
+/// several panes, so it travels the user-turn path and carries no `TIER`,
+/// `TRUST` or `ESCALATE`. Only srv writes this header — `neutralize_markers`
+/// rewrites `[BROADCAST:` (and `[JEKT:`) inside every delivered body, so a
+/// jekt, a chat-bridge message or the broadcast text itself cannot forge one.
+/// See `docs/specs/SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md`.
+pub fn broadcast_turn_message(target_agent: &str, recipients: usize, msg_id: &str, body: &str) -> String {
+    let ts_secs = agentmux_common::time::now_secs_u64();
+    let target_agent = marker_field(target_agent);
+    let msg_id = marker_field(msg_id);
+    let body = neutralize_markers(&sanitize_message(body));
+    format!(
+        "[BROADCAST:FROM=user VIA=swarm TO={target_agent} RECIPIENTS={recipients} MSGID={msg_id} TS={ts_secs}]\n{body}"
+    )
+}
+
 /// A value rendered into the marker as one `KEY=value` field. Only
 /// printable ASCII survives (agent ids are ASCII); `=`, `[`, `]`, spaces and
 /// everything else — including invisible and bidi-control characters —
@@ -478,10 +502,15 @@ fn fold(c: char) -> char {
     c.to_ascii_lowercase()
 }
 
-/// If `chars[i..]` starts a marker delimiter — `[`, optional `/`, `jekt`,
+/// Marker words whose delimiters a delivered body must not be able to write:
+/// the jekt block, and the Swarm broadcast header (`broadcast_turn_message`).
+/// Each is quoted as `[<WORD>-QUOTED...`.
+const MARKER_WORDS: &[(&str, &str)] = &[("jekt", "JEKT"), ("broadcast", "BROADCAST")];
+
+/// If `chars[i..]` starts a marker delimiter — `[`, optional `/`, `word`,
 /// then `:` or `]`, with whitespace/ZWJ/ZWNJ allowed between the parts and
 /// fullwidth forms accepted — returns its length and whether it closes.
-fn match_delimiter(chars: &[char], i: usize) -> Option<(usize, bool, char)> {
+fn match_delimiter(chars: &[char], i: usize, word: &str) -> Option<(usize, bool, char)> {
     let skippable = |c: char| c.is_whitespace() || c == '\u{200C}' || c == '\u{200D}';
     if fold(*chars.get(i)?) != '[' {
         return None;
@@ -493,7 +522,7 @@ fn match_delimiter(chars: &[char], i: usize) -> Option<(usize, bool, char)> {
         j += 1;
         while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
     }
-    for want in ['j', 'e', 'k', 't'] {
+    for want in word.chars() {
         while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
         if fold(*chars.get(j)?) != want {
             return None;
@@ -517,18 +546,20 @@ fn neutralize_markers(msg: &str) -> String {
     let chars: Vec<char> = msg.chars().collect();
     let mut out = String::with_capacity(msg.len());
     let mut i = 0;
-    while i < chars.len() {
-        if let Some((len, closing, end)) = match_delimiter(&chars, i) {
-            out.push_str(match (closing, end) {
-                (true, _) => "[/JEKT-QUOTED]",
-                (false, ':') => "[JEKT-QUOTED:",
-                _ => "[JEKT-QUOTED]",
-            });
-            i += len;
-        } else {
-            out.push(chars[i]);
-            i += 1;
+    'scan: while i < chars.len() {
+        for (word, label) in MARKER_WORDS {
+            if let Some((len, closing, end)) = match_delimiter(&chars, i, word) {
+                match (closing, end) {
+                    (true, _) => out.push_str(&format!("[/{label}-QUOTED]")),
+                    (false, ':') => out.push_str(&format!("[{label}-QUOTED:")),
+                    _ => out.push_str(&format!("[{label}-QUOTED]")),
+                }
+                i += len;
+                continue 'scan;
+            }
         }
+        out.push(chars[i]);
+        i += 1;
     }
     out
 }

@@ -2866,7 +2866,6 @@ mod fleet_tests {
             &state,
             vec![unregistered_block.clone()],
             "hello fleet".to_string(),
-            None,
         ).await;
 
         assert!(result.succeeded.is_empty());
@@ -2893,7 +2892,7 @@ mod fleet_tests {
         let block_id = format!("fleet-test-block-{unique}");
         state.reactive_handler.register_agent(&agent_id, &block_id, None).unwrap();
 
-        let result = fleet_broadcast_impl(&state, vec![block_id.clone()], "hi".to_string(), None).await;
+        let result = fleet_broadcast_impl(&state, vec![block_id.clone()], "hi".to_string()).await;
 
         let outcome_ids: Vec<&str> = result
             .succeeded
@@ -2927,7 +2926,6 @@ mod fleet_tests {
             &state,
             vec![good_block.clone(), bad_block.clone()],
             "hi".to_string(),
-            None,
         ).await;
 
         let bad_failure = result.failed.iter().find(|f| f.id == bad_block);

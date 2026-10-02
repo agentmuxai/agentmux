@@ -23,6 +23,7 @@ import {
     previewCapPx,
     toolExpandedPx,
     STREAMING_CAPABLE,
+    BROADCAST_NOTE_PX,
 } from "./renderers";
 import { rowDisclosureIn } from "./disclosure";
 
@@ -404,5 +405,22 @@ describe("estimates follow the preview cap (window height / 6)", () => {
 
     it("grows on a tall window; the generic tool panel stays at its typical 200", () => {
         expect(at(2400)).toEqual({ cap: 400, cf: 447, jekt: 457, tool: 200 });
+    });
+});
+
+describe("user message height estimate — swarm broadcast note", () => {
+    const base: UserMessageNode = { type: "user_message", id: "u1", message: "line one\nline two" };
+
+    it("adds the broadcast note's height, collapsed or expanded", () => {
+        const plain = estimateNode(base, baseDocState());
+        const broadcast = estimateNode({ ...base, broadcast: { recipients: 3 } }, baseDocState());
+        expect(broadcast - plain).toBe(BROADCAST_NOTE_PX);
+        expect(estimateNodeForState({ ...base, broadcast: {} }, "collapsed", baseDocState())
+            - estimateNodeForState(base, "collapsed", baseDocState())).toBe(BROADCAST_NOTE_PX);
+    });
+
+    it("a startup row stays at its collapsed height", () => {
+        const startup: UserMessageNode = { ...base, isStartup: true };
+        expect(estimateNodeForState(startup, "collapsed", baseDocState())).toBe(32);
     });
 });
