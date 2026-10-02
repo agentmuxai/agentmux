@@ -1,11 +1,14 @@
 # Report: the tool-call hover panel — line height, flicker when it is too tall, and leaving the pane
 
-**Status:** analysis
+**Status:** active: Option A (§6) implemented in #4215 (placement, hover bridge, window boundary, line height); Option B (move onto `AnchoredPopover`) remains open
 
 Date: 2026-10-02 · Author: Loap · Base: `main` @ `f5dfeafbc` (v0.59.5)
 
-Analysis only. No source files were changed. The flicker is reproduced by a
-simulation of the placement code (§3.3), not by watching the app.
+Written as analysis, then Option A was implemented in #4215 (the report's own
+files, `PeekOverlay.tsx` and the new `peek-placement.ts`, are what that PR
+changes). The flicker is reproduced by a simulation of the placement code (§3.3),
+not by watching the app; neither the report nor #4215 has seen it in a running
+window.
 
 ---
 
@@ -228,7 +231,14 @@ decision in §5.3.
 **Option C — only the line height now.** One value; ship immediately; does not touch
 the flicker.
 
-I recommend **C immediately, then B**; A only if B is judged too big.
+I recommended **C immediately, then B**; A only if B is judged too big.
+
+**What shipped (#4215): Option A**, which includes C. B was left for a follow-up
+because it needs the zoom decision in §5.3 and touches how all 13 call sites are
+anchored. The choices in §7 were taken at the recommended defaults without an
+answer: beside the pane, interactive, a `min(free space, 60vh)` ceiling, and the
+agent pane's zoom. §6's "suggested order" steps 1-4 are done; step 5 (fold into
+`AnchoredPopover`) is the open follow-up.
 
 ### Suggested order if you say go
 
