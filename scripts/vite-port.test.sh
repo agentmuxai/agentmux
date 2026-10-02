@@ -32,12 +32,16 @@ expect_status() { # <want 0|1> <label> <args...>
 for p in 1719 1720 1723 2049 3659 4045 4190 5060 5061 6000 6566 6665 6666 6667 6668 6669 6679 6697 10080; do
   expect_status 0 "blocked $p" blocked "$p"
 done
+# Leading zeros are the same port to Vite and Chromium.
+for p in 06000 006666 05060; do
+  expect_status 0 "blocked $p (leading zeros)" blocked "$p"
+done
 for p in 5999 6001 5059 5062 3658 3660 6565 6567 6664 6670 10079 10081; do
   expect_status 1 "not blocked $p" blocked "$p"
 done
 
 # 2. check: refuses bad values and blocked ports, accepts ordinary ones.
-for v in "" abc 12x 0 80 1023 65536 99999 -5 6000 6666; do
+for v in "" abc 12x 0 80 1023 65536 99999 -5 6000 6666   06000 006666 05300 0 00000 99999999999999999999 123456 " 6000" "6000 "; do
   expect_status 1 "check rejects '$v'" check "$v"
 done
 for v in 1024 5173 5300 5372 8080 65535; do

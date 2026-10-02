@@ -26,10 +26,15 @@ BLOCKED_PORTS="1719 1720 1723 2049 3659 4045 4190 5060 5061 6000 6566 6665 6666 
 
 is_number() { case "$1" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
+# Compare as numbers: Vite and Chromium both read 06000 as 6000. More than five
+# digits is never a port (and would overflow the arithmetic below).
 is_blocked() {
-  local p
+  local want="$1" p
+  is_number "$want" || return 1
+  want="${want#"${want%%[!0]*}"}" # strip leading zeros
+  [ -n "$want" ] && [ "${#want}" -le 5 ] || return 1
   for p in $BLOCKED_PORTS; do
-    [ "$p" = "$1" ] && return 0
+    [ "$p" = "$want" ] && return 0
   done
   return 1
 }
@@ -65,8 +70,11 @@ is_listening() {
 
 cmd_check() {
   local port="${1:-}"
-  if ! is_number "$port" || [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
-    echo "❌ AGENTMUX_VITE_PORT='$port' is not a port number between 1024 and 65535." >&2
+  # A plain number, no leading zero (06000 is 6000 to Vite but would slip past a
+  # string comparison) and at most five digits (longer would overflow -gt).
+  if ! is_number "$port" || [ "${#port}" -gt 5 ] || [ "${port#0}" != "$port" ] ||
+    [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+    echo "❌ AGENTMUX_VITE_PORT='$port' is not a plain port number between 1024 and 65535." >&2
     return 1
   fi
   if is_blocked "$port"; then
