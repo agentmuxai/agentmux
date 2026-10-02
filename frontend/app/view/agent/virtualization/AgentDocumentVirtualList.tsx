@@ -394,6 +394,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // the rule use-stick-to-bottom follows for its scroll spring.
     // REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01 (docs/reports) §5.
     const GLIDE_MS = 180;
+    /** Growth below this (sub-pixel settling) pins without a glide. */
+    const GROW_GLIDE_MIN_PX = 2;
     let rowAppended = false;
     const glides = new Set<Animation>();
     function cancelGlides(): void {
@@ -404,10 +406,75 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (scrollRef?.closest(".prefers-reduced-motion")) return true;
         return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
     }
+    /** The running glides' current offset (px, signed), then stops them. */
+    function takeGlideOffset(): number {
+        if (glides.size === 0 || !streamingBufferRef) return 0;
+        // A ResizeObserver callback: style and layout are clean, so this read
+        // costs no forced layout.
+        const m = getComputedStyle(streamingBufferRef).transform; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
+        const ty = m && m !== "none" ? new DOMMatrixReadOnly(m).m42 : 0;
+        cancelGlides();
+        return ty;
+    }
+
+    // ---- Shrink hold: what's above never moves back down ----
+    // When a row in the turn in flight gets shorter while pinned (a finished
+    // tool's preview collapsing to its result — 81 % of recorded shrinks),
+    // the pane's scrollHeight drops and the browser clamps scrollTop in the
+    // same layout: everything above slides down. The resize contract eases
+    // that shrink, which only turns the jump into a backward slide. Instead
+    // the streaming buffer keeps the tallest height it reached while pinned
+    // (`min-height`), so a shrink leaves room at the bottom and the next row
+    // fills it with nothing moving. Released when the turn's rows move into
+    // the head (the frontier moves) and when the reader leaves the bottom.
+    // SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md §2.
+    // The hold is brief: if nothing fills the room within HOLD_MS (the agent
+    // paused), it closes by itself, the content easing down over
+    // HOLD_RELEASE_MS instead of snapping. Every pin pass restarts the wait,
+    // so while the agent streams the room is filled, not closed.
+    const HOLD_MS = 700;
+    const HOLD_RELEASE_MS = 220;
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
+    function holdBufferHeight(): void {
+        const el = streamingBufferRef;
+        if (!el) return;
+        const h = el.offsetHeight; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
+        if (h > 0) el.style.minHeight = `${h}px`;
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(easeOutBufferHold, HOLD_MS);
+    }
+    function releaseBufferHold(): void {
+        clearTimeout(holdTimer);
+        if (streamingBufferRef?.style.minHeight) streamingBufferRef.style.minHeight = "";
+    }
+    /** Close the held room, easing the content down rather than snapping. */
+    function easeOutBufferHold(): void {
+        const el = streamingBufferRef;
+        if (!el?.style.minHeight || !scrollRef) return;
+        // A timer, not an input handler: one deliberate layout read pair.
+        const before = scrollRef.scrollTop; // perf:allow-layout-read — hold-release timer, once per quiet pause
+        el.style.minHeight = "";
+        const after = scrollRef.scrollTop; // perf:allow-layout-read — hold-release timer: the clamp after the release
+        const moved = before - after;
+        if (moved <= 0 || reducedMotion()) return;
+        cancelGlides();
+        for (const target of [virtualContainerRef, streamingBufferRef]) {
+            if (!target || typeof target.animate !== "function") continue;
+            // Upward offset: it doesn't add scrollable room, so no pin fights it.
+            const a = target.animate([{ transform: `translateY(${-moved}px)` }, { transform: "translateY(0)" }], {
+                duration: HOLD_RELEASE_MS,
+                easing: "cubic-bezier(0.2, 0, 0, 1)",
+            });
+            glides.add(a);
+            a.onfinish = () => glides.delete(a);
+            a.oncancel = () => glides.delete(a);
+        }
+    }
+
     function glideContent(delta: number): void {
-        if (delta <= 0 || !scrollRef || reducedMotion()) return;
+        if (Math.abs(delta) < 1 || !scrollRef || reducedMotion()) return;
         // A jump of more than most of the viewport is a load, not an arrival.
-        if (delta > scrollRef.clientHeight * 0.75) return; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
+        if (Math.abs(delta) > scrollRef.clientHeight * 0.75) return; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
         for (const el of [virtualContainerRef, streamingBufferRef]) {
             if (!el || typeof el.animate !== "function") continue;
             const a = el.animate([{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }], {
@@ -452,7 +519,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : undefined;
     onCleanup(() => tailRO?.disconnect());
-    onCleanup(cancelGlides);
+    onCleanup(() => { cancelGlides(); clearTimeout(holdTimer); });
 
     // Sticky frontier id — set once when the document first crosses
     // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
@@ -837,6 +904,23 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         startAgentLayoutShiftObserver();
     });
 
+    // The shrink hold (holdBufferHeight) belongs to the rows it measured: drop
+    // it when the buffer's first row changes — the turn's rows moved into the
+    // head, so the head grew by what the buffer gives up — and when the reader
+    // leaves the bottom (a shrink below them moves nothing they see). Effects
+    // run before the browser lays the change out.
+    let heldFirstId: string | undefined;
+    createEffect(() => {
+        const first = partition()?.streamingNodes[0]?.id;
+        if (first !== heldFirstId) {
+            heldFirstId = first;
+            releaseBufferHold();
+        }
+    });
+    createEffect(() => {
+        if (!props.viewState.stickToBottom()) releaseBufferHold();
+    });
+
     // Flip animateEnabled once history loading is done.
     //
     // `historyReady()` is set by useHistoryPagination after
@@ -1007,9 +1091,20 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 rowAppended = false;
                 return;
             }
+            // A glide still running when the pane re-pins (text streaming on
+            // under it) would make the pin count its transform as content —
+            // scrolling past the real bottom, then pulled back down as the
+            // glide ends. Take the glide's remaining offset, stop it, pin, and
+            // carry the offset into one new glide.
+            const carried = takeGlideOffset();
             const scrolled = scrollToTrueBottom();
-            if (rowAppended) glideContent(scrolled);
+            // Any growth glides, not just a new row: a tool's preview opening,
+            // each output line a running command prints ("tick 1", "tick 2"),
+            // streamed text. A glide still running is carried into the next,
+            // so steady streaming reads as one smooth scroll, not steps.
+            if (rowAppended || carried !== 0 || scrolled >= GROW_GLIDE_MIN_PX) glideContent(scrolled + carried);
             rowAppended = false;
+            holdBufferHeight();
             // New content may have pushed a held-open tool above the top
             // without a user scroll event — collapse it now (pinned to bottom,
             // so no visible jump). Formerly done by the pin effect's microtask;
