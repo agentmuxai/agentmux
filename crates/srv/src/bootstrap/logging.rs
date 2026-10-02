@@ -3,6 +3,23 @@
 
 //! Split out of bootstrap.rs unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.3).
 
+/// Route `log` crate records into `tracing`, at info and above.
+///
+/// The subscriber is built by hand (`registry()...set_global_default`), which does
+/// not install the `log` -> `tracing` bridge that `.init()` would. So every record
+/// from a dependency that logs through the `log` crate was dropped, at every level:
+/// `mdns-sd` included, whose `error!("bind a socket to {}: {}. Skipped.")` is exactly
+/// what was missing when an instance could hear its peers and not be heard
+/// (Area54, 2026-10-02), and which cost several cloud round trips to find by hand.
+///
+/// The cap is `Info`: the `log` macros skip anything above it before formatting, so
+/// the chatty `debug!`/`trace!` records of `mdns-sd`, `hyper` and friends cost
+/// nothing, and the `EnvFilter` below still decides what is written. Returns whether
+/// the bridge was installed (it is not if another `log` logger already is).
+pub(crate) fn install_log_bridge() -> bool {
+    tracing_log::LogTracer::builder().with_max_level(log::LevelFilter::Info).init().is_ok()
+}
+
 /// Initialize tracing with dual output: JSON rolling file + human-readable stderr.
 /// Returns a guard that must be held for the lifetime of the app to ensure log flushing.
 pub fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
@@ -93,6 +110,7 @@ pub fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
                 .with_ansi(true),
         );
 
+    install_log_bridge();
     tracing::subscriber::set_global_default(subscriber).ok();
 
     tracing::info!(
@@ -121,5 +139,53 @@ pub fn enrich_path() {
             source = path_source.as_str(),
             "Enriched srv PATH on direct launch (stripped PATH detected)"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+        type Writer = Capture;
+        fn make_writer(&'a self) -> Capture {
+            self.clone()
+        }
+    }
+
+    /// The failure this exists for: a `log::error!` from `mdns-sd` must reach the srv
+    /// log. Before the bridge it was dropped without a trace.
+    #[test]
+    fn a_log_crate_error_from_mdns_sd_reaches_tracing_but_debug_noise_does_not() {
+        if !super::install_log_bridge() {
+            // Another `log` logger is already installed in this test process, so the
+            // bridge cannot be exercised here; production has none before this runs.
+            eprintln!("skipped: a log logger is already installed in this process");
+            return;
+        }
+        let out = Capture::default();
+        let subscriber = tracing_subscriber::fmt().with_writer(out.clone()).with_max_level(tracing::Level::INFO).finish();
+        tracing::subscriber::with_default(subscriber, || {
+            log::error!(target: "mdns_sd::service_daemon", "bind a socket to 192.168.1.26: socket bind to 0.0.0.0:5353 failed. Skipped.");
+            log::debug!(target: "mdns_sd::service_daemon", "send outgoing query: 1 questions");
+        });
+        let text = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
+        assert!(text.contains("bind a socket to 192.168.1.26"), "the error must be logged: {text:?}");
+        assert!(text.contains("mdns_sd"), "and attributed to its crate: {text:?}");
+        assert!(!text.contains("send outgoing query"), "debug stays out (the bridge caps at info): {text:?}");
     }
 }
