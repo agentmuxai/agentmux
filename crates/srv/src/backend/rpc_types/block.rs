@@ -661,8 +661,10 @@ pub struct RunCliLoginResult {
 
 /// Request for pane.open — create a new pane showing the given view.
 ///
-/// Supported views: `editor`, `term`, `browser`, `sysinfo`, `help`.
-/// `file` is required for `editor`; `url` is required for `browser`.
+/// Supported views: `editor`, `term`, `browser`, `sysinfo`, `help`, `media`,
+/// `files`. `file` is required for `editor` and `media`; `url` is required
+/// for `browser`. For `files`, `file` is the folder (default: `cwd`, then
+/// home).
 /// Placement: if `split_direction` ("right" / "left" / "down" / "up")
 /// and `split_reference_block_id` are provided, the new pane splits
 /// relative to that block. Otherwise it is inserted at the tab root.
@@ -749,6 +751,14 @@ pub struct CommandPaneOpenData {
     /// docs/specs/SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
     /// Part 2.
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "files"` only: names (or full paths) inside `file` to select
+    /// once the pane has listed it, written to `block.meta["files:select"]`
+    /// (a one-shot request the view clears). Set by the `OpenFiles` MCP tool.
+    /// Omitted from serialization when absent, like `stack_onto_block_id`,
+    /// so `muxsh` (which never sends it) and the app-api manifest are
+    /// unaffected. SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<Vec<String>>,
 }
 
 /// Response from pane.open.
@@ -977,6 +987,7 @@ mod app_api_manifest_contract_tests {
             skip_placement: None,
             stack_onto_block_id: None,
             reuse_editor_pane: None,
+            select: None,
         };
         let value = serde_json::to_value(&instance).expect("CommandPaneOpenData must serialize");
         let struct_fields: HashSet<String> = value

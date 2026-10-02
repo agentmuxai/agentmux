@@ -392,6 +392,10 @@ pub struct PaneOpenRequest {
     /// reuse (`EditorViewModel.openToTheSide`/`openInTerminal`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "files"` only: names (or full paths) inside `file` to select
+    /// once the Files pane has listed it. Set by the `OpenFiles` MCP tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<Vec<String>>,
 }
 
 /// Response from `POST /api/v1/pane/open`

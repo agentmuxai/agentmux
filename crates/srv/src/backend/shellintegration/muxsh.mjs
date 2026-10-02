@@ -29,6 +29,7 @@
 // Exit codes: 0 success, 1 usage/environment error, 2 the server rejected
 // the request or is unreachable.
 
+import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { agentmuxFetch, readAgentmuxEnv } from "./lib/muxclient.mjs";
@@ -39,7 +40,7 @@ usage:
   muxsh open <file>              open a file in an editor pane
   muxsh web <url>                open a URL in a browser pane
   muxsh view <path-or-url>       open the right pane type automatically
-                                  (URL -> browser, media file -> media, else -> editor)
+                                  (URL -> browser, media file -> media, folder/ -> files, else -> editor)
   muxsh edit <file>               like 'open', but always forces the editor view
     --title <t>                  pane/tab title
     --split <right|left|down|up> split direction relative to the calling pane (default: right)
@@ -144,9 +145,13 @@ function parsePaneOpenFlags(argv, startIndex, isEditor) {
     return { title, split, collapseTree, floating, focus };
 }
 
-/** Guess the pane.open `view` for `muxsh view <path-or-url>`. Pure. */
+/** Guess the pane.open `view` for `muxsh view <path-or-url>`. Pure.
+ *
+ * A folder is recognised only by its shape (a trailing separator, `.`, `..`
+ * or `~`), since telling any other folder apart would take a stat. */
 export function guessView(target) {
     if (URL_PATTERN.test(target)) return "browser";
+    if (/[\\/]$/.test(target) || target === "." || target === ".." || target === "~") return "files";
     const lower = target.toLowerCase();
     if (MEDIA_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "media";
     return "editor";
@@ -191,6 +196,12 @@ export function parseArgs(argv) {
         if (flags.error) return flags;
         if (view === "browser") {
             return { command: "web", subcommand: "web", url: target, ...flags };
+        }
+        if (view === "files") {
+            // srv resolves `~` itself, but a relative folder means nothing
+            // outside this shell's working directory, so it goes absolute here.
+            const folder = target.startsWith("~") ? target : resolvePath(target);
+            return { command: "open", subcommand: "open", file: folder, view, ...flags };
         }
         // "media" and "editor" both use the pane.open editor-shaped request
         // (view/file), matching what buildPaneOpenBody already emits for "open".

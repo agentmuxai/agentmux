@@ -223,6 +223,12 @@ pub struct AppState {
     /// no-longer-optional note as `editor_file_watcher` above.
     /// See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.
     pub media_file_watcher: std::sync::Arc<crate::backend::media_file_watcher::MediaFileWatcher>,
+    /// Directory watcher behind `fs.watch` for Files panes — publishes
+    /// `files:changed` (scoped per-block) when a watched folder's listing
+    /// changes. Process-wide rather than per connection, so a watch outlives
+    /// the WebSocket that made it, like the two watchers above.
+    /// See docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3.
+    pub files_watcher: std::sync::Arc<crate::backend::files_watcher::FilesWatcher>,
     /// Shared filesystem-watcher framework (retry/fallback/self-healing on
     /// top of `notify`) that `editor_file_watcher`/`media_file_watcher`
     /// above are built on. See

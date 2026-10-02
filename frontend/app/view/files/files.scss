@@ -1,0 +1,402 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The Files pane (Hangar). docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.1.
+// No `transition: all` (CI gate): the pane lives inside window tabs hidden
+// with inherited `visibility`, and an `all` transition would animate that.
+
+.files-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    min-width: 0;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    overflow: hidden;
+    // Narrow panes drop Places first (§5.1).
+    container-type: inline-size;
+}
+
+// ── Toolbar ─────────────────────────────────────────────────────────────────
+
+.files-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.files-tool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+        background: var(--hover-bg-color);
+        color: var(--main-text-color);
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+
+    &.files-tool-on {
+        color: var(--accent-color);
+    }
+}
+
+.files-breadcrumb {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    // Scrolled to its end by the view, so a long path hides its start.
+    overflow: hidden;
+    padding: 0 4px;
+    white-space: nowrap;
+}
+
+.files-crumb {
+    flex-shrink: 0;
+    padding: 2px 4px;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--main-text-color);
+    font: inherit;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+.files-crumb-sep {
+    flex-shrink: 0;
+    font-size: 8px;
+    color: var(--secondary-text-color);
+    margin: 0 1px;
+}
+
+.files-path-input {
+    flex: 1;
+    min-width: 0;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--accent-color);
+    border-radius: 3px;
+    background: var(--input-bg-color);
+    color: var(--main-text-color);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    outline: none;
+}
+
+// ── Body: Places and the list ───────────────────────────────────────────────
+
+.files-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.files-places {
+    display: flex;
+    flex-direction: column;
+    width: 160px;
+    flex-shrink: 0;
+    padding: 4px 0;
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+
+    @container (max-width: 420px) {
+        display: none;
+    }
+}
+
+.files-places-heading {
+    padding: 8px 10px 2px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--secondary-text-color);
+}
+
+.files-place {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    border: none;
+    background: transparent;
+    color: var(--main-text-color);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    i {
+        width: 14px;
+        color: var(--secondary-text-color);
+    }
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+.files-list {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
+    outline: none;
+
+    &:focus-visible .files-row-focused {
+        outline: 1px solid var(--accent-color);
+        outline-offset: -1px;
+    }
+}
+
+.files-row {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 6px;
+    white-space: nowrap;
+    cursor: default;
+    user-select: none;
+}
+
+.files-rows {
+    position: relative;
+
+    .files-row {
+        position: absolute;
+        left: 0;
+        right: 0;
+
+        &:hover {
+            background: var(--hover-bg-color);
+        }
+
+        &.files-row-selected {
+            background: var(--highlight-bg-color);
+        }
+
+        &.files-row-hidden .files-name {
+            opacity: 0.6;
+        }
+    }
+}
+
+.files-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--main-bg-color);
+    border-bottom: 1px solid var(--border-color);
+
+    .files-cell {
+        height: 100%;
+        border: none;
+        background: transparent;
+        color: var(--secondary-text-color);
+        font: inherit;
+        font-weight: 600;
+        text-align: left;
+        cursor: pointer;
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
+}
+
+.files-sort-mark {
+    margin-left: 4px;
+}
+
+.files-cell {
+    padding: 0 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.files-col-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 120px;
+}
+
+.files-col-modified {
+    width: 110px;
+    flex-shrink: 0;
+    color: var(--secondary-text-color);
+}
+
+.files-col-size {
+    width: 72px;
+    flex-shrink: 0;
+    text-align: right;
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.files-col-kind {
+    width: 90px;
+    flex-shrink: 0;
+    color: var(--secondary-text-color);
+
+    @container (max-width: 520px) {
+        display: none;
+    }
+}
+
+.files-icon {
+    width: 14px;
+    flex-shrink: 0;
+    color: var(--secondary-text-color);
+
+    &.files-icon-dir {
+        color: var(--accent-color);
+    }
+}
+
+.files-link-mark {
+    font-size: 8px;
+    margin-left: -8px;
+    align-self: flex-end;
+    color: var(--secondary-text-color);
+}
+
+.files-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.files-entry-error {
+    color: var(--warning-color, var(--error-color));
+    font-size: 10px;
+}
+
+.files-rename {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+
+.files-rename-input {
+    width: 100%;
+    height: 20px;
+    padding: 0 4px;
+    border: 1px solid var(--accent-color);
+    border-radius: 2px;
+    background: var(--input-bg-color);
+    color: var(--main-text-color);
+    font: inherit;
+    outline: none;
+
+    &[aria-invalid="true"] {
+        border-color: var(--error-color);
+    }
+}
+
+.files-rename-problem {
+    position: absolute;
+    top: 22px;
+    left: 0;
+    z-index: 2;
+    padding: 3px 6px;
+    border: 1px solid var(--error-color);
+    border-radius: 3px;
+    background: var(--modal-bg-color);
+    color: var(--error-text-color, var(--main-text-color));
+    white-space: normal;
+}
+
+// ── States: waiting, denied, empty, the macOS notice ───────────────────────
+
+.files-notice {
+    padding: 24px 16px;
+    color: var(--secondary-text-color);
+    text-align: center;
+    white-space: normal;
+
+    p {
+        margin: 0 auto 10px;
+        max-width: 46ch;
+        line-height: 1.5;
+    }
+
+    &.files-notice-error p {
+        color: var(--main-text-color);
+    }
+}
+
+.files-button {
+    padding: 4px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--main-text-color);
+    font: inherit;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+// ── Status line ─────────────────────────────────────────────────────────────
+
+.files-status {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    border-top: 1px solid var(--border-color);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    .files-status-error {
+        color: var(--error-color);
+    }
+}
+
+.files-status-undo {
+    margin-left: 8px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--accent-color);
+    font: inherit;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
