@@ -1,6 +1,6 @@
 # SPEC: Document tabs: one shared tab system for the documents inside a pane
 
-**Status:** active. Phase 1 is built (#4231): the shared layer and Hangar on it (§9; where the build differs from the design below, the section says so). Phases 2–5 are not. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
+**Status:** active. Phase 1 is built (#4231): the shared layer and Hangar on it. Phase 2 is built: the Editor on it (§6.1). Phases 3 and 5 are not; Phase 4 (Browser) is dropped (§6.4). Where the build differs from the design below, the section says so. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"there are actually 3 types: Window tabs, Pane tabs, and inner-pane tabs"*; *"The media pane tabs would also be in-pane tabs"*; *"ok document tabs. so u will create 1 document tab system that editor, hangar, media, (does browser have it too?) and whatever types"*; and *"lets also backreference old docs to this, so old stuff like that idea you found is squashed"*.
@@ -8,7 +8,7 @@
 **Supersedes, in part** (each of these now carries a note pointing here):
 - `SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` §7 resolution 3 ("Editor files-tabs migration onto `blockStack`: yes"), the §2.4 bullet that sets it up, §2.2's tab taxonomy (which has no document layer), and the `Ctrl:Shift:T` row of §4.9.
 - `PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md`: the deferred "Editor's own files-tabs migration onto real `blockStack` semantics" item.
-- `SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md`: the non-goal "Tab management in browser pane. Each browser pane is one page."
+- `SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md`: as to the Editor's files (§6.1). Its non-goal "Tab management in browser pane" **stands**: the repo owner dropped Browser tabs on 2026-10-02 (§6.4).
 - `SPEC_FILE_BROWSER_PANE_2026_10_01.md` §12.6 (Hangar on pane tabs) and the §3 line "We get tabs for free (pane tabs, window tabs)".
 - `SPEC_MEDIA_PANE_2026_07_26.md`: one file per Media pane.
 
@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | **Window tabs** | a whole layout of panes | the workspace | top of the window (`tabbar.tsx`) | Tab 1, Tab 2 |
 | **Pane tabs** | one block (one view instance) stacked in a pane slot | the layout tree (`blockStack`) | the pane header (`PaneChrome` → `PaneTabStrip`) | an Agent and a Terminal sharing a slot |
-| **Document tabs** | one *thing a pane shows*, inside one block | the block (its meta, §5.3) | under the pane header (`DocTabStrip` → `PaneTabStrip`) | Editor files, Hangar folders, Media files, Browser pages |
+| **Document tabs** | one *thing a pane shows*, inside one block | the block (its meta, §5.3) | under the pane header (`DocTabStrip` → `PaneTabStrip`) | Editor files, Hangar folders, Media files |
 
 The rule that decides the layer: **a pane tab is a different pane; a document tab is a different document in the same pane.** An Agent and a Terminal are different panes; two files are two documents of one Editor. Agent and Terminal have no document tabs: each instance *is* its one session.
 
@@ -164,6 +164,9 @@ Dragging a document tab onto another pane's strip of the **same type** moves it 
 ## 6. Pane types
 
 ### 6.1 Editor (Phase 2)
+**As built:** `editor-pane-state-store.ts` keeps its commands, events and audit ring, but its state is the shared model (`doc`, a `DocTabsState` whose payload is the Editor's `EditorBuffer`: path, language, load state, scratch identity), changed only through `doc-tabs.ts`'s functions; `tabs`, `activeTabId` and `recentlyClosed` are a projection of it in the shape the editor already read, reusing unchanged tabs' objects. So new tabs open after the one in front, closing the tab in front activates the one used before it, and the reopen list is the shared one (a reopened tab reads its file again; a scratch buffer comes back as one). Persistence is the `doctabs` record (§5.3) with each tab's path, language and scratch identity; a restored tab reads its file when first shown; `file` is still written for a downgrade and cleared when the last tab closes. The keys (§4.3) are handled by the editor view before CodeMirror sees them, except inside a text box. Closing a tab with unsaved changes now asks (*Discard changes*); before, the × lost them silently. The strip stays `EditorTabStrip` (`PaneTabStrip` with the Save As box inline), always shown. Not built: drag-reorder (Phase 5, §4.1); pinning to the left (no tab menu yet).
+
+The design, as written before the build:
 - Its store's tab state moves onto the shared model. What's left in `editor-pane-state-store.ts` is buffer state per tab: content hash, encoding, line endings, LSP, scratch identity. `EditorTab` becomes the payload: `{ kind: "file", path } | { kind: "scratch", scratchId }` plus language and read-only.
 - Kept exactly: preview tabs (tree single-click), pin on double-click, dirty dot, save-as for a scratch, reopen closed (finally wired, `Ctrl+Shift+T`), the strip always shown.
 - New for the Editor: persistence (§5.3, the never-built Phase 1C), the keys (§4.3), drag-reorder (its reducer had `ReorderTab`, never dispatched).
@@ -179,7 +182,8 @@ Dragging a document tab onto another pane's strip of the **same type** moves it 
 - Payload `{ path }`. Opening a media file when a Media pane is on screen adds a tab there (§5.7). Stepping through files from Hangar's preview or a Read image opens **preview** tabs, so browsing a folder doesn't pile up tabs.
 - Its directory watcher (`media_file_watcher`) watches each open tab's file, not one path.
 
-### 6.4 Browser (Phase 4)
+### 6.4 Browser (Phase 4): dropped
+**Dropped by the repo owner, 2026-10-02:** *"only Editor and Media really need document tabs. Terminal and Browser do not"* (Hangar keeps its document tabs, which the repo owner confirmed the same day). A Browser pane stays one page; more pages are more panes, as `SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md` has it. The design below is kept for the record only.
 - Wires the existing multi-tab reducer to the shared model; payload `{ url, title, favicon }`; key = a generated id (two tabs may show one URL).
 - Each tab is a native CEF browser view (`nativeSurface`). Inactive views are hidden, not destroyed, up to a budget (4 live per pane by default). Past it, the least recently used is **discarded** (its URL kept) and reloaded on activation, as browsers do.
 - `Ctrl+T` opens the start page; links that ask for a new tab (`target=_blank`, middle-click) open a document tab instead of a new pane.
@@ -207,12 +211,12 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 |---|---|---|
 | 0 | This spec, and pointers in the superseded docs | this PR |
 | 1 | The shared layer (§5.1–§5.6) and **Hangar** on it (§6.2) | **built.** Reverts #4227's pane-tab bindings. Drag-reorder moved to Phase 5 (§4.1); the manifest field to Phase 2 (§5.6) |
-| 2 | **Editor** on it (§6.1) | its own PR; deletes the tab half of `editor-pane-state-store.ts` |
+| 2 | **Editor** on it (§6.1) | **built.** Its own PR. The slice keeps its commands on the shared model rather than being deleted (§6.1) |
 | 3 | **Media** tabs (§6.3) and §5.7's open-into-existing-pane for Editor, Hangar, Media | |
-| 4 | **Browser** tabs (§6.4) | native views and discarding |
+| 4 | ~~**Browser** tabs (§6.4)~~ | **dropped** (§6.4) |
 | 5 | Between panes (§5.8): drag to another pane, Move to new pane; drag to reorder (§4.1) | a drag kind of its own |
 
 ## 10. Open questions for the repo owner
 1. **macOS keys.** Mac users expect `Cmd+W`, `Cmd+T` and `Cmd+Shift+T` for document tabs (Safari, VS Code), but in this app `Cmd:` chords are window-level (`Cmd:t` is a new window tab). Proposed: `Ctrl` on every platform (§4.3), revisited after use. The alternative is `Cmd` on macOS only for document tabs, which means moving the window-tab chords there.
 2. **Strip from one tab or from two?** Proposed: from two, except the Editor (always), so a Hangar or Media pane with one document doesn't lose a row.
-3. **Browser live-view budget.** 4 per pane proposed (§6.4); it trades memory for instant switching.
+3. ~~**Browser live-view budget.**~~ Moot: Browser tabs are dropped (§6.4).

@@ -28,7 +28,10 @@ import {
     unregisterEditorPane,
     update,
     initialState,
+    serializeEditorBuffer,
+    deserializeEditorBuffer,
 } from "./editor-pane-state-store";
+import { hydrateDocTabs, persistDocTabs } from "@/app/doc-tabs/doc-tabs";
 
 function assertActiveInvariant(state: EditorPaneState): void {
     if (state.tabs.length === 0) {
@@ -548,5 +551,79 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
         setEventSink(null);
         dispatch("blk-1", { type: "OpenFile", path: "C:/b.ts" });
         expect(sink).toHaveBeenCalledTimes(1); // not called again
+    });
+});
+
+describe("editor-pane-state-store on the shared document tabs (SPEC_DOCUMENT_TABS §6.1)", () => {
+    const open = (s: EditorPaneState, path: string, mode?: "preview" | "pinned") => update(s, { type: "OpenFile", path, mode }).state;
+
+    it("opens a new tab after the one in front, not at the end", () => {
+        let s = open(open(open(initialState(), "C:/a.ts"), "C:/b.ts"), "C:/c.ts");
+        s = update(s, { type: "SwitchTab", tabId: s.tabs[0].id }).state;
+        s = open(s, "C:/d.ts");
+        expect(s.tabs.map((t) => t.filePath)).toEqual(["c:/a.ts", "c:/d.ts", "c:/b.ts", "c:/c.ts"]);
+    });
+
+    it("a preview open replaces the preview in place, keeping its tab id; editing makes it a normal tab", () => {
+        let s = open(initialState(), "C:/a.ts");
+        s = open(s, "C:/p1.ts", "preview");
+        const preview = s.tabs[1];
+        expect(preview.isPreview).toBe(true);
+        const r = update(s, { type: "OpenFile", path: "C:/p2.ts", mode: "preview" });
+        expect(r.state.tabs.map((t) => t.filePath)).toEqual(["c:/a.ts", "c:/p2.ts"]);
+        expect(r.state.tabs[1].id).toBe(preview.id);
+        expect(r.state.tabs[1].contentLoaded).toBe(false);
+        expect(eventTypes(r.events)).toEqual(["TabActivated"]);
+        s = update(r.state, { type: "MarkDirty", tabId: preview.id }).state;
+        expect(s.tabs[1].isPreview).toBe(false);
+        s = open(s, "C:/p3.ts", "preview");
+        expect(s.tabs.map((t) => t.filePath)).toEqual(["c:/a.ts", "c:/p2.ts", "c:/p3.ts"]);
+    });
+
+    it("CycleTab wraps around", () => {
+        let s = open(open(open(initialState(), "C:/a.ts"), "C:/b.ts"), "C:/c.ts");
+        s = update(s, { type: "CycleTab", delta: 1 }).state;
+        expect(s.activeTabId).toBe(s.tabs[0].id);
+        s = update(s, { type: "CycleTab", delta: -1 }).state;
+        expect(s.activeTabId).toBe(s.tabs[2].id);
+    });
+
+    it("a reopened tab reads its file again, and a scratch buffer comes back as one", () => {
+        let s = update(initialState(), { type: "OpenScratch", filePath: "C:/scratch/s1.md", scratchId: "s1", displayName: "Untitled-1" }).state;
+        const id = s.tabs[0].id;
+        s = update(s, { type: "TabContentLoaded", tabId: id, contentHash: "h" }).state;
+        s = update(s, { type: "CloseTab", tabId: id }).state;
+        const r = update(s, { type: "ReopenLastClosed" });
+        expect(r.state.tabs).toHaveLength(1);
+        expect(r.state.tabs[0]).toMatchObject({ isScratch: true, scratchId: "s1", displayName: "Untitled-1", contentLoaded: false, contentHash: "" });
+        expect(eventTypes(r.events)).toEqual(["TabOpened"]);
+    });
+
+    it("keeps an unchanged tab's object, so the view doesn't redraw it", () => {
+        let s = open(open(initialState(), "C:/a.ts"), "C:/b.ts");
+        const a = s.tabs[0];
+        s = update(s, { type: "MarkDirty", tabId: s.tabs[1].id }).state;
+        expect(s.tabs[0]).toBe(a);
+        expect(s.tabs[1].dirty).toBe(true);
+    });
+
+    it("persists paths and scratch identity, never content, and restores tabs unloaded", () => {
+        let s = open(initialState(), "C:/repo/a.ts");
+        s = update(s, { type: "OpenScratch", filePath: "C:/scratch/s1.md", scratchId: "s1", displayName: "Untitled-1", language: "text" }).state;
+        s = update(s, { type: "TabContentLoaded", tabId: s.tabs[0].id, contentHash: "h" }).state;
+        const record = persistDocTabs(s.doc, serializeEditorBuffer);
+        expect(record.tabs.map((t) => t.state)).toEqual([
+            { path: "c:/repo/a.ts", language: "ts" },
+            { path: "c:/scratch/s1.md", language: "text", scratchId: "s1", displayName: "Untitled-1" },
+        ]);
+        expect(record.tabs.map((t) => t.title)).toEqual(["a.ts", "Untitled-1"]);
+        const doc = hydrateDocTabs(JSON.parse(JSON.stringify(record)), deserializeEditorBuffer)!;
+        const r = update(initialState(), { type: "RestoreDocTabs", doc });
+        expect(r.state.tabs.map((t) => [t.filePath, t.contentLoaded, t.isScratch ?? false])).toEqual([
+            ["c:/repo/a.ts", false, false],
+            ["c:/scratch/s1.md", false, true],
+        ]);
+        expect(r.state.activeTabId).toBe(r.state.tabs[1].id);
+        expect(eventTypes(r.events)).toEqual(["TabsRestored"]);
     });
 });

@@ -1,10 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Editor tab strip — Phase 1B of SPEC_EDITOR_TABS_2026-05-26.md.
-// Renders above CodeMirror; one tab per open file. Click to activate,
-// × (hover-shown) to close, middle-click to close. No overflow chip yet
-// (tabs compress to min-width when crowded); chip lands in Phase 2.
+// Editor tab strip: the Editor's document tabs
+// (docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §6.1). Renders above
+// CodeMirror; one tab per open file. Click to activate, × (hover-shown) or
+// middle-click to close. The keys are the editor view's (Ctrl+T, Ctrl+W,
+// Ctrl+Tab, Ctrl+Shift+T, ...). No overflow chip yet (tabs compress to
+// min-width when crowded).
 //
 // Chrome/behavior (click/middle-click/hover-close/tooltip/active-underline)
 // is the shared <PaneTabStrip> (frontend/app/element/PaneTabStrip.tsx),
@@ -92,7 +94,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
                 )
             }
             onAdd={() => void props.model.openScratch(false)}
-            addTitle="New scratch buffer"
+            addTitle="New scratch buffer (Ctrl+T)"
         />
     );
 }

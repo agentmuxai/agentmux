@@ -7,28 +7,17 @@
 //
 // State management: slice #10 editor-pane-state (frontend/app/store/
 // editor-pane-state-store.ts) owns the tab list, active id, dirty flags, and
-// recently-closed stack. This file is a thin projection layer between that
-// slice and the editor view. Tab-content blobs are held in a view-local Map
+// recently-closed stack, on the shared document-tab model
+// (docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §6.1). This file is a thin
+// projection layer between that slice and the editor view, and keeps the
+// pane's tabs in its block's `doctabs` record. Tab-content blobs are held in a view-local Map
 // (this._contentByTab) — content is deliberately NOT in the slice (large,
 // not auditable, not persistable cheaply). The slice tracks contentHash +
 // contentLoaded so it can reason about dirty-vs-disk without holding the
 // buffer.
 //
-// Spec: this file used to cite an "editor tabs" spec (SPEC_EDITOR_TABS,
-// dated 2026-05-26, Phase 1B) that was never actually written — it has never
-// existed in the repo, in any commit. The dangling pointer only surfaced now
-// because check-spec-citations.sh is scoped to changed files. The path is
-// deliberately not written out above, and deliberately NOT repointed at a
-// plausible-looking neighbouring spec: the gate's own message warns against
-// that, and sending a reader on a search that cannot succeed is worse than no
-// pointer at all.
-//
-// What actually documents the tab behaviour is the reducer in
-// frontend/app/store/editor-pane-state-store.ts (slice #10) and its test
-// suite. The same dangling citation still exists in that store, in
-// editor-tab-strip.tsx, and in the pane-tab-strip spec — left alone as out of
-// scope here; each will trip the same gate when its file is next touched.
-// Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
+// Tab behaviour: SPEC_DOCUMENT_TABS_2026_10_02.md, the reducer in
+// frontend/app/store/editor-pane-state-store.ts and its tests. Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { EditorView } from "codemirror";
@@ -37,13 +26,16 @@ import {
     EditorPaneEvent,
     EditorTab,
     canonicalizePath,
+    deserializeEditorBuffer,
     dispatch,
     registerEditorPane,
+    serializeEditorBuffer,
     setEventSink,
     snapshot,
     unregisterEditorPane,
     getAllActiveScratchIds,
 } from "@/app/store/editor-pane-state-store";
+import { DOC_TABS_META, hydrateDocTabs, persistDocTabs } from "@/app/doc-tabs/doc-tabs";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
@@ -80,6 +72,8 @@ const META_PENDING_OPEN_FILES = "editor:pending_open_files";
 
 export type EditorMode = "preview" | "source" | "split";
 const META_SCRATCH = "editor:scratch";
+/** How long tab changes settle before they are written to the block. */
+const DOC_TABS_SAVE_DELAY_MS = 300;
 const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;
 const TREE_WIDTH_MAX = 600;
@@ -221,6 +215,16 @@ export class EditorViewModel {
     private _unsubFileChanged: () => void = () => {};
     private _disposePendingOpenFilesEffect: () => void = () => {};
 
+    // ── Document-tab persistence (SPEC_DOCUMENT_TABS §5.3) ──────────────
+    private _docTabsTimer: ReturnType<typeof setTimeout> | null = null;
+    /** The record last written, so an unchanged tab list isn't rewritten
+     *  (a buffer loading changes the slice, not the record). */
+    private _docTabsWritten = "";
+
+    /** Set by the view: ask before closing a tab with unsaved changes;
+     *  `discard` closes it anyway. Without it, such a close is refused. */
+    confirmDirtyClose: ((tab: EditorTab, discard: () => void) => void) | null = null;
+
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
     // (editor.tsx); its own block's meta comes from, and goes to, the host
     // context.
@@ -245,6 +249,12 @@ export class EditorViewModel {
         // no closure over a disposed model survives.
         this._globalHandler = (events: EditorPaneEvent[]) => {
             this._sliceVersion[1]((v) => v + 1);
+            this._scheduleDocTabsSave();
+            // A tab shown for the first time since a restart, or reopened,
+            // reads its file now (one being opened is already reading).
+            if (events.some((e) => e.type === "TabActivated" || e.type === "TabOpened" || e.type === "TabsRestored")) {
+                queueMicrotask(() => this._ensureActiveLoaded());
+            }
             for (const ev of events) {
                 if (ev.type === "TabClosed") {
                     this._contentByTab.delete(ev.tabId);
@@ -462,12 +472,15 @@ export class EditorViewModel {
             this._wordWrap[1](false);
         }
 
-        // Backwards-compat hydration: existing block meta uses `file` (the
-        // pre-tabs key). If present, restore as a single tab. The saga in
-        // Phase 1C will own the new `editor:tabs` key; this branch stays
-        // until 1C lands + one minor version of grace.
+        // The pane's tabs, from its block's `doctabs` record. A pane from
+        // before document tabs has only `file` (the pre-tabs key): it opens
+        // with that one file.
+        const restored = hydrateDocTabs(meta?.[DOC_TABS_META], deserializeEditorBuffer);
         const legacyFile = meta?.[META_LEGACY_FILE];
-        if (typeof legacyFile === "string" && legacyFile) {
+        if (restored) {
+            this._docTabsWritten = JSON.stringify(meta?.[DOC_TABS_META]);
+            dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
+        } else if (typeof legacyFile === "string" && legacyFile) {
             void this.openFile(legacyFile);
         } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
             // Widget default: open a scratch buffer when no file was persisted.
@@ -733,16 +746,67 @@ export class EditorViewModel {
         this._syncWatch(tab.id, newCanon);
     }
 
+    /** Close a tab. One with unsaved changes asks first (the view's
+     *  `confirmDirtyClose`); closing it then discards them. */
     closeTab(tabId: string): void {
-        // Phase 1B: force-close even for dirty tabs (matches today's
-        // behavior — pane closes silently lose unsaved changes). The
-        // dirty-confirm modal lands in a follow-up commit; until then,
-        // `force: true` short-circuits the RequestDirtyConfirm path.
-        dispatch(this.blockId, { type: "CloseTab", tabId, force: true, source: "user" });
+        const events = dispatch(this.blockId, { type: "CloseTab", tabId, source: "user" });
+        if (!events.some((e) => e.type === "RequestDirtyConfirm")) return;
+        const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+        if (tab && this.confirmDirtyClose) {
+            this.confirmDirtyClose(tab, () => void dispatch(this.blockId, { type: "CloseTab", tabId, force: true, source: "user" }));
+        }
     }
 
     switchTab(tabId: string): void {
         dispatch(this.blockId, { type: "SwitchTab", tabId, source: "user" });
+    }
+
+    /** The next or previous tab, wrapping (Ctrl+Tab, Ctrl+PageDown). */
+    cycleTab(delta: number): void {
+        dispatch(this.blockId, { type: "CycleTab", delta, source: "user" });
+    }
+
+    /** Move the active tab one place (Ctrl+Shift+PageUp/PageDown). */
+    moveActiveTab(delta: number): void {
+        const tabs = snapshot(this.blockId)?.tabs ?? [];
+        const at = tabs.findIndex((t) => t.id === this.activeIdAtom());
+        if (at >= 0) dispatch(this.blockId, { type: "ReorderTab", tabId: tabs[at].id, toIndex: at + delta, source: "user" });
+    }
+
+    /** Read the active tab's file if it hasn't been (a tab restored from
+     *  the block, or reopened). */
+    private _ensureActiveLoaded(): void {
+        const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === snapshot(this.blockId)?.activeTabId);
+        if (!tab || tab.contentLoaded || tab.loadError != null) return;
+        const canonical = canonicalizePath(tab.filePath);
+        if (this._loadingPaths.has(canonical)) return;
+        this._loadingPaths.add(canonical);
+        void this._loadFileIntoTab(tab.id, tab.filePath)
+            .then((hash) => {
+                if (hash !== null) this._syncWatch(tab.id, canonical);
+            })
+            .finally(() => this._loadingPaths.delete(canonical));
+    }
+
+    /** Write the pane's tabs to its block, once changes settle. */
+    private _scheduleDocTabsSave(): void {
+        if (this._docTabsTimer) clearTimeout(this._docTabsTimer);
+        this._docTabsTimer = setTimeout(() => {
+            this._docTabsTimer = null;
+            this._saveDocTabs();
+        }, DOC_TABS_SAVE_DELAY_MS);
+    }
+
+    private _saveDocTabs(): void {
+        const state = snapshot(this.blockId);
+        if (!state) return;
+        const record = state.tabs.length > 0 ? persistDocTabs(state.doc, serializeEditorBuffer) : null;
+        const text = JSON.stringify(record);
+        if (text === this._docTabsWritten) return;
+        this._docTabsWritten = text;
+        // With no tabs left, the pre-tabs `file` key goes too, or the pane
+        // would reopen that file next time.
+        void this.persistMeta(record ? { [DOC_TABS_META]: record } : { [DOC_TABS_META]: null, [META_LEGACY_FILE]: null });
     }
 
     reopenLastClosed(): void {
@@ -899,7 +963,12 @@ export class EditorViewModel {
             // Read the actual on-disk content — the backend may have returned a
             // reused scratch file that already has content from a prior session.
             // Seeding "" here would clobber that content on the next Ctrl+S.
-            const fileResult = await RpcApi.ReadEditorFileCommand(TabRpcClient, { path: result.file_path });
+            // Marked as loading, so the restore path doesn't read it too.
+            const scratchCanon = canonicalizePath(result.file_path);
+            this._loadingPaths.add(scratchCanon);
+            const fileResult = await RpcApi.ReadEditorFileCommand(TabRpcClient, { path: result.file_path }).finally(() =>
+                this._loadingPaths.delete(scratchCanon)
+            );
             const content = fileResult?.content ?? "";
             this._contentByTab.set(tabId, content);
             this._rememberEncoding(tabId, fileResult);
@@ -1301,6 +1370,12 @@ export class EditorViewModel {
     }
 
     dispose(): void {
+        // Tabs changed in the last moments are still written.
+        if (this._docTabsTimer) {
+            clearTimeout(this._docTabsTimer);
+            this._docTabsTimer = null;
+            this._saveDocTabs();
+        }
         this._disposeFileDrop();
         this._unsubFileChanged();
         this._disposePendingOpenFilesEffect();
