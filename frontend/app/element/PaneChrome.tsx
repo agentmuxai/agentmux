@@ -68,9 +68,11 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
 
     const isFocused = () => nodeModel.isFocused();
     const isAlone = () => nodeModel.numLeafs() <= 1;
-    const ringBorderColor = createMemo(() =>
-        computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta)
-    );
+    const ringBorderColor = createMemo(() => {
+        const themeId = getSettingsKeyAtom("window:theme")();
+        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        return computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, isLightTheme);
+    });
 
     // What the ACTIVE tab's view type contributes to this chrome (its
     // manifest's `chrome`, Pane Tab contract Phase 4). It used to be resolved
