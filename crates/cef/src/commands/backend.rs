@@ -266,7 +266,7 @@ async fn run_migrations_inner(
     #[cfg(windows)]
     {
         // CREATE_NO_WINDOW: console-flash suppression — host (GUI) spawning the
-        // srv migrate child; tokio::process::Command has creation_flags inherent.
+        // srv migrate child.
         command.no_window();
     }
     let mut child = command
