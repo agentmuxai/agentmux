@@ -1,21 +1,25 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// XWayland authorization for the host process (#4011).
+// XWayland authorization for processes that talk to X on a Wayland session
+// (#4011, #1648).
 //
-// Used when the host runs under XWayland on a Wayland session, i.e. when
-// `AGENTMUX_OZONE_PLATFORM=x11` forces it. GNOME's Mutter starts Xwayland with
-// `-auth $XDG_RUNTIME_DIR/.mutter-Xwaylandauth.*` and exports XAUTHORITY only
-// into the systemd user environment, so a host started by a login entry, the
-// AppImage binfmt path or an agent shell can lack it. Chromium then fails
-// with "Missing X server or $DISPLAY" and CEF exits before any window opens.
+// GNOME's Mutter starts Xwayland with `-auth $XDG_RUNTIME_DIR/.mutter-Xwaylandauth.*`
+// and exports XAUTHORITY only into the systemd user environment, so a process
+// started by a login entry, the AppImage binfmt path or an agent shell can lack
+// it. Without the cookie the X server refuses the connection:
+// - the host, when forced onto XWayland (`AGENTMUX_OZONE_PLATFORM=x11`), has
+//   Chromium fail with "Missing X server or $DISPLAY" and CEF exit before any
+//   window opens;
+// - the launcher's startup splash fails its X probe and falls back to the
+//   native-Wayland backend, which Mutter places top-left instead of centered.
 
 use std::path::{Path, PathBuf};
 
 /// Make sure XAUTHORITY points at a readable cookie, setting it from the
 /// session when it's missing. Must run before CefInitialize so the GPU and
 /// renderer processes inherit it.
-pub(crate) fn ensure_xauthority() -> Option<PathBuf> {
+pub fn ensure_xauthority() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("XAUTHORITY").map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
     }
