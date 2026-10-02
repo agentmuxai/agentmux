@@ -745,9 +745,9 @@ export class FilesModel {
     }
 
     /** Copy or move `sources` into the folder shown. */
-    async transfer(kind: "copy" | "move", sources: string[]): Promise<boolean> {
+    async transfer(kind: "copy" | "move", sources: string[], destDir: string = this.path()): Promise<boolean> {
         try {
-            await this.ops.start(kind, sources, this.path());
+            await this.ops.start(kind, sources, destDir);
             return true;
         } catch (err) {
             this.setStatus({ text: errorText(err), tone: "error" });
@@ -757,8 +757,8 @@ export class FilesModel {
 
     /** What dropping `sources` here does: move within a drive when the drag
      *  came from another Hangar pane, copy otherwise (as file managers do). */
-    dropKind(sources: string[], fromHangar: boolean): "copy" | "move" {
-        return fromHangar && sameVolume(sources, this.path()) ? "move" : "copy";
+    dropKind(sources: string[], fromHangar: boolean, destDir: string = this.path()): "copy" | "move" {
+        return fromHangar && sameVolume(sources, destDir) ? "move" : "copy";
     }
 
     // ── Git markers ──────────────────────────────────────────────────────────

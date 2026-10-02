@@ -97,6 +97,7 @@ import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
+import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
 import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME, registerFileDropTarget } from "@/app/drag/file-drop";
 import { errorMessage, FilesView, formatModified } from "./files-view";
 import { filesPaneTab, filesTitle } from "./files";
@@ -686,6 +687,49 @@ describe("the Files pane: dragging files (§8.2)", () => {
         blocks.clear();
     });
 
+    it("a row dropped on a folder row moves into that folder, even within the same pane", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const pane = document.createElement("div");
+        pane.setAttribute("data-role", "pane");
+        pane.setAttribute("data-blockid", "b1");
+        pane.getClientRects = () => [{}] as unknown as DOMRectList;
+        pane.appendChild(v.container);
+        document.body.appendChild(pane);
+        const dt = { setData: () => {}, effectAllowed: "", types: [PATHS_MIME], items: [], files: [], dropEffect: "" };
+        beginPathDrag(dt as unknown as DataTransfer, [`${HOME}\\b.txt`], "b1");
+        fireEvent.dragOver(v.row("src"));
+        await waitFor(() => expect(v.row("src").classList.contains("files-row-droptarget")).toBe(true));
+        const drop = new Event("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        v.row("src").dispatchEvent(drop);
+        await waitFor(() =>
+            expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "move", sources: [`${HOME}\\b.txt`], dest_dir: `${HOME}\\src`, block_id: "b1" })
+        );
+        // Over a folder, then over blank space: the folder is no longer the
+        // target, and a drop there goes nowhere (ReAgent on #4224).
+        h.rpc.FsOpStartCommand.mockClear();
+        beginPathDrag(dt as unknown as DataTransfer, [`${HOME}\\b.txt`], "b1");
+        fireEvent.dragOver(v.row("src"));
+        await waitFor(() => expect(v.row("src").classList.contains("files-row-droptarget")).toBe(true));
+        fireEvent.dragOver(v.list());
+        await waitFor(() => expect(v.row("src").classList.contains("files-row-droptarget")).toBe(false));
+        const dropBlank = new Event("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(dropBlank, "dataTransfer", { value: dt });
+        v.list().dispatchEvent(dropBlank);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+        // Dropped on the pane itself (not a folder), it stays where it is.
+        h.rpc.FsOpStartCommand.mockClear();
+        beginPathDrag(dt as unknown as DataTransfer, [`${HOME}\\b.txt`], "b1");
+        const drop2 = new Event("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(drop2, "dataTransfer", { value: dt });
+        v.list().dispatchEvent(drop2);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+        pane.remove();
+    });
+
     it("a dragged row carries the selection's paths", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -748,6 +792,25 @@ describe("the Files pane: git markers", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
         await waitFor(() => expect(h.rpc.FsGitStatusCommand).toHaveBeenCalled());
         expect(v.container.querySelector(".files-git, .files-git-summary")).toBeNull();
+    });
+});
+
+describe("the Files pane: touched by an agent (§8.4)", () => {
+    afterEach(resetTouchedForTests);
+
+    it("badges a file an agent just wrote, and the folder holding one, in the agent's colour", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        noteToolCall({ blockId: "agent-1", agentName: "Korp", color: "#ff8800" }, { id: "w1", tool: "Write", params: { file_path: `${HOME}\\b.txt` } });
+        noteToolResult("w1", "success");
+        noteToolCall({ blockId: "agent-1", agentName: "Korp" }, { id: "e1", tool: "Edit", params: { file_path: `${HOME}\\src\\deep\\x.rs` } });
+        noteToolResult("e1", "success");
+        await waitFor(() => expect(v.row("b.txt").querySelector(".files-touch")).not.toBeNull());
+        const dot = v.row("b.txt").querySelector(".files-touch") as HTMLElement;
+        expect(dot.style.backgroundColor).toBe("rgb(255, 136, 0)");
+        expect(dot.getAttribute("title")).toBe("Changed by Korp, just now (Write)");
+        expect(v.row("src").querySelector(".files-touch")?.getAttribute("title")).toBe("Something inside was changed by Korp, just now (Edit)");
+        expect(v.row("a2.md").querySelector(".files-touch")).toBeNull();
     });
 });
 
