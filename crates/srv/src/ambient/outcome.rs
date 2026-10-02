@@ -79,7 +79,13 @@ pub fn classify_reply(raw: &str, accepted: bool) -> Outcome {
         return Outcome::Accepted;
     }
     let trimmed = raw.trim();
-    if trimmed
+    // An abstain, bare or explained ("KEEP — the title still fits"): the reply
+    // leads with the token. Counted as kept, never as a refusal, or the Titles row
+    // would warn about a healthy pipeline and the logged rejected corpus would
+    // fill with abstains (ReAgent P2 on #4243). A real title that starts with the
+    // word ("Keep alive pings") is accepted above and never reaches this.
+    let first_word = trimmed.split_whitespace().next().unwrap_or("");
+    if first_word
         .trim_matches(|c: char| !c.is_alphanumeric())
         .eq_ignore_ascii_case(KEEP_TOKEN)
     {
@@ -175,6 +181,11 @@ mod tests {
         );
         assert_eq!(classify_reply("KEEP", false), Outcome::Kept);
         assert_eq!(classify_reply("  keep. ", false), Outcome::Kept);
+        // An explained abstain is still an abstain, not a refusal.
+        assert_eq!(classify_reply("KEEP — the title still fits", false), Outcome::Kept);
+        assert_eq!(classify_reply("Keep the current title", false), Outcome::Kept);
+        // A real title starting with the word was accepted, so it never gets here.
+        assert_eq!(classify_reply("Keep alive pings", true), Outcome::Accepted);
         assert_eq!(
             classify_reply("   ", false),
             Outcome::Rejected(RejectReason::Empty)
