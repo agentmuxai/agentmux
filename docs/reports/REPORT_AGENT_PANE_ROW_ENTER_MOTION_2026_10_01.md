@@ -1,6 +1,6 @@
 # Report: Agent Pane — New Rows Arrive with a Jerk
 
-**Status:** analysis — owner asked for a quick animation instead of an instant jump; recommendation in §5, not yet implemented
+**Status:** analysis — recommendation in §5; what shipped, including a fix for the backward move on shrink, in §6
 **Date:** 2026-10-01
 **Verified against:** `8f6415525` (main)
 
@@ -104,7 +104,31 @@ Source-level findings where the code is open; docs or reports otherwise.
   layout-shift score, plus a typing-latency check while a pane streams, before
   and after.
 
-## 6. Sources
+## 6. What shipped (2026-10-01, after a live test in a dev build)
+
+- **A:** the row fade is 180 ms with an 8px rise, and off under
+  `prefers-reduced-motion`.
+- **B1, widened to D:** every growth while pinned glides, not only a new
+  row: a tool's preview opening (the resize contract doesn't ease growth
+  from zero), each line a running command prints, streamed text. A glide
+  still running when the pane re-pins is read back, stopped and carried
+  into one new glide — otherwise the pin counts the transform as content,
+  scrolls past the real bottom and is pulled back down as the glide ends.
+  Cancelled by the user's own scroll or press.
+- **Shrink hold (the backward move).** The owner also reported content
+  moving *down* when a tool's long live preview collapsed to its result.
+  The live diagnostics showed it frame by frame (`[wave-scroll-shrink] …
+  toolu_…(tool) 216->205->157->92->55->36->27->24px`): the resize contract
+  eases the shrink, but each frame's scroll clamp still moves everything
+  above down. The streaming buffer now keeps the height it reached while
+  pinned (`min-height`), so a collapse leaves room at the bottom that the
+  next row fills. A first version held it until the next turn and left a
+  visible gap; the shipped hold lasts 700 ms after the last growth, then
+  the room closes with the content easing down over 220 ms. Released at
+  once when the turn's rows move into the head or the reader leaves the
+  bottom.
+
+## 7. Sources
 
 - VS Code: `src/vs/workbench/contrib/chat/browser/widget/chatListWidget.ts`, `…/chatContentParts/chatIncrementalRendering/media/chatIncrementalRendering.css`, `src/vs/base/browser/ui/list/listView.ts`, `src/vs/base/common/scrollable.ts`
 - Codex CLI: `codex-rs/tui/src/insert_history.rs`, `codex-rs/tui/src/streaming/chunking.rs`, `codex-rs/tui/src/app.rs`
