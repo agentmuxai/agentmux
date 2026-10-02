@@ -43,7 +43,7 @@ and normal RPC plumbing; the difficulty of this redesign lives almost entirely i
 frontend (chrome hoisting, tab-strip UI, focus model, interaction design).
 
 > [!IMPORTANT]
-> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** The repo owner set a third tab layer under pane tabs: **document tabs**, the documents inside one pane (Editor files, Hangar folders, Media files, Browser pages), on one shared system. That reverses §7 resolution 3 below (Editor files do **not** become pane tabs), adds the missing layer to §2.2, and withdraws §4.9's `Ctrl:Shift:T` (it reopens a closed document tab instead). Everything else here stands.
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** The repo owner set a third tab layer under pane tabs: **document tabs**, the files inside one pane (Editor files, Media files), on one shared system; folders (Hangar) stay pane tabs here. That reverses §7 resolution 3 below (Editor files do **not** become pane tabs), adds the missing layer to §2.2, and withdraws §4.9's `Ctrl:Shift:T` (it reopens a closed document tab instead). Everything else here stands.
 
 ---
 
@@ -113,7 +113,7 @@ sharpens it further with the Pane/Pane-Tab split above:
   Pane's tab list, switched via the strip rendered as that Pane's header (§4.1).
   This is the layer being generalized.
 
-> **2026-10-02:** there is a third layer below Pane Tabs, **Document Tabs** (the documents inside one pane: Editor files, Hangar folders, Media files, Browser pages); see `SPEC_DOCUMENT_TABS_2026_10_02.md` §1.
+> **2026-10-02:** there is a third layer below Pane Tabs, **Document Tabs** (the files inside one pane: Editor files, Media files); see `SPEC_DOCUMENT_TABS_2026_10_02.md` §1.
 
 Every mention of "tab" in this document is qualified as one of the three above
 whenever ambiguity is possible; an unqualified "tab" defaults to meaning **Pane
