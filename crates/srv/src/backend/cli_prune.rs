@@ -89,10 +89,10 @@ pub fn scan_process_commands() -> Option<Vec<String>> {
     if cfg!(windows) {
         return None;
     }
-    let out = std::process::Command::new("ps")
-        .args(["-axww", "-o", "args="])
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new("ps");
+    cmd.args(["-axww", "-o", "args="]);
+    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+    let out = cmd.output().ok()?;
     if !out.status.success() {
         return None;
     }
