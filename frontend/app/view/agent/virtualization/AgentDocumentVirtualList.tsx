@@ -425,8 +425,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // paused), it closes by itself, the content easing down over
     // HOLD_RELEASE_MS instead of snapping. Every pin pass restarts the wait,
     // so while the agent streams the room is filled, not closed.
-    const HOLD_MS = 700;
-    const HOLD_RELEASE_MS = 220;
+    // 350 ms / 160 ms (was 700 / 220): an agent's next row usually takes longer
+    // than 700 ms, so most holds ended in a visible empty gap and then an
+    // ease-down; a shorter hold closes the gap sooner. Too short and a row
+    // that was about to arrive finds the room already closed, so tune this
+    // against a live run before shortening further.
+    const HOLD_MS = 350;
+    const HOLD_RELEASE_MS = 160;
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     function holdBufferHeight(): void {
         const el = streamingBufferRef;
