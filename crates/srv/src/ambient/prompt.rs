@@ -24,35 +24,62 @@ pub fn with_material(instruction: &str, label: &str, material: &str) -> String {
     format!("{instruction}\n\n<{label}>\n{material}\n</{label}>")
 }
 
+/// The token the title prompts give the model for "no change" / "nothing to
+/// title". It is not a title: `validate::accept_line` rejects it, so a `KEEP` reply
+/// reaches the caller as "no text" and the current title stays as it is.
+pub const KEEP_TOKEN: &str = "KEEP";
+
 /// Build the session-goal-title prompt for `session:activity_summary`.
-/// Explicitly PR-title-style and stability-biased: the previous "what is
-/// currently being worked on" prompt regenerated from a blank slate every
-/// call (no memory of the prior title, no access to the original ask), so
-/// it thrashed between micro-steps instead of tracking the session's
-/// overall goal. Extracted as a pure function so the prompt shape itself
-/// (both fields embedded, correct fallback text) is unit-testable without
-/// spinning up the full RPC handler. See
+///
+/// Two shapes, chosen by whether a USABLE current title exists. The caller passes
+/// an empty `current_title` for none, and also for a stored value that is not a real
+/// title (`validate::is_usable_title`), so a bad stored value is never fed back.
+///
+/// - **Create** (no current title): there is no "Current title" line at all. The
+///   first version wrote `Current title: (none yet)` and told the model to repeat a
+///   fitting title back exactly, so the model echoed the placeholder, it was stored,
+///   and from then on it WAS the current title. A placeholder in the model's input is
+///   a string the model can return. Absence is now represented by absence.
+/// - **Maintain** (a usable current title): the title is shown as data, and "no
+///   change" is the explicit `KEEP` token, so the model never has to reproduce a
+///   string to say nothing changed.
+///
+/// A missing user message is likewise omitted, not replaced by a stand-in sentence.
+/// Pure so the prompt shape is unit-testable without the RPC handler. See
+/// docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.2 and
 /// docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
 pub fn build_session_title_prompt(current_title: &str, user_message: Option<&str>, word_target: u32) -> String {
-    let current_title_display = if current_title.is_empty() { "(none yet)" } else { current_title };
-    let user_message_display =
-        user_message.unwrap_or("(no new message — re-evaluate from the title alone)");
+    let user_message_block = user_message
+        .map(|m| format!("The user just said:\n<user_message>\n{m}\n</user_message>\n\n"))
+        .unwrap_or_default();
+
+    if current_title.is_empty() {
+        return format!(
+            "You write a short TITLE for this work session, similar to a git pull-request \
+             title: it describes the OVERALL GOAL of the session, not the current \
+             micro-step or the most recent tool call.\n\n\
+             {user_message_block}\
+             Write the title in {word_target} words or fewer. If the message does not show \
+             what the work is (a greeting, a nudge such as \"continue\", a question about \
+             status), reply with exactly {KEEP_TOKEN} and nothing else.\n\n\
+             {PLAIN_TEXT_RULES} No punctuation."
+        );
+    }
 
     format!(
         "You maintain a short running TITLE for this work session, similar to a git \
          pull-request title — it describes the OVERALL GOAL of the session, not the \
          current micro-step or the most recent tool call.\n\n\
-         Current title: {current_title_display}\n\n\
-         The user just said:\n{user_message_display}\n\n\
+         Current title: {current_title}\n\n\
+         {user_message_block}\
          Decide: does this message represent a genuinely NEW or EXPANDED top-level \
          goal, or is it a continuation, follow-up, clarification, correction, or a \
          step within the SAME goal the current title already describes?\n\n\
-         - If the current title still accurately describes the overall goal, repeat \
-         it back EXACTLY, unchanged.\n\
+         - If the current title still accurately describes the overall goal, reply with \
+         exactly {KEEP_TOKEN} and nothing else.\n\
          - Otherwise, output an updated title covering the (possibly still-in-progress) \
          overall goal, in {word_target} words or fewer.\n\n\
-         Plain text only — no markdown, no code fences, no backticks, no quotes, \
-         no punctuation, no preamble."
+         {PLAIN_TEXT_RULES} No punctuation."
     )
 }
 
@@ -199,20 +226,53 @@ mod build_session_title_prompt_tests {
     fn embeds_both_fields_when_present() {
         let prompt = build_session_title_prompt("invert user input styling", Some("also fix the lint warning"), 7);
         assert!(prompt.contains("Current title: invert user input styling"));
-        assert!(prompt.contains("The user just said:\nalso fix the lint warning"));
+        assert!(prompt.contains("The user just said:\n<user_message>\nalso fix the lint warning\n</user_message>"));
         assert!(prompt.contains("in 7 words or fewer"));
     }
 
+    /// The root cause of the swarm row reading `(none yet)`: the prompt used to put
+    /// its own placeholder in the model's input, and the model returned it.
     #[test]
-    fn falls_back_to_none_yet_for_an_empty_current_title() {
+    fn with_no_current_title_the_prompt_has_no_current_title_line_and_no_placeholder() {
         let prompt = build_session_title_prompt("", Some("build a login page"), 7);
-        assert!(prompt.contains("Current title: (none yet)"));
+        assert!(!prompt.contains("Current title"), "{prompt}");
+        assert!(!prompt.to_lowercase().contains("none yet"), "{prompt}");
+        assert!(!prompt.contains("repeat"), "nothing to repeat when there is no title: {prompt}");
+        assert!(prompt.contains("build a login page"));
+        assert!(prompt.contains("in 7 words or fewer"));
+        assert!(prompt.contains(&format!("exactly {KEEP_TOKEN}")), "a way to abstain: {prompt}");
     }
 
     #[test]
-    fn falls_back_to_a_placeholder_for_a_missing_user_message() {
+    fn a_missing_user_message_is_omitted_not_replaced_by_a_stand_in() {
         let prompt = build_session_title_prompt("invert user input styling", None, 7);
-        assert!(prompt.contains("The user just said:\n(no new message — re-evaluate from the title alone)"));
+        assert!(!prompt.contains("The user just said"), "{prompt}");
+        assert!(!prompt.contains("no new message"), "{prompt}");
+        assert!(prompt.contains("Current title: invert user input styling"));
+    }
+
+    /// Prompt hygiene (spec 5.9): no parenthesised placeholder anywhere, for every
+    /// combination of inputs, so there is never a string for the model to echo.
+    #[test]
+    fn no_title_prompt_contains_a_parenthesised_placeholder() {
+        for title in ["", "invert user input styling"] {
+            for msg in [None, Some("continue"), Some("build a login page")] {
+                let p = build_session_title_prompt(title, msg, 7);
+                assert!(!p.contains("(none"), "{p}");
+                assert!(!p.contains("(no "), "{p}");
+                assert!(!p.to_lowercase().contains("none yet"), "{p}");
+            }
+        }
+    }
+
+    /// The abstain token must never be accepted as a title, or abstaining would
+    /// write it to the pane.
+    #[test]
+    fn the_abstain_token_is_rejected_by_the_validator() {
+        assert_eq!(
+            crate::ambient::validate::accept_line(KEEP_TOKEN, &crate::ambient::validate::title_limits(7)),
+            None
+        );
     }
 
     #[test]
@@ -222,9 +282,80 @@ mod build_session_title_prompt_tests {
         // this is what the old "what is currently being worked on" prompt
         // never asked for. docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
         let prompt = build_session_title_prompt("invert user input styling", Some("continue"), 7);
-        assert!(prompt.contains("repeat it back EXACTLY, unchanged"));
+        assert!(prompt.contains(&format!("reply with exactly {KEEP_TOKEN}")));
+        assert!(!prompt.contains("repeat it back"), "the model must not have to reproduce a string");
         assert!(prompt.contains("OVERALL GOAL"));
         assert!(!prompt.contains("what is currently being worked on"));
+    }
+}
+
+/// The self-sustaining loop behind the swarm row reading `(none yet)`, run end to end
+/// through the real prompt builder and validator with a stand-in for the model.
+/// SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.9.
+#[cfg(test)]
+mod title_loop_tests {
+    use super::*;
+    use crate::ambient::validate::{accept_line, is_usable_title, title_limits};
+
+    /// A model that does the worst thing available: it repeats back whatever it was
+    /// told the current title is, and when it was told nothing it reaches for the old
+    /// placeholder. Both are what the real model did.
+    fn echoing_model(prompt: &str) -> String {
+        match prompt.lines().find_map(|l| l.strip_prefix("Current title: ")) {
+            Some(current) => current.to_string(),
+            None => "(none yet)".to_string(),
+        }
+    }
+
+    /// One turn exactly as `session:activity_summary` runs it: judge the stored value,
+    /// build the prompt, validate the reply, store only what is accepted.
+    fn one_turn(stored: &mut String, user_message: &str) {
+        let current = if is_usable_title(stored) { stored.clone() } else { String::new() };
+        let prompt = build_session_title_prompt(&current, Some(user_message), 7);
+        let reply = echoing_model(&prompt);
+        if let Some(title) = accept_line(&reply, &title_limits(7)) {
+            *stored = title;
+        }
+    }
+
+    #[test]
+    fn a_fresh_block_never_ends_up_holding_a_placeholder() {
+        let mut stored = String::new();
+        for msg in ["u there", "continue", "ok", "thanks", "go on"] {
+            one_turn(&mut stored, msg);
+            assert!(stored.is_empty(), "stored {stored:?} after {msg:?}");
+        }
+    }
+
+    /// A value an older build already wrote is healed, not sustained: it is judged
+    /// unusable, so it is not fed back, and the next real reply can replace it.
+    #[test]
+    fn an_existing_placeholder_is_never_fed_back_to_the_model() {
+        for bad in ["(none yet)", "no goal established yet"] {
+            let mut stored = bad.to_string();
+            one_turn(&mut stored, "u there");
+            // The stand-in still returns the placeholder, which is rejected; the bad
+            // value is left in place but it is never what the model is shown.
+            let current = if is_usable_title(&stored) { stored.clone() } else { String::new() };
+            let prompt = build_session_title_prompt(&current, Some("u there"), 7);
+            assert!(!prompt.contains(bad), "the stored placeholder must not reach the model: {prompt}");
+            assert!(!prompt.contains("Current title"), "{prompt}");
+        }
+    }
+
+    /// With the OLD prompt the same stand-in sustains the placeholder, which is the
+    /// bug. Kept as a statement of what the loop used to do, so the test above cannot
+    /// pass for the wrong reason.
+    #[test]
+    fn the_old_prompt_shape_did_sustain_the_placeholder() {
+        let old_prompt = |current: &str| format!("Current title: {}\n\nrepeat it back EXACTLY", if current.is_empty() { "(none yet)" } else { current });
+        let mut stored = String::new();
+        for _ in 0..3 {
+            let reply = echoing_model(&old_prompt(&stored));
+            // The old validator let `(none yet)` through; stand in for it.
+            stored = reply;
+        }
+        assert_eq!(stored, "(none yet)");
     }
 }
 

@@ -127,9 +127,139 @@ fn has_any(lower: &str, phrases: &[&str]) -> bool {
     phrases.iter().any(|p| has_phrase(lower, p))
 }
 
-fn is_placeholder(lower: &str) -> bool {
-    let bare = lower.trim_matches(|c: char| !c.is_alphanumeric());
-    matches!(bare, "none" | "n/a" | "na" | "nothing" | "empty" | "null")
+/// Text that is ABOUT the absence of a title rather than a title. Compared after
+/// [`absence_form`], so brackets, quotes and punctuation do not matter.
+///
+/// Exact entries are whole replies only: "none" must not reject "None of the tests
+/// pass on Windows". Prefix entries are specific enough that a real title is very
+/// unlikely to begin with them. The first real examples were `(none yet)`, which is
+/// the title prompt's own placeholder echoed back, and `no goal established yet`;
+/// see SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md. The corpus in
+/// `title_corpus.json` is the contract, shared with the frontend.
+const ABSENCE_EXACT: &[&str] = &[
+    "none",
+    "n a",
+    "na",
+    "null",
+    "nothing",
+    "empty",
+    "unknown",
+    "untitled",
+    "untitled session",
+    "untitled conversation",
+    "untitled chat",
+    "tbd",
+    "to be determined",
+    "placeholder",
+    "pending",
+    // The abstain token the title prompts tell the model to use for "no change".
+    // It is not a title, so it must never be stored or shown.
+    "keep",
+    // A model that abstains in its own words instead of the exact token. Exact only:
+    // "Keep alive pings" is a real title.
+    "keep the current title",
+    "keep current title",
+    "keep it",
+    "no change",
+    "no changes",
+    "no update",
+    "unchanged",
+    "not set",
+    "not yet",
+    "no title",
+    "no title yet",
+    "title unavailable",
+    "no summary",
+    "no goal",
+    "no task",
+    "no activity",
+    "no recent activity",
+    "nothing yet",
+];
+
+/// Deliberately few and specific. A prefix rejects every title that begins with it,
+/// so "no title" and "title not" are NOT here: "No title bar on Windows" and "Title
+/// not updating in swarm row" are real titles (ReAgent on #4185). Anything that is
+/// only absence when it is the WHOLE reply belongs in `ABSENCE_EXACT`.
+const ABSENCE_PREFIXES: &[&str] = &[
+    "none yet",
+    "no summary yet",
+    "no goal established",
+    "no goal yet",
+    "no goal set",
+    "no task yet",
+    "no activity yet",
+    "nothing yet",
+    "not yet established",
+];
+
+/// Lower-case, every non-alphanumeric run collapsed to one space, trimmed. So
+/// `(None yet)`, `"none yet."` and `none-yet` all become `none yet`, while
+/// `No-op rename threshold` becomes `no op rename threshold`.
+fn absence_form(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut gap = false;
+    for c in normalized(text).chars() {
+        if c.is_alphanumeric() {
+            if gap && !out.is_empty() {
+                out.push(' ');
+            }
+            gap = false;
+            out.push(c);
+        } else {
+            gap = true;
+        }
+    }
+    out
+}
+
+/// A reply that is entirely a parenthetical or bracketed note. A title is not a
+/// note about the title.
+///
+/// Only ONE balanced pair that wraps the WHOLE text counts. `(WIP) Fix login redirect
+/// (again)` and `[Windows] Fix installer crash [x64]` start and end with brackets but
+/// are real titles: the first pair closes before the end (ReAgent on #4185).
+fn is_wrapped_note(text: &str) -> bool {
+    let t = text.trim();
+    let (open, close) = match (t.chars().next(), t.chars().last()) {
+        (Some('('), Some(')')) => ('(', ')'),
+        (Some('['), Some(']')) => ('[', ']'),
+        _ => return false,
+    };
+    let last = t.chars().count() - 1;
+    let mut depth = 0i32;
+    for (i, c) in t.chars().enumerate() {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            // The opening bracket closed before the end: not one wrapping pair.
+            if depth <= 0 && i != last {
+                return false;
+            }
+        }
+    }
+    depth == 0
+}
+
+/// A reply that LEADS with the abstain token in capitals, "KEEP — the title still
+/// fits": the model said "no change" and explained itself. Case-sensitive on purpose:
+/// "Keep alive pings" and "Keep the swarm summary fresh" are real titles, while an
+/// upper-case KEEP is the token the prompt asked for.
+fn leads_with_abstain_token(text: &str) -> bool {
+    let first = text.trim().split_whitespace().next().unwrap_or("");
+    first.trim_matches(|c: char| !c.is_alphanumeric()) == crate::ambient::prompt::KEEP_TOKEN
+}
+
+fn is_absence(text: &str) -> bool {
+    if is_wrapped_note(text) || leads_with_abstain_token(text) {
+        return true;
+    }
+    let form = absence_form(text);
+    ABSENCE_EXACT.contains(&form.as_str())
+        || ABSENCE_PREFIXES
+            .iter()
+            .any(|p| form == *p || form.strip_prefix(*p).is_some_and(|rest| rest.starts_with(' ')))
 }
 
 /// Returns the line to use, or `None` if the reply is not usable text: empty,
@@ -148,14 +278,27 @@ pub fn accept_line(raw: &str, limits: &Limits) -> Option<String> {
     if !text.chars().any(|c| c.is_alphabetic()) {
         return None;
     }
-    let lower = normalized(text);
-    if is_placeholder(&lower) {
+    if is_absence(text) {
         return None;
     }
+    let lower = normalized(text);
     if has_any(&lower, REFUSAL_PHRASES) {
         return None;
     }
     Some(text.to_string())
+}
+
+/// Bounds for judging a title that is ALREADY stored. Generous: a title written
+/// under an older word target or by an older build may be longer than today's.
+pub const STORED_TITLE: Limits = Limits { max_words: 28, max_chars: 200 };
+
+/// Is this stored value a real title? The one predicate behind accepting a reply,
+/// feeding a stored title back into a prompt, and (in the frontend's port of it)
+/// displaying one. A value already in a database from before the check existed,
+/// such as `(none yet)`, is judged here too, so it is never fed back to the model
+/// and never shown.
+pub fn is_usable_title(stored: &str) -> bool {
+    accept_line(stored, &STORED_TITLE).is_some()
 }
 
 /// Returns the suggestion to show, or `None` if the text is not a usable next
@@ -213,6 +356,95 @@ mod tests {
             "Based on the recent activity, run the tests",
         ] {
             assert_eq!(accept_next_prompt(s), None, "{s}");
+        }
+    }
+
+    /// The shared corpus (see `title_corpus.json`): what is about the absence of a
+    /// title is rejected, and a real title that merely contains such a word is not.
+    #[test]
+    fn the_shared_corpus_is_honoured() {
+        #[derive(serde::Deserialize)]
+        struct Corpus {
+            rejected: Vec<String>,
+            accepted: Vec<String>,
+        }
+        let corpus: Corpus = serde_json::from_str(include_str!("title_corpus.json")).expect("corpus parses");
+        assert!(corpus.rejected.len() >= 30 && corpus.accepted.len() >= 10, "the corpus must not be hollowed out");
+        for s in &corpus.rejected {
+            assert_eq!(accept_line(s, &title_limits(7)), None, "must reject {s:?}");
+            assert!(!is_usable_title(s), "a stored {s:?} is not a usable title");
+        }
+        for s in &corpus.accepted {
+            assert!(accept_line(s, &title_limits(7)).is_some(), "must accept {s:?}");
+            assert!(is_usable_title(s), "a stored {s:?} is a usable title");
+        }
+    }
+
+    /// The two values actually found in the owner's database on 2026-10-02.
+    #[test]
+    fn the_values_found_in_the_wild_are_not_titles() {
+        assert!(!is_usable_title("(none yet)"));
+        assert!(!is_usable_title("no goal established yet"));
+        assert!(is_usable_title("Develop hardening spec for swarm ambient summary quality"));
+    }
+
+    // ReAgent on #4185: both of these were false rejects in the first version.
+    #[test]
+    fn titles_that_merely_start_with_a_risky_prefix_or_end_in_brackets_are_accepted() {
+        for s in [
+            "No title bar on Windows",
+            "Title not updating in swarm row",
+            "(WIP) Fix login redirect (again)",
+            "[Windows] Fix installer crash [x64]",
+            "(Draft) Review the plan",
+        ] {
+            assert!(accept_line(s, &title_limits(7)).is_some(), "{s:?}");
+            assert!(is_usable_title(s), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn only_one_balanced_pair_wrapping_the_whole_text_is_a_note() {
+        for note in ["(none yet)", "[no summary]", "(waiting for the user's first message)", "((none yet))", "([x] pending)"] {
+            assert!(is_wrapped_note(note), "{note:?}");
+        }
+        for title in ["(a) b (c)", "[a] b [c]", "(a) (b)", "(a", "a)", "plain"] {
+            assert!(!is_wrapped_note(title), "{title:?}");
+        }
+    }
+
+    // The real model returned the exact token in every abstain case when tried live, but
+    // a reply that abstains in its own words must not overwrite a good title either.
+    #[test]
+    fn an_abstain_in_the_models_own_words_is_not_a_title() {
+        for s in [
+            "KEEP — the title still fits",
+            "KEEP: unchanged",
+            "KEEP the current title",
+            "Keep current title",
+            "keep the current title",
+            "No change",
+            "Unchanged",
+            "No update",
+        ] {
+            assert_eq!(accept_line(s, &title_limits(7)), None, "{s:?}");
+        }
+        for s in ["Keep alive pings", "Keep the swarm summary fresh", "Unchanged files report fix"] {
+            assert!(accept_line(s, &title_limits(7)).is_some(), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn the_abstain_token_is_never_a_title() {
+        for s in ["KEEP", "keep", "Keep.", "(KEEP)", " KEEP "] {
+            assert_eq!(accept_line(s, &title_limits(7)), None, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn whole_word_matching_keeps_real_titles_that_start_with_an_absence_word() {
+        for s in ["None of the tests pass", "Untitled-tab bug", "Nothing else matters here fix", "Keep alive pings"] {
+            assert!(accept_line(s, &title_limits(7)).is_some(), "{s:?}");
         }
     }
 

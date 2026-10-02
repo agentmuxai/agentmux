@@ -101,3 +101,89 @@ describe("Tooltip", () => {
         expect(screen.getByText("tip content")).toBeInTheDocument();
     });
 });
+
+/**
+ * `immediate`: no delay and no fade. The panel node mounts synchronously on hover
+ * whatever the delay, so these assert on its own opacity and transition (reached
+ * through `data-pane-overlay`), which is what actually distinguishes the modes.
+ */
+describe("Tooltip immediate", () => {
+    const frame = () => new Promise((resolve) => setTimeout(resolve, 60));
+    const overlay = () => document.body.querySelector("[data-pane-overlay]") as HTMLElement | null;
+
+    afterEach(() => {
+        cleanup();
+        vi.mocked(computePosition).mockReset();
+        vi.mocked(computePosition).mockImplementation(() => Promise.resolve({ x: 0, y: 0 }) as never);
+    });
+
+    it("is fully visible one frame after hover, with no fade, where the default is still hidden", async () => {
+        render(() => (
+            <Tooltip immediate content={<span>now</span>}>
+                <span>anchor-now</span>
+            </Tooltip>
+        ));
+        render(() => (
+            <Tooltip content={<span>later</span>}>
+                <span>anchor-later</span>
+            </Tooltip>
+        ));
+        fireEvent.mouseEnter(screen.getByText("anchor-now").parentElement!);
+        fireEvent.mouseEnter(screen.getByText("anchor-later").parentElement!);
+        await frame();
+        const now = screen.getByText("now").closest("[data-pane-overlay]") as HTMLElement;
+        const later = screen.getByText("later").closest("[data-pane-overlay]") as HTMLElement;
+        expect(now.getAttribute("style")).toContain("opacity: 1");
+        expect(now.getAttribute("style")).toContain("transition: none");
+        // 60 ms is far under the default's 300 ms show delay.
+        expect(later.getAttribute("style")).toContain("opacity: 0");
+        expect(later.getAttribute("style")).toContain("opacity 200ms");
+    });
+
+    it("is gone the moment the pointer leaves, where the default lingers for its delay", async () => {
+        render(() => (
+            <Tooltip immediate content={<span>now</span>}>
+                <span>anchor-now</span>
+            </Tooltip>
+        ));
+        render(() => (
+            <Tooltip content={<span>later</span>}>
+                <span>anchor-later</span>
+            </Tooltip>
+        ));
+        const a = screen.getByText("anchor-now").parentElement!;
+        const b = screen.getByText("anchor-later").parentElement!;
+        fireEvent.mouseEnter(a);
+        fireEvent.mouseEnter(b);
+        await frame();
+        fireEvent.mouseLeave(a);
+        fireEvent.mouseLeave(b);
+        await tick();
+        expect(screen.queryByText("now")).toBeNull();
+        expect(screen.queryByText("later")).toBeInTheDocument();
+    });
+
+    // Without this the panel would show at its unpositioned top-left corner for a
+    // frame, because it mounts at left:0/top:0 before the position is computed.
+    it("never shows before it has been positioned, and shows as soon as it is", async () => {
+        let place: () => void = () => {};
+        vi.mocked(computePosition).mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    place = () => resolve({ x: 5, y: 6 } as never);
+                }),
+        );
+        render(() => (
+            <Tooltip immediate content={<span>now</span>}>
+                <span>anchor-now</span>
+            </Tooltip>
+        ));
+        fireEvent.mouseEnter(screen.getByText("anchor-now").parentElement!);
+        await frame();
+        expect(overlay()!.getAttribute("style")).toContain("opacity: 0");
+        place();
+        await tick();
+        expect(overlay()!.getAttribute("style")).toContain("opacity: 1");
+        expect(overlay()!.getAttribute("style")).toContain("left: 5px");
+    });
+});
