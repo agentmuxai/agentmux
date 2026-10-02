@@ -2780,7 +2780,9 @@ $transcript-preview-max-height: calc(50vh / 3);
     word-break: break-all;
     font-family: var(--font-mono);
     font-size: 13px;
-    line-height: 1.6;
+    // Was 1.6, the loosest text in the tool UI; the in-flow preview it is a peek
+    // of reads at 1.4. More command fits before the panel has to scroll.
+    line-height: var(--leading-normal);
     color: var(--main-text-color);
 
     @each $tool, $color in $tool-name-colors {
@@ -2803,7 +2805,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     z-index: 50;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     overflow-y: auto;
     overscroll-behavior: contain;
     // Shrink-wrap to the content. PeekOverlay's default ("end") alignment
