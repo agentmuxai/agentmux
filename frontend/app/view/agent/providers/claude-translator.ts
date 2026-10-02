@@ -109,11 +109,79 @@ function fileResultExtras(structured: unknown): Record<string, unknown> | null {
     const range = readFileRange(structured);
     if (range) return { range };
     const s = structured && typeof structured === "object" ? (structured as Record<string, unknown>) : null;
+    // A Read of a file already read and not changed since: the text is a note
+    // to the model, not the file.
+    if (s?.type === "file_unchanged") return { file: { kind: "unchanged" } };
     const patch = s ? patchSpans(s.structuredPatch) : null;
     if (!s || !patch) return null;
     return {
         patch,
         ...(s.type === "create" || s.type === "update" ? { writeKind: s.type } : {}),
+    };
+}
+
+/** An image a tool returned, as a data URL's parts. */
+export interface ResultImage {
+    mediaType: string;
+    data: string;
+}
+
+/** What is known about the file a Read of an image or PDF returned. */
+export interface ResultFileFacts {
+    kind: "image" | "pdf" | "unchanged";
+    size?: number;
+    width?: number;
+    height?: number;
+}
+
+const finite = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+/**
+ * A result whose content blocks include an image or a document: a Read of an
+ * image or PDF, or an MCP tool's screenshot. Returns its text, the images to
+ * show, and what the structured result says about the file (size, and an
+ * image's dimensions). A document's base64 is dropped: a PDF can be many
+ * megabytes, and nothing in the pane renders it. Null when the blocks hold
+ * neither an image nor a document.
+ * docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md §6.
+ */
+export function mediaResultOf(content: unknown, structured: unknown): Record<string, unknown> | null {
+    if (!Array.isArray(content)) return null;
+    const texts: string[] = [];
+    const images: ResultImage[] = [];
+    let documents = 0;
+    for (const b of content) {
+        if (!b || typeof b !== "object") return null;
+        const block = b as { type?: unknown; text?: unknown; source?: unknown };
+        const source = (block.source ?? {}) as { type?: unknown; media_type?: unknown; data?: unknown };
+        if (block.type === "text" && typeof block.text === "string") texts.push(block.text);
+        else if (block.type === "image" && source.type === "base64" && typeof source.media_type === "string" && typeof source.data === "string")
+            images.push({ mediaType: source.media_type, data: source.data });
+        else if (block.type === "document") documents++;
+        else return null;
+    }
+    if (images.length === 0 && documents === 0) return null;
+
+    const s = structured && typeof structured === "object" ? (structured as { type?: unknown; file?: unknown }) : {};
+    const f = (s.file && typeof s.file === "object" ? s.file : {}) as {
+        originalSize?: unknown;
+        dimensions?: { originalWidth?: unknown; originalHeight?: unknown };
+    };
+    let file: ResultFileFacts | null = null;
+    if (s.type === "image" || s.type === "pdf") {
+        const width = finite(f.dimensions?.originalWidth);
+        const height = finite(f.dimensions?.originalHeight);
+        const size = finite(f.originalSize);
+        file = {
+            kind: s.type,
+            ...(size != null ? { size } : {}),
+            ...(width != null && height != null ? { width, height } : {}),
+        };
+    }
+    return {
+        content: texts.join("\n\n"),
+        ...(images.length > 0 ? { images } : {}),
+        ...(file ? { file } : {}),
     };
 }
 
@@ -508,11 +576,17 @@ export class ClaudeTranslator implements OutputTranslator {
                 // tool_reference) pass through for their own renderers.
                 // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.6.
                 const blockText = textOfContentBlocks(block.content);
+                // Images and documents (a Read of an image or PDF, a
+                // screenshot): the text, the images, and the file's facts.
+                const media =
+                    blockText == null
+                        ? mediaResultOf(block.content, toolResultBlocks.length === 1 ? structuredResult : null)
+                        : null;
                 const fallback = blockContentIsString
                     ? { content: block.content }
                     : blockText != null
                       ? { content: blockText }
-                      : block.content;
+                      : (media ?? block.content);
                 const useStructured = canApplyStructured && blockContentIsString;
                 // A file tool's structured result says which lines it touched: a
                 // Read's `startLine` / `numLines` / `totalLines` (and whether the

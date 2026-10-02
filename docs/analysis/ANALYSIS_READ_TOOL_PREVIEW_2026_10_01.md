@@ -132,6 +132,16 @@ Rendered in a throwaway test (`ToolBlock`, pinned open) with the shapes from §2
 | Notebook | not seen | unknown | Unverified |
 | Error (not found, too large) | | The generic compact result | Not examined |
 
+### 6.1 Now
+
+The repo owner asked to *"see the image or whatever"*. Done in the PR after the grammars:
+- **Image:** the translator keeps an image result as `{content, images: [{mediaType, data}], file: {kind, size, width, height}}` (`mediaResultOf`) instead of the raw blocks. The row shows the image itself (`ResultImages`, from the base64 already in memory, no fetch) under a line such as `PNG image · 240 × 160 · 3.5 KB`. The known dimensions reserve its height before it decodes. Clicking it opens the file in a Media pane. Only `image/*` types go into a data URL.
+- **MCP screenshots** and any other tool returning image blocks get the same image in the default renderer, with the result's text below it. With no file to open, a click toggles full size.
+- **PDF:** one line, `PDF · pages 1-5 · 708.4 KB`, and **Show in folder**. The document's base64 (often megabytes) is no longer kept in the pane. An "open with the default app" button needs `open_native_path`, which the CEF host doesn't handle yet (`openNativePath` falls through to "Unknown command").
+- **File unchanged:** one muted line, `unchanged since the last Read`, in place of the note highlighted as code.
+- **Token cap:** the CLI's trailing `<system-reminder>` notes are taken off the preview, so the gutter renders. The range line already says `· cut off at the token cap`. Only trailing notes are removed, since a file may mention the tag.
+- Large image results still unload when collapsed and are read back on open, through the same translator.
+
 ## 7. What is available to improve the preview
 
 | Idea | What it uses | Size |

@@ -1632,6 +1632,58 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
     }
 
+    // A Read of an image, PDF or unchanged file: one line of facts in place
+    // of the model-facing note (ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md §6).
+    .agent-tool-read-facts {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        margin-bottom: var(--space-1);
+        font-size: 11px;
+        font-family: var(--font-mono);
+        color: var(--secondary-text-color);
+    }
+
+    .agent-tool-read-open {
+        padding: 0 var(--space-1);
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--accent-color);
+        font: inherit;
+        cursor: pointer;
+
+        &:hover {
+            background: var(--hover-bg-color);
+        }
+    }
+
+    // Images a tool returned (a Read of a PNG, an MCP screenshot).
+    .agent-tool-images {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-1);
+        margin-bottom: var(--space-1);
+    }
+
+    .agent-tool-image {
+        display: block;
+        max-width: 100%;
+        max-height: 320px;
+        height: auto;
+        // A fixed width with an aspect ratio would stretch under the height
+        // cap; contain keeps the picture's shape inside the box.
+        object-fit: contain;
+        object-position: left top;
+        border: 1px solid var(--border-color);
+        cursor: zoom-in;
+
+        &.agent-tool-image-full {
+            max-height: none;
+            cursor: zoom-out;
+        }
+    }
+
     // === Write Tool ===
     .agent-tool-write {
         .agent-tool-file-path {

@@ -62,7 +62,7 @@ const MuxBlock = (props: MuxBlockProps) => {
 };
 
 /** Same action as the `OpenMedia` tool: a new Media pane on the file. */
-function openInMediaPane(path: string): void {
+export function openInMediaPane(path: string): void {
     fireAndForget(() => createBlock({ meta: { view: "media", "media:path": path } }));
 }
 
