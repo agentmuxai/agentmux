@@ -41,15 +41,18 @@
  * to itself; see `readPaneZoom` and `withPaneZoom` for the mechanism and
  * for why every length has to be divided by the factor.
  *
- * Positioning is deliberately single-direction (top-anchored, growing
- * downward over the entry) rather than the above/below picker
- * hover-anchor.ts's `pickExpandDirection` provides — that picker exists for
- * UserMessageBlock's IN-FLOW body preview, which needs to dodge screen
- * edges since it can be tall (a multi-kB startup payload). This overlay is
- * always a couple of short metadata lines, and the explicit ask is for it
- * to sit at the entry's own top rather than floating below/above it, so
- * there's no direction to pick — height is simply capped to the space
- * between the entry's top and the scroll container's bottom.
+ * Positioning ("end" mode) is peek-placement.ts's job: inside the pane, below or
+ * above the pointer, when the panel fits on one side of it (the common short
+ * peek, unchanged); beside the pane when it is too tall for either side, so it
+ * cannot cover the pointer and may extend past the pane to the window edge; or
+ * above/below with its height constrained when there is no room beside. The
+ * old code clamped the position into the container and let the panel grow back
+ * over the pointer, which flickers (the row sees `mouseleave`, the panel
+ * closes, the row sees `mouseenter`, it reopens). A panel placed beside the pane
+ * is meant to be entered (scroll bar, text selection), so it lingers briefly
+ * after the row's `mouseleave` and stays while the pointer is on it. Tall
+ * panels scroll inside a height capped at a share of the window.
+ * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md
  *
  * `align="end"` mode additionally tracks the mouse's Y position while
  * hovering (2026-09-03, SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md):
@@ -63,9 +66,10 @@
 
 import clsx from "clsx";
 import { autoUpdate } from "@floating-ui/dom";
-import { createSignal, createEffect, onCleanup, Show, type JSX } from "solid-js";
+import { createSignal, createComputed, createEffect, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { findScrollContainerRect } from "./hover-anchor";
+import { BOTTOM_MARGIN_PX, computePeekPlacement, type PeekMode } from "./peek-placement";
 
 interface PeekOverlayProps {
     /** Whether the overlay should be mounted right now. */
@@ -111,15 +115,12 @@ interface PeekOverlayProps {
     children?: JSX.Element;
 }
 
-// Reserved space at the scroll container's bottom edge so the overlay's
-// own `overflow-y: auto` never sits flush against the pane border — same
-// rationale as hover-anchor.ts's `maxOverlayHeight` margin default.
-const BOTTOM_MARGIN_PX = 4;
-
-// Vertical clearance kept between the cursor and the mouse-tracking overlay's
-// own top edge (align="end" mode only) — see the `top` computation in
-// `update()` below for why this must be strictly positive.
-const CURSOR_GAP_PX = 12;
+/**
+ * How long the panel lingers after the pointer leaves the row, so the pointer
+ * can cross the gap to a `beside` panel and enter it. Entering the panel then
+ * holds it open (scroll bar, text selection). Standard hover-card grace.
+ */
+const HOVER_BRIDGE_MS = 150;
 
 /**
  * This overlay's owning pane's zoom factor, read off the anchor row.
@@ -185,6 +186,62 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         top: "0px",
     });
 
+    // True when the panel has left the pane's own area (`beside`/`vertical`).
+    // Only then does it carry `data-pane-overlay`, so the browser-pane airspace
+    // cut (platform/pane-overlay-auto.ts) is not driven for every short peek.
+    const [outside, setOutside] = createSignal(false);
+    // Which placement mode the last `update()` chose. Only `inside`/`vertical`
+    // depend on the pointer's Y; `beside` does not, so it skips mouse updates.
+    let lastMode: PeekMode = "inside";
+
+    // Hover bridge ("end" mode only). The panel is portalled, so moving onto it
+    // fires the row's `mouseleave` and the caller turns `show` off. Keep it up
+    // for HOVER_BRIDGE_MS after that, and while the pointer is on it, so the
+    // pointer can cross the gap and use the scroll bar / select text. The
+    // caller's `show` stays authoritative: when it goes true again (pointer back
+    // on the row) the linger is cancelled.
+    //
+    // `open` is the ONLY thing `<Show>` reads, written synchronously by a
+    // computation. Deriving "show || lingering" from two signals instead made the
+    // panel unmount for one update (show false, linger not yet set) and remount
+    // when the linger arrived — a flicker of its own.
+    const bridges = () => (props.align ?? "end") !== "stretch";
+    const [open, setOpen] = createSignal(props.show);
+    let held = false;
+    let bridgeTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearBridgeTimer = () => {
+        if (bridgeTimer !== undefined) clearTimeout(bridgeTimer);
+        bridgeTimer = undefined;
+    };
+    const startLinger = () => {
+        clearBridgeTimer();
+        bridgeTimer = setTimeout(() => {
+            bridgeTimer = undefined;
+            if (!held && !props.show) setOpen(false);
+        }, HOVER_BRIDGE_MS);
+    };
+    createComputed(
+        on(
+            () => props.show,
+            (show) => {
+                clearBridgeTimer();
+                if (show) {
+                    setOpen(true);
+                } else if (bridges() && untrack(open) && lastMode !== "inside") {
+                    // Only a panel placed to be ENTERED (beside / vertical) lingers.
+                    // An `inside` panel sits a cursor-gap away and a short peek has
+                    // nothing to scroll, so it closes the instant the pointer
+                    // leaves, exactly as it always did.
+                    startLinger(); // stay open; the timer closes it
+                } else {
+                    setOpen(false);
+                }
+            },
+            { defer: true },
+        ),
+    );
+    onCleanup(clearBridgeTimer);
+
     let floatingEl: HTMLElement | undefined;
     let cleanupAutoUpdate: (() => void) | null = null;
     // Latest mouse Y within the hovered row, tracked continuously (not
@@ -217,79 +274,54 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             );
             return;
         }
-        // Shrink-wrapped and right-anchored. No `width` is set at all, so the
-        // stylesheet's `width: max-content` governs; `max-width` still clamps
-        // it to the row so a long tool command can't escape the pane.
-        //
-        // `top` tracks the mouse's Y (clamped to the scroll container's own
-        // bounds) instead of freezing at rect.top — SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md.
-        // Horizontal pinning (left/transform) is untouched. Falls back to
-        // rect.top if no mouse position is known yet.
-        //
-        // `top` is offset CURSOR_GAP_PX below the raw cursor position, not
-        // exactly at it. First cut of this fix set `top: mouseY` exactly,
-        // which put the cursor precisely on the panel's own top edge — any
-        // further downward movement immediately entered the (Portal-rendered,
-        // non-descendant-of-the-row) overlay itself, firing the row's
-        // onMouseLeave and hiding it, which then re-triggered onMouseEnter at
-        // the new Y and looped (reagent P1 on PR #2949, 2nd round). The fix
-        // tried next — `pointer-events: none` on the overlay — traded that
-        // loop for a real regression: `.agent-node-peek-overlay` has a load-
-        // bearing `overflow-y: auto` (ToolBlock.tsx's `cmdText` body can be
-        // long enough to need scrolling), which pointer-events: none also
-        // disables (reagent P1, 3rd round).
-        //
-        // Placing the panel BELOW-with-a-gap isn't enough on its own,
-        // though: clamping `top` to fit the overlay's height within the
-        // container (so `max-height` doesn't collapse near the bottom edge)
-        // can push `top` back down to <= the cursor's raw Y whenever the
-        // cursor is within `overlayHeight + BOTTOM_MARGIN_PX` of the
-        // container's bottom — silently reintroducing the exact
-        // cursor-inside-the-overlay loop CURSOR_GAP_PX exists to prevent
-        // (reagent P1, 4th round: hovering the lowest transcript row, or any
-        // tall ToolBlock peek near the pane's bottom, hit this). Below-with-
-        // gap and the container-fit clamp can genuinely conflict — there is
-        // no single `top` that satisfies both that close to the edge — so
-        // this flips to ABOVE-with-a-gap instead of clamping when the
-        // below-placement wouldn't fit, the standard tooltip flip-direction
-        // pattern. Both branches keep the cursor strictly outside
-        // `[top, top + overlayHeight]` by construction (by `CURSOR_GAP_PX`),
-        // rather than relying on a clamp that can silently violate that
-        // invariant.
-        const overlayHeight = floatingEl?.getBoundingClientRect().height ?? 0;
-        const minTop = container.top;
-        const containerBottomLimit = container.bottom - BOTTOM_MARGIN_PX;
-        let top: number;
-        if (lastMouseY != null) {
-            const belowTop = lastMouseY + CURSOR_GAP_PX;
-            if (belowTop + overlayHeight <= containerBottomLimit) {
-                top = Math.max(belowTop, minTop);
-            } else {
-                // Not enough room below the cursor to fit the overlay without
-                // clipping — flip above it instead. Still clamped to minTop
-                // for the degenerate case where the container itself is
-                // shorter than the overlay; some clipping is unavoidable
-                // there (BOTTOM_MARGIN_PX/`cap` below still bound it), but
-                // that's an existing edge case, not one this fix introduces.
-                top = Math.max(lastMouseY - CURSOR_GAP_PX - overlayHeight, minTop);
-            }
-        } else {
-            top = rect.top;
-        }
-        const cap = Math.max(0, container.bottom - top - BOTTOM_MARGIN_PX);
+        // Shrink-wrapped. Where it goes (inside the pane, beside it, or above/
+        // below with a constrained height) is peek-placement.ts's job; the
+        // invariant it keeps — the pointer is never inside the panel — is
+        // swept by its tests. See that file for why each mode exists.
+        const measured = measureNaturalHeight(rect.width, paneZoom);
+        const placement = computePeekPlacement({
+            row: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+            mouseY: lastMouseY,
+            container,
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            naturalHeight: measured.natural,
+            currentHeight: measured.current,
+        });
+        lastMode = placement.mode;
+        setOutside(placement.mode !== "inside");
         setFloatingStyle(
             withPaneZoom(
                 {
                     position: "fixed",
-                    left: `${rect.right}px`,
-                    top: `${top}px`,
-                    transform: "translateX(-100%)",
-                    "max-width": `${rect.width}px`,
-                    "max-height": `${cap}px`,
+                    left: `${placement.left}px`,
+                    top: `${placement.top}px`,
+                    ...(placement.alignRight ? { transform: "translateX(-100%)" } : {}),
+                    "max-width": `${placement.maxWidth}px`,
+                    "max-height": `${placement.maxHeight}px`,
                 },
                 paneZoom,
             ),
         );
+    };
+
+    // The panel's height with no height cap, laid out at the ROW's width — one
+    // fixed width, so the mode it picks never depends on the mode it picked
+    // last time (a wider `beside` panel is shorter, which would otherwise
+    // flip it back to `inside`). `current` is the height as rendered now.
+    // Styles are set and restored synchronously, so nothing paints between.
+    const measureNaturalHeight = (rowWidth: number, paneZoom: number): { natural: number; current: number } => {
+        const el = floatingEl;
+        if (!el) return { natural: 0, current: 0 };
+        const current = el.getBoundingClientRect().height;
+        const prevW = el.style.maxWidth;
+        const prevH = el.style.maxHeight;
+        el.style.maxWidth = `${rowWidth / paneZoom}px`;
+        el.style.maxHeight = "none";
+        const chrome = el.offsetHeight - el.clientHeight;
+        const natural = Math.max(el.getBoundingClientRect().height, el.scrollHeight + chrome);
+        el.style.maxWidth = prevW;
+        el.style.maxHeight = prevH;
+        return { natural: Math.max(natural, current), current };
     };
 
     // Track the mouse continuously while the row exists, independent of
@@ -307,7 +339,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             if (mouseMoveRaf != null) return;
             mouseMoveRaf = requestAnimationFrame(() => {
                 mouseMoveRaf = null;
-                if (props.show) update();
+                if (props.show && lastMode !== "beside") update();
             });
         };
         row.addEventListener("mousemove", onMouseMove);
@@ -359,11 +391,24 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     });
 
     return (
-        <Show when={props.show}>
+        <Show when={open()}>
             <Portal>
                 <div
                     ref={registerFloating}
                     class={clsx("agent-node-peek-overlay", props.class)}
+                    data-pane-overlay={outside() ? "" : undefined}
+                    onMouseEnter={() => {
+                        if (!bridges()) return;
+                        clearBridgeTimer();
+                        held = true;
+                    }}
+                    onMouseLeave={() => {
+                        if (!bridges()) return;
+                        held = false;
+                        // Pointer left the panel: linger briefly (it may be heading
+                        // back to the row, whose mouseenter will re-show it).
+                        if (!props.show) startLinger();
+                    }}
                     style={floatingStyle()}
                 >
                     {props.children}
