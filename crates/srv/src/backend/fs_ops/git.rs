@@ -6,11 +6,16 @@
 //! line (branch, ahead/behind).
 //!
 //! Running git inside a folder the user merely browsed must not run code the
-//! folder chose. A repository's own `.git/config` can name a command for
-//! `core.fsmonitor`, which `git status` would execute; command-line `-c`
-//! settings win over every config file, so it is turned off here. The
-//! status never writes the index (`--no-optional-locks`), prompts for
-//! nothing, and is killed after a few seconds on a huge repository.
+//! folder chose. A repository's own config can name programs that `git
+//! status` executes: `core.fsmonitor`, and a `filter.<name>.clean` (or
+//! `.process`) applied through its `.gitattributes` whenever a file's stat
+//! data differs from the index. Command-line `-c` settings win over every
+//! config file, so the fsmonitor is turned off and every filter the
+//! repository itself defines is blanked; the user's own system and global
+//! filters (Git LFS) are left alone. Submodules, which have configs of their
+//! own, are not entered. The status never writes the index
+//! (`--no-optional-locks`), prompts for nothing, and is killed after a few
+//! seconds on a huge repository.
 //!
 //! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §12 (Phase 2, git
 //! decorations).
@@ -52,20 +57,85 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
         Ok(out) => String::from_utf8_lossy(&out).trim_end_matches(['\r', '\n']).to_string(),
         Err(_) => return FsGitStatus::default(),
     };
-    let out = match run_git(
-        &dir_arg,
-        &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignored=matching", "--", "."],
-    )
-    .await
+    // The repository's own filters, blanked for this run (see module docs).
+    let mut args: Vec<String> = Vec::new();
+    for name in repo_filters(&dir_arg).await {
+        for key in ["clean", "smudge", "process"] {
+            args.push("-c".into());
+            args.push(format!("filter.{name}.{key}="));
+        }
+        args.push("-c".into());
+        args.push(format!("filter.{name}.required=false"));
+    }
+    args.extend(
+        [
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+            "--untracked-files=normal",
+            "--ignored=matching",
+            "--ignore-submodules=all",
+            "--",
+            ".",
+        ]
+        .map(String::from),
+    );
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = match run_git(&dir_arg, &arg_refs).await
     {
         Ok(out) => out,
-        Err(message) => return FsGitStatus { in_repo: true, error: Some(message), ..Default::default() },
+        Err(e) => return FsGitStatus { in_repo: true, error: Some(e.message()), ..Default::default() },
     };
     summarize(&parse_porcelain_v2(&out), &prefix)
 }
 
+/// The names of the filters a repository's own config defines (its
+/// `.git/config`, worktree config, and what they include): every
+/// `filter.<name>.*` key whose scope isn't the user's system or global
+/// config. An older git without `--show-scope` gets every filter blanked.
+async fn repo_filters(dir: &str) -> Vec<String> {
+    let scoped = run_git(dir, &["config", "--show-scope", "--name-only", "--get-regexp", r"^filter\."]).await;
+    let (out, scoped) = match scoped {
+        Ok(out) => (out, true),
+        // `--get-regexp` exits 1 when nothing matches: no filters at all.
+        Err(GitError::Exit(1)) => return Vec::new(),
+        Err(_) => match run_git(dir, &["config", "--name-only", "--get-regexp", r"^filter\."]).await {
+            Ok(out) => (out, false),
+            Err(_) => return Vec::new(),
+        },
+    };
+    filter_names(&String::from_utf8_lossy(&out), scoped)
+}
+
+/// Filter names from `git config [--show-scope] --name-only --get-regexp
+/// ^filter\.` output; with scopes, only those outside system and global.
+pub fn filter_names(out: &str, scoped: bool) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for line in out.lines() {
+        let (scope, key) = if scoped {
+            match line.split_once(|c: char| c.is_whitespace()) {
+                Some((s, k)) => (s, k.trim()),
+                None => continue,
+            }
+        } else {
+            ("", line.trim())
+        };
+        if scoped && (scope == "system" || scope == "global") {
+            continue;
+        }
+        // filter.<name>.<key>; a name may itself contain dots.
+        let Some(rest) = key.strip_prefix("filter.") else { continue };
+        let Some((name, _)) = rest.rsplit_once('.') else { continue };
+        if !name.is_empty() && !names.iter().any(|n| n == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
 /// Run git in `dir` with the safe settings; its stdout, or a sentence.
-async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
     let mut cmd = tokio::process::Command::new("git");
     cmd.arg("-C").arg(dir).args(SAFE_CONFIG).arg("--no-optional-locks").args(args);
     cmd.env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
@@ -76,12 +146,31 @@ async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
         .no_window();
     // git needs nothing of this instance's identity.
     crate::backend::pane_env::sanitize_external_command(&mut cmd);
-    let child = cmd.spawn().map_err(|e| format!("Couldn't run git: {e}"))?;
+    let child = cmd.spawn().map_err(|e| GitError::Failed(format!("Couldn't run git: {e}")))?;
     match tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output()).await {
-        Err(_) => Err("git took too long to answer.".to_string()),
-        Ok(Err(e)) => Err(format!("git failed: {e}")),
+        Err(_) => Err(GitError::Failed("git took too long to answer.".to_string())),
+        Ok(Err(e)) => Err(GitError::Failed(format!("git failed: {e}"))),
         Ok(Ok(out)) if out.status.success() => Ok(out.stdout),
-        Ok(Ok(out)) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+        Ok(Ok(out)) => match out.status.code() {
+            Some(code) if out.stderr.is_empty() => Err(GitError::Exit(code)),
+            _ => Err(GitError::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string())),
+        },
+    }
+}
+
+#[derive(Debug)]
+enum GitError {
+    /// git exited with this code and said nothing.
+    Exit(i32),
+    Failed(String),
+}
+
+impl GitError {
+    fn message(self) -> String {
+        match self {
+            GitError::Exit(code) => format!("git exited with status {code}."),
+            GitError::Failed(m) => m,
+        }
     }
 }
 
@@ -339,6 +428,48 @@ mod tests {
         assert_eq!(get("tracked.txt"), Some(FsGitState::Modified));
         assert_eq!(get("new.txt"), Some(FsGitState::Untracked));
         assert!(!mark.exists(), "the repository's fsmonitor program ran");
+    }
+
+    #[test]
+    fn blanks_the_repositorys_filters_and_keeps_the_users() {
+        let out = "system\tfilter.lfs.clean\nglobal\tfilter.lfs.process\nlocal\tfilter.evil.clean\nlocal\tfilter.evil.process\nworktree\tfilter.a.b.smudge\n";
+        assert_eq!(filter_names(out, true), vec!["evil".to_string(), "a.b".to_string()]);
+        // Without scopes (an older git), every filter.
+        assert_eq!(filter_names("filter.lfs.clean\nfilter.x.process\n", false), vec!["lfs".to_string(), "x".to_string()]);
+    }
+
+    /// The other route git status has to a repository's code: a clean filter
+    /// named in `.git/config` and applied by `.gitattributes`, run when a
+    /// file's stat data differs from the index. ReAgent on #4223.
+    #[tokio::test]
+    async fn runs_git_without_the_repositorys_clean_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(["-c", "user.email=a@b", "-c", "user.name=a"])
+                .args(args)
+                .current_dir(dir.path())
+                .no_window()
+                .output()
+        };
+        if git(&["init", "-q"]).map(|o| !o.status.success()).unwrap_or(true) {
+            return; // No git on this machine.
+        }
+        std::fs::write(dir.path().join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+        std::fs::write(dir.path().join("t.txt"), "a\n").unwrap();
+        let _ = git(&["add", "."]);
+        let _ = git(&["commit", "-qm", "x"]);
+        let mark = dir.path().join("filter-ran");
+        let mark_arg = mark.display().to_string().replace('\\', "/");
+        let _ = git(&["config", "filter.evil.clean", &format!("sh -c 'touch \"{mark_arg}\"; cat'")]);
+        // New stat data, same content: git must look at the content, through
+        // the filter if it were allowed to.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(dir.path().join("t.txt"), "a\n").unwrap();
+
+        let s = git_status(&dir.path().to_string_lossy()).await;
+        assert!(s.in_repo && s.error.is_none(), "{s:?}");
+        assert!(!mark.exists(), "the repository's clean filter ran");
     }
 
     #[tokio::test]
