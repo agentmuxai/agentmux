@@ -131,9 +131,17 @@ Source-level findings where the code is open; docs or reports otherwise.
   *Update 2026-10-02:* the owner saw the room at the bottom grow and then
   close in a few steps. Most holds ended unfilled (the agent's next row
   usually takes longer than 700 ms), so the gap showed and then eased
-  away. The hold is now 350 ms and the ease 160 ms. This is a tuning
-  change made from reading the code, not a measured one: check it against
-  a live run (`HOLD_MS`, `HOLD_RELEASE_MS` in `AgentDocumentVirtualList.tsx`).
+  away. The hold is now 350 ms and the ease 160 ms (`HOLD_MS`,
+  `HOLD_RELEASE_MS` in `AgentDocumentVirtualList.tsx`).
+
+  Measured twice. From the transcripts of three sessions (5,492 tool
+  results), the next row arrives a median 2.0-3.7 s after a tool result,
+  and within 350 ms in 0-1% of cases, so a 700 ms hold was almost never
+  filled by a row. Then live, in a `task dev` window with a multi-tool
+  run: two real gaps (107 px), open 370 ms and 351 ms, both closed by the
+  timer; a batch of three parallel calls produced three tiny episodes each
+  filled by a row. One run on one machine; no A/B against 700 ms was
+  recorded. The owner's verdict was "looks good".
 
 ## 7. Sources
 
