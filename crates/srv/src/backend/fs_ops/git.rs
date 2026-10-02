@@ -58,7 +58,15 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
         Err(_) => return FsGitStatus::default(),
     };
     // The repository's own filters, blanked for this run (see module docs).
-    let filters = repo_filters(&dir_arg).await;
+    // Fails closed: if the config can't be read, git status doesn't run
+    // (ReAgent on #4223): unblanked filters would run.
+    let Ok(filters) = repo_filters(&dir_arg).await else {
+        return FsGitStatus {
+            in_repo: true,
+            error: Some("Couldn't read this repository's settings, so git markers are off here.".to_string()),
+            ..Default::default()
+        };
+    };
     // `-c` splits at the first `=`, so a filter named `x=y` can't be
     // blanked that way (ReAgent on #4223). Such a name is never needed:
     // don't run git there at all.
@@ -105,18 +113,21 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
 /// `.git/config`, worktree config, and what they include): every
 /// `filter.<name>.*` key whose scope isn't the user's system or global
 /// config. An older git without `--show-scope` gets every filter blanked.
-async fn repo_filters(dir: &str) -> Vec<String> {
+/// `Err` when the config couldn't be read: the caller must not run git
+/// status then. Only `--get-regexp`'s exit 1 ("no match") means none.
+async fn repo_filters(dir: &str) -> Result<Vec<String>, ()> {
     let scoped = run_git(dir, &["config", "--show-scope", "--name-only", "--get-regexp", r"^filter\."]).await;
     let (out, scoped) = match scoped {
         Ok(out) => (out, true),
-        // `--get-regexp` exits 1 when nothing matches: no filters at all.
-        Err(GitError::Exit(1)) => return Vec::new(),
+        Err(GitError::Exit(1)) => return Ok(Vec::new()),
+        // An older git without `--show-scope`: every filter, unscoped.
         Err(_) => match run_git(dir, &["config", "--name-only", "--get-regexp", r"^filter\."]).await {
             Ok(out) => (out, false),
-            Err(_) => return Vec::new(),
+            Err(GitError::Exit(1)) => return Ok(Vec::new()),
+            Err(_) => return Err(()),
         },
     };
-    filter_names(&String::from_utf8_lossy(&out), scoped)
+    Ok(filter_names(&String::from_utf8_lossy(&out), scoped))
 }
 
 /// Filter names from `git config [--show-scope] --name-only --get-regexp
@@ -512,6 +523,26 @@ mod tests {
         let s = git_status(&dir.path().to_string_lossy()).await;
         assert!(s.entries.is_empty() && s.error.is_some(), "{s:?}");
         assert!(!mark.exists(), "the repository's clean filter ran");
+    }
+
+    /// A config git can't parse makes the filter lookup fail: then git
+    /// status must not run (it would run with nothing blanked).
+    #[tokio::test]
+    async fn an_unreadable_config_turns_markers_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = std::process::Command::new("git").args(["init", "-q"]).current_dir(dir.path()).no_window().output();
+        if ok.map(|o| !o.status.success()).unwrap_or(true) {
+            return; // No git on this machine.
+        }
+        let config = dir.path().join(".git").join("config");
+        let mut text = std::fs::read_to_string(&config).unwrap();
+        text.push_str("\n[filter \"evil\"\n\tclean = broken\n");
+        std::fs::write(&config, text).unwrap();
+        // git refuses the repository at the first step, or the filter lookup
+        // fails: either way no status runs and there are no markers.
+        let s = git_status(&dir.path().to_string_lossy()).await;
+        assert!(s.entries.is_empty(), "{s:?}");
+        assert!(!s.in_repo || s.error.is_some(), "{s:?}");
     }
 
     #[tokio::test]
