@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.59.5 — 2026-10-02
+
+- agent pane: new rows fade in more visibly, and the conversation above glides up instead of jumping when one arrives
+- docs(spec): hardening spec so the swarm always shows a useful line per agent (root cause of the (none yet) row, and a fix plan)
+- docs(specs): a spec for what is left of the runtime menu - approval prompts, a remembered runtime, the resolved model, and CLI install pruning
+- fix(ambient): the swarm no longer shows (none yet) as an agent's summary (the title prompt fed the model its own placeholder, which it echoed and the validator accepted); pane tab tooltips for agents show the swarm summary instantly
+- Agent Runtime menu: Plan mode no longer described as read-only for persistent agents (observed: the CLI asks before writing and the server allows it); Haiku effort wording corrected
+- Add an opt-in CLI probe harness (fake Anthropic API, keychain-safe runner) that records what the pinned Claude CLI actually does
+- fix(muxbus): each channel keeps its own AgentMux cloud sign-in tokens — signing in or out of one build no longer replaces or deletes another's
+- Add the disuse-based CLI install pruning core (planner, guarded remover, last-used marker); nothing calls it yet
+- feat(agent): Rust, Go, TOML, PowerShell, Dockerfile and 19 more languages are highlighted in Read, Write and Edit previews
+- Runtime menu shows the model the CLI actually used for the last reply, and flags a different model family
+- Pane tab colours: a pane with one coloured agent plus uncoloured tabs (e.g. Accounts) keeps the agent's header tint whichever tab is selected; light-theme headers and tabs are soft tints instead of solid colour; the selected tab is a step stronger than idle ones; tab underlines meet 3:1 contrast for every agent colour
+- feat(agent): a Read of an image shows the image; PDFs, unchanged files and token-capped reads get one clear line
+- fix(lan): mDNS recovery keeps retrying with a backoff instead of giving up after three tries, logs the OS error and who holds UDP 5353 on each attempt, and mdns-sd's own log lines now reach the srv log (the log-to-tracing bridge was never installed)
+- Agents remember the model, effort and mode you last picked in the Runtime menu, so Continue/Reattach/reopen start there; a launch-modal or fork choice now also beats the definition's own --model
+- Runtime menu shows the model and effort the Claude CLI itself reports it is running (get_settings), and warns when they differ from the selection
+- Opening the Runtime menu no longer restarts an agent to migrate a model id the catalog has replaced
+- feat(files): Hangar, a file browser pane — browse, sort, open by kind, rename, Trash with undo, live updates; OpenFiles MCP tool
+- /btw on a persistent Claude agent no longer fails: the control-protocol flags are removed from its one-shot turn
+- Toolchain view: list and, on request, remove provider CLI installs unused for 30 days (opt-in, dry run first)
+- Update the runtime-bindings report with the final state of every gap
+- Agent pane keeps about 5 MB of conversation before older turns move to History (was 15 MB), and scrolling up no longer shows a "Loading older messages" banner that pushed the conversation down
+- Status bar panels, the version panel and the agent pane's model/effort and session panels now follow chrome zoom and stay anchored to their button; one shared AnchoredPopover replaces nine copies of the popover plumbing
+- Pane colours: in light themes a CPU, terminal or other non-agent pane's header is no longer a solid dark bar; the focused-pane ring, unfocused pane borders and Swarm row borders use the same even-brightness colours as the tabs, so an unfocused yellow pane no longer looks brighter than a focused blue one
+- SendMessage tells the sender more: every answer ends with the message id, HELD says the receiver is not running, a relay answer says it is unconfirmed and expires in 30 minutes, and a failure says whether the receiver needs to sign in (the message was not kept) or was not found
+- A message to an agent that is not signed in is now kept and delivered within about a minute of it signing in (for up to 24 hours), instead of failing; the sender is told HELD (needs_login)
+
 ## 0.59.4 — 2026-10-01
 
 - docs(spec): cross-host access gains hops, non-AgentMux targets and the Windows test bed (follow-up to the merged spec)
