@@ -89,5 +89,17 @@ else
   echo "note: no python on PATH — skipped the live-listener checks"
 fi
 
+# 7. With no probe tool on PATH, `pick` and `listening` fail loudly instead of
+#    reporting every port as free (ReAgent P2 on #4214). An empty PATH hides
+#    lsof, ss and netstat alike; `blocked` and `check` need none of them.
+EMPTY="$(mktemp -d)"
+out="$(env PATH="$EMPTY" "$BASH" "$SUT" pick 2>&1)"; st=$?
+if [ "$st" != 0 ]; then ok; else bad "pick without a probe tool succeeded: $out"; fi
+case "$out" in *"cannot tell which ports are in use"*) ok ;; *) bad "pick without a probe tool says why: $out" ;; esac
+env PATH="$EMPTY" "$BASH" "$SUT" listening 5300 >/dev/null 2>&1; st=$?
+if [ "$st" != 0 ]; then ok; else bad "listening without a probe tool reported success"; fi
+env PATH="$EMPTY" "$BASH" "$SUT" check 5300 >/dev/null 2>&1 && ok || bad "check should not need a probe tool"
+rmdir "$EMPTY" 2>/dev/null
+
 echo "vite-port.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

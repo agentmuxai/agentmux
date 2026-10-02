@@ -1036,7 +1036,12 @@ pub(crate) fn render_load_error_html(
     // per-error-code heading: that's the actual fix this unification made
     // (see this function's own doc comment) — a pane loading an arbitrary
     // external site must never claim "Failed to load AgentMux frontend".
-    let heading_safe = html_escape(if is_browser_pane {
+    //
+    // A permanent failure (see `is_permanent_load_error`) is the exception: the
+    // generic "Failed to load AgentMux frontend" would point at the wrong thing
+    // (Vite IS running), so the catalog's own heading is shown for it.
+    let permanent = is_permanent_load_error(error_code_i32);
+    let heading_safe = html_escape(if is_browser_pane || permanent {
         copy.heading
     } else {
         "Failed to load AgentMux frontend"
@@ -1056,7 +1061,6 @@ pub(crate) fn render_load_error_html(
     // A permanent failure (see `is_permanent_load_error`) never auto-retries
     // either: the retry could only repeat it, and on the main window that is a
     // window that flashes the error page every 1.2 s forever.
-    let permanent = is_permanent_load_error(error_code_i32);
     let auto_retry = if is_browser_pane || permanent {
         String::new()
     } else {
@@ -1275,7 +1279,11 @@ mod load_error_page_tests {
         let html = page(cef_errorcode_t::ERR_UNSAFE_PORT, "ERR_UNSAFE_PORT", false);
         assert!(html.contains("AGENTMUX_VITE_PORT"));
         assert!(html.contains("vite-port.sh pick"));
-        assert!(html.contains("This port is blocked"));
+        assert!(html.contains("<title>This port is blocked</title>"));
+        // The visible heading, not just the tab title: the generic main-window
+        // heading must not win for a blocked port (ReAgent P2 on #4214).
+        assert!(html.contains("<h1>This port is blocked</h1>"));
+        assert!(!html.contains("Failed to load AgentMux frontend"));
         assert!(!html.contains("Make sure the Vite dev server is running"));
     }
 
@@ -1285,6 +1293,7 @@ mod load_error_page_tests {
         let html = page(cef_errorcode_t::ERR_CONNECTION_REFUSED, "ERR_CONNECTION_REFUSED", false);
         assert!(html.contains("setTimeout(__amxRetry, 1200)"));
         assert!(html.contains("Make sure the Vite dev server is running"));
+        assert!(html.contains("<h1>Failed to load AgentMux frontend</h1>"), "other errors keep the main-window heading");
     }
 
     /// A browser pane never auto-retries, whatever the code.

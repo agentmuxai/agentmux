@@ -34,15 +34,33 @@ is_blocked() {
   return 1
 }
 
+is_windows() {
+  case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac
+}
+
+# `listening` and `pick` are only as good as the tool behind them. A missing
+# tool must stop them loudly: swallowing its "not found" would report every
+# port as free, and `pick` could hand back one that is in use.
+require_probe() {
+  if is_windows; then
+    command -v netstat >/dev/null 2>&1 && return 0
+    echo "vite-port.sh: netstat not found, cannot tell which ports are in use" >&2
+  else
+    command -v lsof >/dev/null 2>&1 && return 0
+    command -v ss >/dev/null 2>&1 && return 0
+    echo "vite-port.sh: neither lsof nor ss found, cannot tell which ports are in use" >&2
+  fi
+  return 1
+}
+
 is_listening() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW* | MSYS* | CYGWIN*)
-      netstat -ano 2>/dev/null | grep -i LISTENING | grep -q ":$1 "
-      ;;
-    *)
-      [ -n "$(lsof -ti ":$1" -sTCP:LISTEN 2>/dev/null | head -1)" ]
-      ;;
-  esac
+  if is_windows; then
+    netstat -ano 2>/dev/null | grep -i LISTENING | grep -q ":$1 "
+  elif command -v lsof >/dev/null 2>&1; then
+    [ -n "$(lsof -ti ":$1" -sTCP:LISTEN 2>/dev/null | head -1)" ]
+  else
+    ss -ltn 2>/dev/null | grep -q ":$1 "
+  fi
 }
 
 cmd_check() {
@@ -62,6 +80,7 @@ cmd_check() {
 
 cmd_pick() {
   local port="${1:-5300}"
+  require_probe || return 1
   is_number "$port" || { echo "start port '$port' is not a number" >&2; return 1; }
   while [ "$port" -le 65535 ]; do
     if ! is_blocked "$port" && ! is_listening "$port"; then
@@ -77,7 +96,7 @@ cmd_pick() {
 case "${1:-}" in
   blocked) is_blocked "${2:-}" ;;
   check) cmd_check "${2:-}" ;;
-  listening) is_listening "${2:-}" ;;
+  listening) require_probe && is_listening "${2:-}" ;;
   pick) cmd_pick "${2:-}" ;;
   *)
     echo "usage: vite-port.sh {blocked|check|listening} <port> | pick [start]" >&2
