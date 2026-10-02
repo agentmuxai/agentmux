@@ -47,26 +47,6 @@
     // under this selector (or subject to .agent-view's per-pane zoom) anymore.
 
 
-    // Back-and-forth highlight sweep for .agent-working-shimmer (below).
-    // `alternate` on the animation shorthand does the direction-reversal;
-    // this keyframe only needs to describe one pass.
-    //
-    // Endpoint math — these keep the WHOLE highlight band on-screen for the
-    // entire sweep (flush-left ↔ flush-right), so it never slides off an
-    // edge or thins out at the turning points. With `background-position:
-    // P%` on an X%-wide image, the image's left edge sits at container-x =
-    // (100-X)·(P/100), and the band spans image-fractions [lo,hi] of it.
-    // Solving band-flush-left and band-flush-right for the values used here
-    // (X=220, band [40%,60%] ⇒ 44 container-units wide):
-    //   P_left  = lo·X/(X-100)                    = 40·220/120  = 73.333%
-    //   P_right = 100·(100 - 44 - (lo/100)·X)/(100-X) = 100·(-32)/(-120) = 26.667%
-    // If band stops or background-size change, these must be re-derived
-    // (sandbox/working-shimmer.html on the dev machine computes them live).
-    @keyframes agent-working-shimmer-sweep {
-        0%   { background-position: 73.333% 0; }
-        100% { background-position: 26.667% 0; }
-    }
-
     // === Working Row ===
     // A normal-flow row between the ActivityDock and the composer strip
     // (SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md): dock's
@@ -111,29 +91,29 @@
         padding: var(--space-1) var(--space-3) var(--space-1-5) var(--space-3);
 
         &--loading {
-            // Same typeface as the normal agent thinking/markdown text
-            // (markdown.scss's `.content` rule) rather than --fixed-font's
-            // monospace — nothing about a status sentence ("Working…", a
-            // tool name) is code-shaped. Kept at the row's existing 10px
-            // rather than --markdown-font-size's 14px: this sits directly
-            // above the composer among other 10-11px control-bar text, and
-            // 14px would read oversized there. Bold as a deliberate
-            // distinguishing choice for this one live-status line, not a
-            // match to thinking text (which renders at normal weight).
-            // Scoped to --loading only, NOT the shared base rule above —
-            // the --worked (post-completion) state below is explicitly out
-            // of scope (already non-accent) and must keep its own
-            // typography untouched (codex P2 on PR #2946: the first version
-            // of this put these two declarations on the base selector,
-            // which also reached --worked). See
-            // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md.
-            font-family: var(--markdown-font-family);
+            // Same monospace typeface as the composer input. `.agent-input`
+            // declares `font-family: inherit`, and the nearest declaration up
+            // the tree is `.agent-view`'s `var(--font-mono)`, so naming it
+            // here keeps the two identical. Was `--markdown-font-family` (the
+            // thinking-text face) per
+            // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md; the
+            // operator then asked for the composer's face instead. Kept at the
+            // row's existing 10px and bold. Scoped to --loading only: the
+            // --worked (post-completion) state below keeps its own typography
+            // (codex P2 on PR #2946).
+            font-family: var(--font-mono);
             font-weight: 700;
-            // main-text-color, not accent — the row previously read as the
-            // theme's accent hue (blue by default) end to end, text and
-            // shimmer highlight alike. See
-            // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md §2.
-            color: var(--main-text-color);
+            // The pane border's own color: the agent's color (the same one
+            // the focused border and header use) when the block has one,
+            // otherwise the theme accent. `.has-agent-color` sits on the block
+            // frame, above `.agent-view`, and `--block-agent-color` is
+            // "transparent" without one, so it can't be a var() fallback.
+            // One solid color: no shimmer sweep any more. See
+            // SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md.
+            color: var(--accent-color);
+            .has-agent-color & {
+                color: var(--block-agent-color);
+            }
             // Opaque, still — kept deliberately after the row moved out of
             // the scroll region. It no longer overlaps the message list, so
             // the original bleed-through this fixed (commit 6e4497b: history
@@ -159,62 +139,6 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-
-                // Always applied while loading (AgentFooter.tsx bakes the
-                // class in statically) — a soft highlight band sweeps back
-                // and forth across the text. The animation must run
-                // CONTINUOUSLY across phrase/tool changes: re-adding the
-                // class per phrase restarts the animation at 0%, which
-                // truncates the return leg of the sweep every time a tool
-                // transition lands mid-cycle (validated in the sandbox).
-                // During the type-out reveal the `.is-typing` variant below
-                // overlays opaque text without touching the animation.
-                // `--secondary-text-color` base + `--main-text-color`
-                // highlight — was `--accent-color` (blue by default);
-                // switched alongside the base `color:` above so the sweeping
-                // highlight band doesn't stay blue on its own. main-text is
-                // the brightest general-purpose text token available and is
-                // what --secondary-text-color already reads dim relative to
-                // elsewhere in this file, so the dim-to-bright sweep SHAPE is
-                // unchanged — only the hue is gone. See
-                // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md §3.
-                // `alternate` direction is what makes the sweep reverse
-                // instead of snapping back.
-                &.agent-working-shimmer {
-                    background-image: linear-gradient(
-                        90deg,
-                        var(--secondary-text-color) 0%,
-                        var(--secondary-text-color) 40%,
-                        var(--main-text-color) 50%,
-                        var(--secondary-text-color) 60%,
-                        var(--secondary-text-color) 100%
-                    );
-                    background-size: 220% 100%;
-                    background-clip: text;
-                    -webkit-background-clip: text;
-                    color: transparent;
-                    animation: agent-working-shimmer-sweep 2.4s ease-in-out infinite alternate;
-
-                    // Reduced-motion slowdown — same precedent as the
-                    // marching-ants bar (keep the essential looping "still
-                    // working" signal, just gentler), incl. re-asserting
-                    // `infinite` for Chromium's single-iteration clamp.
-                    // Nested HERE, not in the shared reduced-motion block
-                    // near the top of the file: it must come after the
-                    // `animation:` shorthand above in source order (equal
-                    // specificity), or the shorthand's 2.4s always wins.
-                }
-
-                // Type-out reveal overlay: opaque white glyphs painted over
-                // the (still-running) shimmer. Keep background-clip as
-                // `text` — resetting it would un-clip the gradient into a
-                // full near-white box behind the typing text. With the clip
-                // intact and an opaque -webkit-text-fill-color, the glyphs
-                // simply cover the clipped gradient until the reveal ends.
-                &.agent-working-shimmer.is-typing {
-                    color: var(--main-text-color);
-                    -webkit-text-fill-color: var(--main-text-color);
-                }
             }
 
             .agent-working-row-right {

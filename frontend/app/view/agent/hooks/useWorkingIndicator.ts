@@ -5,7 +5,6 @@
 
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { createMemo, type Accessor } from "solid-js";
-import { hasRunningPromotedTool } from "../activity/tool-adapter";
 import { busyInputFromState, paneBusyForInput } from "../working-indicator";
 
 export interface WorkingIndicator {
@@ -13,31 +12,13 @@ export interface WorkingIndicator {
     paneBusy: Accessor<boolean>;
     /** The working row shows while busy, and after a turn while it has stats, a compaction or a reconnect to show. */
     workingRowVisible: Accessor<boolean>;
-    /** A running Bash call has been promoted to a live ActivityDock row. */
-    hasPromotedTool: Accessor<boolean>;
 }
 
 export function useWorkingIndicator(opts: {
     paneModel: Pick<AgentPaneModel, "state" | "document">;
     showingLaunchActivity: Accessor<boolean>;
-    /** `createPromotionClock(paneModel.document)`, shared with the attached-task effect. */
-    promotionTick: Accessor<number>;
 }): WorkingIndicator {
     const { paneModel } = opts;
-
-    // True once the pane's in-flight Bash tool call has been promoted to a
-    // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
-    // its own "tool · arg" text once this flips, so the dock and the working
-    // row never repeat the same information (report §4.3: "the dock takes
-    // over, AgentWorkingRow goes calm/neutral"). Deliberately uses
-    // hasRunningPromotedTool, not toolActivities — a *finished* call still
-    // lingering in the dock during its retention window must not suppress a
-    // different, newly-started tool call's own working-row text. Promotion
-    // happens on the wall clock, so this recomputes on the promotion clock.
-    const hasPromotedTool = createMemo(() => {
-        opts.promotionTick();
-        return hasRunningPromotedTool(paneModel.document(), Date.now());
-    });
 
     // THE busy predicate — one meaning, three renderings: this row, the top
     // progress bar, and the composer strip. All three read this memo and
@@ -69,5 +50,5 @@ export function useWorkingIndicator(opts: {
             paneModel.state.reconnecting != null,
     );
 
-    return { paneBusy, workingRowVisible, hasPromotedTool };
+    return { paneBusy, workingRowVisible };
 }

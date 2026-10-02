@@ -49,6 +49,7 @@ import {
 } from "./types";
 import type { DisconnectReason } from "./types";
 import { learnContextWindow } from "./context-window";
+import { turnAddedInput } from "./turn-contribution";
 
 export function update(
     state: AgentPaneState,
@@ -817,12 +818,21 @@ export function update(
         }
 
         case "TokensIn": {
+            // Context size going into this turn, for turnAddedInput(): set at
+            // the turn's first call and carried unchanged after. It is the
+            // previous turn's last context size; with nothing before it (a
+            // fresh pane, after TurnReset) the first call's own input stands
+            // in, so the turn is not credited with the system prompt.
+            const contextBaseline =
+                state.turnTokens?.contextBaseline ??
+                ((state.lastContextTokens ?? 0) > 0 ? (state.lastContextTokens as number) : command.input);
             const next = {
                 input: command.input,
                 output: state.turnTokens?.output ?? 0,
                 freshInput: command.freshInput,
                 cacheCreation: command.cacheCreation,
                 cacheRead: command.cacheRead,
+                contextBaseline,
             };
             // Learn the context window from the resolved model + observed fill
             // (seed-then-high-water-upgrade); null until a recognised model is
@@ -898,6 +908,7 @@ export function update(
                 freshInput: state.turnTokens?.freshInput,
                 cacheCreation: state.turnTokens?.cacheCreation,
                 cacheRead: state.turnTokens?.cacheRead,
+                contextBaseline: state.turnTokens?.contextBaseline,
             };
             const nextState = bumpEvent(
                 { ...state, turnTokens: next },
@@ -1677,10 +1688,12 @@ function mergeStats(
     stats: AgentPaneState["sessionStats"],
     tokens: AgentPaneState["turnTokens"],
 ): AgentPaneState["sessionStats"] {
+    const added = turnAddedInput(tokens);
     if (stats) {
         return {
             ...stats,
             input_tokens: stats.input_tokens || tokens?.input,
+            added_input_tokens: added ?? stats.added_input_tokens,
             output_tokens: stats.output_tokens || tokens?.output,
             // Same fallback logic as input_tokens/output_tokens above,
             // applied to the cache breakdown — prefer the result event's
@@ -1693,6 +1706,7 @@ function mergeStats(
     if (tokens) {
         return {
             input_tokens: tokens.input,
+            added_input_tokens: added,
             output_tokens: tokens.output,
             fresh_input_tokens: tokens.freshInput,
             cache_creation_input_tokens: tokens.cacheCreation,

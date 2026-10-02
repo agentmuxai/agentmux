@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Draft — analysis only, no code changes made
+**Update 2026-10-02:** The shimmer sweep in §2 was removed on 2026-10-02; the type-out reveal stays. See `SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md`.
 **Scope:** Frontend only (SolidJS + SCSS). Two independent changes bundled because both touch the Agent pane's conversation chrome:
 
 1. Give the "Working…" indicator a two-phase animation (type-out, then a back-and-forth shimmer sweep), confirm it's theme-bound.

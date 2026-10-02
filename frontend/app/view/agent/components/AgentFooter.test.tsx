@@ -650,6 +650,78 @@ describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_
     });
 });
 
+/**
+ * SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md: the loading row shows the
+ * pane's ambient summary instead of "tool · arg", reports the turn's own
+ * contribution in ↑in ↓out (not the context re-sent), and has no shimmer overlay.
+ */
+describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
+    it("shows the ambient summary in the left zone", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="  Fix the login redirect loop " />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("falls back to the cycling phrase when there is no summary", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} activitySummary={null} />);
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toMatch(/…$/);
+    });
+
+    it("lets a status win over the summary", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} stopping={true} activitySummary="Fix the login redirect loop" />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
+    });
+
+    it("shows what the turn added, not the context it re-sent, next to the elapsed time", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                // 180k of context re-sent on the last call, 40k of it before the turn began.
+                turnTokens={{ input: 180_000, output: 1_200, contextBaseline: 40_000 }}
+            />
+        ));
+
+        const right = container.querySelector(".agent-working-row-right")?.textContent ?? "";
+        expect(right).toMatch(/^↑140k ↓1\.2k {2}·  \d+s$/);
+        expect(right).not.toContain("180k");
+    });
+
+    it("falls back to the raw input only where there is no baseline", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} turnTokens={{ input: 5_000, output: 300 }} />
+        ));
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^↑5\.0k ↓300 {2}·  \d+s$/);
+    });
+
+    it("the Worked summary shows the contribution, not the summed re-sent input", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ input_tokens: 840_000, added_input_tokens: 3_000, output_tokens: 512, duration_ms: 42_000 }}
+            />
+        ));
+
+        const left = container.querySelector(".agent-working-row-left")?.textContent ?? "";
+        expect(left).toContain("↑3.0k ↓512");
+        expect(left).not.toContain("840k");
+    });
+
+    it("renders one solid-color left zone: no shimmer or typing overlay classes", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} activitySummary="Fix it" />);
+
+        const left = container.querySelector(".agent-working-row-left") as HTMLElement;
+        expect(left.className).toBe("agent-working-row-left");
+    });
+});
+
 // Tier 4 (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §5):
 // an ESTIMATED progress bar from earlier compactions' durations. Claude Code
 // reports no real progress, so it is labeled as an estimate and never "done".

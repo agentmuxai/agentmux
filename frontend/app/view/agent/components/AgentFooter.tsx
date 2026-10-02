@@ -14,13 +14,13 @@ import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
-import { abbreviateText } from "@/util/format-text";
 import { MicButton } from "@/app/element/MicButton";
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
+import { turnAddedInput } from "@/app/store/agent-pane-state/turn-contribution";
 import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
 import { SlashAutocomplete } from "./SlashAutocomplete";
@@ -40,8 +40,16 @@ function ingToEd(_phrase: string): string {
     return "Worked";
 }
 
-function fmtTokens(t: TurnTokens): string {
-    return `\u2191${formatCompactNumber(t.input)} \u2193${formatCompactNumber(t.output)}`;
+/** "\u2191in \u2193out" for ONE turn. `input` is what the turn added to the
+ *  context, not the context it re-sent on every call (see turnAddedInput). */
+function fmtTokens(input: number, output: number): string {
+    return `\u2191${formatCompactNumber(input)} \u2193${formatCompactNumber(output)}`;
+}
+
+/** Live readout: the turn's contribution, falling back to the raw input only
+ *  where there is no baseline to subtract (a provider with no live usage). */
+function fmtTurnTokens(t: TurnTokens): string {
+    return fmtTokens(turnAddedInput(t) ?? t.input, t.output);
 }
 
 // \u2500\u2500 Composer draft persistence \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -67,24 +75,19 @@ const composerDrafts = new Map<string, string>();
 // Returns null when neither loading nor has stats — no idle placeholder.
 // Stays visible as a turn delimiter until the user sends the next message.
 
-/** Truncate tool arg to `max` chars, left-truncating file paths to preserve filename. */
-function abbreviateArg(s: string, max: number): string {
-    return abbreviateText(s, max, { pathAware: true });
-}
-
 interface AgentWorkingRowProps {
     loading: boolean;
     stopping?: boolean;
-    currentTool?: string | null;
-    /** First significant argument of the active tool (file path, command, etc.).
-     *  When set alongside currentTool, shown as "tool · arg" in the left zone. */
-    currentToolArg?: string | null;
-    /** True once the current tool call has been promoted to a live
-     *  ActivityDock row (tool-adapter.ts) — the row falls back to the
-     *  cycling "Working…" phrase instead of repeating "tool · arg", since
-     *  the dock already shows it. See REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §4.3. */
-    toolPromoted?: boolean;
+    /** The pane's ambient (Haiku-written) session summary, or the CLI's own
+     *  window-title topic when there isn't one yet — `readSwarmSummary` of the
+     *  block meta, the same line the Swarm row shows. Shown in the left zone
+     *  in place of the old "tool · arg" text; the phrase cycle covers the gap
+     *  until one exists. */
+    activitySummary?: string | null;
     sessionStats?: SessionStats | null;
+    /** Live token counts for the turn in progress; the right zone shows what
+     *  the turn has added (not the context it re-sends) next to the elapsed
+     *  time. */
     turnTokens?: TurnTokens | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
     waitingReason?: "rate_limited" | null;
@@ -152,11 +155,8 @@ function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: num
     }
     const phaseLabel = formatPhaseLabel(props.launchPhase, nowMs);
     if (phaseLabel) return phaseLabel;
-    if (props.currentTool && !props.toolPromoted) {
-        return props.currentToolArg
-            ? `${props.currentTool}  ·  ${abbreviateArg(props.currentToolArg, 40)}`
-            : props.currentTool;
-    }
+    const summary = props.activitySummary?.trim();
+    if (summary) return summary;
     return `${phrase}…`;
 }
 
@@ -165,11 +165,12 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const [lastPhrase, setLastPhrase] = createSignal(pickThinkingPhrase());
     const tick = useTick(1000);
 
-    // ── Type-out + shimmer ──────────────────────────────────────────────
-    // First display of a new left-zone string (a phrase, tool name, or
-    // status change) reveals character-by-character; once fully revealed,
-    // a gradient highlight sweeps back and forth over it for as long as
-    // this string stays on screen. See
+    // ── Type-out ────────────────────────────────────────────────────────
+    // First display of a new left-zone string (a phrase, summary, or status
+    // change) reveals character-by-character. The gradient highlight that
+    // used to sweep over it afterwards is gone: the text is one solid color
+    // now (SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md); the pulsing
+    // dot beside it carries the "still working" signal. Originally
     // SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md §2.
     //
     // Reduced motion: read the app's centralized atom (settings override OR
@@ -178,21 +179,17 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // signal every other animated element in the app honors. Skips the
     // one-shot type-out (jumps straight to full text, matching modal.tsx's
     // "brief, non-moving" convention for one-shot reveals under reduced
-    // motion) but keeps the shimmer running — same precedent as
-    // .agent-pane-progress-bar's marching ants above: this is a small,
-    // essential, looping "still working" signal, not large/parallax motion,
-    // so it slows down (CSS below) rather than disappearing entirely.
+    // motion).
     const reducedMotion = atoms.prefersReducedMotionAtom;
     // tick() re-runs this memo every second so a phase's "up to Ys" countdown
     // (formatPhaseLabel) stays live — see useTick.ts's "always-on tick" pattern.
     const leftText = createMemo(() => loadingLeftText(props, phrase(), (tick(), Date.now())));
     const [revealed, setRevealed] = createSignal(leftText().length);
-    const [typing, setTyping] = createSignal(false);
     const REVEAL_CHAR_MS = 28;
 
     // The very first text after ENTERING the loading state renders in full
     // instantly — the type-out reveal is a transition effect for text
-    // changes while already visibly working (tool → tool → phrase). Playing
+    // changes while already visibly working (summary → phrase). Playing
     // it on entry meant "Working…" trailed the Enter keypress by
     // ~REVEAL_CHAR_MS × 8 ≈ 250ms of a nearly-empty row, reading as "the
     // indicator comes up late" even though the state flip is synchronous
@@ -203,31 +200,18 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         if (!props.loading) revealInstantly = true;
     });
 
-    // The shimmer class is ALWAYS on (baked into the class attribute below);
-    // this effect only toggles `.is-typing`, which overlays opaque white
-    // text during the reveal. Toggling the shimmer class itself on every
-    // phrase/tool change would restart the CSS animation from 0% each time
-    // — and since the sweep period doesn't divide evenly into the interval
-    // between tool transitions, the return (right→left) leg kept getting
-    // truncated, so the highlight visibly "went right but never came back"
-    // (found in the sandbox, sandbox/working-shimmer.html on this machine).
     createEffect(() => {
         const text = leftText();
         if (reducedMotion() || !text || revealInstantly) {
             revealInstantly = false;
             setRevealed(text.length);
-            setTyping(false);
             return;
         }
-        setTyping(true);
         setRevealed(0);
         const id = setInterval(() => {
             setRevealed((n) => {
                 const next = n + 1;
-                if (next >= text.length) {
-                    clearInterval(id);
-                    setTyping(false);
-                }
+                if (next >= text.length) clearInterval(id);
                 return next;
             });
         }, REVEAL_CHAR_MS);
@@ -271,7 +255,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (!props.loading || (props.currentTool && !props.toolPromoted)) return;
+        if (!props.loading) return;
         setPhrase(pickThinkingPhrase());
         const id = setInterval(() => {
             setPhrase((prev) => {
@@ -292,7 +276,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (props.loading && (!props.currentTool || props.toolPromoted)) setLastPhrase(phrase());
+        if (props.loading) setLastPhrase(phrase());
     });
 
     const workedSummary = createMemo((): string | null => {
@@ -304,7 +288,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
             parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
         }
         if (stats.input_tokens != null || stats.output_tokens != null) {
-            parts.push(fmtTokens({ input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }));
+            parts.push(fmtTokens(stats.added_input_tokens ?? stats.input_tokens ?? 0, stats.output_tokens ?? 0));
         }
         return parts.join("  ·  ");
     });
@@ -333,9 +317,9 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 : `${elapsed} / ~${formatElapsedCompact(bar.estimateMs)}`;
         }
         const right: string[] = [];
-        if (props.turnTokens) right.push(fmtTokens(props.turnTokens));
+        if (props.turnTokens) right.push(fmtTurnTokens(props.turnTokens));
         right.push(formatElapsedCompact(elapsedMs()));
-        return right.join("  ·  ");
+        return right.join("  \u00b7  ");
     });
 
     const showCancelLogin = createMemo(
@@ -369,7 +353,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         >
             <span class="agent-working-row agent-working-row--loading">
                 <span class="agent-spinner-dot" />
-                <span class="agent-working-row-left agent-working-shimmer" classList={{ "is-typing": typing() }}>
+                <span class="agent-working-row-left">
                     {leftText().slice(0, revealed())}
                 </span>
                 <span

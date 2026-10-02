@@ -737,6 +737,10 @@ export interface SessionStats {
      *  because the live TurnTokens signal is nulled on session_end
      *  before the Worked footer renders. See PR #549 reagent/codex P1. */
     input_tokens?: number;
+    /** What the turn ADDED to the context (see turnAddedInput), as opposed to
+     *  `input_tokens`, which is the context re-sent on every call. Absent for
+     *  providers with no live usage; display falls back to `input_tokens`. */
+    added_input_tokens?: number;
     /** Snapshot of TurnTokens.output at finalizeTurn (see above). */
     output_tokens?: number;
     /**
@@ -769,6 +773,10 @@ export interface TurnTokens {
     freshInput?: number;
     cacheCreation?: number;
     cacheRead?: number;
+    /** Context size (input of the last call) before this turn began, captured
+     *  at the turn's first TokensIn. `input - contextBaseline` is what the
+     *  turn added; see turnAddedInput() in store/agent-pane-state. */
+    contextBaseline?: number;
 }
 
 /**
