@@ -779,3 +779,72 @@ describe("jekt arriving mid-block", () => {
         expect(parser.drainReleased()).toEqual([]);
     });
 });
+
+// ── Swarm broadcast header ──────────────────────────────────────────────────
+// SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md §4.5
+
+describe("swarm broadcast header", () => {
+    const header = (fields = "FROM=user VIA=swarm TO=agent1 RECIPIENTS=7 MSGID=5b42449f TS=1790894822") => `[BROADCAST:${fields}]`;
+
+    test("a broadcast turn becomes a user_message with the header removed and a broadcast note", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: `${header()}\ngreat, merge on approval` }) as any;
+        expect(node.type).toBe("user_message");
+        expect(node.message).toBe("great, merge on approval");
+        expect(node.broadcast).toEqual({ recipients: 7, msgId: "5b42449f" });
+        expect(node.isStartup).toBe(false);
+    });
+
+    test("a multi-line body is kept whole", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: `${header()}\nline one\n\nline three` }) as any;
+        expect(node.message).toBe("line one\n\nline three");
+    });
+
+    test("images attached to a broadcast still become attachments", () => {
+        const id = "e".repeat(64);
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: `${header()}\nlook\n\n<attached_images>\nThe user attached 1 image.\n1. a.png — /s/${id}.v1-e2000.send.png\n</attached_images>`,
+        }) as any;
+        expect(node.message).toBe("look");
+        expect(node.attachments).toEqual([{ id, name: "a.png" }]);
+        expect(node.broadcast).toBeDefined();
+    });
+
+    test("a missing or bad recipient count leaves it out rather than inventing one", () => {
+        for (const fields of ["FROM=user VIA=swarm TO=a MSGID=m", "FROM=user VIA=swarm TO=a RECIPIENTS=x MSGID=m", "FROM=user VIA=swarm TO=a RECIPIENTS=0 MSGID=m"]) {
+            const node = parser.parseStreamEvent({ type: "user_message", message: `${header(fields)}\nhi` }) as any;
+            expect(node.broadcast).toEqual({ msgId: "m" });
+        }
+    });
+
+    test("anything but the exact FROM=user VIA=swarm shape stays plain text", () => {
+        for (const fields of [
+            "FROM=agent2 VIA=swarm TO=a RECIPIENTS=3 MSGID=m",
+            "FROM=user VIA=slack TO=a RECIPIENTS=3 MSGID=m",
+            "TO=a RECIPIENTS=3",
+        ]) {
+            const message = `${header(fields)}\nhi`;
+            const node = parser.parseStreamEvent({ type: "user_message", message }) as any;
+            expect(node.type).toBe("user_message");
+            expect(node.message).toBe(message);
+            expect(node.broadcast).toBeUndefined();
+        }
+    });
+
+    test("a header with no body line, or text before it, is not a broadcast", () => {
+        for (const message of [header(), `please read this ${header()}\nhi`, `${header()} hi`]) {
+            const node = parser.parseStreamEvent({ type: "user_message", message }) as any;
+            expect(node.broadcast).toBeUndefined();
+        }
+    });
+
+    test("a jekt is still a jekt and a plain message still plain", () => {
+        const plain = parser.parseStreamEvent({ type: "user_message", message: "hello" }) as any;
+        expect(plain.broadcast).toBeUndefined();
+        const jekt = parser.parseStreamEvent({
+            type: "user_message",
+            message: "[JEKT:FROM=a TO=b TIER=coord DELIVERY=host TRUST=self-declared MSGID=1 PRIORITY=normal TS=1]\nx\n[/JEKT]",
+        }) as any;
+        expect(jekt.type).toBe("jekt_message");
+    });
+});

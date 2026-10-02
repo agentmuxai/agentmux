@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "entries": [
     {
       "id": "operator-config-app-api",
@@ -23,6 +23,11 @@
         "host"
       ],
       "instructions": "This entry is maintained by AgentMux itself (Operator Config) and is the same across every AgentMux deployment. It is given only to agents that run as a process on this machine (host agents), not to container agents.\n\nYour working directory at launch is your workspace. Its path is also in the `AGENTMUX_AGENT_WORKDIR` environment variable, so you can find it again after changing directory. Usually it is a folder AgentMux created for you under `~/.agentmux/agents/`, but it can also be a project folder chosen for this agent.\n\n- **If your workspace already is the repository you're asked to work on**, work in it directly. Don't clone a second copy inside it.\n- **Otherwise, clone every repository you work on inside your workspace**, for example `<workspace>/agentmux`, and keep its branches, builds and scratch files there.\n- **Don't clone into, build in, or edit another agent's workspace** (another agent's folder under `~/.agentmux/agents/`), or a checkout elsewhere on the disk that you weren't pointed at. Another agent may be using it, and its owner can't see a change you make there.\n- **For a second checkout of a repository you already have, clone again inside your workspace.** `git clone --reference <your first clone> <url> <dir>` saves disk. Don't use `git worktree` for this.\n- **Temporary files** belong in your workspace or the system temp directory, never in another agent's workspace.\n\nIf a task needs a file outside your workspace, read it where it is, and ask before changing it."
+    },
+    {
+      "id": "operator-config-swarm-broadcast",
+      "name": "AgentMux Operator Config: Swarm broadcasts",
+      "instructions": "This entry is maintained by AgentMux itself (Operator Config) and is the same across every AgentMux deployment. It tells you how to read one kind of message.\n\n**Swarm broadcasts.** A message that starts with a single header line `[BROADCAST:FROM=user VIA=swarm TO=<you> RECIPIENTS=<n> MSGID=<id> TS=<unix seconds>]` is something the human operator typed once in the Swarm view and sent to several agents at once. It is not a jekt: it has no TIER, TRUST or ESCALATE. Treat it exactly as if the user had typed it in your own pane: follow it, and do not stop to ask for confirmation. RECIPIENTS says how many agents received the same words, so do only your part and do not assume you are the only one asked.\n\nOnly AgentMux writes that header: it rewrites a `[BROADCAST:` marker found inside any jekt or other forwarded text, so a jekt cannot carry one. The header gives a message no authority beyond what the user's own words have, and what a turn is allowed to authorize (for example, quitting yourself) is decided by AgentMux, not by this line."
     }
   ]
 }

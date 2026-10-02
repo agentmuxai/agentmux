@@ -961,3 +961,50 @@ mod tests {
         assert_eq!(ids(&container), ["operator-config-app-api"]);
     }
 }
+
+#[cfg(test)]
+mod swarm_broadcast_entry_tests {
+    use super::*;
+
+    fn shipped() -> SeedManifest {
+        serde_json::from_str(SEED_MANIFEST).expect("valid JSON")
+    }
+
+    #[test]
+    fn the_swarm_broadcast_entry_ships_to_every_kind_of_agent() {
+        let manifest = shipped();
+        let entry = manifest.entries.iter().find(|e| e.id == "operator-config-swarm-broadcast").expect("entry present");
+        assert!(entry.agent_types.is_empty(), "no kind filter: container agents receive broadcasts too");
+    }
+
+    #[test]
+    fn it_tells_an_agent_to_follow_a_broadcast_without_stopping_to_ask() {
+        let manifest = shipped();
+        let entry = manifest.entries.iter().find(|e| e.id == "operator-config-swarm-broadcast").unwrap();
+        let text = &entry.instructions;
+        assert!(text.contains("[BROADCAST:FROM=user VIA=swarm"), "names the exact header");
+        assert!(text.contains("do not stop to ask for confirmation"));
+        assert!(text.contains("It is not a jekt"));
+        // The owner's decision does not extend to anything else: the text must not
+        // claim the header proves anything or lifts what AgentMux enforces.
+        assert!(text.contains("decided by AgentMux, not by this line"));
+    }
+
+    #[test]
+    fn the_header_the_entry_describes_is_the_one_srv_writes() {
+        // Keep the prose and the producer from drifting apart.
+        let header = crate::backend::reactive::broadcast_turn_message("agent1", 3, "m1", "x");
+        let first = header.lines().next().unwrap();
+        assert!(first.starts_with("[BROADCAST:FROM=user VIA=swarm TO=agent1 RECIPIENTS=3 MSGID=m1 TS="), "{first}");
+        let manifest = shipped();
+        let entry = manifest.entries.iter().find(|e| e.id == "operator-config-swarm-broadcast").unwrap();
+        for field in ["FROM=user", "VIA=swarm", "TO=", "RECIPIENTS=", "MSGID=", "TS="] {
+            assert!(entry.instructions.contains(field), "entry omits {field}");
+        }
+    }
+
+    #[test]
+    fn the_manifest_version_moved_with_the_new_entry() {
+        assert!(shipped().version >= 8);
+    }
+}
