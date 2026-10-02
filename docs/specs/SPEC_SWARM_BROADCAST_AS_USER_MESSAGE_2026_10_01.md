@@ -56,8 +56,6 @@ Two separate faults:
 
 ### 2.1 Why "verified" cannot be a cryptographic claim for the UI today
 
-
-
 The obvious fix is a new label, `TRUST=operator-verified`, derived from "this arrived on the UI's
 WebSocket". That is **not safe**, because of findings 7 and 8: any process that can read its own
 pane environment holds the key that opens that WebSocket, so the label would be a proof claim
