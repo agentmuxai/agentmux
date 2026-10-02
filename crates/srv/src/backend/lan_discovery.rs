@@ -204,12 +204,25 @@ pub struct LanInstance {
     pub instance_id: String,
     pub hostname: String,
     pub version: String,
+    /// The advertising instance's channel (`AGENTMUX_CHANNEL`, default
+    /// "stable"), so a host running two channels can be told apart in the
+    /// Swarm (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md Phase 2). Empty
+    /// for a peer on a build from before it was advertised.
+    #[serde(default)]
+    pub channel: String,
     pub address: String,
     pub port: u16,
     pub auth_key: String,
     pub agents: Vec<String>,
     pub first_seen: u64,
     pub last_seen: u64,
+    /// Unix seconds of the last successful agent-name poll of this peer
+    /// (`agent_names_refresh_loop`), 0 for never. `last_seen` moves only when
+    /// mDNS re-resolves the peer, which can be tens of minutes apart, so the
+    /// Swarm judges liveness by the later of the two (Codex P1 on #4241). It
+    /// does not change when discovery drops a peer.
+    #[serde(default)]
+    pub last_polled_ok: u64,
     /// This peer's own advertised PTR/TXT record TTL (seconds), captured from
     /// `ServiceInfo::get_other_ttl()` at the most recent `ServiceResolved`.
     /// Drives `peer_staleness_window_secs` — see its doc comment.
@@ -437,10 +450,12 @@ impl LanDiscovery {
         // identity key.
         let service_name = mdns_instance_label(&hostname, port);
         let host_name_mdns = mdns_hostname(&hostname);
+        let channel = crate::backend::reactive::registry::local_channel_id();
         let properties = [
             ("version", version.as_str()),
             ("hostname", hostname.as_str()),
             ("instance_id", instance_id.as_str()),
+            ("channel", channel.as_str()),
             ("auth_key", auth_key.as_str()),
         ];
         // `""` alone does NOT mean "auto-detect" despite how that reads —
@@ -680,6 +695,7 @@ impl LanDiscovery {
                 for (key, names) in outcomes {
                     if let Some(names) = names {
                         if let Some(entry) = instances.get_mut(&key) {
+                            entry.last_polled_ok = agentmux_common::time::now_secs_u64();
                             if entry.agents != names {
                                 entry.agents = names;
                                 changed = true;
@@ -774,13 +790,18 @@ impl LanDiscovery {
     /// `probe_response_json` for the pure field-assembly logic shared with
     /// tests.
     fn build_probe_response(&self) -> serde_json::Value {
-        probe_response_json(
+        let mut response = probe_response_json(
             &self.instance_id,
             &self.hostname,
             &self.version,
             self.port,
             &self.auth_key,
-        )
+        );
+        // The channel, as the TXT record carries it, so a desktop that finds
+        // this instance over UDP can tell two channels on one host apart. An
+        // extra field: older parsers (mobile included) ignore it.
+        response["channel"] = json!(crate::backend::reactive::registry::local_channel_id());
+        response
     }
 
     /// UDP broadcast-probe responder loop (Layer 2 discovery fallback).
@@ -1013,6 +1034,10 @@ impl LanDiscovery {
                     .get_property_val_str("auth_key")
                     .unwrap_or_default()
                     .to_string();
+                let channel = info
+                    .get_property_val_str("channel")
+                    .unwrap_or_default()
+                    .to_string();
                 let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
@@ -1024,12 +1049,14 @@ impl LanDiscovery {
                     instance_id: peer_id.clone(),
                     hostname: hostname.clone(),
                     version: version.clone(),
+                    channel: channel.clone(),
                     address: address.clone(),
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
                     agents: Vec::new(),
                     first_seen: now,
                     last_seen: now,
+                    last_polled_ok: 0,
                     other_ttl_secs,
                 });
                 entry.last_seen = now;
@@ -1058,6 +1085,9 @@ impl LanDiscovery {
                 }
                 if !auth_key.is_empty() {
                     entry.auth_key = auth_key;
+                }
+                if !channel.is_empty() {
+                    entry.channel = channel;
                 }
                 // The UDP route may have found this peer first; one entry per
                 // peer, the mDNS one (udp_peers::merge_udp_peer is the converse).
@@ -2799,12 +2829,14 @@ mod peer_fanout_tests {
             instance_id: format!("peer-{port}"),
             hostname: "test".into(),
             version: "0".into(),
+            channel: String::new(),
             address: host.to_string(),
             port: port.parse().unwrap(),
             auth_key: "k".into(),
             agents: vec![],
             first_seen: 0,
             last_seen: 0,
+            last_polled_ok: 0,
             other_ttl_secs: 4500,
         }
     }

@@ -45,6 +45,8 @@ declare global {
         instance_id: string;
         hostname: string;
         version: string;
+        /** The peer's channel; empty for a peer that predates advertising it. */
+        channel?: string;
         address: string;
         port: number;
         agents: string[];

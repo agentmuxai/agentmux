@@ -82,17 +82,20 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-/// `swarm.other-instances`: this machine's other channels and their agents, from
-/// the host-global shared registry (Phase 1 of
-/// SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md). Names only, no credentials.
+/// `swarm.other-instances`: this machine's other channels (the host-global shared
+/// registry) and the LAN hosts (the LAN discovery peer list), with their agents'
+/// names (Phases 1 and 2 of SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md).
+/// Names only, no credentials and no addresses.
 fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let hostname = state.hostname.clone();
     let own_url = state.local_web_url.clone();
+    let lan_discovery = state.lan_discovery.clone();
     engine.register_handler(
         COMMAND_SWARM_OTHER_INSTANCES,
         Box::new(move |_data, _ctx| {
             let hostname = hostname.clone();
             let own_url = own_url.clone();
+            let lan_peers = lan_discovery.get_instances();
             Box::pin(async move {
                 // A directory read; off the async runtime's worker threads.
                 let entries = tokio::task::spawn_blocking(|| {
@@ -102,8 +105,11 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 })
                 .await
                 .unwrap_or_default();
+                let own_addrs = crate::backend::lan_listeners::cached_local_addresses();
                 let snapshot = crate::backend::swarm_remote::snapshot(
                     &entries,
+                    &lan_peers,
+                    &own_addrs,
                     &hostname,
                     &crate::backend::reactive::registry::local_channel_id(),
                     &own_url,
