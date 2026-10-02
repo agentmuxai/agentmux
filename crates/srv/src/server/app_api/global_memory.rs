@@ -150,16 +150,19 @@ pub(crate) fn global_memory_write_impl(
     Ok(json!({ "id": bundle.id, "name": bundle.name }))
 }
 
-/// Ordinary (non-system) Global Memory entries only — id/name/updated_at,
-/// no content (mirrors `memory_list_impl`'s summary shape). The `is_system`
-/// filter is structural here, not just a response projection. Backs the
-/// `GlobalMemoryList` MCP tool.
+/// Every Global Memory entry the Armory pane shows — id/name/updated_at/system,
+/// no content (mirrors `memory_list_impl`'s summary shape), system rows first
+/// as `bundle_list_global` orders them. System-tier rows are listed so an empty
+/// result means "nothing" and not "nothing you may touch" (the pane lists them
+/// too, and their content is already injected into every agent's context); what
+/// stays structural is that read, write and remove refuse a system id. Backs
+/// the `GlobalMemoryList` MCP tool.
+/// docs/specs/SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md
 pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
     let entries: Vec<_> = state.id_store.bundle_list_global()
         .map_err(|e| format!("globalmemory.list: {e}"))?
         .into_iter()
-        .filter(|b| !b.is_system)
-        .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at }))
+        .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at, "system": b.is_system }))
         .collect();
     Ok(json!({ "entries": entries }))
 }

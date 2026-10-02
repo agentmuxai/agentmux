@@ -128,6 +128,13 @@ described).
   `{id, name, updated_at}`, no content (mirrors `MemoryList`'s shape).
   Never includes system-tier rows, structurally: the query itself filters
   `is_system=0`, not just the response shape.
+  **Superseded 2026-10-02 by `SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md`:**
+  `list` now returns the system rows too, first and flagged `system: true`
+  (`{id, name, updated_at, system}`, still no content), because an empty list
+  read as "no Global Memory" when the Armory pane showed six entries. The
+  query no longer filters `is_system`; the isolation is carried by `read`,
+  `write` and `remove`, which still refuse a system id. Everything else in
+  this section stands.
 - **`read`**: `{id}` → full `{name, content}`.
 - **`remove`**: `{id}` → flips `is_global=false` (matches the existing
   Armory UI's own "Remove" semantics — demotes rather than hard-deletes;
