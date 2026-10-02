@@ -1,6 +1,6 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) the grid view (§12.5) and pane tabs (§12.6); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) the grid view (§12.5) and tabs (§12.6, since moved to document tabs); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
@@ -365,7 +365,7 @@ A toolbar toggle switches the folder between the details list and a grid of tile
 
 ### 12.6 Tabs: Hangar on pane tabs
 
-> **Superseded 2026-10-02:** these tabs move to Document Tabs, one Hangar pane holding several folders (`SPEC_DOCUMENT_TABS_2026_10_02.md` §6.2, Phase 1). The section below records what #4227 built.
+> **Superseded 2026-10-02:** these tabs moved to Document Tabs, one Hangar pane holding several folders (`SPEC_DOCUMENT_TABS_2026_10_02.md` §6.2, Phase 1, built). `Ctrl+T`, `Ctrl+W`, `Ctrl+Enter`, middle-click and *Open in new tab* now act on document tabs; *Open in new pane* keeps the pane-tab behaviour below. The section below records what #4227 built.
 
 AgentMux has three kinds of tab: window tabs, pane tabs (several blocks stacked in one pane, `blockStack`), and inner-pane tabs (the Editor's open files, its own store). Pane tabs and the Editor's file tabs draw with the same `PaneTabStrip`; their state is separate, and SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md (resolution 3) has decided the Editor's should move onto pane tabs. Hangar therefore uses **pane tabs**, not tabs of its own: each tab is a whole Hangar with its own folder, history, selection and view, and gets reordering, dragging between panes, tear-off and layout persistence for free.
 
