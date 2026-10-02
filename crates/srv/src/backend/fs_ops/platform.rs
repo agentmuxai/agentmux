@@ -252,8 +252,8 @@ pub fn explorer_quote(display: &str) -> String {
     format!("\"{}\"", display.trim_end_matches('\\'))
 }
 
-/// The command that opens `path` with the OS default application. The caller
-/// sanitizes its environment and spawns it.
+/// The command that opens `path` with the OS default application, for
+/// `spawn_detached` (which sanitizes its environment).
 pub fn open_command(path: &Path) -> Command {
     #[cfg(windows)]
     {
@@ -309,7 +309,14 @@ pub fn reveal_command(path: &Path) -> Command {
 /// Null stdio because srv's stdout may be a pipe its launcher reads; a
 /// reaper because an un-waited child stays a zombie on Unix until srv
 /// exits, and `xdg-open` can run as long as the application it starts.
+///
+/// The program is third-party and long-lived (a file manager, or whatever
+/// application the OS opens the file with), and could launch another
+/// AgentMux build that would adopt this instance's identity: the strict
+/// external-process policy, as `openinshell` uses (invariant I7). Applied
+/// here, where the spawn is, so no caller can skip it.
 pub fn spawn_detached(mut cmd: Command) -> io::Result<()> {
+    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
     std::thread::Builder::new()
         .name("fs-open-reaper".to_string())
