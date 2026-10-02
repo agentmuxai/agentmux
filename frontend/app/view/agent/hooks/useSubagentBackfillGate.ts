@@ -147,7 +147,7 @@ export function useSubagentBackfillGate(
         const vt = viewType();
         if (vt === undefined) return; // not yet resolved — stay gated, nothing to decide yet
         if (vt !== "agent") {
-            // A genuine view-type change (e.g. "Replace With...") — allow a
+            // A genuine view-type change (e.g. the launcher swapping in a widget) — allow a
             // later re-entry into "agent" to decide fresh (round 6).
             decided = false;
             setSettled(true);

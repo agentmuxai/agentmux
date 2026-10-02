@@ -9,8 +9,7 @@
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { FLOATING_ONTOP_META_KEY } from "./floating-ontop-meta";
 import { splitBlockDefFor } from "./split-block-def";
-import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
-import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
+import { createBlockSplitHorizontally, createBlockSplitVertically, getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 
 type SplitDirection = "up" | "down" | "left" | "right";
@@ -92,31 +91,6 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
     }
 }
 
-// ─── Replace With submenu ─────────────────────────────────────────────────────
-
-/**
- * Build the "Replace With..." submenu entry listing all pane-based widgets
- * (grouped widgets — e.g. the Messengers group's Discord/Slack/etc. — nest
- * under their parent's own label rather than each showing up individually;
- * see buildPaneWidgetMenuItems). Returns a one-item array, or an empty array
- * if no replacement widgets are available. Separators between sections are
- * added by buildPaneContextMenu, not here.
- */
-function buildReplaceSubmenu(blockData: Block): ContextMenuItem[] {
-    const fullConfig = atoms.fullConfigAtom();
-    const wmap = fullConfig?.widgets ?? {};
-    const settings = fullConfig?.settings ?? {};
-    const items = buildPaneWidgetMenuItems(
-        wmap,
-        settings,
-        (blockdef) => void replaceBlock(blockData.oid, blockdef, true),
-        { excludeView: blockData?.meta?.view }
-    );
-
-    if (items.length === 0) return [];
-    return [{ label: "Replace With...", type: "submenu" as const, submenu: items }];
-}
-
 // ─── Menu builder ─────────────────────────────────────────────────────────────
 
 /**
@@ -145,7 +119,6 @@ export type PaneMenuSection =
     | "viewItems" // viewModel.getBodyContextMenuItems()
     | "clipboard" // Copy / Paste
     | "split" // Split Up / Down / Left / Right
-    | "replace" // Replace With...
     | "magnify" // Magnify / Un-Magnify Pane
     | "close" // Close Pane
     | "inspect"; // Inspect Element
@@ -171,10 +144,10 @@ export interface PaneContextMenuOpts {
  * Pass viewModel to enable terminal-aware copy/paste.
  *
  * Layout is a list of groups joined by separators; empty groups (everything in
- * them omitted, or nothing applies — e.g. no replacement widgets) are skipped,
- * so no combination can leave a leading, trailing, or doubled separator:
+ * them omitted, or nothing applies) are skipped, so no combination can leave a
+ * leading, trailing, or doubled separator:
  *
- *   [clipboard] ─ [split] ─ [replace] ─ [magnify, close] ─ [inspect]
+ *   [clipboard] ─ [split] ─ [magnify, close] ─ [inspect]
  */
 export function buildPaneContextMenu(
     blockData: Block,
@@ -224,8 +197,6 @@ export function buildPaneContextMenu(
           ]
         : [];
 
-    const replace: ContextMenuItem[] = has("replace") ? buildReplaceSubmenu(blockData) : [];
-
     const paneActions: ContextMenuItem[] = [
         ...(has("magnify")
             ? [{ label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane", click: opts.onMagnifyToggle }]
@@ -254,5 +225,5 @@ export function buildPaneContextMenu(
               ]
             : [];
 
-    return joinMenuGroups([clipboard, split, replace, paneActions, inspect]);
+    return joinMenuGroups([clipboard, split, paneActions, inspect]);
 }
