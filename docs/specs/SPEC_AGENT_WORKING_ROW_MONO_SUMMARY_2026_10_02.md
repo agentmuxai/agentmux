@@ -68,7 +68,7 @@ Consequences of dropping the tool text:
 
 - `currentTool`, `currentToolArg` and `toolPromoted` are removed from `AgentWorkingRow` and its call site, along with the local `abbreviateArg` helper.
 - The phrase-cycling effects no longer pause during a tool call, because nothing tool-specific is on screen to protect.
-- `AgentBottomPanels` no longer takes `hasPromotedTool`. `useWorkingIndicator` still returns it and keeps its tests; only the unused plumbing is gone.
+- The `hasPromotedTool` chain is removed end to end, since its only reader was the tool text: the prop into `AgentBottomPanels`, the memo and the `promotionTick` option in `useWorkingIndicator`, and `hasRunningPromotedTool` (with its tests) in `tool-adapter.ts`. `agent-view.tsx` keeps the promotion clock for `useAttachedTaskAxis`.
 - The live tool call remains visible where it always had a better home: the ActivityDock rows and the document view.
 
 ### 3.4 Per-turn tokens: what the turn added, not the context it re-sent
