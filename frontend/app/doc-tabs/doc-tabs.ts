@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Document tabs: the documents inside one pane (an Editor's files, a
- * Hangar's folders, a Media pane's files, a Browser's pages), on one shared
- * model every such pane type uses. The third layer of tab, below window tabs
+ * Document tabs: the files inside one pane (an Editor's files, a Media
+ * pane's files), on one shared model every such pane type uses. The third layer of tab, below window tabs
  * and pane tabs. docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §1, §5.
  *
  * This module is pure: the state, and the commands that change it. The
@@ -184,7 +183,7 @@ export function promoteDoc<P>(s: DocTabsState<P>, id: string): DocTabsState<P> {
 }
 
 /** Change what a tab shows: its title, icon, dirty mark, payload, or key
- *  (a Hangar tab navigating to another folder). */
+ *  (a Media tab following a newer render to another file). */
 export function updateDoc<P>(
     s: DocTabsState<P>,
     id: string,
