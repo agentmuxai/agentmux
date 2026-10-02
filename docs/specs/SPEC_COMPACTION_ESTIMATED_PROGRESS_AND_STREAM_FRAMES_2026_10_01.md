@@ -1,7 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
 **Date:** 2026-10-01
-**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) is built in a follow-up PR; the stream-frame fix (§3) and the rest of status-frame handling (§6) are not built and need the decisions in §8.
+**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) and the rest of status-frame handling (§6) are not built and need the decisions in §8.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: *"search online, latest claude CLI system, can agentmux get the progress of the compression?"*, then *"write spec to file on implements. sure, lets try the tier 4"*.
 **Researched against:** `agentmuxai/agentmux` `main` @ `807c749ce`; Claude Code CLI **2.1.287** (the version AgentMux has installed under `~/.agentmux/shared/cli/claude/`).
@@ -104,9 +104,9 @@ It should be designed together with the §3 fix. Seeding the sample store from t
 
 ## 9. Delivery
 
-PR 1 (#4220): this spec + Tier 4. PR 2: the failed-compaction notice (§10), plus the §3 correction. D1 and the rest of D2 are follow-ups.
+PR 1 (#4220): this spec + Tier 4. PR 2 (#4232): the failed-compaction notice (§10), plus the §3 correction. D1 and the rest of D2 are follow-ups.
 
-## 10. Failed-compaction notice as built (PR 2)
+## 10. Failed-compaction notice as built (PR #4232)
 
 **Captured live (CLI 2.1.287):** with the fake API answering the summarizing call with HTTP 400, the CLI retried it 4 times, then wrote
 `{"type":"system","subtype":"status","status":null,"compact_result":"failed","compact_error":"Error during compaction: API Error: 400 …","session_id":…,"uuid":…}` and ended the turn with `result` `is_error:false`, `num_turns:0`, with no `compact_boundary`. Nothing but that one frame says the compaction failed, so before this change the user saw the spinner stop and nothing else.
