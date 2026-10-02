@@ -419,8 +419,10 @@ mod tests {
             .join(provider);
         fs::create_dir_all(dir.join("node_modules")).unwrap();
         fs::write(dir.join("node_modules").join("x"), vec![0u8; 50]).unwrap();
-        let f = File::open(&dir).unwrap();
-        f.set_modified(now - age).unwrap();
+        // Aged through a file inside it: setting a directory's own mtime needs
+        // platform-specific handles (opening a directory fails on Windows).
+        fs::write(dir.join(COMPLETE_MARKER), "").unwrap();
+        set_age(&dir.join(COMPLETE_MARKER), now, age);
         dir
     }
 
