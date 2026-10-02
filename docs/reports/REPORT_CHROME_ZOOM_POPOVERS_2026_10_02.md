@@ -1,6 +1,6 @@
 # Report: Popovers and Chrome Zoom — Why Some Follow It, and One Primitive for All of Them
 
-**Status:** analysis + recommendation (§6). Zoom behaviour measured in headless Chrome 154, the same Chromium as AgentMux's CEF 154 (§4); not yet measured inside the app itself.
+**Status:** implemented in #4208 (§10). Zoom behaviour measured in headless Chrome 154, the same Chromium as AgentMux's CEF 154 (§4); not yet measured inside the app itself.
 **Date:** 2026-10-02
 **Verified against:** `da756879d` (main)
 
