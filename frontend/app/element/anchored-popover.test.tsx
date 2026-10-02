@@ -112,10 +112,29 @@ describe("AnchoredPopover", () => {
     });
 
     it("registers no dismiss listeners without onDismiss (a hover tip)", () => {
-        const { anchor } = mount();
-        // Nothing to assert beyond "doesn't throw": no handler is attached.
-        fireEvent.mouseDown(document.body);
-        fireEvent.keyDown(anchor, { key: "Escape" });
+        const docAdd = vi.spyOn(document, "addEventListener");
+        const winAdd = vi.spyOn(window, "addEventListener");
+        try {
+            mount();
+            expect(docAdd.mock.calls.filter(([type]) => type === "mousedown")).toHaveLength(0);
+            expect(winAdd.mock.calls.filter(([type]) => type === "keydown")).toHaveLength(0);
+        } finally {
+            docAdd.mockRestore();
+            winAdd.mockRestore();
+        }
+    });
+
+    it("registers both dismiss listeners with onDismiss", () => {
+        const docAdd = vi.spyOn(document, "addEventListener");
+        const winAdd = vi.spyOn(window, "addEventListener");
+        try {
+            mount({ onDismiss: vi.fn() });
+            expect(docAdd.mock.calls.filter(([type]) => type === "mousedown")).toHaveLength(1);
+            expect(winAdd.mock.calls.filter(([type]) => type === "keydown")).toHaveLength(1);
+        } finally {
+            docAdd.mockRestore();
+            winAdd.mockRestore();
+        }
     });
 
     it("starts autoUpdate on the first frame, against a reference that reads the captured anchor", () => {

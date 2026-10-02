@@ -509,7 +509,6 @@ const HostPopover = (): JSX.Element => {
         setPopoverOpen(true);
     };
 
-
     return (
         <Show when={hostname && hostname !== "unknown"}>
             <div
@@ -548,20 +547,20 @@ const HostPopover = (): JSX.Element => {
                 </Show>
             </div>
             <Show when={popoverOpen()}>
-                    <HostPopoverPanel
-                        anchor={triggerRef}
-                        onClose={() => setPopoverOpen(false)}
-                        hostname={hostname}
-                        hostInfo={hostInfo}
-                        lanInstances={lanInstances}
-                        lanCount={lanCount}
-                        lanDiscoveryEnabled={lanDiscoveryEnabled}
-                        lanDiscoveryError={lanDiscoveryError}
-                        lanDiscoverability={lanDiscoverabilityAtom}
-                        lanFirewall={lanFirewallAtom}
-                        onLanToggle={(enabled) => void handleLanToggle(enabled)}
-                        muxbus={muxbus}
-                    />
+                <HostPopoverPanel
+                    anchor={triggerRef}
+                    onClose={() => setPopoverOpen(false)}
+                    hostname={hostname}
+                    hostInfo={hostInfo}
+                    lanInstances={lanInstances}
+                    lanCount={lanCount}
+                    lanDiscoveryEnabled={lanDiscoveryEnabled}
+                    lanDiscoveryError={lanDiscoveryError}
+                    lanDiscoverability={lanDiscoverabilityAtom}
+                    lanFirewall={lanFirewallAtom}
+                    onLanToggle={(enabled) => void handleLanToggle(enabled)}
+                    muxbus={muxbus}
+                />
             </Show>
         </Show>
     );

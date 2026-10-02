@@ -46,7 +46,6 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
         onCleanup(() => unsub?.());
     });
 
-
     const usedPct = (v: DiskVolume): number => {
         if (v.totalGb <= 0) return 0;
         return Math.min(100, Math.max(0, ((v.totalGb - v.freeGb) / v.totalGb) * 100));

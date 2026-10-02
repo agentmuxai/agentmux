@@ -121,7 +121,6 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
 
     const panelWidth = (): number => (tier() === "rows" ? 260 : 360);
 
-
     const readout = (): string => {
         const i = activeIdx();
         if (i != null) {
