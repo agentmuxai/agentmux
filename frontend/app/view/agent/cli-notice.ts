@@ -33,6 +33,33 @@ function frameTime(v: unknown): number | null {
     return Number.isNaN(parsed) ? null : parsed;
 }
 
+/** The CLI's own prefix on a failed compaction's reason; the row says it already. */
+const COMPACTION_ERROR_PREFIX = "Error during compaction: ";
+
+/**
+ * A failed compaction: the CLI's `system/status` frame with
+ * `compact_result: "failed"` (and `compact_error`). It is the only trace of
+ * the failure — the turn then ends with `is_error: false` — so without a row
+ * the user sees nothing. Other status frames (the `compacting` start and its
+ * ~30 s heartbeat, a success) are not this. The frame's `uuid` makes the id
+ * stable live and on replay; a frame without one is skipped.
+ */
+function compactionFailedNode(e: Record<string, unknown>, now: number): CliNoticeNode | null {
+    if (e.compact_result !== "failed") return null;
+    const uuid = str(e.uuid);
+    if (!uuid) return null;
+    const raw = str(e.compact_error);
+    const error = raw?.startsWith(COMPACTION_ERROR_PREFIX) ? raw.slice(COMPACTION_ERROR_PREFIX.length) : raw;
+    return {
+        type: "cli_notice",
+        id: `compaction-failed-${uuid}`,
+        kind: "compaction_failed",
+        provider: "claude",
+        error: error ?? undefined,
+        timestamp: frameTime(e.timestamp) ?? now,
+    };
+}
+
 /**
  * The node for a CLI notice frame, or `null` if `rawEvent` isn't one or is
  * malformed. `now` stands in for a frame with no usable timestamp (the live
@@ -42,6 +69,7 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
     if (!rawEvent || typeof rawEvent !== "object") return null;
     const e = rawEvent as Record<string, unknown>;
     if (e.type !== "system") return null;
+    if (e.subtype === "status") return compactionFailedNode(e, now);
     const provider = str(e.provider);
     if (!provider) return null;
     const timestamp = frameTime(e.timestamp) ?? now;
@@ -91,6 +119,9 @@ export type CliNoticeTone = "info" | "warn" | "error";
 /** What the row says: a short label, an optional detail line, and its tone. */
 export function cliNoticeText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
     const name = cliDisplayName(node.provider);
+    if (node.kind === "compaction_failed") {
+        return { label: `${name} couldn't compact the conversation`, detail: node.error ?? null, tone: "error" };
+    }
     if (node.kind === "install") {
         switch (node.state) {
             case "installing":
