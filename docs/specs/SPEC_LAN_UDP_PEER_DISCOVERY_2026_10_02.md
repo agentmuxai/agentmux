@@ -21,7 +21,7 @@ One more discovery route, running whenever LAN discovery is on, that uses the pr
 3. **Answering.** A probe from a private-range source gets the same identity payload the 47891 responder sends (`probe_response_json`). The two paths share the trust check (`is_lan_source`).
 4. **Learning.** A reply becomes a peer: address is the datagram's source (never a claimed address), port, instance id, hostname, version and key come from the payload. Probing and answering share one socket on purpose, so a peer's reply lands on a port the firewall rule names and not on an ephemeral one.
 5. **One entry per peer.** `instances` is keyed by mDNS service name, and `find_agent` queries every entry, so a peer listed twice would double every lookup. A UDP peer is keyed `udp:<instance id>`. If an entry with the same instance id, or the same address and port, exists (mDNS data may not have its TXT yet), the reply only refreshes `last_seen`: the mDNS entry stays authoritative. When mDNS resolves a peer that UDP found first, the UDP entry is dropped.
-6. **Lifetime.** A UDP peer is kept 120 seconds after its last reply (four probe cycles). It is cancelled with the rest of LAN discovery on shutdown.
+6. **Lifetime.** A UDP peer is kept 300 seconds after its last reply (ten probe cycles): the staleness floor every peer gets, below which `peer_staleness_window_secs` will not go. A test pins it. It is cancelled with the rest of LAN discovery on shutdown.
 
 ### 2.1 What it does not do
 

@@ -43,10 +43,15 @@ use super::*;
 /// a number with a TCP listener in the block is harmless.
 pub(crate) const DESKTOP_DISCOVERY_PORT: u16 = 29700;
 
-/// How often each instance probes. A peer is kept for [`UDP_PEER_TTL_SECS`]
-/// after its last reply, so it survives three missed probes.
+/// How often each instance probes.
 pub(super) const PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
-const UDP_PEER_TTL_SECS: u32 = 120;
+///
+/// How long a UDP-learned peer stays listed after its last reply. This is the
+/// staleness floor every peer gets (`peer_staleness_window_secs` clamps a
+/// smaller `other_ttl_secs` up to it), so it is the real lifetime, not a hint:
+/// ten missed probes. A departed peer therefore lingers five minutes, which is
+/// still far shorter than an mDNS peer's TTL.
+const UDP_PEER_TTL_SECS: u32 = LAN_PEER_STALE_TIMEOUT_FLOOR_SECS as u32;
 
 /// Key prefix of a peer learned over UDP in `LanDiscovery::instances` (mDNS
 /// peers are keyed by their service name).
@@ -706,5 +711,29 @@ mod tests {
         )
         .await;
         assert_eq!(a.get_instances().len(), 1);
+    }
+
+    /// A UDP peer is listed for the staleness floor after its last reply and not
+    /// a second longer, whatever `other_ttl_secs` says (ReAgent P2 on #4230: the
+    /// constant used to claim 120 s while the floor made it 300).
+    #[tokio::test]
+    async fn a_udp_peer_is_listed_for_exactly_the_staleness_floor() {
+        let a = instance("id-a", "host-a", 55001, "key-a");
+        let now = agentmux_common::time::now_secs_u64();
+        let floor = LAN_PEER_STALE_TIMEOUT_FLOOR_SECS;
+        assert_eq!(
+            u64::from(UDP_PEER_TTL_SECS),
+            floor,
+            "the constant states the real lifetime"
+        );
+        for (age, listed) in [(0, true), (floor - 5, true), (floor + 5, false)] {
+            merge_udp_peer(
+                &mut a.instances.write(),
+                &peer("abc", "192.168.1.26", 29700),
+                now - age,
+            );
+            assert_eq!(a.get_instances().len(), usize::from(listed), "age {age}s");
+            a.instances.write().clear();
+        }
     }
 }
