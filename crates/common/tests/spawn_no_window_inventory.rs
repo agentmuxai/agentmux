@@ -118,7 +118,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/cef/src/commands/platform.rs", "\"xdg-open\"", 3,
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/cef/src/commands/platform.rs", "program", 1,
-     "not-windows: macOS/Linux/unix-only code path"),
+     "gui-program: spawn_detached runs explorer.exe on Windows, GUI-subsystem, on user action only"),
     ("crates/cef/src/commands/platform.rs", "\"rundll32.exe\"", 1,
      "gui-program: explorer/rundll32 are GUI-subsystem, on user action only"),
     ("crates/cef/src/commands/platform.rs", "\"explorer.exe\"", 1,
