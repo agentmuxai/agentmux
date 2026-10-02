@@ -40,7 +40,7 @@ function isIndividuallyPinned(shortName: string, settings: Record<string, any>):
 
 /**
  * Grouped short-names that should stay hidden from every flat top-level
- * enumeration (pinned bar, More, Pin Widgets, Replace With, the Launcher
+ * enumeration (pinned bar, More, Pin Widgets, the pane-widget pickers, the Launcher
  * grid, ...) — i.e. structurally a child (getGroupedChildKeys) AND NOT
  * individually pinned.
  *
@@ -146,9 +146,9 @@ export function getMoreWidgets(
         .map(([key, widget]) => ({ key, widget }));
 }
 
-// ── Pane-widget pickers (Replace With..., empty-tab menu) ──────────────────────
+// ── Pane-widget pickers (empty-tab menu, pane-tab picker) ──────────────────────
 
-/** Non-pane widget views excluded from any pane-widget picker (Replace With, empty-tab menu). */
+/** Non-pane widget views excluded from any pane-widget picker (empty-tab menu, pane-tab picker). */
 const NON_PANE_WIDGET_VIEWS = new Set(["devtools"]);
 
 function paneWidgetSortKey(w: WidgetConfigType): [number, string] {
@@ -164,9 +164,9 @@ function comparePaneWidgets(a: WidgetConfigType, b: WidgetConfigType): number {
 
 /**
  * Build the menu items for a "pick a pane widget to open here" surface —
- * shared by the "Replace With..." pane context-menu submenu
- * (`pane-actions.ts`) and the empty-tab right-click menu (`tabcontent.tsx`).
- * Both used to hand-roll near-identical flat `Object.values(wmap)` logic
+ * shared by the pane-tab picker (`pane-tab-picker.ts`) and the empty-tab
+ * right-click menu (`tabcontent.tsx`).
+ * They used to hand-roll near-identical flat `Object.values(wmap)` logic
  * that (pre SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md) never knew about
  * grouped children, so "Discord"/"Slack"/etc. showed up individually here
  * even once hidden from the widget bar. A child NOT individually pinned is
@@ -180,13 +180,11 @@ function comparePaneWidgets(a: WidgetConfigType, b: WidgetConfigType): number {
 export function buildPaneWidgetMenuItems(
     wmap: Record<string, WidgetConfigType>,
     settings: Record<string, any>,
-    onSelect: (blockdef: BlockDef) => void,
-    opts: { excludeView?: string } = {}
+    onSelect: (blockdef: BlockDef) => void
 ): ContextMenuItem[] {
     const toLeafItem = (widget: WidgetConfigType): ContextMenuItem | null => {
         const view = widget.blockdef?.meta?.["view"] as string | undefined;
         if (!view || NON_PANE_WIDGET_VIEWS.has(view)) return null;
-        if (opts.excludeView && view === opts.excludeView) return null;
         return { label: widget.label ?? "Unnamed", click: () => onSelect(widget.blockdef) };
     };
 
