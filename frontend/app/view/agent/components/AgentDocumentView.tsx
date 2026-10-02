@@ -174,21 +174,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
         });
     };
 
-    // Header slot: loading-older banner, rendered above the virtualizer
-    // inside the scroll container. VirtualList's scrollMargin
-    // (=virtualContainerRef.offsetTop) handles the offset automatically.
-    //
-    // The auth-URL box and auth-notice USED to render here too, but that
-    // pinned the login UI to the top of the scroll area instead of near the
-    // composer like AgentQuestionPanel/AgentDecisionPanel — see the #2429
-    // follow-up. They're now AgentAuthPanel, rendered by agent-view.tsx as a
-    // flex sibling after .agent-document-scroll-region.
-    const headerSlot = (): JSX.Element => (
-        <Show when={props.loadingOlder?.()}>
-            <div class="agent-history-loading">Loading older messages...</div>
-        </Show>
-    );
-
     // Ordinal-matched tool_use_id -> live dispatch for this pane's
     // Agent/Task/Workflow tool calls (see activity/dispatch-correlation.ts).
     // Empty (not attempted) without a blockId — a pane with no block id has
@@ -219,7 +204,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             layoutView={props.layoutView}
             tailPolicy={props.tailPolicy ?? resolveTailPolicy(untrack(() => getSettingsKeyAtom("agent:turnscopedtail")()))}
             onOpenHistory={props.onOpenHistory}
-            headerSlot={headerSlot()}
             dispatchMatches={dispatchMatches}
         />
     );

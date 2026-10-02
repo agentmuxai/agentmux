@@ -33,7 +33,7 @@ Docs:
 ### 2.1 Behaviour now
 
 **Live feed (#4121).** Finished turns roll off the front of the pane into
-History only when the pane holds more than 15 MB of finished content or more
+History only when the pane holds more than 5 MB of finished content (15 MB as shipped in #4121; lowered on 2026-10-02, see the change log) or more
 than 20,000 rows. There is no turn limit by default; `agent:livefeedturns`
 is now an optional cap. A pass runs on send, turn end, the pane being hidden,
 history load, and whenever the document first goes over its limits (or the
@@ -106,7 +106,7 @@ Limitations (by design for now):
 2. An archived block reads from its `b:` file; a `g:` stub there can't reload and shows "no longer available".
 3. An accepted background launch whose task notification never arrives keeps its log.
 4. A replayed chunk for a dock-kept log that was later freed is buffered again (rare: replay only).
-5. The pane does not fill up to 15 MB on open; it restores 10,000 lines.
+5. The pane does not fill up to the 5 MB budget on open; it restores 10,000 lines.
 6. Once anything has rolled off, scroll-up paging stops; earlier turns are in History.
 
 Open items:
@@ -114,7 +114,7 @@ Open items:
 | ID | Item | Needs |
 |---|---|---|
 | F2 | Fresh-session clamp hides earlier history; show a divider instead | **Decided 2026-10-01: divider.** In progress |
-| F3 | Fill the pane to the 15 MB budget on open (beyond 10,000 lines) | Owner decision; backend read cap |
+| F3 | Fill the pane to the 5 MB budget on open (beyond 10,000 lines) | Owner decision; backend read cap |
 | F4 | Backend `is_claude_turn_start` counts jekts as turns (matters only with a turn cap set) | Small fix |
 | D1 | Diagnostics in §4 | Go-ahead |
 | V1 | U2 live check (§5) | Owner to open the agent |
@@ -122,3 +122,4 @@ Open items:
 ## 7. Change log
 
 - 2026-10-01 — created after #4126 merged.
+- 2026-10-02 — budget lowered from 15 MB to 5 MB, and the "Loading older messages..." banner removed. With 15 MB, scrolling up in a long-running agent (Manoz: about 68 MB of displayed history) paged in 2,000-line pages for hundreds of loads before anything rolled off, each page flashing the banner and pushing the rows down; the pane slowed down. The banner dated from #338 and had been unreachable since #3700 turned paging off with the live feed on; #4121 made it reachable again.

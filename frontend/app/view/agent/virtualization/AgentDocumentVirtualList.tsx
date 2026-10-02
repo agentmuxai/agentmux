@@ -124,13 +124,6 @@ export interface AgentDocumentVirtualListProps {
      */
     zoomFactor?: Accessor<number>;
     /**
-     * Content rendered inside the scroll container, above the
-     * virtualized region. Used by AgentDocumentView for the
-     * auth-url box and the loading-older banner. Affects scroll math
-     * via scrollMargin (read from virtualContainerRef.offsetTop).
-     */
-    headerSlot?: JSX.Element;
-    /**
      * blockId for the agent-pane-layout slice. When present, the list feeds the
      * slice (nodes / estimates / expansion / viewport / measurements) and the
      * measure RO dispatches `RowMeasured` keyed by the row's current expansion
@@ -852,42 +845,19 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const zoom = props.zoomFactor?.() ?? 1;
             dispatchLayoutIfRegistered(blockId, { type: "ZoomChanged", zoom });
         });
-        // scrollMargin = the virtualized container's offsetTop (the header
-        // above it). Re-read on every region reflow; handleScroll + the dedup
-        // cover the header-shift cases (auth box / loading-older banner).
+        // scrollMargin = the virtualized container's offsetTop. Nothing renders
+        // above the container any more (the auth box moved to AgentAuthPanel,
+        // the loading-older banner was removed), so the header watchers that
+        // tracked it are gone; re-read on every region reflow. Keeping
+        // scrollMarginPx in sync matters because row starts include it while
+        // the render path, windowing, and scroll-to-node subtract the live
+        // offsetTop.
         onMount(() => {
             if (!virtualContainerRef) return;
             dispatchScrollMargin();
             const ro = new ResizeObserver(() => dispatchScrollMargin());
             ro.observe(virtualContainerRef);
-            // The header (auth box / loading-older banner) sits ABOVE the
-            // container; it shifts the container's offsetTop WITHOUT resizing
-            // the container itself, so the RO above never fires for it. The
-            // header moves offsetTop two ways, and we watch both:
-            //   • add/remove (a Show toggles the banner/auth box) → childList
-            //     on scrollRef.
-            //   • internal resize (AuthUrlBox grows when its paste-result
-            //     appears inside the existing box) → no childList mutation, so
-            //     a ResizeObserver on the header element itself catches it.
-            // headerRO observes only the 0-2 header elements that precede the
-            // container (never the virtualized rows), so there's no scroll-time
-            // reflow storm. Keeping scrollMarginPx in sync matters because row
-            // starts include it while the render path, windowing, and
-            // scroll-to-node subtract the live offsetTop.
-            const headerRO = new ResizeObserver(() => dispatchScrollMargin());
-            const observeHeaders = (): void => {
-                for (const child of Array.from(scrollRef.children)) {
-                    if (child === virtualContainerRef) break;
-                    headerRO.observe(child); // idempotent per element
-                }
-            };
-            observeHeaders();
-            const mo = new MutationObserver(() => {
-                dispatchScrollMargin();
-                observeHeaders();
-            });
-            mo.observe(scrollRef, { childList: true });
-            onCleanup(() => { ro.disconnect(); headerRO.disconnect(); mo.disconnect(); });
+            onCleanup(() => ro.disconnect());
         });
     }
 
@@ -1591,9 +1561,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         elNodeId.delete(el);
     };
 
-    // Render: scroll container holds the optional header, the
-    // virtualized head, and the streaming buffer. headerSlot offsets
-    // the rows; the slice's scrollMargin (fed above) accounts for it.
+    // Render: scroll container holds the virtualized head and the streaming
+    // buffer. Nothing renders above the rows: the "Loading older messages"
+    // banner that used to sit here pushed the rows down by its height every
+    // time a scroll-up page loaded.
     return (
         <div
             class="agent-document"
@@ -1601,7 +1572,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             onScroll={handleScroll}
             data-follow-state={followLabel(props.viewState.stickToBottom())}
         >
-            {props.headerSlot}
             {/* Virtualized head — only present when document > buffer size.
                 Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
                 slot is permanently tied to one nodeId. The old <Index>
