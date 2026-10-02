@@ -95,8 +95,8 @@ function parseCssColor(color: string | null | undefined): ParsedRgba | null {
         return { r, g, b, a };
     }
 
-    // hsl()/hsla() — needed since this PR's own callers (hueToHeaderBg,
-    // NON_AGENT_DEFAULT_HEADER_BG) pass hsl() strings into
+    // hsl()/hsla() — needed since callers (NON_AGENT_DEFAULT_HEADER_BG, and
+    // hueToActiveBorder/hueToBorder for borders) pass hsl() strings into
     // pickReadableTextColor, which relies on this parser. Without this
     // branch those calls silently returned null and computed no text color
     // at all (reagent P1, PR #3452).

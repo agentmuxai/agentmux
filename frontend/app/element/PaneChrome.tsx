@@ -20,8 +20,9 @@
 
 import { Show, createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type JSX } from "solid-js";
 import {
-    computeBlockActiveBorderColor,
     computeBlockColorBg,
+    computeBlockIdentityColor,
+    computeBlockTabPillActiveBg,
     computeBlockTabPillBg,
     computeBlockTabPillNeutralBg,
     computeFocusRingBorderColor,
@@ -165,7 +166,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // folded into tabInfos above) since it needs the current theme's
     // polarity, which label/icon description has no reason to depend on.
     //
-    // computeBlockActiveBorderColor, one call per pill's own block: a pill's
+    // computeBlockIdentityColor, one call per pill's own block: a pill's
     // color must never come from anything tab-wide, or every pill's
     // underline collapses to one shared color (reagent P1, PR #3484 — back
     // when a tab-level override tier still existed).
@@ -175,13 +176,17 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         const colors = new Map<string, PaneTabColors>();
         for (const blockId of tabIds()) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            const underline = computeBlockActiveBorderColor(meta);
+            // The underline is the identity normalised for the theme, so it
+            // clears 3:1 against the pill under it for every hue
+            // (pane-color-scheme.ts); an uncoloured tab falls back to accent.
+            const underline = computeBlockIdentityColor(meta, isLightTheme);
             const background = computeBlockTabPillBg(meta, isLightTheme);
+            const activeBackground = computeBlockTabPillActiveBg(meta, isLightTheme);
             // Always set: the header behind the strip is tinted with the
             // ACTIVE block's color, so a transparent uncolored pill would
             // appear to take on whichever tab is selected.
             const neutralBackground = computeBlockTabPillNeutralBg(meta, isLightTheme);
-            colors.set(blockId, { underline, background, neutralBackground });
+            colors.set(blockId, { underline, background, activeBackground, neutralBackground });
         }
         return colors;
     });
@@ -237,6 +242,27 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         const headerKeyOf = (meta: Block["meta"] | undefined): string =>
             computeBlockColorBg(meta, isLightTheme) ??
             (paneTabCapability(meta?.view, "header") === "surface" ? "\u0000surface-default" : "\u0000fixed-default");
+        // Count IDENTITIES, not tabs (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md
+        // §6 P2). An uncoloured tab (Accounts, CPU, a terminal) is not a
+        // competing identity, so a pane with one coloured agent plus utility
+        // tabs is about that agent: its tail keeps that agent's tint whichever
+        // tab is selected. Stable, so it never moves on a tab switch. Two or
+        // more identities have no single colour to be about → neutral.
+        const identities = new Set<string>();
+        let anyUncoloured = false;
+        for (const blockId of ids) {
+            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
+            const bg = computeBlockColorBg(meta, isLightTheme);
+            if (bg) identities.add(bg);
+            else anyUncoloured = true;
+        }
+        // Every tab shares the one identity: no override, BlockFrame_Header
+        // already paints that colour for whichever tab is active.
+        if (identities.size === 1 && !anyUncoloured) return undefined;
+        if (identities.size === 1) return [...identities][0];
+        if (identities.size > 1) return computeMixedPaneHeaderBg(isLightTheme);
+        // No identity at all: the earlier rule below still decides, so a pane
+        // of uncoloured agent + non-agent tabs keeps a fixed tail.
         const distinct = new Set<string>();
         for (const blockId of ids) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;

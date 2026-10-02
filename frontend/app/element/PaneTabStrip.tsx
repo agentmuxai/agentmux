@@ -83,6 +83,9 @@ function markLanded(id: string, paneKey: string | undefined): void {
 export interface PaneTabColors {
     underline?: string;
     background?: string;
+    /** The selected pill's background (a step stronger than `background`);
+     *  falls back to `background` when absent. */
+    activeBackground?: string;
     neutralBackground?: string;
 }
 
@@ -762,6 +765,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         if (!c) return {};
         return {
             ...(c.background ? { "--pane-tab-bg": c.background } : {}),
+            ...(c.activeBackground ? { "--pane-tab-bg-active": c.activeBackground } : {}),
             ...(c.underline ? { "--pane-tab-underline": c.underline } : {}),
             ...(c.neutralBackground ? { "--pane-tab-neutral-bg": c.neutralBackground } : {}),
         } as JSX.CSSProperties;
