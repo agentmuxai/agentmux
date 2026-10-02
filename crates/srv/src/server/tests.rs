@@ -6460,6 +6460,78 @@ async fn a_target_running_under_another_name_is_delivered_by_uid_not_held() {
     assert!(!err.starts_with("agent not found"), "delivered to the UID's block: {v}");
 }
 
+/// Phase 0 item 4 of SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md: a
+/// jekt the target's spawn gate refused (not signed in) is held with
+/// `held_reason: needs_login`, never redelivered by UID at once (the target is
+/// registered, so that would only be refused again), and the replay leaves it
+/// alone until a sign-in check is due: no attempt counted, no blind retry.
+#[tokio::test]
+async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
+    use crate::backend::reactive::types::{InjectionRequest, InjectionResponse};
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("login-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Login Y", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state
+        .reactive_handler
+        .register_agent_full(&slug, &format!("{slug}-block"), None, 0, None, Some(&uid), "test")
+        .unwrap();
+
+    let id = format!("req-{slug}");
+    let req = InjectionRequest {
+        target_agent: slug.clone(),
+        message: "hi".to_string(),
+        source_agent: Some("sender".to_string()),
+        request_id: Some(id.clone()),
+        delivery_tier: Some("host".to_string()),
+        ..Default::default()
+    };
+    let refused: InjectionResponse = serde_json::from_value(serde_json::json!({
+        "success": false,
+        "request_id": id,
+        "block_id": format!("{slug}-block"),
+        "error": "identity spawn gate: no credentials for claude: the bound account was deleted or is unresolvable.",
+        "timestamp": 0,
+    }))
+    .unwrap();
+
+    let v = super::reactive::hold_for_absent_target(
+        &state,
+        super::ReactiveAuthVia::FullAuthKey,
+        &req,
+        &refused,
+        super::reactive::HoldReason::NeedsLogin,
+    )
+    .await
+    .expect("held");
+    assert_eq!(v["held"], true, "{v}");
+    assert_eq!(v["held_reason"], "needs_login", "{v}");
+    assert_eq!(v["request_id"], id.as_str(), "{v}");
+    assert!(v["error"].as_str().unwrap().contains("not signed in"), "{v}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows.len(), 1, "kept, not delivered by UID");
+
+    // Registered, but the sign-in check was just done: the replay skips it.
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().all(|(r, _)| r != &id), "{outcomes:?}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows[0].attempts, 0);
+
+    // A LAN caller is still never held.
+    assert!(super::reactive::hold_for_absent_target(
+        &state,
+        super::ReactiveAuthVia::LanKey,
+        &req,
+        &refused,
+        super::reactive::HoldReason::NeedsLogin,
+    )
+    .await
+    .is_none());
+}
+
 // The LAN listeners (`backend::lan_listeners`) serve `build_routers().lan`,
 // not the full router: a LAN peer only ever calls the lan-key routes, so
 // nothing that requires the full `auth_key` is reachable off-host.

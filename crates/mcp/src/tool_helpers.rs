@@ -241,7 +241,16 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
     if result.get("held").and_then(|v| v.as_bool()) == Some(true) {
         // SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md: the target is a known
         // agent that is not running anywhere srv can reach, so srv kept the
-        // message and delivers it when the agent starts.
+        // message and delivers it when the agent starts. Since Phase 0 item 4
+        // it also holds for a receiver that is here but not signed in.
+        if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {
+            return Ok(format!(
+                "HELD for {to} (needs_login) — not delivered yet. {to}'s agent cannot start \
+                 because it is not signed in; this AgentMux instance (channel) keeps the message \
+                 and delivers it within about a minute of their signing in, for up to 24 hours. \
+                 Do not resend it.{id}"
+            ));
+        }
         return Ok(format!(
             "HELD for {to} (not_running) — not delivered yet. {to} is not running; this \
              AgentMux instance (channel) keeps the message and delivers it when {to} starts \
@@ -250,8 +259,9 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
     }
     let err = result.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
     // Two failures the sender can act on differently. A spawn-gate refusal is
-    // recoverable (the receiver signs in) but srv does not keep the message
-    // yet (Phase 0 item 4), so say both.
+    // recoverable (the receiver signs in). srv now holds it (`needs_login`
+    // above); this answer remains for an older srv, a cron sender or a
+    // non-host tier, which are not held.
     if err.starts_with("identity spawn gate") {
         anyhow::bail!(
             "Message delivery failed (needs_login): {to}'s agent cannot start because it is not \

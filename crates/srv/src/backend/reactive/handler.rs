@@ -838,6 +838,12 @@ impl Handler {
         self.uid_to_block.contains_key(uid)
     }
 
+    /// The block `uid` is registered on, with no side effect — for the
+    /// held-jekt replay's quiet sign-in check.
+    pub fn block_for_uid(&self, uid: &str) -> Option<String> {
+        self.uid_to_block.get(uid).cloned()
+    }
+
     /// Deliver a held jekt (durable jekt spec §2.3): the ordinary delivery
     /// path, audited as `held_delivered` (or `held_retry` on failure).
     pub fn inject_held(&mut self, req: InjectionRequest) -> InjectionResponse {
@@ -2245,6 +2251,11 @@ impl ReactiveHandler {
     /// See [`Handler::has_uid_registration`].
     pub fn has_uid_registration(&self, uid: &str) -> bool {
         self.inner.lock().unwrap().has_uid_registration(uid)
+    }
+
+    /// See [`Handler::block_for_uid`].
+    pub fn block_for_uid(&self, uid: &str) -> Option<String> {
+        self.inner.lock().unwrap().block_for_uid(uid)
     }
 
     pub fn get_audit_log(&self, limit: usize) -> Vec<AuditLogEntry> {
