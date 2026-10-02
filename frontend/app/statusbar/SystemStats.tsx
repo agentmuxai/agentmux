@@ -3,8 +3,7 @@
 
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
+import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { CpuCoresPopover } from "./CpuCoresPopover";
 import { DiskVolumesPopover } from "./DiskVolumesPopover";
 import { cpuColor } from "./cpu-color";
@@ -61,79 +60,15 @@ const SystemStats = (): JSX.Element => {
     // the % refers to) and is re-parsed live inside DiskVolumesPopover.
     const [diskVolumes, setDiskVolumes] = createSignal<DiskVolume[]>([]);
 
-    // Per-core CPU panel — opened by clicking the CPU readout. Mirrors the
-    // TokenUsageIndicator → TokenBreakdownPopover interaction.
+    // Per-core CPU and per-drive Disk panels, opened by clicking the
+    // readout. Dismiss and positioning are AnchoredPopover's.
     const [cpuPanelOpen, setCpuPanelOpen] = createSignal(false);
-    const [cpuAnchorRect, setCpuAnchorRect] = createSignal<DOMRect | null>(null);
     let cpuButtonRef: HTMLButtonElement | undefined;
-    let cpuPopoverRef: HTMLDivElement | undefined;
+    const toggleCpuPanel = () => setCpuPanelOpen(!cpuPanelOpen());
 
-    const toggleCpuPanel = () => {
-        if (cpuPanelOpen()) {
-            setCpuPanelOpen(false);
-            return;
-        }
-        if (cpuButtonRef) setCpuAnchorRect(cpuButtonRef.getBoundingClientRect());
-        setCpuPanelOpen(true);
-    };
-
-    // Per-drive Disk panel — same interaction as the CPU panel above.
     const [diskPanelOpen, setDiskPanelOpen] = createSignal(false);
-    const [diskAnchorRect, setDiskAnchorRect] = createSignal<DOMRect | null>(null);
     let diskButtonRef: HTMLButtonElement | undefined;
-    let diskPopoverRef: HTMLDivElement | undefined;
-
-    const toggleDiskPanel = () => {
-        if (diskPanelOpen()) {
-            setDiskPanelOpen(false);
-            return;
-        }
-        if (diskButtonRef) setDiskAnchorRect(diskButtonRef.getBoundingClientRect());
-        setDiskPanelOpen(true);
-    };
-
-    // Close on outside click (ignoring the button + popover) and on Esc.
-    createEffect(() => {
-        if (!cpuPanelOpen()) return;
-        const onDown = (e: MouseEvent) => {
-            const t = e.target as Node;
-            if (cpuButtonRef?.contains(t) || cpuPopoverRef?.contains(t)) return;
-            setCpuPanelOpen(false);
-        };
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") {
-                e.stopPropagation();
-                setCpuPanelOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", onDown, true);
-        window.addEventListener("keydown", onKey, true);
-        onCleanup(() => {
-            document.removeEventListener("mousedown", onDown, true);
-            window.removeEventListener("keydown", onKey, true);
-        });
-    });
-
-    createEffect(() => {
-        if (!diskPanelOpen()) return;
-        const onDown = (e: MouseEvent) => {
-            const t = e.target as Node;
-            if (diskButtonRef?.contains(t) || diskPopoverRef?.contains(t)) return;
-            setDiskPanelOpen(false);
-        };
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") {
-                e.stopPropagation();
-                setDiskPanelOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", onDown, true);
-        window.addEventListener("keydown", onKey, true);
-        onCleanup(() => {
-            document.removeEventListener("mousedown", onDown, true);
-            window.removeEventListener("keydown", onKey, true);
-        });
-    });
+    const toggleDiskPanel = () => setDiskPanelOpen(!diskPanelOpen());
 
     onMount(() => {
         const unsub = muxEventSubscribe({
@@ -188,12 +123,7 @@ const SystemStats = (): JSX.Element => {
                         CPU {Math.round(s().cpu)}%
                     </button>
                     <Show when={cpuPanelOpen()}>
-                        <Portal>
-                            <CpuCoresPopover
-                                anchorRect={cpuAnchorRect()}
-                                ref={(el) => { cpuPopoverRef = el; }}
-                            />
-                        </Portal>
+                        <CpuCoresPopover anchor={cpuButtonRef} onClose={() => setCpuPanelOpen(false)} />
                     </Show>
                     <Show when={s().gpu != null}>
                         <span class="stat-separator">|</span>
@@ -257,13 +187,11 @@ const SystemStats = (): JSX.Element => {
                             Disk {Math.round(s().watchVolumeFreePct!)}%
                         </button>
                         <Show when={diskPanelOpen()}>
-                            <Portal>
-                                <DiskVolumesPopover
-                                    anchorRect={diskAnchorRect()}
-                                    initialVolumes={diskVolumes()}
-                                    ref={(el) => { diskPopoverRef = el; }}
-                                />
-                            </Portal>
+                            <DiskVolumesPopover
+                                anchor={diskButtonRef}
+                                initialVolumes={diskVolumes()}
+                                onClose={() => setDiskPanelOpen(false)}
+                            />
                         </Show>
                     </Show>
                     {/* Network indicator stays mounted even at 0/0 so the user

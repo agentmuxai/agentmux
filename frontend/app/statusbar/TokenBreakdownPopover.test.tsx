@@ -48,7 +48,7 @@ describe("TokenBreakdownPopover — by-agent regroup", () => {
 
     function renderPopover() {
         return render(() => (
-            <TokenBreakdownPopover anchorRect={null} onClose={() => {}} />
+            <TokenBreakdownPopover anchor={null} onClose={() => {}} />
         ));
     }
 

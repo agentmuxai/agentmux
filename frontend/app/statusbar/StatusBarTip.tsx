@@ -24,11 +24,8 @@
  * Mount exactly once (in `StatusBar.tsx`).
  */
 
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
-import { autoUpdate } from "@floating-ui/dom";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
 import "./StatusBarTip.scss";
 
 interface TipBalloonProps {
@@ -37,75 +34,23 @@ interface TipBalloonProps {
 }
 
 /**
- * The balloon itself, split out so `usePaneOverlay` and the floating-ui
- * position registration run against ITS OWN mount lifecycle (only while a
- * tip is showing) — same reasoning as `HostPopoverPanel`/
- * `BackendStatusPanel`/`TokenBreakdownPopover`: calling `usePaneOverlay`
- * in the always-mounted parent would read an undefined ref at the parent's
- * mount time and never re-attach its observers once the ref is later set.
+ * The balloon itself, split out so AnchoredPopover's positioning and airspace
+ * cut run for ITS OWN mount lifecycle (only while a tip is showing). A cursor
+ * sweeping the status bar mounts and disposes a balloon per `[data-tip]` it
+ * crosses, often inside one frame; AnchoredPopover cancels a frame that has
+ * not run yet, so no `autoUpdate` outlives its balloon (a leak seen live
+ * 2026-09-22: 4,718 throws in one hour).
  */
-const TipBalloon = (props: TipBalloonProps): JSX.Element => {
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-    let frameHandle: number | undefined;
-    let rootRef: HTMLDivElement | undefined;
-
-    // Airspace cut so the balloon paints over any browser-pane HWND the
-    // status bar overlaps — same primitive as the status-bar popovers.
-    usePaneOverlay(() => rootRef);
-
-    // The frame handle is tracked so `onCleanup` can cancel a frame that has
-    // not run yet. A tip can be dismissed inside the very frame it mounted in
-    // — a cursor sweeping the status bar crosses several `[data-tip]`
-    // elements per frame, mounting and disposing a balloon for each. Cleanup
-    // then ran with `cleanupAutoUpdate` still null, so it had nothing to
-    // cancel, and the pending frame went on to start an `autoUpdate` that no
-    // longer had any owner to stop it. Each leaked one kept firing on every
-    // later scroll/resize against a disposed component: ~500 throws/second
-    // for ten seconds, 4,718 in one hour, observed live 2026-09-22 09:15Z.
-    const registerFloating = (el: HTMLDivElement) => {
-        rootRef = el;
-        if (frameHandle !== undefined) cancelAnimationFrame(frameHandle);
-        frameHandle = requestAnimationFrame(() => {
-            frameHandle = undefined;
-            if (!(el instanceof Element)) return;
-            const update = async () => {
-                const pos = await computeMenuPosition(
-                    { anchor: props.target.getBoundingClientRect(), placement: "top", avoidNativePanes: false },
-                    el,
-                );
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(
-                { getBoundingClientRect: () => props.target.getBoundingClientRect() },
-                el,
-                update,
-            );
-        });
-    };
-
-    onCleanup(() => {
-        if (frameHandle !== undefined) cancelAnimationFrame(frameHandle);
-        cleanupAutoUpdate?.();
-        cleanupAutoUpdate = null;
-    });
-
-    return (
-        <div
-            ref={registerFloating}
-            class="status-bar-tip-balloon"
-            data-pane-overlay
-            style={floatingStyle()}
-        >
-            {props.text}
-        </div>
-    );
-};
+const TipBalloon = (props: TipBalloonProps): JSX.Element => (
+    <AnchoredPopover
+        anchor={props.target}
+        placement="top"
+        class="status-bar-tip-balloon"
+        shellClass="status-bar-tip-shell"
+    >
+        {props.text}
+    </AnchoredPopover>
+);
 
 TipBalloon.displayName = "TipBalloon";
 
@@ -175,11 +120,7 @@ export const StatusBarTip = (): JSX.Element => {
     // new anchor needs its own `autoUpdate`, not a mutated reference.
     return (
         <Show when={activeEl()} keyed>
-            {(el) => (
-                <Portal>
-                    <TipBalloon target={el} text={el.getAttribute("data-tip") ?? ""} />
-                </Portal>
-            )}
+            {(el) => <TipBalloon target={el} text={el.getAttribute("data-tip") ?? ""} />}
         </Show>
     );
 };

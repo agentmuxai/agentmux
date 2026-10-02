@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../element/popover-frame" as popoverFrame;
 @use "./token-usage";
 @use "./instance-panel";
 @use "./cpu-cores-popover";
@@ -236,24 +237,12 @@
 }
 
 .status-bar-popover {
-    // Positioning (position/left/top) comes from computeMenuPosition's
-    // inline style — floating-ui anchors this to the trigger and keeps it
-    // in the paintable area, mirroring TokenBreakdownPopover. See
-    // SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md.
-    background: var(--modal-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
+    // The body of an AnchoredPopover (BackendStatus, HostPopover): the shell
+    // positions it and sets its z-index; the body carries chrome zoom.
+    @include popoverFrame.popover-frame;
     padding: var(--space-2) 10px;
     min-width: 200px;
-    z-index: var(--zindex-modal-wrapper);
     font-size: 11px;
-    // Deliberately NOT `zoom: var(--zoomfactor)` — see
-    // docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md
-    // (same double-application bug as TokenBreakdownPopover's sibling rule
-    // in _token-usage.scss — this shared class's positioning also comes
-    // from computeMenuPosition, per the comment above).
-    color: var(--main-text-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 
     .status-bar-popover-row {
         display: flex;

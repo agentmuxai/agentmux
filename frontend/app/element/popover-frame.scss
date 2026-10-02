@@ -1,0 +1,13 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The frame the status bar popovers share (token usage, CPU cores, disk
+// volumes, backend, host). Sibling of menu-frame.scss, which frames menus.
+
+@mixin popover-frame {
+    background: var(--modal-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    color: var(--main-text-color);
+}

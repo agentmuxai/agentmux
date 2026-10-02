@@ -16,17 +16,15 @@
  *
  * See `docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md` §3.1.
  *
- * Panel mechanics (open/close, outside-click, focus-out, Escape, floating
- * placement) deliberately mirror `AgentRuntimeDropup`, the strip's other
- * panel — same `computeMenuPosition` primitive, same `data-pane-overlay`, and
- * the same "listeners live only while open" effect scoping.
+ * Panel mechanics (open/close, outside-click, focus-out, Escape) deliberately
+ * mirror `AgentRuntimeDropup`, the strip's other panel, with the same
+ * "listeners live only while open" effect scoping. Placement, chrome zoom and
+ * the airspace cut are AnchoredPopover's.
  */
 
-import { autoUpdate } from "@floating-ui/dom";
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
 
-import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 
 import {
@@ -40,11 +38,6 @@ import {
     type BlockAccessor,
 } from "../session-actions";
 import type { SessionStats } from "../types";
-
-/** Serialize a MenuPositionResult.style the same way flyoutmenu.tsx does. */
-function styleToString(s: JSX.CSSProperties): string {
-    return `position:${s.position};left:${s.left};top:${s.top}`;
-}
 
 interface AgentSessionStatsProps {
     blockId: string;
@@ -91,13 +84,11 @@ function formatCost(usd: number | undefined): string {
 
 export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element => {
     const [open, setOpen] = createSignal(false);
-    const [floatingStyle, setFloatingStyle] = createSignal("");
     const [archiveBusy, setArchiveBusy] = createSignal(false);
     const [exportBusy, setExportBusy] = createSignal(false);
     const [restoreBusy, setRestoreBusy] = createSignal(false);
     let referenceEl: HTMLButtonElement | undefined;
     let floatingEl: HTMLDivElement | undefined;
-    let cleanupAutoUpdate: (() => void) | undefined;
 
     const blockAtom = () => props.blockAtom();
     const archived = () => isSessionArchived(blockAtom);
@@ -153,35 +144,9 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
             document.removeEventListener("mousedown", handleClickOutside);
             document.removeEventListener("keydown", handleKeyDown, true);
             document.removeEventListener("focusin", handleFocusChange);
-            // Tied to the OPEN lifetime, not the component's: the portaled
-            // panel is gone once closed, so leaving autoUpdate armed would
-            // keep scroll/resize observers repositioning a detached element
-            // for the rest of the pane's life (Codex P2 on #3435).
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = undefined;
             floatingEl = undefined;
         });
     });
-    onCleanup(() => cleanupAutoUpdate?.());
-
-    const updatePosition = async () => {
-        if (!referenceEl || !floatingEl) return;
-        const pos = await computeMenuPosition(
-            { anchor: referenceEl, placement: "top-start", avoidNativePanes: false },
-            floatingEl
-        );
-        setFloatingStyle(styleToString(pos.style));
-    };
-
-    const registerFloating = (el: HTMLDivElement) => {
-        floatingEl = el;
-        requestAnimationFrame(() => {
-            if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-            assertMenuInPaintableArea(el, "agent-session-stats");
-        });
-    };
 
     const run = async (
         busy: () => boolean,
@@ -222,122 +187,121 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                 {props.label}
             </button>
             <Show when={open()}>
-                <Portal>
-                    <div
-                        ref={registerFloating}
-                        class="menu agent-session-stats-panel"
-                        style={floatingStyle()}
-                        data-pane-overlay
-                        role="dialog"
-                        aria-label="Session stats"
-                    >
-                        <div class="agent-session-stats-section">Session</div>
+                <AnchoredPopover
+                    anchor={referenceEl}
+                    placement="top-start"
+                    shellClass="anchored-popover--menu"
+                    class="menu agent-session-stats-panel"
+                    role="dialog"
+                    aria-label="Session stats"
+                    ref={(el) => { floatingEl = el; }}
+                >
+                    <div class="agent-session-stats-section">Session</div>
 
-                        <Show when={contextPct() != null}>
-                            {statRow(
-                                "Context",
-                                <>
-                                    {formatCompactNumber(props.contextTokens ?? 0)} /{" "}
-                                    {formatCompactNumber(props.contextWindow ?? 0)} (
-                                    {contextPct()!.toFixed(0)}%)
-                                </>
-                            )}
-                        </Show>
+                    <Show when={contextPct() != null}>
+                        {statRow(
+                            "Context",
+                            <>
+                                {formatCompactNumber(props.contextTokens ?? 0)} /{" "}
+                                {formatCompactNumber(props.contextWindow ?? 0)} (
+                                {contextPct()!.toFixed(0)}%)
+                            </>
+                        )}
+                    </Show>
 
-                        <Show when={totals()}>
-                            {statRow(
-                                "Cost",
-                                <>
-                                    {formatCost(totals()?.cost_usd)}
-                                    <Show when={totals()?.num_turns}>
-                                        {" · "}
-                                        {totals()!.num_turns} turns
-                                    </Show>
-                                    <Show when={totals()?.duration_ms}>
-                                        {" · "}
-                                        {formatDuration(totals()!.duration_ms!)}
-                                    </Show>
-                                </>
-                            )}
-                            {statRow(
-                                "Tokens",
-                                <>
-                                    {formatCompactNumber(totals()?.input_tokens ?? 0)} in
-                                    <Show when={cacheShare() != null}>
-                                        {" "}
-                                        ({cacheShare()!.toFixed(0)}% cached)
-                                    </Show>
+                    <Show when={totals()}>
+                        {statRow(
+                            "Cost",
+                            <>
+                                {formatCost(totals()?.cost_usd)}
+                                <Show when={totals()?.num_turns}>
                                     {" · "}
-                                    {formatCompactNumber(totals()?.output_tokens ?? 0)} out
-                                </>
-                            )}
-                        </Show>
+                                    {totals()!.num_turns} turns
+                                </Show>
+                                <Show when={totals()?.duration_ms}>
+                                    {" · "}
+                                    {formatDuration(totals()!.duration_ms!)}
+                                </Show>
+                            </>
+                        )}
+                        {statRow(
+                            "Tokens",
+                            <>
+                                {formatCompactNumber(totals()?.input_tokens ?? 0)} in
+                                <Show when={cacheShare() != null}>
+                                    {" "}
+                                    ({cacheShare()!.toFixed(0)}% cached)
+                                </Show>
+                                {" · "}
+                                {formatCompactNumber(totals()?.output_tokens ?? 0)} out
+                            </>
+                        )}
+                    </Show>
 
-                        <Show when={lineCount() > 0}>
-                            {statRow(
-                                "History",
-                                <span title={`${formatExactNumber(lineCount())} lines`}>
-                                    {formatCompactNumber(lineCount())} lines ·{" "}
-                                    {formatAgo(sessionLastActivityMs(blockAtom))}
-                                </span>
-                            )}
-                        </Show>
+                    <Show when={lineCount() > 0}>
+                        {statRow(
+                            "History",
+                            <span title={`${formatExactNumber(lineCount())} lines`}>
+                                {formatCompactNumber(lineCount())} lines ·{" "}
+                                {formatAgo(sessionLastActivityMs(blockAtom))}
+                            </span>
+                        )}
+                    </Show>
 
-                        <Show when={archived()}>
-                            {statRow(
-                                "Archived",
-                                new Date(sessionArchivedAt(blockAtom)).toLocaleString()
-                            )}
-                        </Show>
+                    <Show when={archived()}>
+                        {statRow(
+                            "Archived",
+                            new Date(sessionArchivedAt(blockAtom)).toLocaleString()
+                        )}
+                    </Show>
 
-                        <Show when={canManage() && (lineCount() > 0 || archived())}>
-                            <div class="agent-session-stats-actions">
-                                <Show
-                                    when={archived()}
-                                    fallback={
-                                        <button
-                                            class="agent-session-btn agent-session-btn-archive"
-                                            disabled={archiveBusy()}
-                                            onClick={() =>
-                                                void run(archiveBusy, setArchiveBusy, "archive", () =>
-                                                    archiveSession(props.blockId)
-                                                )
-                                            }
-                                            title="Compress and archive this session's history to free disk space, then start fresh"
-                                        >
-                                            {archiveBusy() ? "Archiving…" : "Archive"}
-                                        </button>
-                                    }
-                                >
+                    <Show when={canManage() && (lineCount() > 0 || archived())}>
+                        <div class="agent-session-stats-actions">
+                            <Show
+                                when={archived()}
+                                fallback={
                                     <button
-                                        class="agent-session-btn agent-session-btn-restore"
-                                        disabled={restoreBusy()}
+                                        class="agent-session-btn agent-session-btn-archive"
+                                        disabled={archiveBusy()}
                                         onClick={() =>
-                                            void run(restoreBusy, setRestoreBusy, "restore", () =>
-                                                restoreSession(props.blockId)
+                                            void run(archiveBusy, setArchiveBusy, "archive", () =>
+                                                archiveSession(props.blockId)
                                             )
                                         }
-                                        title="Restore this session's history from the archive"
+                                        title="Compress and archive this session's history to free disk space, then start fresh"
                                     >
-                                        {restoreBusy() ? "Restoring…" : "Restore"}
+                                        {archiveBusy() ? "Archiving…" : "Archive"}
                                     </button>
-                                </Show>
+                                }
+                            >
                                 <button
-                                    class="agent-session-btn agent-session-btn-export"
-                                    disabled={exportBusy()}
+                                    class="agent-session-btn agent-session-btn-restore"
+                                    disabled={restoreBusy()}
                                     onClick={() =>
-                                        void run(exportBusy, setExportBusy, "export", () =>
-                                            exportSession(props.blockId)
+                                        void run(restoreBusy, setRestoreBusy, "restore", () =>
+                                            restoreSession(props.blockId)
                                         )
                                     }
-                                    title="Download this session's history as a .jsonl file"
+                                    title="Restore this session's history from the archive"
                                 >
-                                    {exportBusy() ? "Exporting…" : "Export"}
+                                    {restoreBusy() ? "Restoring…" : "Restore"}
                                 </button>
-                            </div>
-                        </Show>
-                    </div>
-                </Portal>
+                            </Show>
+                            <button
+                                class="agent-session-btn agent-session-btn-export"
+                                disabled={exportBusy()}
+                                onClick={() =>
+                                    void run(exportBusy, setExportBusy, "export", () =>
+                                        exportSession(props.blockId)
+                                    )
+                                }
+                                title="Download this session's history as a .jsonl file"
+                            >
+                                {exportBusy() ? "Exporting…" : "Export"}
+                            </button>
+                        </div>
+                    </Show>
+                </AnchoredPopover>
             </Show>
         </>
     );

@@ -8,16 +8,13 @@
  * grand total row, and a destructive-gated "Reset counter" action.
  * Clicking a real agent row focuses that agent's pane.
  *
- * Calls `usePaneOverlay` so the popover renders cleanly over any
- * browser pane HWND (same airspace pattern as MoreDropdown and the
- * canonical `<Modal>`). Spec: SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.2,
+ * Renders through AnchoredPopover (positioning, chrome zoom, dismiss, the
+ * airspace cut). Spec: SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.2,
  * SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md.
  */
 
-import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-import { autoUpdate } from "@floating-ui/dom";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
@@ -68,19 +65,12 @@ function serviceRowsOf(row: AgentUsage): ServiceRow[] {
 }
 
 interface TokenBreakdownPopoverProps {
-    anchorRect: DOMRect | null;
+    /** The TokenUsageIndicator button. */
+    anchor: PopoverAnchor;
     onClose: () => void;
-    ref?: (el: HTMLDivElement) => void;
 }
 
 export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.Element => {
-    let rootRef: HTMLDivElement | undefined;
-
-    // Airspace cut so the popover shows through any browser pane HWND
-    // that the status bar overlaps. Same primitive used by `<Modal>`
-    // (PR #544) and MoreDropdown.
-    usePaneOverlay(() => rootRef);
-
     const [confirmingReset, setConfirmingReset] = createSignal(false);
     const [ambientExpanded, setAmbientExpanded] = createSignal(false);
 
@@ -104,48 +94,10 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
         return getCacheHitRate();
     });
 
-    // Positioning routes through the shared primitive (Phase 3): anchored to
-    // the TokenUsageIndicator rect, preferred placement top-end so the popover
-    // opens upward and right-aligns to the indicator (it lives in the status
-    // bar at the bottom of the window). flip/shift/size + the paintable-area
-    // boundary replace the old bespoke 8px-GUTTER viewport clamp.
+    // Opens upward, right-aligned to the indicator (it sits at the right of
+    // the status bar). Positioning, zoom, dismiss and the airspace cut are
+    // AnchoredPopover's.
     const POPOVER_WIDTH = 320;
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        rootRef = el;
-        props.ref?.(el);
-        requestAnimationFrame(() => {
-            const r = props.anchorRect;
-            if (!r || !(el instanceof Element)) return;
-            const update = async () => {
-                const cur = props.anchorRect;
-                if (!cur) return;
-                const pos = await computeMenuPosition(
-                    { anchor: cur, placement: "top-end", avoidNativePanes: false },
-                    el,
-                );
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            // anchorRect is a static DOMRect → virtual reference element.
-            cleanupAutoUpdate = autoUpdate(
-                { getBoundingClientRect: () => props.anchorRect ?? r },
-                el,
-                update,
-            );
-            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
-            // (airspace transparency cut-out), so intentional native-pane overlap
-            // would produce a false-positive [menu-guard] warning.
-        });
-    };
-
-    onCleanup(() => cleanupAutoUpdate?.());
 
     const handleResetClick = () => setConfirmingReset(true);
 
@@ -163,13 +115,14 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
 
     return (
         <>
-            <div
-                ref={registerFloating}
+            <AnchoredPopover
+                anchor={props.anchor}
+                placement="top-end"
+                onDismiss={props.onClose}
                 class="token-usage-breakdown"
                 role="dialog"
                 aria-label="Token usage breakdown"
-                data-pane-overlay
-                style={{ ...floatingStyle(), width: `${POPOVER_WIDTH}px` }}
+                style={{ width: `${POPOVER_WIDTH}px` }}
             >
                 <div class="token-usage-breakdown-header">
                     <span class="token-usage-breakdown-title">Token Usage</span>
@@ -297,7 +250,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                         Reset counter
                     </button>
                 </div>
-            </div>
+            </AnchoredPopover>
             <ConfirmModal
                 open={confirmingReset()}
                 title="Reset token counter?"

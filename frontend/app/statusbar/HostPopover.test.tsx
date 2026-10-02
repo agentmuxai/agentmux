@@ -80,7 +80,7 @@ const muxbus = {
 function renderPanel(mux = muxbus, extra: Record<string, unknown> = {}) {
     return render(() => (
         <HostPopoverPanel
-            anchorRect={null}
+            anchor={null}
             onClose={() => {}}
             hostname="narko"
             hostInfo={() => hostInfo}

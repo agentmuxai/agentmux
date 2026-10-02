@@ -13,7 +13,8 @@
     color: var(--main-text-color);
     font-size: 12px;
     user-select: none;
-    z-index: var(--z-popover, 8500);
+    // The body of an AnchoredPopover: position and z-index are the shell's,
+    // chrome zoom comes from anchored-popover.scss.
 }
 
 .instance-panel-header {
