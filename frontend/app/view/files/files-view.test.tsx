@@ -382,6 +382,44 @@ describe("the Files pane: scrolling to a row (ReAgent on #4201)", () => {
     });
 });
 
+describe("the Files pane: deliberate selection (ReAgent on #4201)", () => {
+    it("Delete does nothing once the selection is cleared, even with a row focused", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.click(v.list());
+        expect(v.model.selection().names.size).toBe(0);
+        fireEvent.keyDown(v.list(), { key: "Delete" });
+        fireEvent.keyDown(v.list(), { key: "Delete", shiftKey: true });
+        await new Promise((r) => setTimeout(r, 20));
+        expect(h.rpc.FsTrashCommand).not.toHaveBeenCalled();
+        expect(screen.queryByText(/permanently\?/)).toBeNull();
+    });
+
+    it("leaving the rename box with a bad name cancels it, so the keys work again", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "F2" });
+        const input = v.container.querySelector(".files-rename-input") as HTMLInputElement;
+        input.value = "a:b";
+        fireEvent.blur(input);
+        await waitFor(() => expect(v.model.renaming()).toBeNull());
+        expect(h.rpc.FsRenameCommand).not.toHaveBeenCalled();
+        fireEvent.keyDown(v.list(), { key: "ArrowUp" });
+        expect(v.model.selection().focus).toBe("a10.md");
+    });
+
+    it("watches again after a failed watch", async () => {
+        h.rpc.FsWatchCommand.mockRejectedValueOnce(new Error("cap"));
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await waitFor(() => expect(h.rpc.FsWatchCommand).toHaveBeenCalledTimes(1));
+        v.model.refresh();
+        await waitFor(() => expect(h.rpc.FsWatchCommand).toHaveBeenCalledTimes(2));
+    });
+});
+
 describe("the Files pane: live", () => {
     it("re-lists when srv says the folder changed", async () => {
         const v = mount();
