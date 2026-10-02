@@ -30,6 +30,7 @@ import {
 import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
+import { readSwarmSummary } from "@/app/store/activitySummary";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
@@ -261,6 +262,14 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const [renamingId, setRenamingId] = createSignal<string | null>(null);
     const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
     const labelOf = (id: string) => titleOverrides()[id] ?? tabInfos().get(id)?.label ?? "";
+    // An agent tab's pill shows the agent's summary, the same line the Swarm row shows
+    // (`readSwarmSummary` is the one function behind both), immediately on hover.
+    // Agents only: a terminal's OSC title is not an agent summary.
+    const summaryOf = (id: string): string | undefined => {
+        const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta;
+        if (meta?.view !== "agent") return undefined;
+        return readSwarmSummary(meta) ?? undefined;
+    };
     const confirmRename = async (id: string, title: string) => {
         setRenamingId(null);
         const rename = tabInfos().get(id)?.rename;
@@ -350,6 +359,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             activeId={activeBlockId()}
             getId={(id) => id}
             getLabel={labelOf}
+            getTooltipDetail={summaryOf}
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
             getColor={(id) => tabColors().get(id)}
             headerBgOverride={headerTailBg()}

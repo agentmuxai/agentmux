@@ -9,7 +9,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { MOS } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
-import { readActivitySummary } from "@/app/store/activitySummary";
+import { readSwarmSummary } from "@/app/store/activitySummary";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 
@@ -1996,7 +1996,8 @@ export class SwarmViewModel {
                 "Agent";
             const agentProvider =
                 (block?.meta?.["agentProvider"] as string | undefined)?.trim() || null;
-            const activitySummary = readActivitySummary(block?.meta)?.trim() || null;
+            // The same function the pane tab tooltip uses, so the two cannot disagree.
+            const activitySummary = readSwarmSummary(block?.meta);
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";

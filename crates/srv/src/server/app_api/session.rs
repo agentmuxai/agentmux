@@ -358,7 +358,16 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map(str::to_string)
                     .or_else(|| ambient::digest::read_recent_activity_digest(&filestore, &cmd.block_id));
 
-                let current_title = obj::meta_get_string(&block.meta, "term:ambient_summary", "");
+                // A stored value that is not a real title (a placeholder an older build
+                // accepted, such as `(none yet)`) counts as NO title: it is never fed
+                // back into the prompt, so it cannot sustain itself. The first draft
+                // fed it back as the "current title" and told the model to repeat it.
+                let stored_title = obj::meta_get_string(&block.meta, "term:ambient_summary", "");
+                let current_title = if ambient::validate::is_usable_title(&stored_title) {
+                    stored_title
+                } else {
+                    String::new()
+                };
 
                 // Nothing to anchor a title on AND nothing new to evaluate —
                 // matches the old digest-empty early return.
