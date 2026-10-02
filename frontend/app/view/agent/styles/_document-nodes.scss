@@ -1188,10 +1188,13 @@ $transcript-preview-max-height: calc(50vh / 3);
                 @include message-chevron;
             }
 
+            // Same scale as the other meta rows (outcome / notice labels are
+            // 11px secondary); the pane base of 15px is for conversation text.
             .agent-context-delivery-title {
                 flex: 1;
-                font-weight: 600;
-                color: var(--main-text-color);
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--secondary-text-color);
             }
 
             .agent-context-delivery-size {
@@ -1208,6 +1211,12 @@ $transcript-preview-max-height: calc(50vh / 3);
                 text-overflow: ellipsis;
                 white-space: nowrap;
             }
+        }
+
+        .agent-context-delivery-icon,
+        .agent-context-delivery-item-icon {
+            font-size: 11px;
+            flex-shrink: 0;
         }
 
         // A card with nothing to open has no chevron; keep its title aligned
@@ -1269,6 +1278,8 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-context-delivery-item-name {
                 flex: 1;
+                font-size: 11px;
+                color: var(--secondary-text-color);
             }
 
             .agent-context-delivery-item-size {
@@ -1282,6 +1293,8 @@ $transcript-preview-max-height: calc(50vh / 3);
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
             padding: var(--space-1) var(--space-1-5);
             margin: 0 0 var(--space-1) 0;
+            font-size: 11px;
+            line-height: 1.35;
             white-space: pre-wrap;
             // Same cap and scroll hand-off as a jekt body.
             max-height: $transcript-preview-max-height;
