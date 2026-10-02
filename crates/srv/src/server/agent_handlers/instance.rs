@@ -10,7 +10,8 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,
     COMMAND_CREATE_AGENT_INSTANCE, COMMAND_UPDATE_AGENT_INSTANCE,
-    COMMAND_DELETE_AGENT_INSTANCE,
+    COMMAND_DELETE_AGENT_INSTANCE, COMMAND_AGENT_LAST_RUNTIME,
+    AgentLastRuntime, CommandAgentLastRuntimeData,
     CommandListAgentInstancesData, CommandGetAgentInstanceData,
     CommandCreateAgentInstanceData, CommandUpdateAgentInstanceData,
     CommandDeleteAgentInstanceData, DeleteAgentInstanceResult,
@@ -198,6 +199,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     let mstore = state.mstore.clone();
+    engine.register_typed(
+        COMMAND_AGENT_LAST_RUNTIME,
+        move |cmd: CommandAgentLastRuntimeData, _ctx| {
+            let mstore = mstore.clone();
+            async move {
+                if let Some(raw) = &cmd.runtime {
+                    let normalized = crate::backend::storage::agents::normalize_last_runtime(raw)
+                        .map_err(|e| format!("agentlastruntime: {e}"))?;
+                    mstore
+                        .agent_last_runtime_set(&cmd.id, &normalized)
+                        .map_err(|e| format!("agentlastruntime: {e}"))?;
+                }
+                let runtime = mstore
+                    .agent_last_runtime_get(&cmd.id)
+                    .map_err(|e| format!("agentlastruntime: {e}"))?;
+                Ok(AgentLastRuntime { runtime })
+            }
+        },
+    );
+
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     let identity_store_del = state.identity_store.clone();
     engine.register_typed(
@@ -368,5 +390,63 @@ mod tests {
                 "{cmd} is migrated and must appear in the schema",
             );
         }
+    }
+
+    /// `agentlastruntime`: read / replace / forget the remembered runtime, and
+    /// refuse a value the launch path could not read.
+    #[tokio::test]
+    async fn agentlastruntime_reads_replaces_forgets_and_refuses_bad_values() {
+        let state = crate::server::tests::test_state();
+        let mut agent: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": "rt-agent",
+            "name": "rt-agent",
+            "icon": "sparkles",
+            "provider": "claude",
+            "description": "",
+            "created_at": 1,
+        }))
+        .unwrap();
+        state.mstore.agent_def_insert(&mut agent).unwrap();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        let mut n = 0;
+        let mut call = |payload: serde_json::Value| {
+            n += 1;
+            engine.handle_message(crate::backend::rpc_types::RpcMessage {
+                command: COMMAND_AGENT_LAST_RUNTIME.to_string(),
+                reqid: format!("r{n}"),
+                data: Some(payload),
+                ..Default::default()
+            });
+        };
+        macro_rules! next {
+            () => {
+                tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            };
+        }
+
+        call(serde_json::json!({ "id": "rt-agent" }));
+        let r = next!();
+        assert!(r.error.is_empty(), "{:?}", r.error);
+        assert_eq!(r.data.unwrap()["runtime"], "");
+
+        call(serde_json::json!({ "id": "rt-agent", "runtime": r#"{"model":"opus","effort":"high"}"# }));
+        let r = next!();
+        assert!(r.error.is_empty(), "{:?}", r.error);
+        assert_eq!(r.data.unwrap()["runtime"], r#"{"effort":"high","model":"opus"}"#);
+
+        call(serde_json::json!({ "id": "rt-agent", "runtime": r#"{"colour":"red"}"# }));
+        let r = next!();
+        assert!(!r.error.is_empty(), "an unknown key is refused");
+
+        call(serde_json::json!({ "id": "rt-agent" }));
+        assert_eq!(next!().data.unwrap()["runtime"], r#"{"effort":"high","model":"opus"}"#, "a refused write changes nothing");
+
+        call(serde_json::json!({ "id": "rt-agent", "runtime": "" }));
+        assert_eq!(next!().data.unwrap()["runtime"], "");
     }
 }

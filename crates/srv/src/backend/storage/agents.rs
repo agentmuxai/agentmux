@@ -1520,6 +1520,35 @@ impl Store {
         }
     }
 
+    /// The Runtime menu choices the user last made for agent `id` (JSON, see
+    /// [`normalize_last_runtime`]), or '' when there are none or the agent is
+    /// unknown or a template.
+    pub fn agent_last_runtime_get(&self, id: &str) -> Result<String, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        match conn.query_row(
+            "SELECT last_runtime FROM db_agents WHERE id = ?1 AND is_template = 0",
+            params![id],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(v) => Ok(v),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(String::new()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Replace agent `id`'s remembered runtime. Returns false for an unknown
+    /// agent or a template (templates are not agents anyone continues, so
+    /// they remember nothing). Deliberately leaves `updated_at` alone: this is
+    /// a note about how the agent was last run, not an edit of its definition.
+    pub fn agent_last_runtime_set(&self, id: &str, runtime: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_agents SET last_runtime = ?2 WHERE id = ?1 AND is_template = 0",
+            params![id, runtime],
+        )?;
+        Ok(rows > 0)
+    }
+
     /// A single `db_agents` row in the `AgentDefinition` shape, no registry
     /// overlay — the definition a launch resolves against. Templates and
     /// user agents alike.
@@ -3780,4 +3809,37 @@ mod fallback_id_tests {
         assert_eq!(frontend_fallback_id("Café Bot"), "caf--bot");
         assert_eq!(agent_open_fallback_id("Café Bot"), "café-bot");
     }
+}
+
+
+/// The only keys a remembered runtime may hold, and the longest value of each.
+const LAST_RUNTIME_KEYS: &[(&str, usize)] = &[("permissionMode", 32), ("model", 128), ("effort", 32)];
+
+/// Validate and canonicalise a remembered runtime before it is stored:
+/// `''` clears; otherwise a JSON object of non-empty strings under the known
+/// keys only (`permissionMode`, `model`, `effort`), each bounded. Anything
+/// else is rejected, so the column can only ever hold something the launch
+/// path knows how to read.
+pub fn normalize_last_runtime(raw: &str) -> Result<String, String> {
+    if raw.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("last runtime is not JSON: {e}"))?;
+    let obj = value.as_object().ok_or("last runtime must be a JSON object")?;
+    let mut out = serde_json::Map::new();
+    for (key, v) in obj {
+        let Some(&(_, max)) = LAST_RUNTIME_KEYS.iter().find(|(k, _)| k == key) else {
+            return Err(format!("unknown last-runtime key {key:?}"));
+        };
+        let s = v.as_str().ok_or_else(|| format!("{key} must be a string"))?;
+        if s.is_empty() || s.len() > max || s.chars().any(char::is_control) {
+            return Err(format!("{key} is empty, too long or has control characters"));
+        }
+        out.insert(key.clone(), serde_json::Value::String(s.to_owned()));
+    }
+    if out.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(serde_json::Value::Object(out).to_string())
 }

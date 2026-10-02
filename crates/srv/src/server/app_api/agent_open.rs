@@ -565,11 +565,26 @@ async fn open_agent_inner(
                 // definition's own flags. Without the middle step a pane opened here
                 // ran on the CLI's default model while its menu read Sonnet — see
                 // backend/agent_runtime.rs.
-                let seeded = crate::backend::agent_runtime::seed_launch(
+                //
+                // What the user last picked in the menu for this agent sits above the
+                // definition's flags (and replaces them in this pane's copy), so
+                // reopening an agent starts where it was left. A read failure only
+                // means "nothing remembered".
+                let remembered = crate::backend::agent_runtime::Remembered::parse(
+                    provider.id,
+                    &mstore.agent_last_runtime_get(&agent.id).unwrap_or_default(),
+                );
+                let (base_args, pane_flags, remembered_mode) = crate::backend::agent_runtime::apply_remembered(
                     provider.id,
                     resolve_cli_args(&provider, controller_type),
                     &agent.provider_flags,
+                    &remembered,
                 );
+                let mut seeded =
+                    crate::backend::agent_runtime::seed_launch(provider.id, base_args, &pane_flags);
+                if let (Some(mode), Some(rt)) = (remembered_mode, seeded.runtime.as_mut()) {
+                    rt["permissionMode"] = json!(mode);
+                }
 
                 let agent_slug = agentmux_common::slug::path_slug(&agent.name);
                 // Shared with native-memory resolution so the two can never
@@ -821,7 +836,7 @@ async fn open_agent_inner(
                 meta.insert("controller".to_string(), json!(controller_type));
                 meta.insert("cmd".to_string(), json!(&resolved_cli_path));
                 // cmd:args + agent:runtime + agent:provider_flags, written together.
-                crate::backend::agent_runtime::apply_to_meta(&mut meta, seeded, &agent.provider_flags);
+                crate::backend::agent_runtime::apply_to_meta(&mut meta, seeded, &pane_flags);
                 meta.insert("cmd:cwd".to_string(), json!(&work_dir));
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));

@@ -162,6 +162,19 @@ continuity write-back. One row per agent ⇒ one launch state per agent. A remem
 
 - Templates (`is_seeded`) store nothing: they are not agents anyone continues.
 
+### 3.3.1 As built
+
+`db_agents.last_runtime` (schema v42, JSON, `''` = none) and one RPC, `agentlastruntime` (`{id, runtime?}`: omit
+`runtime` to read, a JSON object to replace, `""` to forget; the value is validated and stored canonically). It is
+written by `patchRuntime` for **only the settings picked** (a read-modify-write, inside the per-pane queue), so choosing an
+effort does not freeze the model the definition happened to give the pane. Read by `launchAgentDefinition`
+(`resolveLaunchRuntime`: modal choice > fork > remembered > definition flags > default, per setting) and by srv's
+`agent.open` (`apply_remembered`, Claude only). In both, the definition's flag for a remembered setting is taken out of the
+**pane's** copy of `provider_flags`, since the definition's flags are appended last and would otherwise win; this also
+makes a fork carry-over and a launch-modal model win over the definition, which they did not before. A write on pick
+rather than on close, so a crash loses nothing. Not done: other providers on the srv path (their model namespaces are
+not known there), and the "resume an old session at the model it ran" feature (§3.6).
+
 ### 3.4 Edge cases
 
 - **The provider changed** (an agent redefined from Claude to Codex): drop any stored value the new provider's

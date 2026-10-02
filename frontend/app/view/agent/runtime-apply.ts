@@ -40,6 +40,7 @@ import { staticTabId } from "@/app/store/global";
 import { buildPaneArgs, getRuntimeConfig } from "./buildRuntimeArgs";
 import { modelTakesEffort } from "./runtime-capabilities";
 import { isPersistentLaunch, parseProviderFlags, PROVIDER_FLAGS_META_KEY, withoutOverriddenFlags } from "./launch-args";
+import { rememberRuntime } from "./remembered-runtime";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
 
@@ -183,6 +184,9 @@ export function patchRuntime(
 
         await applyRuntimeChange(blockId, provider, updated, { ...meta, [PROVIDER_FLAGS_META_KEY]: flags });
         chain.last = { config: updated, flags, at: Date.now() };
+        // What the user picked is what this agent starts with next time it is
+        // opened (never fails the pick: see rememberRuntime).
+        await rememberRuntime(meta?.["agentId"] as string | undefined, patch);
         return updated;
     });
     chain.tail = run.then(
