@@ -402,6 +402,9 @@ pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
 /// sections below its own tree. Returns `backend::swarm_remote::SwarmOtherInstancesResult`.
 /// docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md
 pub const COMMAND_SWARM_OTHER_INSTANCES: &str = "swarm.other-instances";
+/// Ambient call outcomes since srv started, by purpose then outcome label
+/// (`ambient::outcome::snapshot`). For the Instance panel.
+pub const COMMAND_AMBIENT_OUTCOMES: &str = "ambient.outcomes";
 /// Every agent pane open in this instance — all tabs, all windows — with
 /// its agent id and where it is. Returns `AgentOpenPanesResult`.
 pub const COMMAND_AGENT_OPEN_PANES: &str = "agent.open-panes";

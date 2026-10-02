@@ -288,6 +288,31 @@ pub fn accept_line(raw: &str, limits: &Limits) -> Option<String> {
     Some(text.to_string())
 }
 
+/// Which rule refuses `raw`, for the outcome log (`ambient::outcome`). Uses the
+/// stored-title bounds for "too long", since the caller's own word target is not
+/// known here; a reply refused only by a tighter purpose limit reads `Other`.
+pub fn rejection_reason(raw: &str) -> super::outcome::RejectReason {
+    use super::outcome::RejectReason;
+    let text = raw.trim();
+    if text.is_empty() {
+        return RejectReason::Empty;
+    }
+    if text.contains('\n')
+        || !text.chars().any(|c| c.is_alphabetic())
+        || text.chars().count() > STORED_TITLE.max_chars
+        || text.split_whitespace().count() > STORED_TITLE.max_words
+    {
+        return RejectReason::Shape;
+    }
+    if is_absence(text) {
+        return RejectReason::AbsencePattern;
+    }
+    if has_any(&normalized(text), REFUSAL_PHRASES) {
+        return RejectReason::Refusal;
+    }
+    RejectReason::Other
+}
+
 /// Bounds for judging a title that is ALREADY stored. Generous: a title written
 /// under an older word target or by an older build may be longer than today's.
 pub const STORED_TITLE: Limits = Limits { max_words: 28, max_chars: 200 };
