@@ -127,6 +127,18 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         })
     );
 
+    // OpenFiles' selection request, whenever it lands in the block's meta:
+    // pane.open writes the meta in more than one step, so it can arrive
+    // after the first listing (or come back after the pane cleared it).
+    createEffect(
+        on(
+            () => ctx.meta()?.["files:select"],
+            (req) => {
+                if (req != null) model.applyRequestedSelection();
+            }
+        )
+    );
+
     // A new folder starts at the top.
     createEffect(
         on(model.path, () => {
