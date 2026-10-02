@@ -317,6 +317,17 @@ of order), so Stage B can also *correct* drift without a restart (the reconcilia
 6. **Visible:** a dry-run (`cli.prune` with `dry_run: true`) returning what *would* go and how much space, surfaced
    in the toolchain settings, so the first prune is never a surprise.
 
+### 5.3.1 As built
+
+`cli_prune` (planner `plan_prune`, guarded remover `prune`, `record_use`, `scan_process_commands`) merged in #4191.
+On top of it, an RPC `toolchain.prune` (`{dry_run?}`; **omitted means dry run**, deleting needs an explicit `false`) and a
+"Old CLI versions" section in the Toolchain view: **Check** (dry run) lists what would go and what it frees; **Remove**
+is a separate click on exactly that. This is §5.8's conservative branch (opt-in, nothing automatic, 30 days). The
+"live controller" input is every block that records a `cmd` / `cmd:args` (open panes and panes restored from a layout,
+which hold the absolute CLI path until they mount), and the process scan is `ps`; a failed scan offers nothing. Windows
+returns no scan, so nothing is offered there. The automatic daily run (§5.3 item 5) is deliberately NOT built; it needs
+the owner's answer to §5.8 first.
+
 ### 5.4 Why a 30-day age and not "keep N versions"
 
 Version counting is wrong in both directions: a user who upgrades twice in a week would lose the CLI an older channel
