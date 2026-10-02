@@ -3,8 +3,8 @@
 //
 // XWayland authorization for the host process (#4011).
 //
-// `window:transparent=true` routes the host through XWayland (ozone x11) so
-// `_NET_WM_WINDOW_OPACITY` applies. GNOME's Mutter starts Xwayland with
+// Used when the host runs under XWayland on a Wayland session, i.e. when
+// `AGENTMUX_OZONE_PLATFORM=x11` forces it. GNOME's Mutter starts Xwayland with
 // `-auth $XDG_RUNTIME_DIR/.mutter-Xwaylandauth.*` and exports XAUTHORITY only
 // into the systemd user environment, so a host started by a login entry, the
 // AppImage binfmt path or an agent shell can lack it. Chromium then fails
@@ -32,18 +32,6 @@ pub(crate) fn ensure_xauthority() -> Option<PathBuf> {
     std::env::set_var("XAUTHORITY", &found);
     tracing::info!("XAUTHORITY was unset; using {}", found.display());
     Some(found)
-}
-
-/// True when an X client in this process can connect to the X server
-/// (XWayland). Run after [`ensure_xauthority`].
-pub(crate) fn xwayland_reachable() -> bool {
-    match x11rb::connect(None) {
-        Ok(_) => true,
-        Err(e) => {
-            tracing::warn!("XWayland unreachable: {e}");
-            false
-        }
-    }
 }
 
 fn systemd_user_xauthority() -> Option<PathBuf> {
