@@ -345,7 +345,8 @@ Each phase is independently shippable and reviewable.
 - **Preview panel (§6.6):** Space toggles it (Ctrl+Space toggles the focused row's selection instead). Code is highlighted, Markdown rendered, images shown; text reads only the first 256 KB, through a ranged request; binary files and video/audio get a card. A preview starts 150 ms after the selection settles and is abandoned when it moves.
 - **Filter:** Ctrl+F or `/`, case-insensitive, per folder.
 - Dropping onto a folder row puts the files in that folder (the row is outlined while the drag is over it), including a drag within the same pane; dropped anywhere else in the pane they go into the folder shown, and a same-pane drop there does nothing.
-- Not built: the tree view, route 3 (Alt+K `@path` mention).
+- **Mention (§8.2, route 3):** Alt+K (or *Mention in agent* in the row menu) splices an `@path` per selected entry into the message box of the agent the user last worked in (the only agent pane, if there is one), relative to that agent's working folder when inside it, quoted when it has a space.
+- Not built: the tree view.
 
 ### 12.3 Git markers
 
