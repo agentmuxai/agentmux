@@ -5,13 +5,14 @@
  * Shared string-truncation display formatting — consolidates 3 independently-
  * duplicated implementations found across `block/autotitle.ts` (dead code,
  * removed outright — see below), `view/drone/drone-view.tsx`, and
- * `AgentFooter.tsx`'s `abbreviateArg`.
+ * `AgentFooter.tsx`'s `abbreviateArg` (since removed with the working row's
+ * tool text, SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md).
  *
  * `autotitle.ts`'s `truncate` turned out to be genuinely unused (no call
  * sites anywhere in that file) — deleted rather than migrated.
  *
  * The remaining two disagreed on more than just the ellipsis character:
- * `AgentFooter.tsx`'s `abbreviateArg` left-truncates any string containing
+ * `abbreviateArg` left-truncated any string containing
  * `/`/`\` to preserve a trailing filename — the right call for its actual
  * inputs (tool args, overwhelmingly file paths), but NOT automatically safe
  * to apply to `drone-view.tsx`'s inputs (URLs, boolean expressions,
@@ -32,7 +33,7 @@
  * `pathAware: true`, a string that actually LOOKS like a path (contains `/`
  * or `\`) left-truncates instead of right-truncating so a trailing filename
  * survives — `pathAware` only enables the check, it does not force every
- * input through it. `AgentFooter.tsx`'s tool args aren't all paths (Bash
+ * input through it. The tool args it served weren't all paths (Bash
  * flags, grep patterns, etc.) — reagent P1 on PR #2387 caught an earlier
  * draft that left-truncated unconditionally once `pathAware: true` was
  * passed, silently reversing the truncation direction for every non-path

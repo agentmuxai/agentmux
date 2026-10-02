@@ -4,6 +4,7 @@
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 6).
 
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
+import { readSwarmSummary } from "@/app/store/activitySummary";
 import { isStopping } from "@/app/store/agent-pane-state/types";
 import { Show, type Accessor, type ComponentProps } from "solid-js";
 import type { UseAgentFailureResult } from "../hooks/useAgentFailure";
@@ -57,7 +58,6 @@ export const AgentBottomPanels = (props: {
     backgroundTasksAtom: ComponentProps<typeof ActivityDock>["backgroundTasksAtom"];
     workingRowVisible: Accessor<boolean>;
     workingRowLoading: Accessor<boolean>;
-    hasPromotedTool: Accessor<boolean>;
 }) => (
     <>
         {/* Login UI — bottom-docked like AgentDecisionPanel/
@@ -229,11 +229,9 @@ export const AgentBottomPanels = (props: {
                 <AgentWorkingRow
                     loading={props.workingRowLoading()}
                     stopping={isStopping(props.paneModel.state.turnPhase)}
-                    currentTool={props.paneModel.state.currentTool}
-                    currentToolArg={props.paneModel.state.currentToolArg}
-                    toolPromoted={props.hasPromotedTool()}
-                    sessionStats={props.paneModel.state.sessionStats}
+                    activitySummary={readSwarmSummary(props.block()?.meta)}
                     turnTokens={props.paneModel.state.turnTokens}
+                    sessionStats={props.paneModel.state.sessionStats}
                     launchPhase={props.status.launchPhase()}
                     onCancelLogin={props.status.cancelLogin}
                     hasAuthUrl={!!props.status.authUrl()}

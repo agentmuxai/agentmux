@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { DocumentNode, ToolNode } from "../types";
-import { hasRunningPromotedTool, nextToolPromotionAt, TOOL_PROMOTION_MS, toolActivities, toolOutputChunks, toolToActivity } from "./tool-adapter";
+import { nextToolPromotionAt, TOOL_PROMOTION_MS, toolActivities, toolOutputChunks, toolToActivity } from "./tool-adapter";
 
 function mkBash(overrides: Partial<ToolNode> = {}): ToolNode {
     return {
@@ -133,23 +133,6 @@ describe("nextToolPromotionAt", () => {
         // At the instant t1 crosses the threshold, a re-run should now
         // surface t2's own promotion instant instead of returning null.
         expect(nextToolPromotionAt(nodes, 1000 + TOOL_PROMOTION_MS)).toBe(5000 + TOOL_PROMOTION_MS);
-    });
-});
-
-describe("hasRunningPromotedTool", () => {
-    it("is false before the threshold and true at/after it, for a running call", () => {
-        const nodes: DocumentNode[] = [mkBash({ id: "t1", timestamp: 1000 })];
-        expect(hasRunningPromotedTool(nodes, 1000 + TOOL_PROMOTION_MS - 1)).toBe(false);
-        expect(hasRunningPromotedTool(nodes, 1000 + TOOL_PROMOTION_MS)).toBe(true);
-    });
-
-    it("is false for a finished call still lingering in the dock's retention window — must not suppress a different, newly-started tool's working-row text", () => {
-        const nodes: DocumentNode[] = [mkBash({ id: "t1", status: "success", timestamp: 1000, duration: 40 })];
-        expect(hasRunningPromotedTool(nodes, 1000 + 40_000 + 1000)).toBe(false);
-    });
-
-    it("is false with no nodes", () => {
-        expect(hasRunningPromotedTool([], 1_000_000)).toBe(false);
     });
 });
 
@@ -324,12 +307,6 @@ describe("whole-command sleeps promote immediately (sleep-detect.ts)", () => {
 
     it("carries sleepMs so the row can render a real countdown", () => {
         expect(toolActivities([sleepNode()], 1000)[0].sleepMs).toBe(300_000);
-    });
-
-    it("suppresses the working row's tool text immediately too", () => {
-        // Otherwise the dock would show the sleep while AgentWorkingRow went on
-        // repeating it for another 30s.
-        expect(hasRunningPromotedTool([sleepNode()], 1000)).toBe(true);
     });
 
     it("schedules no promotion timer — it is already promoted", () => {
