@@ -129,12 +129,12 @@ if command -v node >/dev/null 2>&1; then
     echo "  OK   node.js — $NODE_VERSION"
   else
     echo "  WRONG VERSION  node.js — found $NODE_VERSION, need >=24.11.0 (see .nvmrc)"
-    echo "                 https://nodejs.org/ or nvm install 24.11.0"
+    echo "                 https://nodejs.org/ or nvm install 24.21.0"
     FAIL=1
   fi
 else
   echo "  MISSING  node.js"
-  echo "           https://nodejs.org/ or nvm install 24.11.0 — need >=24.11.0, see .nvmrc"
+  echo "           https://nodejs.org/ or nvm install 24.21.0 — need >=24.11.0, see .nvmrc"
   FAIL=1
 fi
 
