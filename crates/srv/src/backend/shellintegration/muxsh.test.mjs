@@ -152,6 +152,31 @@ describe("muxsh guessView", () => {
         expect(guessView("/tmp/notes.md")).toBe("editor");
         expect(guessView("/tmp/no-extension")).toBe("editor");
     });
+
+    it("a path shaped like a folder guesses files", () => {
+        expect(guessView("/tmp/src/")).toBe("files");
+        expect(guessView("C:\\work\\repo\\")).toBe("files");
+        expect(guessView(".")).toBe("files");
+        expect(guessView("..")).toBe("files");
+        expect(guessView("~")).toBe("files");
+        expect(guessView("/tmp/.hidden")).toBe("editor");
+    });
+});
+
+describe("muxsh parseArgs — view of a folder", () => {
+    it("resolves a relative folder against this shell's directory", () => {
+        const parsed = parseArgs(["view", "./"]);
+        expect(parsed).toMatchObject({ command: "open", view: "files", file: process.cwd() });
+        expect(buildRequestBody(parsed, {})).toMatchObject({ view: "files", file: process.cwd() });
+    });
+
+    it("leaves ~ for the server to expand", () => {
+        expect(parseArgs(["view", "~/projects/"])).toMatchObject({ view: "files", file: "~/projects/" });
+    });
+
+    it("rejects the editor-only flag", () => {
+        expect(parseArgs(["view", "./", "--collapse-tree"]).error).toMatch(/only valid for an editor pane/);
+    });
 });
 
 describe("muxsh parseArgs — view", () => {

@@ -145,6 +145,13 @@ export function registerDefaultCommands(): void {
         iconColor: "#f59e0b",
         execute: () => createBlock({ meta: { view: "swarm" } }),
     });
+    commandRegistry.register({
+        id: "open:files",
+        label: "Open Hangar (Files)",
+        category: "Open",
+        icon: "folder-open",
+        execute: () => createBlock({ meta: { view: "files" } }),
+    });
 
     // ---- split ----
     commandRegistry.register({

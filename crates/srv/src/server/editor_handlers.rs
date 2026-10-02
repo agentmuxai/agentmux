@@ -39,8 +39,10 @@ fn scratch_session_token() -> &'static str {
 /// sandbox; see the note at the macOS arm). On Linux/Windows it exposes the
 /// filesystem root + mounts.
 /// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up).
+/// Also the drives section of `fs.places` (fs_handlers.rs), so the editor
+/// tree and the Files pane offer the same roots.
 #[cfg(target_os = "windows")]
-fn list_drives() -> Vec<EditorDrive> {
+pub(super) fn list_drives() -> Vec<EditorDrive> {
     let mut drives = Vec::new();
     for letter in b'A'..=b'Z' {
         let path = format!("{}:\\", letter as char);
@@ -62,13 +64,13 @@ fn list_drives() -> Vec<EditorDrive> {
 // symlink under HOME can resolve outside it; macOS TCC remains the actual gate
 // for protected locations.
 #[cfg(target_os = "macos")]
-fn list_drives() -> Vec<EditorDrive> {
+pub(super) fn list_drives() -> Vec<EditorDrive> {
     Vec::new()
 }
 
 // Linux (and any other non-Windows, non-macOS unix): filesystem root + mounts.
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn list_drives() -> Vec<EditorDrive> {
+pub(super) fn list_drives() -> Vec<EditorDrive> {
     let mut drives = vec![EditorDrive { name: "/".to_string(), path: "/".to_string() }];
     for mount_dir in ["/mnt", "/media", "/Volumes"] {
         if let Ok(entries) = std::fs::read_dir(mount_dir) {

@@ -10,6 +10,7 @@ pub mod agent_resources;
 pub mod agent_handlers;
 mod agent_takeover;
 mod editor_handlers;
+mod fs_handlers;
 pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
 mod identity_auth_spawn;

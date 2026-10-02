@@ -13,6 +13,7 @@ import { armoryPaneTab } from "@/app/view/armory/armory";
 import { browserPaneTab } from "@/app/view/browser/browser";
 import { dronePaneTab } from "@/app/view/drone/drone";
 import { editorPaneTab } from "@/app/view/editor/editor";
+import { filesPaneTab } from "@/app/view/files/files";
 import { identityPaneTab } from "@/app/view/identity/identity-pane";
 import { launcherPaneTab } from "@/app/view/launcher/launcher";
 import { mediaPaneTab } from "@/app/view/media/media";
@@ -37,6 +38,9 @@ const builtins = [
     agentPaneTabManifest, // native — Phase 2c (keep-alive)
     browserPaneTab, // native — Phase 2c (keep-alive, native surface)
     editorPaneTab, // native — Phase 2c (keep-alive, zoom base 13)
+    // Keep-alive so its scroll and selection survive a pane-tab switch
+    // (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
+    filesPaneTab, // native (keep-alive)
     // Native (create(ctx)) — Phase 2c. "cpuplot" is the same view under an
     // older name.
     sysinfoPaneTab("sysinfo"),

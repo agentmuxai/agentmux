@@ -426,6 +426,10 @@ mod recent_sessions_tests {
                 fs_watch_pool.clone(),
                 broker.clone(),
             ),
+            files_watcher: crate::backend::files_watcher::FilesWatcher::new(
+                fs_watch_pool.clone(),
+                broker.clone(),
+            ),
             fs_watch_pool: fs_watch_pool.clone(),
         };
 
@@ -774,6 +778,10 @@ mod recent_sessions_tests {
                 broker.clone(),
             ),
             media_file_watcher: crate::backend::media_file_watcher::MediaFileWatcher::new(
+                fs_watch_pool.clone(),
+                broker.clone(),
+            ),
+            files_watcher: crate::backend::files_watcher::FilesWatcher::new(
                 fs_watch_pool.clone(),
                 broker.clone(),
             ),

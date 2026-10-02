@@ -61,6 +61,13 @@ export const WpsEvent = {
     // created/modified in a directory it's watching. Payload: `{ path }` —
     // a wake signal only. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.
     MediaFileChanged: "media:file_changed",
+    // Fired when a folder a Files pane watches (`FsWatchCommand`) changes:
+    // an entry created, modified, removed or renamed. Coalesced per folder;
+    // also fired for every watched folder after a watcher overflow, so it
+    // means "re-list", never a diff. Payload: `{ dir }`, the folder's path as
+    // `FsListCommand` returns it. Scoped `block:<id>`. See
+    // docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3.
+    FilesChanged: "files:changed",
     UpgradeMigrationEvent:     "upgrade:migration-event",
     UpgradeMigrationsComplete: "upgrade:migrations-complete",
     UpgradeMigrationsFailed:   "upgrade:migrations-failed",

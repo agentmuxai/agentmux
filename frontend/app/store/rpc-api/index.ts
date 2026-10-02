@@ -19,6 +19,7 @@ import { BrowserStartPageApi } from "./browser-start-page";
 import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
+import { FsApi } from "./fs";
 import { IdentityApi } from "./identity";
 import { LayoutApi } from "./layout";
 import { McpApi } from "./mcp";
@@ -250,6 +251,32 @@ export type {
     BundleImportSkillPreview,
     BundleImportUnresolvedRequirement,
 } from "./bundle";
+export type {
+    FsCreateKind,
+    FsCreateReq,
+    FsCreateResult,
+    FsDeleteReq,
+    FsEmptyResult,
+    FsEntry,
+    FsError,
+    FsErrorKind,
+    FsListReq,
+    FsListResult,
+    FsOpResult,
+    FsOpResults,
+    FsPathReq,
+    FsPlace,
+    FsPlaceKind,
+    FsPlacesReq,
+    FsPlacesResult,
+    FsRenameReq,
+    FsRenameResult,
+    FsRestoreReq,
+    FsTrashReq,
+    FsUnwatchReq,
+    FsWatchReq,
+    FsWatchResult,
+} from "./fs";
 export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
 export type {
     ReactiveAgentRegistration,
@@ -303,6 +330,7 @@ export const RpcApi = {
     ...MiscApi,
     ...BlockApi,
     ...FileApi,
+    ...FsApi,
     ...WorkspaceApi,
     ...AgentApi,
     ...IdentityApi,
