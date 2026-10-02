@@ -22,9 +22,22 @@ import { MediaView } from "./media-view";
 /** The file the pane shows (the tab in front's): the pane's title, layout
  *  export, and what an older build restores. */
 export const META_PATH = "media:path" as const;
-/** Files to open here as tabs, appended by `openMedia` (media-open.ts) and
- *  drained by the pane. */
+/** Files to open here as tabs, appended by `openInMediaPaneOnScreen`
+ *  (media-open.ts) and drained by the pane. */
 export const META_OPEN = "media:open" as const;
+
+/** One request in `media:open`. Its `id` tells two requests for the same
+ *  file apart (two clicks on one image), so draining removes exactly the
+ *  ones handled. */
+export interface MediaOpenRequest {
+    id: string;
+    path: string;
+}
+
+function asRequest(v: unknown): MediaOpenRequest | null {
+    const r = v as Partial<MediaOpenRequest> | null;
+    return r && typeof r.id === "string" && typeof r.path === "string" && r.path ? { id: r.id, path: r.path } : null;
+}
 
 /** A Media document: a file, or none yet ("Click to load media"). */
 export interface MediaDoc {
@@ -74,10 +87,21 @@ export class MediaPaneModel {
     }
 
     /** A tab now shows `path`: its title follows, and the pane's
-     *  `media:path` when it is the tab in front. */
-    setTabPath(tabId: string, path: string): void {
+     *  `media:path` when it is the tab in front. One file has one tab: if
+     *  another tab already shows `path`, an empty tab gives way to it (that
+     *  tab comes to the front; false: this tab is gone), and a tab that
+     *  showed a file keeps it, closing the other (a newer render landing on
+     *  a file another tab had open). */
+    setTabPath(tabId: string, path: string): boolean {
         const tab = this.tabs.tabs().find((t) => t.id === tabId);
-        if (!tab) return;
+        if (!tab) return false;
+        const other = path ? this.tabs.tabs().find((t) => t.id !== tabId && t.payload.path === path) : undefined;
+        if (other && !tab.payload.path) {
+            this.tabs.activate(other.id);
+            this.tabs.close(tabId);
+            return false;
+        }
+        if (other) this.tabs.close(other.id);
         const payload: MediaDoc = path ? { path } : { path: "", blank: ++blanks };
         this.tabs.update(tabId, {
             payload,
@@ -86,13 +110,15 @@ export class MediaPaneModel {
             icon: MEDIA_DOC_TABS.iconOf!(payload),
         });
         if (this.tabs.activeId() === tabId) fireAndForget(() => this.ctx.setMeta({ [META_PATH]: path }));
+        return true;
     }
 
     /** Open `path` as a tab here (one already open on it comes to the front). */
     open(path: string): void {
-        // The tab in front with no file yet takes it.
+        // The tab in front with no file yet takes it, unless the file is
+        // open already (then that tab comes to the front).
         const active = this.tabs.active();
-        if (active && !active.payload.path) {
+        if (active && !active.payload.path && !this.tabs.tabs().some((t) => t.payload.path === path)) {
             this.setTabPath(active.id, path);
             return;
         }
@@ -127,30 +153,32 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
         if (tabs.tabs().length === 0) tabs.newDocument();
     });
 
-    // Files sent here from elsewhere in the app, in order; only the entries
-    // handled are removed (more may have been appended meanwhile). Tracks
-    // the queue alone: opening reads the tabs, and the tabs changing must
-    // not open the same files again while the queue's clearing is on its
-    // way to the block (a queue seen once is skipped until it changes).
-    let lastQueue = "";
+    // Files sent here from elsewhere in the app, in order. Each request is
+    // handled once, by id: the queue is seen again whenever the block's
+    // meta changes, and its clearing takes a round trip to land. Draining
+    // removes exactly the requests handled; ones appended meanwhile stay.
+    // Tracks the queue alone: opening reads the tabs.
+    const handledIds = new Set<string>();
     createEffect(
         on(
             () => ctx.meta()?.[META_OPEN],
             (queued) => {
-                if (!Array.isArray(queued) || queued.length === 0) {
-                    lastQueue = "";
-                    return;
-                }
-                const seen = JSON.stringify(queued);
-                if (seen === lastQueue) return;
-                lastQueue = seen;
-                const handled = queued.filter((p): p is string => typeof p === "string" && p.length > 0);
+                const requests = (Array.isArray(queued) ? queued : []).map(asRequest).filter((r): r is MediaOpenRequest => r != null);
+                // Forget ids the block no longer holds: their clearing landed.
+                const present = new Set(requests.map((r) => r.id));
+                for (const id of handledIds) if (!present.has(id)) handledIds.delete(id);
+                const fresh = requests.filter((r) => !handledIds.has(r.id));
+                if (fresh.length === 0) return;
+                for (const r of fresh) handledIds.add(r.id);
                 untrack(() => {
-                    for (const path of handled) pane.open(path);
+                    for (const r of fresh) pane.open(r.path);
                 });
                 fireAndForget(() => {
                     const now = untrack(() => ctx.meta()?.[META_OPEN]);
-                    const rest = Array.isArray(now) ? now.filter((p) => !handled.includes(p as string)) : [];
+                    const rest = (Array.isArray(now) ? now : []).filter((v) => {
+                        const r = asRequest(v);
+                        return r != null && !handledIds.has(r.id);
+                    });
                     return ctx.setMeta({ [META_OPEN]: rest.length ? rest : null });
                 });
             }

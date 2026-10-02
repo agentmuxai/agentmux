@@ -53,6 +53,11 @@ vi.mock("@/layout/lib/layoutModelHooks", () => ({
 
 import { mediaPaneTab } from "./media";
 import { openInMediaPaneOnScreen } from "./media-open";
+import { MediaPaneModel } from "./media-pane";
+
+let reqs = 0;
+/** A `media:open` request, as openInMediaPaneOnScreen appends it. */
+const req = (path: string) => ({ id: `r${++reqs}`, path });
 
 beforeEach(() => {
     hub.hooks.clear();
@@ -103,7 +108,7 @@ describe("the Media pane's document tabs", () => {
     it("files sent here become tabs; the empty tab takes the first; the queue empties", async () => {
         const v = mount();
         expect(v.container.textContent).toContain("Click to load media");
-        await v.setMeta({ "media:open": ["C:/pics/a.png", "C:/clips/b.mp4"] });
+        await v.setMeta({ "media:open": [req("C:/pics/a.png"), req("C:/clips/b.mp4")] });
         await waitFor(() => expect(v.pills()).toEqual(["a.png", "b.mp4"]));
         await waitFor(() => expect(v.meta()["media:open"]).toBeUndefined());
         expect(v.meta()["media:path"]).toBe("C:/clips/b.mp4");
@@ -114,7 +119,7 @@ describe("the Media pane's document tabs", () => {
 
     it("switching tabs sticks while the queue's clearing is still on its way (live-test bug)", async () => {
         const v = mount({ "media:path": "C:/pics/a.png" }, { lagOpenClear: true });
-        await v.setMeta({ "media:open": ["C:/pics/b.png"] });
+        await v.setMeta({ "media:open": [req("C:/pics/b.png")] });
         await waitFor(() => expect(v.pills()).toEqual(["a.png", "b.png"]));
         fireEvent.keyDown(v.root(), { key: "PageUp", ctrlKey: true });
         await waitFor(() => expect(v.inst.liveTitle!().text).toBe("a.png"));
@@ -122,6 +127,46 @@ describe("the Media pane's document tabs", () => {
         expect(v.inst.liveTitle!().text).toBe("a.png");
         fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
         await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media", "b.png"]));
+    });
+
+    it("a second request for the same file is handled even while the first one's clearing is on its way (ReAgent on #4235)", async () => {
+        const v = mount({ "media:path": "C:/pics/a.png" }, { lagOpenClear: true });
+        const first = req("C:/pics/b.png");
+        await v.setMeta({ "media:open": [first] });
+        await waitFor(() => expect(v.inst.liveTitle!().text).toBe("b.png"));
+        fireEvent.keyDown(v.root(), { key: "PageUp", ctrlKey: true });
+        await waitFor(() => expect(v.inst.liveTitle!().text).toBe("a.png"));
+        // A second click on the same image, appended behind the first.
+        await v.setMeta({ "media:open": [first, req("C:/pics/b.png")] });
+        await waitFor(() => expect(v.inst.liveTitle!().text).toBe("b.png"));
+        expect(v.pills()).toEqual(["a.png", "b.png"]);
+    });
+
+    it("one file, one tab: sent into an empty tab, the tab already showing it comes to the front (ReAgent on #4235)", async () => {
+        const v = mount({ "media:path": "C:/pics/a.png" });
+        fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
+        await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media"]));
+        await v.setMeta({ "media:open": [req("C:/pics/a.png")] });
+        await waitFor(() => expect(v.inst.liveTitle!().text).toBe("a.png"));
+        expect(v.pills()).toEqual(["a.png", "Media"]);
+    });
+
+    it("a newer render landing on a file another tab shows leaves one tab on it", () => {
+        const ctx = { blockId: "m9", meta: () => ({}) as MetaType, setMeta: async () => {}, isFocused: () => true, visibility: () => "active" } as PaneTabHostContext;
+        const pane = new MediaPaneModel(ctx);
+        pane.open("C:/out/1.png");
+        pane.tabs.open({ path: "C:/out/2.png" });
+        const shown = pane.tabs.activeId()!;
+        // A picked or dropped file into an empty tab gives way, too.
+        pane.tabs.newDocument();
+        expect(pane.setTabPath(pane.tabs.activeId()!, "C:/out/1.png")).toBe(false);
+        expect(pane.tabs.active()?.payload.path).toBe("C:/out/1.png");
+        // The tab in front follows a newer render onto 1.png: 1.png's own tab goes.
+        pane.tabs.activate(shown);
+        expect(pane.setTabPath(shown, "C:/out/1.png")).toBe(true);
+        expect(pane.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/1.png"]);
+        expect(pane.tabs.activeId()).toBe(shown);
+        pane.dispose();
     });
 
     it("a drop on a tab showing a file opens a new tab; on an empty tab, it shows there", async () => {
@@ -148,7 +193,7 @@ describe("the Media pane's document tabs", () => {
 
     it("keeps its files in the block and restores them", async () => {
         const v = mount();
-        await v.setMeta({ "media:open": ["C:/pics/a.png", "C:/pics/b.png"] });
+        await v.setMeta({ "media:open": [req("C:/pics/a.png"), req("C:/pics/b.png")] });
         await waitFor(() => expect((v.meta().doctabs as { tabs: unknown[] } | undefined)?.tabs).toHaveLength(2));
         const record = v.meta().doctabs;
         cleanup();
@@ -162,14 +207,15 @@ describe("opening media into the Media pane on screen", () => {
     it("queues the file on the focused Media pane, else the first one, else says there is none", async () => {
         expect(await openInMediaPaneOnScreen("C:/x.png")).toBe(false);
         hub.blocks.set("t1", { meta: { view: "term" } });
-        hub.blocks.set("m1", { meta: { view: "media", "media:open": ["C:/a.png"] } });
+        const queued = req("C:/a.png");
+        hub.blocks.set("m1", { meta: { view: "media", "media:open": [queued] } });
         hub.blocks.set("m2", { meta: { view: "media" } });
         hub.leafs = ["t1", "m1", "m2"];
         hub.focused = "t1";
         expect(await openInMediaPaneOnScreen("C:/x.png")).toBe(true);
-        expect(hub.metaWrites).toEqual([["m1", { "media:open": ["C:/a.png", "C:/x.png"] }]]);
+        expect(hub.metaWrites).toEqual([["m1", { "media:open": [queued, { id: expect.any(String), path: "C:/x.png" }] }]]);
         hub.focused = "m2";
         await openInMediaPaneOnScreen("C:/y.png");
-        expect(hub.metaWrites[1]).toEqual(["m2", { "media:open": ["C:/y.png"] }]);
+        expect(hub.metaWrites[1]).toEqual(["m2", { "media:open": [{ id: expect.any(String), path: "C:/y.png" }] }]);
     });
 });

@@ -10,7 +10,7 @@
 import { setBlockMeta } from "@/app/store/block-meta";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
-import { META_OPEN } from "./media-pane";
+import { META_OPEN, type MediaOpenRequest } from "./media-pane";
 
 /** A Media pane shown in the window tab on screen: the focused one if it is
  *  one, else the first. */
@@ -36,7 +36,8 @@ export async function openInMediaPaneOnScreen(path: string): Promise<boolean> {
     const blockId = mediaPaneOnScreen();
     if (!blockId) return false;
     const queued = getObjectValue<Block>(makeORef("block", blockId))?.meta?.[META_OPEN];
-    const list = Array.isArray(queued) ? queued.filter((p): p is string => typeof p === "string") : [];
-    await setBlockMeta(blockId, { [META_OPEN]: [...list, path] } as MetaType);
+    const list: unknown[] = Array.isArray(queued) ? queued : [];
+    const request: MediaOpenRequest = { id: crypto.randomUUID(), path };
+    await setBlockMeta(blockId, { [META_OPEN]: [...list, request] } as MetaType);
     return true;
 }

@@ -40,8 +40,9 @@ export function MediaView(props: {
     blockId: string;
     /** The file this tab shows ("" for none yet). */
     path: string;
-    /** The tab now shows `path` (picked, dropped, or a newer render). */
-    onPathChange: (path: string) => void;
+    /** The tab now shows `path` (picked, dropped, or a newer render).
+     *  False when the tab gave way to another tab already showing it. */
+    onPathChange: (path: string) => boolean | void;
     /** A file dropped on the pane: true when the pane opened it elsewhere
      *  (a new tab), false to show it here. */
     openDropped?: (path: string) => boolean;
@@ -120,7 +121,7 @@ export function MediaView(props: {
     // something (no path text entry, per design). The tab keeps the pick, so
     // it survives a pane reload.
     const openPath = (path: string) => {
-        props.onPathChange(path);
+        if (props.onPathChange(path) === false) return;
         showPath(path);
     };
 
