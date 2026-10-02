@@ -148,17 +148,27 @@ pub(super) fn merge_udp_peer(
     peer: &UdpPeer,
     now: u64,
 ) -> Merge {
-    if let Some((key, existing)) = find_existing(instances, peer) {
-        existing.last_seen = now;
+    if let Some(key) = find_existing(instances, peer).map(|(k, _)| k.clone()) {
         if key.starts_with(UDP_KEY_PREFIX) {
-            // Ours: the reply is the freshest word on where and how to reach it.
-            existing.address = peer.address.to_string();
-            existing.port = peer.port;
-            existing.hostname = peer.hostname.clone();
-            existing.version = peer.version.clone();
-            existing.auth_key = peer.auth_key.clone();
-        } else if existing.auth_key.is_empty() {
-            existing.auth_key = peer.auth_key.clone();
+            // Ours: the reply is the freshest word on who this is and where and
+            // how to reach it. A peer that restarted keeps its address and port
+            // but gets a new instance id, so the entry is re-keyed with it;
+            // otherwise the stale id would feed every later id-based comparison.
+            if let Some(mut existing) = instances.remove(&key) {
+                existing.last_seen = now;
+                existing.instance_id = peer.instance_id.clone();
+                existing.address = peer.address.to_string();
+                existing.port = peer.port;
+                existing.hostname = peer.hostname.clone();
+                existing.version = peer.version.clone();
+                existing.auth_key = peer.auth_key.clone();
+                instances.insert(format!("{UDP_KEY_PREFIX}{}", peer.instance_id), existing);
+            }
+        } else if let Some(existing) = instances.get_mut(&key) {
+            existing.last_seen = now;
+            if existing.auth_key.is_empty() {
+                existing.auth_key = peer.auth_key.clone();
+            }
         }
         return Merge::Refreshed;
     }
@@ -735,5 +745,34 @@ mod tests {
             assert_eq!(a.get_instances().len(), usize::from(listed), "age {age}s");
             a.instances.write().clear();
         }
+    }
+
+    /// A peer that restarts keeps its address and port and gets a new instance
+    /// id (ReAgent P2 on #4230): the entry follows it, re-keyed, so id-based
+    /// dedup compares against the live id and not a stale one.
+    #[test]
+    fn a_restarted_peer_keeps_one_entry_under_its_new_id() {
+        let mut t = HashMap::new();
+        merge_udp_peer(&mut t, &peer("old-id", "192.168.1.26", 29700), 100);
+        assert_eq!(
+            merge_udp_peer(&mut t, &peer("new-id", "192.168.1.26", 29700), 200),
+            Merge::Refreshed
+        );
+        assert_eq!(t.len(), 1, "{:?}", t.keys().collect::<Vec<_>>());
+        let e = &t["udp:new-id"];
+        assert_eq!(
+            (e.instance_id.as_str(), e.first_seen, e.last_seen),
+            ("new-id", 100, 200)
+        );
+        // And the id-based dedup now sees the live id.
+        t.insert(
+            "agentmux-x._agentmux._tcp.local.".to_string(),
+            mdns_entry("new-id", "192.168.1.99", 1111),
+        );
+        drop_udp_duplicates(&mut t);
+        assert!(
+            !t.keys().any(|k| k.starts_with("udp:")),
+            "covered by the mDNS entry"
+        );
     }
 }
