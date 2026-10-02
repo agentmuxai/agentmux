@@ -8,6 +8,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_output(engine, state);
     register_agent_process_list(engine, state);
     register_agent_tracked_blocks(engine, state);
+    register_swarm_other_instances(engine, state);
     register_agent_open_panes(engine, state);
     register_agent_kill_process(engine, state);
     register_agent_kill_tree(engine, state);
@@ -75,6 +76,39 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
                     block_ids,
                 }).unwrap()))
+            })
+        }),
+    );
+}
+
+/// `swarm.other-instances`: this machine's other channels and their agents, from
+/// the host-global shared registry (Phase 1 of
+/// SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md). Names only, no credentials.
+fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let hostname = state.hostname.clone();
+    let own_url = state.local_web_url.clone();
+    engine.register_handler(
+        COMMAND_SWARM_OTHER_INSTANCES,
+        Box::new(move |_data, _ctx| {
+            let hostname = hostname.clone();
+            let own_url = own_url.clone();
+            Box::pin(async move {
+                // A directory read; off the async runtime's worker threads.
+                let entries = tokio::task::spawn_blocking(|| {
+                    crate::registry::resolve_shared_reactive_dir()
+                        .map(|dir| crate::backend::reactive::registry::list_all_shared(&dir))
+                        .unwrap_or_default()
+                })
+                .await
+                .unwrap_or_default();
+                let snapshot = crate::backend::swarm_remote::snapshot(
+                    &entries,
+                    &hostname,
+                    &crate::backend::reactive::registry::local_channel_id(),
+                    &own_url,
+                    agentmux_common::time::now_ms_u64(),
+                );
+                Ok(Some(serde_json::to_value(&snapshot).map_err(|e| format!("swarm.other-instances: {e}"))?))
             })
         }),
     );

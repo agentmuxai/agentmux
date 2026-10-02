@@ -398,6 +398,10 @@ pub const COMMAND_ATTACHMENTS_COPY_TO_WORKDIR: &str = "attachments.copy-to-workd
 /// List every block currently tracked (for the swarm aggregate view).
 /// Returns `AgentTrackedBlocksResult`.
 pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
+/// The agents of other AgentMux instances this one knows about, for the Swarm's
+/// sections below its own tree. Returns `backend::swarm_remote::SwarmOtherInstancesResult`.
+/// docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md
+pub const COMMAND_SWARM_OTHER_INSTANCES: &str = "swarm.other-instances";
 /// Every agent pane open in this instance — all tabs, all windows — with
 /// its agent id and where it is. Returns `AgentOpenPanesResult`.
 pub const COMMAND_AGENT_OPEN_PANES: &str = "agent.open-panes";

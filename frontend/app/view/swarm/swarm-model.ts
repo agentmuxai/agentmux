@@ -11,6 +11,7 @@ import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
+import type { SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 
@@ -991,6 +992,16 @@ export class SwarmViewModel {
     // ViewModel-residency rationale as _expandedIds: tree() rebuilds
     // wrapper objects on every status tick, so row-local state would
     // silently reset on unrelated refreshes.
+    // Other instances' agents, for the sections below this instance's tree
+    // (swarm-remote.ts). Null until the first answer; refreshed with the tracked
+    // blocks' poll, since the source (the host-global registry) has no event.
+    private _otherInstances = createSignal<SwarmOtherInstances | null>(null);
+    otherInstancesAtom: Accessor<SwarmOtherInstances | null> = this._otherInstances[0];
+    // Remote sections the user collapsed. Expanded by default, unlike agent rows:
+    // a section is a handful of names, and hiding them would hide the feature.
+    private _collapsedRemote = createSignal<Set<string>>(new Set());
+    collapsedRemoteAtom: Accessor<Set<string>> = this._collapsedRemote[0];
+
     private _expandedAgentIds = createSignal<Set<string>>(new Set());
     expandedAgentIdsAtom: Accessor<Set<string>> = this._expandedAgentIds[0];
     private setExpandedAgentIds: Setter<Set<string>> = this._expandedAgentIds[1];
@@ -1316,10 +1327,10 @@ export class SwarmViewModel {
         // go stale forever from a gap in event wiring not yet discovered, the
         // same class of bug this poll is itself a response to. Cheap: the RPC
         // is a HashMap clone + Vec filter server-side, not a per-block probe.
-        this.trackedBlocksPollTimer = setInterval(
-            () => void this.loadTrackedBlocks(),
-            SwarmViewModel.TRACKED_BLOCKS_POLL_MS,
-        );
+        this.trackedBlocksPollTimer = setInterval(() => {
+            void this.loadTrackedBlocks();
+            void this.loadOtherInstances();
+        }, SwarmViewModel.TRACKED_BLOCKS_POLL_MS);
 
         // term:osc_title / term:ambient_summary meta changes — force re-read
         // of block meta. The block atom in MOS updates reactively, so the
@@ -1338,6 +1349,7 @@ export class SwarmViewModel {
                 this.loadCrons(),
                 this.loadFleetGroups(),
                 this.loadBackgroundTasks(),
+                this.loadOtherInstances(),
             ]);
             // codex P2 on PR #2677: a transient ListActive/ListDispatches
             // failure is swallowed by its own loader (silent catch below),
@@ -1564,6 +1576,30 @@ export class SwarmViewModel {
      *  backed by its own _expandedAgentIds set (see there for why). */
     isAgentCollapsed(blockId: string): boolean {
         return !this.expandedAgentIdsAtom().has(blockId);
+    }
+
+    /** Fetch the other instances' agents. A failure keeps the last answer: these
+     *  sections are informational and must never disturb this instance's tree. */
+    loadOtherInstances = async (): Promise<void> => {
+        try {
+            const result = await RpcApi.SwarmOtherInstancesCommand(TabRpcClient, {});
+            this._otherInstances[1](result ?? null);
+        } catch {
+            // Older srv without the command, or a transient failure.
+        }
+    };
+
+    isRemoteCollapsed(key: string): boolean {
+        return this.collapsedRemoteAtom().has(key);
+    }
+
+    toggleRemoteCollapsed(key: string): void {
+        this._collapsedRemote[1]((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
     }
 
     toggleAgentCollapsed(blockId: string): void {
