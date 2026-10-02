@@ -372,7 +372,7 @@ is the "live check" the report keeps listing as outstanding, minus the need for 
 
 ### 7.3 Results (pinned CLI 2.1.285, macOS arm64, 2026-10-01)
 
-Run with `scripts/cli-probe` (a fake API, a `security` shim that answers "not found", a from-scratch environment).
+Run with the cli-probe harness (`scripts/cli-probe`, landing in #4189; a fake API, a `security` shim that answers "not found", a from-scratch environment).
 **No account was used, no real keychain item was read, and no consent dialog appeared**; the shim's log shows the CLI
 tried to read two items (`Claude Code-credentials-<hash>`, `Claude Code-<hash>`) and was told neither exists. Each
 probe takes 3-6 seconds.
@@ -387,7 +387,7 @@ probe takes 3-6 seconds.
 | When is `system/init` emitted? | Only after the first user message (~0.5 s later). Nothing at all before one. It carries `model` and `permissionMode`. |
 | Does `get_settings` work? | Yes, immediately after spawn, with no message and no account. `applied` = `{model, effort, advisor, ultracode, ...}`. |
 | Do control requests change a running process? | Yes: `set_model` (incl. `"default"` → Opus/medium), `apply_flag_settings` (`effortLevel`), `set_permission_mode` all answer `ok` and take effect; `get_settings` reflects the model and effort. Sent back-to-back, a later request can be answered before an earlier one finishes, so send one at a time. |
-| Permission routing, **with** a permission prompt tool (a persistent agent) | `default`: asks for Write, `touch`, `curl`, and a read outside the working directory; does **not** ask for `echo`. `acceptEdits`: no ask for Write or `touch`; asks for `curl` and the outside read. **`plan`: asks for Write (does not refuse it)**, asks for `ExitPlanMode`; `echo` and an in-tree read are not asked. A **deny** answer produces a real tool error in every case. |
+| Permission routing, **with** a permission prompt tool (a persistent agent) | `default`: asks for Write, `touch`, `curl`, and a read outside the working directory; does **not** ask for `echo`. `acceptEdits`: no ask for a Write or `touch` **inside the working directory** (a write outside it still asks); asks for `curl` and the outside read. **`plan`: asks for Write (does not refuse it)**, asks for `ExitPlanMode`; `echo` and an in-tree read are not asked. A **deny** answer produces a real tool error in every case. |
 | Permission routing, **without** one (a container's one-shot run) | `default` refuses an unapproved write and `touch`; `plan` refuses writes ("Cannot write to …") and blocks commands. There, "Plan (read-only)" is true. |
 
 **What this overturned.** #4163 said Plan on a persistent agent is "read-only while planning". It is not: the CLI asks
@@ -395,10 +395,12 @@ before writing and the server's blanket "allow" lets the write happen. The wordi
 "Default (prompt all)" was wrong in a second way: even the CLI's own Default does not ask about safe commands, and a
 one-shot run *refuses* instead of asking).
 
+**Observed for the Claude CLI only.** Every row above is the pinned Claude CLI; no other provider's CLI was run, so the menu makes no claim about what a mode does for them.
+
 **Not observed, and why.** Auto mode (its classifier is a model call the fake API cannot emulate); Windows; the other
 providers' CLIs (not installed here), so G1 stays unverified; the CLI's behaviour under the real API's validation.
 
-**Reproduce:** `AGENTMUX_CLI_PROBE=1 npx vitest run scripts/cli-probe/cli-probe.test.mjs` (opt-in; it spawns the pinned
+**Reproduce** (once #4189 is merged): `AGENTMUX_CLI_PROBE=1 npx vitest run scripts/cli-probe/cli-probe.test.mjs` (opt-in; it spawns the pinned
 CLI from `~/.agentmux/shared/cli`).
 
 ---
@@ -407,7 +409,7 @@ CLI from `~/.agentmux/shared/cli`).
 
 | Order | Item | Size | Risk | Needs |
 |---|---|---|---|---|
-| 1 | §7 harness (fake API server + argv runner) | small–medium | low | **built; results in §7.3** |
+| 1 | §7 harness (fake API server + argv runner) | small–medium | low | **built (PR #4189); results in §7.3** |
 | 2 | Item 4 install pruning | medium | **medium** (deletes files) | §5.8 decision; ships with dry-run first |
 | 3 | Item 3 Stage A | small | low | nothing |
 | 4 | Item 2 remembered runtime | medium | low–medium (schema) | §3.7 decision |

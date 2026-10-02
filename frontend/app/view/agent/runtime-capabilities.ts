@@ -135,7 +135,9 @@ export function effectiveRuntime<T extends { model: string; effort: string; perm
  * don't promise more than happens.
  *
  * OBSERVED, not assumed - by running the pinned CLI (2.1.285) against a fake API
- * (scripts/cli-probe, docs/specs/SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md §7):
+ * (the cli-probe harness, docs/specs/SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md §7).
+ * That is the CLAUDE CLI only: no other provider's CLI was run, so for them this
+ * makes no claim about what a mode does (`providerId`).
  *
  * With the permission prompt tool (a persistent agent), the CLI SENDS a
  * `can_use_tool` request for what its mode wants approval for, and srv answers
@@ -159,7 +161,21 @@ export function effectiveRuntime<T extends { model: string; effort: string; perm
 export function permissionModeText(
     mode: PermissionMode,
     autoAnswersPrompts: boolean,
+    providerId = "claude",
 ): { label: string; note?: string } {
+    if (providerId !== "claude") {
+        // Gemini, Kimi and Qwen get `--yolo` for every non-default mode and Codex
+        // gets no permission flag at all (buildRuntimeArgs.ts), and none of their
+        // CLIs were observed: no promise either way.
+        const names: Record<PermissionMode, string> = {
+            bypass: "Bypass (no prompts)",
+            auto: "Auto",
+            acceptEdits: "Accept Edits",
+            plan: "Plan",
+            default: "Default",
+        };
+        return { label: names[mode] };
+    }
     if (!autoAnswersPrompts) {
         // Nothing to ask, so the CLI refuses what the mode does not allow.
         switch (mode) {

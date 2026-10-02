@@ -86,6 +86,18 @@ describe("permissionModeFromFlags / effectiveRuntime's mode", () => {
 });
 
 describe("permissionModeText", () => {
+    it("makes no claim for a provider whose CLI was not observed", () => {
+        for (const id of ["gemini", "kimi", "qwen", "codex", ""]) {
+            for (const persistent of [true, false]) {
+                for (const m of ["bypass", "default", "acceptEdits", "auto", "plan"] as const) {
+                    const t = permissionModeText(m, persistent, id);
+                    expect(t.note).toBeUndefined();
+                    expect(t.label).not.toMatch(/read-only|prompt all|refused/i);
+                }
+            }
+        }
+    });
+
     const MODES: PermissionMode[] = ["bypass", "auto", "acceptEdits", "plan", "default"];
 
     it("where nothing can be asked (a container's one-shot run), the CLI refuses what the mode does not allow", () => {
