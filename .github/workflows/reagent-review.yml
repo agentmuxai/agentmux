@@ -24,15 +24,15 @@ name: ReAgent review (GitHub Actions)
 # use the GitHub API (gh pr diff), not a checkout of untrusted code.
 #
 # Image: the same container image ReAgent's Lambda (claude-reviewer) runs --
-# one Dockerfile, one build, two invocation paths, not a second
-# implementation to maintain. It's pulled from the `reagent-reviewer-image` ECR
-# repository's `:prod` tag, which every ReAgent prod deploy moves to the
-# image it just shipped (a5af/reagent's versioning spec, §3). So a deploy
-# needs no PR here. The run logs the digest it actually pulled, and the
-# review header shows the build's <version>+g<sha>, so a review can still be
-# traced to an exact build. Other tags in that repository are immutable
-# commit SHAs; to pin a known build (for example during a rollback), set
-# REVIEWER_IMAGE below to `...reagent-reviewer-image:<40-char sha>`.
+# one Dockerfile, one build, two invocation paths. It is pulled from a PRIVATE
+# GHCR package, ghcr.io/agentmuxai/reagent-reviewer, with this run's
+# GITHUB_TOKEN: free, and no AWS egress. mirror-reviewer-image.yml copies
+# ECR's `:prod` there after every ReAgent deploy. Do NOT point this at ECR:
+# that cost ~0.6 GiB of AWS egress per run (~$14/day; a5af/reagent
+# docs/retro-actions-review-ecr-egress-2026-10-01.md), and this workflow's AWS
+# role no longer has ECR access, so it would fail. The run logs the digest
+# and the ECR digest it was mirrored from; to pin a build, set REVIEWER_IMAGE
+# to `ghcr.io/agentmuxai/reagent-reviewer:ecr-<first 12 hex of the ECR digest>`.
 
 on:
   pull_request_target:
@@ -43,17 +43,36 @@ on:
 permissions:
   id-token: write # aws-actions/configure-aws-credentials (OIDC, no static keys)
   contents: read
+  packages: read # pull the reviewer image from GHCR with GITHUB_TOKEN
 
 jobs:
   review:
-    # reagentx caught this on PR #4009: without this gate, EVERY comment on
+    # reagentx caught this on PR #4009: without a gate, EVERY comment on
     # ANY issue in the repo (not just a PR) spun up AWS OIDC credential
-    # exchange, ECR login, and a docker pull before build_task()'s own
+    # exchange, a registry login and a docker pull before build_task()'s own
     # "not a PR" filter ever ran downstream. Same gate shape as this repo's
     # own codex-review-gate.yml uses for the identical problem.
+    #
+    # Gate before the pull (a5af/reagent specs/reviewer-image-on-ghcr-2026-10-01.md
+    # §3): a superset of the reviewer's own filter
+    # (sns_consumer.should_process_pull_request / _build_mention_task), so it
+    # never skips an event the reviewer would act on, but it drops the ones
+    # it would certainly drop: PR body/title edits, closed PRs, ReAgent's own
+    # comments, and comments from humans with no @-mention. Codex's comments
+    # are NOT dropped: the reviewer reads them for its Codex quota breaker
+    # (reviewer_handler.handle_codex_comment). a5af/reagent's tests read THIS
+    # expression from main and check it against the reviewer's filter; keep
+    # the `pull_request.state == 'open'` clause (the test uses it as a marker
+    # of this gate).
     if: >-
-      github.event_name == 'pull_request_target' ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.state == 'open' &&
+       (github.event.action != 'edited' || github.event.changes.base)) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       github.event.comment.user.login != 'reagentx-workflow[bot]' &&
+       (contains(github.event.comment.body, '@reagentx-workflow') ||
+        endsWith(github.event.comment.user.login, '[bot]') ||
+        startsWith(github.event.comment.user.login, 'GenericAgentX-')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Job-level, not workflow-level -- same reasoning as codex-review-gate.yml's
@@ -74,13 +93,13 @@ jobs:
           role-to-assume: arn:aws:iam::050544946291:role/reagent-actions-agentmux-role
           aws-region: us-east-1
 
-      - name: Log in to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Run ReAgent reviewer
         env:
           # See this file's header comment: `:prod` follows ReAgent's deploys.
-          REVIEWER_IMAGE: "050544946291.dkr.ecr.us-east-1.amazonaws.com/reagent-reviewer-image:prod"
+          REVIEWER_IMAGE: "ghcr.io/agentmuxai/reagent-reviewer:prod"
         # --user: the image runs as root under plain `docker run`, and the
         # Claude CLI refuses --dangerously-skip-permissions as root (Lambda
         # runs it as a non-root sandbox user, so this never came up there).
@@ -91,7 +110,7 @@ jobs:
         # "please re-review" right after it get two independent reviews.
         run: |
           docker pull --quiet "$REVIEWER_IMAGE"
-          echo "ReAgent reviewer image: $(docker image inspect --format '{{index .RepoDigests 0}}' "$REVIEWER_IMAGE")"
+          echo "ReAgent reviewer image: $(docker image inspect --format '{{index .RepoDigests 0}}' "$REVIEWER_IMAGE") (mirrored from ECR $(docker image inspect --format '{{index .Config.Labels "reagent.ecr-digest"}}' "$REVIEWER_IMAGE"))"
           docker run --rm \
             --user 1000:1000 \
             -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
