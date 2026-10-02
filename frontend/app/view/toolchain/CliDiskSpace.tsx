@@ -55,7 +55,7 @@ export const CliDiskSpace = (): JSX.Element => {
         }
     };
 
-    const list = (r: ToolchainPruneResult, items: ToolchainPruneResult["candidates"]) => (
+    const list = (items: ToolchainPruneResult["candidates"]) => (
         <ul class="toolchain-prune-list">
             <For each={items}>
                 {(c) => (
@@ -108,7 +108,7 @@ export const CliDiskSpace = (): JSX.Element => {
                                     {r().candidates.length} old {r().candidates.length === 1 ? "install" : "installs"} ·{" "}
                                     {formatBytes(r().reclaimable_bytes)} can be freed
                                 </div>
-                                {list(r(), r().candidates)}
+                                {list(r().candidates)}
                                 <button class="toolchain-link-btn" onClick={() => remove(r().candidates.map((c) => c.dir))}>
                                     Remove {r().candidates.length} · free {formatBytes(r().reclaimable_bytes)}
                                 </button>
@@ -131,12 +131,19 @@ export const CliDiskSpace = (): JSX.Element => {
                                     Couldn't tell which CLIs are running, so nothing was removed.
                                 </div>
                             </Show>
-                            <Show when={r().scan_ok}>
+                            <Show when={r().scan_ok && r().removed.length > 0}>
                                 <div class="toolchain-env-line">
                                     Removed {r().removed.length} · freed {formatBytes(freed())}
                                 </div>
                             </Show>
-                            {list(r(), r().removed)}
+                            {/* Nothing removed with a working scan: every listed install was
+                                no longer removable by then (now in use, or used again). */}
+                            <Show when={r().scan_ok && r().removed.length === 0}>
+                                <div class="toolchain-env-line">
+                                    Nothing was removed — the listed installs are in use again or were used since the check.
+                                </div>
+                            </Show>
+                            {list(r().removed)}
                             <Show when={r().skipped.length > 0}>
                                 <div class="toolchain-env-line">
                                     Left in place ({r().skipped.length}): something started using {r().skipped.length === 1 ? "it" : "them"}{" "}

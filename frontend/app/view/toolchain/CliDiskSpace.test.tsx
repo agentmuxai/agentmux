@@ -94,6 +94,16 @@ describe("CliDiskSpace", () => {
         expect(await screen.findByText(/Left in place \(1\)/)).toBeInTheDocument();
     });
 
+    it("says so when every listed install stopped being removable before Remove", async () => {
+        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210_000_000 }));
+        prune.mockResolvedValueOnce(result({ dry_run: false })); // re-planned: nothing left to remove, nothing skipped
+        render(() => <CliDiskSpace />);
+        fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));
+        fireEvent.click(await screen.findByRole("button", { name: /Remove 1/ }));
+        expect(await screen.findByText(/Nothing was removed/)).toBeInTheDocument();
+        expect(screen.queryByText(/Removed 0/)).toBeNull();
+    });
+
     it("explains a removal that did nothing because the scan failed at that moment", async () => {
         prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210_000_000 }));
         prune.mockResolvedValueOnce(result({ dry_run: false, scan_ok: false }));

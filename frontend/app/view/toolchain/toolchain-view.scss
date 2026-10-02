@@ -55,6 +55,19 @@
     padding: 2px 0;
 }
 
+// ── Old CLI versions ──────────────────────────────────────────────────
+
+.toolchain-prune-list {
+    margin: 4px 0 6px;
+    padding-left: 18px;
+    font-size: 0.85rem;
+    opacity: 0.85;
+}
+
+.toolchain-error {
+    color: var(--error-color, #f85149);
+}
+
 .toolchain-env-key {
     min-width: 92px;
     opacity: 0.6;
