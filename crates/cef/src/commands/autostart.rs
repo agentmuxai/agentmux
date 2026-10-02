@@ -39,7 +39,6 @@ fn run_launcher(flag: &'static str) -> Result<String, String> {
     cmd.arg(flag);
     #[cfg(target_os = "windows")]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.no_window();
     }
     let out = cmd.output().map_err(|e| format!("auto-start: failed to run launcher: {e}"))?;
