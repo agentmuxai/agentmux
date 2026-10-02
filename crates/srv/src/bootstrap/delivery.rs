@@ -29,6 +29,81 @@ pub fn install_cron_delivery(state: &AppState) {
     }));
 }
 
+/// Where a message for an agent block goes.
+pub(crate) enum AgentRoute {
+    /// Taken on the controller's own channel — persistent stdin, ACP
+    /// `session/prompt`, App Server — either now (`Delivered`) or queued for when
+    /// the process can take it (`Deferred`). `Pty`: the controller is PTY-based,
+    /// and the caller decides what that means for it.
+    Sent(reactive::SenderDelivery),
+    /// No structured channel takes it now: the caller starts a turn
+    /// (`run_agent_turn`). `subprocess` is true for a `SubprocessController`,
+    /// false for a persistent controller that is registered but not yet spawned.
+    StartTurn { subprocess: bool },
+}
+
+/// The routing half of the reactive sender below, shared with the Swarm broadcast
+/// (`server::app_api::fleet`) so a broadcast reaches ACP, App Server, running
+/// persistent and not-yet-spawned agents exactly as an inter-agent message does.
+///
+/// Persistent + ACP + App Server keep their structured delivery; genuine PTY
+/// controllers report `Pty`; a `SubprocessController` has no PTY and rejects raw
+/// input, so it gets a turn instead (docs/reports/
+/// REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md). An `Err` is a
+/// structured controller that failed to take the message; it must not be retried
+/// as keystrokes.
+pub(crate) fn route_agent_message(block_id: &str, message: &str) -> Result<AgentRoute, String> {
+    let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
+        return Err(format!("no controller for block {block_id}"));
+    };
+    let is_subprocess = ctrl
+        .as_any()
+        .downcast_ref::<backend::blockcontroller::subprocess::SubprocessController>()
+        .is_some();
+    if is_subprocess {
+        return Ok(AgentRoute::StartTurn { subprocess: true });
+    }
+    match backend::blockcontroller::deliver_agent_message(block_id, message) {
+        Ok(backend::blockcontroller::AgentDelivery::Structured) => {
+            Ok(AgentRoute::Sent(reactive::SenderDelivery::Delivered))
+        }
+        Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => {
+            Ok(AgentRoute::Sent(reactive::SenderDelivery::Deferred))
+        }
+        Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(AgentRoute::Sent(reactive::SenderDelivery::Pty)),
+        Err(e) => {
+            // A persistent controller that is REGISTERED BUT NOT YET SPAWNED can't
+            // be steered — `deliver_agent_message` writes to a live stdin and there
+            // isn't one — but it can be STARTED. Controllers register lazily, so
+            // after any srv restart every persistent agent sits in this state until
+            // something is sent to it; without this, first contact fails with
+            // "persistent process not running"
+            // (docs/reports/REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03.md).
+            //
+            // Narrow on purpose: `needs_spawn()` is false while a spawn is already
+            // in flight (that surfaces as the retryable "still starting up"), and
+            // false for a live process whose delivery failed for another reason;
+            // both keep returning the original error rather than start a second
+            // turn.
+            let recoverable = ctrl
+                .as_any()
+                .downcast_ref::<backend::blockcontroller::persistent::PersistentSubprocessController>()
+                .is_some_and(|p| p.needs_spawn());
+            if !recoverable {
+                return Err(e);
+            }
+            // Nothing was persisted or written, so falling through cannot
+            // double-deliver.
+            tracing::info!(
+                block_id = %block_id,
+                error = %e,
+                "reactive delivery: persistent controller not yet spawned — starting a turn instead"
+            );
+            Ok(AgentRoute::StartTurn { subprocess: false })
+        }
+    }
+}
+
 /// Give the reactive handler a delivery route to `SubprocessController` agents.
 ///
 /// `spawn_background_subsystems` installs a message sender that can only reach
@@ -57,63 +132,13 @@ pub fn install_agent_turn_delivery(state: &AppState) {
     state
         .reactive_handler
         .set_message_sender(Arc::new(move |block_id: &str, message: &str| {
-            // Persistent + ACP keep their existing structured delivery, and
-            // genuine PTY controllers (shell/term) keep falling back to
-            // keystrokes. Only the subprocess case changes.
-            let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
-                return Err(format!("no controller for block {block_id}"));
+            // Which controller kinds take a structured message and which need a turn
+            // started is `route_agent_message`, shared with the Swarm broadcast so
+            // the two cannot drift.
+            let is_subprocess = match route_agent_message(block_id, message)? {
+                AgentRoute::Sent(outcome) => return Ok(outcome),
+                AgentRoute::StartTurn { subprocess } => subprocess,
             };
-            let is_subprocess = ctrl
-                .as_any()
-                .downcast_ref::<backend::blockcontroller::subprocess::SubprocessController>()
-                .is_some();
-            if !is_subprocess {
-                match backend::blockcontroller::deliver_agent_message(block_id, message) {
-                    Ok(backend::blockcontroller::AgentDelivery::Structured) => return Ok(reactive::SenderDelivery::Delivered),
-                    Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => {
-                        return Ok(reactive::SenderDelivery::Deferred)
-                    }
-                    Ok(backend::blockcontroller::AgentDelivery::Pty) => return Ok(reactive::SenderDelivery::Pty),
-                    Err(e) => {
-                        // A persistent controller that is REGISTERED BUT NOT YET
-                        // SPAWNED can't be steered — `deliver_agent_message`
-                        // writes to a live stdin and there isn't one — but it can
-                        // be STARTED. Controllers register lazily ("spawns on
-                        // first message"), so after any srv restart every
-                        // persistent agent sits in this state until a human sends
-                        // it something from the UI. Without this fall-through,
-                        // agent-to-agent delivery to such an agent fails
-                        // permanently with "persistent process not running", and
-                        // first contact is exactly the case that breaks.
-                        // #2930 built the machinery to start a turn from here and
-                        // scoped it to subprocess controllers; this widens it to
-                        // the one other case that needs it.
-                        // docs/reports/REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03.md
-                        //
-                        // Narrow on purpose. `needs_spawn()` is false while a
-                        // spawn is already in flight (that surfaces as the
-                        // retryable "still starting up"), and false for a live
-                        // process whose delivery failed for some other reason —
-                        // both must keep returning the original error rather than
-                        // starting a second turn.
-                        let recoverable = ctrl
-                            .as_any()
-                            .downcast_ref::<backend::blockcontroller::persistent::PersistentSubprocessController>()
-                            .is_some_and(|p| p.needs_spawn());
-                        if !recoverable {
-                            return Err(e);
-                        }
-                        // Nothing was persisted or written: `inject_message`
-                        // returns before its blockfile append, so falling through
-                        // cannot double-deliver.
-                        tracing::info!(
-                            block_id = %block_id,
-                            error = %e,
-                            "reactive delivery: persistent controller not yet spawned — starting a turn instead"
-                        );
-                    }
-                }
-            }
 
             // `MessageSender` is synchronous but starting a turn is not, so this
             // waits for the turn to START and reports what actually happened.
@@ -236,4 +261,64 @@ pub fn install_close_on_exit_handler(state: &AppState) {
             }
         });
     }));
+}
+
+#[cfg(test)]
+mod route_agent_message_tests {
+    use super::*;
+    use backend::blockcontroller::{delete_controller, register_controller};
+
+    #[test]
+    fn a_block_with_no_controller_is_an_error() {
+        let Err(e) = route_agent_message("route-test-no-such-block", "hi") else {
+            panic!("an unregistered block has nowhere to go");
+        };
+        assert!(e.contains("no controller for block"), "{e}");
+    }
+
+    #[test]
+    fn a_subprocess_agent_gets_a_turn_not_keystrokes() {
+        let block_id = "route-test-subprocess";
+        register_controller(
+            block_id,
+            Arc::new(backend::blockcontroller::subprocess::SubprocessController::new(
+                "tab-route".to_string(),
+                block_id.to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                Arc::from("test-boot"),
+            )),
+        );
+        assert!(matches!(
+            route_agent_message(block_id, "hi"),
+            Ok(AgentRoute::StartTurn { subprocess: true })
+        ));
+        delete_controller(block_id);
+    }
+
+    #[test]
+    fn an_app_server_agent_is_routed_to_its_own_channel_never_to_a_turn_or_keystrokes() {
+        let block_id = "route-test-app-server";
+        register_controller(
+            block_id,
+            Arc::new(backend::blockcontroller::app_server_controller::AppServerController::new(
+                "tab-route".to_string(),
+                block_id.to_string(),
+                None,
+                None,
+                None,
+                None,
+            )),
+        );
+        // No process yet, so its own `send_message` refuses: reaching that refusal
+        // is the proof the structured route was taken (not StartTurn, not Pty).
+        let Err(e) = route_agent_message(block_id, "hi") else {
+            panic!("an App Server controller with no process cannot take a message");
+        };
+        assert!(e.contains("not initialized"), "{e}");
+        delete_controller(block_id);
+    }
 }

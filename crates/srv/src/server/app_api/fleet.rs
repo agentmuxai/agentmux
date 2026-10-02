@@ -13,8 +13,10 @@
 //!
 //! `fleet.broadcast` is deliberately WS-RPC-only (the human/Swarm-UI path),
 //! not exposed over HTTP to agentmux-mcp. It is NOT a jekt: a broadcast is the
-//! human typing once to several panes, so each target gets the user-turn path
-//! (`run_agent_turn`) with a one-line `[BROADCAST:FROM=user VIA=swarm ...]` header
+//! human typing once to several panes, so each target gets a message routed the
+//! way an inter-agent message is (`bootstrap::route_agent_message`: persistent, ACP
+//! and App Server on their own channel, a subprocess or unspawned agent via
+//! `run_agent_turn`) with a one-line `[BROADCAST:FROM=user VIA=swarm ...]` header
 //! from `reactive::broadcast_turn_message`, instead of a `self-declared` jekt from
 //! `unknown`. See `docs/specs/SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md`.
 //! The turn is `BROADCAST_TURN_ORIGIN` (`Automated`), not `User`: srv, not the
@@ -138,6 +140,54 @@ where
         .await
 }
 
+/// What to do with one target, given how its controller routes a message.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum BroadcastAction {
+    /// Taken on a structured channel (now or queued).
+    Done,
+    /// Start a turn.
+    StartTurn,
+    Fail(String),
+}
+
+/// Maps `route_agent_message`'s answer to an action. A PTY-based target is
+/// refused rather than typed into: a broadcast is prose, and keystrokes into a
+/// shell prompt would run it as a command.
+pub(crate) fn broadcast_action(route: Result<crate::bootstrap::AgentRoute, String>) -> BroadcastAction {
+    use crate::backend::reactive::SenderDelivery;
+    use crate::bootstrap::AgentRoute;
+    match route {
+        Ok(AgentRoute::Sent(SenderDelivery::Delivered | SenderDelivery::Deferred)) => BroadcastAction::Done,
+        Ok(AgentRoute::Sent(SenderDelivery::Pty)) => BroadcastAction::Fail(
+            "this pane is a terminal, not an agent session; a broadcast is not typed into a shell".to_string(),
+        ),
+        Ok(AgentRoute::StartTurn { .. }) => BroadcastAction::StartTurn,
+        Err(e) => BroadcastAction::Fail(e),
+    }
+}
+
+/// Delivers one broadcast text to one block the way an inter-agent message reaches
+/// it (`route_agent_message`): structured controllers (persistent, ACP, App Server)
+/// take it on their own channel, which also steers a turn already running; a
+/// subprocess or not-yet-spawned persistent agent gets a turn started with `origin`.
+async fn deliver_broadcast_turn(
+    deps: &AgentTurnDeps,
+    block_id: String,
+    text: String,
+    origin: TurnOrigin,
+) -> Result<(), String> {
+    match broadcast_action(crate::bootstrap::route_agent_message(&block_id, &text)) {
+        BroadcastAction::Done => Ok(()),
+        BroadcastAction::Fail(e) => Err(e),
+        // The block was resolved through the reactive handler's own agent map, so
+        // it is already registered: skip re-registering, as the reactive-delivery
+        // caller does.
+        BroadcastAction::StartTurn => {
+            run_agent_turn(deps, block_id, text, None, TurnRegistration::Skip, origin, Vec::new()).await
+        }
+    }
+}
+
 pub(crate) async fn fleet_broadcast_impl(
     state: &AppState,
     targets: Vec<String>,
@@ -153,12 +203,7 @@ pub(crate) async fn fleet_broadcast_impl(
         |block_id| state.reactive_handler.get_agent_by_block(block_id).map(|a| a.agent_id),
         |block_id, text, origin| {
             let deps = deps.clone();
-            async move {
-                // The block was resolved through the reactive handler's own agent
-                // map, so it is already registered: skip re-registering, exactly
-                // as the reactive-delivery caller does.
-                run_agent_turn(&deps, block_id, text, None, TurnRegistration::Skip, origin, Vec::new()).await
-            }
+            async move { deliver_broadcast_turn(&deps, block_id, text, origin).await }
         },
     )
     .await;
@@ -894,5 +939,42 @@ mod broadcast_core_tests {
     async fn no_targets_is_a_no_op() {
         let out = run_broadcast(vec![], "x", "m", 4, agent_for, |_b, _t, _| async { Ok(()) }).await;
         assert!(out.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod broadcast_action_tests {
+    use super::*;
+    use crate::backend::reactive::SenderDelivery;
+    use crate::bootstrap::AgentRoute;
+
+    #[test]
+    fn structured_channels_take_the_broadcast_without_a_new_turn() {
+        // ACP, App Server and a running persistent agent all land here: the
+        // regression ReAgent found on #4176 was that ACP had no branch at all.
+        assert_eq!(broadcast_action(Ok(AgentRoute::Sent(SenderDelivery::Delivered))), BroadcastAction::Done);
+        assert_eq!(broadcast_action(Ok(AgentRoute::Sent(SenderDelivery::Deferred))), BroadcastAction::Done);
+    }
+
+    #[test]
+    fn a_subprocess_or_unspawned_persistent_agent_gets_a_turn() {
+        assert_eq!(broadcast_action(Ok(AgentRoute::StartTurn { subprocess: true })), BroadcastAction::StartTurn);
+        assert_eq!(broadcast_action(Ok(AgentRoute::StartTurn { subprocess: false })), BroadcastAction::StartTurn);
+    }
+
+    #[test]
+    fn a_terminal_pane_is_refused_not_typed_into() {
+        let BroadcastAction::Fail(e) = broadcast_action(Ok(AgentRoute::Sent(SenderDelivery::Pty))) else {
+            panic!("a PTY target must fail");
+        };
+        assert!(e.contains("not typed into a shell"), "{e}");
+    }
+
+    #[test]
+    fn a_structured_controller_failure_is_reported_per_target() {
+        assert_eq!(
+            broadcast_action(Err("persistent process not running".into())),
+            BroadcastAction::Fail("persistent process not running".into())
+        );
     }
 }
