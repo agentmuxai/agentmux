@@ -55,6 +55,10 @@ Swarm can run in another window, which is another renderer, so the owner also wr
 - `null` on end and on unmount. Unlike `term:awaiting_user`, the question is still pending after an unmount, but nothing is counting any more.
 - Same machine, same clock: every window and the owner share `Date.now()`, so `endsAt` reads the same everywhere.
 - Remote rows (another channel or host) never have this key in this window's store; they show plain `question` (§3.3).
+- **Stale values.** A renderer crash or a closed window skips the unmount, so the key can outlive its owner. Three rules keep that from showing:
+  1. `questionCountdown` returns no state for a published `counting` whose `endsAt` has passed, so the chip shows plain `question`, never `0s` or a negative.
+  2. Readers use the key only while §3.2's question condition holds (turn in flight and `term:awaiting_user`). Once the turn ends, a leftover `paused` or `counting` is ignored, the same guard §5.3 keeps for `term:awaiting_user`.
+  3. The owner always writes the key when its panel mounts: the live state if a question is pending, `null` otherwise. A reload or a restored window therefore overwrites whatever the crash left behind. A closed window takes its blocks with it, so no Swarm row is left reading the key.
 
 ## 3. Swarm: the "question" chip and its countdown
 
@@ -137,7 +141,8 @@ Besides the countdown itself (§2), the panel's `countdownSeverity()` thresholds
   - end and unmount clear the state and the published key;
   - edges-only meta writes;
   - a non-owner renderer reads the published copy and never schedules an expiry;
-  - `questionCountdown` seconds and bands.
+  - `questionCountdown` seconds and bands;
+  - stale values (§2.2): a published `counting` past its `endsAt` reads as no state; a leftover key is ignored once the turn ends; mounting the panel overwrites a leftover key.
 - **Chip**: `chipStatus` for working + flag → question; idle + stale flag → idle; subagent rows unchanged. A render test for the label, `--accent-color` class, steady dot, countdown text, the warning and critical bands, `paused`, and no countdown without timer state.
 - **Panel**:
   - typing in the composer pauses the countdown;
