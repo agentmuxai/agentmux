@@ -12,14 +12,12 @@
  *   17–64     → compact cells (index + % + mini bar)
  *   65+       → heatmap of computed-size squares, detail on hover/focus
  *
- * Positioning + airspace mirror TokenBreakdownPopover (the canonical
- * status-bar popover): usePaneOverlay, computeMenuPosition top-end, autoUpdate.
+ * Renders through AnchoredPopover (positioning top-end, chrome zoom, dismiss,
+ * the airspace cut).
  */
 
 import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { autoUpdate } from "@floating-ui/dom";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { cpuColor, loadColor } from "./cpu-color";
@@ -45,17 +43,12 @@ const SQ_MAX = 22;
 const CPU_KEY = /^cpu:(\d+)$/;
 
 interface CpuCoresPopoverProps {
-    anchorRect: DOMRect | null;
-    ref?: (el: HTMLDivElement) => void;
+    /** The status bar's CPU readout. */
+    anchor: PopoverAnchor;
+    onClose: () => void;
 }
 
 export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
-    let rootRef: HTMLDivElement | undefined;
-
-    // Airspace cut so the popover paints over any browser-pane HWND the status
-    // bar overlaps — same primitive as <Modal> and TokenBreakdownPopover.
-    usePaneOverlay(() => rootRef);
-
     const [cores, setCores] = createSignal<Core[]>([]);
     const [aggregate, setAggregate] = createSignal(0);
     // Hovered/focused core drives the readout line (cheaper + a11y-friendlier
@@ -128,40 +121,6 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
 
     const panelWidth = (): number => (tier() === "rows" ? 260 : 360);
 
-    // ── Positioning (mirrors TokenBreakdownPopover) ──────────────────────────
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        rootRef = el;
-        props.ref?.(el);
-        requestAnimationFrame(() => {
-            const r = props.anchorRect;
-            if (!r || !(el instanceof Element)) return;
-            const update = async () => {
-                const cur = props.anchorRect;
-                if (!cur) return;
-                const pos = await computeMenuPosition({ anchor: cur, placement: "top-end", avoidNativePanes: false }, el);
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(
-                { getBoundingClientRect: () => props.anchorRect ?? r },
-                el,
-                update,
-            );
-            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
-            // (airspace transparency cut-out), so intentional native-pane overlap
-            // would produce a false-positive [menu-guard] warning.
-        });
-    };
-
-    onCleanup(() => cleanupAutoUpdate?.());
-
     const readout = (): string => {
         const i = activeIdx();
         if (i != null) {
@@ -197,14 +156,14 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
     };
 
     return (
-        <div
-            ref={registerFloating}
-            class="cpu-cores-popover"
-            classList={{ [`cpu-cores-popover--${tier()}`]: true }}
+        <AnchoredPopover
+            anchor={props.anchor}
+            placement="top-end"
+            onDismiss={props.onClose}
+            class={`cpu-cores-popover cpu-cores-popover--${tier()}`}
             role="dialog"
             aria-label="Per-core CPU usage"
-            data-pane-overlay
-            style={{ ...floatingStyle(), width: `${panelWidth()}px` }}
+            style={{ width: `${panelWidth()}px` }}
         >
             <div class="cpu-cores-header">
                 <span class="cpu-cores-title">CPU Usage</span>
@@ -288,7 +247,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                     </div>
                 </Show>
             </Show>
-        </div>
+        </AnchoredPopover>
     );
 };
 

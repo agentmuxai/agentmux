@@ -1,11 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Visual styling only — position/left/top come from computeMenuPosition's
-// inline style (floating-ui), which also handles keeping the balloon off
-// the window edges (replacing the old CSS's hand-rolled
-// .status-bar-left/.status-bar-right edge-anchor variants with flip/shift).
-// See StatusBarTip.tsx.
+// Visual styling only. Position comes from AnchoredPopover (floating-ui
+// flip/shift keeps the balloon off the window edges). See StatusBarTip.tsx.
+
+// The shell of the tip's AnchoredPopover: above the status bar popovers, and
+// never in the way of the pointer.
+.status-bar-tip-shell {
+    z-index: calc(var(--zindex-modal-wrapper) + 10);
+    pointer-events: none;
+}
+
+// The body: position comes from the shell; chrome zoom from anchored-popover.scss.
 .status-bar-tip-balloon {
     padding: var(--space-1) var(--space-1-5);
     background: var(--modal-bg-color);
@@ -13,11 +19,6 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     font-size: 11px;
-    // Deliberately NOT `zoom: var(--zoomfactor)` — this balloon is
-    // positioned via computeMenuPosition (see the doc comment above) from
-    // an anchor rect that's already real, post-chrome-zoom pixels; self-
-    // zooming it too double-applies the same factor to its own left/top —
-    // see docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md.
     // Size to content, but wrap (don't single-line overflow) once the tip
     // exceeds max-width. `nowrap` + `max-width` contradicted: long tips
     // (e.g. GFX's full GPU renderer string) spilled out of the balloon.
@@ -29,6 +30,5 @@
     max-width: 320px;
     overflow-wrap: anywhere;
     pointer-events: none;
-    z-index: calc(var(--zindex-modal-wrapper) + 10);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
