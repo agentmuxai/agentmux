@@ -23,12 +23,12 @@ import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 
 const ShikiTheme = "github-dark-high-contrast";
 
-// Lazy-load shiki — same singleton as streamdown.tsx so the chunk is
-// only fetched once per app session.
-let shikiModule: typeof import("shiki/bundle/web") | null = null;
+// Lazy-load shiki — the same module as DiffViewer, so the chunk is only
+// fetched once per app session.
+let shikiModule: typeof import("./shiki-highlighter") | null = null;
 const getShiki = async () => {
     if (!shikiModule) {
-        shikiModule = await import("shiki/bundle/web");
+        shikiModule = await import("./shiki-highlighter");
     }
     return shikiModule;
 };

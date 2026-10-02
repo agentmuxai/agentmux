@@ -90,7 +90,7 @@ Not done: a diff view with real line numbers in its gutter. The patch hunks have
 
 **What is there.** `HighlightedCode` renders a plain `<pre>`, then swaps in Shiki HTML (theme `github-dark-high-contrast`), cached by `(lang, code)`, skipped above 200 KB or 2,000 lines, with a 1,000-line head cap upstream (`MAX_TOOL_OUTPUT_LINES`) and a hidden-lines marker. Markdown files render as Markdown. Indentation is dedented and narrowed to 2 columns; the `<N>\t` gutter is re-emitted right-aligned. `DiffViewer` loads Shiki the same way.
 
-**The gap.** Both import `shiki/bundle/web`. Checked directly against the installed Shiki 3.23:
+**The gap (closed, see below).** Both imported `shiki/bundle/web`. Checked directly against the installed Shiki 3.23:
 
 | Bundle | Languages |
 |---|---|
@@ -101,7 +101,18 @@ Mapped by `detectLanguage` but **not in the web bundle**: `rust`, `go`, `toml`, 
 
 The same cap applies to the Write preview, Edit diffs, and fenced code in agent messages, wherever the web bundle is used.
 
-**Cost to close it.** The grammars are small. Raw sizes: Rust 17 KB, TOML 7 KB, Go 51 KB, PowerShell 21 KB, Make 10 KB, INI 2 KB, Ruby 50 KB, Kotlin 10 KB, Lua 17 KB; the twelve most useful total about 370 KB raw, before gzip. They can be added with Shiki's core highlighter and explicit grammar imports (loaded lazily by the first file that needs them), without taking the full 332-language bundle. The frontend is a single bundle with dynamic imports inlined (`vite.config.ts`), so this does grow the bundle, but by about the size of one medium dependency.
+**Cost to close it.** An earlier draft of this section summed each grammar's own file and said "about 370 KB raw for twelve". That overstated it: some grammars embed others (Ruby pulls in 20 files, mostly HTML, JavaScript and CSS), and most of those embedded grammars already ship with the web bundle. What counts is the grammars that don't ship yet:
+
+| Set | Raw | gzip | Brotli |
+|---|---|---|---|
+| Rust, TOML, Go, PowerShell | 96 KB | 13 KB | 11 KB |
+| + Dockerfile, Make, INI | 109 KB | 16 KB | 14 KB |
+| + Kotlin, Swift, C#, Lua | 324 KB | 46 KB | 40 KB |
+| All of them (the 23 above, less `ignore`, plus `dotenv`) | 600 KB | 84 KB | 73 KB |
+
+Measured from `@shikijs/langs/dist`. The shipped JavaScript is about 12.8 MB raw and 3.2 MB gzipped, so all of them add under 3%. Each grammar is its own chunk, loaded the first time a file in that language is highlighted: nothing at startup.
+
+**Closed.** `components/shiki-highlighter.ts` builds a highlighter from the web bundle's languages plus these 24 (`createBundledHighlighter`, the same Oniguruma engine), and `HighlightedCode` and `DiffViewer` load it in place of `shiki/bundle/web`. In a production build the 24 come out as separate chunks totalling about 530 KB raw and 82 KB gzipped. Shiki has no grammar for ignore files, so `.gitignore` and friends now map to plain text instead of failing; `.env` files map to `dotenv`. A test checks that every language `detectLanguage` can return has a grammar.
 
 **Also available:** the Editor pane's CodeMirror has language packs for seven languages (including Rust), and a read-only CodeMirror view could serve long files better than a `<pre>` with innerHTML (selection, folding, find), at a higher mount cost.
 

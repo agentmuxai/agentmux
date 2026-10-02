@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { detectLanguage } from "./detectLanguage";
+import { detectableLanguages, detectLanguage } from "./detectLanguage";
 
 describe("detectLanguage", () => {
     // Extension map
@@ -37,9 +37,9 @@ describe("detectLanguage", () => {
     it("maps dockerfile (lowercase) to dockerfile", () =>
         expect(detectLanguage("/app/dockerfile")).toBe("dockerfile"));
     it("maps Makefile to makefile", () => expect(detectLanguage("Makefile")).toBe("makefile"));
-    it("maps .gitignore to ignore", () => expect(detectLanguage(".gitignore")).toBe("ignore"));
-    it("maps .env to bash", () => expect(detectLanguage(".env")).toBe("bash"));
-    it("maps .env.local to bash", () => expect(detectLanguage(".env.local")).toBe("bash"));
+    it("leaves .gitignore plain: Shiki has no grammar for it", () => expect(detectLanguage(".gitignore")).toBe("text"));
+    it("maps .env to dotenv", () => expect(detectLanguage(".env")).toBe("dotenv"));
+    it("maps .env.local to dotenv", () => expect(detectLanguage(".env.local")).toBe("dotenv"));
 
     // Shebang detection
     it("detects python3 shebang", () =>
@@ -60,4 +60,37 @@ describe("detectLanguage", () => {
         expect(detectLanguage("somefile")).toBe("text"));
     it("returns text for empty string", () =>
         expect(detectLanguage("")).toBe("text"));
+});
+
+describe("detectLanguage: every answer is a grammar the highlighter has", () => {
+    it("has a grammar for each language it can return", async () => {
+        const { bundledLanguages } = await import("shiki/bundle/web");
+        const { extraLanguages } = await import("./shiki-highlighter");
+        const missing = detectableLanguages().filter(
+            (lang) => lang !== "text" && !(lang in bundledLanguages) && !(lang in extraLanguages)
+        );
+        expect(missing).toEqual([]);
+    });
+
+    it.each([
+        ["main.rs", "rust", 'fn main() { let x = "a"; }'],
+        ["main.go", "go", 'func main() { x := "a" }'],
+        ["Cargo.toml", "toml", '[package]\nname = "a"'],
+        ["build.ps1", "powershell", '$x = Get-Item "a"'],
+        ["Dockerfile", "dockerfile", "FROM node:20\nRUN npm ci"],
+        ["Makefile", "makefile", "all: build\n\tcargo build"],
+        ["setup.cfg", "ini", "[metadata]\nname = a"],
+        [".env", "dotenv", "# comment\nKEY=value"],
+        ["App.kt", "kotlin", 'fun main() { val x = "a" }'],
+        ["View.swift", "swift", 'func main() { let x = "a" }'],
+        ["Program.cs", "csharp", 'class A { string x = "a"; }'],
+        ["app.rb", "ruby", 'def a; "b"; end'],
+    ])("highlights %s as %s, in colour", async (file, lang, code) => {
+        const { codeToHtml } = await import("./shiki-highlighter");
+        expect(detectLanguage(file)).toBe(lang);
+        const html = await codeToHtml(code, { lang, theme: "github-dark-high-contrast" });
+        // A grammar that loaded tokenizes the code into differently coloured spans.
+        const colours = new Set([...html.matchAll(/color:(#[0-9A-Fa-f]+)/g)].map((m) => m[1]));
+        expect(colours.size).toBeGreaterThan(1);
+    });
 });
