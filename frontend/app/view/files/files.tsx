@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { getObjectValue, makeORef } from "@/app/store/mos";
 import { baseName } from "./files-path";
 import { FilesModel, META_PATH } from "./files-model";
 import { FilesView } from "./files-view";
@@ -24,6 +25,16 @@ export const filesPaneTab: PaneTabManifest = {
     label: "Hangar",
     icon: "folder-open",
     capabilities: { lifecycle: "keepAlive", noPadding: true },
+    // A Hangar tab added with the pane's "+" starts in the folder the tab in
+    // front shows, as a terminal's new tab starts in its directory.
+    chrome: (_anchor, nodeModel) => ({
+        newTabMeta: (view) => {
+            if (view !== "files") return undefined;
+            const active = nodeModel.activeBlockId?.() ?? nodeModel.blockId;
+            const path = getObjectValue<Block>(makeORef("block", active))?.meta?.[META_PATH];
+            return typeof path === "string" && path !== "" ? { [META_PATH]: path } : undefined;
+        },
+    }),
     create: (ctx) => {
         const model = new FilesModel(ctx);
         return {
