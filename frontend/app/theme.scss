@@ -460,6 +460,35 @@
     --z-context-menu:  10000;
 }
 
+// Native Wayland (#4011): no compositor fade exists, so the host fades the
+// page itself (ui_tasks SetWindowAlphaTask sets this class and
+// `--am-window-fade`), matching _NET_WM_WINDOW_OPACITY on X11.
+// - Backgrounds stay opaque: fading the alpha-aware `--window-opacity`
+//   backgrounds instead compounds through nested panes. `!important` beats
+//   the inline value AppSettingsUpdater sets.
+// - `opacity` goes on body, not html: a transparent html makes the body's
+//   background propagate to the canvas, which root opacity doesn't fade. So
+//   html and body are transparent and the page background is painted by
+//   body::before, inside the faded group.
+:root.am-uniform-fade {
+    --window-opacity: 1 !important;
+    background: transparent !important;
+
+    body {
+        background: transparent !important;
+        opacity: var(--am-window-fade, 1);
+    }
+
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background: var(--main-bg-color);
+    }
+}
+
 // Light-family override for the `color-scheme` fix above — same marker
 // window-controls.win32.scss already uses for dark/light chrome decisions.
 [data-theme-polarity="light"] {
