@@ -1,7 +1,7 @@
 # SPEC: A dev window must never be pointed at a port Chromium refuses to load
 
 **Date:** 2026-10-02
-**Status:** implemented — all three layers, in the PR that adds this file.
+**Status:** implemented — all three layers, in PR #4214.
 **Author:** AgentX (narko), at the owner's request
 **Affects:** `Taskfile.yml` (`dev:serve`, `dev:standalone:serve`), `scripts/vite-port.sh` (new), `scripts/vite-port.test.sh` (new), `.github/workflows/ci-pr.yml`, `.claude/skills/run/SKILL.md`, `crates/cef/src/client/error_catalog.rs`, `crates/cef/src/client/navigation.rs`
 **Builds on:** `.claude/skills/run/SKILL.md` (the dev-launch skill whose port step caused this), `docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md` (the earlier port-collision incident the skill was written from)
