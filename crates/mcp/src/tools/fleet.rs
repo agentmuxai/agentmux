@@ -57,59 +57,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
-            if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                // `success: true` spans two very different outcomes and the old
-                // message conflated them, which made agent-to-agent delivery
-                // unfalsifiable from the sender side: a name that exists on no
-                // machine anywhere reported exactly the same string as a
-                // message injected into a live conversation. Verified against a
-                // running srv — `SendMessage(to="definitely-not-a-real-agent-xyz123")`
-                // returned "Message sent to ...", and the server log showed
-                // "cloud relay: queued for WAN delivery" for it, identical to a
-                // real remote agent.
-                //
-                // The response already carries the distinction: the handler sets
-                // `block_id` to the receiving block on local/host delivery
-                // (backend/reactive/handler.rs), while the cloud-relay path
-                // leaves it `None` because no receiver has seen the message yet
-                // (server/reactive.rs, `try_cloud_relay` — "Queued is not
-                // delivered"). Report which one happened.
-                if result.get("block_id").and_then(|v| v.as_str()).is_some() {
-                    // srv queues a message while the target's process is
-                    // starting up, restarting or stopping
-                    // (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.1) and
-                    // says so with `deferred`; "injected" would be untrue.
-                    if result.get("deferred").and_then(|v| v.as_bool()) == Some(true) {
-                        Ok(deferred_delivery_text(&to))
-                    } else {
-                        Ok(format!("Delivered to {to} — injected into their conversation."))
-                    }
-                } else {
-                    Ok(format!(
-                        "QUEUED for {to} via the cloud relay — NOT yet delivered. \
-                         The relay accepted it; their AgentMux picks it up on its next \
-                         sync, which never happens if that instance is offline. You get \
-                         this same result for an agent name that does not exist anywhere, \
-                         so check the spelling against DiscoverAgents if you expected \
-                         local delivery."
-                    ))
-                }
-            } else if result.get("held").and_then(|v| v.as_bool()) == Some(true) {
-                // SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md: the target is a
-                // known agent that is not running anywhere srv can reach, so
-                // srv kept the message and delivers it when the agent starts.
-                Ok(format!(
-                    "HELD for {to} — not delivered yet. {to} is not running; this AgentMux \
-                     instance (channel) keeps the message and delivers it when {to} starts \
-                     here, for up to 24 hours. Do not resend it."
-                ))
-            } else {
-                let err = result
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown error");
-                anyhow::bail!("Message delivery failed: {err}")
-            }
+            send_message_outcome(to, &result)
         }
         "DiscoverAgents" => {
             if local_url.is_empty() || auth_key.is_empty() {

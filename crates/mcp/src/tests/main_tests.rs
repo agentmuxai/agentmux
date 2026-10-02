@@ -94,6 +94,65 @@ fn deferred_delivery_text_is_clean_and_names_the_target() {
     assert!(t.ends_with("Don't resend it."), "{t}");
 }
 
+/// Every srv answer to `/agentmux/reactive/inject` maps to a reply that keeps
+/// its first word and carries the message id
+/// (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md §5.2, Phase 0 item 3).
+#[test]
+fn send_message_outcome_names_the_state_and_the_id() {
+    use serde_json::json;
+    let ok = |v: Value| send_message_outcome("Camper", &v).unwrap();
+    let err = |v: Value| send_message_outcome("Camper", &v).unwrap_err().to_string();
+
+    let t = ok(json!({ "success": true, "request_id": "1-2-3", "block_id": "b1", "deferred": false }));
+    assert!(t.starts_with("Delivered to Camper — "), "{t}");
+    assert!(t.ends_with(" id=1-2-3"), "{t}");
+    // PTY delivery leaves `deferred` out entirely.
+    assert!(ok(json!({ "success": true, "request_id": "1-2-3", "block_id": "b1" })).starts_with("Delivered to Camper"));
+
+    let t = ok(json!({ "success": true, "request_id": "1-2-3", "block_id": "b1", "deferred": true }));
+    assert!(t.starts_with(&deferred_delivery_text("Camper")), "{t}");
+    assert!(t.ends_with(" id=1-2-3"), "{t}");
+
+    // Relay: no block_id; the id is the relay's own.
+    let t = ok(json!({ "success": true, "request_id": "inj-42" }));
+    assert!(t.starts_with("QUEUED for Camper via the cloud relay (unconfirmed, expires in 30 min)"), "{t}");
+    assert!(t.contains("DiscoverAgents") && t.ends_with(" id=inj-42"), "{t}");
+
+    let t = ok(json!({ "success": false, "held": true, "request_id": "1-2-3", "error": "agent Camper is not running" }));
+    assert!(t.starts_with("HELD for Camper (not_running)"), "{t}");
+    assert!(t.contains("24 hours") && t.ends_with(" id=1-2-3"), "{t}");
+
+    let e = err(json!({ "success": false, "block_id": "b1",
+        "error": "identity spawn gate: no credentials for claude: the bound account was deleted or is unresolvable." }));
+    assert!(e.starts_with("Message delivery failed (needs_login)"), "{e}");
+    assert!(e.contains("NOT kept") && e.contains("no credentials for claude"), "{e}");
+
+    let e = err(json!({ "success": false, "error": "agent not found: Camper" }));
+    assert_eq!(e, "Message delivery failed (not_found): agent not found: Camper");
+
+    assert_eq!(err(json!({ "success": false, "error": "rate limit exceeded" })), "Message delivery failed: rate limit exceeded");
+    assert_eq!(err(json!({})), "Message delivery failed: unknown error");
+
+    // No id from srv (an old peer's forwarded body): no dangling "id=".
+    let t = ok(json!({ "success": true, "block_id": "b1" }));
+    assert!(!t.contains("id="), "{t}");
+    for t in [ok(json!({ "success": true, "request_id": "x" })), ok(json!({ "success": false, "held": true }))] {
+        assert!(!t.contains("  "), "no runs of spaces: {t:?}");
+    }
+}
+
+/// The description lists every answer the tool can give (G10: it once
+/// omitted HELD and the failures).
+#[test]
+fn send_message_description_lists_every_answer() {
+    let v: Value = serde_json::from_str(SEND_MESSAGE_TOOL).unwrap();
+    let d = v["description"].as_str().unwrap();
+    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)",
+              "via the cloud relay (unconfirmed", "(needs_login)", "(not_found)", "id="] {
+        assert!(d.contains(s), "missing {s:?}");
+    }
+}
+
 /// Serve exactly one HTTP response on a fresh localhost port; return the
 /// base URL.
 fn one_shot_server(status_line: &'static str, body: &'static str) -> String {
