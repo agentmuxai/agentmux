@@ -1,6 +1,6 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) and the grid view (§12.5); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) the grid view (§12.5) and pane tabs (§12.6); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
@@ -359,6 +359,14 @@ A coloured dot before a row's name when an agent wrote or edited it in the last 
 ### 12.5 Grid view (§5.2)
 
 A toolbar toggle switches the folder between the details list and a grid of tiles (`files:view = grid`, kept in the block). Images get a thumbnail: read once, scaled to 192 px on the longer side with `createImageBitmap`, and kept as a small object URL (at most 300, least recently used released; 4 decoded at a time; files over the inline image cap get an icon). Everything else gets a large icon. The grid is windowed by rows like the list, and shares its selection, keyboard (left and right move a tile, up and down a row), drag, drop, menus, rename, git markers and touched-by badges.
+
+### 12.6 Tabs: Hangar on pane tabs
+
+AgentMux has three kinds of tab: window tabs, pane tabs (several blocks stacked in one pane, `blockStack`), and inner-pane tabs (the Editor's open files, its own store). Pane tabs and the Editor's file tabs draw with the same `PaneTabStrip`; their state is separate, and SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md (resolution 3) has decided the Editor's should move onto pane tabs. Hangar therefore uses **pane tabs**, not tabs of its own: each tab is a whole Hangar with its own folder, history, selection and view, and gets reordering, dragging between panes, tear-off and layout persistence for free.
+
+- **Open in new tab** for a folder: Ctrl+Enter, middle-click, or the row menu. It opens beside the current tab in the same pane.
+- **Ctrl+T** (or *New tab here* in the folder menu) opens the folder shown in a new tab; the pane's own **+** → Hangar starts in that folder too (the manifest's `chrome().newTabMeta`).
+- **Ctrl+W** closes this Hangar tab, but never the pane's last one (the pane's × does that). These keys are Hangar's own: app-wide pane-tab shortcuts are still unbuilt.
 
 ## 13. Names
 

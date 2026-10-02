@@ -10,6 +10,9 @@
 
 import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { RpcApi } from "@/app/store/rpc-api";
+import type { LayoutModel } from "@/layout/lib/layoutModel";
+import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
+import { addWidgetAsPaneTab, closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { extensionOf } from "./files-sort";
 
@@ -63,4 +66,36 @@ export async function openTerminalHere(dir: string, besideBlockId: string): Prom
         { view: "term", cwd: dir, split_direction: "right", split_reference_block_id: besideBlockId },
         {}
     );
+}
+
+// ── Pane tabs (several Hangar tabs in one pane) ────────────────────────────
+//
+// Hangar uses the app's pane tabs rather than tabs of its own: each tab is a
+// whole Hangar block with its own folder, history and selection, and gets
+// reordering, dragging between panes, tear-off and layout persistence from
+// the pane-tab system (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md).
+
+/** The pane (leaf) holding `blockId` in the window tab on screen. */
+function paneOf(blockId: string): { model: LayoutModel; nodeId: string } | null {
+    const model = getLayoutModelForStaticTab();
+    const node = model?.getNodeByBlockId(blockId);
+    return model && node ? { model, nodeId: node.id } : null;
+}
+
+/** A new Hangar tab on `dir`, beside `fromBlockId` in its pane. */
+export async function openFolderInNewTab(fromBlockId: string, dir: string): Promise<void> {
+    const pane = paneOf(fromBlockId);
+    if (!pane) throw new Error("This pane isn't in the window tab on screen.");
+    await addWidgetAsPaneTab(pane.model, pane.nodeId, { meta: { view: "files", "files:path": dir } });
+}
+
+/** Close `blockId`'s pane tab, but never the pane itself: false when it is
+ *  the pane's only tab (the pane's own × closes that). */
+export async function closeOwnTab(blockId: string): Promise<boolean> {
+    const pane = paneOf(blockId);
+    if (!pane) return false;
+    const node = pane.model.getNodeByBlockId(blockId);
+    if (!node?.data || effectiveStack(node.data).length <= 1) return false;
+    await closeBlockInStack(pane.model, pane.nodeId, blockId);
+    return true;
 }

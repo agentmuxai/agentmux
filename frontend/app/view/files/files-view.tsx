@@ -24,7 +24,7 @@ import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { errorText, type FilesModel, windowsNames } from "./files-model";
-import { openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
+import { closeOwnTab, openFolderInNewTab, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
 import { paneWorkdir } from "@/app/drag/file-drop-actions";
 import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
@@ -376,6 +376,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             });
     };
 
+    /** A folder in a new Hangar tab of this pane (Ctrl+Enter, middle-click,
+     *  the menu); Ctrl+T opens the folder shown. */
+    const openInNewTab = (dir: string): void => {
+        void openFolderInNewTab(model.blockId, dir).catch((err) =>
+            model.setStatus({ text: `Couldn't open a new tab: ${errorText(err)}`, tone: "error" })
+        );
+    };
+
     const askDeletePermanently = (list: FsEntry[]): void => {
         if (list.length === 0) return;
         const what = list.length === 1 ? `"${list[0].name}"` : `${list.length} items`;
@@ -424,7 +432,21 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         else if (e.key === "PageUp") move({ delta: -page });
         else if (e.key === "Home") move({ to: 0 });
         else if (e.key === "End") move({ to: order().length - 1 });
-        else if (e.key === "Enter") {
+        else if (e.key === "Enter" && isMod(e)) {
+            // Folders in new tabs; files open as usual.
+            for (const entry of model.selectedEntries()) {
+                if (entry.is_dir) openInNewTab(model.pathOf(entry.name));
+                else openEntry(entry);
+            }
+        } else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "t") openInNewTab(model.path());
+        else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "w") {
+            void closeOwnTab(model.blockId).then(
+                (closed) => {
+                    if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
+                },
+                (err) => model.setStatus({ text: `Couldn't close this tab: ${errorText(err)}`, tone: "error" })
+            );
+        } else if (e.key === "Enter") {
             const list = model.selectedEntries();
             if (list.length === 1) openEntry(list[0]);
             else list.filter((x) => !x.is_dir).forEach(openEntry);
@@ -478,7 +500,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         const many = list.length > 1;
         const path = model.pathOf(entry.name);
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
-        const items: ContextMenuItem[] = [{ type: "action", label: entry.is_dir ? "Open" : "Open", shortcut: "Enter", onSelect: () => openEntry(entry) }];
+        const items: ContextMenuItem[] = [{ type: "action", label: "Open", shortcut: "Enter", onSelect: () => openEntry(entry) }];
+        if (entry.is_dir) {
+            items.push({ type: "action", label: "Open in new tab", shortcut: isMacOS() ? "⌘Enter" : "Ctrl+Enter", onSelect: () => openInNewTab(path) });
+        }
         if (!entry.is_dir) {
             items.push(
                 { type: "action", label: "Open in Editor", onSelect: () => void openInPane("editor", path, model.blockId).catch(fail) },
@@ -589,6 +614,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         return [
             { type: "action", label: "New folder", shortcut: isMacOS() ? "⌘⇧N" : "Ctrl+Shift+N", onSelect: () => void model.createNew("dir") },
             { type: "action", label: "New file", onSelect: () => void model.createNew("file") },
+            { type: "action", label: "New tab here", shortcut: isMacOS() ? "⌘T" : "Ctrl+T", onSelect: () => openInNewTab(model.path()) },
             {
                 type: "action",
                 label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
@@ -839,6 +865,17 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
                     }}
                     onContextMenu={onListContextMenu}
+                    onAuxClick={(e) => {
+                        // Middle-click a folder: open it in a new tab.
+                        if (e.button !== 1 || !(e.target instanceof Element)) return;
+                        const el = e.target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
+                        const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
+                        const entry = name ? byName().get(name) : undefined;
+                        if (entry?.is_dir) {
+                            e.preventDefault();
+                            openInNewTab(model.pathOf(entry.name));
+                        }
+                    }}
                     onClick={(e) => {
                         if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });
                     }}
