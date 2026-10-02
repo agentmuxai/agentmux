@@ -304,7 +304,6 @@ const BackendStatus = (): JSX.Element => {
         setPopoverOpen(true);
     };
 
-
     return (
         <Show when={backendStatus() !== null && icon() !== null}>
             <div
@@ -331,16 +330,16 @@ const BackendStatus = (): JSX.Element => {
                 </Show>
             </div>
             <Show when={popoverOpen()}>
-                    <BackendStatusPanel
-                        anchor={triggerRef}
-                        onClose={() => setPopoverOpen(false)}
-                        backendInfo={backendInfo}
-                        startedAt={startedAt}
-                        uptimeSecs={uptimeSecs}
-                        restarting={restarting}
-                        onRestart={handleRestart}
-                        gpu={gpu}
-                    />
+                <BackendStatusPanel
+                    anchor={triggerRef}
+                    onClose={() => setPopoverOpen(false)}
+                    backendInfo={backendInfo}
+                    startedAt={startedAt}
+                    uptimeSecs={uptimeSecs}
+                    restarting={restarting}
+                    onRestart={handleRestart}
+                    gpu={gpu}
+                />
             </Show>
         </Show>
     );
