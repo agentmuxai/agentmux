@@ -178,6 +178,19 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     // Re-applies the current selection: rebuilds the args and restarts the agent.
     const restartToApply = () => void updateRuntime({});
 
+    // A model id the catalog has replaced is corrected quietly: opening a menu
+    // must not restart the agent, nor count as the user's pick. The process
+    // keeps running until its next spawn; the drift notice covers the gap.
+    const migrateModel = async (model: string) => {
+        try {
+            await patchRuntime(props.blockId, getProvider(props.providerId), { model }, () => props.blockAtom()?.meta, {
+                migration: true,
+            });
+        } catch (err) {
+            console.warn("could not migrate the stored model id", err);
+        }
+    };
+
     const modelOptions = (): ProviderModel[] => getProvider(props.providerId)?.models ?? FALLBACK_MODEL_OPTIONS;
 
     // Migrate a persisted model id the live-catalog overlay has superseded.
@@ -201,7 +214,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         if (!current || opts.length === 0) return;
         if (opts.some((o) => o.value === current)) return;
         const replacement = opts.find((o) => familyKey(o.value) === familyKey(current));
-        if (replacement) void updateRuntime({ model: replacement.value });
+        if (replacement) void migrateModel(replacement.value);
     });
 
     const modelLabel = (value: string): string => modelOptions().find((o) => o.value === value)?.label ?? value;
