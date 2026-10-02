@@ -57,8 +57,12 @@ const h = vi.hoisted(() => {
         FsOpCancelCommand: vi.fn<(client: unknown, req: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
         FsRevealCommand: vi.fn(async () => ({})),
         ListNamedAgentsCommand: vi.fn(async () => [
-            { instance_name: "korp", definition_name: "korp", working_directory: "C:\\Users\\a\\.agentmux\\agents\\korp" },
+            { instance_name: "korp", definition_name: "korp", definition_id: "def-korp", working_directory: "C:\\Users\\a\\.agentmux\\agents\\korp" },
+            { instance_name: "loap", definition_name: "loap", definition_id: "def-loap", working_directory: "C:\\Users\\a\\.agentmux\\agents\\loap" },
         ]),
+        GetAgentContentCommand: vi.fn(async (_c: unknown, req: { agent_id: string }) =>
+            req.agent_id === "def-korp" ? { agent_id: req.agent_id, content_type: "ui:color", content: "#22c55e", updated_at: 0 } : null
+        ),
     };
     const rpcCall = vi.fn(async () => ({}));
     return { state, rpc, rpcCall };
@@ -116,7 +120,9 @@ const d = (name: string, over: Partial<FsEntry> = {}): FsEntry => f(name, { is_d
 
 const HOME = "C:\\Users\\a";
 
-function mount(meta: Record<string, unknown> = {}) {
+/** `frameContextMenu` stands in for the pane frame, which listens above the view
+ *  with a Solid handler (so it takes part in Solid's delegated bubbling). */
+function mount(meta: Record<string, unknown> = {}, frameContextMenu?: (e: MouseEvent) => void) {
     const [m, setM] = createSignal<Record<string, unknown>>(meta);
     const [visibility, setVisibility] = createSignal<"active" | "dormant" | "windowHidden">("active");
     const ctx: PaneTabHostContext = {
@@ -134,7 +140,11 @@ function mount(meta: Record<string, unknown> = {}) {
         visibility,
     };
     const model = new FilesModel(ctx);
-    const r = render(() => <FilesView model={model} ctx={ctx} />);
+    const r = render(() => (
+        <div onContextMenu={frameContextMenu}>
+            <FilesView model={model} ctx={ctx} />
+        </div>
+    ));
     const names = () => [...r.container.querySelectorAll(".files-rows .files-name")].map((n) => n.textContent);
     const list = () => r.container.querySelector(".files-list") as HTMLElement;
     const row = (name: string) =>
@@ -259,6 +269,32 @@ describe("the Files pane: navigation", () => {
         expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Run"));
         expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe` });
+    });
+
+    it("shows each agent's name in the color its pane border uses", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.getByText("korp")).toBeTruthy());
+        // A stored ui:color wins; an agent with none gets the deterministic
+        // pick its pane would be seeded with.
+        expect((v.getByText("korp") as HTMLElement).style.color).toBe("rgb(34, 197, 94)");
+        const loap = (v.getByText("loap") as HTMLElement).style.color;
+        expect(loap).not.toBe("");
+        expect(loap).not.toBe("rgb(34, 197, 94)");
+    });
+
+    it("opens only Hangar's menu on blank space, not the pane frame's as well", async () => {
+        // The pane frame listens above the view; a right-click that reaches it
+        // opens the generic pane menu on top of Hangar's own.
+        const reachedFrame = vi.fn();
+        const v = mount({}, reachedFrame);
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.contextMenu(v.list());
+        expect(document.body.querySelector(".ctx-menu")).toBeTruthy();
+        expect(reachedFrame).not.toHaveBeenCalled();
+        // Rows already behaved this way.
+        fireEvent.keyDown(document.body, { key: "Escape" });
+        fireEvent.contextMenu(v.row("src"));
+        expect(reachedFrame).not.toHaveBeenCalled();
     });
 
     it("lists each agent's folder under Places", async () => {
