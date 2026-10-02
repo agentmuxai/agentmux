@@ -15,7 +15,7 @@ import { createSignal } from "solid-js";
 
 // Shiki is a heavy async ESM import; stub it with a synchronous-resolving
 // codeToHtml so the highlighted branch is reachable in a test.
-vi.mock("shiki/bundle/web", () => ({
+vi.mock("./shiki-highlighter", () => ({
     codeToHtml: async (code: string) =>
         `<pre><code>${code
             .split("\n")
