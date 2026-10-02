@@ -20,7 +20,16 @@ const MAX_CACHED = 300;
 const MAX_ACTIVE = 4;
 
 const cache = new Map<string, string>();
-const inflight = new Map<string, Promise<string | null>>();
+/** A job in progress, shared by every tile that wants it; aborted once no
+ *  tile does (scrolled past before it finished). */
+interface Job {
+    promise: Promise<string | null>;
+    controller: AbortController;
+    interest: number;
+}
+const inflight = new Map<string, Job>();
+/** Images that couldn't be read or decoded: not tried again this session. */
+const failed = new Set<string>();
 let active = 0;
 const waiting: (() => void)[] = [];
 
@@ -43,14 +52,18 @@ export function cachedThumbnail(path: string, mtime?: number): string | undefine
     return url;
 }
 
+/** Run `work` once fewer than MAX_ACTIVE are running. A finishing job hands
+ *  its slot straight to the next waiter, so no new caller can slip in
+ *  between (ReAgent on #4225). */
 async function slot<T>(work: () => Promise<T>): Promise<T> {
     if (active >= MAX_ACTIVE) await new Promise<void>((r) => waiting.push(r));
-    active++;
+    else active++;
     try {
         return await work();
     } finally {
-        active--;
-        waiting.shift()?.();
+        const next = waiting.shift();
+        if (next) next();
+        else active--;
     }
 }
 
@@ -79,20 +92,48 @@ async function shrink(blob: Blob): Promise<Blob> {
     return await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b ?? blob), "image/png"));
 }
 
-/** The thumbnail for an image file, made if needed; null when it can't be. */
-export function thumbnail(path: string, mtime?: number): Promise<string | null> {
+/**
+ * The thumbnail for an image file, made if needed; null when it can't be.
+ * `signal` is the asking tile going away: when every tile that asked has
+ * gone, the fetch is abandoned, queued or not (ReAgent on #4225).
+ */
+export function thumbnail(path: string, mtime?: number, signal?: AbortSignal): Promise<string | null> {
     const key = keyOf(path, mtime);
     const hit = cachedThumbnail(path, mtime);
     if (hit) return Promise.resolve(hit);
-    const running = inflight.get(key);
-    if (running) return running;
-    const job = slot(async () => {
+    if (failed.has(key)) return Promise.resolve(null);
+    let job = inflight.get(key);
+    if (!job) {
+        const controller = new AbortController();
+        job = { controller, interest: 0, promise: make(path, key, controller.signal) };
+        inflight.set(key, job);
+    }
+    const j = job;
+    j.interest++;
+    signal?.addEventListener(
+        "abort",
+        () => {
+            if (--j.interest <= 0 && inflight.get(key) === j) {
+                inflight.delete(key);
+                j.controller.abort();
+            }
+        },
+        { once: true }
+    );
+    return j.promise;
+}
+
+function make(path: string, key: string, signal: AbortSignal): Promise<string | null> {
+    return slot(async () => {
+        if (signal.aborted) return null;
         try {
             const ext = extensionOf(path);
             const blob = await fetchMediaBlob(path, {
                 maxBytes: INLINE_IMAGE_MAX_BYTES,
                 type: ext === "svg" ? "image/svg+xml" : undefined,
+                signal,
             });
+            if (signal.aborted) return null;
             const url = URL.createObjectURL(await shrink(blob));
             cache.set(key, url);
             while (cache.size > MAX_CACHED) {
@@ -102,13 +143,12 @@ export function thumbnail(path: string, mtime?: number): Promise<string | null> 
             }
             return url;
         } catch {
+            if (!signal.aborted) failed.add(key);
             return null;
         } finally {
-            inflight.delete(key);
+            if (inflight.get(key)?.controller.signal === signal) inflight.delete(key);
         }
     });
-    inflight.set(key, job);
-    return job;
 }
 
 /** Test hook. */
@@ -116,6 +156,7 @@ export function resetThumbnailsForTests(): void {
     for (const url of cache.values()) URL.revokeObjectURL(url);
     cache.clear();
     inflight.clear();
+    failed.clear();
     active = 0;
     waiting.length = 0;
 }

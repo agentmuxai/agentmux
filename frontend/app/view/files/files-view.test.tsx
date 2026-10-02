@@ -901,6 +901,28 @@ describe("the Files pane: Alt+K mentions (§8.2, route 3)", () => {
         blocks.clear();
     });
 
+    it("won't give a container agent a host path it can't see", async () => {
+        const agentPane = document.createElement("div");
+        agentPane.setAttribute("data-role", "pane");
+        agentPane.setAttribute("data-blockid", "agent-c");
+        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
+        const ta = document.createElement("textarea");
+        ta.className = "agent-input";
+        agentPane.appendChild(ta);
+        document.body.appendChild(agentPane);
+        blocks.set("agent-c", { meta: { view: "agent", agentName: "Boxy", agentMode: "container", "cmd:cwd": `${HOME}\\src` } });
+        const dispose = registerFileDropTarget("agent-c", { accept: () => ({ ok: true, message: "" }), drop: () => {} });
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
+        expect(ta.value).toBe("");
+        expect(v.container.querySelector(".files-status")?.textContent).toContain("Boxy runs in a container and sees only its working folder");
+        dispose();
+        agentPane.remove();
+        blocks.clear();
+    });
+
     it("says so when there's no agent to mention in", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));

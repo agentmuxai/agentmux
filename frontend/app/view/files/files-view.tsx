@@ -27,7 +27,7 @@ import { errorText, type FilesModel, windowsNames } from "./files-model";
 import { openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
 import { paneWorkdir } from "@/app/drag/file-drop-actions";
-import { spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
+import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
 import { clipboard, opProgressText } from "./files-ops";
 import {
@@ -547,7 +547,23 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             );
             return;
         }
-        const tokens = list.map((e) => mentionToken(model.pathOf(e.name), paneWorkdir(target.blockId)));
+        const workdir = paneWorkdir(target.blockId);
+        // A container agent sees only its working folder (bind-mounted), so a
+        // host path outside it means nothing to it (ReAgent on #4225).
+        if (isContainerPane(target.blockId)) {
+            const outside = list.filter((e) => !workdir || !isWithin(model.pathOf(e.name), workdir));
+            if (outside.length > 0) {
+                model.setStatus(
+                    {
+                        text: `${target.name} runs in a container and sees only its working folder. Drop ${outside.length === 1 ? outside[0].name : "those files"} on it to copy ${outside.length === 1 ? "it" : "them"} in.`,
+                        tone: "info",
+                    },
+                    6000
+                );
+                return;
+            }
+        }
+        const tokens = list.map((e) => mentionToken(model.pathOf(e.name), workdir));
         const root = document.querySelector<HTMLElement>(`[data-role="pane"][data-blockid="${CSS.escape(target.blockId)}"]`);
         if (!root || !spliceComposerTokens(root, tokens)) {
             model.setStatus({ text: `${target.name}'s message box isn't open.`, tone: "error" }, 4000);
@@ -1194,10 +1210,11 @@ function GridTile(props: {
                 const hit = cachedThumbnail(p, mtime);
                 setThumb(hit);
                 if (hit) return;
-                let live = true;
-                onCleanup(() => (live = false));
-                void thumbnail(p, mtime).then((url) => {
-                    if (live && url) setThumb(url);
+                // Scrolled past before it was made: stop asking for it.
+                const gone = new AbortController();
+                onCleanup(() => gone.abort());
+                void thumbnail(p, mtime, gone.signal).then((url) => {
+                    if (!gone.signal.aborted && url) setThumb(url);
                 });
             }
         )
