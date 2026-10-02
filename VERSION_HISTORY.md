@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.59.6 — 2026-10-02
+
+- feat(agent): while a conversation is compacting, the working row shows an estimated progress bar and the usual duration (from your earlier compactions), labeled as an estimate since Claude Code reports no real progress
+- The pane right-click menu no longer has a "Replace With..." entry
+- Agent pane: the empty room left at the bottom when a tool's preview collapses closes sooner (350 ms instead of 700 ms)
+- Agent pane Working row: composer monospace typeface, pane-border color, ambient summary instead of the tool call. The per-turn token readout (row and "Worked" line) now shows what the turn added to the conversation, not the context re-sent on every call.
+- feat(files): Hangar copy/move with conflicts and progress, Cut/Copy/Paste, drag files to agents and panes, Attach to agent, preview panel, filter
+- feat(files): git markers in Hangar - modified/untracked/ignored per entry, branch and ahead/behind in the status line
+- feat(files): Hangar marks files an agent changed in the last 30 minutes, in that agent's colour
+- feat(files): Hangar grid view with image thumbnails
+- feat(files): Hangar tabs - open a folder in a new tab (Ctrl+Enter, middle-click), Ctrl+T, Ctrl+W; + starts in the current folder
+- feat(files): Hangar folders are document tabs - Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+Shift+T reopen, a strip from two tabs, restored with the pane
+- feat(agent): a failed compaction now shows a row saying why (Claude Code's own reason), instead of the spinner just stopping with no trace
+- feat(editor): the Editor's files are document tabs - restored with the pane, Ctrl+T/W/Tab/Shift+T, asks before closing unsaved changes
+- feat(media): Media panes hold several files as document tabs; images and videos opened from an agent's reply or Hangar join the Media pane on screen
+- fix(files): Hangar's folder tabs are pane tabs again (document tabs are for the Editor and Media)
+- A message to an agent on this computer whose pane is closed is now kept here for 24 hours and delivered when it opens, instead of going through the cloud relay with a 30-minute expiry; the relay is used only when it reports the agent running on another of your installs, so messaging works without the relay
+
 ## 0.59.5 — 2026-10-02
 
 - agent pane: new rows fade in more visibly, and the conversation above glides up instead of jumping when one arrives
