@@ -585,7 +585,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
