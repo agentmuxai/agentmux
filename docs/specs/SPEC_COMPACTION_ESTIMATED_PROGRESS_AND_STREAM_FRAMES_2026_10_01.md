@@ -1,7 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
 **Date:** 2026-10-01
-**Status:** active — Tier 4 (§5) shipped in PR #4220; the stream-frame fix (§3) and status-frame handling (§6) are not built and need the decisions in §8.
+**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) is built in a follow-up PR; the stream-frame fix (§3) and the rest of status-frame handling (§6) are not built and need the decisions in §8.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: *"search online, latest claude CLI system, can agentmux get the progress of the compression?"*, then *"write spec to file on implements. sure, lets try the tier 4"*.
 **Researched against:** `agentmuxai/agentmux` `main` @ `807c749ce`; Claude Code CLI **2.1.287** (the version AgentMux has installed under `~/.agentmux/shared/cli/claude/`).
@@ -40,16 +40,16 @@ Both live parsers read only the camelCase form:
 - `crates/srv/src/agents/translator/claude.rs` `handle_system_message`: `frame.get("compactMetadata")`.
 - `frontend/app/view/agent/compact-boundary.ts` `parseCompactBoundaryFrame`: `e.compactMetadata`.
 
-The unit tests use camelCase fixtures, copied from the transcript (the old spec's "live evidence" was a `.jsonl` file). AgentMux's own stored agent output (the `output` blockfiles in `filestore.db`, 0.59.1) contains the stdout form: 3 snake_case boundary lines, 1 camelCase. [verified by grep; not watched live in a pane]
+The unit tests use camelCase fixtures, copied from the transcript (the old spec's "live evidence" was a `.jsonl` file). AgentMux's own stored agent output (the `output` blockfiles in `filestore.db`, 0.59.1) contains the stdout form: 3 snake_case boundary lines. (The one camelCase hit in that store is prose in an agent's message quoting this spec, not a frame.) [verified by grep; not watched live in a pane]
 
 **Consequence [inferred from the code, not observed in a running pane]:** the live path in `useAgentStream.ts` that handles `compact_boundary` gets `null` from the parser and dispatches nothing. That path also drives:
 - the reducer's `CompactionBoundary` (clearing `compacting`, `lastCompactionBoundaryAt`, the live `context_compacted` node);
 - `CompactionSummaryTracker.noteBoundary` (the compaction context-delivery card);
 - **`memoryReinjectionController.trigger(...)`**, the hidden Global/Personal Memory reinjection after compaction (`SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md`).
 
-The history replay (`parseHistoryLines.ts`) reads the camelCase transcript, which is why compactions still show up after a reload and the problem stayed hidden.
+**Correction (2026-10-02):** an earlier revision of this section said history replay reads the camelCase transcript and so hides the problem. It does not. `parseHistoryLines.ts` parses the lines of the `output` blockfile ("raw NDJSON lines as stored in the 'output' blockfile", its own doc comment), which are these same stdout lines, with the same camelCase-only `parseCompactBoundaryFrame`. So a reload misses the real boundary too. [verified from the code and the stored data] The `context_compacted` row from a real boundary therefore likely appears neither live nor after a reload; the only compaction row left is the live one from the `TokensIn` >=50%-drop heuristic (`source: "heuristic"`, not replayable). [inferred]
 
-**Why this spec does not just fix it:** fixing the casing activates code that, if the above holds, has never run live. In particular, with no `timestamp` on the stdout frame, `memoryReinjectionNodeId(null)` gives one fixed id (`memory-reinjected-notime`) for every compaction in a session, so the second reinjection's node would be deduplicated away; and the live `context_compacted` node id (content- or uuid-derived) would differ from the history node id (timestamp-derived) unless both are re-keyed on `uuid`. That is a separate change with its own tests and a visible behavior change (a hidden message to the model after every compaction). It needs the owner's decision, §8 D1.
+**Why this spec does not just fix it:** fixing the casing activates code that, if the above holds, has never run live. In particular, with no `timestamp` on the stdout frame, `memoryReinjectionNodeId(null)` gives one fixed id (`memory-reinjected-notime`) for every compaction in a session, so the second reinjection's node would be deduplicated away. (The live and replay `context_compacted` ids would agree, since both fall back to the same content-derived key when the frame has no timestamp, though a `uuid` key would be steadier.) That is a separate change with its own tests and a visible behavior change (a hidden message to the model after every compaction). It needs the owner's decision, §8 D1.
 
 ## 4. Requirements
 
@@ -81,12 +81,12 @@ The caller computes it once when `compacting` starts (R4), from `state.lastConte
 - once elapsed exceeds the estimate: the fill stops at 95% and turns indeterminate, right side `42s · longer than usual` (R2).
 With no estimate, exactly today's row.
 
-## 6. Not built here — status frames (decision D2)
+## 6. Status frames (decision D2) — failure notice built (§10); the rest not built
 
-The `status` frames in §2 could give (a) a **hook-independent start** (the `PreCompact` hook arrives over a live-only WPS event that can be missed), (b) a **visible failure** (`compact_result:"failed"`, `compact_error`, which AgentMux cannot see today), (c) a liveness heartbeat. They are not wired because:
+The `status` frames in §2 could give (a) a **hook-independent start** (the `PreCompact` hook arrives over a live-only WPS event that can be missed), (b) a **visible failure** (`compact_result:"failed"`, `compact_error`, which AgentMux could not see) — **built, see §10**, (c) a liveness heartbeat. (a) and (c) are not wired because:
 - they go through `useAgentStream`'s stdout path and the reducer's `CompactionStarted` race guards (`pendingCompactionPing`, `lastCompactionBoundaryAt`), the same machinery §3 says is unproven live;
 - a status frame has no `trigger`, and a re-read of an old frame could set a stale `compacting` state;
-- showing a failure needs a new node type (`AgentErrorNode` has an HTTP `code`, `CliNoticeNode` is install/version only).
+- (showing a failure turned out not to need a new node type: §10 adds a third kind to `CliNoticeNode`.)
 It should be designed together with the §3 fix. Seeding the sample store from transcript history (so a first compaction already has an estimate) is also left out; the store fills as compactions happen.
 
 ## 7. Tests
@@ -99,9 +99,22 @@ It should be designed together with the §3 fix. Seeding the sample store from t
 ## 8. Decisions
 
 - **D1 — fix the boundary casing (and re-key node ids on `uuid`) so the live compaction path actually runs?** Recommended: yes, as its own PR, with memory reinjection's id fixed first and a check of what hidden reinjection does after every compaction. Alternative: leave the live path as it is and rely on history replay.
-- **D2 — status-frame handling (§6)** after D1, or not at all?
+- **D2 — the rest of status-frame handling (§6: a hook-independent start, a heartbeat)** after D1, or not at all? The failure notice is built (§10).
 - **D3 — sample store scope:** global (as built) or per account/model.
 
 ## 9. Delivery
 
-One PR: this spec + Tier 4 (frontend only, no srv change). D1 and D2 are follow-ups.
+PR 1 (#4220): this spec + Tier 4. PR 2: the failed-compaction notice (§10), plus the §3 correction. D1 and the rest of D2 are follow-ups.
+
+## 10. Failed-compaction notice as built (PR 2)
+
+**Captured live (CLI 2.1.287):** with the fake API answering the summarizing call with HTTP 400, the CLI retried it 4 times, then wrote
+`{"type":"system","subtype":"status","status":null,"compact_result":"failed","compact_error":"Error during compaction: API Error: 400 …","session_id":…,"uuid":…}` and ended the turn with `result` `is_error:false`, `num_turns:0`, with no `compact_boundary`. Nothing but that one frame says the compaction failed, so before this change the user saw the spinner stop and nothing else.
+
+**Built (frontend only):** `parseCliNoticeFrame` (`cli-notice.ts`) turns that frame into a `cli_notice` node of a third kind, `compaction_failed`:
+- label "Claude Code couldn't compact the conversation", detail = the CLI's reason with its "Error during compaction: " prefix removed, error tone;
+- id `compaction-failed-<uuid>`: the same stdout line gives the same id live and on replay, so seeing it twice shows one row;
+- no change at the call sites: `useAgentStream` and `parseHistoryLines` already run `parseCliNoticeFrame` on every `system` frame, and `cli_notice` is already handled everywhere a row must be (fixed height, never collapsible, no prompt text, rendering);
+- other `status` frames (`compacting`, its heartbeat, `compact_result:"success"`) are ignored, as is a failed frame with no `uuid`.
+
+**Not done:** it doesn't touch the reducer (the turn's end already clears `compacting`), the boundary path (§3), or the start/heartbeat uses of the status frame. Not live-verified in a pane: a real failed compaction is hard to provoke, so the evidence is the captured frame as the test fixture.

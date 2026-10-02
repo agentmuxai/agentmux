@@ -633,13 +633,15 @@ export interface SessionOutcomeNode {
 /**
  * A notice about the agent's CLI, from srv's own `agentmux_cli_install` /
  * `agentmux_cli_version_changed` frames (`cli-notice.ts`;
- * SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §6.3).
+ * SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §6.3), or
+ * the CLI's own `system/status` frame reporting a failed compaction
+ * (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §10).
  * For the user only: the model never sees it.
  */
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed";
+    kind: "install" | "version_changed" | "compaction_failed";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
@@ -647,7 +649,7 @@ export interface CliNoticeNode {
     state?: "installing" | "installed" | "failed";
     /** `install`, once installed: how long it took. */
     seconds?: number;
-    /** `install`, when it failed. */
+    /** `install` or `compaction_failed`: why it failed, when known. */
     error?: string;
     /** `version_changed`: the version the agent last ran, and now runs. */
     from?: string;
