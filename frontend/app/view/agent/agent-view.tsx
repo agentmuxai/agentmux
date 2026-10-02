@@ -853,7 +853,7 @@ export const AgentPresentationView = ({
     const promotionTick = createPromotionClock(paneModel.document);
 
     // The busy predicate and its renderings (hooks/useWorkingIndicator.ts).
-    const { paneBusy, workingRowVisible, hasPromotedTool } = useWorkingIndicator({
+    const { paneBusy, workingRowVisible } = useWorkingIndicator({
         paneModel,
         showingLaunchActivity,
         promotionTick,
@@ -1394,7 +1394,6 @@ export const AgentPresentationView = ({
                 backgroundTasksAtom={backgroundTasksAtom}
                 workingRowVisible={workingRowVisible}
                 workingRowLoading={workingRowLoading}
-                hasPromotedTool={hasPromotedTool}
             />
 
             {/* Composer status strip — single 28-32px row with live

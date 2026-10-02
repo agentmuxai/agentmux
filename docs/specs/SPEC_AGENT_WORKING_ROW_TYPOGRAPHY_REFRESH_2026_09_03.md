@@ -2,6 +2,7 @@
 
 **Date:** 2026-09-03
 **Status:** Proposed. No code changed by this document.
+**Update 2026-10-02:** Typeface and color here were later changed: monospace like the composer, in the pane border color, no shimmer. See `SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md`.
 **Component:** `AgentWorkingRow` (`frontend/app/view/agent/components/AgentFooter.tsx:146-347`)
 **Styles:** `.agent-working-row-anchor .agent-working-row` (`frontend/app/view/agent/styles/_control-bar.scss:104-276`)
 **Verified against:** `main` @ `ee327f631` (2026-09-03 pull)

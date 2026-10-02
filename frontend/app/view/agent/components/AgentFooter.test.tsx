@@ -649,6 +649,52 @@ describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_
     });
 });
 
+/**
+ * SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md: the loading row shows the
+ * pane's ambient summary instead of "tool · arg", no longer carries the
+ * ↑in ↓out token readout, and has no shimmer overlay.
+ */
+describe("AgentWorkingRow ambient summary, elapsed-only right zone", () => {
+    it("shows the ambient summary in the left zone", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="  Fix the login redirect loop " />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("falls back to the cycling phrase when there is no summary", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} activitySummary={null} />);
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toMatch(/…$/);
+    });
+
+    it("lets a status win over the summary", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} stopping={true} activitySummary="Fix the login redirect loop" />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
+    });
+
+    it("shows only the elapsed time on the right, never a token readout", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" />
+        ));
+
+        const right = container.querySelector(".agent-working-row-right")?.textContent ?? "";
+        expect(right).toMatch(/^\d+s$/);
+        expect(right).not.toMatch(/[↑↓]/);
+    });
+
+    it("renders one solid-color left zone: no shimmer or typing overlay classes", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} activitySummary="Fix it" />);
+
+        const left = container.querySelector(".agent-working-row-left") as HTMLElement;
+        expect(left.className).toBe("agent-working-row-left");
+    });
+});
+
 // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3 — right
 // after a launch (one-shot request) the composer takes focus itself, with
 // retries; every other mount defers to focusManager.claimFocusOnMount
