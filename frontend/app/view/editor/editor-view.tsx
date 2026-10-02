@@ -8,6 +8,7 @@
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
+import { docTabKeyAction } from "@/app/doc-tabs/doc-tabs-controller";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -140,6 +141,32 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         const handleEditorKeys = (ev: KeyboardEvent) => {
             const mod = ev.ctrlKey || ev.metaKey;
             if (!mod) return;
+            // Document-tab keys (SPEC_DOCUMENT_TABS §4.3), before CodeMirror
+            // sees them. A text box (Save As, a tree rename) keeps its own.
+            const tabKey = docTabKeyAction(ev);
+            if (tabKey && !(ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement)) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const active = model.activeIdAtom();
+                switch (tabKey.kind) {
+                    case "new":
+                        void model.openScratch(false);
+                        break;
+                    case "close":
+                        if (active) model.closeTab(active);
+                        break;
+                    case "cycle":
+                        model.cycleTab(tabKey.delta);
+                        break;
+                    case "reopen":
+                        model.reopenLastClosed();
+                        break;
+                    case "move":
+                        model.moveActiveTab(tabKey.delta);
+                        break;
+                }
+                return;
+            }
             // Ctrl/Cmd+F → CodeMirror's native find panel (find/replace, regex,
             // case, whole-word). Only in source view — in rendered markdown
             // there's nothing editable to search. See
@@ -674,8 +701,21 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     const [deleteConfirm, setDeleteConfirm] = createSignal<{
         title: string;
         message: string;
+        confirmLabel?: string;
         onConfirm: () => void;
     } | null>(null);
+
+    // Closing a tab with unsaved changes asks first.
+    model.confirmDirtyClose = (tab, discard) =>
+        setDeleteConfirm({
+            title: `Close "${tab.displayName || tab.filePath.split(/[/\\]/).pop()}" without saving?`,
+            message: "Your changes to this file will be lost.",
+            confirmLabel: "Discard changes",
+            onConfirm: discard,
+        });
+    onCleanup(() => {
+        model.confirmDirtyClose = null;
+    });
 
     const buildContextMenuItems = (path: string | null, isDir: boolean): ContextMenuItem[] => {
         if (!path) {
@@ -1050,7 +1090,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     <ConfirmDialog
                         title={dc().title}
                         message={dc().message}
-                        confirmLabel="Delete"
+                        confirmLabel={dc().confirmLabel ?? "Delete"}
                         onConfirm={() => { dc().onConfirm(); setDeleteConfirm(null); }}
                         onCancel={() => setDeleteConfirm(null)}
                     />
