@@ -15,8 +15,12 @@ import type { PermissionMode } from "./types";
  */
 
 /**
- * Whether `--effort` is passed for `model`. Haiku 4.5 rejects it (HTTP 400 on
- * every turn), so a Haiku pane gets none. Matches the model id as well as the
+ * Whether `--effort` is passed for `model`. Haiku takes none: the pinned CLI
+ * (2.1.285) was observed to DROP `--effort` for Haiku and send no effort at all
+ * (`get_settings` reports `effort: null`), so passing it is harmless there. Older
+ * CLIs are documented to have forwarded it, and the API answered HTTP 400
+ * (docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md), so a Haiku pane is
+ * never given one, and the menu says it is not applied. Matches the model id as well as the
  * alias: this used to be `model === "haiku"`, so a concrete Haiku id such as
  * `claude-haiku-4-5-20251001` still got the flag and failed.
  */
@@ -62,7 +66,7 @@ export function modelFromFlags(flags: readonly string[]): string | undefined {
  * are appended after the runtime's flags, so a `--model` among them wins; a
  * decision that depends on the model (does `--effort` apply?) must be made on
  * THIS, not on the runtime's selection, or a definition that picks Haiku gets
- * `--effort` with the Haiku it overrode to — HTTP 400 every turn
+ * `--effort` with the Haiku it overrode to — a flag Haiku does not take
  * (Codex P1 on #4152).
  */
 export function effectiveModel(runtimeModel: string, providerFlags: unknown): string {
@@ -130,14 +134,24 @@ export function effectiveRuntime<T extends { model: string; effort: string; perm
  * What a permission mode actually does, so the menu and `/permission-mode`
  * don't promise more than happens.
  *
- * A persistent Claude agent runs on the control protocol, and srv answers EVERY
- * `can_use_tool` request itself: AskUserQuestion is shown to the user, and all
- * other tools — including the request to leave plan mode — are allowed
- * (`handle_control_frame`, crates/srv/src/backend/blockcontroller/persistent/
- * input.rs; real approval prompts are a later phase). So there, Bypass, Default
- * and Accept Edits behave alike, and "Default (prompt all)" prompted nothing.
- * Other agents (a container's one-shot runs) have no such layer, and the
- * mode's own wording is true.
+ * OBSERVED, not assumed - by running the pinned CLI (2.1.285) against a fake API
+ * (scripts/cli-probe, docs/specs/SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md §7):
+ *
+ * With the permission prompt tool (a persistent agent), the CLI SENDS a
+ * `can_use_tool` request for what its mode wants approval for, and srv answers
+ * EVERY one "allow" itself (`handle_control_frame`, crates/srv/src/backend/
+ * blockcontroller/persistent/input.rs; AskUserQuestion is the exception - it is
+ * shown to the user). The CLI asked about: in Default, writes, reads outside the
+ * working directory, and shell commands that are not known-safe (`touch`, `curl`;
+ * not `echo`); in Accept Edits, the same minus edits; in Plan, WRITES (it did not
+ * refuse them) and `ExitPlanMode`. An "allow" lets the write happen. So there,
+ * Default and Accept Edits behave like Bypass, and **Plan does not stop edits**.
+ *
+ * Without it (a container's one-shot run, nothing to ask), the CLI itself refuses:
+ * Default refuses unapproved writes and commands ("requested permissions"), and
+ * Plan refuses writes ("Cannot write") and blocks commands. There "read-only" is true.
+ *
+ * Auto was not observed (its classifier needs the real API).
  *
  * `autoAnswersPrompts`: whether this pane's permission requests are answered
  * for the user, i.e. a persistent (control-protocol) launch.
@@ -146,24 +160,40 @@ export function permissionModeText(
     mode: PermissionMode,
     autoAnswersPrompts: boolean,
 ): { label: string; note?: string } {
-    const plain: Record<PermissionMode, string> = {
-        bypass: "Bypass (no prompts)",
-        auto: "Auto (AI classifier)",
-        acceptEdits: "Accept Edits",
-        plan: "Plan (read-only)",
-        default: "Default (prompt all)",
-    };
-    if (!autoAnswersPrompts) return { label: plain[mode] };
+    if (!autoAnswersPrompts) {
+        // Nothing to ask, so the CLI refuses what the mode does not allow.
+        switch (mode) {
+            case "bypass":
+                return { label: "Bypass (no prompts)" };
+            case "default":
+                return { label: "Default", note: "unapproved writes and commands are refused (there is no one to ask)" };
+            case "acceptEdits":
+                return { label: "Accept Edits", note: "edits are allowed; other unapproved commands are refused" };
+            case "auto":
+                return { label: "Auto (AI classifier)" };
+            case "plan":
+                return { label: "Plan (read-only)" };
+        }
+    }
     switch (mode) {
         case "bypass":
-            return { label: plain.bypass };
+            return { label: "Bypass (no prompts)" };
         case "default":
-            return { label: "Default", note: "every prompt is allowed automatically — same as Bypass for now" };
+            return {
+                label: "Default",
+                note: "writes and commands are asked about, and every ask is allowed automatically — same as Bypass for now",
+            };
         case "acceptEdits":
-            return { label: "Accept Edits", note: "every prompt is allowed automatically — same as Bypass for now" };
+            return {
+                label: "Accept Edits",
+                note: "edits are not asked about; any other ask is allowed automatically — same as Bypass for now",
+            };
         case "auto":
-            return { label: "Auto", note: "the CLI decides what to ask; every ask is allowed automatically" };
+            return { label: "Auto", note: "the CLI's classifier decides what to ask; every ask is allowed automatically" };
         case "plan":
-            return { label: "Plan", note: "read-only while planning; the plan is then approved automatically" };
+            return {
+                label: "Plan",
+                note: "writes are asked about and allowed automatically, so this does NOT stop edits; the plan is approved automatically",
+            };
     }
 }

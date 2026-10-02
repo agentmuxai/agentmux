@@ -1,7 +1,9 @@
 # SPEC: Finishing the runtime menu — approval prompts, a remembered runtime, the resolved model, and install cleanup
 
 **Date:** 2026-10-01
-**Status:** proposed — nothing here is built. The four items below are what is left after the runtime-menu work in
+**Status:** proposed — nothing here is built, **but §7's harness has since been used and its results are recorded there**
+(2026-10-01): several assumptions below are now observed facts, and one claim (Plan mode is read-only) was observed to be
+false and has been corrected. The four items below are what is left after the runtime-menu work in
 `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md` §8 (#4098 … #4171). Each states what exists, what is
 missing, a proposal, how to test it, and what is still unknown.
 **Author:** Agento
@@ -42,12 +44,14 @@ A persistent Claude agent runs on the control protocol (`--permission-prompt-too
 - `AskUserQuestion` is parked and shown to the user (works).
 - Every other tool, **including the request to leave plan mode**, gets `behavior: "allow"`.
 
-So Bypass, Default and Accept Edits behave identically; Plan is read-only while planning and then approves its own
-plan; "Auto" depends on the CLI's classifier and then everything it asks about is allowed. `bypass` is spawned as
+So Bypass, Default and Accept Edits behave alike. **Plan does not stop edits** (§7.3: the CLI *asks* before a write in
+Plan mode, and "allow" lets it through) and it then approves its own plan; "Auto" depends on the CLI's classifier
+(not observed) and then everything it asks about is allowed. `bypass` is spawned as
 `--permission-mode default` on purpose: the bypass *flag* (`--dangerously-skip-permissions`) disables `can_use_tool`
 routing altogether, which also kills `AskUserQuestion` (`buildRuntimeArgs.ts`, `CONTROL_PROTOCOL_FLAG`).
 
-The menu text was corrected to say this (#4163). That is a description of a limitation, not a fix.
+The menu text was corrected to say this (#4163), and corrected again after §7 showed #4163 had still called Plan
+"read-only". That is a description of a limitation, not a fix.
 
 ### 2.2 What already exists
 
@@ -70,16 +74,16 @@ The menu text was corrected to say this (#4163). That is a description of a limi
 ### 2.4 Proposal
 
 The mode decides whether srv routes what the CLI asks about; the CLI's own mode still decides *what it asks about*.
-The "CLI asks about" column below is the CLI's **documented** behaviour for each mode and has **not been observed**
-(§2.6, §7).
+The "CLI asks about" column is **observed** for Default, Accept Edits and Plan (§7.3) and **not observed** for Auto
+(its classifier needs the real API).
 
 | Mode | The CLI asks about | srv does |
 |---|---|---|
 | Bypass | (default mode: most non-read tools) | auto-allow, as today |
-| Default | most non-read tools | route to the panel unless an allow rule matches |
-| Accept Edits | everything except file edits | route to the panel unless an allow rule matches |
+| Default | writes, reads outside the working directory, shell commands that are not known-safe (`touch`, `curl`; not `echo`) | route to the panel unless an allow rule matches |
+| Accept Edits | the same minus edits (and minus `touch`-style file commands) | route to the panel unless an allow rule matches |
 | Auto | what its classifier is unsure about | route to the panel unless an allow rule matches |
-| Plan | edits are denied by the CLI; `ExitPlanMode` asks | route `ExitPlanMode` as **"approve this plan?"** (this is the real plan approval); everything else as Default |
+| Plan | **writes are ASKED about, not refused** (observed); `ExitPlanMode` asks | **srv must refuse writes itself** (deny `Write`/`Edit`/`NotebookEdit` and mutating shell commands with a message the model can act on): the CLI will not. Route `ExitPlanMode` as **"approve this plan?"**, which is the real plan approval |
 
 Mechanics:
 
@@ -202,8 +206,8 @@ resolves differently across providers and over time, and the repo already hit th
 | Source | Gives | Status |
 |---|---|---|
 | `message_start.message.model` on the **main agent's** stream lines | the resolved model id of the last reply | Available now. Trustworthy since #4158 (subagent lines no longer pollute it). Lags: only known after a reply. |
-| `system/init.model` | the resolved model at session start | **Unverified.** One report says it arrives only after the first user message on 2.1.283+. |
-| `get_settings` control request → `applied: {model, effort}` | the effective model **and effort**, on demand | Documented in the Agent SDK; **srv sends only `interrupt` and `can_use_tool` answers today**, so this is new protocol work and **unverified against the pinned CLI (2.1.285)**. The only source for *effort*. |
+| `system/init.model` | the resolved model at session start | **Observed (2.1.285):** emitted only after the first user message (~0.5 s later; nothing at all without one); carries the resolved `model` (`claude-sonnet-5-5` for `sonnet`). Too late to be the only source. |
+| `get_settings` control request → `applied: {model, effort}` | the effective model **and effort**, on demand | **Observed (2.1.285): works immediately after spawn, with no account and no message.** `applied.model` is the resolved id; `applied.effort` is `null` for Haiku and `medium` for an unflagged Sonnet. srv sends only `interrupt` and `can_use_tool` answers today, so this is new protocol work. The only source for *effort*. |
 | `modelUsage` on `result` | per-model cost | **Not a source.** It includes subagents' models (reconciliation report §3.6). |
 
 ### 4.3 Proposal, in two stages
@@ -232,10 +236,13 @@ conditions each independently suppress the warning; the subagent case (a Haiku s
 pane). Stage B: against a **fake CLI** (§7) that answers `get_settings`, one that doesn't, and one that answers with a
 different model than requested.
 
-### 4.5 Unknowns that block Stage B
+### 4.5 What was unknown, and is not any more
 
-Whether the pinned CLI answers `get_settings` at all; what its response looks like; whether answering needs an
-authenticated session. These are answerable only by running the CLI (§7).
+§7 answered the three things that blocked Stage B: the pinned CLI **does** answer `get_settings`; the response is
+`{effective, sources, applied: {model, effort, advisor, ultracode, ...}}`; and it needs **no** authenticated session.
+It also showed that `set_model`, `apply_flag_settings` (effort) and `set_permission_mode` take effect **on the running
+process** with an `ok` answer, one request at a time (a request sent while another is outstanding can be answered out
+of order), so Stage B can also *correct* drift without a restart (the reconciliation report's design).
 
 ---
 
@@ -363,15 +370,48 @@ is the "live check" the report keeps listing as outstanding, minus the need for 
 
 ---
 
+### 7.3 Results (pinned CLI 2.1.285, macOS arm64, 2026-10-01)
+
+Run with `scripts/cli-probe` (a fake API, a `security` shim that answers "not found", a from-scratch environment).
+**No account was used, no real keychain item was read, and no consent dialog appeared**; the shim's log shows the CLI
+tried to read two items (`Claude Code-credentials-<hash>`, `Claude Code-<hash>`) and was told neither exists. Each
+probe takes 3-6 seconds.
+
+| Question | Observed |
+|---|---|
+| Which of two repeated `--model` flags wins? | **The last**, in both orders (`opus,haiku` → `claude-haiku-4-5-20251001`; `haiku,opus` → `claude-opus-5-5`). Everything that assumed this is confirmed. |
+| What does an alias resolve to? | `sonnet` → `claude-sonnet-5-5`; `opus` → `claude-opus-5-5`; `haiku` → `claude-haiku-4-5-20251001` (the model id on the API request). |
+| What runs with no `--model`? | **`claude-opus-5-5`, effort `medium`**: the 2026-09-29 incident, reproduced. |
+| `--effort high` on Sonnet? | Sent as `output_config.effort: "high"`. |
+| `--effort high` on Haiku? | **The CLI drops it**: no `output_config`, `get_settings` reports `effort: null`. So on this CLI the flag is **harmless** on Haiku. The earlier claim that it "400s" is true of older CLIs per `docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md`, and is **not** established for 2.1.285. Not passing it remains right; the menu's "not applied" is true. |
+| When is `system/init` emitted? | Only after the first user message (~0.5 s later). Nothing at all before one. It carries `model` and `permissionMode`. |
+| Does `get_settings` work? | Yes, immediately after spawn, with no message and no account. `applied` = `{model, effort, advisor, ultracode, ...}`. |
+| Do control requests change a running process? | Yes: `set_model` (incl. `"default"` → Opus/medium), `apply_flag_settings` (`effortLevel`), `set_permission_mode` all answer `ok` and take effect; `get_settings` reflects the model and effort. Sent back-to-back, a later request can be answered before an earlier one finishes, so send one at a time. |
+| Permission routing, **with** a permission prompt tool (a persistent agent) | `default`: asks for Write, `touch`, `curl`, and a read outside the working directory; does **not** ask for `echo`. `acceptEdits`: no ask for Write or `touch`; asks for `curl` and the outside read. **`plan`: asks for Write (does not refuse it)**, asks for `ExitPlanMode`; `echo` and an in-tree read are not asked. A **deny** answer produces a real tool error in every case. |
+| Permission routing, **without** one (a container's one-shot run) | `default` refuses an unapproved write and `touch`; `plan` refuses writes ("Cannot write to …") and blocks commands. There, "Plan (read-only)" is true. |
+
+**What this overturned.** #4163 said Plan on a persistent agent is "read-only while planning". It is not: the CLI asks
+before writing and the server's blanket "allow" lets the write happen. The wording was corrected (and the earlier
+"Default (prompt all)" was wrong in a second way: even the CLI's own Default does not ask about safe commands, and a
+one-shot run *refuses* instead of asking).
+
+**Not observed, and why.** Auto mode (its classifier is a model call the fake API cannot emulate); Windows; the other
+providers' CLIs (not installed here), so G1 stays unverified; the CLI's behaviour under the real API's validation.
+
+**Reproduce:** `AGENTMUX_CLI_PROBE=1 npx vitest run scripts/cli-probe/cli-probe.test.mjs` (opt-in; it spawns the pinned
+CLI from `~/.agentmux/shared/cli`).
+
+---
+
 ## 8. Order, effort, risk
 
 | Order | Item | Size | Risk | Needs |
 |---|---|---|---|---|
-| 1 | §7 harness (fake API server + argv runner) | small–medium | low | nothing |
+| 1 | §7 harness (fake API server + argv runner) | small–medium | low | **built; results in §7.3** |
 | 2 | Item 4 install pruning | medium | **medium** (deletes files) | §5.8 decision; ships with dry-run first |
 | 3 | Item 3 Stage A | small | low | nothing |
 | 4 | Item 2 remembered runtime | medium | low–medium (schema) | §3.7 decision |
-| 5 | Item 3 Stage B | medium | low | §7 result for `get_settings` |
+| 5 | Item 3 Stage B | medium | low | nothing: §7 showed `get_settings` works |
 | 6 | smaller items (§6) | small each | low | §7 for G1 / G2 |
 | 7 | Item 1 approval prompts | **large** | **high** (can hang unattended agents) | §2.7 decisions; behind a setting |
 

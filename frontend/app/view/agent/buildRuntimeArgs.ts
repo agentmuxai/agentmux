@@ -152,7 +152,8 @@ export function buildRuntimeArgs(
     if (supportsModel) {
         args.push("--model", config.model);
     }
-    // --effort: claude only, and NOT on Haiku — `--effort` 400s on Haiku 4.5
+    // --effort: claude only, and NOT on Haiku — Haiku takes none (the pinned CLI drops
+    // it; older CLIs forwarded it and the API answered 400, see modelTakesEffort)
     // (effort is supported on Opus/Sonnet only). Skip it so a Haiku pane
     // doesn't error out on every turn. Matches a concrete Haiku id too.
     if (effortApplies(providerId, effectiveModelId ?? config.model)) {
@@ -233,7 +234,8 @@ export function buildPaneArgs(
 ): string[] {
     const model = effectiveModel((runtime ?? DEFAULT_RUNTIME_CONFIG).model, providerFlags);
     // An `--effort` among the agent's own flags would be appended after the
-    // runtime's. If the model that runs takes none (Haiku), it would be HTTP 400
+    // runtime's. If the model that runs takes none (Haiku), it would be a flag it
+    // does not take (a 400 on the older CLIs that forwarded it)
     // on every turn, whichever way the definition got there.
     // Only for Claude: other providers' own `--effort` is theirs to interpret,
     // and `effortApplies` is false for all of them (ReAgent P2 on #4161).
