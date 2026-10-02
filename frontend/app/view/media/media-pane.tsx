@@ -42,9 +42,15 @@ function asRequest(v: unknown): MediaOpenRequest | null {
 /** A Media document: a file, or none yet ("Click to load media"). */
 export interface MediaDoc {
     path: string;
-    /** Tells apart tabs with no file yet (each is its own document). */
+    /** Tells apart tabs with no file on disk (each is its own document). */
     blank?: number;
+    /** Dropped bytes with no host path: shown, kept while the pane lives,
+     *  not saved (a restart drops the tab). */
+    file?: File;
 }
+
+/** A tab showing nothing yet. */
+const isEmpty = (d: MediaDoc | undefined): boolean => !!d && !d.path && !d.file;
 
 let blanks = 0;
 
@@ -58,8 +64,8 @@ export function mediaIcon(path: string): string {
 
 export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
     keyOf: (d) => d.path || `blank:${d.blank ?? 0}`,
-    titleOf: (d) => (d.path ? basenameOf(d.path) : "Media"),
-    iconOf: (d) => mediaIcon(d.path),
+    titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "Media")),
+    iconOf: (d) => mediaIcon(d.path || d.file?.name || ""),
     serialize: (d) => d.path,
     deserialize: (st) => (typeof st === "string" && st ? { path: st } : null),
     // Ctrl+T, "+": a tab to pick a file into.
@@ -96,7 +102,7 @@ export class MediaPaneModel {
         const tab = this.tabs.tabs().find((t) => t.id === tabId);
         if (!tab) return false;
         const other = path ? this.tabs.tabs().find((t) => t.id !== tabId && t.payload.path === path) : undefined;
-        if (other && !tab.payload.path) {
+        if (other && isEmpty(tab.payload)) {
             this.tabs.activate(other.id);
             this.tabs.close(tabId);
             return false;
@@ -118,11 +124,24 @@ export class MediaPaneModel {
         // The tab in front with no file yet takes it, unless the file is
         // open already (then that tab comes to the front).
         const active = this.tabs.active();
-        if (active && !active.payload.path && !this.tabs.tabs().some((t) => t.payload.path === path)) {
+        if (active && isEmpty(active.payload) && !this.tabs.tabs().some((t) => t.payload.path === path)) {
             this.setTabPath(active.id, path);
             return;
         }
         this.tabs.open({ path });
+    }
+
+    /** Dropped bytes with no host path: on the tab in front when it shows
+     *  nothing, else on a new tab (a drop never replaces what a tab shows). */
+    openFile(file: File): void {
+        const active = this.tabs.active();
+        if (active && isEmpty(active.payload)) {
+            const payload: MediaDoc = { path: "", blank: active.payload.blank, file };
+            this.tabs.update(active.id, { payload, title: MEDIA_DOC_TABS.titleOf(payload), icon: MEDIA_DOC_TABS.iconOf!(payload) });
+            fireAndForget(() => this.ctx.setMeta({ [META_PATH]: "" }));
+            return;
+        }
+        this.tabs.open({ path: "", blank: ++blanks, file });
     }
 
     dispose(): void {
@@ -214,11 +233,16 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
                         <MediaView
                             blockId={ctx.blockId}
                             path={tabs.tabs().find((t) => t.id === id)?.payload.path ?? ""}
+                            file={tabs.tabs().find((t) => t.id === id)?.payload.file}
+                            openDroppedFile={(file) => {
+                                pane.openFile(file);
+                                return true;
+                            }}
                             onPathChange={(path) => pane.setTabPath(id, path)}
                             openDropped={(path) => {
                                 // Onto a tab showing a file: a new tab. Onto
                                 // an empty one: that tab.
-                                if (!tabs.active()?.payload.path) return false;
+                                if (isEmpty(tabs.active()?.payload)) return false;
                                 tabs.open({ path });
                                 return true;
                             }}

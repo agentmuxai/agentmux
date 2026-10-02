@@ -46,6 +46,12 @@ export function MediaView(props: {
     /** A file dropped on the pane: true when the pane opened it elsewhere
      *  (a new tab), false to show it here. */
     openDropped?: (path: string) => boolean;
+    /** Dropped bytes with no host path this tab shows (kept by the pane, so
+     *  they survive a tab switch; not across a restart). */
+    file?: File;
+    /** Dropped bytes: the pane keeps them on a tab (this one when it shows
+     *  nothing, else a new one) and returns true. */
+    openDroppedFile?: (file: File) => boolean;
 }): JSX.Element {
     const blockId = props.blockId;
     const [displayPath, setDisplayPath] = createSignal("");
@@ -131,10 +137,11 @@ export function MediaView(props: {
         openPath(path);
     };
 
+    let shownFile: File | null = null;
     const showFile = (file: File) => {
+        shownFile = file;
         stopWatching();
         fetchToken++; // drop any fetch still in flight for the previous path
-        props.onPathChange("");
         setDisplayPath("");
         setErrorMsg("");
         const url = URL.createObjectURL(file);
@@ -153,13 +160,27 @@ export function MediaView(props: {
                 showPath: (path) => {
                     if (!props.openDropped?.(path)) openPath(path);
                 },
-                showFile,
+                showFile: (file) => {
+                    if (!props.openDroppedFile?.(file)) showFile(file);
+                },
                 cantOpen: (name) => notifyDrop.cantOpen(name, "media pane"),
             }),
         );
         onCleanup(dispose);
-        if (props.path) showPath(props.path);
+        if (props.file) showFile(props.file);
+        else if (props.path) showPath(props.path);
     });
+
+    // The pane put dropped bytes on this tab.
+    createEffect(
+        on(
+            () => props.file,
+            (file) => {
+                if (file && file !== shownFile) showFile(file);
+            },
+            { defer: true }
+        )
+    );
 
     // The pane gave this tab a file (one sent here while it showed none).
     createEffect(

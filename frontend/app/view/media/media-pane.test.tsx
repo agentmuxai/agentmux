@@ -169,6 +169,28 @@ describe("the Media pane's document tabs", () => {
         pane.dispose();
     });
 
+    it("dropped bytes open in a new tab, survive a tab switch, and aren't saved (ReAgent on #4235)", async () => {
+        const v = mount({ "media:path": "C:/pics/a.png" });
+        await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
+        hub.hooks.get("m1")!.drop({ paths: [], files: [new File(["x"], "drop.png", { type: "image/png" })] });
+        await waitFor(() => expect(v.pills()).toEqual(["a.png", "drop.png"]));
+        expect(v.inst.liveTitle!().text).toBe("drop.png");
+        await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
+        fireEvent.keyDown(v.root(), { key: "PageUp", ctrlKey: true });
+        await waitFor(() => expect(v.inst.liveTitle!().text).toBe("a.png"));
+        fireEvent.keyDown(v.root(), { key: "PageDown", ctrlKey: true });
+        await waitFor(() => expect(v.inst.liveTitle!().text).toBe("drop.png"));
+        await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
+        expect(v.container.textContent).not.toContain("Click to load media");
+        // Saved, the bytes are nothing (no path): a restart restores a.png alone.
+        await waitFor(() => expect((v.meta().doctabs as { tabs: unknown[] } | undefined)?.tabs).toHaveLength(2));
+        const record = v.meta().doctabs;
+        cleanup();
+        const again = mount({ doctabs: record });
+        expect(again.pills()).toEqual([]);
+        expect(again.inst.liveTitle!().text).toBe("a.png");
+    });
+
     it("a drop on a tab showing a file opens a new tab; on an empty tab, it shows there", async () => {
         const v = mount();
         hub.hooks.get("m1")!.drop({ paths: ["C:/pics/a.png"], files: [] });
