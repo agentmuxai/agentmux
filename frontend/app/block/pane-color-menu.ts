@@ -32,14 +32,6 @@ export function hueToActiveBorder(hue: number): string {
     return `hsl(${hue}, 65%, 52%)`;
 }
 
-/** Derive the dimmed unfocused-border color from a hue (0–360). Lightness
- * scaled by the same 0.55 dim factor as agent-color.ts::dimAgentColor, so
- * an explicit hue pick dims the same way the auto-assigned agent color
- * does. */
-export function hueToBorder(hue: number): string {
-    return `hsl(${hue}, 65%, 29%)`;
-}
-
 /** HSL -> `#rrggbb`. Standard conversion (Illuminae/W3C formula) — needed
  * because the agent identity color (`ui:color`, agent-color.ts) is a
  * strict hex string, while the pane-color picker works in hue-space. Used
@@ -72,9 +64,9 @@ export function hueToAgentIdentityColor(hue: number): string {
  * identity color was applied to the header at full, vivid strength — the
  * same value the border used — so only explicitly-colored panes got the
  * dark-header/vivid-border look; every other agent pane's header matched
- * its border exactly. `computeFocusRingBorderColor` is untouched: the
- * border side of "one system" was already correct (full-strength color from
- * either source) — only the header side needed unifying.
+ * its border exactly. The border side (`computeFocusRingBorderColor`)
+ * resolves both sources to the same hue too (`identity` focused, `border`
+ * unfocused, since 2026-10-02).
  *
  * `isLightTheme`: on 2026-09-21 the light theme was kept at the identity's
  * full strength, because darkening it (the dark-theme treatment) read as
@@ -127,6 +119,16 @@ export function paneIdentityForEffectiveColor(
     isLightTheme: boolean,
 ): string | undefined {
     return paneRoleColor(hue, activeBorderHex, isLightTheme, "identity");
+}
+
+/** An unfocused pane's border (`border`): the identity dimmed for the theme,
+ * at one perceived lightness for every hue. */
+export function paneBorderForEffectiveColor(
+    hue: number | undefined,
+    activeBorderHex: string | undefined,
+    isLightTheme: boolean,
+): string | undefined {
+    return paneRoleColor(hue, activeBorderHex, isLightTheme, "border");
 }
 
 /**

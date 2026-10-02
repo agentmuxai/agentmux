@@ -51,6 +51,22 @@ describe("pane colour scheme", () => {
         expect(spread).toBeLessThan(1.25);
     });
 
+    // The focus ring tells you which pane has focus. Under HSL an unfocused
+    // yellow border (OKLCH L 0.56) was brighter than a focused blue ring
+    // (0.50), so a yellow pane next to a blue one could look focused when it
+    // was not. Now every hue's focused ring stands out from the page more than
+    // any hue's unfocused border: brighter on dark, darker on light.
+    for (const [theme, light, page] of [
+        ["dark", false, "#000000"],
+        ["light", true, "#ffffff"],
+    ] as const) {
+        it(`${theme} theme: every focused ring stands out more than any unfocused border`, () => {
+            const prominence = (role: "identity" | "border") =>
+                IDENTITIES.map((id) => contrastRatio(paneRoleColor(id.hue, id.hex, light, role)!, page));
+            expect(Math.min(...prominence("identity"))).toBeGreaterThan(Math.max(...prominence("border")) * 1.5);
+        });
+    }
+
     it("maps a preset hue and the hex it persists as to the same identity hue", () => {
         // "Pane Color: Blue" persists hsl(240, 65%, 52%) as the agent's ui:color;
         // both must render identically.

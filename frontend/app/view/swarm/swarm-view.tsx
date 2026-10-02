@@ -11,7 +11,8 @@ import AnsiLine from "@/element/ansiline";
 import { callBackendService } from "@/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MOS, atoms } from "@/app/store/global";
+import { MOS, atoms, getSettingsKeyAtom } from "@/app/store/global";
+import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
@@ -264,7 +265,10 @@ export function AgentRow({
     const blockMeta = createMemo(() =>
         node.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node.blockId))()?.meta : undefined
     );
-    const rowColors = createMemo(() => swarmRowColors(blockMeta()));
+    const rowColors = createMemo(() => {
+        const themeId = getSettingsKeyAtom("window:theme")();
+        return swarmRowColors(blockMeta(), typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId));
+    });
     // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
     // below (reagent P1 on PR #2862). Left in the bucket, an agent whose only
     // active work was a promoted Bash/sleep call had `hasChildren() === false`
