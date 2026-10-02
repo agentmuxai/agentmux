@@ -12,6 +12,7 @@
 
 import { Markdown } from "@/app/element/markdown";
 import { Show, type JSX } from "solid-js";
+import type { ResultFileFacts } from "../../providers/claude-translator";
 import type { ToolNode } from "../../types";
 import { BashOutputViewer } from "../BashOutputViewer";
 import { CompactResult } from "../CompactResult";
@@ -20,6 +21,7 @@ import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "../
 import { detectLanguage } from "../detectLanguage";
 import { HighlightedCode } from "../HighlightedCode";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
+import { ResultImages, resultImagesOf } from "../ResultImages";
 import { capText, MAX_TOOL_OUTPUT_LINES, type CappedText } from "../output-cap";
 import { terminalText } from "../terminal-text";
 import { fileRangeOf, formatFileRangeLong } from "../../tool-meta/file-range";
@@ -102,9 +104,55 @@ function FilePreview(props: {
     );
 }
 
+/**
+ * Claude Code appends notes for the model to the end of a Read's text
+ * (`<system-reminder>…</system-reminder>`, e.g. the token cap's "PARTIAL
+ * view" note). The range line already says what they say, and inside the code
+ * they broke the gutter, so the preview shows only the file. Only trailing
+ * notes are taken off: a file may mention the tag itself.
+ */
+const TRAILING_NOTE_RE = /(?:^|\n)<system-reminder>[\s\S]*?<\/system-reminder>\s*$/;
+
+export function withoutTrailingNotes(text: string): string {
+    let out = text;
+    for (let m = TRAILING_NOTE_RE.exec(out); m; m = TRAILING_NOTE_RE.exec(out)) out = out.slice(0, m.index);
+    return out.trimEnd();
+}
+
+/**
+ * One line for a Read that returned something other than the file's text: an
+ * image (its type, dimensions and size), a PDF (its size and the pages asked
+ * for), or a file unchanged since the last Read. Null for a text Read.
+ */
+export function readFactsLine(node: ToolNode): string | null {
+    const file = (node.result as { file?: ResultFileFacts } | undefined)?.file;
+    if (file?.kind === "unchanged") return "unchanged since the last Read";
+    const images = resultImagesOf(node.result);
+    const parts: string[] = [];
+    if (file?.kind === "pdf") {
+        parts.push("PDF");
+        const pages = (node.params as { pages?: unknown } | undefined)?.pages;
+        if (typeof pages === "string" && pages.trim() !== "") parts.push(`pages ${pages.trim()}`);
+    } else if (images.length > 0 || file?.kind === "image") {
+        const type = images[0]?.mediaType.replace(/^image\//i, "").replace(/\+xml$/i, "").toUpperCase();
+        parts.push(type ? `${type} image` : "image");
+        if (file?.width && file?.height) parts.push(`${file.width} × ${file.height}`);
+    } else {
+        return null;
+    }
+    if (file?.size != null) parts.push(formatBytes(file.size));
+    return parts.join(" · ");
+}
+
 function renderRead(node: ToolNode): JSX.Element {
     const filePath = (node.params as any).file_path ?? "";
-    const content: string | undefined = (node.result as any)?.content;
+    const raw: string | undefined = (node.result as any)?.content;
+    const facts = readFactsLine(node);
+    const file = (node.result as { file?: ResultFileFacts } | undefined)?.file;
+    const images = resultImagesOf(node.result);
+    // An image, PDF or unchanged-file Read has a note for the model as its
+    // text, not the file: the facts line replaces it.
+    const content = facts ? undefined : raw ? withoutTrailingNotes(raw) : raw;
     // Head-cap file content (read top-down) so a huge Read can't bloat
     // the conversation DOM; HighlightedCode stays simple (it injects
     // innerHTML, so capping here is cleaner than inside it).
@@ -127,10 +175,28 @@ function renderRead(node: ToolNode): JSX.Element {
                 </Show>
                 <span class="agent-tool-file-path">{filePath}</span>
             </div>
+            <Show when={facts}>
+                <div class="agent-tool-read-facts">
+                    <span>{facts}</span>
+                    <Show when={file?.kind === "pdf" && filePath}>
+                        <button
+                            type="button"
+                            class="agent-tool-read-open"
+                            title="Show the file in the OS file manager"
+                            onClick={() => window.api?.revealInFileExplorer(filePath)}
+                        >
+                            Show in folder
+                        </button>
+                    </Show>
+                </div>
+            </Show>
+            <Show when={images.length > 0}>
+                <ResultImages images={images} path={filePath || undefined} width={file?.width} height={file?.height} />
+            </Show>
             <Show
                 when={capped}
                 fallback={
-                    <Show when={node.result}>
+                    <Show when={node.result && !facts}>
                         <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
                     </Show>
                 }
@@ -275,7 +341,19 @@ export function renderWorkflow(node: ToolNode): JSX.Element {
 }
 
 export function renderCompactDefault(node: ToolNode): JSX.Element {
-    return <CompactResult tool={node.tool} params={node.params as any} result={node.result} />;
+    // An image a tool returned (an MCP screenshot) shows as the image, with
+    // the result's text below it.
+    const images = resultImagesOf(node.result);
+    if (images.length === 0) return <CompactResult tool={node.tool} params={node.params as Record<string, unknown>} result={node.result} />;
+    const text = (node.result as { content?: unknown }).content;
+    return (
+        <div class="agent-tool-media-result">
+            <ResultImages images={images} />
+            <Show when={typeof text === "string" && text.trim() !== ""}>
+                <CompactResult tool={node.tool} params={node.params as Record<string, unknown>} result={{ content: text }} />
+            </Show>
+        </div>
+    );
 }
 
 // Built-ins sit at priority 0 and the catch-all below everything; rich,

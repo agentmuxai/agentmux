@@ -332,12 +332,13 @@ describe("ClaudeTranslator", () => {
             expect(resultOf([{ type: "text", text: "only" }])).toEqual({ content: "only" });
         });
 
-        it("passes an array with any non-text block through unchanged", () => {
+        it("keeps an image array as its text and images; passes any other non-text block through unchanged", () => {
             const withImage = [
                 { type: "text", text: "caption" },
                 { type: "image", source: { type: "base64", media_type: "image/png", data: "x" } },
             ];
-            expect(resultOf(withImage)).toEqual(withImage);
+            // Rendered as the image (ResultImages), not `0: {2 keys}`.
+            expect(resultOf(withImage)).toEqual({ content: "caption", images: [{ mediaType: "image/png", data: "x" }] });
             const refs = [{ type: "tool_reference", tool_name: "mcp__agentmux__WhoAmI" }];
             expect(resultOf(refs)).toEqual(refs);
         });
