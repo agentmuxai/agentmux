@@ -530,6 +530,7 @@ partial list.
 | [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) | SPEC: durable conversation memory — one continuous conversation per agent, in every case |
 | [`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24`](SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) | SPEC: durable jekt delivery — a message to an absent agent is held, not dropped |
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
+| [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
 | [`SPEC_GATED_RENDERER_RECOVERY_2026_06_01`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) | Gated Renderer Recovery — Memory-Aware Crash Handling |
@@ -885,7 +886,6 @@ partial list.
 | [`SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20`](SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20.md) | SPEC: Eliminate Transparent Console Windows on Windows |
 | [`SPEC_ERROR_CATALOG_2026_05_17`](SPEC_ERROR_CATALOG_2026_05_17.md) | SPEC: Global Error Code/Message Catalog |
 | [`SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27`](SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md) | SPEC: Frontend source-map resolver for piped error stacks |
-| [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
 | [`SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14`](SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md) | SPEC: File Tree Right-Click Context Menu |
 | [`SPEC_FLOATING_PANE_REDOCK_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) | Spec: Floating pane re-dock (with multi-window + drop-target highlighting) |
 | [`SPEC_FORGE_AGENT_IDENTITY_2026_04_13`](SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md) | Spec: Forge Agent Identity — GitHub + AWS + Git |

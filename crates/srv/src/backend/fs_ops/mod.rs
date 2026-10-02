@@ -818,12 +818,8 @@ pub fn open_or_reveal(raw: &str, reveal: bool) -> Result<(), String> {
     // A drive root has no parent to canonicalize; it is opened as it is.
     let target = if path.parent().is_none() { path } else { resolve_entry_path(raw)? };
     std::fs::symlink_metadata(&target).map_err(|e| missing_or(e, "open"))?;
-    let mut cmd = if reveal { platform::reveal_command(&target) } else { platform::open_command(&target) };
-    // The file manager or the opened application is third-party and
-    // long-lived, and could launch another AgentMux build that would adopt
-    // this instance's identity: the strict external-process policy, as
-    // `openinshell` uses (invariant I7).
-    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+    let cmd = if reveal { platform::reveal_command(&target) } else { platform::open_command(&target) };
+    // `spawn_detached` applies the strict external-process policy (I7).
     let result = platform::spawn_detached(cmd).map_err(|e| format!("Couldn't open it: {e}"));
     tracing::info!(
         op = if reveal { "fs.reveal" } else { "fs.open" },
