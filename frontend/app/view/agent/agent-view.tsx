@@ -1406,6 +1406,7 @@ export const AgentPresentationView = ({
                 onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
                 contextTokens={(paneModel.state.lastContextTokens ?? null)}
                 contextWindow={(paneModel.state.lastContextWindow ?? null) ?? provider()?.contextWindow}
+                lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
                 authEmail={authEmail()}
                 canSwitchAccount={bindCandidates().length > 0}

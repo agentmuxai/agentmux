@@ -447,3 +447,44 @@ describe("AgentRuntimeDropup — the Mode section doesn't promise prompting that
     });
 
 });
+
+describe("AgentRuntimeDropup — says what the CLI resolved the model to", () => {
+    const AGREES: ProcessRuntime = { running: true, restartPending: false, model: "sonnet", effort: "high", permissionMode: "default" };
+    const renderWith = (lastReplyModel: string | null | undefined) =>
+        render(() => (
+            <AgentRuntimeDropup blockId="block-1" blockAtom={() => undefined} providerId="claude" lastReplyModel={lastReplyModel} />
+        ));
+    const notes = () => Array.from(document.querySelectorAll(".agent-runtime-dropup-note")).map((n) => n.textContent ?? "");
+
+    it("shows nothing before there has been a reply", async () => {
+        renderWith(null);
+        setReport(AGREES);
+        await openPanel();
+        expect(notes().filter((t) => t.startsWith("Last reply") || t.includes("Last reply"))).toEqual([]);
+    });
+
+    it("shows the resolved id without a warning when it matches the selection", async () => {
+        renderWith("claude-sonnet-5-5");
+        setReport(AGREES);
+        await openPanel();
+        const n = notes().find((t) => t.includes("Last reply"));
+        expect(n).toBe("Last reply used claude-sonnet-5-5");
+    });
+
+    it("warns when the reply came from another family although the process was spawned with the selection", async () => {
+        renderWith("claude-opus-5-5");
+        setReport(AGREES);
+        await openPanel();
+        const n = notes().find((t) => t.includes("Last reply"))!;
+        expect(n).toContain("⚠");
+        expect(n).toContain("claude-opus-5-5");
+    });
+
+    it("does not warn while the process itself is not what is selected (the drift banner says that)", async () => {
+        renderWith("claude-opus-5-5");
+        setReport({ ...AGREES, model: undefined, effort: undefined });
+        await openPanel();
+        const n = notes().find((t) => t.includes("Last reply"))!;
+        expect(n).not.toContain("⚠");
+    });
+});
