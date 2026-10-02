@@ -4,6 +4,8 @@
 // Backend/sidecar management commands for the CEF host.
 // Ported from src-tauri/src/commands/backend.rs.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use tokio::io::AsyncBufReadExt as _;
@@ -264,9 +266,8 @@ async fn run_migrations_inner(
     #[cfg(windows)]
     {
         // CREATE_NO_WINDOW: console-flash suppression — host (GUI) spawning the
-        // srv migrate child; tokio::process::Command has creation_flags inherent.
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        command.creation_flags(CREATE_NO_WINDOW);
+        // srv migrate child.
+        command.no_window();
     }
     let mut child = command
         .spawn()

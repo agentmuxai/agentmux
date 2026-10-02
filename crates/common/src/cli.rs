@@ -1,6 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(windows)]
+use crate::win32::NoWindow;
+
 /// Resolved target of a Windows `.cmd` npm shim.
 #[cfg(windows)]
 enum ResolvedShim {
@@ -29,12 +32,10 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     // (server/app_api/session.rs) and the per-check `--version`/auth probes.
     // Applied at this single chokepoint so every `make_cli_cmd` caller is
     // covered; idempotent for the agent-CLI callers (persistent/subprocess/
-    // acp) that already set it manually. `tokio::process::Command` exposes
-    // `creation_flags` as an inherent method on Windows — no `CommandExt`
-    // import needed (see crates/bashwrap/src/bash_wrap.rs's note).
+    // acp) that already set it manually.
     #[cfg(windows)]
     {
-        cmd.creation_flags(crate::win32::CREATE_NO_WINDOW);
+        cmd.no_window();
     }
     cmd
 }

@@ -12,6 +12,8 @@
 //! into `identity_auth_persist::persist_oauth_success` on the OAuth-
 //! success path.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -136,8 +138,7 @@ pub(crate) fn spawn_auth_cli(
         // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
         #[cfg(windows)]
         {
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.no_window();
         }
         let mut child = match cmd.spawn()
         {
@@ -756,8 +757,7 @@ async fn confirm_authenticated(
     // auth flow — without the flag each poll flashes a console. See cli.rs.
     #[cfg(windows)]
     {
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        c.creation_flags(CREATE_NO_WINDOW);
+        c.no_window();
     }
     match c.status().await {
         Ok(s) => s.success(),

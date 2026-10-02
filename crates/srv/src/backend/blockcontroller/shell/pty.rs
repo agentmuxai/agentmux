@@ -3,6 +3,8 @@
 
 //! PTY geometry resolution and platform-specific shell detection.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use portable_pty::PtySize;
 
 use super::controller::ShellController;
@@ -135,13 +137,11 @@ pub(super) const FLUSHER_BARRIER_TIMEOUT: std::time::Duration =
 ///   3. Fall back to `cmd.exe`
 #[cfg(windows)]
 pub(super) fn detect_local_shell_path_windows() -> String {
-    use std::os::windows::process::CommandExt;
     use std::process::Command;
-    use agentmux_common::win32::CREATE_NO_WINDOW;
     // Try pwsh (PowerShell 7)
     if Command::new("where")
         .arg("pwsh")
-        .creation_flags(CREATE_NO_WINDOW)
+        .no_window()
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -151,7 +151,7 @@ pub(super) fn detect_local_shell_path_windows() -> String {
     // Try powershell (Windows PowerShell 5.x)
     if Command::new("where")
         .arg("powershell")
-        .creation_flags(CREATE_NO_WINDOW)
+        .no_window()
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
