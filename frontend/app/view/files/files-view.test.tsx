@@ -100,7 +100,7 @@ import { clipboard, setClipboard } from "./files-ops";
 import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
 import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME, registerFileDropTarget } from "@/app/drag/file-drop";
-import { errorMessage, FilesView, formatModified } from "./files-view";
+import { errorMessage, FilesView, formatModified, mentionToken } from "./files-view";
 import { filesPaneTab, filesTitle } from "./files";
 
 const f = (name: string, over: Partial<FsEntry> = {}): FsEntry => ({
@@ -864,6 +864,49 @@ describe("the Files pane: grid view (§5.2)", () => {
         const src = [...v.container.querySelectorAll(".files-tile")].find((t) => t.textContent?.includes("src"))!;
         fireEvent.dblClick(src);
         await waitFor(() => expect(tiles(v)).toEqual(["main.rs"]));
+    });
+});
+
+describe("the Files pane: Alt+K mentions (§8.2, route 3)", () => {
+    it("writes @path relative to the agent's folder, quoted when it has a space", () => {
+        expect(mentionToken("C:\\work\\src\\a.ts", "C:\\work")).toBe("@src\\a.ts");
+        expect(mentionToken("C:\\other\\a.ts", "C:\\work")).toBe("@C:\\other\\a.ts");
+        expect(mentionToken("/home/a/my notes.md", "/home/a")).toBe('@"my notes.md"');
+        expect(mentionToken("/x/y.md", undefined)).toBe("@/x/y.md");
+    });
+
+    it("puts the selection's mentions in the last agent's message box", async () => {
+        const agentPane = document.createElement("div");
+        agentPane.setAttribute("data-role", "pane");
+        agentPane.setAttribute("data-blockid", "agent-1");
+        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
+        const ta = document.createElement("textarea");
+        ta.className = "agent-input";
+        ta.value = "look at";
+        agentPane.appendChild(ta);
+        document.body.appendChild(agentPane);
+        blocks.set("agent-1", { meta: { view: "agent", agentName: "Korp", "cmd:cwd": HOME } });
+        const dispose = registerFileDropTarget("agent-1", { accept: () => ({ ok: true, message: "" }), drop: () => {} });
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        // The user was last typing to Korp.
+        ta.focus();
+        ta.setSelectionRange(7, 7);
+        fireEvent.click(v.row("a2.md"));
+        fireEvent.click(v.row("src"), { ctrlKey: true });
+        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
+        expect(ta.value).toBe("look at @src @a2.md ");
+        dispose();
+        agentPane.remove();
+        blocks.clear();
+    });
+
+    it("says so when there's no agent to mention in", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
+        expect(v.container.querySelector(".files-status")?.textContent).toBe("No agent pane is open to mention these in.");
     });
 });
 

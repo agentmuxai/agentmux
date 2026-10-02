@@ -26,6 +26,8 @@ import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMo
 import { errorText, type FilesModel, windowsNames } from "./files-model";
 import { openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
+import { paneWorkdir } from "@/app/drag/file-drop-actions";
+import { spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
 import { clipboard, opProgressText } from "./files-ops";
 import {
@@ -39,7 +41,7 @@ import {
 } from "@/app/drag/file-drop";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
-import { crumbsOf, joinPath, nameProblem, samePath, stemLength } from "./files-path";
+import { crumbsOf, isWithin, joinPath, nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
@@ -91,6 +93,34 @@ function iconOf(e: FsEntry): string {
     if (/\.pdf$/.test(n)) return "file-pdf";
     if (/\.(zip|tar|gz|7z|rar|bz2|xz)$/.test(n)) return "file-zipper";
     return "file";
+}
+
+/** The agent pane the user last worked in, for Alt+K: Hangar has the focus
+ *  when the key is pressed, so it is remembered as focus moves. */
+let lastAgentBlock: string | null = null;
+let focusTracking = false;
+function trackAgentFocus(): void {
+    if (focusTracking || typeof window === "undefined") return;
+    focusTracking = true;
+    window.addEventListener(
+        "focusin",
+        (e) => {
+            const pane = e.target instanceof Element ? e.target.closest('[data-role="pane"][data-blockid]') : null;
+            const id = pane?.getAttribute("data-blockid");
+            if (id && getObjectValue<Block>(makeORef("block", id))?.meta?.view === "agent") lastAgentBlock = id;
+        },
+        true
+    );
+}
+
+/** `@path` for an agent's composer: relative to its working folder when
+ *  inside it, quoted when it has a space. */
+export function mentionToken(path: string, workdir: string | undefined): string {
+    let p = path;
+    if (workdir && isWithin(path, workdir) && !samePath(path, workdir)) {
+        p = path.slice(workdir.replace(/[\\/]+$/, "").length + 1);
+    }
+    return /\s/.test(p) ? `@"${p}"` : `@${p}`;
 }
 
 type Confirm = { title: string; message: string; confirmLabel: string; onConfirm: () => void };
@@ -193,6 +223,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         beginPathDrag(e.dataTransfer, paths, model.blockId);
     };
 
+    trackAgentFocus();
     model.focusList = () => listEl?.focus();
     onCleanup(() => (model.focusList = null));
 
@@ -412,6 +443,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         } else if (isMod(e) && e.key.toLowerCase() === "x") model.copyToClipboard("cut", model.selectedEntries());
         else if (isMod(e) && e.key.toLowerCase() === "v") void model.paste();
         else if (isMod(e) && e.key.toLowerCase() === "l") startEditingPath();
+        // By key code: on macOS Option+K types a character instead.
+        else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyK") mentionIn(model.selectedEntries());
         else if (isMod(e) && e.shiftKey && e.key.toLowerCase() === "n") void model.createNew("dir");
         else if (isMod(e) && e.key.toLowerCase() === "f") openFilter();
         else if (e.key === "/" && !typeahead.active()) openFilter();
@@ -457,6 +490,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         items.push(
             { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(path).catch(fail) },
             // One item per agent pane on screen (the DOM menu has no submenus).
+            {
+                type: "action",
+                label: "Mention in agent",
+                shortcut: isMacOS() ? "⌥K" : "Alt+K",
+                disabled: agentTargets().length === 0,
+                onSelect: () => mentionIn(many ? list : [entry]),
+            },
             ...agentTargets().map((t): ContextMenuItem => ({
                 type: "action",
                 label: `Attach to ${t.name}`,
@@ -486,6 +526,33 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             .map((blockId) => ({ blockId, meta: getObjectValue<Block>(makeORef("block", blockId))?.meta }))
             .filter((t) => t.meta?.view === "agent")
             .map((t) => ({ blockId: t.blockId, name: (t.meta?.["agentName"] as string | undefined)?.trim() || "agent" }));
+
+    /**
+     * Alt+K (spec §8.2, route 3): an `@path` mention of each selected entry
+     * in the composer of the agent the user was last working with, as
+     * Claude Code's own editor integrations do. Relative to the agent's
+     * working folder when inside it.
+     */
+    const mentionIn = (list: FsEntry[]): void => {
+        if (list.length === 0) return;
+        const agents = agentTargets();
+        const target = agents.find((t) => t.blockId === lastAgentBlock) ?? (agents.length === 1 ? agents[0] : undefined);
+        if (!target) {
+            model.setStatus(
+                {
+                    text: agents.length === 0 ? "No agent pane is open to mention these in." : "Click into the agent you mean first, then Alt+K here.",
+                    tone: "info",
+                },
+                4000
+            );
+            return;
+        }
+        const tokens = list.map((e) => mentionToken(model.pathOf(e.name), paneWorkdir(target.blockId)));
+        const root = document.querySelector<HTMLElement>(`[data-role="pane"][data-blockid="${CSS.escape(target.blockId)}"]`);
+        if (!root || !spliceComposerTokens(root, tokens)) {
+            model.setStatus({ text: `${target.name}'s message box isn't open.`, tone: "error" }, 4000);
+        }
+    };
 
     const attachTo = (target: { blockId: string; name: string }, list: FsEntry[]): void => {
         const paths = list.map((e) => model.pathOf(e.name));
