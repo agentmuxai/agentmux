@@ -159,7 +159,16 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         if (top < listEl.scrollTop) listEl.scrollTop = top;
         else if (top + ROW_HEIGHT > listEl.scrollTop + listEl.clientHeight - header)
             listEl.scrollTop = top + ROW_HEIGHT - listEl.clientHeight + header;
+        // Move the window now rather than on the scroll event, so the row
+        // (and a rename box on it) mounts in this same update.
+        setScrollTop(listEl.scrollTop);
     };
+
+    createEffect(
+        on(model.revealRequest, (req) => {
+            if (req) reveal(order().indexOf(req.name));
+        })
+    );
 
     const isMod = (e: KeyboardEvent | MouseEvent): boolean => (isMacOS() ? e.metaKey : e.ctrlKey);
 
@@ -682,6 +691,12 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
     // Enter or Escape unmounts the input, and its removal can fire blur,
     // which must not commit a second time (ReAgent on #4201).
     let finished = false;
+    // Scrolled out of the window, the row (and this box) unmounts: leave
+    // rename mode with it, or the list's keyboard would wait on a box that
+    // isn't there.
+    onCleanup(() => {
+        if (!finished && props.model.renaming() === props.entry.name) props.model.setRenaming(null);
+    });
     onMount(() => {
         input?.focus();
         input?.setSelectionRange(0, stemLength(props.entry.name, props.entry.is_dir));
