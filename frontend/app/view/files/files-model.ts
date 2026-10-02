@@ -21,11 +21,15 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsError } from "@/types/rpc/FsError";
 import type { FsOpResult } from "@/types/rpc/FsOpResult";
+import type { FsGitState } from "@/types/rpc/FsGitState";
+import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
+import { isValidAgentColor, pickAgentColor } from "@/app/view/agent/agent-color";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
+import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
 export const META_PATH = "files:path";
@@ -34,11 +38,15 @@ export const META_SORT = "files:sort";
 export const META_SORTDIR = "files:sortdir";
 export const META_HIDDEN = "files:hidden";
 export const META_SIDEBAR = "files:sidebar";
+export const META_PREVIEW = "files:preview";
 
 /** Entries per `fs.list` page (srv caps at 5000). */
 const PAGE = 1000;
 /** No first page by now: say we're waiting (on macOS, likely for a prompt). */
 export const SLOW_LISTING_MS = 400;
+/** Ask git this long after a listing settles (a burst of changes re-lists
+ *  many times; each `git status` is a process). */
+export const GIT_DELAY_MS = 300;
 
 export type Phase =
     /** Listing the folder; nothing to show yet. */
@@ -54,6 +62,8 @@ export type Phase =
 export interface AgentPlace {
     name: string;
     path: string;
+    /** The agent's identity color (#rrggbb), the one its pane border uses. */
+    color?: string;
 }
 
 type UndoEntry =
@@ -113,6 +123,23 @@ function saveSafeRoot(root: string): void {
     }
 }
 
+/** An agent's identity color: its stored `ui:color` (what seeds the pane
+ *  border), else the deterministic pick the pane would get on first open. */
+async function loadAgentColor(definitionId: string): Promise<string | undefined> {
+    if (!definitionId) return undefined;
+    try {
+        const stored = await RpcApi.GetAgentContentCommand(TabRpcClient, {
+            agent_id: definitionId,
+            content_type: "ui:color",
+        });
+        const color = stored?.content?.trim();
+        if (isValidAgentColor(color)) return color;
+    } catch {
+        // Fall through to the deterministic pick.
+    }
+    return pickAgentColor(definitionId);
+}
+
 export class FilesModel {
     readonly blockId: string;
     private readonly ctx: PaneTabHostContext;
@@ -147,6 +174,13 @@ export class FilesModel {
     readonly places: () => FsPlace[];
     private readonly setPlaces: (p: FsPlace[]) => void;
     readonly agents: () => AgentPlace[];
+    /** What git says about the folder shown: markers per entry, the branch. */
+    readonly git: () => FsGitStatus | null;
+    private readonly setGit: (g: FsGitStatus | null) => void;
+    /** Each entry's git state, by name. */
+    readonly gitStateOf: () => ReadonlyMap<string, FsGitState>;
+    private gitGeneration = 0;
+    private gitTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly setAgents: (a: AgentPlace[]) => void;
     readonly canBack: () => boolean;
     readonly canForward: () => boolean;
@@ -154,6 +188,9 @@ export class FilesModel {
 
     /** Sorted, hidden entries filtered unless shown. */
     readonly entries: () => FsEntry[];
+    /** The filter typed into the toolbar (spec §5.3.1, Ctrl+F). */
+    readonly filter: () => string;
+    private readonly setFilterSignal: (v: string) => void;
     /** Names in display order (selection and type-ahead work on these). */
     readonly order: () => string[];
 
@@ -176,6 +213,8 @@ export class FilesModel {
     /** Called once the first listing has painted (or failed): the view's
      *  settled-content hold (§6.5). */
     onFirstSettled: (() => void) | null = null;
+    /** Copy and move jobs started from this pane (§7.1). */
+    readonly ops: FilesOps;
     /** Puts keyboard focus on the list; set by the view while it's mounted. */
     focusList: (() => void) | null = null;
 
@@ -194,17 +233,30 @@ export class FilesModel {
         [this.revealRequest, this.setRevealRequest] = createSignal<{ name: string } | null>(null, { equals: false });
         [this.places, this.setPlaces] = createSignal<FsPlace[]>([]);
         [this.agents, this.setAgents] = createSignal<AgentPlace[]>([]);
+        [this.git, this.setGit] = createSignal<FsGitStatus | null>(null);
+        this.gitStateOf = createMemo(() => new Map((this.git()?.entries ?? []).map((e) => [e.name, e.state])));
         const [historyVersion, setHistoryVersion] = createSignal(0);
         this.setHistoryVersion = setHistoryVersion;
         this.canBack = () => (historyVersion(), this.back.length > 0);
         this.canForward = () => (historyVersion(), this.forward.length > 0);
 
+        [this.filter, this.setFilterSignal] = createSignal("");
         this.entries = createMemo(() => {
-            const shown = this.showHidden() ? this.rawEntries() : this.rawEntries().filter((e) => !e.hidden);
+            const needle = this.filter().trim().toLowerCase();
+            const shown = this.rawEntries().filter(
+                (e) => (this.showHidden() || !e.hidden) && (needle === "" || e.name.toLowerCase().includes(needle))
+            );
             return sortEntries(shown, this.sortKey(), this.sortDir());
         });
         this.order = createMemo(() => this.entries().map((e) => e.name));
 
+        this.ops = new FilesOps(ctx.blockId);
+        this.ops.onFinished = (op) => {
+            this.setStatus(opFinishedText(op), op.state === "done" && !op.failures?.length ? 4000 : 10000);
+            // The watcher re-lists the folder shown; a move OUT of it (or a
+            // copy into a folder this pane isn't watching) may not be seen.
+            this.refresh();
+        };
         this.unsubscribe = muxEventSubscribe({
             eventType: WpsEvent.FilesChanged,
             scope: makeORef("block", ctx.blockId),
@@ -229,6 +281,7 @@ export class FilesModel {
     readonly sortDir = (): SortDir => (this.ctx.meta()?.[META_SORTDIR] === "desc" ? "desc" : "asc");
     readonly showHidden = (): boolean => this.ctx.meta()?.[META_HIDDEN] === true;
     readonly showSidebar = (): boolean => this.ctx.meta()?.[META_SIDEBAR] !== false;
+    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true;
 
     /** Clicking a column header: sort by it, or flip its direction. */
     setSort(key: SortKey): void {
@@ -242,6 +295,16 @@ export class FilesModel {
 
     toggleSidebar(): void {
         void this.ctx.setMeta({ [META_SIDEBAR]: this.showSidebar() ? false : null });
+    }
+
+    togglePreview(): void {
+        void this.ctx.setMeta({ [META_PREVIEW]: this.showPreview() ? null : true });
+    }
+
+    /** Narrows the list to names containing `text` (case-insensitive). Per
+     *  folder: navigating clears it. */
+    setFilter(text: string): void {
+        this.setFilterSignal(text);
     }
 
     // ── Start ────────────────────────────────────────────────────────────────
@@ -273,13 +336,24 @@ export class FilesModel {
         try {
             const rows = await RpcApi.ListNamedAgentsCommand(TabRpcClient, { limit: 200 });
             const seen = new Set<string>();
-            const agents: AgentPlace[] = [];
+            const picked: { name: string; path: string; definitionId: string }[] = [];
             for (const r of rows) {
                 const dir = r.working_directory;
                 if (!dir || seen.has(dir.toLowerCase())) continue;
                 seen.add(dir.toLowerCase());
-                agents.push({ name: r.instance_name || r.definition_name || baseName(dir), path: dir });
+                picked.push({
+                    name: r.instance_name || r.definition_name || baseName(dir),
+                    path: dir,
+                    definitionId: r.definition_id ?? "",
+                });
             }
+            const agents: AgentPlace[] = await Promise.all(
+                picked.map(async ({ name, path, definitionId }) => ({
+                    name,
+                    path,
+                    color: await loadAgentColor(definitionId),
+                }))
+            );
             agents.sort((a, b) => a.name.localeCompare(b.name));
             if (!this.disposed) this.setAgents(agents);
         } catch {
@@ -333,6 +407,8 @@ export class FilesModel {
             this.setPath(target);
             this.setSelection(EMPTY_SELECTION);
             this.setRenaming(null);
+            this.setFilterSignal("");
+            this.setGit(null);
         });
         void this.ctx.setMeta({ [META_PATH]: target });
         if (opts.consented) {
@@ -472,6 +548,7 @@ export class FilesModel {
             });
             this.applyRequestedSelection();
             void this.watch(this.path());
+            this.refreshGit();
         } catch (err) {
             if (gen !== this.generation || this.disposed) return;
             batch(() => {
@@ -674,7 +751,74 @@ export class FilesModel {
         this.refresh();
     }
 
+    // ── Clipboard and transfers (§7.1) ─────────────────────────────────────
+
+    /** Ctrl+C / Ctrl+X: the selection onto the shared Hangar clipboard. */
+    copyToClipboard(kind: "copy" | "cut", entries: FsEntry[]): void {
+        if (entries.length === 0) return;
+        setClipboard({ kind, paths: entries.map((e) => this.pathOf(e.name)) });
+        const what = entries.length === 1 ? entries[0].name : `${entries.length} items`;
+        this.setStatus({ text: kind === "cut" ? `Cut ${what}: paste to move it` : `Copied ${what}: paste to copy it`, tone: "info" }, 3000);
+    }
+
+    /** Ctrl+V: copy (or move, after Cut) the clipboard into the folder shown. */
+    async paste(): Promise<void> {
+        const c = clipboard();
+        if (!c || c.paths.length === 0) {
+            this.setStatus({ text: "Nothing to paste", tone: "info" }, 2500);
+            return;
+        }
+        if (this.phase() !== "ready") return;
+        // A cut is used up only once srv has taken the move: a refused one
+        // (protected place, folder into itself) keeps it (ReAgent on #4221).
+        const started = await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths);
+        if (started && c.kind === "cut" && clipboard() === c) setClipboard(null);
+    }
+
+    /** Copy or move `sources` into the folder shown. */
+    async transfer(kind: "copy" | "move", sources: string[], destDir: string = this.path()): Promise<boolean> {
+        try {
+            await this.ops.start(kind, sources, destDir);
+            return true;
+        } catch (err) {
+            this.setStatus({ text: errorText(err), tone: "error" });
+            return false;
+        }
+    }
+
+    /** What dropping `sources` here does: move within a drive when the drag
+     *  came from another Hangar pane, copy otherwise (as file managers do). */
+    dropKind(sources: string[], fromHangar: boolean, destDir: string = this.path()): "copy" | "move" {
+        return fromHangar && sameVolume(sources, destDir) ? "move" : "copy";
+    }
+
+    // ── Git markers ──────────────────────────────────────────────────────────
+
+    /** Ask git about the folder shown, once things settle: a burst of
+     *  changes on disk (a build, a checkout) re-lists many times, and each
+     *  `git status` is a process. The answer for a folder the pane has left
+     *  is dropped. */
+    private refreshGit(): void {
+        if (this.gitTimer) clearTimeout(this.gitTimer);
+        const dir = this.path();
+        const gen = ++this.gitGeneration;
+        this.gitTimer = setTimeout(() => {
+            this.gitTimer = null;
+            RpcApi.FsGitStatusCommand(TabRpcClient, { path: dir }).then(
+                (g) => {
+                    if (gen !== this.gitGeneration || this.disposed || !samePath(dir, this.path())) return;
+                    this.setGit(g.in_repo && !g.error ? g : null);
+                },
+                () => {
+                    if (gen === this.gitGeneration) this.setGit(null);
+                }
+            );
+        }, GIT_DELAY_MS);
+    }
+
     dispose(): void {
+        if (this.gitTimer) clearTimeout(this.gitTimer);
+        this.ops.dispose();
         this.disposed = true;
         this.generation++;
         this.stopWatching();

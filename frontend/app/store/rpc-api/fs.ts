@@ -19,11 +19,23 @@ export type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
 export type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
 export type { FsEntry } from "@/types/rpc/FsEntry";
 export type { FsError } from "@/types/rpc/FsError";
+export type { FsGitEntry } from "@/types/rpc/FsGitEntry";
+export type { FsGitState } from "@/types/rpc/FsGitState";
+export type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 export type { FsErrorKind } from "@/types/rpc/FsErrorKind";
 export type { FsListReq } from "@/types/rpc/FsListReq";
 export type { FsListResult } from "@/types/rpc/FsListResult";
+export type { FsOpCancelReq } from "@/types/rpc/FsOpCancelReq";
+export type { FsOpChoice } from "@/types/rpc/FsOpChoice";
+export type { FsOpConflict } from "@/types/rpc/FsOpConflict";
+export type { FsOpEvent } from "@/types/rpc/FsOpEvent";
+export type { FsOpEventState } from "@/types/rpc/FsOpEventState";
+export type { FsOpKind } from "@/types/rpc/FsOpKind";
+export type { FsOpResolveReq } from "@/types/rpc/FsOpResolveReq";
 export type { FsOpResult } from "@/types/rpc/FsOpResult";
 export type { FsOpResults } from "@/types/rpc/FsOpResults";
+export type { FsOpStartReq } from "@/types/rpc/FsOpStartReq";
+export type { FsOpStartResult } from "@/types/rpc/FsOpStartResult";
 export type { FsPathReq } from "@/types/rpc/FsPathReq";
 export type { FsPlace } from "@/types/rpc/FsPlace";
 export type { FsPlaceKind } from "@/types/rpc/FsPlaceKind";
@@ -41,9 +53,14 @@ import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
 import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
 import type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
+import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import type { FsListReq } from "@/types/rpc/FsListReq";
 import type { FsListResult } from "@/types/rpc/FsListResult";
+import type { FsOpCancelReq } from "@/types/rpc/FsOpCancelReq";
+import type { FsOpResolveReq } from "@/types/rpc/FsOpResolveReq";
 import type { FsOpResults } from "@/types/rpc/FsOpResults";
+import type { FsOpStartReq } from "@/types/rpc/FsOpStartReq";
+import type { FsOpStartResult } from "@/types/rpc/FsOpStartResult";
 import type { FsPathReq } from "@/types/rpc/FsPathReq";
 import type { FsPlacesReq } from "@/types/rpc/FsPlacesReq";
 import type { FsPlacesResult } from "@/types/rpc/FsPlacesResult";
@@ -106,5 +123,31 @@ export const FsApi = {
 
     FsRevealCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsEmptyResult> {
         return client.rpcCall("fs.reveal", data, opts);
+    },
+
+    // Copy or move as a background job. Resolves with `op_id` once the
+    // request is validated (rejects with a sentence otherwise); progress,
+    // conflicts and the outcome arrive as `files:op` events
+    // (`MpsEvents.FilesOp`, data `FsOpEvent`) scoped to `block:<block_id>`.
+    // An event can arrive before this resolves.
+    FsOpStartCommand(client: RpcClient, data: FsOpStartReq, opts?: RpcOpts): Promise<FsOpStartResult> {
+        return client.rpcCall("fs.op.start", data, opts);
+    },
+
+    // Answer the conflict an op is waiting on (state `conflict`). Rejects if
+    // the op is finished or isn't waiting.
+    FsOpResolveCommand(client: RpcClient, data: FsOpResolveReq, opts?: RpcOpts): Promise<FsEmptyResult> {
+        return client.rpcCall("fs.op.resolve", data, opts);
+    },
+
+    // Stop an op between files or chunks; a partial file is removed. A
+    // final `canceled` event follows. Unknown or finished ops are ignored.
+    FsOpCancelCommand(client: RpcClient, data: FsOpCancelReq, opts?: RpcOpts): Promise<FsEmptyResult> {
+        return client.rpcCall("fs.op.cancel", data, opts);
+    },
+    // What git says about a listed folder's entries, and the branch. Never
+    // fails: outside a repository `in_repo` is false.
+    FsGitStatusCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsGitStatus> {
+        return client.rpcCall("fs.git_status", data, opts);
     },
 };

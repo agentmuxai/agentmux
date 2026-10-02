@@ -444,7 +444,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         onCleanup(() => containerRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
 
         // Right-click in the terminal: the drawer's own Copy/Paste, and no
-        // Split / Replace With… / agent-pane view items — those act on the
+        // Split / agent-pane view items — those act on the
         // whole agent pane and make no sense from a terminal. Magnify, Close
         // and Inspect stay. See shell-drawer-menu.ts and
         // SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25.md.
@@ -453,7 +453,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         if (containerRef) {
             onCleanup(
                 registerContextMenuRegion(containerRef, {
-                    omit: ["viewItems", "clipboard", "split", "replace"],
+                    omit: ["viewItems", "clipboard", "split"],
                     items: () => buildShellDrawerClipboardItems(menuDeps),
                 })
             );

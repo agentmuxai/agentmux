@@ -18,11 +18,27 @@ import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu
 import { formatBytes } from "@/app/element/local-media";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import type { FsEntry } from "@/types/rpc/FsEntry";
+import type { FsGitState } from "@/types/rpc/FsGitState";
+import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
+import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched-files";
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { errorText, type FilesModel, windowsNames } from "./files-model";
 import { openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
-import { crumbsOf, joinPath, nameProblem, stemLength } from "./files-path";
+import { FilesPreview } from "./files-preview";
+import { clipboard, opProgressText } from "./files-ops";
+import {
+    beginPathDrag,
+    dropPathsOnto,
+    endPathDrag,
+    pathDragPaths,
+    pathDragSource,
+    registerFileDropTarget,
+    visibleDropTargets,
+} from "@/app/drag/file-drop";
+import { getObjectValue, makeORef } from "@/app/store/mos";
+import { Portal } from "solid-js/web";
+import { crumbsOf, joinPath, nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
@@ -89,12 +105,88 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const [scrollTop, setScrollTop] = createSignal(0);
     const [viewHeight, setViewHeight] = createSignal(400);
     const [editingPath, setEditingPath] = createSignal(false);
+    const [filterOpen, setFilterOpen] = createSignal(false);
+    let filterInput: HTMLInputElement | undefined;
+    const openFilter = (): void => {
+        setFilterOpen(true);
+        queueMicrotask(() => {
+            filterInput?.focus();
+            filterInput?.select();
+        });
+    };
+    const closeFilter = (): void => {
+        model.setFilter("");
+        setFilterOpen(false);
+        listEl?.focus();
+    };
+    // Navigating clears the filter (the model does); close the box with it.
+    createEffect(
+        on(model.path, () => {
+            if (!model.filter()) setFilterOpen(false);
+        })
+    );
     const [menu, setMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
     const [confirm, setConfirm] = createSignal<Confirm | null>(null);
     const typeahead = new TypeAhead();
     let listEl: HTMLDivElement | undefined;
     let pathInput: HTMLInputElement | undefined;
     let crumbsEl: HTMLElement | undefined;
+
+    // Files dropped on the pane go into the folder it shows: an OS drop or
+    // another pane's row is copied; a row from another Hangar pane on the
+    // same drive is moved (§8.2).
+    onMount(() => {
+        const dispose = registerFileDropTarget(model.blockId, {
+            needsPaths: true,
+            onNoPaths: () => model.setStatus({ text: "Those files have no path on disk, so they can't be copied here.", tone: "error" }),
+            accept(drag) {
+                if (model.phase() !== "ready") return { ok: false, reason: "Open a folder first" };
+                // From this same pane only a folder row is somewhere new; the
+                // verdict is asked once per drag, so the drop itself checks.
+                if (pathDragSource() === model.blockId) return { ok: true, message: "Drop on a folder to move it there", icon: "fa-folder-open" };
+                const what = drag.count === 1 ? (drag.names?.[0] ?? "1 item") : `${drag.count} items`;
+                const inApp = pathDragPaths();
+                const kind = inApp ? model.dropKind(inApp, pathDragSource() != null) : "copy";
+                return kind === "move"
+                    ? { ok: true, message: `Move ${what} here`, icon: "fa-right-left" }
+                    : { ok: true, message: `Copy ${what} here`, icon: "fa-copy" };
+            },
+            async drop({ paths }) {
+                // Onto a folder row: into that folder; anywhere else: here.
+                const row = dropRow();
+                setDropRow(null);
+                if (paths.length === 0) return;
+                if (!row && pathDragSource() === model.blockId) return; // Already here.
+                const dest = row ? model.pathOf(row) : model.path();
+                // A folder dropped onto itself goes nowhere.
+                const sources = paths.filter((p) => !samePath(p, dest));
+                if (sources.length === 0) return;
+                await model.transfer(model.dropKind(sources, pathDragSource() != null, dest), sources, dest);
+            },
+        });
+        onCleanup(dispose);
+    });
+
+    // The folder row under a drag, which a drop goes into (§8.2).
+    const [dropRow, setDropRow] = createSignal<string | null>(null);
+    const clearDropRow = () => setDropRow(null);
+    window.addEventListener("dragend", clearDropRow, true);
+    onCleanup(() => window.removeEventListener("dragend", clearDropRow, true));
+    const onRowDragOver = (entry: FsEntry): void => {
+        const dragged = pathDragPaths();
+        // Not onto a folder that is itself being dragged.
+        const self = dragged?.some((p) => samePath(p, model.pathOf(entry.name)));
+        setDropRow(entry.is_dir && !self ? entry.name : null);
+    };
+
+    const onRowDragStart = (e: DragEvent, entry: FsEntry): void => {
+        if (!e.dataTransfer) return;
+        if (!model.selection().names.has(entry.name)) {
+            model.setSelection({ names: new Set([entry.name]), focus: entry.name, anchor: entry.name });
+        }
+        const paths = model.selectedEntries().map((x) => model.pathOf(x.name));
+        beginPathDrag(e.dataTransfer, paths, model.blockId);
+    };
 
     model.focusList = () => listEl?.focus();
     onCleanup(() => (model.focusList = null));
@@ -168,6 +260,24 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         return order().slice(first, last);
     });
     const byName = createMemo(() => new Map(entries().map((e) => [e.name, e])));
+    // Files an agent changed in the last half hour (§8.4), by child name.
+    // A minute's tick lets an old badge go without waiting for a change.
+    const [minute, setMinute] = createSignal(Date.now());
+    const minuteTimer = setInterval(() => setMinute(Date.now()), 60_000);
+    onCleanup(() => clearInterval(minuteTimer));
+    const touches = createMemo(() => {
+        touched();
+        return touchesUnder(model.path(), minute());
+    });
+    const touchOf = (name: string) => touches().get(childKey(model.path(), name));
+
+    /** The one selected entry the preview shows (none for several). */
+    const previewEntry = createMemo(() => {
+        const names = model.selection().names;
+        if (names.size !== 1) return null;
+        const [name] = names;
+        return byName().get(name) ?? null;
+    });
 
     const focusIndex = createMemo(() => {
         const f = model.selection().focus;
@@ -228,10 +338,12 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         });
     };
 
-    const copyPaths = (list: FsEntry[]): void => {
+    const copyPaths = (list: FsEntry[], quiet = false): void => {
         const text = list.map((e) => model.pathOf(e.name)).join("\n");
         void navigator.clipboard?.writeText(text).then(
-            () => model.setStatus({ text: list.length === 1 ? "Copied the path" : `Copied ${list.length} paths`, tone: "info" }, 2500),
+            () => {
+                if (!quiet) model.setStatus({ text: list.length === 1 ? "Copied the path" : `Copied ${list.length} paths`, tone: "info" }, 2500);
+            },
             () => model.setStatus({ text: "Couldn't copy to the clipboard", tone: "error" })
         );
     };
@@ -268,10 +380,21 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         else if (e.key === "Delete") void model.trash(model.selectedEntries());
         else if (isMod(e) && e.key.toLowerCase() === "a") model.setSelection(selectAll(sel, order()));
         else if (isMod(e) && e.key.toLowerCase() === "z") void model.undo();
-        else if (isMod(e) && e.key.toLowerCase() === "c" && !e.shiftKey) copyPaths(model.selectedEntries());
+        else if (isMod(e) && e.key.toLowerCase() === "c" && !e.shiftKey) {
+            // Both: the files for a paste in Hangar, the paths for anywhere else.
+            model.copyToClipboard("copy", model.selectedEntries());
+            copyPaths(model.selectedEntries(), true);
+        } else if (isMod(e) && e.key.toLowerCase() === "x") model.copyToClipboard("cut", model.selectedEntries());
+        else if (isMod(e) && e.key.toLowerCase() === "v") void model.paste();
         else if (isMod(e) && e.key.toLowerCase() === "l") startEditingPath();
         else if (isMod(e) && e.shiftKey && e.key.toLowerCase() === "n") void model.createNew("dir");
-        else if (e.key === " " && !typeahead.active()) model.setSelection(toggleFocused(sel));
+        else if (isMod(e) && e.key.toLowerCase() === "f") openFilter();
+        else if (e.key === "/" && !typeahead.active()) openFilter();
+        else if (e.key === "Escape" && model.filter()) closeFilter();
+        // Ctrl+Space toggles the focused row (as in Explorer); Space alone is
+        // quick look, the preview panel (spec §5.3.1).
+        else if (e.key === " " && isMod(e)) model.setSelection(toggleFocused(sel));
+        else if (e.key === " " && !typeahead.active()) model.togglePreview();
         else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
             const hit = typeahead.next(e.key, order(), sel.focus);
             if (hit) {
@@ -308,7 +431,16 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         }
         items.push(
             { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(path).catch(fail) },
-            { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", shortcut: isMacOS() ? "⌘C" : "Ctrl+C", onSelect: () => copyPaths(many ? list : [entry]) },
+            // One item per agent pane on screen (the DOM menu has no submenus).
+            ...agentTargets().map((t): ContextMenuItem => ({
+                type: "action",
+                label: `Attach to ${t.name}`,
+                onSelect: () => attachTo(t, many ? list : [entry]),
+            })),
+            { type: "separator" },
+            { type: "action", label: "Cut", shortcut: isMacOS() ? "⌘X" : "Ctrl+X", onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
+            { type: "action", label: "Copy", shortcut: isMacOS() ? "⌘C" : "Ctrl+C", onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
+            { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", onSelect: () => copyPaths(many ? list : [entry]) },
             { type: "separator" },
             { type: "action", label: "Rename", shortcut: "F2", disabled: many, onSelect: () => model.setRenaming(entry.name) },
             { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", shortcut: "Delete", onSelect: () => void model.trash(many ? list : [entry]) },
@@ -323,11 +455,39 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         return items;
     };
 
+    /** The agent panes on screen, by name: "Attach to <agent>" targets. */
+    const agentTargets = (): { blockId: string; name: string }[] =>
+        visibleDropTargets()
+            .map((blockId) => ({ blockId, meta: getObjectValue<Block>(makeORef("block", blockId))?.meta }))
+            .filter((t) => t.meta?.view === "agent")
+            .map((t) => ({ blockId: t.blockId, name: (t.meta?.["agentName"] as string | undefined)?.trim() || "agent" }));
+
+    const attachTo = (target: { blockId: string; name: string }, list: FsEntry[]): void => {
+        const paths = list.map((e) => model.pathOf(e.name));
+        void dropPathsOnto(target.blockId, paths).then(
+            (ok) =>
+                model.setStatus(
+                    ok
+                        ? { text: `Attached ${list.length === 1 ? list[0].name : `${list.length} items`} to ${target.name}`, tone: "info" }
+                        : { text: `${target.name} can't take files right now`, tone: "error" },
+                    4000
+                ),
+            (err) => model.setStatus({ text: `Couldn't attach: ${errorText(err)}`, tone: "error" })
+        );
+    };
+
     const folderMenu = (): ContextMenuItem[] => {
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
         return [
             { type: "action", label: "New folder", shortcut: isMacOS() ? "⌘⇧N" : "Ctrl+Shift+N", onSelect: () => void model.createNew("dir") },
             { type: "action", label: "New file", onSelect: () => void model.createNew("file") },
+            {
+                type: "action",
+                label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
+                shortcut: isMacOS() ? "⌘V" : "Ctrl+V",
+                disabled: !clipboard(),
+                onSelect: () => void model.paste(),
+            },
             { type: "separator" },
             { type: "action", label: "Open terminal here", onSelect: () => void openTerminalHere(model.path(), model.blockId).catch(fail) },
             { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(model.path()).catch(fail) },
@@ -350,6 +510,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     const onListContextMenu = (e: MouseEvent): void => {
         e.preventDefault();
+        // Like a row: stop here, or the click bubbles to the pane frame and the
+        // generic pane menu opens on top of this one.
+        e.stopPropagation();
         setMenu({ x: e.clientX, y: e.clientY, items: folderMenu() });
     };
 
@@ -375,7 +538,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const summary = createMemo(() => {
         const all = entries();
         const sel = model.selectedEntries().filter((e) => model.selection().names.has(e.name));
-        const count = `${all.length} item${all.length === 1 ? "" : "s"}${model.partial() ? "…" : ""}`;
+        const total = model.rawEntries().filter((e) => model.showHidden() || !e.hidden).length;
+        const count = model.filter()
+            ? `${all.length} of ${total} items match`
+            : `${all.length} item${all.length === 1 ? "" : "s"}${model.partial() ? "…" : ""}`;
         if (sel.length === 0) return count;
         const bytes = sel.reduce((n, e) => n + (e.size ?? 0), 0);
         const size = sel.some((e) => !e.is_dir) ? ` · ${formatBytes(bytes)}` : "";
@@ -432,6 +598,30 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         </For>
                     </nav>
                 </Show>
+                <Show when={filterOpen() || model.filter() !== ""}>
+                    <input
+                        ref={filterInput}
+                        class="files-filter-input"
+                        placeholder="Filter"
+                        aria-label="Filter this folder"
+                        value={model.filter()}
+                        spellcheck={false}
+                        onInput={(e) => model.setFilter(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Escape") closeFilter();
+                            else if (e.key === "Enter" || e.key === "ArrowDown") {
+                                e.preventDefault();
+                                const first = model.order()[0];
+                                if (first) model.setSelection({ names: new Set([first]), focus: first, anchor: first });
+                                listEl?.focus();
+                            }
+                        }}
+                    />
+                </Show>
+                <button type="button" class="files-tool" title={isMacOS() ? "Filter (⌘F)" : "Filter (Ctrl+F)"} onClick={openFilter}>
+                    <i class="fa fa-filter" />
+                </button>
                 <button type="button" class="files-tool" title="New folder" onClick={() => void model.createNew("dir")}>
                     <i class="fa fa-folder-plus" />
                 </button>
@@ -457,6 +647,16 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     onClick={() => model.toggleSidebar()}
                 >
                     <i class="fa fa-table-columns" />
+                </button>
+                <button
+                    type="button"
+                    class="files-tool"
+                    classList={{ "files-tool-on": model.showPreview() }}
+                    title={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"}
+                    aria-pressed={model.showPreview()}
+                    onClick={() => model.togglePreview()}
+                >
+                    <i class="fa fa-eye" />
                 </button>
             </div>
 
@@ -489,7 +689,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                 {(a) => (
                                     <button type="button" class="files-place" title={a.path} onClick={() => void model.navigate(a.path)}>
                                         <i class="fa fa-robot" />
-                                        <span>{a.name}</span>
+                                        <span style={a.color ? { color: a.color } : undefined}>{a.name}</span>
                                     </button>
                                 )}
                             </For>
@@ -508,6 +708,15 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     tabIndex={0}
                     onKeyDown={onKeyDown}
                     onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+                    // Over blank space, the header or a notice: no folder row is
+                    // the target any more (ReAgent on #4224). A row's own
+                    // dragover runs first and sets or clears it.
+                    onDragOver={(e) => {
+                        if (!(e.target instanceof Element && e.target.closest(".files-rows .files-row"))) setDropRow(null);
+                    }}
+                    onDragLeave={(e) => {
+                        if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
+                    }}
                     onContextMenu={onListContextMenu}
                     onClick={(e) => {
                         if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });
@@ -563,7 +772,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         </Match>
                         <Match when={model.phase() === "ready" && entries().length === 0 && !model.partial()}>
                             <div class="files-notice">
-                                {model.rawEntries().length > 0 ? "Only hidden files here." : "This folder is empty."}
+                                {model.filter()
+                                    ? `Nothing here matches “${model.filter()}”.`
+                                    : model.rawEntries().length > 0
+                                      ? "Only hidden files here."
+                                      : "This folder is empty."}
                             </div>
                         </Match>
                     </Switch>
@@ -581,9 +794,15 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                                 selected={model.selection().names.has(name)}
                                                 focused={model.selection().focus === name}
                                                 renaming={model.renaming() === name}
+                                                git={model.gitStateOf().get(name)}
+                                                touch={touchOf(name)}
                                                 onClick={(e) => onRowClick(e, entry())}
                                                 onOpen={() => openEntry(entry())}
                                                 onContextMenu={(e) => onRowContextMenu(e, entry())}
+                                                onDragStart={(e) => onRowDragStart(e, entry())}
+                                                onDragOver={() => onRowDragOver(entry())}
+                                                dropTarget={dropRow() === name}
+                                                onDragEnd={() => endPathDrag()}
                                                 onRenameDone={() => listEl?.focus()}
                                             />
                                         )}
@@ -593,10 +812,55 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         </div>
                     </Show>
                 </div>
+                <Show when={model.showPreview()}>
+                    <FilesPreview
+                        entry={previewEntry()}
+                        pathOf={(name) => model.pathOf(name)}
+                        onOpen={openEntry}
+                        onOpenWithOs={(entry) =>
+                            void openWithOs(model.pathOf(entry.name)).catch((err) =>
+                                model.setStatus({ text: `Couldn't open ${entry.name}: ${errorText(err)}`, tone: "error" })
+                            )
+                        }
+                    />
+                </Show>
             </div>
 
+            <For each={model.ops.ops().filter((o) => o.state === "running" || o.state === "conflict")}>
+                {(op) => (
+                    <div class="files-op" role="status">
+                        <span class="files-op-text">{opProgressText(op)}</span>
+                        <span class="files-op-bar" aria-hidden="true">
+                            <span
+                                class="files-op-fill"
+                                style={{ width: `${op.total_bytes > 0 ? Math.floor((op.done_bytes / op.total_bytes) * 100) : op.total_items > 0 ? Math.floor((op.done_items / op.total_items) * 100) : 0}%` }}
+                            />
+                        </span>
+                        <button type="button" class="files-status-undo" onClick={() => void model.ops.cancel(op.op_id)}>
+                            Cancel
+                        </button>
+                    </div>
+                )}
+            </For>
+            <Show when={model.ops.ops().find((o) => o.state === "conflict" && o.conflict)}>
+                {(op) => <ConflictDialog op={op()} onResolve={(choice, all) => void model.ops.resolve(op().op_id, choice, all)} onCancel={() => void model.ops.cancel(op().op_id)} />}
+            </Show>
             <div class="files-status" role="status">
-                <Show when={model.status()} fallback={<span>{summary()}</span>}>
+                <Show
+                    when={model.status()}
+                    fallback={
+                        <span>
+                            {summary()}
+                            <Show when={model.git()}>
+                                {(g) => (
+                                    <span class="files-git-summary" title="git branch, commits ahead/behind its upstream, and changes under this folder">
+                                        <i class="fa fa-code-branch" aria-hidden="true" /> {gitSummary(g())}
+                                    </span>
+                                )}
+                            </Show>
+                        </span>
+                    }
+                >
                     {(msg) => (
                         <span classList={{ "files-status-error": msg().tone === "error" }}>
                             {msg().text}
@@ -635,6 +899,28 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     );
 }
 
+/** The letter beside a name and what it means (spec §12, git decorations).
+ *  A folder shows the most pressing state of what's inside it. */
+export const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title: string }> = {
+    untracked: { letter: "U", title: "Untracked: new, not yet added to git" },
+    added: { letter: "A", title: "Added to git, not yet committed" },
+    renamed: { letter: "R", title: "Renamed" },
+    deleted: { letter: "D", title: "Deleted" },
+    modified: { letter: "M", title: "Changed since the last commit" },
+    conflicted: { letter: "!", title: "Merge conflict" },
+};
+
+/** "main ↑1 ↓2 · 3 changes" for the status line. */
+export function gitSummary(g: FsGitStatus): string {
+    const parts: string[] = [];
+    let head = g.branch ?? "detached";
+    if (g.ahead) head += ` ↑${g.ahead}`;
+    if (g.behind) head += ` ↓${g.behind}`;
+    parts.push(head);
+    if (g.changes > 0) parts.push(`${g.changes} change${g.changes === 1 ? "" : "s"}`);
+    return parts.join(" · ");
+}
+
 /** What went wrong listing a folder, in words, never as an empty folder
  *  (§9.1.4 item 4). */
 export function errorMessage(kind: string | undefined, message: string | undefined, place: string): string {
@@ -663,6 +949,12 @@ function FileRow(props: {
     onOpen: () => void;
     onContextMenu: (e: MouseEvent) => void;
     onRenameDone: () => void;
+    onDragStart: (e: DragEvent) => void;
+    onDragEnd: () => void;
+    git?: FsGitState;
+    touch?: Touch;
+    onDragOver: () => void;
+    dropTarget: boolean;
 }): JSX.Element {
     return (
         <div
@@ -672,6 +964,8 @@ function FileRow(props: {
                 "files-row-selected": props.selected,
                 "files-row-focused": props.focused,
                 "files-row-hidden": props.entry.hidden,
+                "files-row-ignored": props.git === "ignored",
+                "files-row-droptarget": props.dropTarget,
             }}
             role="row"
             aria-rowindex={props.index + 2}
@@ -680,6 +974,10 @@ function FileRow(props: {
             onClick={props.onClick}
             onDblClick={props.onOpen}
             onContextMenu={props.onContextMenu}
+            draggable={!props.renaming}
+            onDragStart={props.onDragStart}
+            onDragOver={props.onDragOver}
+            onDragEnd={props.onDragEnd}
             title={props.entry.error ?? (props.entry.link_target ? `→ ${props.entry.link_target}` : undefined)}
         >
             <div class="files-cell files-col-name" role="gridcell">
@@ -687,11 +985,28 @@ function FileRow(props: {
                 <Show when={props.entry.is_symlink}>
                     <i class="fa fa-share files-link-mark" aria-label="link" />
                 </Show>
+                <Show when={props.touch}>
+                    {(t) => (
+                        <span
+                            class="files-touch"
+                            style={t().color ? { "background-color": t().color } : undefined}
+                            title={`${props.entry.is_dir ? "Something inside was changed" : "Changed"} by ${t().agentName}, ${formatModified(t().at)} (${t().tool})`}
+                            aria-label={`changed by ${t().agentName}`}
+                        />
+                    )}
+                </Show>
                 <Show when={props.renaming} fallback={<span class="files-name">{props.entry.name}</span>}>
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
                 </Show>
                 <Show when={props.entry.error}>
                     <i class="fa fa-triangle-exclamation files-entry-error" aria-label={props.entry.error} />
+                </Show>
+                <Show when={props.git && props.git !== "ignored" && GIT_MARKS[props.git]}>
+                    {(mark) => (
+                        <span class={`files-git files-git-${props.git}`} title={mark().title} aria-label={mark().title}>
+                            {mark().letter}
+                        </span>
+                    )}
                 </Show>
             </div>
             <div class="files-cell files-col-modified" role="gridcell">
@@ -784,3 +1099,66 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
 
 /** The full path of an entry in the folder shown (for tests and callers). */
 export const entryPath = (dir: string, name: string): string => joinPath(dir, name);
+
+/** A copy or move found something already at the destination (§7.2). */
+function ConflictDialog(props: {
+    op: import("./files-ops").OpView;
+    onResolve: (choice: "replace" | "skip" | "keep_both", applyToAll: boolean) => void;
+    onCancel: () => void;
+}): JSX.Element {
+    const [all, setAll] = createSignal(false);
+    const c = () => props.op.conflict!;
+    const name = () => c().dest.split(/[\\/]/).pop() ?? c().dest;
+    const side = (size?: number, mtime?: number) =>
+        [size != null ? formatBytes(size) : null, mtime != null ? new Date(mtime).toLocaleString() : null].filter(Boolean).join(", ");
+    let first: HTMLButtonElement | undefined;
+    onMount(() => first?.focus());
+    return (
+        <Portal>
+            <div
+                class="files-conflict-overlay"
+                onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                        e.preventDefault();
+                        props.onCancel();
+                    }
+                }}
+            >
+                <div class="files-conflict" role="alertdialog" aria-labelledby="files-conflict-title">
+                    <div id="files-conflict-title" class="files-conflict-title">
+                        “{name()}” already exists here
+                    </div>
+                    <div class="files-conflict-body">
+                        <div>
+                            {c().dest_is_dir ? "A folder" : "A file"} with that name is already in the destination
+                            {c().source_is_dir && c().dest_is_dir ? "." : `${c().dest_is_dir !== c().source_is_dir ? `, and the one being ${props.op.kind === "move" ? "moved" : "copied"} is a ${c().source_is_dir ? "folder" : "file"}.` : "."}`}
+                        </div>
+                        <Show when={!c().source_is_dir && !c().dest_is_dir}>
+                            <div class="files-conflict-sides">
+                                <div>Existing: {side(c().dest_size ?? undefined, c().dest_mtime ?? undefined)}</div>
+                                <div>Incoming: {side(c().source_size ?? undefined, c().source_mtime ?? undefined)}</div>
+                            </div>
+                        </Show>
+                        <label class="files-conflict-all">
+                            <input type="checkbox" checked={all()} onChange={(e) => setAll(e.currentTarget.checked)} /> Do this for every conflict
+                        </label>
+                    </div>
+                    <div class="files-conflict-actions">
+                        <button ref={first} type="button" class="files-button" onClick={() => props.onResolve("keep_both", all())}>
+                            Keep both
+                        </button>
+                        <button type="button" class="files-button" onClick={() => props.onResolve("skip", all())}>
+                            Skip
+                        </button>
+                        <button type="button" class="files-button files-button-danger" onClick={() => props.onResolve("replace", all())}>
+                            Replace
+                        </button>
+                        <button type="button" class="files-button" onClick={props.onCancel}>
+                            Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Portal>
+    );
+}

@@ -72,6 +72,54 @@ export function paneDropState(blockId: Accessor<string | undefined>): Accessor<P
     };
 }
 
+// ── In-app path drags ───────────────────────────────────────────────────
+//
+// A Hangar row dragged inside the app is a drag of host PATHS, not of OS
+// files: the renderer can't make a native file drag from the DOM. The
+// controller treats it exactly like an OS file drop that carries paths, so
+// the agent composer, the Editor, Media and terminal hooks take it unchanged
+// (SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.2). The paths live here, not only
+// in the DataTransfer, because `getData` is unreadable until the drop.
+
+/** The DataTransfer type that marks an in-app path drag. */
+export const PATHS_MIME = "application/x-agentmux-paths";
+
+let pathDrag: { paths: string[]; sourceBlockId?: string } | null = null;
+
+/** Start a path drag from `dragstart` (Hangar rows). */
+export function beginPathDrag(dt: DataTransfer, paths: string[], sourceBlockId?: string): void {
+    pathDrag = { paths, sourceBlockId };
+    dt.setData(PATHS_MIME, JSON.stringify(paths));
+    // Text elsewhere (a text field, another app) gets the paths themselves.
+    dt.setData("text/plain", paths.join("\n"));
+    dt.effectAllowed = "copyMove";
+}
+
+/** End it from `dragend`, whether or not anything took the drop. */
+export function endPathDrag(): void {
+    pathDrag = null;
+    end();
+}
+
+/** The paths of the path drag underway, if any. */
+export function pathDragPaths(): string[] | undefined {
+    return pathDrag?.paths;
+}
+
+/** The block a path drag started in, while one is underway. */
+export function pathDragSource(): string | undefined {
+    return pathDrag?.sourceBlockId;
+}
+
+function isPathDrag(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    return pathDrag != null && !!types && Array.from(types).includes(PATHS_MIME);
+}
+
+function dragFilesFromPaths(paths: string[]): DragFiles {
+    return { count: paths.length, types: paths.map(() => ""), names: paths.map(baseName) };
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 function dragFilesFromTransfer(dt: DataTransfer | null | undefined): DragFiles {
@@ -180,12 +228,14 @@ function queueRender(): void {
     });
 }
 
-function begin(dt: DataTransfer | null | undefined): Session {
-    const s: Session = { files: dragFilesFromTransfer(dt), verdicts: new Map(), renderQueued: false };
+function begin(dt: DataTransfer | null | undefined, paths?: string[]): Session {
+    const s: Session = { files: paths ? dragFilesFromPaths(paths) : dragFilesFromTransfer(dt), verdicts: new Map(), renderQueued: false };
     session = s;
     // Every visible accepting pane up front, so valid ones are Armed at once.
     for (const id of visiblePanes()) verdictFor(s, id);
     queueRender();
+    // An in-app drag already knows its names.
+    if (paths) return s;
     // Names arrive a moment later from the host; re-ask every verdict once.
     void peekDragPaths().then((paths) => {
         if (session !== s || paths.length === 0) return;
@@ -212,8 +262,9 @@ function touch(s: Session): void {
 }
 
 function onDragEnterOrOver(e: DragEvent): void {
-    if (!isFileDrag(e)) return;
-    const s = session ?? begin(e.dataTransfer);
+    const inApp = isPathDrag(e);
+    if (!inApp && !isFileDrag(e)) return;
+    const s = session ?? begin(e.dataTransfer, inApp ? pathDrag!.paths : undefined);
     touch(s);
     const id = paneAt(e.target);
     const v = id ? verdictFor(s, id) : undefined;
@@ -232,6 +283,17 @@ function onDragLeave(e: DragEvent): void {
 }
 
 async function onDrop(e: DragEvent): Promise<void> {
+    if (isPathDrag(e)) {
+        e.preventDefault();
+        const paths = pathDrag!.paths;
+        const id = paneAt(e.target);
+        end();
+        const hook = id ? hooks.get(id) : undefined;
+        if (!hook || !hook.accept(dragFilesFromPaths(paths)).ok) return;
+        e.stopPropagation();
+        await hook.drop({ paths, files: [] });
+        return;
+    }
     if (!isFileDrag(e)) return;
     e.preventDefault();
     const files = Array.from(e.dataTransfer?.files ?? []);
@@ -273,8 +335,28 @@ export function installFileDropController(win: Window = window): () => void {
     };
 }
 
+/**
+ * Hand `paths` to `blockId`'s drop hook as if they had been dropped on it:
+ * the Files pane's "Attach to <agent>" (spec §8.2, route 2), so a menu item
+ * and a drag end in exactly the same place. False when the pane has no hook
+ * or refuses them.
+ */
+export async function dropPathsOnto(blockId: string, paths: string[]): Promise<boolean> {
+    const hook = hooks.get(blockId);
+    if (!hook || paths.length === 0) return false;
+    if (!hook.accept(dragFilesFromPaths(paths)).ok) return false;
+    await hook.drop({ paths, files: [] });
+    return true;
+}
+
+/** Block ids with a drop hook whose pane is on screen now. */
+export function visibleDropTargets(): string[] {
+    return visiblePanes();
+}
+
 /** Test hook: forget every registration and session. */
 export function resetFileDropForTests(): void {
     hooks.clear();
+    pathDrag = null;
     end();
 }

@@ -199,7 +199,7 @@ async fn editing_an_existing_entry_chains_a_second_version() {
 }
 
 #[tokio::test]
-async fn list_excludes_system_entries() {
+async fn list_includes_system_entries_flagged_and_first() {
     let state = crate::server::tests::test_state();
     state.id_store.bundle_upsert(&ordinary_bundle("ordinary-1", true)).unwrap();
     let mut sys = ordinary_bundle("sys-2", true);
@@ -208,8 +208,18 @@ async fn list_excludes_system_entries() {
 
     let result = global_memory_list_impl(&state).unwrap();
     let entries = result.get("entries").and_then(|v| v.as_array()).unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].get("id").and_then(|v| v.as_str()), Some("ordinary-1"));
+    assert_eq!(entries.len(), 2);
+    // System rows sort first (bundle_list_global's order) and say so.
+    assert_eq!(entries[0].get("id").and_then(|v| v.as_str()), Some("sys-2"));
+    assert_eq!(entries[0].get("system").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(entries[1].get("id").and_then(|v| v.as_str()), Some("ordinary-1"));
+    assert_eq!(entries[1].get("system").and_then(|v| v.as_bool()), Some(false));
+    // Listing is not access: the content never leaves, and every mutation path
+    // still refuses a system id.
+    assert!(entries[0].get("content").is_none() && entries[0].get("instructions").is_none());
+    assert!(global_memory_read_impl(&state, "sys-2").is_err());
+    assert!(global_memory_remove_impl(&state, "sys-2").is_err());
+    assert!(global_memory_write_impl(&state, "agent-1", "", Some("sys-2"), "x", "y", None).is_err());
 }
 
 #[tokio::test]

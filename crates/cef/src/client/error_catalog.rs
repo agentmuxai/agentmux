@@ -229,6 +229,14 @@ pub(crate) fn describe(error_code_i32: i32) -> ErrorCopy {
         ),
 
         // --- Address / scheme / general request ---------------------------
+        // Chromium refuses to load pages from certain ports (6000, 6665-6669,
+        // ...) whatever is listening there. Permanent, so navigation.rs does not
+        // auto-retry it (see `is_permanent_load_error`).
+        x if x == c(cef_errorcode_t::ERR_UNSAFE_PORT) => copy(
+            "This port is blocked",
+            "This port is blocked",
+            "The browser engine refuses to load pages from this port, whatever is running on it.",
+        ),
         x if x == c(cef_errorcode_t::ERR_INVALID_URL) => {
             copy("Invalid address", "Invalid address", "The requested address is not a valid URL.")
         }
@@ -271,5 +279,23 @@ pub(crate) fn describe(error_code_i32: i32) -> ErrorCopy {
         // never the data: URI), with CEF's own error_text folded in by the
         // caller for the detail line.
         _ => copy("This page isn't working", "This page isn't working", "Couldn't load this page."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::describe;
+    use cef::sys::cef_errorcode_t;
+
+    /// A blocked port gets its own words, not the generic "This page isn't
+    /// working" — the generic page is what made the 2026-10-02 incident
+    /// undiagnosable from the window.
+    #[test]
+    fn a_blocked_port_is_described_in_its_own_words() {
+        let copy = describe(cef_errorcode_t::ERR_UNSAFE_PORT as i32);
+        assert_eq!(copy.title, "This port is blocked");
+        assert_eq!(copy.heading, "This port is blocked");
+        assert!(copy.detail.contains("port"));
+        assert_ne!(copy.title, describe(cef_errorcode_t::ERR_FAILED as i32).title);
     }
 }

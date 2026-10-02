@@ -5,7 +5,7 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
@@ -17,6 +17,7 @@ import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import type { AgentViewModel } from "../agent-model";
+import { compactionProgress, estimateCompactionMs, readCompactionSamples } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
 import { turnAddedInput } from "@/app/store/agent-pane-state/turn-contribution";
@@ -112,6 +113,13 @@ interface AgentWorkingRowProps {
      *  exactly one place to check "is something happening right now." Takes
      *  priority over the normal Working/tool display. */
     compacting?: CompactionState | null;
+    /** Tokens in the pane's context (`state.lastContextTokens`). While
+     *  `compacting`, the row estimates how long this compaction will take from
+     *  earlier ones (`compaction-estimate.ts`) scaled by this, and shows an
+     *  ESTIMATE bar — Claude Code reports no real compaction progress, so the
+     *  bar is labeled as an estimate. Read once when the compaction starts, so
+     *  the estimate doesn't move mid-run. No earlier compactions → no bar. */
+    compactionContextTokens?: number | null;
     /** Live "recovering from a stale --resume session id" state, or null —
      *  same relocation as `compacting` above. Fires ONLY after the
      *  underlying process has already crashed/exited, so this can be set
@@ -227,6 +235,24 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         const r = props.reconnecting;
         return r ? (tick(), Date.now() - r.startedAt) : 0;
     });
+    // Estimated compaction progress (Tier 4). Only while compacting, only with
+    // an estimate, and never while reconnecting (which takes the row over).
+    // The estimate is keyed on `startedAt` and reads the context size untracked,
+    // so it is computed once per compaction and stays put while it runs.
+    const compactStartedAt = createMemo(() => props.compacting?.startedAt ?? null);
+    const compactionEstimateMs = createMemo(() =>
+        compactStartedAt() == null
+            ? null
+            : estimateCompactionMs(
+                  readCompactionSamples(),
+                  untrack(() => props.compactionContextTokens)
+              )
+    );
+    const compactionBar = createMemo(() => {
+        const est = compactionEstimateMs();
+        if (!props.compacting || props.reconnecting || !est) return null;
+        return { estimateMs: est, ...compactionProgress(compactingElapsedMs(), est) };
+    });
 
     createEffect(() => {
         if (!props.loading) return;
@@ -282,7 +308,14 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         // states were relocated from. `reconnecting` takes priority (see
         // its prop doc comment above).
         if (props.reconnecting) return formatElapsedCompact(reconnectingElapsedMs());
-        if (props.compacting) return formatElapsedCompact(compactingElapsedMs());
+        if (props.compacting) {
+            const elapsed = formatElapsedCompact(compactingElapsedMs());
+            const bar = compactionBar();
+            if (!bar) return elapsed;
+            return bar.over
+                ? `${elapsed} · longer than usual`
+                : `${elapsed} / ~${formatElapsedCompact(bar.estimateMs)}`;
+        }
         const right: string[] = [];
         if (props.turnTokens) right.push(fmtTurnTokens(props.turnTokens));
         right.push(formatElapsedCompact(elapsedMs()));
@@ -323,7 +356,14 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 <span class="agent-working-row-left">
                     {leftText().slice(0, revealed())}
                 </span>
-                <span class="agent-working-row-right">
+                <span
+                    class="agent-working-row-right"
+                    title={
+                        compactionBar()
+                            ? "Estimate from your earlier compactions. Claude Code doesn't report compaction progress."
+                            : undefined
+                    }
+                >
                     {rightText()}
                     <Show when={showCancelLogin()}>
                         <button
@@ -334,6 +374,26 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                         </button>
                     </Show>
                 </span>
+                <Show when={compactionBar()}>
+                    {(bar) => (
+                        <span
+                            class="agent-working-row-progress"
+                            classList={{ "is-over": bar().over }}
+                            role="progressbar"
+                            aria-label="Estimated compaction progress"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={bar().over ? undefined : Math.round(bar().fraction * 100)}
+                            aria-valuetext={
+                                bar().over
+                                    ? "Taking longer than the estimate"
+                                    : `About ${Math.round(bar().fraction * 100)} percent, estimated`
+                            }
+                        >
+                            <span class="agent-working-row-progress-fill" style={{ width: `${bar().fraction * 100}%` }} />
+                        </span>
+                    )}
+                </Show>
             </span>
         </Show>
     );

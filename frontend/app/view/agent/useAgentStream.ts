@@ -36,6 +36,8 @@
  */
 
 import { getFileSubject } from "@/app/store/mps";
+import { getObjectValue, makeORef } from "@/app/store/mos";
+import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
@@ -45,6 +47,7 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { noteTaskFrame } from "./activity/task-outcomes";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
 import { workingFromPhase, type AgentPaneEvent, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
@@ -219,6 +222,12 @@ interface UseAgentStreamOpts {
 /**
  * Subscribe to subprocess output and parse it into styled DocumentNodes.
  */
+/** The colour an agent pane is drawn in (its focused border), if set. */
+function agentColorOf(blockId: string): string | undefined {
+    const c = getObjectValue<Block>(makeORef("block", blockId))?.meta?.["frame:activebordercolor"];
+    return typeof c === "string" ? c : undefined;
+}
+
 export function useAgentStream({
     blockId,
     model,
@@ -564,6 +573,11 @@ export function useAgentStream({
                 // `compact-boundary.ts` (Codex P1, PR #2378 round 2) so the two
                 // can't drift on what counts as a valid frame.
                 if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
+                    // Feeds only the compaction-time ESTIMATE (the working row's
+                    // progress bar) with its own parser — it reads the frame's
+                    // real stdout shape, and changes nothing below. See
+                    // SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §3/§5.
+                    recordCompactionSample(parseCompactionSample(rawEvent));
                     // Compaction happens MID-turn — flushParserPending() is
                     // only called at finalizeTurn (useTurnLifecycle.ts), so
                     // without an explicit flush here the parser's
@@ -849,6 +863,12 @@ export function useAgentStream({
                     // the broker's replay-on-subscribe covers the late-
                     // subscribe race that the per-tool model lost.
                     if (event.type === "tool_call") {
+                        // Files this agent writes, for the Files pane's
+                        // "touched by" badges (touched-files.ts).
+                        noteToolCall(
+                            { blockId, agentName, color: agentColorOf(blockId) },
+                            { id: event.id, tool: event.tool, params: event.params }
+                        );
                         if (event.tool) {
                             model.dispatchPane({
                                 type: "ToolStart",
@@ -859,6 +879,7 @@ export function useAgentStream({
                             model.dispatchPane({ type: "ToolEnd" });
                         }
                     } else if (event.type === "tool_result") {
+                        noteToolResult(event.id, event.status);
                         model.dispatchPane({ type: "ToolEnd" });
                     } else if (event.type === "tool_chunk") {
                         // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):

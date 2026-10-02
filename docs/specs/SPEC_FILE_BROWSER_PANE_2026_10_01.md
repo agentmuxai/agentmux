@@ -1,6 +1,6 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1); Phases 2–4 are not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) and touched-by badges (§12.4); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
@@ -335,6 +335,25 @@ Each phase is independently shippable and reviewable.
 - **Frontend:** the details view (hand-windowed rows keyed by name, natural sort, folders first), breadcrumb and Ctrl+L, history, Places with drives and agent workspaces, the §5.3.1 keys and type-ahead, open by kind beside the pane, the context menu, rename and new item, Trash with Undo, Shift+Delete with a named confirmation, live re-list (deferred while hidden), the settled-content hold, and the macOS rules of §9.1.4: a protected folder is never listed until the user clicks Open on the pane's explanation, once per release; a denial says where to turn access on. `Info.plist` has the five folder usage strings.
 - **Not built from Phase 0:** the editor tree model was not extracted, `fs.stat` was not added, and the editor RPCs keep their names.
 - **Not yet verified:** nothing has been run on macOS (the §9.1.3 test plan stands), and the §10 budgets have not been traced.
+
+### 12.2 Phase 2a: transfers, preview, filter, files to agents
+
+- **Copy and move jobs (§7.1, §7.2):** `fs.op.start` / `fs.op.resolve` / `fs.op.cancel`, with `files:op` progress events scoped to the pane. Conflicts ask Replace, Skip or Keep both, optionally for every conflict; a folder onto a folder merges. A move within a drive is a rename; across drives it is a copy, and each source is deleted only after its copy finished. Cancel stops between files and between chunks, and removes a partial file. Links are copied as links, never followed.
+- **Clipboard:** Ctrl+X / Ctrl+C / Ctrl+V (and Cut, Copy, Paste in the menus), shared by every Hangar pane in the window. Ctrl+C also puts the paths on the system clipboard. A cut is pasted once.
+- **Drag (§8.2, route 1):** a row (or the selection) drags as an in-app *path drag* (`beginPathDrag` in `app/drag/file-drop.ts`). The drop controller treats it like an OS file drop that carries paths, so the agent composer, the Editor, Media and terminal panes take it unchanged. Dropped on another Hangar pane it moves (same drive) or copies; OS files dropped on Hangar are copied in.
+- **Attach to agent (§8.2, route 2):** one menu item per agent pane on screen, which hands the paths to that pane's own drop hook (`dropPathsOnto`), so it ends exactly where a drag would.
+- **Preview panel (§6.6):** Space toggles it (Ctrl+Space toggles the focused row's selection instead). Code is highlighted, Markdown rendered, images shown; text reads only the first 256 KB, through a ranged request; binary files and video/audio get a card. A preview starts 150 ms after the selection settles and is abandoned when it moves.
+- **Filter:** Ctrl+F or `/`, case-insensitive, per folder.
+- Dropping onto a folder row puts the files in that folder (the row is outlined while the drag is over it), including a drag within the same pane; dropped anywhere else in the pane they go into the folder shown, and a same-pane drop there does nothing.
+- Not built: the tree view, route 3 (Alt+K `@path` mention).
+
+### 12.3 Git markers
+
+`fs.git_status` runs `git status --porcelain=v2 -z --branch --untracked-files=normal --ignored=matching -- .` in the folder shown, 300 ms after a listing settles, and folds the result into one state per entry: a letter beside the name (M, A, D, R, U, ! for a conflict; a folder shows the most pressing state inside it), ignored entries dimmed, and the branch with ahead/behind and the number of changes under the folder in the status line. Browsing a repository must not run code it chose. A repository's own config can name programs that `git status` executes: `core.fsmonitor`, and a `filter.<name>.clean` / `.process` applied through its `.gitattributes` whenever a file's stat data differs from the index (ReAgent found the second on #4223). Every run passes `-c core.fsmonitor=false`, blanks each filter the repository's own config defines (`git config --show-scope` tells them from the user's system and global ones, such as Git LFS, which are kept; an older git without `--show-scope` gets every filter blanked; a repository with a filter whose name contains `=`, which `-c` can't express, gets no git run at all), does not enter submodules (`--ignore-submodules=all`, as each has its own config), passes `--no-optional-locks`, inherits none of the instance's `AGENTMUX_*` environment, never prompts, and is killed after 4 s. Tests with real repositories prove both overrides matter: without them, git runs the repository's program.
+
+### 12.4 Touched by an agent (§8.4)
+
+A coloured dot before a row's name when an agent wrote or edited it in the last 30 minutes, in the agent's own colour (its pane border); a folder shows one when something inside it was changed. The tooltip says who, when and with which tool. The source is each agent pane's live stream: a `Write`, `Edit`, `MultiEdit` or `NotebookEdit` call is remembered by its id, and counts once its result reports success (`app/store/touched-files.ts`). Nothing watches the filesystem for this, so a user's own save shows no badge. Kept in memory for the window: up to 2,000 paths, each for 30 minutes. History replay doesn't feed it, so a reload starts empty.
 
 ## 13. Names
 

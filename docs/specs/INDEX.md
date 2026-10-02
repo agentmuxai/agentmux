@@ -307,6 +307,7 @@ partial list.
 | [`SPEC_DEV_ENV_ISOLATION`](SPEC_DEV_ENV_ISOLATION.md) | Dev-Build Environment Isolation |
 | [`SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19`](SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md) | SPEC: Fix misleading guidance when a second `task dev` instance collides |
 | [`SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16`](SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md) | SPEC: Restore Launcher IPC in `task dev` Mode |
+| [`SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02`](SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md) | SPEC: A dev window must never be pointed at a port Chromium refuses to load |
 | [`SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25`](SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25.md) | Spec: `task dev TITLE="..."` — per-session window title for dev builds |
 | [`SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12`](SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12.md) | SPEC: Divider-Pill Rule Misalignment Fix |
 | [`SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23`](SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md) | SPEC: Port the specs-index generator to Node |
@@ -318,6 +319,7 @@ partial list.
 | [`SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22`](SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22.md) | SPEC: `FleetBroadcast` reaches cross-channel/LAN/WAN targets |
 | [`SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22`](SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) | SPEC: `FleetBulkStop` reaches cross-channel targets; LAN/WAN deliberately deferred |
 | [`SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29`](SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) | SPEC: Floating-pane edge-resize (Win32) |
+| [`SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02`](SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md) | SPEC: `GlobalMemoryList` lists the system rows too, flagged and read-only |
 | [`SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) | SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry |
 | [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
 | [`SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17`](SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md) | SPEC: External-link routing + single robust "Restore" recovery |
@@ -521,6 +523,7 @@ partial list.
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
+| [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21`](SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) | SPEC: cross-channel agent history resolution |
@@ -1090,6 +1093,7 @@ partial list.
 | [`browser-pane-state-catalog`](browser-pane-state-catalog.md) | Browser pane state catalog |
 | [`container-agent-runtime`](container-agent-runtime.md) | Spec: Container Agent Runtime |
 | [`modal-cleanup-migration-2026-05-01`](modal-cleanup-migration-2026-05-01.md) | Modal Cleanup — Migration Audit & Plan |
+| [`replace-pane-widget`](replace-pane-widget.md) | Replace Pane Context Menu |
 | [`service-update-consolidation`](service-update-consolidation.md) | Analysis: Consolidate Object Update Return Paths |
 | [`sysinfo-continuous-monitor-animation-2026-05-03`](sysinfo-continuous-monitor-animation-2026-05-03.md) | Sysinfo Plot — Continuous-Monitor Animation |
 | [`windows-firewall-fix`](windows-firewall-fix.md) | Windows Firewall Popup — Root Cause & Fix |
@@ -1217,7 +1221,6 @@ Fix one when you touch it and know its real state.
 | [`process-lifecycle-v2`](process-lifecycle-v2.md) | Process Lifecycle v2: OS-Level Parent-Child Binding |
 | [`process-state-tracker`](process-state-tracker.md) | Process State Tracker — Spec |
 | [`readme-rewrite`](readme-rewrite.md) | Spec: README.md Rewrite |
-| [`replace-pane-widget`](replace-pane-widget.md) | Replace Pane Context Menu |
 | [`responsive-agent-pane`](responsive-agent-pane.md) | Spec: Responsive Agent Pane |
 | [`runtime-logging`](runtime-logging.md) | Spec: Runtime Logging Infrastructure Rewrite |
 | [`secondary-windows-impl-plan`](secondary-windows-impl-plan.md) | Secondary Windows CEF Views — Implementation Plan |

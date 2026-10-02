@@ -15,9 +15,10 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
+import { recordCompactionSample } from "../compaction-estimate";
 import { ObjectService } from "@/app/store/services";
 import type { AgentViewModel } from "../agent-model";
 import { requestComposerFocus } from "../composer-focus";
@@ -718,6 +719,93 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
 
         const left = container.querySelector(".agent-working-row-left") as HTMLElement;
         expect(left.className).toBe("agent-working-row-left");
+    });
+});
+
+// Tier 4 (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §5):
+// an ESTIMATED progress bar from earlier compactions' durations. Claude Code
+// reports no real progress, so it is labeled as an estimate and never "done".
+describe("AgentWorkingRow estimated compaction progress", () => {
+    const seed = (durationMs: number, preTokens = 50000, uuid = `s-${durationMs}`) =>
+        recordCompactionSample({ uuid, preTokens, durationMs });
+    const startedAgo = (ms: number) => ({ trigger: "auto" as const, startedAt: Date.now() - ms });
+    const right = (c: HTMLElement) => c.querySelector(".agent-working-row-right")?.textContent ?? "";
+    const bar = (c: HTMLElement) => c.querySelector<HTMLElement>(".agent-working-row-progress");
+    const fill = (c: HTMLElement) => c.querySelector<HTMLElement>(".agent-working-row-progress-fill");
+
+    beforeEach(() => localStorage.clear());
+    afterEach(() => localStorage.clear());
+
+    it("shows only the elapsed counter, with no bar, when there is no history (R3)", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={startedAgo(12_000)} compactionContextTokens={50000} />
+        ));
+        expect(right(container)).toMatch(/^\d+s$/);
+        expect(bar(container)).toBeNull();
+    });
+
+    it("shows elapsed / ~typical and an estimate bar once there is history", () => {
+        seed(30_000);
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={startedAgo(12_000)} compactionContextTokens={50000} />
+        ));
+        expect(right(container)).toBe("12s / ~30s");
+        expect(bar(container)?.getAttribute("role")).toBe("progressbar");
+        expect(bar(container)?.getAttribute("aria-valuenow")).toBe("40");
+        expect(bar(container)?.getAttribute("aria-valuetext")).toMatch(/estimated/);
+        expect(fill(container)?.style.width).toBe("40%");
+        expect(container.querySelector(".agent-working-row-right")?.getAttribute("title")).toMatch(/Estimate/);
+    });
+
+    it("on overshoot says 'longer than usual', goes indeterminate, and never reaches 100% (R2)", () => {
+        seed(30_000);
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={startedAgo(45_000)} compactionContextTokens={50000} />
+        ));
+        expect(right(container)).toBe("45s · longer than usual");
+        expect(bar(container)?.classList.contains("is-over")).toBe(true);
+        expect(bar(container)?.hasAttribute("aria-valuenow")).toBe(false);
+        expect(fill(container)?.style.width).toBe("95%");
+    });
+
+    it("keeps the same estimate for the whole compaction, whatever else changes (R4)", () => {
+        seed(30_000);
+        const [tokens, setTokens] = createSignal(50000);
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={startedAgo(12_000)} compactionContextTokens={tokens()} />
+        ));
+        expect(right(container)).toBe("12s / ~30s");
+        seed(200_000, 50000, "late"); // a new sample lands mid-run
+        setTokens(500_000); // and the context size changes
+        expect(right(container)).toBe("12s / ~30s");
+    });
+
+    it("estimates afresh for the next compaction", () => {
+        seed(30_000);
+        const [compacting, setCompacting] = createSignal<ReturnType<typeof startedAgo> | null>(startedAgo(5_000));
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={compacting()} compactionContextTokens={50000} />
+        ));
+        expect(right(container)).toBe("5s / ~30s");
+        seed(90_000, 50000, "slow"); // history is now [30s, 90s] -> median 60s
+        // A different compaction has a different start time; keyed on it, the
+        // estimate is computed afresh.
+        setCompacting({ trigger: "auto", startedAt: Date.now() - 5_000 - 50 });
+        expect(right(container)).toBe("5s / ~1m 0s");
+    });
+
+    it("shows no bar while reconnecting, which takes the row over", () => {
+        seed(30_000);
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                compacting={startedAgo(12_000)}
+                reconnecting={{ startedAt: Date.now() }}
+                compactionContextTokens={50000}
+            />
+        ));
+        expect(bar(container)).toBeNull();
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Reconnecting…");
     });
 });
 
