@@ -37,6 +37,7 @@ const EXT_MAP: Record<string, string> = {
     fish: "fish",
     ps1: "powershell",
     psm1: "powershell",
+    psd1: "powershell",
     // Markup / config
     md: "markdown",
     mdx: "markdown",
@@ -45,6 +46,9 @@ const EXT_MAP: Record<string, string> = {
     yaml: "yaml",
     yml: "yaml",
     toml: "toml",
+    ini: "ini",
+    cfg: "ini",
+    properties: "ini",
     xml: "xml",
     html: "html",
     htm: "html",
@@ -57,6 +61,8 @@ const EXT_MAP: Record<string, string> = {
     sql: "sql",
     // Ruby
     rb: "ruby",
+    rake: "ruby",
+    gemspec: "ruby",
     // Java / JVM
     java: "java",
     kt: "kotlin",
@@ -82,6 +88,7 @@ const EXT_MAP: Record<string, string> = {
     svelte: "svelte",
     // Infrastructure
     tf: "terraform",
+    tfvars: "terraform",
     hcl: "hcl",
     graphql: "graphql",
     gql: "graphql",
@@ -98,6 +105,7 @@ const EXT_MAP: Record<string, string> = {
     groovy: "groovy",
     pl: "perl",
     dockerfile: "dockerfile",
+    mk: "makefile",
     lock: "text",
     log: "text",
 };
@@ -111,9 +119,10 @@ const BASENAME_MAP: Record<string, string> = {
     gemfile: "ruby",
     podfile: "ruby",
     vagrantfile: "ruby",
-    ".gitignore": "ignore",
-    ".npmignore": "ignore",
-    ".dockerignore": "ignore",
+    // Shiki has no grammar for ignore files.
+    ".gitignore": "text",
+    ".npmignore": "text",
+    ".dockerignore": "text",
     ".gitattributes": "ini",
     ".editorconfig": "ini",
     ".babelrc": "json",
@@ -158,7 +167,7 @@ export function detectLanguage(filePath: string, firstLine?: string): string {
     if (BASENAME_MAP[baseLower]) return BASENAME_MAP[baseLower];
 
     // Handle .env, .env.local, .env.production etc.
-    if (baseLower === ".env" || baseLower.startsWith(".env.")) return "bash";
+    if (baseLower === ".env" || baseLower.startsWith(".env.")) return "dotenv";
 
     // 3. Shebang scan
     if (firstLine?.startsWith("#!")) {
@@ -178,4 +187,9 @@ export function detectLanguage(filePath: string, firstLine?: string): string {
     }
 
     return "text";
+}
+
+/** Every language id detectLanguage can return. */
+export function detectableLanguages(): string[] {
+    return [...new Set([...Object.values(EXT_MAP), ...Object.values(BASENAME_MAP), ...Object.values(SHEBANG_MAP), "dotenv"])];
 }
