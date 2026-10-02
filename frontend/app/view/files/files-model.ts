@@ -521,7 +521,9 @@ export class FilesModel {
             }
             this.watchId = res.watch_id;
         } catch {
-            // No live updates for this folder; Refresh still works.
+            // No live updates for this folder; Refresh still works, and the
+            // next listing tries to watch again (ReAgent on #4201).
+            if (this.watchedPath && samePath(this.watchedPath, dir)) this.watchedPath = null;
         }
     }
 
@@ -546,8 +548,10 @@ export class FilesModel {
     /** Selected entries, in display order; the focused row when nothing is
      *  selected. */
     selectedEntries(): FsEntry[] {
-        const sel = this.selection();
-        const names = sel.names.size > 0 ? sel.names : sel.focus ? new Set([sel.focus]) : new Set<string>();
+        // Selected names only, never the focused row on its own: a row that
+        // shows as unselected must not be deleted, opened or copied
+        // (ReAgent on #4201).
+        const names = this.selection().names;
         return this.entries().filter((e) => names.has(e.name));
     }
 

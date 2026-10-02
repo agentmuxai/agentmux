@@ -239,7 +239,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             else list.filter((x) => !x.is_dir).forEach(openEntry);
         } else if (e.key === "Backspace") model.goBack();
         else if (e.key === "F2") {
-            if (sel.focus) model.setRenaming(sel.focus);
+            if (sel.focus && sel.names.size === 1 && sel.names.has(sel.focus)) model.setRenaming(sel.focus);
         } else if (e.key === "F5") model.refresh();
         else if (e.key === "Delete" && e.shiftKey) askDeletePermanently(model.selectedEntries());
         else if (e.key === "Delete") void model.trash(model.selectedEntries());
@@ -701,19 +701,25 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
         input?.focus();
         input?.setSelectionRange(0, stemLength(props.entry.name, props.entry.is_dir));
     });
-    const finish = async (commit: boolean): Promise<void> => {
+    /** Enter commits and stays in the box on a problem, so it can be fixed.
+     *  Leaving the box (blur) commits too, but on a problem it cancels: with
+     *  the focus gone, the list's keys would otherwise wait on a box nobody
+     *  is typing in (ReAgent on #4201). */
+    const finish = async (commit: boolean, leaving = false): Promise<void> => {
         if (busy || finished) return;
         const value = input?.value ?? props.entry.name;
         if (commit && value !== props.entry.name) {
             const why = nameProblem(value, windowsNames());
-            if (why) {
+            if (why && !leaving) {
                 setProblem(why);
                 return;
             }
-            busy = true;
-            const ok = await props.model.rename(props.entry.name, value);
-            busy = false;
-            if (!ok) return;
+            if (!why) {
+                busy = true;
+                const ok = await props.model.rename(props.entry.name, value);
+                busy = false;
+                if (!ok && !leaving) return;
+            }
         }
         finished = true;
         props.model.setRenaming(null);
@@ -736,7 +742,7 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
                     if (e.key === "Enter") void finish(true);
                     else if (e.key === "Escape") void finish(false);
                 }}
-                onBlur={() => void finish(true)}
+                onBlur={() => void finish(true, true)}
             />
             <Show when={problem()}>
                 <span class="files-rename-problem" role="alert">
