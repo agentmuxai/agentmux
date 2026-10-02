@@ -107,3 +107,69 @@ describe("replay", () => {
         ]);
     });
 });
+
+// A failed compaction (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §6/§10).
+// The frame is the one the real CLI 2.1.287 wrote when the summarizing call
+// failed; the turn then ended with `is_error: false`, so nothing else says so.
+const COMPACT_FAILED = {
+    type: "system",
+    subtype: "status",
+    status: null,
+    compact_result: "failed",
+    compact_error: "Error during compaction: API Error: 400 probe: simulated summarizer failure",
+    session_id: "a9acc189-3ec1-4cce-960e-2bab4a55e486",
+    uuid: "e211036a-3ae3-4dbf-a47f-9d6457209af0",
+};
+
+describe("a failed compaction", () => {
+    it("is a cli_notice row carrying the CLI's own reason, without its boilerplate prefix", () => {
+        expect(parseCliNoticeFrame(COMPACT_FAILED, 7)).toEqual({
+            type: "cli_notice",
+            id: "compaction-failed-e211036a-3ae3-4dbf-a47f-9d6457209af0",
+            kind: "compaction_failed",
+            provider: "claude",
+            error: "API Error: 400 probe: simulated summarizer failure",
+            timestamp: 7,
+        });
+    });
+
+    it("reads as an error, naming the CLI and giving the reason", () => {
+        expect(cliNoticeText(parseCliNoticeFrame(COMPACT_FAILED, 0)!)).toEqual({
+            label: "Claude Code couldn't compact the conversation",
+            detail: "API Error: 400 probe: simulated summarizer failure",
+            tone: "error",
+        });
+    });
+
+    it("still reports a failure that came without a reason", () => {
+        const node = parseCliNoticeFrame({ ...COMPACT_FAILED, compact_error: undefined }, 0)!;
+        expect(cliNoticeText(node)).toMatchObject({ detail: null, tone: "error" });
+    });
+
+    it("keeps a reason that lacks the usual prefix as it is", () => {
+        expect(parseCliNoticeFrame({ ...COMPACT_FAILED, compact_error: "boom" }, 0)!.error).toBe("boom");
+    });
+
+    it.each([
+        ["the start", { status: "compacting", compact_result: undefined, compact_error: undefined }],
+        ["a success", { compact_result: "success", compact_error: undefined }],
+        ["a status with no result", { compact_result: undefined, compact_error: undefined }],
+        ["another status", { status: "requesting", compact_result: undefined, compact_error: undefined }],
+    ])("ignores %s", (_name, patch) => {
+        expect(parseCliNoticeFrame({ ...COMPACT_FAILED, ...patch }, 0)).toBeNull();
+    });
+
+    it("needs the frame's uuid for a stable id, and skips a frame without one", () => {
+        expect(parseCliNoticeFrame({ ...COMPACT_FAILED, uuid: undefined }, 0)).toBeNull();
+    });
+
+    it("lands on one id live and on replay, so seeing the frame twice shows one row", () => {
+        const live = parseCliNoticeFrame(COMPACT_FAILED, 1)!;
+        const notices = parseHistoryLines([JSON.stringify(COMPACT_FAILED), JSON.stringify(COMPACT_FAILED)], "claude-stream-json").nodes.filter(
+            (n): n is CliNoticeNode => n.type === "cli_notice"
+        );
+        expect(notices).toHaveLength(1);
+        expect(notices[0].id).toBe(live.id);
+        expect(notices[0]).toMatchObject({ kind: "compaction_failed" });
+    });
+});
