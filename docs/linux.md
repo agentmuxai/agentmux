@@ -26,9 +26,9 @@ usr/bin/
 
 ## Display server
 
-By default, AgentMux uses **XWayland** (`--ozone-platform=x11`) under any Wayland compositor (Mutter, KWin, etc.). This default provides the best frame-rate consistency across GPU configurations (5–8× fewer stalls than native Wayland on the tested hardware/driver set).
+On a Wayland session (`WAYLAND_DISPLAY` set), AgentMux uses **native Wayland** (`--ozone-platform=wayland`, `xdg_toplevel`) under any compositor (Mutter, KWin, etc.), with window transparency included (#1611, #4011). On an X11 session it uses X11.
 
-Set `AGENTMUX_OZONE_PLATFORM=wayland` to use native Wayland (`xdg_toplevel`). This is experimental.
+Set `AGENTMUX_OZONE_PLATFORM=x11` to run under XWayland instead, or `AGENTMUX_OZONE_PLATFORM=wayland` to force native Wayland.
 
 ## Window drag
 
@@ -137,7 +137,6 @@ Opening a second instance sends an `open_new_window` command to the running laun
 |---|---|
 | Splash screen | Not yet implemented (Windows + macOS have native splash screens) |
 | Window transparency | Works on native Wayland (per-pixel, applies live) and X11 (`_NET_WM_WINDOW_OPACITY`). See SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01 §3.2 |
-| Native Wayland (non-XWayland) | Experimental; set `AGENTMUX_OZONE_PLATFORM=wayland` |
 | Owned-window floaters (`transient-for` + destroy-with-parent) | Phase B, not yet implemented — floaters open as independent top-level windows |
 
 **Correction (2026-09-15):** this table previously listed `.deb` as
