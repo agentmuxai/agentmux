@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setMeta = vi.fn();
 const resync = vi.fn();
+const remember = vi.fn();
 let setMetaGate: Promise<void> | null = null;
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -29,6 +30,12 @@ vi.mock("@/app/store/rpc-api", () => ({
             resync(data);
             return Promise.resolve();
         },
+    },
+}));
+vi.mock("./remembered-runtime", () => ({
+    rememberRuntime: (agentId: unknown, patch: unknown) => {
+        remember(agentId, patch);
+        return Promise.resolve();
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -59,6 +66,7 @@ const flag = (args: string[], f: string) => args[args.indexOf(f) + 1];
 beforeEach(() => {
     setMeta.mockClear();
     resync.mockClear();
+    remember.mockClear();
     setMetaGate = null;
     __resetRuntimeApply();
 });
@@ -207,5 +215,20 @@ describe("patchRuntime — a pick wins over the agent definition's own flags", (
         expect(lastFlag(args, "--effort")).toBe("max");
         expect(args.filter((a) => a === "--model")).toHaveLength(1);
         expect(args.filter((a) => a === "--effort")).toHaveLength(1);
+    });
+});
+
+describe("patchRuntime — remembers what the user picked", () => {
+    it("hands the pick (not the merged config) and the pane's agent to the memory", async () => {
+        await patchRuntime("b1", claude, { effort: "max" }, () => ({ ...meta(), agentId: "agent-7" }));
+        expect(remember).toHaveBeenCalledWith("agent-7", { effort: "max" });
+    });
+
+    it("a failed change remembers nothing", async () => {
+        resync.mockImplementationOnce(() => {
+            throw new Error("resync refused");
+        });
+        await expect(patchRuntime("b1", claude, { model: "opus" }, () => ({ ...meta(), agentId: "agent-7" }))).rejects.toThrow();
+        expect(remember).not.toHaveBeenCalled();
     });
 });

@@ -18,7 +18,7 @@ import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { buildConfigFiles, deriveSlug } from "./agent-config-builder";
-import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
+import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, resolveLaunchRuntime, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
@@ -28,6 +28,7 @@ import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
@@ -522,13 +523,21 @@ export class AgentViewModel {
         // — so without them it runs on the CLI's own default while the strip
         // reads the selection (docs/retro/
         // RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
-        const runtimeConfig = resolveInitialRuntimeConfig(
+        //
+        // What the agent remembers from its last pick sits between a fork's
+        // carry-over and the definition's flags (see resolveLaunchRuntime).
+        const remembered = await recallRuntime(
+            agent.id,
+            provider.models?.map((m) => m.value),
+        );
+        const { runtimeConfig, paneFlags } = resolveLaunchRuntime(
             overrides?.model,
-            provider.models,
+            provider,
             agent.provider_flags,
+            remembered,
             overrides?.carryOverRuntime,
         );
-        const cliArgs = buildPaneArgs(provider, agentMode, runtimeConfig, agent.provider_flags);
+        const cliArgs = buildPaneArgs(provider, agentMode, runtimeConfig, paneFlags);
         // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
         // comment, and fork-session-args.ts's doc comment for the two real
         // bugs (reagent + Codex, PR #2725) this resolution now guards
@@ -820,7 +829,7 @@ export class AgentViewModel {
                 // the user's flags are dropped on the first send and never come
                 // back (#2872). `--fork-session` is deliberately NOT persisted
                 // here — it is a one-shot launch intent, not a durable arg.
-                [PROVIDER_FLAGS_META_KEY]: agent.provider_flags ?? "",
+                [PROVIDER_FLAGS_META_KEY]: paneFlags,
                 ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
                 controller: isPersistent ? "persistent" : "subprocess",
                 cmd: cliBin,

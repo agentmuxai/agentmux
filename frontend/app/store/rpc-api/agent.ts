@@ -107,12 +107,16 @@ export type WriteAgentConfigInput = Omit<CommandWriteAgentConfigData, "auto_allo
 // The agent-instance shapes are GENERATED from their Rust definitions by
 // ts-rs. This covers agent_handlers/instance.rs.
 export type { AgentInstance } from "@/types/rpc/AgentInstance";
+export type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+export type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
 export type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
 export type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentInstanceData";
 export type { CommandListAgentInstancesData } from "@/types/rpc/CommandListAgentInstancesData";
 export type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
 
 import type { AgentInstance } from "@/types/rpc/AgentInstance";
+import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
 import type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
 import type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentInstanceData";
 import type { CommandListAgentInstancesData } from "@/types/rpc/CommandListAgentInstancesData";
@@ -519,6 +523,16 @@ export const AgentApi = {
         opts?: RpcOpts,
     ): Promise<AgentInstance> {
         return client.rpcCall("createagentinstance", data, opts);
+    },
+
+    // The Runtime menu choices remembered for an agent. Omit `runtime` to read,
+    // send a JSON object (permissionMode / model / effort) to replace, "" to forget.
+    AgentLastRuntimeCommand(
+        client: RpcClient,
+        data: CommandAgentLastRuntimeData,
+        opts?: RpcOpts,
+    ): Promise<AgentLastRuntime> {
+        return client.rpcCall("agentlastruntime", data, opts);
     },
 
     // PATCH semantics — absent fields preserve current value.

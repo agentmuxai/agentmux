@@ -461,7 +461,13 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        NULL for the agent's own tasks. Joins a task to its subagent, whose
 ///        `meta.json` records the same id. Phase 2 of
 ///        `SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md`.
-pub const OBJECT_SCHEMA_VERSION: i64 = 41;
+///   v42 — db_agents.last_runtime: the Runtime menu choices (permission mode,
+///        model, effort) the user last made for this agent, as a JSON object,
+///        '' when none. Lets Continue / Reattach / a fresh open start where
+///        the user left off instead of on the definition's defaults. Written
+///        only when the user picked something. Item 2 of
+///        `SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 42;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -1351,6 +1357,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // v41: the subagent that owns a background task. See
         // OBJECT_SCHEMA_VERSION's v41 doc comment above.
         "ALTER TABLE db_background_tasks ADD COLUMN owner_tool_use_id TEXT",
+        // v42: the Runtime menu choices the user last made for the agent. See
+        // OBJECT_SCHEMA_VERSION's v42 doc comment above.
+        "ALTER TABLE db_agents ADD COLUMN last_runtime TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

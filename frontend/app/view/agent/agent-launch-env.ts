@@ -16,8 +16,8 @@ import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
-import { parseProviderFlags } from "./launch-args";
-import { effortFromFlags, modelFromFlags, permissionModeFromFlags } from "./runtime-capabilities";
+import { parseProviderFlags, withoutOverriddenFlags } from "./launch-args";
+import { effortFromFlags, modelFromFlags, modelTakesEffort, permissionModeFromFlags } from "./runtime-capabilities";
 
 /**
  * Check that Node.js and npm are available for a provider installed via
@@ -229,6 +229,41 @@ export function resolveInitialRuntimeConfig(
         effort: effort as AgentRuntimeConfig["effort"],
         permissionMode: permissionMode as AgentRuntimeConfig["permissionMode"],
     };
+}
+
+/**
+ * The runtime a launch starts with, and the provider flags its pane keeps.
+ *
+ * Precedence, setting by setting: a choice made in the launch modal
+ * (`overridesModel`), then the runtime of the pane being forked
+ * (`forkCarryOver`), then what the user last picked for this agent
+ * (`remembered`), then the definition's own flags, then the provider default.
+ *
+ * The definition's flags are appended after the runtime's, so one that names a
+ * setting decided above would win over it: the menu would show the choice and
+ * the process run the definition's. Those flags are taken out of the PANE's copy
+ * (`paneFlags`; the definition itself is untouched). With nothing to take out,
+ * the flags are returned exactly as the definition has them.
+ */
+export function resolveLaunchRuntime(
+    overridesModel: string | undefined,
+    provider: Pick<ProviderDefinition, "id" | "models">,
+    providerFlags: unknown,
+    remembered: Partial<AgentRuntimeConfig> | undefined,
+    forkCarryOver: Partial<AgentRuntimeConfig> | undefined,
+): { runtimeConfig: AgentRuntimeConfig; paneFlags: string } {
+    const carryOver = { ...remembered, ...forkCarryOver };
+    const runtimeConfig = resolveInitialRuntimeConfig(overridesModel, provider.models, providerFlags, carryOver);
+    const stripped = withoutOverriddenFlags(providerFlags, {
+        model: !!(overridesModel || carryOver.model),
+        // A model that takes no --effort (Haiku) must not keep the definition's
+        // either: it is appended last and the CLI is handed a flag it does not take.
+        effort: carryOver.effort !== undefined || (provider.id === "claude" && !modelTakesEffort(runtimeConfig.model)),
+        permissionMode: carryOver.permissionMode !== undefined,
+    });
+    const paneFlags =
+        stripped === parseProviderFlags(providerFlags).join(" ") ? ((providerFlags as string | undefined) ?? "") : stripped;
+    return { runtimeConfig, paneFlags };
 }
 
 /**
