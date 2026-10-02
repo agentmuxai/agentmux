@@ -29,9 +29,9 @@ import { formatDiffSides } from "./dedent";
 
 const ShikiTheme = "github-dark-high-contrast";
 
-let shikiModule: typeof import("shiki/bundle/web") | null = null;
+let shikiModule: typeof import("./shiki-highlighter") | null = null;
 const getShiki = async () => {
-    if (!shikiModule) shikiModule = await import("shiki/bundle/web");
+    if (!shikiModule) shikiModule = await import("./shiki-highlighter");
     return shikiModule;
 };
 
