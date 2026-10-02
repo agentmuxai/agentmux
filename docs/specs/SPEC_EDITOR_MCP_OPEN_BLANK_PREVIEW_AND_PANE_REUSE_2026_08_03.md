@@ -11,6 +11,9 @@ push-event pattern Part 2 reuses), `docs/specs/SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_
 (sibling MCP-tool spec from the same session, unrelated feature, same
 general area of the codebase).
 
+> [!IMPORTANT]
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** The editor's `editor:pending_open_files` reuse queue is generalized to a `doctabs:pending` queue for every Document Tabs pane type (Editor, Hangar, Media, Browser), so agents add a document tab to an open pane instead of opening new panes (its §5.7).
+
 ## Trigger
 
 User report: opening a `.md` file via the `OpenEditor` MCP tool (agent-driven)

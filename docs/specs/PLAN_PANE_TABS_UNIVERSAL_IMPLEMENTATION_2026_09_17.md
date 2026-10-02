@@ -20,6 +20,9 @@ follow-up work — attempting all of it in one pass would produce an unreviewabl
 untestable diff. Task Group C below scopes exactly how far this pass goes and what
 it deliberately leaves for a follow-up plan.
 
+> [!IMPORTANT]
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** The deferred "Editor's own files-tabs migration onto real `blockStack` semantics" below is **withdrawn**: the editor's file tabs become Document Tabs on a shared layer instead. The deferred `Ctrl:Shift:T` (new pane tab) is withdrawn too: that chord reopens a closed Document Tab.
+
 ---
 
 ## Task Group A — Groundwork (no visible behavior change yet)
@@ -219,7 +222,7 @@ shipped in this pass):
   `Ctrl:Shift:T`, `Ctrl:Alt:[`/`]`, and `Cmd:w`'s redefinition).
 - Tab reorder (drag + keyboard) and tear-off-from-stack (§7 resolution 5) — both
   explicitly gated behind the separate drag-session refactor per design spec §4.8.
-- Editor's own files-tabs migration onto real `blockStack` semantics (§7
+- ~~Editor's own files-tabs migration onto real `blockStack` semantics~~ **Withdrawn 2026-10-02** (`SPEC_DOCUMENT_TABS_2026_10_02.md`): the editor's files become Document Tabs, not pane tabs. Original note: (§7
   resolution 3) — editor now HAS the outer unified header (correctly showing/
   hiding based on whether OTHER widget types have been pushed onto its Pane's
   stack via the generic "+"), but its own internal multi-file tab strip
