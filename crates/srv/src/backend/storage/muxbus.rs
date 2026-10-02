@@ -541,12 +541,30 @@ fn write_split_tokens(ns: &str, tokens: &MuxBusTokens) -> Result<Vec<(String, Pr
 /// the single blob), without migrating or deleting anything. `None` when
 /// neither layout holds a complete, consistent set or a read fails. Used
 /// only to adopt the host-wide session into a channel namespace.
+///
+/// When both layouts are present, the fresher generation wins, the same
+/// rule `muxbus_load_tokens` applies: on macOS/Linux `muxbus_save` writes
+/// only the blob, so split entries left over beside it are older and must
+/// not be adopted over it. A blob without a generation (the legacy Windows
+/// format) ranks oldest, so Windows' current split layout wins over it.
 fn read_any_layout(ns: &str) -> Option<MuxBusTokens> {
-    if let Ok(Some((tokens, _))) = read_split_tokens(ns) {
-        return Some(tokens);
+    let split = read_split_tokens(ns).ok().flatten();
+    let blob = secret_store::get_optional(&blob_key(ns))
+        .ok()
+        .flatten()
+        .and_then(|b| serde_json::from_str::<MuxBusBlob>(&b).ok());
+    match (split, blob) {
+        (Some((split_tokens, split_gen)), Some(blob)) => {
+            if generation_as_number(&split_gen) > generation_as_number(&blob.generation) {
+                Some(split_tokens)
+            } else {
+                Some(blob.tokens)
+            }
+        }
+        (Some((split_tokens, _)), None) => Some(split_tokens),
+        (None, Some(blob)) => Some(blob.tokens),
+        (None, None) => None,
     }
-    let blob = secret_store::get_optional(&blob_key(ns)).ok().flatten()?;
-    serde_json::from_str::<MuxBusBlob>(&blob).ok().map(|b| b.tokens)
 }
 
 /// Read the three split-entry (chunked) tokens. `Ok(None)` means none of the
@@ -985,7 +1003,8 @@ impl Store {
                     };
                     if write_result.is_err() {
                         tracing::warn!(
-                            "muxbus: couldn't copy the adopted session into this channel's                              keychain namespace — it stays readable from the host-wide set for now"
+                            "muxbus: couldn't copy the adopted session into this channel's \
+                             keychain namespace — it stays readable from the host-wide set for now"
                         );
                     }
                 }
@@ -1281,6 +1300,25 @@ mod tests {
         assert_eq!(read_any_layout(&ns_b).unwrap().access_token, tok("b").access_token);
         clear(&ns_b);
         assert!(read_any_layout(&ns_b).is_none(), "b cleared");
+
+        // Both layouts present under one namespace: the fresher generation
+        // wins, whichever layout it's in (adoption must not pick stale
+        // leftovers).
+        // Small tokens here: a single blob over Windows Credential Manager's
+        // 2560-byte cap can't be written at all (why Windows splits).
+        let small = |s: &str| MuxBusTokens {
+            access_token: format!("access-{s}"),
+            refresh_token: format!("refresh-{s}"),
+            id_token: format!("id-{s}"),
+        };
+        let ns_c = format!("muxbus:channel:test-{run}-c");
+        write_split_tokens(&ns_c, &small("split-old")).expect("split old");
+        write_single_blob(&ns_c, &small("blob-new")).expect("blob new");
+        assert_eq!(read_any_layout(&ns_c).unwrap().refresh_token, "refresh-blob-new");
+        write_split_tokens(&ns_c, &small("split-newest")).expect("split newest");
+        assert_eq!(read_any_layout(&ns_c).unwrap().refresh_token, "refresh-split-newest");
+        clear(&ns_c);
+        assert!(read_any_layout(&ns_c).is_none(), "c cleared");
     }
 
     /// Regression guard for every bug this file has fixed in sequence: the
