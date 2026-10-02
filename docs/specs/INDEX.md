@@ -558,6 +558,7 @@ partial list.
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
+| [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |

@@ -55,6 +55,8 @@
 //! fields, the `InteractiveToken` logon type — unit-testable without
 //! touching the machine's real login configuration.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::path::Path;
 
 /// The flag every generated artifact passes to the launcher.
@@ -402,6 +404,18 @@ pub fn artifact_path() -> Option<std::path::PathBuf> {
     }
 }
 
+/// A `schtasks` command that never opens a console window.
+///
+/// The launcher is a GUI-subsystem process and `schtasks.exe` is a console
+/// program, so a bare spawn flashes a console over the splash. The start-at-login
+/// reconcile runs `schtasks /Query` on every startup.
+#[cfg(target_os = "windows")]
+fn schtasks_command() -> std::process::Command {
+    let mut cmd = std::process::Command::new("schtasks");
+    cmd.no_window();
+    cmd
+}
+
 /// Is auto-start currently registered?
 ///
 /// Half of the WS4 uninstall contract: an uninstall path is only
@@ -413,7 +427,7 @@ pub fn is_enabled() -> bool {
     #[cfg(target_os = "windows")]
     {
         // `schtasks /Query` exits non-zero when the task does not exist.
-        std::process::Command::new("schtasks")
+        schtasks_command()
             .args(["/Query", "/TN", AUTOSTART_ID])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -450,7 +464,7 @@ pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
         // and permission problems on stderr, and an autostart registration
         // that fails with only "exit code 1" is undiagnosable for a user or
         // in a bug report.
-        let out = std::process::Command::new("schtasks")
+        let out = schtasks_command()
             .args(["/Create", "/TN", AUTOSTART_ID, "/XML"])
             .arg(&path)
             .arg("/F") // replace an existing registration
@@ -498,7 +512,7 @@ pub fn disable() -> Result<(), String> {
         if !is_enabled() {
             return Ok(());
         }
-        match std::process::Command::new("schtasks")
+        match schtasks_command()
             .args(["/Delete", "/TN", AUTOSTART_ID, "/F"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -609,7 +623,7 @@ pub struct Entry {
 pub fn read_entry() -> Option<Entry> {
     #[cfg(target_os = "windows")]
     {
-        let out = std::process::Command::new("schtasks")
+        let out = schtasks_command()
             .args(["/Query", "/TN", AUTOSTART_ID, "/XML"])
             .stderr(std::process::Stdio::null())
             .output()

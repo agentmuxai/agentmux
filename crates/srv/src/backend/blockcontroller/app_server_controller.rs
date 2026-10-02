@@ -9,6 +9,8 @@
 //! block output publication, and shutdown. Codex remains opt-in until the
 //! provider registry flips its controller type.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -164,8 +166,7 @@ impl AppServerController {
         core::apply_working_dir(&mut command, &self.block_id, &working_dir, &env_vars);
         #[cfg(windows)]
         {
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            command.creation_flags(CREATE_NO_WINDOW);
+            command.no_window();
         }
         Ok(command)
     }

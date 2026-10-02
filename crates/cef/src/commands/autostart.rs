@@ -17,6 +17,8 @@
 // is safe. Its path comes from `AGENTMUX_LAUNCHER_EXE`, which the launcher
 // stamps on the host's env at spawn.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::process::Command;
 
 const ENV_LAUNCHER_EXE: &str = "AGENTMUX_LAUNCHER_EXE";
@@ -37,9 +39,7 @@ fn run_launcher(flag: &'static str) -> Result<String, String> {
     cmd.arg(flag);
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.no_window();
     }
     let out = cmd.output().map_err(|e| format!("auto-start: failed to run launcher: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();

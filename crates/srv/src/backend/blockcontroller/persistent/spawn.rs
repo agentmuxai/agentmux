@@ -5,6 +5,8 @@
 //! per-session I/O tasks (stdin writer, stdout reader, stderr reader, waiter).
 //! Moved here verbatim; extracting the task bodies is a separate change.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use super::*;
 
 impl PersistentSubprocessController {
@@ -199,8 +201,7 @@ impl PersistentSubprocessController {
         // Matches acp.rs / subprocess.rs; sibling of shell.rs's PTY path.
         #[cfg(windows)]
         {
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.no_window();
         }
 
         cmd.stdin(std::process::Stdio::piped());
@@ -512,6 +513,17 @@ impl PersistentSubprocessController {
             inner.agent_lease = agent_lease.clone();
             Self::set_status(&mut inner, STATUS_RUNNING);
             inner.spawn_runtime = Some(crate::backend::agent_runtime::spawn_runtime_from_args(&spawn_args));
+            inner.effective_runtime = None;
+            // Ask the CLI what it is really using as soon as it is up: the argv
+            // carries an alias, the CLI resolves it. Only a control-protocol
+            // process reads such requests from stdin. An answer is folded into
+            // the `agentruntime` event (the reader below).
+            inner.settings_readback = spawn_args.iter().any(|a| a == "--permission-prompt-tool");
+            if inner.settings_readback {
+                if let Some(tx) = inner.stdin_tx.as_ref() {
+                    let _ = tx.try_send(crate::backend::agent_runtime::settings_request_line());
+                }
+            }
         }
         // Now visible to `session_held_elsewhere` — a concurrent resume of
         // the same session may run its check.
@@ -815,6 +827,23 @@ impl PersistentSubprocessController {
                     // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
                     if let Some(kind) = parsed.get("type").and_then(|v| v.as_str()) {
                         if kind == "control_request" || kind == "control_response" {
+                            // The answer to our `get_settings`: what the CLI
+                            // really runs. Ignored from a replaced process.
+                            if let Some(eff) = crate::backend::agent_runtime::effective_from_control_response(&parsed) {
+                                let changed = {
+                                    let mut g = inner_read.lock().unwrap();
+                                    if g.spawn_generation == my_generation_read && g.spawn_runtime.is_some() {
+                                        let changed = g.effective_runtime.as_ref() != Some(&eff);
+                                        g.effective_runtime = Some(eff);
+                                        changed
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if let (true, Some(broker)) = (changed, broker_read.as_ref()) {
+                                    super::status::publish_runtime_event(&inner_read, broker, &block_id_read);
+                                }
+                            }
                             Self::handle_control_frame(kind, &parsed, &block_id_read, &inner_read);
                             // OS notification: the agent is now blocked on the
                             // user — known here even with no pane mounted
@@ -899,6 +928,16 @@ impl PersistentSubprocessController {
                         // P1 on #3562).
                         let boundary_is_current = boundary.is_some();
                         let deferred_restart = boundary.unwrap_or(false);
+                        // The model can change under a running process (the CLI
+                        // falls back to another model when one is overloaded), so
+                        // ask again at every turn boundary. Cheap, and not for a
+                        // process that is about to be restarted anyway.
+                        if boundary_is_current && !deferred_restart {
+                            let ask = inner_read.lock().unwrap().settings_readback;
+                            if ask {
+                                Self::push_stdin(&inner_read, crate::backend::agent_runtime::settings_request_line());
+                            }
+                        }
                         if deferred_restart {
                             tracing::info!(
                                 block_id = %block_id_read,

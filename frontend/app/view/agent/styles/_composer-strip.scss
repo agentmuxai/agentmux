@@ -46,7 +46,7 @@
     row-gap: 2px;
     min-height: 28px;
     padding: var(--space-1) var(--space-2);
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 1.4;
     color: var(--secondary-text-color);
     background: color-mix(in srgb, var(--main-bg-color) 96%, var(--main-text-color));
@@ -660,7 +660,7 @@
 .agent-shell-subblock-error {
     padding: var(--space-2);
     color: var(--error-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-family: var(--font-mono);
 }
 

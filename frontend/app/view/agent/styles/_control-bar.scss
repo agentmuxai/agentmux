@@ -27,7 +27,7 @@
         }
 
         .agent-picker-empty-desc {
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--secondary-text-color);
             max-width: 240px;
             line-height: 1.5;
@@ -339,7 +339,7 @@
         padding: var(--space-1) var(--space-2);
         background: color-mix(in srgb, var(--accent-color) 14%, transparent);
         border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--main-text-color);
 
         .agent-interrupted-label {
@@ -360,7 +360,7 @@
         padding: var(--space-1) var(--space-2);
         background: color-mix(in srgb, var(--warning-color, #d97706) 14%, transparent);
         border-bottom: 1px solid color-mix(in srgb, var(--warning-color, #d97706) 30%, transparent);
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--main-text-color);
 
         .agent-resume-failed-label {
@@ -383,7 +383,7 @@
         padding: var(--space-1) var(--space-2);
         background: color-mix(in srgb, var(--warning-color) 14%, transparent);
         border-bottom: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--main-text-color);
 
         .agent-large-session-label {
@@ -400,7 +400,7 @@
         padding: var(--space-1) var(--space-2);
         background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
         border-bottom: 1px solid var(--border-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
 
         .agent-archived-label {

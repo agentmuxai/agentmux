@@ -72,6 +72,12 @@ export async function applyRuntimeChange(
      * Optional only so callers predating it keep compiling.
      */
     blockMeta?: Record<string, unknown>,
+    /**
+     * `restart: false` records the change and rebuilds `cmd:args` but leaves the
+     * running process alone, so the next spawn picks it up. For corrections the
+     * user did not ask for (see `PatchOptions.migration`).
+     */
+    opts: { restart?: boolean } = {},
 ): Promise<void> {
     const agentMode = blockMeta?.["agentMode"] as string | undefined;
     const oref = MOS.makeORef("block", blockId);
@@ -93,12 +99,26 @@ export async function applyRuntimeChange(
             oref,
             meta: { "cmd:args": updatedArgs },
         });
-        await RpcApi.ControllerResyncCommand(TabRpcClient, {
-            tabid: staticTabId(),
-            blockid: blockId,
-            forcerestart: true,
-        });
+        if (opts.restart !== false) {
+            await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                tabid: staticTabId(),
+                blockid: blockId,
+                forcerestart: true,
+            });
+        }
     }
+}
+
+export interface PatchOptions {
+    /**
+     * The change is a correction the app makes to a stored value (a model id the
+     * catalog has since replaced), not a choice the user made. It is recorded
+     * and `cmd:args` is rebuilt, but the agent is NOT restarted (opening a menu
+     * must never interrupt an agent) and the value is NOT remembered as a pick.
+     * The running process then differs from the menu until its next spawn, and
+     * the menu says so, with a button to restart.
+     */
+    migration?: boolean;
 }
 
 /**
@@ -147,6 +167,7 @@ export function patchRuntime(
     provider: ProviderDefinition | undefined,
     patch: Partial<AgentRuntimeConfig>,
     getMeta: () => Record<string, unknown> | undefined,
+    options: PatchOptions = {},
 ): Promise<AgentRuntimeConfig> {
     const chain = chains.get(blockId) ?? { tail: Promise.resolve(), pending: 0 };
     chains.set(blockId, chain);
@@ -182,11 +203,13 @@ export function patchRuntime(
             });
         }
 
-        await applyRuntimeChange(blockId, provider, updated, { ...meta, [PROVIDER_FLAGS_META_KEY]: flags });
+        await applyRuntimeChange(blockId, provider, updated, { ...meta, [PROVIDER_FLAGS_META_KEY]: flags }, {
+            restart: !options.migration,
+        });
         chain.last = { config: updated, flags, at: Date.now() };
         // What the user picked is what this agent starts with next time it is
         // opened (never fails the pick: see rememberRuntime).
-        await rememberRuntime(meta?.["agentId"] as string | undefined, patch);
+        if (!options.migration) await rememberRuntime(meta?.["agentId"] as string | undefined, patch);
         return updated;
     });
     chain.tail = run.then(

@@ -1,11 +1,14 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     ToolchainEnvReq, ToolchainEnvResult, ToolchainVersionsReq,
+    ToolchainPruneItem, ToolchainPruneReq, ToolchainPruneResult, ToolchainPruneSkip,
     WidgetApiResult, WidgetHealthResult,
     CheckCliAuthResult, CommandCheckCliAuthData, CommandResolveCliData, CommandRunCliLoginData,
     EnsureProviderAuthDirReq, EnsureProviderAuthDirResult, ResolveCliResult, RunCliLoginResult,
@@ -138,8 +141,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         probe.arg("npm");
                         #[cfg(windows)]
                         {
-                            use std::os::windows::process::CommandExt;
-                            probe.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
+                            probe.no_window();
                         }
                         probe.output().await.map(|o| o.status.success()).unwrap_or(false)
                     } else {
@@ -482,6 +484,50 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
+    // toolchain.prune — find (dry run, the default) or remove (an explicit
+    // `dry_run: false`, from a user action) provider CLI installs that nothing
+    // has used for 30 days and nothing is running. Never runs on its own.
+    // SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md §5.
+    let mstore_prune = state.mstore.clone();
+    engine.register_typed(
+        "toolchain.prune",
+        move |req: Option<ToolchainPruneReq>, _ctx| {
+            let mstore = mstore_prune.clone();
+            async move {
+                let dry_run = req.as_ref().and_then(|r| r.dry_run).unwrap_or(true);
+                let only = req.and_then(|r| r.only);
+                let paths = agentmux_common::DataPaths::from_env()
+                    .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
+                // The commands of every block that records one: the open panes
+                // and the ones restored from a layout, which keep the absolute CLI
+                // path until they mount.
+                let live: Vec<String> = mstore
+                    .get_all::<crate::backend::obj::Block>()
+                    .map_err(|e| format!("toolchain.prune: {e}"))?
+                    .iter()
+                    .filter_map(|b| {
+                        let mut parts: Vec<String> = Vec::new();
+                        if let Some(c) = b.meta.get("cmd").and_then(|v| v.as_str()) {
+                            parts.push(c.to_string());
+                        }
+                        if let Some(a) = b.meta.get("cmd:args").and_then(|v| v.as_array()) {
+                            parts.extend(a.iter().filter_map(|v| v.as_str().map(str::to_string)));
+                        }
+                        (!parts.is_empty()).then(|| parts.join(" "))
+                    })
+                    .collect();
+                let max_idle = crate::backend::cli_prune::DEFAULT_MAX_IDLE;
+                let now = std::time::SystemTime::now();
+                let run = tokio::task::spawn_blocking(move || {
+                    crate::backend::cli_prune::run(&paths, &live, dry_run, only.as_deref(), max_idle, now)
+                })
+                .await
+                .map_err(|e| format!("toolchain.prune: {e}"))?;
+                Ok(prune_result(run, dry_run, max_idle))
+            }
+        },
+    );
+
     // widget.health — HTTP liveness probe for an external widget server running
     // on localhost. The frontend passes { port, health_check_path,
     // health_check_body_contains? } and gets back { healthy, status_code }.
@@ -789,8 +835,7 @@ pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
         probe.arg(cli_command);
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
-            probe.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
+            probe.no_window();
         }
         probe.output().await
     } else {
@@ -909,6 +954,48 @@ async fn get_cli_version(cli_path: &str) -> String {
     }
 }
 
+/// The wire form of a prune [`crate::backend::cli_prune::Run`].
+fn prune_result(
+    run: crate::backend::cli_prune::Run,
+    dry_run: bool,
+    max_idle: std::time::Duration,
+) -> ToolchainPruneResult {
+    use crate::backend::cli_prune::Candidate;
+    let item = |c: &Candidate| ToolchainPruneItem {
+        dir: c.dir.to_string_lossy().into_owned(),
+        provider: c.provider.clone(),
+        version: c.version.clone(),
+        legacy: c.legacy,
+        bytes: c.bytes,
+        idle_days: c.idle.as_secs() / 86_400,
+    };
+    let removed_dirs: std::collections::HashSet<&std::path::PathBuf> = run
+        .report
+        .iter()
+        .flat_map(|r| r.removed.iter().map(|(d, _)| d))
+        .collect();
+    ToolchainPruneResult {
+        dry_run,
+        scan_ok: run.scan_ok,
+        candidates: run.plan.prunable.iter().map(item).collect(),
+        reclaimable_bytes: run.plan.reclaimable_bytes(),
+        removed: run
+            .plan
+            .prunable
+            .iter()
+            .filter(|c| removed_dirs.contains(&c.dir))
+            .map(item)
+            .collect(),
+        skipped: run
+            .report
+            .iter()
+            .flat_map(|r| r.skipped.iter())
+            .map(|(d, why)| ToolchainPruneSkip { dir: d.to_string_lossy().into_owned(), reason: why.clone() })
+            .collect(),
+        kept: run.plan.kept.len() as u32,
+        max_idle_days: (max_idle.as_secs() / 86_400) as u32,
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -352,6 +352,13 @@ struct PersistentInner {
     /// the process was given. Set at spawn, cleared when the status leaves
     /// "running" (`set_status`).
     spawn_runtime: Option<crate::backend::agent_runtime::SpawnRuntime>,
+    /// What the running CLI itself reported using (`get_settings`'s `applied`):
+    /// the alias resolved to a concrete model, and the effort in force. `None`
+    /// until it answers, for a CLI that cannot, and when no process runs.
+    effective_runtime: Option<crate::backend::agent_runtime::EffectiveRuntime>,
+    /// Whether the running process takes control requests, so it is asked
+    /// `get_settings` (set at spawn: a control-protocol launch).
+    settings_readback: bool,
     /// A kill has been requested for the current process (`request_stop_on`).
     /// `stdin_tx` stays live until it actually exits. Writing an automated
     /// message then would put it into the dying process and lose it (codex
@@ -1174,6 +1181,8 @@ impl PersistentSubprocessController {
                 restart_when_idle: false,
                 restart_pending: false,
                 spawn_runtime: None,
+                effective_runtime: None,
+                settings_readback: false,
                 stop_pending: false,
                 config_restart_generation: None,
                 restart_spawn_for: None,

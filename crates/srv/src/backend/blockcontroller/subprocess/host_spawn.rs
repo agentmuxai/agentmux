@@ -12,6 +12,8 @@
 //! `spawn_turn` is one continuous, non-trivially-ordered state machine and
 //! is moved here WHOLE rather than decomposed further.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -153,8 +155,7 @@ impl SubprocessController {
         // console, causing stdout to go to that console rather than the pipe.
         #[cfg(windows)]
         {
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.no_window();
         }
         core::apply_working_dir(&mut cmd, &self.block_id, &config.working_dir, &config.env_vars);
         // Identity M4a: record what this process is actually given.

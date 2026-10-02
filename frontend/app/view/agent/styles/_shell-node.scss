@@ -79,7 +79,7 @@
 
 .agent-shell-sigil {
     flex: 0 0 auto;
-    font-size: 12px;
+    font-size: var(--text-sm);
     width: 14px;
     text-align: center;
 
@@ -108,7 +108,7 @@
     // See SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §2.1.
     flex: 1 1 40%;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
@@ -117,7 +117,7 @@
 
 .agent-shell-elapsed {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     white-space: nowrap;
 }
@@ -126,7 +126,7 @@
     // flex-basis 60% (was 0) — paired with .agent-shell-title's 40% above,
     // see that rule's comment for why a nonzero basis here matters.
     flex: 1 1 60%;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     white-space: nowrap;
     overflow: hidden;
@@ -137,7 +137,7 @@
 
 .agent-shell-header-cmd {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -154,7 +154,7 @@
     border: none;
     background: transparent;
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 1;
     padding: 2px 6px;
     border-radius: 3px;
@@ -257,7 +257,7 @@
 
 .agent-activity-sigil {
     flex: 0 0 auto;
-    font-size: 12px;
+    font-size: var(--text-sm);
     width: 14px;
     text-align: center;
 
@@ -275,7 +275,7 @@
     // PR #2995). SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §2.
     flex: 1 1 40%;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 600;
     color: var(--main-text-color);
     white-space: nowrap;
@@ -285,7 +285,7 @@
 
 .agent-activity-elapsed {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--main-text-color);
     opacity: 0.8;
     white-space: nowrap;
@@ -297,7 +297,7 @@
 // primary reading.
 .agent-activity-remaining {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
     white-space: nowrap;
 }
@@ -306,7 +306,7 @@
     // flex-basis 60% (was 0) — see .agent-activity-title's comment above.
     flex: 1 1 60%;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--main-text-color);
     font-family: var(--font-mono);
     white-space: nowrap;
@@ -371,7 +371,7 @@
 // reading it in full.
 .agent-activity-command {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -388,7 +388,7 @@
     text-align: left;
     cursor: default;
     padding: var(--space-1) var(--space-2);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
 
     &:hover { background: var(--hover-bg-color, rgba(255, 255, 255, 0.04)); color: var(--main-text-color); }

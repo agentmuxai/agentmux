@@ -76,6 +76,16 @@ describe.skipIf(!cli)("pinned Claude CLI", () => {
         expect(settings(h)?.effort ?? null).toBeNull();
     }, 90000);
 
+    it("answers get_settings in the frame shape srv parses (effective_from_control_response)", async () => {
+        const r = await run({ args: ["--model", "haiku"], messages: [], controlRequests: [{ subtype: "get_settings" }] });
+        const frame = r.events.find((e) => e.type === "control_response");
+        // {type: control_response, response: {subtype: success, request_id, response: {applied: {model, effort}}}}
+        expect(frame.response.subtype).toBe("success");
+        expect(typeof frame.response.request_id).toBe("string");
+        expect(frame.response.response.applied).toHaveProperty("model");
+        expect(frame.response.response.applied).toHaveProperty("effort");
+    }, 90000);
+
     it("set_model takes effect on the running process", async () => {
         const r = await run({
             args: ["--model", "sonnet"],
