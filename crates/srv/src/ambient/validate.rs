@@ -158,6 +158,8 @@ const ABSENCE_EXACT: &[&str] = &[
     "not set",
     "not yet",
     "no title",
+    "no title yet",
+    "title unavailable",
     "no summary",
     "no goal",
     "no task",
@@ -166,9 +168,12 @@ const ABSENCE_EXACT: &[&str] = &[
     "nothing yet",
 ];
 
+/// Deliberately few and specific. A prefix rejects every title that begins with it,
+/// so "no title" and "title not" are NOT here: "No title bar on Windows" and "Title
+/// not updating in swarm row" are real titles (ReAgent on #4185). Anything that is
+/// only absence when it is the WHOLE reply belongs in `ABSENCE_EXACT`.
 const ABSENCE_PREFIXES: &[&str] = &[
     "none yet",
-    "no title",
     "no summary yet",
     "no goal established",
     "no goal yet",
@@ -176,10 +181,7 @@ const ABSENCE_PREFIXES: &[&str] = &[
     "no task yet",
     "no activity yet",
     "nothing yet",
-    "not set",
     "not yet established",
-    "title unavailable",
-    "title not",
 ];
 
 /// Lower-case, every non-alphanumeric run collapsed to one space, trimmed. So
@@ -204,9 +206,31 @@ fn absence_form(text: &str) -> String {
 
 /// A reply that is entirely a parenthetical or bracketed note. A title is not a
 /// note about the title.
+///
+/// Only ONE balanced pair that wraps the WHOLE text counts. `(WIP) Fix login redirect
+/// (again)` and `[Windows] Fix installer crash [x64]` start and end with brackets but
+/// are real titles: the first pair closes before the end (ReAgent on #4185).
 fn is_wrapped_note(text: &str) -> bool {
     let t = text.trim();
-    (t.starts_with('(') && t.ends_with(')')) || (t.starts_with('[') && t.ends_with(']'))
+    let (open, close) = match (t.chars().next(), t.chars().last()) {
+        (Some('('), Some(')')) => ('(', ')'),
+        (Some('['), Some(']')) => ('[', ']'),
+        _ => return false,
+    };
+    let last = t.chars().count() - 1;
+    let mut depth = 0i32;
+    for (i, c) in t.chars().enumerate() {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            // The opening bracket closed before the end: not one wrapping pair.
+            if depth <= 0 && i != last {
+                return false;
+            }
+        }
+    }
+    depth == 0
 }
 
 fn is_absence(text: &str) -> bool {
@@ -344,6 +368,31 @@ mod tests {
         assert!(!is_usable_title("(none yet)"));
         assert!(!is_usable_title("no goal established yet"));
         assert!(is_usable_title("Develop hardening spec for swarm ambient summary quality"));
+    }
+
+    // ReAgent on #4185: both of these were false rejects in the first version.
+    #[test]
+    fn titles_that_merely_start_with_a_risky_prefix_or_end_in_brackets_are_accepted() {
+        for s in [
+            "No title bar on Windows",
+            "Title not updating in swarm row",
+            "(WIP) Fix login redirect (again)",
+            "[Windows] Fix installer crash [x64]",
+            "(Draft) Review the plan",
+        ] {
+            assert!(accept_line(s, &title_limits(7)).is_some(), "{s:?}");
+            assert!(is_usable_title(s), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn only_one_balanced_pair_wrapping_the_whole_text_is_a_note() {
+        for note in ["(none yet)", "[no summary]", "(waiting for the user's first message)", "((none yet))", "([x] pending)"] {
+            assert!(is_wrapped_note(note), "{note:?}");
+        }
+        for title in ["(a) b (c)", "[a] b [c]", "(a) (b)", "(a", "a)", "plain"] {
+            assert!(!is_wrapped_note(title), "{title:?}");
+        }
     }
 
     #[test]

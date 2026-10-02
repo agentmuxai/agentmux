@@ -36,7 +36,9 @@
     "[title unavailable]",
     "I cannot determine a title without more context",
     "I don't have enough information",
-    "If you'd like me to write a title, share the conversation"
+    "If you'd like me to write a title, share the conversation",
+    "((none yet))",
+    "Title unavailable"
   ],
   "accepted": [
     "Fix the untitled-tab bug",
@@ -53,6 +55,11 @@
     "Fix agentmux UI issues",
     "Sync agentmux from GitHub",
     "Why does login fail?",
-    "Fix the user’s login"
+    "Fix the user’s login",
+    "No title bar on Windows",
+    "Title not updating in swarm row",
+    "(WIP) Fix login redirect (again)",
+    "[Windows] Fix installer crash [x64]",
+    "(Draft) Review the plan"
   ]
 }

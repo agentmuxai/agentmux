@@ -43,6 +43,8 @@ const ABSENCE_EXACT = new Set([
     "not set",
     "not yet",
     "no title",
+    "no title yet",
+    "title unavailable",
     "no summary",
     "no goal",
     "no task",
@@ -51,10 +53,14 @@ const ABSENCE_EXACT = new Set([
     "nothing yet",
 ]);
 
-/** Specific enough that a real title is very unlikely to begin with them. */
+/**
+ * Deliberately few and specific: a prefix rejects every title that begins with it, so
+ * "no title" and "title not" are NOT here ("No title bar on Windows" and "Title not
+ * updating in swarm row" are real titles; ReAgent on #4185). Anything that is only
+ * absence as the WHOLE reply belongs in ABSENCE_EXACT.
+ */
 const ABSENCE_PREFIXES = [
     "none yet",
-    "no title",
     "no summary yet",
     "no goal established",
     "no goal yet",
@@ -62,10 +68,7 @@ const ABSENCE_PREFIXES = [
     "no task yet",
     "no activity yet",
     "nothing yet",
-    "not set",
     "not yet established",
-    "title unavailable",
-    "title not",
 ];
 
 /** First-person refusals and offers: a model talking to the reader. */
@@ -123,10 +126,28 @@ function absenceForm(text: string): string {
     return out;
 }
 
-/** A reply that is entirely a parenthetical or bracketed note about the title. */
+/**
+ * A reply that is entirely ONE parenthetical or bracketed note. Only a single balanced
+ * pair wrapping the whole text counts: "(WIP) Fix login redirect (again)" and
+ * "[Windows] Fix installer crash [x64]" start and end with brackets but are real titles
+ * (ReAgent on #4185).
+ */
 function isWrappedNote(text: string): boolean {
     const t = text.trim();
-    return (t.startsWith("(") && t.endsWith(")")) || (t.startsWith("[") && t.endsWith("]"));
+    const chars = Array.from(t);
+    if (chars.length < 2) return false;
+    const [open, close] = chars[0] === "(" && chars[chars.length - 1] === ")" ? ["(", ")"] : chars[0] === "[" && chars[chars.length - 1] === "]" ? ["[", "]"] : ["", ""];
+    if (!open) return false;
+    let depth = 0;
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] === open) depth++;
+        else if (chars[i] === close) {
+            depth--;
+            // The opening bracket closed before the end: not one wrapping pair.
+            if (depth <= 0 && i !== chars.length - 1) return false;
+        }
+    }
+    return depth === 0;
 }
 
 function isAbsence(text: string): boolean {
