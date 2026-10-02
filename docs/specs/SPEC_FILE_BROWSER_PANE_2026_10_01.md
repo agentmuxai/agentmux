@@ -1,6 +1,6 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** partially implemented. The v1 cut of Phases 0 and 1 shipped with this spec (§12.1); Phases 2–4 are not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1); Phases 2–4 are not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
@@ -328,6 +328,13 @@ Each phase is independently shippable and reviewable.
 - **Phase 3, agent-aware and extra views.** Agent workspaces in Places, touched-by badges, Miller columns, thumbnail grid, fuzzy find in the folder tree.
 - **Phase 4, convergence.** The Editor's side tree becomes an instance of the shared component; the editor-specific tree code is deleted.
 - **Later.** Remote roots (containers, SSH).
+
+### 12.1 What v1 shipped (#4201)
+
+- **srv:** `fs.list` (cursor-paginated, `spawn_blocking`, per-entry errors, hidden/system attributes, `os_blocked`), `fs.places`, `fs.watch`/`fs.unwatch` (`files:changed`, coalesced at 150 ms, 64 per block), `fs.rename` (never overwrites; case-only via a temp name), `fs.create`, `fs.trash`/`fs.restore` (one trash thread; `NsFileManager` on macOS; restore on Windows and Linux only), `fs.delete`, `fs.open`, `fs.reveal`. The mutation policy of §9 is enforced at execution time, with the protected list refused outright and agent workspaces under `~/.agentmux/agents/<name>/` allowed. `pane.open` with view `files` and `select`, layout export/import, `defwidget@files`, the `OpenFiles` MCP tool, `mux view <folder>/`.
+- **Frontend:** the details view (hand-windowed rows keyed by name, natural sort, folders first), breadcrumb and Ctrl+L, history, Places with drives and agent workspaces, the §5.3.1 keys and type-ahead, open by kind beside the pane, the context menu, rename and new item, Trash with Undo, Shift+Delete with a named confirmation, live re-list (deferred while hidden), the settled-content hold, and the macOS rules of §9.1.4: a protected folder is never listed until the user clicks Open on the pane's explanation, once per release; a denial says where to turn access on. `Info.plist` has the five folder usage strings.
+- **Not built from Phase 0:** the editor tree model was not extracted, `fs.stat` was not added, and the editor RPCs keep their names.
+- **Not yet verified:** nothing has been run on macOS (the §9.1.3 test plan stands), and the §10 budgets have not been traced.
 
 ## 13. Names
 
