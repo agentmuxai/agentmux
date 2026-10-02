@@ -20,6 +20,7 @@ const h = vi.hoisted(() => {
         errors: new Map<string, { kind: string; message: string }>(),
         pageSize: 0,
         handlers: [] as ((event: unknown) => void)[],
+        byType: new Map<string, ((event: unknown) => void)[]>(),
     };
     const rpc = {
         FsPlacesCommand: vi.fn(async () => ({
@@ -50,6 +51,9 @@ const h = vi.hoisted(() => {
         FsRestoreCommand: vi.fn(async (_c: unknown, req: { paths: string[] }) => ({ results: req.paths.map((path) => ({ path, ok: true })) })),
         FsDeleteCommand: vi.fn(async (_c: unknown, req: { paths: string[] }) => ({ results: req.paths.map((path) => ({ path, ok: true })) })),
         FsOpenCommand: vi.fn(async () => ({})),
+        FsOpStartCommand: vi.fn<(client: unknown, req: Record<string, unknown>) => Promise<unknown>>(async () => ({ op_id: "op1" })),
+        FsOpResolveCommand: vi.fn<(client: unknown, req: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
+        FsOpCancelCommand: vi.fn<(client: unknown, req: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
         FsRevealCommand: vi.fn(async () => ({})),
         ListNamedAgentsCommand: vi.fn(async () => [
             { instance_name: "korp", definition_name: "korp", working_directory: "C:\\Users\\a\\.agentmux\\agents\\korp" },
@@ -60,10 +64,29 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: h.rpc }));
+const blocks = vi.hoisted(() => new Map<string, { meta: Record<string, unknown> }>());
+vi.mock("@/app/store/mos", async (orig) => ({
+    ...(await orig<typeof import("@/app/store/mos")>()),
+    getObjectValue: (oref: string | null) => (oref ? blocks.get(oref.replace(/^block:/, "")) : undefined),
+}));
+const media = vi.hoisted(() => ({
+    // Typed with the real signatures, so `mock.calls` carries the arguments.
+    range: vi.fn<typeof import("@/app/element/local-media").fetchMediaRange>(async () => ({
+        blob: new Blob(["fn main() {}\n"]),
+        total: 13,
+    })),
+    blob: vi.fn<typeof import("@/app/element/local-media").fetchMediaBlob>(async () => new Blob(["png"], { type: "image/png" })),
+}));
+vi.mock("@/app/element/local-media", async (orig) => ({
+    ...(await orig<typeof import("@/app/element/local-media")>()),
+    fetchMediaRange: media.range,
+    fetchMediaBlob: media.blob,
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: h.rpcCall } }));
 vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (sub: { handler: (e: unknown) => void }) => {
+    muxEventSubscribe: (sub: { eventType: string; handler: (e: unknown) => void }) => {
         h.state.handlers.push(sub.handler);
+        h.state.byType.set(sub.eventType, [...(h.state.byType.get(sub.eventType) ?? []), sub.handler]);
         return () => {};
     },
 }));
@@ -72,6 +95,8 @@ import { getPaneTab } from "@/app/block/pane-tab-registry";
 import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
+import { clipboard, setClipboard } from "./files-ops";
+import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME, registerFileDropTarget } from "@/app/drag/file-drop";
 import { errorMessage, FilesView, formatModified } from "./files-view";
 import { filesPaneTab, filesTitle } from "./files";
 
@@ -121,6 +146,8 @@ beforeEach(() => {
     h.state.errors.clear();
     h.state.pageSize = 0;
     h.state.handlers = [];
+    h.state.byType = new Map();
+    setClipboard(null);
     h.state.dirs.set(HOME, [f("b.txt"), d("src"), f(".env", { hidden: true }), f("a10.md"), f("a2.md")]);
     h.state.dirs.set(`${HOME}\\src`, [f("main.rs")]);
     for (const fn of Object.values(h.rpc)) fn.mockClear();
@@ -433,6 +460,260 @@ describe("the Files pane: deliberate selection (ReAgent on #4201)", () => {
         await waitFor(() => expect(h.rpc.FsWatchCommand).toHaveBeenCalledTimes(1));
         v.model.refresh();
         await waitFor(() => expect(h.rpc.FsWatchCommand).toHaveBeenCalledTimes(2));
+    });
+});
+
+describe("the Files pane: preview and filter (Phase 2a)", () => {
+    beforeEach(() => {
+        media.range.mockClear();
+        media.blob.mockClear();
+        (URL as unknown as { createObjectURL: unknown }).createObjectURL ??= () => "blob:x";
+        (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL ??= () => {};
+    });
+
+    it("Space opens the preview, which shows the selected file's text", async () => {
+        h.state.dirs.set(HOME, [f("main.rs", { size: 13 }), f("b.txt")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(2));
+        fireEvent.click(v.row("main.rs"));
+        fireEvent.keyDown(v.list(), { key: " " });
+        expect(v.meta()["files:preview"]).toBe(true);
+        await waitFor(() => expect(v.container.querySelector(".files-preview-text")?.textContent).toContain("fn main()"));
+        // Read with a range: never the whole file.
+        expect(media.range).toHaveBeenCalledWith(`${HOME}\\main.rs`, 0, 256 * 1024 - 1, expect.anything());
+    });
+
+    it("says when only the start of a big file is shown", async () => {
+        media.range.mockResolvedValueOnce({ blob: new Blob(["x".repeat(10)]), total: 5_000_000 });
+        h.state.dirs.set(HOME, [f("big.log", { size: 5_000_000 })]);
+        const v = mount({ "files:preview": true });
+        await waitFor(() => expect(v.names()).toHaveLength(1));
+        fireEvent.click(v.row("big.log"));
+        await waitFor(() => expect(v.container.querySelector(".files-preview-more")?.textContent).toContain("Showing the first 256 KB"));
+    });
+
+    it("doesn't show a binary file as text", async () => {
+        media.range.mockResolvedValueOnce({ blob: new Blob([new Uint8Array([77, 90, 0, 1, 2])]), total: 5 });
+        h.state.dirs.set(HOME, [f("tool.dat", { size: 5 })]);
+        const v = mount({ "files:preview": true });
+        await waitFor(() => expect(v.names()).toHaveLength(1));
+        fireEvent.click(v.row("tool.dat"));
+        await waitFor(() => expect(v.container.querySelector(".files-preview")?.textContent).toContain("not a text file"));
+    });
+
+    it("shows an image, and only reads the selection that settled", async () => {
+        h.state.dirs.set(HOME, [f("a.png", { size: 3 }), f("b.png", { size: 3 })]);
+        const v = mount({ "files:preview": true });
+        await waitFor(() => expect(v.names()).toHaveLength(2));
+        fireEvent.click(v.row("a.png"));
+        fireEvent.click(v.row("b.png"));
+        await waitFor(() => expect(v.container.querySelector(".files-preview-media img")).not.toBeNull());
+        expect(media.blob).toHaveBeenCalledTimes(1);
+        expect(media.blob.mock.calls[0][0]).toBe(`${HOME}\\b.png`);
+    });
+
+    it("Ctrl+Space toggles the focused row's selection", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: " ", ctrlKey: true });
+        expect(v.model.selection().names.size).toBe(0);
+        expect(v.meta()["files:preview"]).toBeUndefined();
+    });
+
+    it("Ctrl+F filters the folder; Escape clears it", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "f", ctrlKey: true });
+        const input = await waitFor(() => v.container.querySelector(".files-filter-input") as HTMLInputElement);
+        fireEvent.input(input, { target: { value: "A" } });
+        await waitFor(() => expect(v.names()).toEqual(["a2.md", "a10.md"]));
+        expect(v.container.querySelector(".files-status")?.textContent).toBe("2 of 4 items match");
+        fireEvent.keyDown(input, { key: "Escape" });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(v.container.querySelector(".files-filter-input")).toBeNull();
+    });
+
+    it("a new folder clears the filter", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.setFilter("zzz");
+        await waitFor(() => expect(v.names()).toHaveLength(0));
+        expect(v.container.querySelector(".files-notice")?.textContent).toBe("Nothing here matches “zzz”.");
+        v.model.setFilter("sr");
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        fireEvent.dblClick(v.row("src"));
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        expect(v.model.filter()).toBe("");
+    });
+});
+
+describe("the Files pane: copy and move (Phase 2a)", () => {
+    const opEvent = (data: Record<string, unknown>) =>
+        h.state.byType.get("files:op")?.forEach((fn) => fn({ data: { op_id: "op1", kind: "copy", done_items: 0, total_items: 1, done_bytes: 0, total_bytes: 0, ...data } }));
+
+    it("Ctrl+C then Ctrl+V in another folder copies; Ctrl+X then Ctrl+V moves, once", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "c", ctrlKey: true });
+        expect(clipboard()).toEqual({ kind: "copy", paths: [`${HOME}\\b.txt`] });
+        fireEvent.dblClick(v.row("src"));
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() =>
+            expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "copy", sources: [`${HOME}\\b.txt`], dest_dir: `${HOME}\\src`, block_id: "b1" })
+        );
+        // A copy can be pasted again; a cut moves once and empties the clipboard.
+        expect(clipboard()).not.toBeNull();
+        fireEvent.click(v.row("main.rs"));
+        fireEvent.keyDown(v.list(), { key: "x", ctrlKey: true });
+        fireEvent.keyDown(v.list(), { key: "ArrowUp", altKey: true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toMatchObject({ kind: "move", dest_dir: HOME }));
+        await waitFor(() => expect(clipboard()).toBeNull());
+    });
+
+    it("shows progress with Cancel, then what happened", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        setClipboard({ kind: "copy", paths: ["D:\\big.iso"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-op-text")?.textContent).toBe("Copying big.iso"));
+        opEvent({ state: "running", done_bytes: 50, total_bytes: 200 });
+        await waitFor(() => expect(v.container.querySelector(".files-op-text")?.textContent).toBe("Copying big.iso · 25%"));
+        fireEvent.click(v.getByText("Cancel"));
+        expect(h.rpc.FsOpCancelCommand.mock.lastCall?.[1]).toEqual({ op_id: "op1" });
+        opEvent({ state: "done", done_items: 1 });
+        await waitFor(() => expect(v.container.querySelector(".files-op")).toBeNull());
+        expect(v.container.querySelector(".files-status")?.textContent).toBe("Copied big.iso");
+    });
+
+    it("asks about a conflict and sends the answer", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        setClipboard({ kind: "copy", paths: ["D:\\b.txt"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(h.rpc.FsOpStartCommand).toHaveBeenCalled());
+        opEvent({
+            state: "conflict",
+            conflict: { source: "D:\\b.txt", dest: `${HOME}\\b.txt`, source_is_dir: false, dest_is_dir: false, source_size: 2048, dest_size: 10 },
+        });
+        await waitFor(() => expect(screen.getByText("“b.txt” already exists here")).toBeTruthy());
+        fireEvent.click(screen.getByLabelText(/Do this for every conflict/));
+        fireEvent.click(screen.getByText("Keep both"));
+        expect(h.rpc.FsOpResolveCommand.mock.lastCall?.[1]).toEqual({ op_id: "op1", choice: "keep_both", apply_to_all: true });
+    });
+
+    it("an op that finishes before srv replies leaves no progress bar, and keeps its name (ReAgent on #4221)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        h.rpc.FsOpStartCommand.mockImplementationOnce(async () => {
+            opEvent({ state: "running", total_items: 1 });
+            opEvent({ state: "done", done_items: 1 });
+            return { op_id: "op1" };
+        });
+        setClipboard({ kind: "copy", paths: ["D:\\tiny.txt"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Copied tiny.txt"));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(v.container.querySelector(".files-op")).toBeNull();
+    });
+
+    it("says why srv stopped an op itself", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        setClipboard({ kind: "copy", paths: ["D:\\x"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(h.rpc.FsOpStartCommand).toHaveBeenCalled());
+        opEvent({ state: "canceled", error: "No one answered about “x”, so the operation stopped." });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("No one answered about “x”, so the operation stopped."));
+    });
+
+    it("keeps a cut when srv refuses the move", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        h.rpc.FsOpStartCommand.mockRejectedValueOnce(new Error("Can't copy a folder into itself."));
+        setClipboard({ kind: "cut", paths: ["C:\\Users\\a"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Can't copy a folder into itself."));
+        expect(clipboard()).toEqual({ kind: "cut", paths: ["C:\\Users\\a"] });
+    });
+
+    it("reports items that failed", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        setClipboard({ kind: "copy", paths: ["D:\\a", "D:\\b"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(h.rpc.FsOpStartCommand).toHaveBeenCalled());
+        opEvent({ state: "done", done_items: 2, total_items: 2, failures: [{ path: "D:\\b", ok: false, error: "Access denied." }] });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Copied 1 of 2; b: Access denied."));
+    });
+});
+
+describe("the Files pane: dragging files (§8.2)", () => {
+    let uninstall: () => void;
+    beforeEach(() => {
+        uninstall = installFileDropController(window);
+    });
+    afterEach(() => {
+        endPathDrag();
+        uninstall();
+    });
+
+    it("Attach to <agent> hands the selection to that agent pane's drop hook", async () => {
+        const agentPane = document.createElement("div");
+        agentPane.setAttribute("data-role", "pane");
+        agentPane.setAttribute("data-blockid", "agent-1");
+        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
+        document.body.appendChild(agentPane);
+        blocks.set("agent-1", { meta: { view: "agent", agentName: "Korp" } });
+        const drop = vi.fn();
+        const dispose = registerFileDropTarget("agent-1", { accept: () => ({ ok: true, message: "attach" }), drop });
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("a2.md"));
+        fireEvent.click(v.row("b.txt"), { ctrlKey: true });
+        fireEvent.contextMenu(v.row("b.txt"));
+        // The menu acts on pointerdown (context-menu.tsx).
+        fireEvent.pointerDown(await waitFor(() => screen.getByText("Attach to Korp")));
+        await waitFor(() => expect(drop).toHaveBeenCalledWith({ paths: [`${HOME}\\a2.md`, `${HOME}\\b.txt`], files: [] }));
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Attached 2 items to Korp"));
+        dispose();
+        agentPane.remove();
+        blocks.clear();
+    });
+
+    it("a dragged row carries the selection's paths", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("a2.md"));
+        fireEvent.click(v.row("b.txt"), { shiftKey: true });
+        const data = new Map<string, string>();
+        const dt = { setData: (k: string, val: string) => data.set(k, val), effectAllowed: "" };
+        fireEvent.dragStart(v.row("b.txt"), { dataTransfer: dt });
+        expect(JSON.parse(data.get(PATHS_MIME)!)).toEqual([`${HOME}\\a2.md`, `${HOME}\\a10.md`, `${HOME}\\b.txt`]);
+    });
+
+    it("a row dropped on another Hangar pane on the same drive is moved there", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        // The pane is the drop target; the drag came from another Hangar pane.
+        const pane = document.createElement("div");
+        pane.setAttribute("data-role", "pane");
+        pane.setAttribute("data-blockid", "b1");
+        pane.getClientRects = () => [{}] as unknown as DOMRectList;
+        document.body.appendChild(pane);
+        const dt = { setData: () => {}, effectAllowed: "", types: [PATHS_MIME], items: [], files: [], dropEffect: "" };
+        beginPathDrag(dt as unknown as DataTransfer, ["C:\\other\\x.txt"], "another-hangar");
+        const drop = new Event("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        pane.dispatchEvent(drop);
+        await waitFor(() =>
+            expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "move", sources: ["C:\\other\\x.txt"], dest_dir: HOME, block_id: "b1" })
+        );
+        pane.remove();
     });
 });
 

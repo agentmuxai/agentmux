@@ -13,6 +13,10 @@
 //! through `fs_ops::ProtectedPaths` instead of the editor's home-only rule
 //! (spec §9, "Security").
 //!
+//! Copy and move (`fs.op.*`) are jobs rather than calls: `fs.op.start`
+//! answers once the request is validated, and the work reports through
+//! `files:op` events (`fs_ops::jobs`).
+//!
 //! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3, §7, §9.
 
 use std::sync::Arc;
@@ -20,9 +24,9 @@ use std::sync::Arc;
 use crate::backend::fs_ops;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    FsCreateReq, FsDeleteReq, FsEmptyResult, FsListReq, FsOpResult, FsOpResults, FsPathReq,
-    FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult, FsRenameReq, FsRestoreReq, FsTrashReq,
-    FsUnwatchReq, FsWatchReq, FsWatchResult,
+    FsCreateReq, FsDeleteReq, FsEmptyResult, FsListReq, FsOpCancelReq, FsOpResolveReq, FsOpResult,
+    FsOpResults, FsOpStartReq, FsPathReq, FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult,
+    FsRenameReq, FsRestoreReq, FsTrashReq, FsUnwatchReq, FsWatchReq, FsWatchResult,
 };
 
 use super::AppState;
@@ -152,6 +156,35 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         blocking(move || fs_ops::open_or_reveal(&cmd.path, true)).await??;
         Ok(FsEmptyResult {})
     });
+
+    // ── Copy/move jobs. Spec §7.1, §7.2 ─────────────────────────────────
+
+    // fs.op.start → validate, answer with an op id, then work on the op's
+    // own thread, publishing `files:op` to the block.
+    {
+        let broker = state.broker.clone();
+        engine.register_typed("fs.op.start", move |cmd: FsOpStartReq, _ctx| {
+            let broker = broker.clone();
+            async move {
+                if cmd.block_id.is_empty() {
+                    return Err("No pane was named to report the operation's progress to.".to_string());
+                }
+                let emit = fs_ops::jobs::broker_emitter(broker, cmd.block_id.clone());
+                blocking(move || fs_ops::jobs::JOBS.start(&cmd, emit)).await?
+            }
+        });
+    }
+
+    // fs.op.resolve / fs.op.cancel → touch only the op's in-memory controls,
+    // so they answer at once, on the async thread.
+    engine.register_typed("fs.op.resolve", |cmd: FsOpResolveReq, _ctx| async move {
+        fs_ops::jobs::JOBS.resolve(&cmd.op_id, cmd.choice, cmd.apply_to_all)?;
+        Ok(FsEmptyResult {})
+    });
+    engine.register_typed("fs.op.cancel", |cmd: FsOpCancelReq, _ctx| async move {
+        fs_ops::jobs::JOBS.cancel(&cmd.op_id);
+        Ok(FsEmptyResult {})
+    });
 }
 
 #[cfg(test)]
@@ -183,6 +216,9 @@ mod tests {
             ("fs.delete", "FsDeleteReq", "FsOpResults"),
             ("fs.open", "FsPathReq", "FsEmptyResult"),
             ("fs.reveal", "FsPathReq", "FsEmptyResult"),
+            ("fs.op.start", "FsOpStartReq", "FsOpStartResult"),
+            ("fs.op.resolve", "FsOpResolveReq", "FsEmptyResult"),
+            ("fs.op.cancel", "FsOpCancelReq", "FsEmptyResult"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");

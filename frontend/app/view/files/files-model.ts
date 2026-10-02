@@ -26,6 +26,7 @@ import { isMacOS, isWindows } from "@/util/platformutil";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
+import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
 export const META_PATH = "files:path";
@@ -34,6 +35,7 @@ export const META_SORT = "files:sort";
 export const META_SORTDIR = "files:sortdir";
 export const META_HIDDEN = "files:hidden";
 export const META_SIDEBAR = "files:sidebar";
+export const META_PREVIEW = "files:preview";
 
 /** Entries per `fs.list` page (srv caps at 5000). */
 const PAGE = 1000;
@@ -154,6 +156,9 @@ export class FilesModel {
 
     /** Sorted, hidden entries filtered unless shown. */
     readonly entries: () => FsEntry[];
+    /** The filter typed into the toolbar (spec §5.3.1, Ctrl+F). */
+    readonly filter: () => string;
+    private readonly setFilterSignal: (v: string) => void;
     /** Names in display order (selection and type-ahead work on these). */
     readonly order: () => string[];
 
@@ -176,6 +181,8 @@ export class FilesModel {
     /** Called once the first listing has painted (or failed): the view's
      *  settled-content hold (§6.5). */
     onFirstSettled: (() => void) | null = null;
+    /** Copy and move jobs started from this pane (§7.1). */
+    readonly ops: FilesOps;
     /** Puts keyboard focus on the list; set by the view while it's mounted. */
     focusList: (() => void) | null = null;
 
@@ -199,12 +206,23 @@ export class FilesModel {
         this.canBack = () => (historyVersion(), this.back.length > 0);
         this.canForward = () => (historyVersion(), this.forward.length > 0);
 
+        [this.filter, this.setFilterSignal] = createSignal("");
         this.entries = createMemo(() => {
-            const shown = this.showHidden() ? this.rawEntries() : this.rawEntries().filter((e) => !e.hidden);
+            const needle = this.filter().trim().toLowerCase();
+            const shown = this.rawEntries().filter(
+                (e) => (this.showHidden() || !e.hidden) && (needle === "" || e.name.toLowerCase().includes(needle))
+            );
             return sortEntries(shown, this.sortKey(), this.sortDir());
         });
         this.order = createMemo(() => this.entries().map((e) => e.name));
 
+        this.ops = new FilesOps(ctx.blockId);
+        this.ops.onFinished = (op) => {
+            this.setStatus(opFinishedText(op), op.state === "done" && !op.failures?.length ? 4000 : 10000);
+            // The watcher re-lists the folder shown; a move OUT of it (or a
+            // copy into a folder this pane isn't watching) may not be seen.
+            this.refresh();
+        };
         this.unsubscribe = muxEventSubscribe({
             eventType: WpsEvent.FilesChanged,
             scope: makeORef("block", ctx.blockId),
@@ -229,6 +247,7 @@ export class FilesModel {
     readonly sortDir = (): SortDir => (this.ctx.meta()?.[META_SORTDIR] === "desc" ? "desc" : "asc");
     readonly showHidden = (): boolean => this.ctx.meta()?.[META_HIDDEN] === true;
     readonly showSidebar = (): boolean => this.ctx.meta()?.[META_SIDEBAR] !== false;
+    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true;
 
     /** Clicking a column header: sort by it, or flip its direction. */
     setSort(key: SortKey): void {
@@ -242,6 +261,16 @@ export class FilesModel {
 
     toggleSidebar(): void {
         void this.ctx.setMeta({ [META_SIDEBAR]: this.showSidebar() ? false : null });
+    }
+
+    togglePreview(): void {
+        void this.ctx.setMeta({ [META_PREVIEW]: this.showPreview() ? null : true });
+    }
+
+    /** Narrows the list to names containing `text` (case-insensitive). Per
+     *  folder: navigating clears it. */
+    setFilter(text: string): void {
+        this.setFilterSignal(text);
     }
 
     // ── Start ────────────────────────────────────────────────────────────────
@@ -333,6 +362,7 @@ export class FilesModel {
             this.setPath(target);
             this.setSelection(EMPTY_SELECTION);
             this.setRenaming(null);
+            this.setFilterSignal("");
         });
         void this.ctx.setMeta({ [META_PATH]: target });
         if (opts.consented) {
@@ -674,7 +704,49 @@ export class FilesModel {
         this.refresh();
     }
 
+    // ── Clipboard and transfers (§7.1) ─────────────────────────────────────
+
+    /** Ctrl+C / Ctrl+X: the selection onto the shared Hangar clipboard. */
+    copyToClipboard(kind: "copy" | "cut", entries: FsEntry[]): void {
+        if (entries.length === 0) return;
+        setClipboard({ kind, paths: entries.map((e) => this.pathOf(e.name)) });
+        const what = entries.length === 1 ? entries[0].name : `${entries.length} items`;
+        this.setStatus({ text: kind === "cut" ? `Cut ${what}: paste to move it` : `Copied ${what}: paste to copy it`, tone: "info" }, 3000);
+    }
+
+    /** Ctrl+V: copy (or move, after Cut) the clipboard into the folder shown. */
+    async paste(): Promise<void> {
+        const c = clipboard();
+        if (!c || c.paths.length === 0) {
+            this.setStatus({ text: "Nothing to paste", tone: "info" }, 2500);
+            return;
+        }
+        if (this.phase() !== "ready") return;
+        // A cut is used up only once srv has taken the move: a refused one
+        // (protected place, folder into itself) keeps it (ReAgent on #4221).
+        const started = await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths);
+        if (started && c.kind === "cut" && clipboard() === c) setClipboard(null);
+    }
+
+    /** Copy or move `sources` into the folder shown. */
+    async transfer(kind: "copy" | "move", sources: string[]): Promise<boolean> {
+        try {
+            await this.ops.start(kind, sources, this.path());
+            return true;
+        } catch (err) {
+            this.setStatus({ text: errorText(err), tone: "error" });
+            return false;
+        }
+    }
+
+    /** What dropping `sources` here does: move within a drive when the drag
+     *  came from another Hangar pane, copy otherwise (as file managers do). */
+    dropKind(sources: string[], fromHangar: boolean): "copy" | "move" {
+        return fromHangar && sameVolume(sources, this.path()) ? "move" : "copy";
+    }
+
     dispose(): void {
+        this.ops.dispose();
         this.disposed = true;
         this.generation++;
         this.stopWatching();
