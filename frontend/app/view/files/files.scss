@@ -400,3 +400,202 @@
         background: var(--hover-bg-color);
     }
 }
+
+// ── Filter and preview (Phase 2a) ──────────────────────────────────────────
+
+.files-filter-input {
+    width: 160px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--input-bg-color);
+    color: var(--main-text-color);
+    font: inherit;
+    outline: none;
+
+    &:focus {
+        border-color: var(--accent-color);
+    }
+}
+
+.files-preview {
+    display: flex;
+    flex-direction: column;
+    width: 40%;
+    min-width: 200px;
+    max-width: 640px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border-color);
+    overflow: auto;
+
+    // Narrow panes drop the preview after Places (§5.1).
+    @container (max-width: 640px) {
+        display: none;
+    }
+}
+
+.files-preview-empty {
+    padding: 24px 12px;
+    color: var(--secondary-text-color);
+    text-align: center;
+}
+
+.files-preview-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 12px;
+    text-align: center;
+}
+
+.files-preview-icon {
+    font-size: 40px;
+    color: var(--secondary-text-color);
+}
+
+.files-preview-name {
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.files-preview-facts {
+    color: var(--secondary-text-color);
+}
+
+.files-preview-media {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+
+    img {
+        max-width: 100%;
+        max-height: 70vh;
+        object-fit: contain;
+    }
+}
+
+.files-preview-text {
+    min-width: 0;
+
+    .files-preview-code {
+        margin: 0;
+        padding: 6px 8px;
+        background: transparent;
+        font-size: 11px;
+        white-space: pre;
+        overflow-x: auto;
+    }
+
+    .files-preview-md {
+        padding: 6px 10px;
+    }
+}
+
+.files-preview-more {
+    padding: 6px 10px;
+    border-top: 1px solid var(--border-color);
+    color: var(--secondary-text-color);
+}
+
+.files-link {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--accent-color);
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+// ── Copy and move: progress and conflicts (§7.1, §7.2) ─────────────────────
+
+.files-op {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    border-top: 1px solid var(--border-color);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+.files-op-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.files-op-bar {
+    flex: 1;
+    min-width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--hover-bg-color);
+    overflow: hidden;
+}
+
+.files-op-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent-color);
+}
+
+.files-conflict-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--modal-shadow-color, rgb(0 0 0 / 50%));
+}
+
+.files-conflict {
+    width: min(440px, 90vw);
+    padding: 16px;
+    border: 1px solid var(--modal-border-color, var(--border-color));
+    border-radius: 6px;
+    background: var(--modal-bg-color);
+    color: var(--main-text-color);
+    font-family: var(--font-sans);
+    font-size: 13px;
+}
+
+.files-conflict-title {
+    margin-bottom: 8px;
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.files-conflict-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
+    line-height: 1.5;
+}
+
+.files-conflict-sides {
+    color: var(--secondary-text-color);
+}
+
+.files-conflict-all {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.files-conflict-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.files-button-danger {
+    border-color: var(--error-color);
+    color: var(--error-color);
+}

@@ -1,6 +1,6 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1); Phases 2–4 are not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), and Phase 2a (§12.2); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
@@ -335,6 +335,16 @@ Each phase is independently shippable and reviewable.
 - **Frontend:** the details view (hand-windowed rows keyed by name, natural sort, folders first), breadcrumb and Ctrl+L, history, Places with drives and agent workspaces, the §5.3.1 keys and type-ahead, open by kind beside the pane, the context menu, rename and new item, Trash with Undo, Shift+Delete with a named confirmation, live re-list (deferred while hidden), the settled-content hold, and the macOS rules of §9.1.4: a protected folder is never listed until the user clicks Open on the pane's explanation, once per release; a denial says where to turn access on. `Info.plist` has the five folder usage strings.
 - **Not built from Phase 0:** the editor tree model was not extracted, `fs.stat` was not added, and the editor RPCs keep their names.
 - **Not yet verified:** nothing has been run on macOS (the §9.1.3 test plan stands), and the §10 budgets have not been traced.
+
+### 12.2 Phase 2a: transfers, preview, filter, files to agents
+
+- **Copy and move jobs (§7.1, §7.2):** `fs.op.start` / `fs.op.resolve` / `fs.op.cancel`, with `files:op` progress events scoped to the pane. Conflicts ask Replace, Skip or Keep both, optionally for every conflict; a folder onto a folder merges. A move within a drive is a rename; across drives it is a copy, and each source is deleted only after its copy finished. Cancel stops between files and between chunks, and removes a partial file. Links are copied as links, never followed.
+- **Clipboard:** Ctrl+X / Ctrl+C / Ctrl+V (and Cut, Copy, Paste in the menus), shared by every Hangar pane in the window. Ctrl+C also puts the paths on the system clipboard. A cut is pasted once.
+- **Drag (§8.2, route 1):** a row (or the selection) drags as an in-app *path drag* (`beginPathDrag` in `app/drag/file-drop.ts`). The drop controller treats it like an OS file drop that carries paths, so the agent composer, the Editor, Media and terminal panes take it unchanged. Dropped on another Hangar pane it moves (same drive) or copies; OS files dropped on Hangar are copied in.
+- **Attach to agent (§8.2, route 2):** one menu item per agent pane on screen, which hands the paths to that pane's own drop hook (`dropPathsOnto`), so it ends exactly where a drag would.
+- **Preview panel (§6.6):** Space toggles it (Ctrl+Space toggles the focused row's selection instead). Code is highlighted, Markdown rendered, images shown; text reads only the first 256 KB, through a ranged request; binary files and video/audio get a card. A preview starts 150 ms after the selection settles and is abandoned when it moves.
+- **Filter:** Ctrl+F or `/`, case-insensitive, per folder.
+- Not built: the tree view, git decorations, route 3 (Alt+K `@path` mention), dropping onto a folder row rather than the pane.
 
 ## 13. Names
 
