@@ -19,7 +19,11 @@
  *
  * One deviation from the spec's order, on purpose: an agent that is waiting on
  * the user says so ahead of `restored` and `heuristic`. That is the one state
- * someone has to act on, and an old goal would bury it.
+ * someone has to act on, and an old goal would bury it. The flag is honoured
+ * only while the agent has a turn in flight (`status === "running"`): a pending
+ * question means a live turn, so a flag left behind by a crash, or by a question
+ * that was answered while the pane was not mounted to clear it, cannot outrank
+ * the other lines once the agent is idle.
  *
  * docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.4.
  */
@@ -149,7 +153,9 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
     const generated = readSwarmSummary(meta);
     if (generated) return { text: generated, source: "generated" };
 
-    if (meta?.[META_AWAITING_USER] === true) return { text: STATUS_WAITING, source: "status" };
+    if (status === "running" && meta?.[META_AWAITING_USER] === true) {
+        return { text: STATUS_WAITING, source: "status" };
+    }
 
     const restored = meta?.[META_RESTORED];
     if (typeof restored === "string" && isUsableTitle(restored)) {

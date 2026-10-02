@@ -39,7 +39,7 @@ import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { MOS } from "@/app/store/global";
 import { isUsableTitle } from "@/app/store/ambient-title";
-import { META_RESTORED } from "@/app/store/swarm-line";
+import { META_AWAITING_USER, META_LAST_PROMPT, META_RESTORED } from "@/app/store/swarm-line";
 
 export interface UseBlockActivityOptions {
     blockId: string;
@@ -59,6 +59,12 @@ function clearActivity(blockId: string): void {
             "term:osc_title": null,
             "term:ambient_summary": null,
             "term:next_prompt_suggestion": null,
+            // The session is over: what it was asked and whether it was waiting
+            // belong to it. Left in place, a new session in this pane, or one
+            // after a restart, would open under the old session's last message
+            // (ReAgent P2 on #4234).
+            [META_LAST_PROMPT]: null,
+            [META_AWAITING_USER]: null,
             // Only replaced by a title that was actually worth keeping: a session
             // that never got one leaves the previous restored title in place.
             ...(restored ? { [META_RESTORED]: restored } : {}),

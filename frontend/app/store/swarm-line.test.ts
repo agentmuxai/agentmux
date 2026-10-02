@@ -130,6 +130,15 @@ describe("resolveSwarmLine", () => {
         expect(line({ meta: { ...waiting, [META_AWAITING_USER]: false } }).source).toBe("restored");
     });
 
+    it("ignores a waiting flag once the agent has no turn in flight", () => {
+        // A flag left behind by a crash, or by a question answered while the pane
+        // was not mounted, must not outrank the other lines for an idle agent
+        // (ReAgent P1 on #4234).
+        const stale = { [META_AWAITING_USER]: true, [META_RESTORED]: "Set up CI for the docs site" };
+        expect(line({ meta: stale, status: "idle" })).toEqual({ text: "Set up CI for the docs site", source: "restored" });
+        expect(line({ meta: { [META_AWAITING_USER]: true }, status: "idle" }).text).toBe(STATUS_NO_ACTIVITY);
+    });
+
     it("uses the restored title next, then the heuristic one", () => {
         const both = { [META_RESTORED]: "Set up CI for the docs site", [META_LAST_PROMPT]: "Please fix the login redirect" };
         expect(line({ meta: both })).toEqual({ text: "Set up CI for the docs site", source: "restored" });
