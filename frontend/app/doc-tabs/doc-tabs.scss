@@ -1,0 +1,17 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The document-tab strip (SPEC_DOCUMENT_TABS_2026_10_02.md §4.1): under the
+// pane header, above the pane's content. The pills themselves are
+// PaneTabStrip's.
+
+.doc-tab-strip {
+    display: flex;
+    flex-shrink: 0;
+    min-width: 0;
+    border-bottom: 1px solid var(--border-color);
+
+    .doc-tab--preview .pane-tab-label {
+        font-style: italic;
+    }
+}

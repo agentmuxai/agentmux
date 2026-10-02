@@ -1,6 +1,6 @@
 # SPEC: Document tabs: one shared tab system for the documents inside a pane
 
-**Status:** proposed. Design only; nothing in §5–§9 is built. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
+**Status:** active. Phase 1 is built (#4231): the shared layer and Hangar on it (§9; where the build differs from the design below, the section says so). Phases 2–5 are not. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"there are actually 3 types: Window tabs, Pane tabs, and inner-pane tabs"*; *"The media pane tabs would also be in-pane tabs"*; *"ok document tabs. so u will create 1 document tab system that editor, hangar, media, (does browser have it too?) and whatever types"*; and *"lets also backreference old docs to this, so old stuff like that idea you found is squashed"*.
@@ -64,7 +64,7 @@ The rule that decides the layer: **a pane tab is a different pane; a document ta
 - Shown when a pane has **two or more** document tabs. A type can ask to show it always (`alwaysShowStrip`): the Editor does, matching today.
 - Each tab: icon, title, close ×, and per-type marks: **dirty** (a dot that the × replaces on hover), **preview** (italic title), **pinned** (no ×, kept left).
 - "+" at the end: a new document tab (§4.3, `Ctrl+T`).
-- Drag to reorder within the strip (Phase 1). Pinned tabs stay before unpinned ones.
+- Reorder: `Ctrl+Shift+PageUp` / `PageDown` (§4.3). Pinned tabs stay before unpinned ones. **Drag to reorder is deferred to Phase 5** (as built in Phase 1): `PaneTabStrip`'s drag is the pane-tab drag (its own drag kind, with tear-off into a new window), so a document tab dragged with it would be taken for a pane tab. Document tabs get their own drag kind with §5.8's between-pane drag.
 - The **pane tab's label** in the header is the active document tab's title (through the view's `liveTitle`), so a pane reads "README.md" or "docs", not "Editor".
 
 ### 4.2 Preview tabs
@@ -95,7 +95,7 @@ Close · Close others · Close to the right · Pin/Unpin · Copy path (types wit
 ## 5. The shared layer
 
 ### 5.1 Where it lives
-`frontend/app/doc-tabs/`: the pure model and reducer (`doc-tabs.ts`), the strip (`DocTabStrip.tsx`), keys (`doc-tab-keys.ts`), persistence (`doc-tab-meta.ts`). No view-specific code.
+`frontend/app/doc-tabs/`: the pure model, its commands and persistence (`doc-tabs.ts`); a controller holding one pane's state as a signal, saving it debounced, plus the keys (`doc-tabs-controller.ts`); the strip (`DocTabStrip.tsx`). No view-specific code. Tests: `doc-tabs.test.ts`.
 
 ### 5.2 Model
 ```ts
@@ -122,13 +122,15 @@ Commands (one reducer, pure, tested once for every type): `Open { key, payload, 
 ### 5.3 Persistence
 One block-meta key, `doctabs`, written debounced (300 ms) on any change, never containing transient state:
 ```json
-{ "v": 1, "active": "t2", "tabs": [ { "id": "t1", "key": "C:\\repo\\a.ts", "title": "a.ts", "pinned": true, "state": { … } } ] }
+{ "v": 1, "active": 1, "tabs": [ { "key": "C:\\repo\\a.ts", "title": "a.ts", "icon": "file", "pinned": true, "state": { … } } ] }
 ```
+As built, `active` is an index into `tabs` and tabs carry no id: ids are minted fresh on restore, so nothing depends on them surviving a restart.
 `state` is what the type's `serialize(payload)` returns (a path, a URL, a scroll line): small and JSON-safe. Preview tabs and the closed list are not persisted. On restore, `deserialize` rebuilds each payload; a document that's gone (a deleted file) restores as a tab that says so. This replaces the Editor's unbuilt `editor:tabs` and its legacy single-`file` restore (kept read-only for one release, for a downgrade).
 
 ### 5.4 Content per tab
 The layer manages tabs, not content. Each type decides how inactive documents are kept:
-- **Keep state, mount one** (Hangar, Media): each tab's model or state object lives in memory; only the active tab's view is mounted.
+- **Keep state, mount one** (Media): each tab's state object lives in memory; only the active tab's view is mounted.
+- **Keep mounted, show one** (Hangar, as built): each tab's view stays mounted and hidden, so its scroll, filter and an open rename survive a switch. Hangar's views are plain DOM, so this costs little; only the active one listens for drops, holds settled content or applies an OpenFiles selection.
 - **Keep instances** (Editor): one CodeMirror `EditorState` per tab, swapped into one view, which is how the editor already works.
 - **Keep a budget** (Browser): §6.4.
 
@@ -151,6 +153,8 @@ docTabs?: {
 ```
 The host renders the strip, owns the keys and the persistence, and hands the view its active document. The view renders that document.
 
+**As built in Phase 1** the manifest field is not there yet: a view that wants document tabs makes a `DocTabsController` with a `DocTabsSpec` (the fields above) and renders `DocTabStrip` itself, as Hangar's `files-pane.tsx` does. Moving that into the host is for when a second type adopts the layer (Phase 2), so its shape is settled by two users, not one.
+
 ### 5.7 Agents and other panes opening documents
 `OpenEditor`, `OpenFiles`, `OpenMedia` (and a future `OpenBrowser`), and in-app opens (Hangar's open-by-kind, a Read row's image), **add a document tab to an existing pane of that type in the window tab on screen**, preferring the focused one, then the most recently focused. They create a new pane only when none exists or the caller asks (`new_pane: true`). This generalizes the Editor's `editor:pending_open_files` queue (`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md`) to a `doctabs:pending` meta queue drained by the host, so it works for every type.
 
@@ -166,9 +170,9 @@ Dragging a document tab onto another pane's strip of the **same type** moves it 
 - Risk: highest of the four (buffers, dirty state, LSP, the file watcher). It gets its own PR, a live check of save, close-dirty, reopen and restart, and nothing else bundled in.
 
 ### 6.2 Hangar (Phase 1, first adopter)
-- Payload `{ path }`; key = the canonical path. Each tab keeps its own `FilesModel` in memory (history, selection, sort, scroll); only the active one is mounted.
+- Payload `{ path }`; key = the path. Each tab has its own `FilesModel` (history, selection, sort, scroll), made in its own reactive root, and its own mounted view (§5.4). The tabs share one queue of copy and move jobs; when one finishes, the tab in front reports it and every tab re-lists. The block's `files:path` follows the tab in front, so the pane's "+", OpenFiles and layout export keep working, and a Hangar from before document tabs opens with one tab on it. Built in `frontend/app/view/files/files-pane.tsx`.
 - `Ctrl+T` and "+" open the folder shown; `Ctrl+Enter`, middle-click and **Open in new tab** on a folder open it as a document tab. These replace #4227's pane-tab behaviour. **Open in new pane** stays in the row menu for a folder you want beside this one.
-- `keepOne: true`: Hangar always shows a folder.
+- `keepOne: true`: Hangar always shows a folder; `Ctrl+W` on the last tab says to use the pane's ×.
 - Single-click on a folder row in Hangar navigates the current tab (as now); there are no preview tabs.
 
 ### 6.3 Media (Phase 3)
@@ -194,7 +198,7 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 - Reducer (`doc-tabs.test.ts`): every command, preview replacement, key de-duplication, MRU order, the closed list (cap, reopen), pinned ordering, `keepOne`.
 - Persistence: round-trip, unknown version ignored, a missing document restored as a marked tab, preview and closed not written.
 - Strip and keys: visibility threshold, marks, reorder by drag and by keys, the keys acting only inside a doc-tab pane (a terminal keeps `Ctrl+W`).
-- Per type: the Editor's existing tab tests ported onto the shared layer, unchanged in what they assert; Hangar's #4227 tests rewritten for document tabs.
+- Per type: the Editor's existing tab tests ported onto the shared layer, unchanged in what they assert; Hangar's #4227 tests rewritten for document tabs (done: `files-view.test.tsx`, "document tabs").
 - Live checks on a dev build for each phase, the Editor's with save and close-dirty.
 
 ## 9. Rollout
@@ -202,11 +206,11 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 | Phase | What | Notes |
 |---|---|---|
 | 0 | This spec, and pointers in the superseded docs | this PR |
-| 1 | The shared layer (§5.1–§5.6) and **Hangar** on it (§6.2) | proves the layer on the newest, simplest pane; reverts #4227's pane-tab bindings |
+| 1 | The shared layer (§5.1–§5.6) and **Hangar** on it (§6.2) | **built.** Reverts #4227's pane-tab bindings. Drag-reorder moved to Phase 5 (§4.1); the manifest field to Phase 2 (§5.6) |
 | 2 | **Editor** on it (§6.1) | its own PR; deletes the tab half of `editor-pane-state-store.ts` |
 | 3 | **Media** tabs (§6.3) and §5.7's open-into-existing-pane for Editor, Hangar, Media | |
 | 4 | **Browser** tabs (§6.4) | native views and discarding |
-| 5 | Between panes (§5.8): drag to another pane, Move to new pane | |
+| 5 | Between panes (§5.8): drag to another pane, Move to new pane; drag to reorder (§4.1) | a drag kind of its own |
 
 ## 10. Open questions for the repo owner
 1. **macOS keys.** Mac users expect `Cmd+W`, `Cmd+T` and `Cmd+Shift+T` for document tabs (Safari, VS Code), but in this app `Cmd:` chords are window-level (`Cmd:t` is a new window tab). Proposed: `Ctrl` on every platform (§4.3), revisited after use. The alternative is `Cmd` on macOS only for document tabs, which means moving the window-tab chords there.
