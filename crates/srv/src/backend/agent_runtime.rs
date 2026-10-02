@@ -103,13 +103,71 @@ pub fn spawn_runtime_from_args(args: &[String]) -> SpawnRuntime {
     out
 }
 
+/// What the running CLI says it is ACTUALLY using, from its `get_settings`
+/// answer (`applied`): the alias on the command line resolved to a concrete
+/// model, and the effort in force. `None` for a field the CLI reports as null
+/// (Haiku has no effort).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EffectiveRuntime {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+/// Prefix of the `request_id` of our `get_settings` requests, so the answer can
+/// be told from the answers to anything else.
+pub const SETTINGS_REQUEST_PREFIX: &str = "agentmux-settings-";
+
+/// The control request asking a running Claude CLI what it is using. Observed
+/// on CLI 2.1.285 to be answered straight after spawn, with no account and no
+/// message (docs/specs/SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md §7.3).
+pub fn settings_request_line() -> String {
+    json!({
+        "type": "control_request",
+        "request_id": format!("{SETTINGS_REQUEST_PREFIX}{}", uuid::Uuid::new_v4()),
+        "request": { "subtype": "get_settings" },
+    })
+    .to_string()
+}
+
+/// The effective runtime in a `get_settings` answer, or `None` for any other
+/// frame, an error answer (a CLI that has no `get_settings`) or one without
+/// `applied`. The shape is `{type: control_response, response: {subtype:
+/// success, request_id, response: {applied: {model, effort, ...}}}}`.
+pub fn effective_from_control_response(frame: &Value) -> Option<EffectiveRuntime> {
+    if frame.get("type").and_then(Value::as_str) != Some("control_response") {
+        return None;
+    }
+    let resp = frame.get("response")?;
+    if resp.get("subtype").and_then(Value::as_str) != Some("success") {
+        return None;
+    }
+    if !resp
+        .get("request_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id.starts_with(SETTINGS_REQUEST_PREFIX))
+    {
+        return None;
+    }
+    let applied = resp.get("response")?.get("applied")?.as_object()?;
+    let field = |k: &str| {
+        applied
+            .get(k)
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    Some(EffectiveRuntime { model: field("model"), effort: field("effort") })
+}
+
 /// The `agentruntime` event for one pane (persisted, so a menu that mounts late
 /// still gets the latest). `running` is `None` when no process is alive — then
-/// there is nothing for the menu to compare against.
+/// there is nothing for the menu to compare against. `effective` is what the
+/// CLI reported using, when it has (see [`EffectiveRuntime`]).
 pub fn agent_runtime_event(
     block_id: &str,
     running: Option<&SpawnRuntime>,
     restart_pending: bool,
+    effective: Option<&EffectiveRuntime>,
 ) -> Value {
     let mut v = json!({
         "blockid": block_id,
@@ -127,6 +185,14 @@ pub fn agent_runtime_event(
             obj.insert("permission_mode".to_string(), json!(p));
         }
     }
+    if let (Some(eff), Some(obj)) = (effective.filter(|_| running.is_some()), v.as_object_mut()) {
+        if let Some(m) = &eff.model {
+            obj.insert("effective_model".to_string(), json!(m));
+        }
+        if let Some(e) = &eff.effort {
+            obj.insert("effective_effort".to_string(), json!(e));
+        }
+    }
     v
 }
 
@@ -135,6 +201,7 @@ pub fn publish_agent_runtime(
     block_id: &str,
     running: Option<&SpawnRuntime>,
     restart_pending: bool,
+    effective: Option<&EffectiveRuntime>,
 ) {
     use crate::backend::mps::{MuxEvent, EVENT_AGENT_RUNTIME};
     broker.publish(MuxEvent {
@@ -142,7 +209,7 @@ pub fn publish_agent_runtime(
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
         persist: 1,
-        data: Some(agent_runtime_event(block_id, running, restart_pending)),
+        data: Some(agent_runtime_event(block_id, running, restart_pending, effective)),
     });
 }
 
@@ -434,7 +501,7 @@ mod tests {
             effort: None,
             permission_mode: Some("default".into()),
         };
-        let v = agent_runtime_event("b1", Some(&rt), true);
+        let v = agent_runtime_event("b1", Some(&rt), true, None);
         assert_eq!(v["blockid"], "b1");
         assert_eq!(v["running"], true);
         assert_eq!(v["model"], "sonnet");
@@ -445,9 +512,57 @@ mod tests {
             "an absent flag is omitted, not null"
         );
 
-        let none = agent_runtime_event("b1", None, false);
+        let none = agent_runtime_event("b1", None, false, None);
         assert_eq!(none["running"], false);
         assert!(none.get("model").is_none());
+        assert!(v.get("effective_model").is_none(), "nothing reported yet");
+    }
+
+    #[test]
+    fn the_event_carries_what_the_cli_reported_only_while_a_process_runs() {
+        let rt = SpawnRuntime { model: Some("sonnet".into()), ..Default::default() };
+        let eff = EffectiveRuntime { model: Some("claude-sonnet-5-5".into()), effort: None };
+        let v = agent_runtime_event("b1", Some(&rt), false, Some(&eff));
+        assert_eq!(v["effective_model"], "claude-sonnet-5-5");
+        assert!(v.get("effective_effort").is_none(), "a null effort (Haiku) is omitted");
+        // a stale report must not outlive its process
+        let gone = agent_runtime_event("b1", None, false, Some(&eff));
+        assert!(gone.get("effective_model").is_none());
+    }
+
+    #[test]
+    fn a_get_settings_answer_is_read_and_nothing_else_is() {
+        let ok = json!({"type":"control_response","response":{
+            "subtype":"success","request_id":"agentmux-settings-1",
+            "response":{"applied":{"model":"claude-opus-5-5","effort":"medium","advisor":null}}}});
+        assert_eq!(
+            effective_from_control_response(&ok),
+            Some(EffectiveRuntime { model: Some("claude-opus-5-5".into()), effort: Some("medium".into()) })
+        );
+        let haiku = json!({"type":"control_response","response":{
+            "subtype":"success","request_id":"agentmux-settings-2",
+            "response":{"applied":{"model":"claude-haiku-4-5-20251001","effort":null}}}});
+        assert_eq!(effective_from_control_response(&haiku).unwrap().effort, None);
+
+        // someone else's request id, an error answer, no `applied`, other frames
+        for bad in [
+            json!({"type":"control_response","response":{"subtype":"success","request_id":"other-1","response":{"applied":{"model":"x"}}}}),
+            json!({"type":"control_response","response":{"subtype":"error","request_id":"agentmux-settings-3","error":"Unsupported"}}),
+            json!({"type":"control_response","response":{"subtype":"success","request_id":"agentmux-settings-4","response":{}}}),
+            json!({"type":"control_request","request_id":"agentmux-settings-5","request":{"subtype":"get_settings"}}),
+            json!({"type":"result"}),
+        ] {
+            assert_eq!(effective_from_control_response(&bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_settings_request_is_a_get_settings_control_request() {
+        let v: Value = serde_json::from_str(&settings_request_line()).unwrap();
+        assert_eq!(v["type"], "control_request");
+        assert_eq!(v["request"]["subtype"], "get_settings");
+        assert!(v["request_id"].as_str().unwrap().starts_with(SETTINGS_REQUEST_PREFIX));
+        assert_ne!(settings_request_line(), settings_request_line(), "each request has its own id");
     }
 
     fn s(v: &[&str]) -> Vec<String> {
