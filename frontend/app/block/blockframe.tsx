@@ -43,7 +43,7 @@ import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pa
 import {
     headerBgForEffectiveColor,
     hueToActiveBorder,
-    hueToBorder,
+    paneBorderForEffectiveColor,
     paneIdentityForEffectiveColor,
     paneTabActiveBgForEffectiveColor,
     paneTabBgForEffectiveColor,
@@ -143,6 +143,17 @@ export function computeBlockTabPillNeutralBg(blockMeta: Block["meta"] | undefine
  * non-agent side of that split: one value per theme, for every pane.
  */
 export function computeMixedPaneHeaderBg(isLightTheme: boolean): string {
+    return computeNonAgentHeaderBg(isLightTheme);
+}
+
+/**
+ * Header background for a non-agent pane (CPU, terminal, browser, editor…)
+ * with no color of its own. Dark theme: the fixed NON_AGENT_DEFAULT_HEADER_BG.
+ * Light theme: the theme's own block surface, as the uncoloured pills and the
+ * mixed-pane tail already use — the dark constant there was a solid slate bar
+ * across a light UI (owner report 2026-10-02, the CPU pane).
+ */
+export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
     return isLightTheme ? "var(--block-bg-solid-color)" : NON_AGENT_DEFAULT_HEADER_BG;
 }
 
@@ -732,9 +743,10 @@ function BlockFrame_Header(
             // etc.) gets ONE fixed header color instead of the default
             // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
             // constant, not per-pane-type or randomized. User request
-            // 2026-09-20.
-            style["background-color"] = NON_AGENT_DEFAULT_HEADER_BG;
-            style.color = pickReadableTextColor(NON_AGENT_DEFAULT_HEADER_BG) ?? undefined;
+            // 2026-09-20. Dark theme only: see computeNonAgentHeaderBg.
+            const fallback = computeNonAgentHeaderBg(isLightTheme);
+            style["background-color"] = fallback;
+            style.color = pickReadableTextColor(fallback) ?? undefined;
         }
         return style;
     });
@@ -1002,15 +1014,15 @@ function ConnStatusOverlay({
  * falls through here (typeof null !== "number") back to the agent's
  * default color rather than to no color at all.
  */
-export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefined): string | undefined {
+export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
     const hue = blockMeta?.["frame:hue"];
-    if (typeof hue === "number") {
-        return hueToActiveBorder(hue);
-    }
-    if (blockMeta?.["frame:activebordercolor"]) {
-        return blockMeta["frame:activebordercolor"] as string;
-    }
-    return undefined;
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    // The identity at full strength in OKLCH (pane-color-scheme.ts
+    // `identity`), the same colour as the active-tab underline. Since
+    // 2026-10-02; before, `hsl(h, 65%, 52%)` or the raw hex, whose perceived
+    // lightness ran from 0.50 (blue) to 0.84 (yellow). A value that is not a
+    // hex (nothing writes one today) is passed through as before.
+    return paneIdentityForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme) ?? (ac || undefined);
 }
 
 /**
@@ -1030,7 +1042,11 @@ export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefin
  * sit on top of this; nothing wrote those keys any more, so it was removed
  * (SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md §3).
  */
-export function computeFocusRingBorderColor(isFocused: boolean, blockMeta: Block["meta"] | undefined): string | undefined {
+export function computeFocusRingBorderColor(
+    isFocused: boolean,
+    blockMeta: Block["meta"] | undefined,
+    isLightTheme: boolean
+): string | undefined {
     if (isFocused) {
         // This used to inline the hue/activebordercolor check itself,
         // checking activebordercolor first and returning before ever
@@ -1038,19 +1054,17 @@ export function computeFocusRingBorderColor(isFocused: boolean, blockMeta: Block
         // (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's follow-up).
         // Now shares computeBlockActiveBorderColor's already-correct
         // hue-first precedence instead of duplicating it.
-        return computeBlockActiveBorderColor(blockMeta);
+        return computeBlockActiveBorderColor(blockMeta, isLightTheme);
     }
-    // Same precedence fix as the focused branch above, for the unfocused
-    // (dimmed) border — frame:bordercolor is frame:activebordercolor's
-    // passive-default counterpart, not an explicit choice.
+    // Same hue-first precedence, dimmed (pane-color-scheme.ts `border`). The
+    // agent's persisted `frame:bordercolor` (dimAgentColor's HSL snapshot) is
+    // used only when there is no identity to derive from.
     const hue = blockMeta?.["frame:hue"];
-    if (typeof hue === "number") {
-        return hueToBorder(hue);
-    }
-    if (blockMeta?.["frame:bordercolor"]) {
-        return blockMeta["frame:bordercolor"] as string;
-    }
-    return undefined;
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return (
+        paneBorderForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme) ??
+        ((blockMeta?.["frame:bordercolor"] as string | undefined) || undefined)
+    );
 }
 
 function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
@@ -1061,7 +1075,9 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
 
     const style = createMemo<JSX.CSSProperties>(() => {
-        const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta);
+        const themeId = getSettingsKeyAtom("window:theme")();
+        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta, isLightTheme);
         return color ? { "border-color": color } : {};
     });
 
@@ -1170,10 +1186,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // from that alone — only real agents (or an explicit hue pick) do.
     const blockAgentColor = createMemo(() => {
         if (!props.preview && paneTabCapability(blockData()?.meta?.view, "hueBorder")) {
-            const hue = blockData()?.meta?.["frame:hue"];
-            const color = typeof hue === "number"
-                ? hueToActiveBorder(hue)
-                : (blockData()?.meta?.["frame:activebordercolor"] as string | undefined);
+            const themeId = getSettingsKeyAtom("window:theme")();
+            const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+            const color = computeBlockActiveBorderColor(blockData()?.meta, isLightTheme);
             if (isUsableFocusRingColor(color)) {
                 return color;
             }
