@@ -1,7 +1,7 @@
 # SPEC: The Swarm shows the agents of every other instance this one knows about
 
 **Date:** 2026-10-02
-**Status:** active — Phase 1 (this machine's other channels) in PR #4239; Phases 2 to 4 not started. Section 9 asks for decisions.
+**Status:** active — Phase 1 (this machine's other channels) in PR #4239, Phase 2 (LAN hosts) in PR #4241; Phases 3 and 4 not started. Section 9 asks for decisions.
 **Author:** AgentX (narko), at the owner's request
 **Affects:** `frontend/app/view/swarm/` (`swarm-model.ts`, `swarm-view.tsx`), `crates/srv/src/server/http_health.rs` (`/agentmux/discovery`), `crates/srv/src/backend/lan_discovery.rs`, `crates/srv/src/server/reactive.rs`, `crates/srv/src/registry/`, and, for the cloud tier, `crates/srv/src/muxbus/` plus the separate `agentmux-cloud` repository
 **Builds on:** `docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` (the same-host registry), `docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` (install identities), `docs/specs/SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md` (how LAN peers are found), `docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md` §3 (the per-account directory this needs)
@@ -82,6 +82,8 @@ RemoteAgent  { name, block_id?, status?: "running"|"idle", provider?, line? }
 | **4: status and line for remote rows** | `status` first (running or idle, no content). `line` only if the owner decides to (§6). LAN: a new `lan_key` route returning the thin record; cloud: part of the signed record. | owner decisions 1 and 2 of §9 | narko ↔ Area54 |
 
 **Phase 1 is built in #4239**, with one change to 3.3: the registry has no change event to push from, so the Swarm polls `swarm.other-instances` on its existing 12 s timer instead of receiving a `swarmremote` event. Switching to a push fits Phase 2, whose LAN peer list already has an event.
+
+**Phase 2 is built in #4241.** Each instance advertises `channel` in its mDNS TXT record and its UDP identity reply; `install_id` is not added yet, since nothing consumes it before Phase 3. A LAN peer at one of this machine's own addresses is left to the registry, and a peer from an older build that does not advertise its channel is labelled by its port (`:29700`). The Swarm still polls; the switch to a pushed event is left for when the cloud tier needs it.
 
 Phases 1 and 2 do not touch the cloud repository. Phase 3 cannot start from this repository alone.
 
