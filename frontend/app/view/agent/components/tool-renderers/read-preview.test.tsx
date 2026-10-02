@@ -11,8 +11,9 @@
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ createBlock: vi.fn(async () => "new-block") }));
+const h = vi.hoisted(() => ({ createBlock: vi.fn(async () => "new-block"), fsOpen: vi.fn<(client: unknown, req: { path: string }) => Promise<object>>(async () => ({})) }));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FsOpenCommand: h.fsOpen } }));
 
 import { ClaudeTranslator } from "../../providers/claude-translator";
 import type { ToolNode } from "../../types";
@@ -112,14 +113,18 @@ describe("a Read of a PDF", () => {
         expect(r).toMatchObject({ content: "PDF file read: C:/docs/a.pdf (708.3KB)", file: { kind: "pdf", size: 725359 } });
     });
 
-    it("shows one line with the size and the pages asked for, and a Show in folder button", () => {
+    it("shows one line with the size and the pages asked for, with Open and Show in folder", () => {
         const open = vi.fn();
         (window as unknown as { api: unknown }).api = { revealInFileExplorer: open };
         const { container } = show(node({ params: { file_path: "C:/docs/a.pdf", pages: "1-5" }, result: result() }));
         expect(container.querySelector(".agent-tool-read-facts span")?.textContent).toBe("PDF · pages 1-5 · 708.4 KB");
         expect(container.querySelector(".agent-highlighted-code")).toBeNull();
-        fireEvent.click(container.querySelector(".agent-tool-read-open")!);
+        const buttons = [...container.querySelectorAll(".agent-tool-read-open")];
+        expect(buttons.map((b) => b.textContent)).toEqual(["Open", "Show in folder"]);
+        fireEvent.click(buttons[1]);
         expect(open).toHaveBeenCalledWith("C:/docs/a.pdf");
+        fireEvent.click(buttons[0]);
+        expect(h.fsOpen.mock.lastCall?.[1]).toEqual({ path: "C:/docs/a.pdf" });
         delete (window as unknown as { api?: unknown }).api;
     });
 });

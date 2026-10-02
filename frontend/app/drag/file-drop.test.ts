@@ -17,7 +17,10 @@ vi.mock("@/util/dnd", () => ({
 }));
 
 import {
+    beginPathDrag,
+    endPathDrag,
     installFileDropController,
+    PATHS_MIME,
     paneDropState,
     pathsMatchFiles,
     registerFileDropTarget,
@@ -206,6 +209,66 @@ describe("file-drop controller", () => {
         fire("dragleave", a, {}, null);
         await frame();
         expect(state("a")).toBeUndefined();
+    });
+});
+
+describe("in-app path drags (a Hangar row; SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.2)", () => {
+    const start = (paths: string[]) => {
+        const data = new Map<string, string>();
+        const dt = { setData: (k: string, v: string) => data.set(k, v), effectAllowed: "" } as unknown as DataTransfer;
+        beginPathDrag(dt, paths, "hangar");
+        return data;
+    };
+    const pathTransfer = { types: [PATHS_MIME, "text/plain"], items: [], files: [] };
+
+    it("puts the paths on the drag, as data and as text", () => {
+        const data = start(["C:\\a\\x.ts", "C:\\a\\y.md"]);
+        expect(JSON.parse(data.get(PATHS_MIME)!)).toEqual(["C:\\a\\x.ts", "C:\\a\\y.md"]);
+        expect(data.get("text/plain")).toBe("C:\\a\\x.ts\nC:\\a\\y.md");
+        endPathDrag();
+    });
+
+    it("targets panes with the names, and drops the paths with no file bytes", async () => {
+        const a = pane("agent");
+        const h = hook();
+        registerFileDropTarget("agent", h);
+        start(["C:\\a\\x.ts", "C:\\a\\y.md"]);
+        const { transfer } = fire("dragenter", a, pathTransfer);
+        await frame();
+        expect(state("agent")).toEqual({ state: "target", message: "Drop here", icon: undefined });
+        expect(h.accept).toHaveBeenCalledWith({ count: 2, types: ["", ""], names: ["x.ts", "y.md"] });
+        expect(transfer.dropEffect).toBe("copy");
+        fire("drop", a, pathTransfer);
+        await frame();
+        expect(h.drop).toHaveBeenCalledWith({ paths: ["C:\\a\\x.ts", "C:\\a\\y.md"], files: [] });
+        // No OS drop happened: the host's stash is never consulted.
+        expect(hub.consume).not.toHaveBeenCalled();
+        endPathDrag();
+    });
+
+    it("ignores the MIME once the drag has ended (a stale drag from elsewhere)", async () => {
+        const a = pane("agent");
+        const h = hook();
+        registerFileDropTarget("agent", h);
+        start(["C:\\a\\x.ts"]);
+        endPathDrag();
+        fire("dragenter", a, pathTransfer);
+        fire("drop", a, pathTransfer);
+        await frame();
+        expect(h.accept).not.toHaveBeenCalled();
+        expect(h.drop).not.toHaveBeenCalled();
+    });
+
+    it("doesn't drop where the pane refuses", async () => {
+        const a = pane("media");
+        const h = hook({ ok: false });
+        registerFileDropTarget("media", h);
+        start(["C:\\a\\x.ts"]);
+        fire("dragenter", a, pathTransfer);
+        fire("drop", a, pathTransfer);
+        await frame();
+        expect(h.drop).not.toHaveBeenCalled();
+        endPathDrag();
     });
 });
 
