@@ -991,6 +991,18 @@ impl AgentMuxHandler {
     }
 }
 
+/// Load failures that can never clear by trying again, so the error page must
+/// not auto-retry them. Deliberately narrow: every other code (connection
+/// refused while Vite starts, a network that comes back) CAN clear, and the
+/// main window's auto-retry exists for exactly those. Widen only with evidence.
+///
+/// `ERR_UNSAFE_PORT`: Chromium refuses to load pages from ports such as 6000
+/// (X11) whatever is listening there. Observed 2026-10-02 as 211 identical
+/// failures and a window that flickered until killed.
+pub(crate) fn is_permanent_load_error(error_code_i32: i32) -> bool {
+    error_code_i32 == sys::cef_errorcode_t::ERR_UNSAFE_PORT as i32
+}
+
 /// Build the load-error page HTML for a failed navigation. Always sets an
 /// explicit `<title>` — see `error_catalog`'s module doc for why that
 /// matters: without one, the window/tab title falls back to this page's own
@@ -1024,7 +1036,12 @@ pub(crate) fn render_load_error_html(
     // per-error-code heading: that's the actual fix this unification made
     // (see this function's own doc comment) — a pane loading an arbitrary
     // external site must never claim "Failed to load AgentMux frontend".
-    let heading_safe = html_escape(if is_browser_pane {
+    //
+    // A permanent failure (see `is_permanent_load_error`) is the exception: the
+    // generic "Failed to load AgentMux frontend" would point at the wrong thing
+    // (Vite IS running), so the catalog's own heading is shown for it.
+    let permanent = is_permanent_load_error(error_code_i32);
+    let heading_safe = html_escape(if is_browser_pane || permanent {
         copy.heading
     } else {
         "Failed to load AgentMux frontend"
@@ -1040,13 +1057,22 @@ pub(crate) fn render_load_error_html(
     // URLs through this SAME handler — auto-retrying their failures (offline
     // site, DNS error, refused service) would be an unbounded reload loop, so
     // panes get a manual Retry only.
-    let auto_retry = if is_browser_pane {
+    //
+    // A permanent failure (see `is_permanent_load_error`) never auto-retries
+    // either: the retry could only repeat it, and on the main window that is a
+    // window that flashes the error page every 1.2 s forever.
+    let auto_retry = if is_browser_pane || permanent {
         String::new()
     } else {
         "setTimeout(__amxRetry, 1200);".to_string()
     };
     let dev_hint = if is_browser_pane {
         String::new()
+    } else if permanent {
+        // The only permanent main-window failure today is a blocked Vite port.
+        // docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md
+        "<p>Restart with a different port:<br><code>AGENTMUX_VITE_PORT=5300 task dev</code><br>or <code>AGENTMUX_VITE_PORT=$(bash scripts/vite-port.sh pick) task dev</code></p>"
+            .to_string()
     } else {
         "<p>Make sure the Vite dev server is running:<br><code>task dev</code> or <code>npx vite</code></p>"
             .to_string()
@@ -1224,5 +1250,74 @@ mod reveal_decision_tests {
         assert!(!should_run_reveal(true, Some(true)));
         // No native evidence => trust the Views layer, as before this fix.
         assert!(!should_run_reveal(true, None));
+    }
+}
+
+#[cfg(test)]
+mod load_error_page_tests {
+    use super::{is_permanent_load_error, render_load_error_html};
+    use cef::sys::cef_errorcode_t;
+
+    const URL: &str = "http://localhost:6000/?ipc_port=1";
+
+    fn page(code: cef_errorcode_t, text: &str, is_pane: bool) -> String {
+        render_load_error_html(URL, code as i32, text, is_pane)
+    }
+
+    /// The incident: a blocked Vite port is permanent, and the main window's
+    /// page must not reload itself every 1.2 s forever.
+    #[test]
+    fn a_blocked_port_on_the_main_window_does_not_auto_retry() {
+        let html = page(cef_errorcode_t::ERR_UNSAFE_PORT, "ERR_UNSAFE_PORT", false);
+        assert!(!html.contains("setTimeout(__amxRetry"), "must not loop");
+        assert!(html.contains("onclick=\"__amxRetry()\""), "manual Retry stays");
+    }
+
+    /// ...and it says what to do, instead of "make sure Vite is running".
+    #[test]
+    fn a_blocked_port_names_the_fix() {
+        let html = page(cef_errorcode_t::ERR_UNSAFE_PORT, "ERR_UNSAFE_PORT", false);
+        assert!(html.contains("AGENTMUX_VITE_PORT"));
+        assert!(html.contains("vite-port.sh pick"));
+        assert!(html.contains("<title>This port is blocked</title>"));
+        // The visible heading, not just the tab title: the generic main-window
+        // heading must not win for a blocked port (ReAgent P2 on #4214).
+        assert!(html.contains("<h1>This port is blocked</h1>"));
+        assert!(!html.contains("Failed to load AgentMux frontend"));
+        assert!(!html.contains("Make sure the Vite dev server is running"));
+    }
+
+    /// The race this retry exists for is untouched: Vite not up yet.
+    #[test]
+    fn a_refused_connection_on_the_main_window_still_auto_retries() {
+        let html = page(cef_errorcode_t::ERR_CONNECTION_REFUSED, "ERR_CONNECTION_REFUSED", false);
+        assert!(html.contains("setTimeout(__amxRetry, 1200)"));
+        assert!(html.contains("Make sure the Vite dev server is running"));
+        assert!(html.contains("<h1>Failed to load AgentMux frontend</h1>"), "other errors keep the main-window heading");
+    }
+
+    /// A browser pane never auto-retries, whatever the code.
+    #[test]
+    fn a_browser_pane_never_auto_retries() {
+        for code in [cef_errorcode_t::ERR_UNSAFE_PORT, cef_errorcode_t::ERR_CONNECTION_REFUSED] {
+            let html = page(code, "x", true);
+            assert!(!html.contains("setTimeout(__amxRetry"));
+            assert!(!html.contains("AGENTMUX_VITE_PORT"), "dev hint is main-window only");
+        }
+    }
+
+    /// Only the one observed-permanent code is permanent.
+    #[test]
+    fn only_a_blocked_port_is_permanent() {
+        assert!(is_permanent_load_error(cef_errorcode_t::ERR_UNSAFE_PORT as i32));
+        for code in [
+            cef_errorcode_t::ERR_CONNECTION_REFUSED,
+            cef_errorcode_t::ERR_CONNECTION_TIMED_OUT,
+            cef_errorcode_t::ERR_NAME_NOT_RESOLVED,
+            cef_errorcode_t::ERR_INTERNET_DISCONNECTED,
+            cef_errorcode_t::ERR_FAILED,
+        ] {
+            assert!(!is_permanent_load_error(code as i32), "{code:?} can clear");
+        }
     }
 }

@@ -1147,6 +1147,10 @@ tasks:
                   AGENTMUX_VITE_PORT=$((5173 + PORT_OFFSET))
                   echo "Auto-selected Vite port $AGENTMUX_VITE_PORT for clone $CLONE_ROOT"
                 fi
+                # Refuse a port Chromium won't load pages from (6000 and friends):
+                # the window would flicker on ERR_UNSAFE_PORT with no explanation.
+                # SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md
+                bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
 
@@ -1410,6 +1414,7 @@ tasks:
                   AGENTMUX_VITE_PORT=$((5173 + PORT_OFFSET))
                   echo "Auto-selected Vite port $AGENTMUX_VITE_PORT for clone $CLONE_ROOT"
                 fi
+                bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
                 if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
