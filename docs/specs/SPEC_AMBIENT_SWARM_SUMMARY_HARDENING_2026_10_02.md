@@ -1,7 +1,7 @@
 # SPEC: The swarm always shows a useful line for every agent — hardening the ambient summary
 
 **Date:** 2026-10-02
-**Status:** proposed — investigation and design; nothing implemented. Section 9 asks for decisions.
+**Status:** active — PR 1 shipped in #4185 and PR 2 in #4234; PRs 3 and 4 not started. The section 9 decisions were answered on 2026-10-02 (the recommendations, see 9.1).
 **Author:** AgentX (narko), at the owner's request
 **Affects:** `crates/srv/src/ambient/` (`prompt.rs`, `validate.rs`, `tasks.rs`), `crates/srv/src/server/app_api/session.rs`, `crates/srv/src/backend/reactive/activity_watcher.rs`, `frontend/app/store/activitySummary.ts`, `frontend/app/view/agent/hooks/useAgentActivitySummary.ts` and `useBlockActivity.ts`, `frontend/app/view/swarm/swarm-model.ts` and `swarm-view.tsx`.
 **Builds on:** `docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md` (the title prompt this spec corrects), `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md` (the gateway), `docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md`.
@@ -97,11 +97,15 @@ Two prompts, chosen by whether a *valid* current title exists:
 3. **`heuristic`**: a deterministic one-liner from the latest *human* message of the session, cut to the word limit with the leading filler stripped (greetings, "please", "can you"). No model call. If the latest message is a nudge with no content ("u there", "continue"), use the latest message that has content.
 4. **`status`**: a plain phrase from the agent's status, so a row is never empty. Proposed wording (the owner's call, section 9): running with tool activity, "Working"; running without, "Thinking"; waiting on the user, "Waiting for you"; idle with conversation history but no usable title, **"Summarizing work completed"** (the phrase the owner suggested; it fits an agent that has done work and whose summary is not ready yet); idle with no history at all, "No activity yet".
 
+**Built in #4234, with one change to this order:** "Waiting for you" (a pending AskUserQuestion, kept in `term:awaiting_user`, honoured only while the agent has a turn in flight) outranks `restored` and `heuristic`, though not `generated`. It is the one state someone has to act on, and an old goal would bury it. Approval prompts are not wired to it yet.
+
 Rungs 3 and 4 render in the muted style the swarm already uses for secondary text, with a tooltip naming the source ("Shown until a summary is ready"), so a fallback is never mistaken for the agent's own account of its work (P5). The wording is a product decision (section 9).
 
 ### 5.5 Restore across restart (stop clearing to blank)
 
 `useBlockActivity.ts` clears `term:ambient_summary` on a session boundary, which is correct for the *live* title but throws away the last good one. Keep the last good title per agent definition (the `agent_activity_summaries` store that the picker already uses, keyed by definition), write it when a generated title is accepted, and on a new session surface it as `restored` until a fresh title replaces it. The owner's restart therefore opens onto the previous goal, not a blank, which is the situation that produced this report.
+
+**Built in #4234, differently:** the title is kept in block meta (`term:restored_summary`), not in `db_agent_activity_summaries`. That table is the picker's once-per-definition cache ("never regenerated once non-empty"), a different contract, and reading it from the swarm needs a new RPC. Block meta already survives a restart, so `useBlockActivity` moves the ended session's title there instead of discarding it, which covers the reported case. What it does not do is carry a title to a **new pane of the same agent**; that still needs the per-definition store and is a follow-up.
 
 ### 5.6 When a title is (re)computed
 
@@ -163,6 +167,10 @@ The Ambient Model Call gateway's admission and cancellation, the title length li
 3. **Persist across restart.** Keep the last good title per agent definition and show it as `restored` (recommended), or start each session blank until a real title exists?
 4. **How strict.** Ship the absence-pattern list now and grounding as advisory only (recommended), or also enforce grounding from the start?
 5. **Re-evaluation cadence.** The `muxterm` schedule (turns 2, 5, 8, then every third) or the present per-submission refresh with only the predicate and the abstain token added?
+
+### 9.1 Answers (2026-10-02)
+
+The owner said to use the recommendations: the wording of 1 with fallback lines muted, the sweep wired as the empty-title recovery (2), persistence with `restored` (3), the absence-pattern list now and grounding advisory only (4), and the `muxterm` re-check schedule (5). Items 1 and 3 are built in #4234; 2, the grounding half of 4, and 5 belong to PRs 3 and 4.
 
 ## 10. Sources
 

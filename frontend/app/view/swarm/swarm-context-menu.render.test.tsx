@@ -58,6 +58,7 @@ function treeNode(over: Partial<AgentTreeNode> = {}): AgentTreeNode {
         agentName: "AgentX",
         agentProvider: "claude",
         activitySummary: null,
+        line: { text: "No activity yet", source: "status" },
         contextTokens: null,
         agentStatus: "running",
         agentToolRows: [],

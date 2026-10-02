@@ -72,6 +72,7 @@ function treeNode(tasks: BackgroundTaskView[], subs: ActiveSubagent[] = []): Age
         agentName: "AgentX",
         agentProvider: "claude",
         activitySummary: null,
+        line: { text: "No activity yet", source: "status" },
         contextTokens: null,
         agentStatus: "running",
         agentToolRows: subs,
