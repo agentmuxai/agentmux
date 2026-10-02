@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-10-01
-**Status:** proposed — nothing built. Designs what `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §3 recorded as "Phase 2" and fixes the gaps found in the 2026-10-01 incident (§1).
+**Status:** active — Phase 0 item 1 (pull on subscribe, connect and a timer) shipped in PR #4122 (v0.59.3); everything else is proposed. Designs what `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §3 recorded as "Phase 2" and fixes the gaps found in the 2026-10-01 incident (§1).
 **Related (read these first):**
 - `SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` — current policy: a live agent gets the jekt at once; only a starting, restarting or stopping process queues. Implemented.
 - `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` — the 24 h hold (`db_jekt_held`) for an absent agent. Phase 1 shipped (#3632); its Phase 2 is this spec.
@@ -30,6 +30,8 @@ reached the model four minutes after it was sent. Evidence from this instance's 
 | 03:07:19 | `muxbus: provisioned per-agent credential` for `agenty` | relay credential in place; the subscription follows |
 | 03:10:25.489 | `wan verify: arrived without a WAN signature` for the same id | pulled from the relay **3 min 59 s after it was sent, 3 min 6 s after AgentY went live** |
 | 03:10:25.493 | `inject: structured delivery … target agenty` | first moment the model could see it |
+
+> **Update 2026-10-01 (after merge):** the pull gap described next was fixed independently by AgentX in PR #4122 (merged 00:59 PT, shipped in v0.59.3), which also records a second occurrence: a jekt waited 8 min 46 s on 2026-09-30. See G1 and Phase 0. The text below describes the code as it was when the incident happened.
 
 Why it was late: `cloud_subscriber.rs` pulls pending relay messages **only** when the relay broadcasts
 `inject_available` (`sync_agent_reactive` is called from that one handler; its own comment says "no
@@ -67,6 +69,7 @@ PRs are from `git log` and the specs above.
 | 2026-09-24/25 | #3738…, cloud #92 | single live instance per agent (relay lease, fencing) | — |
 | 2026-09-27/28 | #3979, #3977 | **reversal:** live agent gets the jekt at once, no turn-boundary hold | durable hold unchanged |
 | 2026-09-29 | #3990 | deferred restart now respawns (the Korp outage) | "queued forever" still invisible to senders |
+| 2026-10-01 | #4122 (AgentX) | catch-up pull on connect, on add, and every 120 s; subscription seeded with agents that registered before the subscriber existed | sender still told only "QUEUED"; relay expiry still silent |
 | 2026-09-29/30 | issues #4012, #4013 | MuxBus sign-in expires after ~2 h → sends fail "agent not found"; late-login agents not subscribed | both open |
 | open | issue #3894 | review notices arrive 1–1.5 h late: held/deferred jekts ignore the sender's expiry | open |
 
@@ -101,7 +104,7 @@ or the failures.
 
 ### 3.3 Gaps
 
-- **G1. The relay path is wake-driven.** No pull on `SubscribeAdd` or connect, no periodic resync (`cloud_subscriber.rs`, `sync_agent_reactive` doc). A message to an agent that comes online *after* the send waits for an unrelated wake. This is the incident.
+- **G1. The relay path is wake-driven. FIXED in #4122 (v0.59.3).** Before: no pull on `SubscribeAdd` or connect, no periodic resync (`cloud_subscriber.rs`, `sync_agent_reactive` doc), so a message to an agent that came online *after* the send waited for an unrelated wake. This was the incident. Now `catch_up` runs on connect, when an agent is added, and every `CATCH_UP_EVERY` = 120 s, and registered agents are seeded into the subscription when the subscriber is created (an isolated channel creates it lazily at `muxbus.login`). What remains of G1: a missed wake now costs up to 2 minutes, not an unbounded wait; and the relay's 30-minute expiry still drops the message silently (G9).
 - **G2. Relay before local hold, even for a same-machine target.** A defined local agent gets a cloud round trip it does not need, and the 30-minute relay expiry instead of the local 24 h hold.
 - **G3. "Delivered" means enqueued, not consumed.** srv has no per-agent auth state on the jekt path; the human fast-fail (`useAgentCommands.ts`) is not reachable from `/agentmux/reactive/inject`.
 - **G4. Spawn-gate refusal drops, with no hint.** `identity spawn gate: …` is a recoverable condition (sign in) reported like a permanent failure, and the jekt is not kept.
@@ -208,21 +211,21 @@ a sender that doesn't is told it in the send result (§5.2).
 ## 6. Phases
 
 - **Phase 0 — truthful and unstuck (small, no schema change).**
-  1. Pull on `SubscribeAdd`/connect and a 60 s resync in `cloud_subscriber.rs` (G1).
+  1. ~~Pull on `SubscribeAdd`/connect and a resync in `cloud_subscriber.rs` (G1).~~ **Done: PR #4122** (v0.59.3), with a 120 s timer rather than the 60 s proposed here. Its unit tests cover the subscription seeding; the end-to-end timing check is test 2 below and is still to be written.
   2. Local-first, **lease-aware** (G2): a known local agent is held locally only if this srv holds its lease or the relay reports it free. The relay today exposes only `claim`, `take`, `renew` and `release` for leases, so this needs a **read-only holder query** (`GET /agents/lease/:agent`, same auth as `/reactive/pending`). Until it exists, a target whose lease state srv does not know keeps going to the relay as today; 0.1 already makes that path deliver on subscribe, so the §1 scenario is fixed without 0.2.
   3. `SendMessage` returns `id=` and the receiver condition where srv already knows it; refresh `tool_schemas.rs` (G10).
   4. A spawn-gate refusal is reported as `HELD (needs_login)` and the jekt is kept (G4).
-  Acceptance: the §1 scenario passes (§7 test 1).
+  Acceptance: the §1 scenario passes (§7 test 1). With 0.1 shipped, the pull half already passes; what still fails is the sender-visible half (0.3: the sender is still told only "QUEUED via the cloud relay") and the credential-blocked half (0.4).
 - **Phase 1 — durable and drained.** Mailbox columns and states (§5.3); move `deferred_deliveries` into it (G5); `needs_login` hold with drain on sign-in (G3); attempt budget fix (G6); `receiver_state` plumbing.
 - **Phase 2 — receipts and the mailbox tools.** Sender notices (§5.5), `InboxList`, `MessageStatus`, digest (§5.4), `DiscoverAgents` presence (§5.6), relay `expired` status.
 - **Phase 3 — UI.** "N waiting" badge, list, cancel.
 
-Phase 0 is independent of the rest and fixes the observed failure; ship it first.
+Phase 0 is independent of the rest. Its first item removed the unbounded wait; the remaining items (0.2–0.4) are what make the sender's picture true, so they are the next thing to build.
 
 ## 7. Tests
 
 1. **The incident, end to end:** pane not loaded → send → sender sees `HELD (pane_not_open)` and an id → open the pane with the account unresolvable → state becomes `needs_login`, message still held → sign in → message delivered within 5 s, sender gets the late-delivery notice, `InboxList` shows it delivered. Run once with the sender signed in to MuxBus and once not.
-2. Same, with the relay path forced (target on another instance): subscribe-add triggers a pull; with no other traffic the message arrives within 5 s of subscription.
+2. Same, with the relay path forced (target on another instance): subscribe-add triggers a pull; with no other traffic the message arrives within 5 s of subscription (#4122 makes this true; add the end-to-end test).
 3. Idle `active` and `idle` receivers: `Delivered (active|idle)`, no mailbox row left behind.
 4. A live receiver whose CLI reported an auth failure: the jekt is held, not written; after login it is delivered once (no duplicate on `retryLastTurn`).
 5. Stop mid-queue: the deferred jekts survive a controller drop and an srv restart; none are lost.
