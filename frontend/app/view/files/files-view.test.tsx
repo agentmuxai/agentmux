@@ -706,6 +706,19 @@ describe("the Files pane: dragging files (§8.2)", () => {
         await waitFor(() =>
             expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "move", sources: [`${HOME}\\b.txt`], dest_dir: `${HOME}\\src`, block_id: "b1" })
         );
+        // Over a folder, then over blank space: the folder is no longer the
+        // target, and a drop there goes nowhere (ReAgent on #4224).
+        h.rpc.FsOpStartCommand.mockClear();
+        beginPathDrag(dt as unknown as DataTransfer, [`${HOME}\\b.txt`], "b1");
+        fireEvent.dragOver(v.row("src"));
+        await waitFor(() => expect(v.row("src").classList.contains("files-row-droptarget")).toBe(true));
+        fireEvent.dragOver(v.list());
+        await waitFor(() => expect(v.row("src").classList.contains("files-row-droptarget")).toBe(false));
+        const dropBlank = new Event("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(dropBlank, "dataTransfer", { value: dt });
+        v.list().dispatchEvent(dropBlank);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
         // Dropped on the pane itself (not a folder), it stays where it is.
         h.rpc.FsOpStartCommand.mockClear();
         beginPathDrag(dt as unknown as DataTransfer, [`${HOME}\\b.txt`], "b1");

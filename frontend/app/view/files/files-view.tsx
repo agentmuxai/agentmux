@@ -705,6 +705,12 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     tabIndex={0}
                     onKeyDown={onKeyDown}
                     onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+                    // Over blank space, the header or a notice: no folder row is
+                    // the target any more (ReAgent on #4224). A row's own
+                    // dragover runs first and sets or clears it.
+                    onDragOver={(e) => {
+                        if (!(e.target instanceof Element && e.target.closest(".files-rows .files-row"))) setDropRow(null);
+                    }}
                     onDragLeave={(e) => {
                         if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
                     }}
