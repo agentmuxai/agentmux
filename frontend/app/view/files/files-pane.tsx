@@ -131,13 +131,19 @@ export function FilesPane(props: { pane: FilesPaneModel; ctx: PaneTabHostContext
 
     // Closed tabs drop their model; the tab in front names the pane's folder.
     createEffect(on(() => tabs.tabs().map((t) => t.id).join("\u0000"), () => pane.prune()));
+    // Deferred: on mount the host decides focus (its `focus()`), or a
+    // restored pane would take it.
     createEffect(
-        on(tabs.activeId, () => {
-            const t = tabs.active();
-            if (t?.payload.path) void props.ctx.setMeta({ [META_PATH]: t.payload.path });
-            // Keyboard focus follows the tab switched to.
-            queueMicrotask(() => pane.activeModel()?.focusList?.());
-        })
+        on(
+            tabs.activeId,
+            () => {
+                const t = tabs.active();
+                if (t?.payload.path) void props.ctx.setMeta({ [META_PATH]: t.payload.path });
+                // Keyboard focus follows the tab switched to.
+                queueMicrotask(() => pane.activeModel()?.focusList?.());
+            },
+            { defer: true }
+        )
     );
 
     const onKeyDown = (e: KeyboardEvent): void => {

@@ -15,6 +15,7 @@
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
+import { docTabKeyAction } from "@/app/doc-tabs/doc-tabs-controller";
 import { formatBytes } from "@/app/element/local-media";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import type { FsEntry } from "@/types/rpc/FsEntry";
@@ -431,6 +432,9 @@ export function FilesView(props: {
 
     const onKeyDown = (e: KeyboardEvent): void => {
         if (model.renaming() || editingPath()) return;
+        // The pane's document-tab keys (Ctrl+PageDown, Ctrl+Tab, ...) go up
+        // to it, not to the list's own paging (SPEC_DOCUMENT_TABS §4.3).
+        if (docTabKeyAction(e)) return;
         const sel = model.selection();
         // In the grid, up and down move a row of tiles, left and right one.
         const step = grid() ? gridCols() : 1;

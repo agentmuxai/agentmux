@@ -170,6 +170,15 @@ describe("document tabs: the controller", () => {
         expect(ctl.tabs()).toHaveLength(2);
     });
 
+    it("says whether a tab was reopened (ReAgent on #4231)", () => {
+        const ctl = new DocTabsController(spec, host(), [{ path: "/a" }]);
+        expect(ctl.reopen()).toBe(false);
+        ctl.open({ path: "/b" });
+        ctl.close(ctl.activeId()!);
+        expect(ctl.reopen()).toBe(true);
+        expect(ctl.active()?.key).toBe("/b");
+    });
+
     it("tells the pane when a tab is gone for good", () => {
         const ctl = new DocTabsController(spec, host(), [{ path: "/a" }]);
         const gone = vi.fn();

@@ -1081,6 +1081,31 @@ describe("the Files pane: document tabs (SPEC_DOCUMENT_TABS_2026_10_02.md §6.2)
         await waitFor(() => expect(v.pills()).toEqual(["a", "src"]));
     });
 
+    it("Ctrl+PageDown and Ctrl+Shift+PageDown from the list act on tabs, not the list's paging (ReAgent on #4231)", async () => {
+        const v = mountPane();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("src"));
+        fireEvent.keyDown(v.list(), { key: "Enter", ctrlKey: true });
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        fireEvent.keyDown(v.list(), { key: "PageDown", ctrlKey: true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "PageDown", ctrlKey: true, shiftKey: true });
+        await waitFor(() => expect(v.pills()).toEqual(["src", "a"]));
+    });
+
+    it("doesn't take focus when it mounts; switching tabs does (ReAgent on #4231)", async () => {
+        const before = document.createElement("button");
+        document.body.append(before);
+        before.focus();
+        const v = mountPane({ doctabs: { v: 1, active: 0, tabs: [{ key: HOME, title: "a", state: HOME }, { key: `${HOME}\\src`, title: "src", state: `${HOME}\\src` }] } });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(document.activeElement).toBe(before);
+        v.pane.tabs.cycle(1);
+        await waitFor(() => expect(document.activeElement).toBe(v.list()));
+        before.remove();
+    });
+
     it("won't close the last tab: a Hangar always shows a folder", async () => {
         const v = mountPane();
         await waitFor(() => expect(v.names()).toHaveLength(4));

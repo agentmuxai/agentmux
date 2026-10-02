@@ -163,10 +163,12 @@ export class DocTabsController<P> {
         this.apply(closeToRight(this.state(), id));
     }
 
+    /** False when there was nothing to reopen. */
     reopen(): boolean {
-        const next = reopenClosed(this.state());
+        const before = this.state();
+        const next = reopenClosed(before);
         this.apply(next);
-        return next !== this.state();
+        return next !== before;
     }
 
     cycle(delta: number): void {
