@@ -109,13 +109,13 @@ describe("/permission-mode choices", () => {
     it("a persistent agent: says what actually happens", () => {
         const d = Object.fromEntries(choices("host").map((c) => [c.value, c.description]));
         expect(d.default).toMatch(/allowed automatically/);
-        expect(d.plan).toMatch(/approved automatically/);
+        expect(d.plan).toMatch(/does NOT stop edits/);
         expect(d.default).not.toMatch(/Standard permission prompts/);
     });
 
-    it("a container agent keeps the mode's own description", () => {
+    it("a container agent: the CLI refuses what the mode does not allow; Plan keeps its own description", () => {
         const d = Object.fromEntries(choices("container").map((c) => [c.value, c.description]));
-        expect(d.default).toBe("Standard permission prompts");
+        expect(d.default).toMatch(/refused/);
         expect(d.plan).toBe("No tool execution — read-only planning");
     });
 });
