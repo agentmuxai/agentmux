@@ -30,6 +30,10 @@ import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
 import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { makeORef } from "@/app/store/mos";
+import { ObjectService } from "@/app/store/services";
+import { META_AWAITING_USER } from "@/app/store/swarm-line";
+import { fireAndForget } from "@/util/util";
 import type { DocumentNode, ToolNode } from "../types";
 import type { AnswerOutcome } from "../components/AgentQuestionPanel";
 import type { LogFn } from "./useAgentControllerStatus";
@@ -109,11 +113,21 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
     // (agent blocked waiting for the user to pick an option). Stop it when
     // all questions are answered or the pane closes.
     let waitingToneActive = false;
+    // The swarm row says "Waiting for you" while a question is pending
+    // (store/swarm-line.ts), so the state is kept in block meta, where the swarm
+    // can read it for panes that are not mounted. `null` removes the key.
+    const setAwaitingUser = (waiting: boolean) =>
+        fireAndForget(() =>
+            ObjectService.UpdateObjectMeta(makeORef("block", opts.blockId), {
+                [META_AWAITING_USER]: waiting ? true : null,
+            } as any)
+        );
     createEffect(on(pendingQuestions, (qs, prevQs) => {
         const hadAny = (prevQs?.length ?? 0) > 0;
         const hasAny = qs.length > 0;
         if (hasAny && !hadAny) {
             waitingToneActive = true;
+            setAwaitingUser(true);
             firePaneEvent(opts.blockId, {
                 type: "waiting-for-input",
                 question: qs[0]?.question?.questions?.[0]?.question,
@@ -121,11 +135,13 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             });
         } else if (!hasAny && hadAny) {
             waitingToneActive = false;
+            setAwaitingUser(false);
             firePaneEvent(opts.blockId, { type: "waiting-ended", reason: "submitted" });
         }
     }));
     onCleanup(() => {
         if (waitingToneActive) {
+            setAwaitingUser(false);
             firePaneEvent(opts.blockId, { type: "waiting-ended", reason: "closed" });
             waitingToneActive = false;
         }

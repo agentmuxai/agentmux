@@ -37,17 +37,31 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
+import { MOS } from "@/app/store/global";
+import { isUsableTitle } from "@/app/store/ambient-title";
+import { META_RESTORED } from "@/app/store/swarm-line";
 
 export interface UseBlockActivityOptions {
     blockId: string;
 }
 
 function clearActivity(blockId: string): void {
+    // The live title is cleared so the next session does not start under the
+    // finished one's topic, but it is not thrown away: it moves to
+    // `term:restored_summary`, which the swarm row shows (muted, labelled) until
+    // a fresh title exists. Without this a restart opened onto a blank row.
+    // Block meta persists across a restart, so this needs no new store.
+    // docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.5.
+    const ended = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta?.["term:ambient_summary"];
+    const restored = typeof ended === "string" && isUsableTitle(ended) ? ended.trim() : null;
     fireAndForget(() =>
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
             "term:osc_title": null,
             "term:ambient_summary": null,
             "term:next_prompt_suggestion": null,
+            // Only replaced by a title that was actually worth keeping: a session
+            // that never got one leaves the previous restored title in place.
+            ...(restored ? { [META_RESTORED]: restored } : {}),
         } as any)
     );
 }

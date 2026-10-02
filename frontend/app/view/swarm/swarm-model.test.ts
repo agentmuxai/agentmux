@@ -439,6 +439,7 @@ function mkNode(agentToolRows: ActiveSubagent[], workflowRows: WorkflowDispatch[
         agentName: "Agent",
         agentProvider: null,
         activitySummary: null,
+        line: { text: "No activity yet", source: "status" },
         contextTokens: null,
         agentStatus: "idle",
         agentToolRows,
