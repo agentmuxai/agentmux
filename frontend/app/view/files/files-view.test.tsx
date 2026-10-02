@@ -319,6 +319,47 @@ describe("the Files pane: operations", () => {
     });
 });
 
+describe("the Files pane: rows (ReAgent on #4201)", () => {
+    it("keeps each row's element across a scroll and a re-list", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const before = v.row("b.txt");
+        fireEvent.scroll(v.list(), { target: { scrollTop: 5 } });
+        expect(v.row("b.txt")).toBe(before);
+        h.state.dirs.set(HOME, [f("b.txt"), d("src"), f("a2.md"), f("a10.md"), f("z.txt")]);
+        h.state.handlers.forEach((fn) => fn({ data: { dir: HOME } }));
+        await waitFor(() => expect(v.names()).toContain("z.txt"));
+        expect(v.row("b.txt")).toBe(before);
+    });
+
+    it("commits a rename once: the blur after Enter doesn't repeat it", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "F2" });
+        const input = v.container.querySelector(".files-rename-input") as HTMLInputElement;
+        input.value = "c.txt";
+        fireEvent.keyDown(input, { key: "Enter" });
+        fireEvent.blur(input);
+        await waitFor(() => expect(h.rpc.FsRenameCommand).toHaveBeenCalledTimes(1));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it("Escape cancels: the blur that follows doesn't rename", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "F2" });
+        const input = v.container.querySelector(".files-rename-input") as HTMLInputElement;
+        input.value = "c.txt";
+        fireEvent.keyDown(input, { key: "Escape" });
+        fireEvent.blur(input);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(h.rpc.FsRenameCommand).not.toHaveBeenCalled();
+    });
+});
+
 describe("the Files pane: live", () => {
     it("re-lists when srv says the folder changed", async () => {
         const v = mount();
@@ -379,6 +420,25 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
         expect(h.rpc.FsListCommand.mock.calls.some((c) => (c[1] as { path: string }).path === "/Users/a/Documents")).toBe(false);
         fireEvent.click(v.getByText("Open Documents"));
         await waitFor(() => expect(v.names()).toEqual(["cv.pdf"]));
+    });
+
+    it("gates a protected folder however its path is spelled (ReAgent on #4201)", async () => {
+        h.state.dirs.set("/Users/a", [d("Documents")]);
+        const v = mount({ "files:path": "/Users/a/Desktop/../Documents" });
+        await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
+        expect(h.rpc.FsListCommand).not.toHaveBeenCalled();
+        cleanup();
+        h.rpc.FsPlacesCommand.mockResolvedValueOnce({
+            home: "/Users/a",
+            sep: "/",
+            places: [
+                { id: "home", label: "Home", path: "/Users/a", kind: "home" },
+                { id: "documents", label: "Documents", path: "/Users/a/Documents", kind: "known" },
+            ],
+        });
+        const tilde = mount({ "files:path": "~/Documents" });
+        await waitFor(() => expect(tilde.getByText("Open Documents")).toBeTruthy());
+        expect(h.rpc.FsListCommand).not.toHaveBeenCalled();
     });
 
     it("lists it straight away once this release has opened it", async () => {

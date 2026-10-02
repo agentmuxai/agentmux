@@ -24,7 +24,7 @@ import type { FsOpResult } from "@/types/rpc/FsOpResult";
 import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
 import { batch, createMemo, createSignal } from "solid-js";
-import { baseName, isWithin, joinPath, parentOf, samePath } from "./files-path";
+import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
@@ -280,8 +280,13 @@ export class FilesModel {
     // ── macOS access prompts (§9.1.4) ────────────────────────────────────────
 
     /** The protected macOS place `path` is in, if any. */
-    protectedPlace(path: string): FsPlace | null {
+    protectedPlace(raw: string): FsPlace | null {
         if (!isMacOS()) return null;
+        // Compare the folder srv will list, not how it was spelled: `~/Documents`
+        // or `Desktop/../Documents` from the path box, `mux view` or OpenFiles
+        // must not slip past the gate (ReAgent on #4201).
+        const home = this.places().find((p) => p.kind === "home")?.path ?? "";
+        const path = normalizePath(raw, home);
         for (const p of this.places()) {
             if (MAC_PROTECTED_PLACE_IDS.has(p.id) && isWithin(path, p.path)) return p;
         }
@@ -394,7 +399,7 @@ export class FilesModel {
             }, SLOW_LISTING_MS);
         }
         let cursor: string | undefined;
-        let collected: FsEntry[] = [];
+        const collected: FsEntry[] = [];
         let first = true;
         try {
             do {
@@ -411,18 +416,21 @@ export class FilesModel {
                     this.settleFirst();
                     return;
                 }
-                collected = collected.concat(res.entries);
+                for (const e of res.entries) collected.push(e);
                 cursor = res.cursor ?? undefined;
-                if (first || !opts.silent) {
-                    // Paint each page as it comes; a silent re-list swaps the
-                    // whole listing at the end so rows don't vanish and return.
+                if (first) {
+                    // Paint the first page at once. Later pages are collected
+                    // and the listing is set (and sorted) once at the end: a
+                    // re-sort per page is O(pages x n log n) on a 200k-entry
+                    // folder (ReAgent on #4201). A silent re-list keeps the old
+                    // rows until then, so nothing vanishes and returns.
                     batch(() => {
                         if (first && res.path && !samePath(res.path, this.path())) {
                             // srv resolved `~` or a link: show the real path.
                             this.setPath(res.path);
                             void this.ctx.setMeta({ [META_PATH]: res.path });
                         }
-                        if (!opts.silent) this.setRawEntries(collected);
+                        if (!opts.silent) this.setRawEntries([...collected]);
                         this.setPhase("ready");
                         this.setPartial(cursor != null);
                     });
@@ -436,7 +444,7 @@ export class FilesModel {
             } while (cursor);
             batch(() => {
                 const before = this.order();
-                this.setRawEntries(collected);
+                this.setRawEntries([...collected]);
                 this.setPartial(false);
                 this.setSelection(pruneSelection(this.selection(), opts.silent ? oldOrder : before, this.order()));
             });

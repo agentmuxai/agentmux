@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { FsEntry } from "@/types/rpc/FsEntry";
-import { baseName, crumbsOf, isWithin, joinPath, nameProblem, parentOf, samePath, stemLength } from "./files-path";
+import { baseName, crumbsOf, isWithin, joinPath, nameProblem, normalizePath, parentOf, samePath, stemLength } from "./files-path";
 import { clickRow, EMPTY_SELECTION, moveFocus, pruneSelection, selectAll, toggleFocused } from "./files-selection";
 import { sortEntries } from "./files-sort";
 import { TypeAhead } from "./typeahead";
@@ -64,6 +64,13 @@ describe("files-path", () => {
         ["console.txt", true, null],
     ])("nameProblem(%j, windows=%s)", (name, windows, problem) => {
         expect(nameProblem(name, windows)).toBe(problem);
+    });
+
+    it("normalizes ~, . and .. before comparing (ReAgent on #4201)", () => {
+        expect(normalizePath("~/Documents", "/Users/a")).toBe("/Users/a/Documents");
+        expect(normalizePath("/Users/a/Desktop/../Documents/./x", "/Users/a")).toBe("/Users/a/Documents/x");
+        expect(normalizePath("C:\\Users\\a\\..\\b", "")).toBe("C:\\Users\\b");
+        expect(normalizePath("/..", "")).toBe("/");
     });
 
     it("selects the stem of a file name for a rename", () => {

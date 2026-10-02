@@ -128,3 +128,25 @@ export function stemLength(name: string, isDir: boolean): number {
     const dot = name.lastIndexOf(".");
     return dot > 0 ? dot : name.length;
 }
+
+/**
+ * `path` with a leading `~` replaced by `home` and `.` and `..` segments
+ * resolved, lexically: links can't be followed here. For comparing where a
+ * path points, not for display.
+ */
+export function normalizePath(path: string, home: string): string {
+    let p = path.trim();
+    if (home && (p === "~" || /^~[\\/]/.test(p))) p = home + p.slice(1);
+    const crumbs = crumbsOf(p);
+    if (crumbs.length === 0) return p;
+    const sep = sepOf(p);
+    const root = crumbs[0].path;
+    const out: string[] = [];
+    for (const c of crumbs.slice(1)) {
+        if (c.label === ".") continue;
+        if (c.label === "..") out.pop();
+        else out.push(c.label);
+    }
+    if (out.length === 0) return root;
+    return root.endsWith(sep) ? root + out.join(sep) : root + sep + out.join(sep);
+}

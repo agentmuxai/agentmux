@@ -126,17 +126,25 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     const entries = model.entries;
     const order = model.order;
-    const range = createMemo(() => {
-        const first = Math.max(0, Math.floor(scrollTop() / ROW_HEIGHT) - OVERSCAN);
-        const count = Math.ceil(viewHeight() / ROW_HEIGHT) + OVERSCAN * 2;
-        return { first, last: Math.min(entries().length, first + count) };
-    });
-    const visible = createMemo(() => {
+    // The window only changes when a row crosses an edge, not on every
+    // scroll event (ReAgent on #4201).
+    const range = createMemo(
+        () => {
+            const first = Math.max(0, Math.floor(scrollTop() / ROW_HEIGHT) - OVERSCAN);
+            const count = Math.ceil(viewHeight() / ROW_HEIGHT) + OVERSCAN * 2;
+            return { first, last: Math.min(entries().length, first + count) };
+        },
+        { first: 0, last: 0 },
+        { equals: (a, b) => a.first === b.first && a.last === b.last }
+    );
+    // Rows are keyed by NAME: a string is the same key in every listing, so
+    // scrolling, a re-sort or a re-list after a change on disk reuses the row
+    // (and an open rename box) instead of remounting it.
+    const visibleNames = createMemo(() => {
         const { first, last } = range();
-        return entries()
-            .slice(first, last)
-            .map((entry, i) => ({ entry, index: first + i }));
+        return order().slice(first, last);
     });
+    const byName = createMemo(() => new Map(entries().map((e) => [e.name, e])));
 
     const focusIndex = createMemo(() => {
         const f = model.selection().focus;
@@ -530,20 +538,24 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
                     <Show when={model.phase() === "ready"}>
                         <div class="files-rows" style={{ height: `${entries().length * ROW_HEIGHT}px` }}>
-                            <For each={visible()}>
-                                {(row) => (
-                                    <FileRow
-                                        model={model}
-                                        entry={row.entry}
-                                        index={row.index}
-                                        selected={model.selection().names.has(row.entry.name)}
-                                        focused={model.selection().focus === row.entry.name}
-                                        renaming={model.renaming() === row.entry.name}
-                                        onClick={(e) => onRowClick(e, row.entry)}
-                                        onOpen={() => openEntry(row.entry)}
-                                        onContextMenu={(e) => onRowContextMenu(e, row.entry)}
-                                        onRenameDone={() => listEl?.focus()}
-                                    />
+                            <For each={visibleNames()}>
+                                {(name, i) => (
+                                    <Show when={byName().get(name)}>
+                                        {(entry) => (
+                                            <FileRow
+                                                model={model}
+                                                entry={entry()}
+                                                index={range().first + i()}
+                                                selected={model.selection().names.has(name)}
+                                                focused={model.selection().focus === name}
+                                                renaming={model.renaming() === name}
+                                                onClick={(e) => onRowClick(e, entry())}
+                                                onOpen={() => openEntry(entry())}
+                                                onContextMenu={(e) => onRowContextMenu(e, entry())}
+                                                onRenameDone={() => listEl?.focus()}
+                                            />
+                                        )}
+                                    </Show>
                                 )}
                             </For>
                         </div>
@@ -667,12 +679,15 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
     let input: HTMLInputElement | undefined;
     const [problem, setProblem] = createSignal<string | null>(null);
     let busy = false;
+    // Enter or Escape unmounts the input, and its removal can fire blur,
+    // which must not commit a second time (ReAgent on #4201).
+    let finished = false;
     onMount(() => {
         input?.focus();
         input?.setSelectionRange(0, stemLength(props.entry.name, props.entry.is_dir));
     });
     const finish = async (commit: boolean): Promise<void> => {
-        if (busy) return;
+        if (busy || finished) return;
         const value = input?.value ?? props.entry.name;
         if (commit && value !== props.entry.name) {
             const why = nameProblem(value, windowsNames());
@@ -685,6 +700,7 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
             busy = false;
             if (!ok) return;
         }
+        finished = true;
         props.model.setRenaming(null);
         props.onDone();
     };
