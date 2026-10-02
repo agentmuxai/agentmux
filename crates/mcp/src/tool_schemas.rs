@@ -922,7 +922,7 @@ pub(crate) const MEMORY_REVERT_TOOL: &str = r#"{
 
 pub(crate) const GLOBAL_MEMORY_LIST_TOOL: &str = r#"{
   "name": "GlobalMemoryList",
-  "description": "List Global Memory entries (summary only: id, name, last-updated time). Global Memory is inherited by EVERY agent in this workspace at launch, not just you — unlike MemoryList, which only shows your own private native memory. Use this to discover entries before fetching one in full with GlobalMemoryRead, or before updating one with GlobalMemoryWrite. Takes no arguments.",
+  "description": "List Global Memory entries (summary only: id, name, last-updated time, and `system`). Global Memory is inherited by EVERY agent in this workspace at launch, not just you — unlike MemoryList, which only shows your own private native memory. Entries with system=true are AgentMux's own Operator Config, listed so you can see what is already in your context; they are listed first and cannot be read, changed or removed through this API. Use this to discover entries before fetching one in full with GlobalMemoryRead, or before updating one with GlobalMemoryWrite. Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}
