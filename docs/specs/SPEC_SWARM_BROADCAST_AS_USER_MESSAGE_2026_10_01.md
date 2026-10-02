@@ -1,7 +1,7 @@
 # Spec: a Swarm broadcast reaches agents as the user's own message, marked as a broadcast
 
 **Date:** 2026-10-01
-**Status:** proposed
+**Status:** Implemented — #4176
 **Author:** agent1
 **Related:**
 - `SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md` (the broadcast feature; it fans out over the
@@ -230,3 +230,14 @@ those words can authorize, and srv enforces it, not the text.
 - An Operator signing key or any claim that srv can prove a request came from the human.
   That needs the hardened-host work in the identity spec.
 - Moving the chat bridges or agent-initiated broadcast off the jekt path.
+
+## 9. As built (#4176)
+
+- P1-P3 as specified. `RECIPIENTS` counts resolved targets. Delivery starts up to 8 turns at a
+  time and returns outcomes in target order; each target is audited as `fleet.broadcast` under
+  the shared `MSGID`.
+- P4: the agent guidance shipped as the Operator Config entry `operator-config-swarm-broadcast`
+  (manifest v8, every agent kind). The `CLAUDE.md` jekt section lives in `~/.agentmux/agents/`,
+  outside this repository; the proposed wording is in the PR description for the owner to apply.
+- Still open: question 2 (self-quit by broadcast stays refused), question 3 (whether `UIClick`
+  can press Broadcast), questions 4 and 5.
