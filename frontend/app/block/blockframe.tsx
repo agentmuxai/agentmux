@@ -143,6 +143,17 @@ export function computeBlockTabPillNeutralBg(blockMeta: Block["meta"] | undefine
  * non-agent side of that split: one value per theme, for every pane.
  */
 export function computeMixedPaneHeaderBg(isLightTheme: boolean): string {
+    return computeNonAgentHeaderBg(isLightTheme);
+}
+
+/**
+ * Header background for a non-agent pane (CPU, terminal, browser, editor…)
+ * with no color of its own. Dark theme: the fixed NON_AGENT_DEFAULT_HEADER_BG.
+ * Light theme: the theme's own block surface, as the uncoloured pills and the
+ * mixed-pane tail already use — the dark constant there was a solid slate bar
+ * across a light UI (owner report 2026-10-02, the CPU pane).
+ */
+export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
     return isLightTheme ? "var(--block-bg-solid-color)" : NON_AGENT_DEFAULT_HEADER_BG;
 }
 
@@ -732,9 +743,10 @@ function BlockFrame_Header(
             // etc.) gets ONE fixed header color instead of the default
             // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
             // constant, not per-pane-type or randomized. User request
-            // 2026-09-20.
-            style["background-color"] = NON_AGENT_DEFAULT_HEADER_BG;
-            style.color = pickReadableTextColor(NON_AGENT_DEFAULT_HEADER_BG) ?? undefined;
+            // 2026-09-20. Dark theme only: see computeNonAgentHeaderBg.
+            const fallback = computeNonAgentHeaderBg(isLightTheme);
+            style["background-color"] = fallback;
+            style.color = pickReadableTextColor(fallback) ?? undefined;
         }
         return style;
     });
