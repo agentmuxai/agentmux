@@ -22,6 +22,8 @@
 //!
 //! See: https://github.com/agentclientprotocol/agent-client-protocol
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -217,8 +219,7 @@ impl AcpController {
         // console, causing stdout to go to that console rather than the pipe.
         #[cfg(windows)]
         {
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.no_window();
         }
 
         cmd.stdin(std::process::Stdio::piped());

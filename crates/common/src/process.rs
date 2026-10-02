@@ -58,6 +58,8 @@
 //! multiples of 4) — so the guards cost nothing in practice and close the
 //! whole class, not just the three instances that were reported.
 
+#[cfg(windows)]
+use crate::win32::NoWindow;
 use std::io;
 
 /// Convert a caller-supplied PID to a signed, **strictly positive** `pid_t`.
@@ -159,13 +161,12 @@ pub fn kill_process_group(pid: u32) {
 /// suppressed — the one Windows kill command, built once.
 #[cfg(windows)]
 fn taskkill_tree(pid: i32) -> std::process::Command {
-    use std::os::windows::process::CommandExt;
     let mut cmd = std::process::Command::new("taskkill");
     cmd.args(["/F", "/T", "/PID", &pid.to_string()])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .creation_flags(crate::win32::CREATE_NO_WINDOW);
+        .no_window();
     cmd
 }
 

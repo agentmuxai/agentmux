@@ -13,6 +13,8 @@
 //! PTY support is a Phase 3 follow-up that requires portable-pty wiring
 //! similar to the existing ShellController).
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use parking_lot::Mutex;
@@ -380,9 +382,7 @@ impl ShellNodeRunner {
         // output is lost — the window was decorative noise only.
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt as _;
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            child_cmd.creation_flags(CREATE_NO_WINDOW);
+            child_cmd.no_window();
         }
         // Backstop: reap the wrapper shell if this runner task is ever dropped.
         child_cmd.kill_on_drop(true);

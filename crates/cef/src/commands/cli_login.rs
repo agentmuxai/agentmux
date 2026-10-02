@@ -9,6 +9,8 @@
 // cluster is a self-contained subsystem with its own state fields
 // (`AppState::cli_login_*`) and its own dedicated test modules.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use crate::state::AppState;
@@ -202,7 +204,7 @@ pub async fn run_cli_login(
 
     #[cfg(windows)]
     {
-        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
+        cmd.no_window(); // CREATE_NO_WINDOW
     }
 
     let mut child = cmd

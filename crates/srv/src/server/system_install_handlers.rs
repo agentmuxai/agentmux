@@ -24,6 +24,8 @@
 //! string through `sh -c`/`cmd /c` — so there is no interpolation surface
 //! even though nothing in this table is user-suppliable today.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -173,9 +175,7 @@ async fn query_winget_version(winget_id: &str) -> Option<String> {
     c.args(["show", "--id", winget_id, "-e"]);
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        c.creation_flags(CREATE_NO_WINDOW);
+        c.no_window();
     }
     let output = c.output().await.ok()?;
     if !output.status.success() {
@@ -565,8 +565,7 @@ fn spawn_system_install_task(
             .kill_on_drop(true);
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
+            cmd.no_window(); // CREATE_NO_WINDOW
         }
 
         let mut child = match cmd.spawn() {

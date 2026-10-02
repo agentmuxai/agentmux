@@ -21,6 +21,8 @@
 //! probe-only client follows the same house style instead of adding a new
 //! dependency for a handshake this small.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -140,8 +142,7 @@ async fn probe_stdio(config: &Value) -> ProbeResult {
     // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
     #[cfg(windows)]
     {
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.no_window();
     }
 
     let mut child = match cmd.spawn() {

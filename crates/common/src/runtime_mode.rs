@@ -29,6 +29,8 @@
 //! 4. `AGENTMUX_DEV_BRANCH` env override (CI override for dev mode).
 //! 5. Default: `Installed`.
 
+#[cfg(windows)]
+use crate::win32::NoWindow;
 use std::path::Path;
 use std::process::Command;
 
@@ -425,10 +427,8 @@ fn run_git_branch(repo_dir: &Path) -> Option<String> {
         .current_dir(repo_dir);
     #[cfg(windows)]
     {
-        // CREATE_NO_WINDOW: console-flash suppression — std::process::Command
-        // needs the CommandExt trait to call creation_flags.
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(crate::win32::CREATE_NO_WINDOW);
+        // CREATE_NO_WINDOW: console-flash suppression.
+        cmd.no_window();
     }
     let output = cmd.output().ok()?;
     if !output.status.success() {
