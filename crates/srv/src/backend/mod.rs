@@ -31,6 +31,7 @@ pub mod project_instructions;
 pub mod agent_runtime;
 pub mod providers;
 pub mod cli_install;
+pub mod cli_prune;
 pub mod cli_notice;
 pub mod startup_files;
 pub mod workdir_fs;
