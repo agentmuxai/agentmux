@@ -101,9 +101,10 @@ import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
+import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
 import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME, registerFileDropTarget } from "@/app/drag/file-drop";
-import { errorMessage, FilesView, formatModified } from "./files-view";
+import { errorMessage, FilesView, formatModified, mentionToken } from "./files-view";
 import { filesPaneTab, filesTitle } from "./files";
 
 const f = (name: string, over: Partial<FsEntry> = {}): FsEntry => ({
@@ -847,6 +848,123 @@ describe("the Files pane: touched by an agent (§8.4)", () => {
         expect(dot.getAttribute("title")).toBe("Changed by Korp, just now (Write)");
         expect(v.row("src").querySelector(".files-touch")?.getAttribute("title")).toBe("Something inside was changed by Korp, just now (Edit)");
         expect(v.row("a2.md").querySelector(".files-touch")).toBeNull();
+    });
+});
+
+describe("the Files pane: grid view (§5.2)", () => {
+    beforeEach(() => {
+        resetThumbnailsForTests();
+        media.blob.mockClear();
+        (URL as unknown as { createObjectURL: unknown }).createObjectURL ??= () => "blob:x";
+        (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL ??= () => {};
+    });
+
+    const tiles = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll(".files-tile .files-tile-name")].map((n) => n.textContent);
+
+    it("shows tiles, with thumbnails for images, and remembers the choice", async () => {
+        h.state.dirs.set(HOME, [d("src"), f("a.png", { size: 10 }), f("b.txt"), f("huge.png", { size: 999_999_999 })]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.container.querySelector('[title="Show as thumbnails"]')!);
+        expect(v.meta()["files:view"]).toBe("grid");
+        await waitFor(() => expect(tiles(v)).toEqual(["src", "a.png", "b.txt", "huge.png"]));
+        await waitFor(() => expect(v.container.querySelectorAll(".files-tile-thumb")).toHaveLength(1));
+        // Too big to fetch for a thumbnail: an icon.
+        expect(media.blob).toHaveBeenCalledTimes(1);
+        expect(media.blob.mock.calls[0][0]).toBe(`${HOME}\\a.png`);
+        fireEvent.click(v.container.querySelector('[title="Show as a list"]')!);
+        await waitFor(() => expect(v.container.querySelector(".files-grid")).toBeNull());
+        expect(v.meta()["files:view"]).toBeUndefined();
+    });
+
+    it("moves by a tile with left and right, and by a row with up and down", async () => {
+        h.state.dirs.set(HOME, Array.from({ length: 12 }, (_, i) => f(`f${String(i).padStart(2, "0")}.txt`)));
+        const v = mount({ "files:view": "grid" });
+        await waitFor(() => expect(tiles(v)).toHaveLength(12));
+        // A 600 px list fits five 112 px tiles a row.
+        fireEvent.keyDown(v.list(), { key: "ArrowRight" });
+        expect(v.model.selection().focus).toBe("f00.txt");
+        fireEvent.keyDown(v.list(), { key: "ArrowRight" });
+        expect(v.model.selection().focus).toBe("f01.txt");
+        fireEvent.keyDown(v.list(), { key: "ArrowDown" });
+        expect(v.model.selection().focus).toBe("f06.txt");
+        fireEvent.keyDown(v.list(), { key: "ArrowLeft" });
+        expect(v.model.selection().focus).toBe("f05.txt");
+        fireEvent.keyDown(v.list(), { key: "ArrowUp" });
+        expect(v.model.selection().focus).toBe("f00.txt");
+    });
+
+    it("opens a tile on double-click, like a row", async () => {
+        const v = mount({ "files:view": "grid" });
+        await waitFor(() => expect(tiles(v)).toHaveLength(4));
+        const src = [...v.container.querySelectorAll(".files-tile")].find((t) => t.textContent?.includes("src"))!;
+        fireEvent.dblClick(src);
+        await waitFor(() => expect(tiles(v)).toEqual(["main.rs"]));
+    });
+});
+
+describe("the Files pane: Alt+K mentions (§8.2, route 3)", () => {
+    it("writes @path relative to the agent's folder, quoted when it has a space", () => {
+        expect(mentionToken("C:\\work\\src\\a.ts", "C:\\work")).toBe("@src\\a.ts");
+        expect(mentionToken("C:\\other\\a.ts", "C:\\work")).toBe("@C:\\other\\a.ts");
+        expect(mentionToken("/home/a/my notes.md", "/home/a")).toBe('@"my notes.md"');
+        expect(mentionToken("/x/y.md", undefined)).toBe("@/x/y.md");
+    });
+
+    it("puts the selection's mentions in the last agent's message box", async () => {
+        const agentPane = document.createElement("div");
+        agentPane.setAttribute("data-role", "pane");
+        agentPane.setAttribute("data-blockid", "agent-1");
+        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
+        const ta = document.createElement("textarea");
+        ta.className = "agent-input";
+        ta.value = "look at";
+        agentPane.appendChild(ta);
+        document.body.appendChild(agentPane);
+        blocks.set("agent-1", { meta: { view: "agent", agentName: "Korp", "cmd:cwd": HOME } });
+        const dispose = registerFileDropTarget("agent-1", { accept: () => ({ ok: true, message: "" }), drop: () => {} });
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        // The user was last typing to Korp.
+        ta.focus();
+        ta.setSelectionRange(7, 7);
+        fireEvent.click(v.row("a2.md"));
+        fireEvent.click(v.row("src"), { ctrlKey: true });
+        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
+        expect(ta.value).toBe("look at @src @a2.md ");
+        dispose();
+        agentPane.remove();
+        blocks.clear();
+    });
+
+    it("won't give a container agent a host path it can't see", async () => {
+        const agentPane = document.createElement("div");
+        agentPane.setAttribute("data-role", "pane");
+        agentPane.setAttribute("data-blockid", "agent-c");
+        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
+        const ta = document.createElement("textarea");
+        ta.className = "agent-input";
+        agentPane.appendChild(ta);
+        document.body.appendChild(agentPane);
+        blocks.set("agent-c", { meta: { view: "agent", agentName: "Boxy", agentMode: "container", "cmd:cwd": `${HOME}\\src` } });
+        const dispose = registerFileDropTarget("agent-c", { accept: () => ({ ok: true, message: "" }), drop: () => {} });
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
+        expect(ta.value).toBe("");
+        expect(v.container.querySelector(".files-status")?.textContent).toContain("Boxy runs in a container and sees only its working folder");
+        dispose();
+        agentPane.remove();
+        blocks.clear();
+    });
+
+    it("says so when there's no agent to mention in", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("b.txt"));
+        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
+        expect(v.container.querySelector(".files-status")?.textContent).toBe("No agent pane is open to mention these in.");
     });
 });
 

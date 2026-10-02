@@ -655,3 +655,106 @@
     border-radius: 50%;
     background-color: var(--accent-color);
 }
+
+// ── Grid of thumbnails (§5.2) ───────────────────────────────────────────────
+
+.files-grid {
+    position: relative;
+    margin: 4px;
+}
+
+.files-tile {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 108px;
+    height: 128px;
+    padding: 6px 4px;
+    border-radius: 4px;
+    cursor: default;
+    user-select: none;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+
+    &.files-row-selected {
+        background: var(--highlight-bg-color);
+    }
+
+    &.files-row-droptarget {
+        outline: 1px solid var(--accent-color);
+        outline-offset: -1px;
+    }
+
+    &.files-row-hidden .files-tile-name,
+    &.files-row-ignored .files-tile-name {
+        opacity: 0.55;
+    }
+}
+
+.files-list:focus-visible .files-tile.files-row-focused {
+    outline: 1px solid var(--accent-color);
+    outline-offset: -1px;
+}
+
+.files-tile-art {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 96px;
+    height: 80px;
+    flex-shrink: 0;
+}
+
+.files-tile-thumb {
+    max-width: 96px;
+    max-height: 80px;
+    object-fit: contain;
+    border-radius: 2px;
+}
+
+.files-tile-icon {
+    font-size: 40px;
+    color: var(--secondary-text-color);
+
+    &.files-icon-dir {
+        color: var(--accent-color);
+    }
+}
+
+.files-tile-touch {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    margin: 0;
+}
+
+.files-tile-git {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    padding: 0 3px;
+    border-radius: 2px;
+    background: var(--main-bg-color);
+}
+
+.files-tile-name {
+    display: -webkit-box;
+    width: 100%;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.3;
+    text-align: center;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.files-tile .files-rename {
+    width: 100%;
+}
