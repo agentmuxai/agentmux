@@ -1,6 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -138,8 +140,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         probe.arg("npm");
                         #[cfg(windows)]
                         {
-                            use std::os::windows::process::CommandExt;
-                            probe.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
+                            probe.no_window();
                         }
                         probe.output().await.map(|o| o.status.success()).unwrap_or(false)
                     } else {
@@ -789,8 +790,7 @@ pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
         probe.arg(cli_command);
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
-            probe.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
+            probe.no_window();
         }
         probe.output().await
     } else {

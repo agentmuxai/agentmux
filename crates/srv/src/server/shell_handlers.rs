@@ -1,6 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -285,8 +287,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // See crates/common/src/cli.rs.
                     #[cfg(windows)]
                     {
-                        use agentmux_common::win32::CREATE_NO_WINDOW;
-                        c.creation_flags(CREATE_NO_WINDOW);
+                        c.no_window();
                     }
                     c
                 };

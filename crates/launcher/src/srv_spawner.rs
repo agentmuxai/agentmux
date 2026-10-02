@@ -27,6 +27,8 @@
 //   * Auth key generated here, not consumed from a shared AppState
 //   * stderr ESTART parsing returns the result via tokio mpsc
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -245,7 +247,7 @@ pub async fn run_migrate(
     .kill_on_drop(true);
 
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
+    cmd.no_window(); // CREATE_NO_WINDOW
 
     let mut child = cmd
         .spawn()

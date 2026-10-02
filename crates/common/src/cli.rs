@@ -1,6 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(windows)]
+use crate::win32::NoWindow;
+
 /// Resolved target of a Windows `.cmd` npm shim.
 #[cfg(windows)]
 enum ResolvedShim {
@@ -34,7 +37,7 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     // import needed (see crates/bashwrap/src/bash_wrap.rs's note).
     #[cfg(windows)]
     {
-        cmd.creation_flags(crate::win32::CREATE_NO_WINDOW);
+        cmd.no_window();
     }
     cmd
 }

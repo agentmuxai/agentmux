@@ -30,6 +30,45 @@ pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// parent can assign it to a Job Object before it runs a single instruction.
 pub const CREATE_SUSPENDED: u32 = 0x0000_0004;
 
+/// Spawn a child without opening a console window for it.
+///
+/// Every crate that spawns a child on Windows needs the same three lines:
+/// `#[cfg(windows)]`, `use std::os::windows::process::CommandExt`,
+/// `cmd.creation_flags(CREATE_NO_WINDOW)`. Forgetting them is silent, and shows up
+/// only as a console flashing over the splash on a user's desktop (#2171, #2173,
+/// #3788). This trait makes it one call that is a no-op off Windows, and works for
+/// both `std::process::Command` and `tokio::process::Command`.
+///
+/// `creation_flags` *replaces* the flags, it does not OR them, so a spawn that needs
+/// other flags too (`CREATE_SUSPENDED | CREATE_NO_WINDOW`) or a different one
+/// (`CREATE_NEW_CONSOLE`) still calls `creation_flags` itself.
+pub trait NoWindow {
+    fn no_window(&mut self) -> &mut Self;
+}
+
+impl NoWindow for std::process::Command {
+    #[allow(unused_mut)]
+    fn no_window(&mut self) -> &mut Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            self.creation_flags(CREATE_NO_WINDOW);
+        }
+        self
+    }
+}
+
+impl NoWindow for tokio::process::Command {
+    fn no_window(&mut self) -> &mut Self {
+        // `tokio::process::Command` has `creation_flags` as an inherent method on Windows.
+        #[cfg(windows)]
+        {
+            self.creation_flags(CREATE_NO_WINDOW);
+        }
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,5 +80,18 @@ mod tests {
     fn flags_match_the_win32_abi() {
         assert_eq!(CREATE_NO_WINDOW, 0x08000000);
         assert_eq!(CREATE_SUSPENDED, 0x00000004);
+    }
+
+    /// `no_window` chains and compiles for both Command types on every platform; on
+    /// Windows it must have set the flag (a spawned `cmd` would otherwise be the one
+    /// that flashes), which `creation_flags` offers no way to read back, so this
+    /// pins the chaining shape and the real effect is covered by the spawn inventory.
+    #[test]
+    fn no_window_chains_on_both_command_types() {
+        let mut std_cmd = std::process::Command::new("agentmux-no-such-program");
+        std_cmd.no_window().arg("x");
+        let mut tokio_cmd = tokio::process::Command::new("agentmux-no-such-program");
+        tokio_cmd.no_window().arg("x");
+        assert_eq!(std_cmd.get_program(), "agentmux-no-such-program");
     }
 }

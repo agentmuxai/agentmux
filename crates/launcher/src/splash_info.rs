@@ -8,6 +8,8 @@
 //! All sourcing is dependency-light and best-effort — a missing field falls back
 //! to a placeholder and never blocks or crashes the splash.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::process::Command;
 
 pub struct SplashInfo {
@@ -101,9 +103,7 @@ fn cmd_first_line(cmd: &str, args: &[&str]) -> Option<String> {
     {
         // CREATE_NO_WINDOW: console-flash suppression — std::process::Command
         // needs the CommandExt trait to call creation_flags.
-        use std::os::windows::process::CommandExt;
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        command.creation_flags(CREATE_NO_WINDOW);
+        command.no_window();
     }
     let out = command.output().ok()?;
     if !out.status.success() {
