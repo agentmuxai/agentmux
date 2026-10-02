@@ -88,13 +88,15 @@ describe.skipIf(!cli)("pinned Claude CLI", () => {
     describe("permission routing with a permission prompt tool (a persistent agent)", () => {
         // A file INSIDE the working directory: outside it, even acceptEdits asks.
         const writeCall = (n, _body, { cwd }) =>
-            n === 0 ? { toolUse: { id: "toolu_probe_w", name: "Write", input: { file_path: join(cwd, "probe-never-written.txt"), content: "x" } } } : { text: "done" };
+            n === 0 ? { toolUse: { id: "toolu_probe_w", name: "Write", input: { file_path: join(cwd, "probe-write-target.txt"), content: "x" } } } : { text: "done" };
         const ask = (mode) =>
             run({
                 args: ["--permission-prompt-tool", "stdio", "--permission-mode", mode],
                 messages: ["write a file"],
                 script: writeCall,
-                decide: () => "deny", // nothing is ever actually written
+                // A prompted Write is denied. acceptEdits never prompts for one inside the
+                // working directory, so there it runs - in the throwaway home, deleted after.
+                decide: () => "deny",
             });
 
         it("default asks before a write", async () => {

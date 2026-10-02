@@ -58,9 +58,6 @@ export function probeEnv({ baseUrl, home, configDir, shimDir, path = process.env
     };
 }
 
-const userLine = (text) =>
-    JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
-
 /**
  * @param {object} o
  * @param {string} o.cli                    path to the claude binary
@@ -79,39 +76,49 @@ export async function runProbe({ cli, args = [], messages = ["hello"], controlRe
     mkdirSync(home, { recursive: true });
     mkdirSync(configDir, { recursive: true });
     const shim = makeSecurityShim(join(root, "shim"));
-    const api = await startFakeAnthropic({ script: script && ((n, body) => script(n, body, { cwd: home })) });
+    let api;
+    let child;
+    try {
+        api = await startFakeAnthropic({ script: script && ((n, body) => script(n, body, { cwd: home })) });
 
-    const argv = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", ...args];
-    const child = spawn(cli, argv, {
-        cwd: home,
-        env: probeEnv({ baseUrl: api.url, home, configDir, shimDir: shim.dir }),
-        stdio: ["pipe", "pipe", "pipe"],
-    });
+        const argv = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", ...args];
+        child = spawn(cli, argv, {
+            cwd: home,
+            env: probeEnv({ baseUrl: api.url, home, configDir, shimDir: shim.dir }),
+            stdio: ["pipe", "pipe", "pipe"],
+        });
 
-    const events = [];
-    const permissionRequests = []; // every can_use_tool the CLI asked, in order
-    const timeline = []; // [label, ms since start] for ordering questions
-    const t0 = Date.now();
-    let stderr = "";
-    let buf = "";
-    let results = 0;
-    child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
-    child.stdout.on("data", (d) => {
-        buf += d.toString("utf8");
-        let i;
-        while ((i = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, i).trim();
-            buf = buf.slice(i + 1);
-            if (!line) continue;
-            try {
-                const ev = JSON.parse(line);
-                events.push(ev);
-                timeline.push([`${ev.type}${ev.subtype ? "/" + ev.subtype : ""}`, Date.now() - t0]);
-                if (ev.type === "control_request" && ev.request?.subtype === "can_use_tool") {
-                    permissionRequests.push({ tool: ev.request.tool_name, input: ev.request.input });
-                    const verdict = decide(ev.request);
-                    child.stdin.write(
-                        JSON.stringify({
+        const events = [];
+        const permissionRequests = []; // every can_use_tool the CLI asked, in order
+        const timeline = []; // [label, ms since start] for ordering questions
+        const t0 = Date.now();
+        let stderr = "";
+        let buf = "";
+        let results = 0;
+        let spawnError = null;
+        // A failed spawn (bad path) or a write to a CLI that has already exited must
+        // fail THIS probe, not crash the test worker with an unhandled 'error'.
+        child.on("error", (e) => (spawnError = e));
+        child.stdin.on("error", () => {});
+        const send = (obj) => {
+            if (child.exitCode === null && !child.stdin.destroyed) child.stdin.write(JSON.stringify(obj) + "\n");
+        };
+        child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
+        child.stdout.on("data", (d) => {
+            buf += d.toString("utf8");
+            let i;
+            while ((i = buf.indexOf("\n")) >= 0) {
+                const line = buf.slice(0, i).trim();
+                buf = buf.slice(i + 1);
+                if (!line) continue;
+                try {
+                    const ev = JSON.parse(line);
+                    events.push(ev);
+                    timeline.push([`${ev.type}${ev.subtype ? "/" + ev.subtype : ""}`, Date.now() - t0]);
+                    if (ev.type === "control_request" && ev.request?.subtype === "can_use_tool") {
+                        permissionRequests.push({ tool: ev.request.tool_name, input: ev.request.input });
+                        const verdict = decide(ev.request);
+                        send({
                             type: "control_response",
                             response: {
                                 subtype: "success",
@@ -121,57 +128,59 @@ export async function runProbe({ cli, args = [], messages = ["hello"], controlRe
                                         ? { behavior: "allow", updatedInput: ev.request.input }
                                         : { behavior: "deny", message: "denied by the probe" },
                             },
-                        }) + "\n",
-                    );
+                        });
+                    }
+                    if (ev.type === "result") results++;
+                } catch {
+                    /* non-JSON stdout line: ignored */
                 }
-                if (ev.type === "result") results++;
-            } catch {
-                /* non-JSON stdout line: ignored */
+            }
+        });
+        const exit = new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
+
+        // One at a time: each control_request waits for its own answer, so a later
+        // request observes the effect of an earlier one (a request that is merely
+        // QUEUED behind it would otherwise look like it had no effect).
+        for (const request of controlRequests) {
+            const id = `probe-${Math.random().toString(36).slice(2, 8)}`;
+            send({ type: "control_request", request_id: id, request });
+            timeline.push([`sent control_request/${request.subtype}`, Date.now() - t0]);
+            const until = Date.now() + 8000;
+            while (Date.now() < until && !spawnError && child.exitCode === null && !events.some((e) => e.type === "control_response" && e.response?.request_id === id)) {
+                await new Promise((r) => setTimeout(r, 25));
             }
         }
-    });
-
-    // One at a time: each control_request waits for its own answer, so a later
-    // request observes the effect of an earlier one (a request that is merely
-    // QUEUED behind it would otherwise look like it had no effect).
-    for (const request of controlRequests) {
-        const id = `probe-${Math.random().toString(36).slice(2, 8)}`;
-        child.stdin.write(JSON.stringify({ type: "control_request", request_id: id, request }) + "\n");
-        timeline.push([`sent control_request/${request.subtype}`, Date.now() - t0]);
-        const until = Date.now() + 8000;
-        while (Date.now() < until && child.exitCode === null && !events.some((e) => e.type === "control_response" && e.response?.request_id === id)) {
-            await new Promise((r) => setTimeout(r, 25));
+        for (const m of messages) {
+            send({ type: "user", message: { role: "user", content: [{ type: "text", text: m }] } });
+            timeline.push(["sent user message", Date.now() - t0]);
         }
-    }
-    for (const m of messages) {
-        child.stdin.write(userLine(m) + "\n");
-        timeline.push(["sent user message", Date.now() - t0]);
-    }
 
-    const exit = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
-    const deadline = Date.now() + timeoutMs;
-    if (messages.length === 0) {
-        // Nothing to wait for a result of: let the CLI say what it says on its own.
-        await new Promise((r) => setTimeout(r, settleMs));
-    }
-    while (results < messages.length && Date.now() < deadline) {
-        if (child.exitCode !== null) break;
-        await new Promise((r) => setTimeout(r, 50));
-    }
-    const timedOut = results < messages.length && child.exitCode === null;
-    child.stdin.end();
-    const done = await Promise.race([exit, new Promise((r) => setTimeout(() => r(null), 5000))]);
-    if (!done) child.kill("SIGKILL");
-    const status = done ?? (await exit);
+        const deadline = Date.now() + timeoutMs;
+        if (messages.length === 0) {
+            // Nothing to wait for a result of: let the CLI say what it says on its own.
+            await new Promise((r) => setTimeout(r, settleMs));
+        }
+        while (results < messages.length && Date.now() < deadline && !spawnError) {
+            if (child.exitCode !== null) break;
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        const timedOut = results < messages.length && child.exitCode === null && !spawnError;
+        child.stdin.end();
+        const done = await Promise.race([exit, new Promise((r) => setTimeout(() => r(null), 5000))]);
+        if (!done) child.kill("SIGKILL");
+        const status = done ?? (await Promise.race([exit, new Promise((r) => setTimeout(() => r({ code: null, signal: "SIGKILL" }), 2000))]));
+        if (spawnError) throw new Error(`could not run ${cli}: ${spawnError.message}`);
 
-    let securityCalls = [];
-    try {
-        securityCalls = readFileSync(shim.log, "utf8").split("\n").filter(Boolean);
-    } catch {
-        /* none */
+        let securityCalls = [];
+        try {
+            securityCalls = readFileSync(shim.log, "utf8").split("\n").filter(Boolean);
+        } catch {
+            /* none */
+        }
+        return { argv, events, timeline, requests: api.requests.slice(), permissionRequests, securityCalls, stderr, timedOut, ...status };
+    } finally {
+        if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await api?.close();
+        rmSync(root, { recursive: true, force: true });
     }
-    const requests = api.requests.slice();
-    await api.close();
-    rmSync(root, { recursive: true, force: true });
-    return { argv, events, timeline, requests, permissionRequests, securityCalls, stderr, timedOut, ...status };
 }

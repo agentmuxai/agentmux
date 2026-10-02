@@ -43,6 +43,8 @@ const DOCS_INDEX_PATTERNS = [
     /^scripts\/gen-docs-index\./,
     /^scripts\/test-fixtures\/gen-docs-index\//,
     /^scripts\/ci-classify-changes\./,
+    // Its CLI-free tests run in this job's step (ci-pr.yml).
+    /^scripts\/cli-probe\//,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^package(-lock)?\.json$/,
     /^(vite|vitest)\.config\./,

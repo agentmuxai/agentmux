@@ -13,7 +13,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { makeSecurityShim, probeEnv, SECURITY_ITEM_NOT_FOUND } from "./probe.mjs";
+import { makeSecurityShim, probeEnv, runProbe, SECURITY_ITEM_NOT_FOUND } from "./probe.mjs";
 
 const posix = process.platform !== "win32";
 const dirs = [];
@@ -76,5 +76,11 @@ describe("the probe environment", () => {
         expect(env.HOME).toBe("/h");
         expect(env.CLAUDE_CONFIG_DIR).toBe("/c");
         expect(env.PATH.startsWith("/shim:")).toBe(true);
+    });
+});
+
+describe("runProbe failure handling", () => {
+    it("a CLI that cannot be started fails that probe with a clear error, not the test worker", async () => {
+        await expect(runProbe({ cli: join(tmp(), "no-such-claude"), timeoutMs: 2000 })).rejects.toThrow(/could not run/);
     });
 });
