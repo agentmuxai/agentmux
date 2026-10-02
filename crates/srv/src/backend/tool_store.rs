@@ -190,7 +190,7 @@ fn system_path_of(name: &str) -> Option<String> {
 /// Run `cmd --version-arg` and extract the first version-looking token.
 /// Returns `Some(version_string)` on success, `None` if the command fails or
 /// the output contains no recognisable version token.
-fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
+pub(crate) fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
     let arg = version_arg.as_deref()?;
     let mut command = std::process::Command::new(cmd);
     // `cmd` is a third-party binary, so it gets the strict policy for the same

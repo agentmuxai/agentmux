@@ -3,4 +3,11 @@
 /**
  * Request for `resolve.prereqs`. Was a function-local anonymous struct.
  */
-export type ResolvePrereqsReq = { tools: Array<string>, };
+export type ResolvePrereqsReq = { tools: Array<string>, 
+/**
+ * Tools from `tools` whose version should also be read, for prereqs with
+ * a minimum version (e.g. OpenClaw needs Node 24.16+). Only these are
+ * executed (`<resolved path> --version`); every other tool stays a
+ * path-only lookup. Names not also in `tools` are ignored.
+ */
+versions?: Array<string>, };

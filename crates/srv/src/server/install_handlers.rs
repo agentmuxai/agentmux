@@ -80,6 +80,13 @@ pub struct InstallCheckReq {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ResolvePrereqsReq {
     pub tools: Vec<String>,
+    /// Tools from `tools` whose version should also be read, for prereqs with
+    /// a minimum version (e.g. OpenClaw needs Node 24.16+). Only these are
+    /// executed (`<resolved path> --version`); every other tool stays a
+    /// path-only lookup. Names not also in `tools` are ignored.
+    #[serde(default)]
+    #[ts(optional)]
+    pub versions: Option<Vec<String>>,
 }
 
 /// Result of `install.start`. Was an inline `json!({ "sessionId": .. })`.
@@ -131,6 +138,10 @@ pub struct PrereqToolResolution {
     pub found: bool,
     /// Always present, null when the tool was not found.
     pub path: Option<String>,
+    /// The tool's version, when the request asked for it (`versions`) and
+    /// it could be read. Null means "not asked" or "unknown" — never
+    /// "new enough"; the caller decides how to treat an unknown version.
+    pub version: Option<String>,
 }
 
 /// Result of `resolve.prereqs`.
@@ -265,8 +276,9 @@ fn provider_installed_dirs(provider_id: &str) -> Vec<std::path::PathBuf> {
 /// its absolute path; None when it isn't there.
 ///
 /// Used by `resolve.prereqs` to pre-launch-check whether a provider's
-/// system dependencies are installed. The probe is path-only — never
-/// executes the tool — so it's safe to call without side effects.
+/// system dependencies are installed. The lookup is path-only — never
+/// executes the tool. (`resolve.prereqs` runs `--version` separately, and
+/// only for tools the caller lists in `versions`.)
 /// See SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
 pub(crate) async fn resolve_tool_path(tool: &str) -> Option<String> {
     // In-process PATH search (the `which` crate: PATHEXT-aware on Windows),
@@ -277,6 +289,20 @@ pub(crate) async fn resolve_tool_path(tool: &str) -> Option<String> {
     let tool = tool.to_string();
     tokio::task::spawn_blocking(move || find_on_path(&tool, std::env::var_os("PATH").as_deref()))
         .await
+        .ok()
+        .flatten()
+}
+
+/// Version of the prereq binary at `path` (already resolved on PATH), via
+/// `--version`, bounded so a hung binary can't stall the launch check.
+async fn probe_prereq_version(path: &str) -> Option<String> {
+    let path = path.to_string();
+    let probe = tokio::task::spawn_blocking(move || {
+        crate::backend::tool_store::probe_version(&path, &Some("--version".to_string()))
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), probe)
+        .await
+        .ok()?
         .ok()
         .flatten()
 }
@@ -457,10 +483,19 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         ));
                     }
                     let path = resolve_tool_path(tool).await;
+                    let wants_version = req
+                        .versions
+                        .as_deref()
+                        .is_some_and(|v| v.iter().any(|t| t == tool));
+                    let version = match (&path, wants_version) {
+                        (Some(p), true) => probe_prereq_version(p).await,
+                        _ => None,
+                    };
                     results.push(PrereqToolResolution {
                         tool: tool.clone(),
                         found: path.is_some(),
                         path,
+                        version,
                     });
                 }
                 Ok(ResolvePrereqsResult { results })
@@ -953,6 +988,11 @@ mod req_shape_tests {
         .expect("install.check");
         serde_json::from_value::<ResolvePrereqsReq>(json!({"tools": ["node", "git"]}))
             .expect("resolve.prereqs");
+        let with_versions = serde_json::from_value::<ResolvePrereqsReq>(
+            json!({"tools": ["node", "git"], "versions": ["node"]}),
+        )
+        .expect("resolve.prereqs with versions");
+        assert_eq!(with_versions.versions.as_deref(), Some(&["node".to_string()][..]));
 
         assert!(
             serde_json::from_value::<InstallCancelReq>(json!({"session_id": "s1"})).is_err(),
@@ -981,10 +1021,14 @@ mod req_shape_tests {
                 tool: "node".to_string(),
                 found: false,
                 path: None,
+                version: None,
             }],
         })
         .expect("serializable");
-        assert_eq!(v, json!({"results": [{"tool": "node", "found": false, "path": null}]}));
+        assert_eq!(
+            v,
+            json!({"results": [{"tool": "node", "found": false, "path": null, "version": null}]})
+        );
     }
 }
 
