@@ -1,5 +1,7 @@
 # Replace Pane Context Menu
 
+**Status:** historical — the "Replace With..." entry was removed from the pane context menu on 2026-10-02. A pane's view can still be swapped by the launcher and the new-pane picker; the rest of this document describes the removed menu.
+
 ## Overview
 
 Add a "Replace With..." submenu to the pane right-click context menu. Selecting a widget from the submenu closes the current pane and opens the selected widget in the same layout position.

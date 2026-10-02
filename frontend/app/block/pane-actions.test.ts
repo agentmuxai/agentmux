@@ -12,17 +12,10 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-const { replaceItems } = vi.hoisted(() => ({ replaceItems: [] as any[] }));
-
 vi.mock("@/app/store/global", () => ({
-    atoms: { fullConfigAtom: () => ({ widgets: {}, settings: {} }) },
     createBlockSplitHorizontally: vi.fn(),
     createBlockSplitVertically: vi.fn(),
     getApi: () => ({ inspectElementAt: vi.fn() }),
-    replaceBlock: vi.fn(),
-}));
-vi.mock("@/app/window/action-widgets-config", () => ({
-    buildPaneWidgetMenuItems: () => replaceItems,
 }));
 vi.mock("@/util/clipboard", () => ({ readText: vi.fn(), writeText: vi.fn() }));
 
@@ -47,11 +40,10 @@ const opts = (over: Record<string, unknown> = {}) => ({
 /** "-" for a separator, otherwise the label. */
 const shape = (items: ContextMenuItem[]) => items.map((i) => (i.type === "separator" ? "-" : i.label));
 
-const ALL_SECTIONS: PaneMenuSection[] = ["clipboard", "split", "replace", "magnify", "close", "inspect"];
+const ALL_SECTIONS: PaneMenuSection[] = ["clipboard", "split", "magnify", "close", "inspect"];
 
 describe("buildPaneContextMenu — baseline (no omit)", () => {
-    it("term pane, with a Replace submenu and Inspect", () => {
-        replaceItems.splice(0, replaceItems.length, { label: "Browser" });
+    it("term pane, with Inspect", () => {
         const menu = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 } }));
         expect(shape(menu)).toEqual([
             "Copy",
@@ -62,8 +54,6 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
             "Split Left",
             "Split Right",
             "-",
-            "Replace With...",
-            "-",
             "Magnify Pane",
             "Close Pane",
             "-",
@@ -72,7 +62,6 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
     });
 
     it("agent pane has no Paste; magnified pane offers Un-Magnify; no inspectAt means no Inspect", () => {
-        replaceItems.splice(0, replaceItems.length, { label: "Browser" });
         const menu = buildPaneContextMenu(agentBlock, opts({ magnified: true }));
         expect(shape(menu)).toEqual([
             "Copy",
@@ -82,64 +71,32 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
             "Split Left",
             "Split Right",
             "-",
-            "Replace With...",
-            "-",
             "Un-Magnify Pane",
-            "Close Pane",
-        ]);
-    });
-
-    it("with no replacement widgets the Replace entry and its separator both disappear", () => {
-        replaceItems.splice(0, replaceItems.length);
-        const menu = buildPaneContextMenu(agentBlock, opts());
-        expect(shape(menu)).toEqual([
-            "Copy",
-            "-",
-            "Split Up",
-            "Split Down",
-            "Split Left",
-            "Split Right",
-            "-",
-            "Magnify Pane",
             "Close Pane",
         ]);
     });
 });
 
 describe("buildPaneContextMenu — omit", () => {
-    it("drops Split and Replace, keeping Magnify/Close/Inspect grouped correctly", () => {
-        replaceItems.splice(0, replaceItems.length, { label: "Browser" });
+    it("drops Clipboard and Split, keeping Magnify/Close/Inspect grouped correctly", () => {
         const menu = buildPaneContextMenu(
             agentBlock,
-            opts({ inspectAt: { x: 1, y: 2 }, omit: new Set<PaneMenuSection>(["clipboard", "split", "replace"]) })
+            opts({ inspectAt: { x: 1, y: 2 }, omit: new Set<PaneMenuSection>(["clipboard", "split"]) })
         );
         expect(shape(menu)).toEqual(["Magnify Pane", "Close Pane", "-", "Inspect Element"]);
     });
 
-    it("omitting only Replace leaves no dangling separator", () => {
-        replaceItems.splice(0, replaceItems.length, { label: "Browser" });
-        const menu = buildPaneContextMenu(agentBlock, opts({ omit: new Set<PaneMenuSection>(["replace"]) }));
-        expect(shape(menu)).toEqual([
-            "Copy",
-            "-",
-            "Split Up",
-            "Split Down",
-            "Split Left",
-            "Split Right",
-            "-",
-            "Magnify Pane",
-            "Close Pane",
-        ]);
+    it("omitting only Split leaves no dangling separator", () => {
+        const menu = buildPaneContextMenu(agentBlock, opts({ omit: new Set<PaneMenuSection>(["split"]) }));
+        expect(shape(menu)).toEqual(["Copy", "-", "Magnify Pane", "Close Pane"]);
     });
 
     it("omitting everything yields an empty menu", () => {
-        replaceItems.splice(0, replaceItems.length, { label: "Browser" });
         const menu = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 }, omit: new Set(ALL_SECTIONS) }));
         expect(menu).toEqual([]);
     });
 
     it("never produces a leading, trailing, or doubled separator for ANY omitted subset", () => {
-        replaceItems.splice(0, replaceItems.length, { label: "Browser" });
         for (let mask = 0; mask < 1 << ALL_SECTIONS.length; mask++) {
             const omit = new Set(ALL_SECTIONS.filter((_, i) => mask & (1 << i)));
             const s = shape(buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 }, omit })));

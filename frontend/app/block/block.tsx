@@ -366,7 +366,7 @@ function Block(props: BlockProps): JSX.Element {
     const [blockData, loading] = useMuxObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
 
     // Track only the view type (not the full blockData) so the effect only re-runs
-    // when the view changes (e.g. "Replace With..."), not on every meta update.
+    // when the view changes (e.g. the launcher swapping in a widget), not on every meta update.
     // This prevents Solid.js from disposing ViewModel createMemo computations
     // that are owned by the effect when unrelated meta fields change.
     const viewType = createMemo(() => blockData()?.meta?.view);

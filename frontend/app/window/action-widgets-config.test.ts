@@ -191,7 +191,7 @@ describe("individually pinning a grouped child (promote out of the group)", () =
 });
 
 describe("buildPaneWidgetMenuItems", () => {
-    // Replace With... / empty-tab menu — grouped children must not show up
+    // Empty-tab menu / pane-tab picker — grouped children must not show up
     // individually, but must still be reachable via a nested submenu under
     // their parent's own label.
     function paneWmap(): Record<string, WidgetConfigType> {
@@ -218,15 +218,6 @@ describe("buildPaneWidgetMenuItems", () => {
     it("excludes non-pane views (devtools) everywhere, including inside a submenu", () => {
         const items = buildPaneWidgetMenuItems(paneWmap(), {}, vi.fn());
         expect(items.map((i) => i.label)).not.toContain("DevTools");
-    });
-
-    it("excludes the current view via opts.excludeView (leaf) and from inside a submenu", () => {
-        const wmap = paneWmap();
-        wmap["defwidget@discord"].blockdef = { meta: { view: "editor" } };
-        const items = buildPaneWidgetMenuItems(wmap, {}, vi.fn(), { excludeView: "editor" });
-        expect(items.map((i) => i.label)).not.toContain("Editor");
-        const messengers = items.find((i) => i.label === "Messengers");
-        expect(messengers?.submenu?.map((c) => c.label)).toEqual(["Slack"]);
     });
 
     it("omits a parent entirely once every child is filtered out", () => {
