@@ -441,6 +441,24 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
         expect(h.rpc.FsListCommand).not.toHaveBeenCalled();
     });
 
+    it("Refresh, F5 and New folder don't list a gated folder (ReAgent on #4201)", async () => {
+        const v = mount({ "files:path": "/Users/a/Documents" });
+        await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
+        fireEvent.click(v.container.querySelector('[title="Refresh (F5)"]')!);
+        fireEvent.keyDown(v.list(), { key: "F5" });
+        fireEvent.click(v.container.querySelector('[title="New folder"]')!);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(h.rpc.FsListCommand).not.toHaveBeenCalled();
+        expect(h.rpc.FsCreateCommand).not.toHaveBeenCalled();
+        expect(v.getByText("Open Documents")).toBeTruthy();
+    });
+
+    it("ignores case, as APFS does (ReAgent on #4201)", async () => {
+        const v = mount({ "files:path": "~/documents" });
+        await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
+        expect(h.rpc.FsListCommand).not.toHaveBeenCalled();
+    });
+
     it("lists it straight away once this release has opened it", async () => {
         const first = mount({ "files:path": "/Users/a/Documents" });
         await waitFor(() => expect(first.getByText("Open Documents")).toBeTruthy());

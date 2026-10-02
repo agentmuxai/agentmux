@@ -288,9 +288,10 @@ export class FilesModel {
         const home = this.places().find((p) => p.kind === "home")?.path ?? "";
         const path = normalizePath(raw, home);
         for (const p of this.places()) {
-            if (MAC_PROTECTED_PLACE_IDS.has(p.id) && isWithin(path, p.path)) return p;
+            // APFS ignores case by default, so ~/documents is Documents too.
+            if (MAC_PROTECTED_PLACE_IDS.has(p.id) && isWithin(path.toLowerCase(), p.path.toLowerCase())) return p;
         }
-        if (path === "/Volumes" || path.startsWith("/Volumes/")) return { id: "volumes", label: "Volumes", path: "/Volumes", kind: "known" };
+        if (isWithin(path.toLowerCase(), "/volumes")) return { id: "volumes", label: "Volumes", path: "/Volumes", kind: "known" };
         return null;
     }
 
@@ -336,7 +337,7 @@ export class FilesModel {
             this.settleFirst();
             return;
         }
-        await this.list(target, { silent: false });
+        await this.list(target, { silent: false, consented: true });
     }
 
     goBack(): void {
@@ -383,7 +384,11 @@ export class FilesModel {
      * the cursor after its TTL). `silent` keeps the current rows on screen
      * while re-listing (a change on disk, Refresh) and keeps the selection.
      */
-    async list(dir: string, opts: { silent: boolean }): Promise<void> {
+    async list(dir: string, opts: { silent: boolean; consented?: boolean }): Promise<void> {
+        // Only navigate() decides to list a protected macOS folder; Refresh,
+        // a change event, New folder or Undo must not list one the user hasn't
+        // opened (ReAgent on #4201).
+        if (!opts.consented && (this.phase() === "gated" || this.needsConsent(dir))) return;
         const gen = ++this.generation;
         const oldOrder = this.order();
         if (!opts.silent) {
@@ -547,6 +552,7 @@ export class FilesModel {
     /** Creates "New folder" (or "New file.txt", "New folder (2)" when taken)
      *  and starts renaming it (§7.4). */
     async createNew(kind: "file" | "dir"): Promise<void> {
+        if (this.phase() !== "ready") return;
         const base = kind === "dir" ? "New folder" : "New file";
         const ext = kind === "dir" ? "" : ".txt";
         const taken = new Set(this.rawEntries().map((e) => e.name.toLowerCase()));
