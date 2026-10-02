@@ -69,13 +69,16 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: h.rpc }));
-const tabs = vi.hoisted(() => ({ opened: [] as string[][], closeResult: true }));
+const tabs = vi.hoisted(() => ({ opened: [] as string[][], closeResult: true, closeError: "" }));
 vi.mock("./files-open", async (orig) => ({
     ...(await orig<typeof import("./files-open")>()),
     openFolderInNewTab: async (from: string, dir: string) => {
         tabs.opened.push([from, dir]);
     },
-    closeOwnTab: async () => tabs.closeResult,
+    closeOwnTab: async () => {
+        if (tabs.closeError) throw new Error(tabs.closeError);
+        return tabs.closeResult;
+    },
 }));
 const blocks = vi.hoisted(() => new Map<string, { meta: Record<string, unknown> }>());
 vi.mock("@/app/store/mos", async (orig) => ({
@@ -980,6 +983,7 @@ describe("the Files pane: pane tabs", () => {
     beforeEach(() => {
         tabs.opened = [];
         tabs.closeResult = true;
+        tabs.closeError = "";
     });
 
     it("Ctrl+Enter and middle-click open a folder in a new tab; Ctrl+T opens this one", async () => {
@@ -1007,6 +1011,14 @@ describe("the Files pane: pane tabs", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
         await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("This is the pane's only tab. Use the pane's × to close it."));
+    });
+
+    it("says why when a tab can't be closed (ReAgent on #4227)", async () => {
+        tabs.closeError = "layout save failed";
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Couldn't close this tab: layout save failed"));
     });
 
     it("offers Open in new tab for folders", async () => {
