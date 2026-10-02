@@ -856,7 +856,6 @@ export const AgentPresentationView = ({
     const { paneBusy, workingRowVisible } = useWorkingIndicator({
         paneModel,
         showingLaunchActivity,
-        promotionTick,
     });
     const workingRowLoading = paneBusy;
 

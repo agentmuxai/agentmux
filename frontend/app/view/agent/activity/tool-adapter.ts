@@ -344,18 +344,3 @@ export function nextToolPromotionAt(nodes: ReadonlyArray<DocumentNode>, now: num
     }
     return next;
 }
-
-/**
- * True if the pane currently has a live, already-promoted Bash call —
- * used by AgentWorkingRow to suppress its own "tool · arg" text once the
- * dock is already showing it (report §4.3). Deliberately narrower than
- * `toolActivities`: a *finished* call still lingering in the dock during
- * its retention window must not suppress a different, newly-started tool
- * call's own working-row text.
- */
-export function hasRunningPromotedTool(nodes: ReadonlyArray<DocumentNode>, now: number): boolean {
-    for (const n of nodes) {
-        if (isBashToolNode(n) && isRunningPastThreshold(n, now)) return true;
-    }
-    return false;
-}
