@@ -87,6 +87,12 @@ wrap_window_delegate! {
                 height: 1,
             }
         }
+
+        fn on_theme_changed(&self, view: Option<&mut View>) {
+            if self.frameless {
+                window_settings::keep_view_background_transparent(view, "window");
+            }
+        }
     }
 
     impl PanelDelegate {}
@@ -351,7 +357,13 @@ wrap_browser_view_delegate! {
         runtime_style: RuntimeStyle,
     }
 
-    impl ViewDelegate {}
+    impl ViewDelegate {
+        fn on_theme_changed(&self, view: Option<&mut View>) {
+            if self.runtime_style == RuntimeStyle::ALLOY {
+                window_settings::keep_view_background_transparent(view, "browser_view");
+            }
+        }
+    }
 
     impl BrowserViewDelegate {
         fn on_popup_browser_view_created(
@@ -711,32 +723,14 @@ wrap_app! {
                             if !on_wayland {
                                 return None;
                             }
-                            // Track 1 window transparency (uniform whole-window
-                            // alpha, SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01) is
-                            // delivered via the EWMH `_NET_WM_WINDOW_OPACITY` X11
-                            // property — native Wayland has no equivalent protocol
-                            // Chromium supports. Route transparent windows through
-                            // XWayland (the universal default until CEF 148) so the
-                            // property applies; opaque users keep native Wayland.
-                            // An explicit AGENTMUX_OZONE_PLATFORM still wins above.
-                            if read_window_transparent_setting() {
-                                // Without an X cookie Chromium exits before any
-                                // window opens (#4011), so stay on native Wayland
-                                // rather than fail to start.
-                                xauthority::ensure_xauthority();
-                                if !xauthority::xwayland_reachable() {
-                                    tracing::warn!(
-                                        "window:transparent=true but XWayland is unreachable → staying on native Wayland; window opacity won't apply"
-                                    );
-                                    return Some("wayland".to_string());
-                                }
-                                tracing::info!(
-                                    "window:transparent=true → ozone-platform=x11 (XWayland) for _NET_WM_WINDOW_OPACITY"
-                                );
-                                Some("x11".to_string())
-                            } else {
-                                Some("wayland".to_string())
-                            }
+                            // Native Wayland, transparency included: every
+                            // window gets an alpha-capable surface (see
+                            // `alpha_capable` below) and the page's CSS
+                            // background carries the opacity, so toggling
+                            // transparency and moving the slider apply live
+                            // (#4011). An explicit AGENTMUX_OZONE_PLATFORM
+                            // still wins above.
+                            Some("wayland".to_string())
                         })
                     };
                     if let Some(platform) = ozone {
@@ -899,13 +893,32 @@ wrap_app! {
                     false
                 };
 
-                if is_transparent {
+                // Native Wayland has no whole-window opacity protocol, so
+                // transparency there is per-pixel: the window is alpha-capable
+                // and the page's CSS background carries `window:opacity`. That
+                // only applies live if the window was created alpha-capable,
+                // so on native Wayland every window is, whatever the setting
+                // says at startup (#4011). Elsewhere it follows the setting:
+                // X11 fades the whole window with _NET_WM_WINDOW_OPACITY.
+                #[cfg(target_os = "linux")]
+                let native_wayland =
+                    crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) == Some("wayland");
+                #[cfg(not(target_os = "linux"))]
+                let native_wayland = false;
+                let alpha_capable = process_type.is_none() && (is_transparent || native_wayland);
+                if process_type.is_none() {
+                    window_settings::WINDOW_ALPHA_ENABLED
+                        .store(alpha_capable, std::sync::atomic::Ordering::Relaxed);
+                    tracing::info!(alpha_capable, native_wayland, "window alpha");
+                }
+
+                if alpha_capable {
                 // Initial background color, ARGB hex. alpha=00 → fully
                 // transparent → first-frame paint is alpha-aware so the
                 // CSS body background's rgba() composes with the desktop
-                // wallpaper. Only applied when window:transparent=true;
-                // opaque windows keep the default (ff) background so
-                // Chromium can use opaque compositing and LCD text.
+                // wallpaper. Only applied to alpha-capable windows; others
+                // keep the default (ff) background so Chromium can use
+                // opaque compositing and LCD text.
                 // Pair with: BrowserSettings.background_color = 0, and the
                 // is_frameless main window delegate.
                 let bg_key = CefString::from("background-color");
@@ -920,7 +933,7 @@ wrap_app! {
                 // windows to preserve subpixel rendering quality.
                 let lcd_key = CefString::from("disable-lcd-text");
                 cmd.append_switch(Some(&lcd_key));
-                } // end if is_transparent
+                } // end if alpha_capable
 
                 // Allow the DevTools inspector page (served from the remote
                 // debugging server) to open its own WebSocket connection back
@@ -1085,13 +1098,14 @@ wrap_browser_process_handler! {
 
             // Browser settings.
             let is_transparent = self.state.window_transparent.load(std::sync::atomic::Ordering::Relaxed);
+            let alpha_capable = window_settings::WINDOW_ALPHA_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
             let settings = BrowserSettings {
                 windowless_frame_rate: 60,
                 // ARGB: alpha=0 → SK_AlphaTRANSPARENT → enables Views-framework
-                // transparency. Only set when window:transparent=true; opaque
-                // windows use 0xFF000000 so Chromium's compositor treats layers as
-                // opaque (better performance, subpixel LCD text, no opacity flash).
-                background_color: if is_transparent { 0x00000000 } else { 0xFF000000 },
+                // transparency. Only set for alpha-capable windows; others use
+                // 0xFF000000 so Chromium's compositor treats layers as opaque
+                // (better performance, subpixel LCD text, no opacity flash).
+                background_color: if alpha_capable { 0x00000000 } else { 0xFF000000 },
                 ..Default::default()
             };
 

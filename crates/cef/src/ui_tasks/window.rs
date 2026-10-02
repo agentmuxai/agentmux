@@ -1136,12 +1136,12 @@ wrap_task! {
             };
             // Under ozone-x11 `window_handle()` is the X11 Window XID. Under
             // native Wayland it is not an XID and there is no uniform-alpha
-            // protocol at all — the host routes `window:transparent=true`
-            // sessions through XWayland (app.rs ozone selection), so this
-            // guard only fires on an explicit AGENTMUX_OZONE_PLATFORM=wayland
-            // override or when opacity is requested with transparency off.
+            // protocol at all; transparency there is per-pixel instead (every
+            // window is alpha-capable and the page's CSS background carries
+            // `window:opacity`, app.rs `alpha_capable`), so there is nothing
+            // to do here.
             if crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) == Some("wayland") {
-                tracing::warn!("[opacity] uniform window alpha unsupported on native Wayland (no protocol); set window:transparent=true (XWayland) or use per-pixel transparency");
+                tracing::debug!("[opacity] native Wayland: per-pixel transparency, no window alpha to set");
                 return;
             }
             let xid = window.window_handle() as u32;

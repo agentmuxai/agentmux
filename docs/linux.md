@@ -136,7 +136,7 @@ Opening a second instance sends an `open_new_window` command to the running laun
 | Feature | Status |
 |---|---|
 | Splash screen | Not yet implemented (Windows + macOS have native splash screens) |
-| Window transparency | Under investigation — root cause identified (views::SolidBackground), fix blocked on Mutter wl_surface visibility without opaque base pixel |
+| Window transparency | Works on native Wayland (per-pixel, applies live) and X11 (`_NET_WM_WINDOW_OPACITY`). See SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01 §3.2 |
 | Native Wayland (non-XWayland) | Experimental; set `AGENTMUX_OZONE_PLATFORM=wayland` |
 | Owned-window floaters (`transient-for` + destroy-with-parent) | Phase B, not yet implemented — floaters open as independent top-level windows |
 
