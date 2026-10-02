@@ -45,6 +45,7 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { noteTaskFrame } from "./activity/task-outcomes";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
 import { workingFromPhase, type AgentPaneEvent, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
@@ -564,6 +565,11 @@ export function useAgentStream({
                 // `compact-boundary.ts` (Codex P1, PR #2378 round 2) so the two
                 // can't drift on what counts as a valid frame.
                 if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
+                    // Feeds only the compaction-time ESTIMATE (the working row's
+                    // progress bar) with its own parser — it reads the frame's
+                    // real stdout shape, and changes nothing below. See
+                    // SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §3/§5.
+                    recordCompactionSample(parseCompactionSample(rawEvent));
                     // Compaction happens MID-turn — flushParserPending() is
                     // only called at finalizeTurn (useTurnLifecycle.ts), so
                     // without an explicit flush here the parser's
