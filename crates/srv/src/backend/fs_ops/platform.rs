@@ -200,6 +200,81 @@ pub fn remove_entry_no_follow(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Open `path` for reading, refusing a symlink where the OS can: a copy
+/// reads the file that was listed, never what a link swapped in since
+/// points at (spec §9: never follow a link when copying).
+///
+/// Unix refuses with `O_NOFOLLOW`. Windows opens normally: the flag that
+/// would refuse a link there (`FILE_FLAG_OPEN_REPARSE_POINT`) also opens a
+/// cloud placeholder (OneDrive) without fetching its contents. The caller
+/// checks the opened file's own type either way.
+pub fn open_no_follow(path: &Path) -> io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::File::open(path)
+    }
+}
+
+/// Create a symlink at `link` pointing at `target`, of the same kind as
+/// the link being copied (`like`, its own file type). Windows has separate
+/// file and directory links; a junction is recreated as a directory link.
+pub fn create_symlink(target: &Path, link: &Path, like: &std::fs::FileType) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let _ = like;
+        std::os::unix::fs::symlink(target, link)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        if like.is_symlink_dir() {
+            std::os::windows::fs::symlink_dir(target, link)
+        } else {
+            std::os::windows::fs::symlink_file(target, link)
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, link, like);
+        Err(io::Error::new(io::ErrorKind::Unsupported, "symlinks aren't supported here"))
+    }
+}
+
+/// Whether creating a symlink failed because Windows requires Developer
+/// Mode or elevation for it (`ERROR_PRIVILEGE_NOT_HELD`).
+pub fn is_symlink_privilege_error(err: &io::Error) -> bool {
+    const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+    cfg!(windows) && err.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD)
+}
+
+/// Remove the regular file at `path`. On Windows a read-only file refuses
+/// deletion, so the attribute is cleared first when that is the refusal:
+/// a moved file's original and a discarded partial copy both have to go.
+pub fn remove_file_force(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        #[cfg(windows)]
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            let meta = std::fs::symlink_metadata(path)?;
+            if !meta.is_file() || !meta.permissions().readonly() {
+                return Err(e);
+            }
+            let mut perms = meta.permissions();
+            // Windows only: this clears the read-only attribute; there is
+            // no Unix mode to make world-writable.
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            std::fs::set_permissions(path, perms)?;
+            std::fs::remove_file(path)
+        }
+        other => other,
+    }
+}
+
 /// Why `path` can't go to the Recycle Bin, if it can't.
 ///
 /// Windows has no Recycle Bin on network shares or removable drives, and

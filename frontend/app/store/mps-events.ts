@@ -68,6 +68,13 @@ export const WpsEvent = {
     // `FsListCommand` returns it. Scoped `block:<id>`. See
     // docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3.
     FilesChanged: "files:changed",
+    // Progress of a copy/move job started with `FsOpStartCommand`. Payload:
+    // `FsOpEvent` (`{ op_id, kind, state, done_items, total_items,
+    // done_bytes, total_bytes, current?, conflict?, error?, failures? }`).
+    // `running` is throttled to one per 100 ms; `done`, `failed` and
+    // `canceled` are final. Scoped `block:<id>`. See
+    // docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §7.1.
+    FilesOp: "files:op",
     UpgradeMigrationEvent:     "upgrade:migration-event",
     UpgradeMigrationsComplete: "upgrade:migrations-complete",
     UpgradeMigrationsFailed:   "upgrade:migrations-failed",

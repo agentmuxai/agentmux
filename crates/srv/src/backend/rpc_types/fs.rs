@@ -184,7 +184,8 @@ pub struct FsUnwatchReq {
     pub watch_id: String,
 }
 
-/// The empty answer of `fs.unwatch`, `fs.open` and `fs.reveal`.
+/// The empty answer of `fs.unwatch`, `fs.open`, `fs.reveal`, `fs.op.resolve`
+/// and `fs.op.cancel`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FsEmptyResult {}
@@ -279,4 +280,153 @@ pub struct FsOpResults {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FsPathReq {
     pub path: String,
+}
+
+// ── Copy/move jobs (spec §7.1, §7.2) ─────────────────────────────────────
+
+/// What a copy/move job does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub enum FsOpKind {
+    Copy,
+    /// A rename on the same volume; copy, then delete the source, across
+    /// volumes.
+    Move,
+}
+
+/// Request for `fs.op.start`: copy or move `sources` into `dest_dir`.
+///
+/// Validated before the answer: the destination is a folder, every source
+/// exists, no folder goes into itself, and nothing protected is touched.
+/// The work then runs in the background and reports as `files:op` events.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsOpStartReq {
+    pub kind: FsOpKind,
+    pub sources: Vec<String>,
+    pub dest_dir: String,
+    /// Scopes the `files:op` events to `block:<block_id>`.
+    pub block_id: String,
+}
+
+/// Response for `fs.op.start`. Events for the op may arrive before it.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsOpStartResult {
+    pub op_id: String,
+}
+
+/// An answer to a conflict (spec §7.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub enum FsOpChoice {
+    /// Overwrite what is there. A file over a file is written beside it and
+    /// renamed over it, so the original survives a failure.
+    Replace,
+    /// Leave both where they are; the item is not copied or moved.
+    Skip,
+    /// Copy or move under the first free `name (2).ext`, `name (3).ext`…
+    KeepBoth,
+}
+
+/// Request for `fs.op.resolve`: answer the conflict an op is waiting on.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsOpResolveReq {
+    pub op_id: String,
+    pub choice: FsOpChoice,
+    /// Use the same answer for every later conflict of this op.
+    pub apply_to_all: bool,
+}
+
+/// Request for `fs.op.cancel`. An unknown or finished op is not an error.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsOpCancelReq {
+    pub op_id: String,
+}
+
+/// Where an op is. `done`, `failed` and `canceled` are final: no event
+/// follows them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub enum FsOpEventState {
+    /// Working, or queued behind other ops (then with no progress yet).
+    Running,
+    /// Waiting for `fs.op.resolve`; `conflict` says on what.
+    Conflict,
+    /// Finished. Items that failed are in `failures`.
+    Done,
+    /// The op as a whole couldn't run; `error` says why.
+    Failed,
+    Canceled,
+}
+
+/// The two sides of a conflict, for the Replace / Skip / Keep both prompt.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsOpConflict {
+    pub source: String,
+    pub dest: String,
+    /// Each side's own type, not followed: a link to a folder is not a
+    /// folder.
+    pub source_is_dir: bool,
+    pub dest_is_dir: bool,
+    /// Files only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub source_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub dest_size: Option<u64>,
+    /// Unix millis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub source_mtime: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub dest_mtime: Option<u64>,
+}
+
+/// Payload of the `files:op` event, scoped to `block:<block_id>`.
+///
+/// `running` events come at most every 100 ms; every other state is sent
+/// as it happens. Counts cover files, links and folders alike; bytes count
+/// file contents only.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsOpEvent {
+    pub op_id: String,
+    pub kind: FsOpKind,
+    pub state: FsOpEventState,
+    #[ts(type = "number")]
+    pub done_items: u64,
+    /// Zero until the sources have been measured.
+    #[ts(type = "number")]
+    pub total_items: u64,
+    #[ts(type = "number")]
+    pub done_bytes: u64,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// The source path being worked on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current: Option<String>,
+    /// Set in the `conflict` state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub conflict: Option<FsOpConflict>,
+    /// Set in the `failed` state, and on `canceled` when the op stopped by
+    /// itself (an unanswered conflict). A sentence fit to show the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+    /// Per-item failures, by source path, on a final event. Absent when
+    /// none failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub failures: Option<Vec<FsOpResult>>,
 }

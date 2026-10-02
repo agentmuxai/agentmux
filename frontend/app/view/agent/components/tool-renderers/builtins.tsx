@@ -11,6 +11,8 @@
  */
 
 import { Markdown } from "@/app/element/markdown";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { Show, type JSX } from "solid-js";
 import type { ResultFileFacts } from "../../providers/claude-translator";
 import type { ToolNode } from "../../types";
@@ -179,6 +181,14 @@ function renderRead(node: ToolNode): JSX.Element {
                 <div class="agent-tool-read-facts">
                     <span>{facts}</span>
                     <Show when={file?.kind === "pdf" && filePath}>
+                        <button
+                            type="button"
+                            class="agent-tool-read-open"
+                            title="Open with the default app"
+                            onClick={() => void RpcApi.FsOpenCommand(TabRpcClient, { path: filePath }).catch(() => {})}
+                        >
+                            Open
+                        </button>
                         <button
                             type="button"
                             class="agent-tool-read-open"

@@ -11,6 +11,7 @@
 //!
 //! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3, §7, §9.
 
+pub mod jobs;
 pub mod platform;
 pub mod trash_worker;
 
