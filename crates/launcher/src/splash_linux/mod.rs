@@ -215,6 +215,13 @@ fn detect() -> Session {
         Some("wayland") => return Session::Wayland,
         _ => {}
     }
+    // Without XAUTHORITY (a login entry, the AppImage binfmt path or an agent
+    // shell doesn't get Mutter's cookie, #4011) XWayland refuses us and we'd fall
+    // back to the uncentered Wayland splash, so find the cookie first. Called from
+    // `spawn()`, where the launcher is still single-threaded.
+    if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()) {
+        agentmux_common::xauthority::ensure_xauthority();
+    }
     // `DISPLAY` being set doesn't prove a server is live (stale env / no
     // XWayland), so probe a real connection — a failed handshake is fast.
     if x11::server_reachable() {
