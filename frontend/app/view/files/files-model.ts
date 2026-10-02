@@ -141,32 +141,8 @@ async function loadAgentColor(definitionId: string): Promise<string | undefined>
     return pickAgentColor(definitionId);
 }
 
-/** What a model needs when it is one document tab of a pane. */
-export interface FilesTabOptions {
-    initialPath?: string;
-    ops?: FilesOps;
-    onPathChange?: (path: string) => void;
-    isActive?: () => boolean;
-    domKey?: string;
-}
-
 export class FilesModel {
     readonly blockId: string;
-    private readonly ownsOps: boolean;
-
-    /** Whether this is the tab in front of its pane. */
-    readonly isActive = (): boolean => this.tab.isActive?.() ?? true;
-    /** An id for this tab's DOM (row ids), unique in the pane. */
-    get domKey(): string {
-        return this.tab.domKey ? `${this.blockId}-${this.tab.domKey}` : this.blockId;
-    }
-
-    /** Where the folder shown is remembered: the tab's own record, or the
-     *  block's `files:path` for a model that is the whole pane. */
-    private savePath(path: string): void {
-        if (this.tab.onPathChange) this.tab.onPathChange(path);
-        else void this.ctx.setMeta({ [META_PATH]: path });
-    }
     private readonly ctx: PaneTabHostContext;
 
     readonly path: () => string;
@@ -243,15 +219,7 @@ export class FilesModel {
     /** Puts keyboard focus on the list; set by the view while it's mounted. */
     focusList: (() => void) | null = null;
 
-    /** One document tab of a Hangar pane (SPEC_DOCUMENT_TABS_2026_10_02.md
-     *  §6.2): its folder, its pane's shared copy/move jobs, whether it is the
-     *  tab in front, and an id for its DOM. Without these, the model is the
-     *  whole pane, as before document tabs. */
-    private readonly tab: FilesTabOptions;
-    private started = false;
-
-    constructor(ctx: PaneTabHostContext, tab: FilesTabOptions = {}) {
-        this.tab = tab;
+    constructor(ctx: PaneTabHostContext) {
         this.ctx = ctx;
         this.blockId = ctx.blockId;
         [this.path, this.setPath] = createSignal("");
@@ -283,10 +251,8 @@ export class FilesModel {
         });
         this.order = createMemo(() => this.entries().map((e) => e.name));
 
-        this.ownsOps = !tab.ops;
-        this.ops = tab.ops ?? new FilesOps(ctx.blockId);
-        // A pane with several tabs shares one FilesOps; the pane reports.
-        if (this.ownsOps) this.ops.onFinished = (op) => {
+        this.ops = new FilesOps(ctx.blockId);
+        this.ops.onFinished = (op) => {
             this.setStatus(opFinishedText(op), op.state === "done" && !op.failures?.length ? 4000 : 10000);
             // The watcher re-lists the folder shown; a move OUT of it (or a
             // copy into a folder this pane isn't watching) may not be seen.
@@ -354,10 +320,7 @@ export class FilesModel {
      *  Documents or Desktop). Restoring never lists a protected macOS folder
      *  on its own (§9.1.4 item 7). */
     async start(): Promise<void> {
-        // A tab switched back to keeps its listing.
-        if (this.started) return;
-        this.started = true;
-        const saved = this.tab.initialPath ?? this.ctx.meta()?.[META_PATH];
+        const saved = this.ctx.meta()?.[META_PATH];
         await this.loadPlaces();
         const home = this.places().find((p) => p.kind === "home")?.path ?? "~";
         const target = typeof saved === "string" && saved !== "" ? saved : home;
@@ -454,7 +417,7 @@ export class FilesModel {
             this.setFilterSignal("");
             this.setGit(null);
         });
-        this.savePath(target);
+        void this.ctx.setMeta({ [META_PATH]: target });
         if (opts.consented) {
             const place = this.protectedPlace(target);
             if (place) this.openedPlaces.add(place.path);
@@ -570,7 +533,7 @@ export class FilesModel {
                         if (first && res.path && !samePath(res.path, this.path())) {
                             // srv resolved `~` or a link: show the real path.
                             this.setPath(res.path);
-                            this.savePath(res.path);
+                            void this.ctx.setMeta({ [META_PATH]: res.path });
                         }
                         if (!opts.silent) this.setRawEntries([...collected]);
                         this.setPhase("ready");
@@ -607,9 +570,8 @@ export class FilesModel {
     /** `files:select` (written by the OpenFiles tool): select those entries
      *  once, then clear the request. */
     applyRequestedSelection(): void {
-        // Only against a complete listing of the folder it names, and only
-        // by the tab in front.
-        if (this.phase() !== "ready" || this.partial() || !this.isActive()) return;
+        // Only against a complete listing of the folder it names.
+        if (this.phase() !== "ready" || this.partial()) return;
         const req = this.ctx.meta()?.[META_SELECT];
         if (!Array.isArray(req) || req.length === 0) return;
         const present = new Set(this.order());
@@ -863,7 +825,7 @@ export class FilesModel {
 
     dispose(): void {
         if (this.gitTimer) clearTimeout(this.gitTimer);
-        if (this.ownsOps) this.ops.dispose();
+        this.ops.dispose();
         this.disposed = true;
         this.generation++;
         this.stopWatching();
