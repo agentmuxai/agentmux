@@ -38,6 +38,8 @@ pub mod workdir_fs;
 pub mod model_catalog;
 pub mod config_watcher_fs;
 pub mod editor_file_watcher;
+pub mod files_watcher;
+pub mod fs_ops;
 pub mod fs_watch;
 pub mod media_file_watcher;
 pub mod native_memory_drift;

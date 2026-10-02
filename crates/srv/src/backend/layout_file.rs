@@ -478,6 +478,11 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
                 config.insert("path".into(), Value::String(home_relative(path, home)));
             }
         }
+        "files" => {
+            if let Some(path) = meta_str(meta, "files:path") {
+                config.insert("path".into(), Value::String(home_relative(path, home)));
+            }
+        }
         "sysinfo" => {
             if let Some(kind) = meta_str(meta, "sysinfo:type") {
                 config.insert("sysinfo_type".into(), Value::String(kind.to_string()));
@@ -897,6 +902,15 @@ impl PlanBuilder<'_> {
                     meta.insert("media:path".into(), Value::String(path.to_string_lossy().to_string()));
                 } else {
                     self.summary.push("Media".to_string());
+                }
+            }
+            "files" => {
+                meta.insert("view".into(), "files".into());
+                if let Some(path) = cfg_str(view, "path").map(|p| expand_home(p, home)) {
+                    self.summary.push(format!("Hangar: {}", path.display()));
+                    meta.insert("files:path".into(), Value::String(path.to_string_lossy().to_string()));
+                } else {
+                    self.summary.push("Hangar".to_string());
                 }
             }
             "sysinfo" => {

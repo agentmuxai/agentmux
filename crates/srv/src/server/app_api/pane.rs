@@ -261,9 +261,28 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             meta.insert("view".to_string(), json!("media"));
             meta.insert("media:path".to_string(), json!(file));
         }
+        // The Files pane ("Hangar"). The folder comes from `file`, else
+        // `cwd`, else home; `select` becomes a one-shot `files:select` the
+        // view applies after its first listing and then clears.
+        // SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2, §8.1.
+        "files" => {
+            let path = cmd
+                .file
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .or_else(|| cmd.cwd.as_deref().filter(|s| !s.is_empty()))
+                .map(str::to_string)
+                .or_else(|| dirs::home_dir().map(|h| h.to_string_lossy().into_owned()))
+                .ok_or_else(|| "MISSING_ARG: view=files requires 'file' (no home directory to default to)".to_string())?;
+            meta.insert("view".to_string(), json!("files"));
+            meta.insert("files:path".to_string(), json!(path));
+            if let Some(select) = cmd.select.as_ref().filter(|s| !s.is_empty()) {
+                meta.insert("files:select".to_string(), json!(select));
+            }
+        }
         other => {
             return Err(format!(
-                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help/media)"
+                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help/media/files)"
             ));
         }
     }

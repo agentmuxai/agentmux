@@ -631,6 +631,22 @@ pub(crate) const OPEN_MEDIA_TOOL: &str = r#"{
   }
 }"#;
 
+pub(crate) const OPEN_FILES_TOOL: &str = r#"{
+  "name": "OpenFiles",
+  "description": "Open a folder in an AgentMux Files pane (Hangar) next to this conversation, optionally with some of its entries selected. Use it to show the user where things are, e.g. the files you just created or changed. Pass an absolute host path to a folder. Navigation only: the pane changes nothing on disk. Fire-and-forget: returns once the pane is opened.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":     { "type": "string", "description": "Absolute path to the folder to show" },
+      "select":   { "type": "array", "items": { "type": "string" }, "description": "Names (or absolute paths) of entries inside that folder to select once it is listed" },
+      "title":    { "type": "string", "description": "Optional tab/pane title (defaults to the folder name)" },
+      "split":    { "type": "string", "enum": ["right", "left", "down", "up"], "description": "Where to place the new pane relative to this agent pane (default: right). Ignored when floating is true." },
+      "floating": { "type": "boolean", "description": "Open the folder in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
+    },
+    "required": ["path"]
+  }
+}"#;
+
 pub(crate) const LOOP_TOOL: &str = r#"{
   "name": "Loop",
   "description": "Cross-agent recurring inject: run a prompt or slash command on a recurring interval by injecting it into ANOTHER agent's conversation (or your own, if you explicitly need muxbus-delivered self-messaging). Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you call LoopStop(loop_id) or it exhausts max_iterations. If you're scheduling your OWN future turn (a same-session self-check, no other agent involved) — prefer the native ScheduleWakeup (one-off or adaptive-delay recurring, via re-arming) or native CronCreate (durable, cron-expression) tools instead: they have zero delivery overhead (no cross-agent messaging envelope) and built-in cache-window-aware backoff guidance this tool doesn't have. Use THIS tool only when the target is a different agent, or you specifically need AgentMux-persisted delivery across a restart. Loops stop automatically when the agent pane closes.",

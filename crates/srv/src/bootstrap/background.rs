@@ -12,6 +12,7 @@ pub struct BackgroundSubsystems {
     pub broker: Arc<Broker>,
     pub editor_file_watcher: Arc<backend::editor_file_watcher::EditorFileWatcher>,
     pub media_file_watcher: Arc<backend::media_file_watcher::MediaFileWatcher>,
+    pub files_watcher: Arc<backend::files_watcher::FilesWatcher>,
     pub fs_watch_pool: Arc<backend::fs_watch::FsWatchPool>,
     pub config_watcher: Arc<wconfig::ConfigState>,
     pub reactive_handler: &'static reactive::ReactiveHandler,
@@ -56,6 +57,11 @@ pub fn spawn_background_subsystems(
     // wake signal when a matching-extension file changes. See
     // SPEC_MEDIA_PANE_2026_07_26.md.
     let media_file_watcher = backend::media_file_watcher::MediaFileWatcher::new(fs_watch_pool.clone(), broker.clone());
+
+    // Watches folders open in Files panes (`fs.watch`), publishing a
+    // per-block "re-list this folder" signal. See
+    // SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3.
+    let files_watcher = backend::files_watcher::FilesWatcher::new(fs_watch_pool.clone(), broker.clone());
 
     // Deploy shell integration scripts (muxlog.mjs/muxspect.mjs + rcfiles)
     // unconditionally at startup, not opportunistically from a specific
@@ -505,6 +511,7 @@ pub fn spawn_background_subsystems(
         broker,
         editor_file_watcher,
         media_file_watcher,
+        files_watcher,
         fs_watch_pool,
         config_watcher,
         reactive_handler,

@@ -388,6 +388,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <array>
         <string>_agentmux._tcp</string>
     </array>
+    <!-- Files & Folders (TCC). macOS asks the first time AgentMux reads one of
+         these places: when the user opens it in a Hangar or Editor pane, or an
+         agent they started works there. Nothing reads them at launch
+         (SPEC_FILE_BROWSER_PANE_2026_10_01.md §9.1.4 item 6, §9.1.5). -->
+    <key>NSDesktopFolderUsageDescription</key><string>AgentMux reads your Desktop folder only when you open it in a Hangar or Editor pane, or an agent you started works there.</string>
+    <key>NSDocumentsFolderUsageDescription</key><string>AgentMux reads your Documents folder only when you open it in a Hangar or Editor pane, or an agent you started works there.</string>
+    <key>NSDownloadsFolderUsageDescription</key><string>AgentMux reads your Downloads folder only when you open it in a Hangar or Editor pane, or an agent you started works there.</string>
+    <key>NSRemovableVolumesUsageDescription</key><string>AgentMux reads a removable drive only when you open it in a Hangar or Editor pane, or an agent you started works there.</string>
+    <key>NSNetworkVolumesUsageDescription</key><string>AgentMux reads a network drive only when you open it in a Hangar or Editor pane, or an agent you started works there.</string>
 </dict>
 </plist>
 PLIST

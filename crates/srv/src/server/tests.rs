@@ -115,6 +115,10 @@ pub(crate) fn test_state() -> AppState {
             fs_watch_pool.clone(),
             broker.clone(),
         ),
+        files_watcher: crate::backend::files_watcher::FilesWatcher::new(
+            fs_watch_pool.clone(),
+            broker.clone(),
+        ),
         fs_watch_pool: fs_watch_pool.clone(),
     }
 }
