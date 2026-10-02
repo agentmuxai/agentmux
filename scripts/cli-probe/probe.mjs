@@ -69,7 +69,7 @@ const userLine = (text) =>
  * @param {object[]} [o.controlRequests]    `request` bodies to send as control_requests once the CLI is up
  * @param {number} [o.timeoutMs]
  * @param {number} [o.settleMs]             with no messages, how long to let the CLI talk on its own
- * @param {Function} [o.script]             scripted API replies (see fake-anthropic.mjs): e.g. make the model call a tool
+ * @param {Function} [o.script]             scripted API replies (see fake-anthropic.mjs): e.g. make the model call a tool; called (n, body, {cwd})
  * @param {(req: object) => ("allow"|"deny")} [o.decide]  answer to each can_use_tool request the CLI sends (default allow)
  */
 export async function runProbe({ cli, args = [], messages = ["hello"], controlRequests = [], timeoutMs = 60000, settleMs = 3000, script, decide = () => "allow" }) {
@@ -79,7 +79,7 @@ export async function runProbe({ cli, args = [], messages = ["hello"], controlRe
     mkdirSync(home, { recursive: true });
     mkdirSync(configDir, { recursive: true });
     const shim = makeSecurityShim(join(root, "shim"));
-    const api = await startFakeAnthropic({ script });
+    const api = await startFakeAnthropic({ script: script && ((n, body) => script(n, body, { cwd: home })) });
 
     const argv = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", ...args];
     const child = spawn(cli, argv, {
