@@ -61,7 +61,7 @@ use super::super::AppState;
 /// lives in block meta and would otherwise stay wrong forever. Applied at the
 /// point of use so a block that never re-runs `resync_controller` can't bypass
 /// it.
-fn container_argv(argv: Vec<String>, provider_id: &str) -> Vec<String> {
+pub(crate) fn container_argv(argv: Vec<String>, provider_id: &str) -> Vec<String> {
     let Some(provider) = crate::backend::providers::get_provider(provider_id) else {
         // Unknown provider — no catalog to diff against, so remove the one flag
         // that is outright fatal rather than guessing at the rest.
