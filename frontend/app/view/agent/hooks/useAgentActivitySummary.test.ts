@@ -16,6 +16,8 @@ import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 const hub = vi.hoisted(() => ({
     activitySummary: vi.fn(),
     updateMeta: vi.fn(),
+    /** The block's meta as the hook reads it back; updateMeta writes merge in. */
+    meta: {} as Record<string, unknown>,
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -29,6 +31,9 @@ vi.mock("@/app/store/services", () => ({
     ObjectService: { UpdateObjectMeta: (...args: unknown[]) => hub.updateMeta(...args) },
 }));
 vi.mock("@/app/store/token-usage", () => ({ recordTurn: vi.fn() }));
+vi.mock("@/app/store/global", () => ({
+    MOS: { getMuxObjectAtom: () => () => ({ meta: hub.meta }) },
+}));
 
 import { useAgentActivitySummary } from "./useAgentActivitySummary";
 
@@ -36,7 +41,14 @@ const BLOCK_ID = "b";
 
 beforeEach(() => {
     hub.activitySummary.mockReset();
-    hub.updateMeta.mockReset().mockResolvedValue(undefined);
+    hub.meta = {};
+    hub.updateMeta.mockReset().mockImplementation((_oref: string, patch: Record<string, unknown>) => {
+        for (const [k, v] of Object.entries(patch)) {
+            if (v === null) delete hub.meta[k];
+            else hub.meta[k] = v;
+        }
+        return Promise.resolve();
+    });
 });
 afterEach(() => {
     vi.clearAllMocks();
@@ -167,6 +179,68 @@ describe("useAgentActivitySummary — trigger", () => {
         await Promise.resolve();
 
         expect(hub.updateMeta).not.toHaveBeenCalled();
+        dispose();
+    });
+});
+
+const submit = (setPhase: (p: TurnPhase) => void, n: number, text = `message ${n} about the login race`) => {
+    setPhase({ kind: "Submitting", submittedAt: n, pendingContent: text });
+    setPhase({ kind: "Streaming", bufferSize: 0, toolsActive: 0, lastEventMs: 0 });
+};
+const flush = async () => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+};
+
+describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
+    it("counts human turns in block meta, so a remount does not restart the count", async () => {
+        hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
+        const { setPhase, dispose } = setup();
+        submit(setPhase, 1);
+        submit(setPhase, 2);
+        await flush();
+        expect(hub.meta["term:human_turns"]).toBe(2);
+        dispose();
+
+        const again = setup();
+        submit(again.setPhase, 3);
+        await flush();
+        expect(hub.meta["term:human_turns"]).toBe(3);
+        again.dispose();
+    });
+
+    it("asks on every message while there is no title", async () => {
+        hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
+        const { setPhase, dispose } = setup();
+        for (let n = 1; n <= 4; n++) submit(setPhase, n);
+        await flush();
+        expect(hub.activitySummary).toHaveBeenCalledTimes(4);
+        dispose();
+    });
+
+    it("with a title, asks only on turns 2, 5 and 8", async () => {
+        hub.meta["term:ambient_summary"] = "Fix the login race";
+        hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
+        const { setPhase, dispose } = setup();
+        for (let n = 1; n <= 9; n++) submit(setPhase, n);
+        await flush();
+        const asked = hub.activitySummary.mock.calls.map(([, payload]) => payload.user_message);
+        expect(asked).toEqual([2, 5, 8].map((n) => `message ${n} about the login race`));
+        dispose();
+    });
+
+    it("keeps the title over a rewording, and replaces it with a new goal", async () => {
+        hub.meta = { "term:ambient_summary": "Fix the login race", "term:human_turns": 1 };
+        hub.activitySummary.mockResolvedValueOnce({ summary: "Fix login race condition", tokens: null });
+        const { setPhase, dispose } = setup();
+        submit(setPhase, 2);
+        await flush();
+        expect(hub.meta["term:ambient_summary"]).toBe("Fix the login race");
+
+        hub.meta["term:human_turns"] = 4;
+        hub.activitySummary.mockResolvedValueOnce({ summary: "Set up CI for the docs site", tokens: null });
+        submit(setPhase, 5);
+        await flush();
+        expect(hub.meta["term:ambient_summary"]).toBe("Set up CI for the docs site");
         dispose();
     });
 });

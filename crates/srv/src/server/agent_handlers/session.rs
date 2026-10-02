@@ -529,7 +529,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     // total exists for ANY background-triggered
                                     // ambient call today (dispatch_name/
                                     // subagent_name via trigger_eager_naming,
-                                    // generate_pushed_activity_summary all
+                                    // generate_recovered_title all
                                     // discard their own returned tokens the
                                     // same way; only the live, RPC-response
                                     // pull paths — session:activity_summary,

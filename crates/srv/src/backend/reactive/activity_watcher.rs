@@ -1,32 +1,36 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pushed per-agent activity summaries: periodically runs the same
-//! Haiku-powered digest used by `session:activity_summary` for every
-//! registered reactive agent that is actively running, and publishes the
-//! result as an `agent:summary` MuxEvent — so panes (the swarm feed, in
-//! particular) can show a live one-liner without polling.
+//! Empty-title recovery: a running agent with conversation and no usable
+//! session title gets one, written straight to its block's
+//! `term:ambient_summary`, which the pane header and the Swarm row read.
 //!
-//! Each call goes through `crate::ambient::tasks::generate_pushed_activity_summary`,
-//! which routes it through the Ambient Model Call gateway (`crate::ambient`)
-//! under its own purpose tag — distinct from the pull RPC's, so a periodic
-//! background summary never contends with a live, user-facing pane-header
-//! request for the same block.
+//! The title is otherwise computed only when a human submits a message
+//! (`useAgentActivitySummary.ts`). An agent driven by jekts or tool work, one
+//! reattached mid-turn, or one whose title call failed or abstained could sit on
+//! an empty title for as long as it ran. This sweep is the second route.
+//!
+//! It replaces what this module used to do: a "what is being worked on" summary
+//! every 20 s for every running agent, published as an `agent:summary` event that
+//! nothing subscribed to, so every call was spent and its output went nowhere.
+//! Now an agent that already has a title costs nothing here.
+//! docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md sections 2.1
+//! (defects 2 and 5), 5.6 and 5.7.
+//!
+//! Each call goes through `crate::ambient::tasks::generate_recovered_title`, so
+//! the Ambient Model Call gateway admits, cancels and accounts for it under its
+//! own purpose tag, distinct from the pane's own title request.
 //!
 //! Cost controls:
-//!   - skipped entirely for agents whose controller isn't `STATUS_RUNNING`
-//!     (an idle/stopped pane costs nothing)
-//!   - skipped when the block's `output` FileStore size hasn't changed since
-//!     the last *successful* summary (nothing new happened; no point
-//!     re-summarizing) — a failed/empty attempt does not mark the size as
-//!     seen, so the next tick retries rather than being permanently
-//!     suppressed until the output happens to grow again
-//!   - skipped when a summarization for that block is already in flight
-//!     (guards against a slow call still running when the next tick fires)
-//!   - capped at `MAX_CONCURRENT_SUMMARIES` simultaneous Haiku CLI spawns
-//!   - per-block bookkeeping is pruned each tick against the current
-//!     registration list, so a disconnected/unregistered agent's entry
-//!     doesn't linger for the rest of the process's lifetime
+//!   - only agents whose controller is running (`STATUS_RUNNING`) and that have no usable title;
+//!   - only when the block's `output` has grown since the last completed attempt;
+//!   - at most [`MAX_ATTEMPTS`] completed attempts per block while the title stays
+//!     empty, counted again from zero once a title exists, so an agent whose
+//!     activity never shows what the work is (the model abstains) stops costing;
+//!   - no conversation in the digest means no call at all (`digest` returns
+//!     `None` for activity with no user or assistant text);
+//!   - one call in flight per block, and [`MAX_CONCURRENT`] across all blocks;
+//!   - per-block bookkeeping is pruned each tick against the registration list.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -35,52 +39,102 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::time::interval;
 
+use crate::ambient::validate::is_usable_title;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
+use crate::backend::eventbus::{EventBus, WSEventType};
+use crate::backend::obj::{self, Block};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::mps::{Broker, MuxEvent};
 
 use super::get_global_handler;
 
-/// How often to sweep registered agents for a fresh summary.
+/// How often to sweep registered agents.
 const SWEEP_INTERVAL_SECS: u64 = 20;
 
-/// Max simultaneous Haiku CLI spawns across all agents.
-const MAX_CONCURRENT_SUMMARIES: usize = 2;
+/// Max simultaneous recovery calls across all agents.
+const MAX_CONCURRENT: usize = 2;
 
-/// Word budget for the pushed summary. Matches the frontend's dynamic cap
-/// for `session:activity_summary` (`useAgentActivitySummary.ts`), not that
-/// RPC's own bare default of 7 (`app_api/session.rs`'s `unwrap_or(7)`) — the
-/// pull path's effective width varies with pane size, so 12 is the closest
-/// fixed stand-in for a swarm-tree row rather than a claim of being tighter.
-const WORD_TARGET: u32 = 12;
+/// Completed attempts per block while its title stays empty. Bounded, as the
+/// `lys` design bounds its retries (spec section 3, research point 2).
+pub(crate) const MAX_ATTEMPTS: u32 = 3;
 
-pub const EVENT_AGENT_SUMMARY: &str = "agent:summary";
+/// Word budget for a recovered title: within the range the pane's own request
+/// uses (5 to 12, by pane width), so a recovered title looks like any other.
+const WORD_TARGET: u32 = 8;
 
-/// Run the pushed-summary sweep loop. Never returns.
-pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore>, broker: Arc<Broker>) {
+/// The block meta key the title lives in.
+pub(crate) const META_TITLE: &str = "term:ambient_summary";
+
+/// Per-block state the sweep keeps between ticks.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Attempts {
+    /// Completed (billed) attempts since the title was last seen non-empty.
+    pub count: u32,
+    /// The `output` size at the last completed attempt.
+    pub last_size: Option<i64>,
+}
+
+/// Why a block is not attempted this tick, or `None` to attempt it. Pure, so the
+/// cost rules are testable without a model, a store or a clock.
+pub(crate) fn skip_reason(has_title: bool, attempts: Attempts, output_size: i64) -> Option<&'static str> {
+    if has_title {
+        return Some("has a title");
+    }
+    if attempts.count >= MAX_ATTEMPTS {
+        return Some("attempts exhausted");
+    }
+    if attempts.last_size == Some(output_size) {
+        return Some("no new output");
+    }
+    None
+}
+
+/// Write `title` as the block's session title, unless a usable one appeared while
+/// the call ran (the pane's own request can win the race; it is the better
+/// source). Check and write happen in one transaction. `Ok(true)` when written.
+pub(crate) fn store_recovered_title(store: &Store, block_id: &str, title: &str) -> Result<bool, String> {
+    store
+        .with_tx(|tx| {
+            let mut block = tx.must_get::<Block>(block_id)?;
+            if is_usable_title(&obj::meta_get_string(&block.meta, META_TITLE, "")) {
+                return Ok(false);
+            }
+            block.meta.insert(META_TITLE.to_string(), serde_json::Value::String(title.to_string()));
+            tx.update(&mut block)?;
+            Ok(true)
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Tell open frontends the block changed, the way the other backend meta writers
+/// do (`blockcontroller::core::persist_session_id`).
+fn broadcast_block_update(store: &Store, event_bus: &EventBus, block_id: &str) {
+    let Ok(block) = store.must_get::<Block>(block_id) else {
+        return;
+    };
+    let data = serde_json::to_value(&obj::MuxObjUpdate {
+        updatetype: "update".into(),
+        otype: "block".into(),
+        oid: block_id.to_string(),
+        obj: Some(obj::mux_obj_to_value(&block)),
+    })
+    .ok();
+    event_bus.broadcast_event(&WSEventType {
+        eventtype: "waveobj:update".to_string(),
+        oref: format!("block:{block_id}"),
+        data,
+    });
+}
+
+/// Run the recovery sweep. Never returns.
+pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<EventBus>) {
     let mut ticker = interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SUMMARIES));
-    // block_id -> last output size we *successfully* summarized at, so idle
-    // agents (no new output since the last summary) are skipped instead of
-    // re-billed every tick. An entry is only written after a non-empty
-    // summary comes back (see the spawned task below) — a transient failure
-    // (CLI error, missing `cmd` in meta, missing block) leaves no entry, so
-    // the next tick retries instead of being permanently suppressed until
-    // the output size happens to change again.
-    let last_seen_size: Arc<Mutex<HashMap<String, i64>>> = Arc::new(Mutex::new(HashMap::new()));
-    // block_ids with a summarization currently in flight, so a slow call
-    // (up to the 15s CLI timeout) doesn't get double-dispatched by the next
-    // 20s tick before last_seen_size has a chance to reflect its result.
-    // Self-cleaning: every insert below has a matching remove once that same
-    // spawned task's call resolves, on every exit path.
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
+    let attempts: Arc<Mutex<HashMap<String, Attempts>>> = Arc::new(Mutex::new(HashMap::new()));
+    // One call per block at a time: a slow call (up to the CLI timeout) must not
+    // be dispatched again by the next tick. Every insert has a matching remove.
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-
-    // Shared generation counter for the Ambient Model Call gateway — only
-    // needs to strictly increase per (block_id, purpose) key over time, so
-    // one counter incremented once per tick and reused across every block
-    // checked in that tick is sufficient (different block_ids are different
-    // gateway keys and never interact).
+    // The gateway's generation only has to increase per (block, purpose).
     let mut tick: u64 = 0;
 
     loop {
@@ -88,87 +142,164 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
         tick += 1;
 
         let agents = get_global_handler().list_agents();
-
-        // Drop last_seen_size entries for agents that unregistered/disconnected
-        // since the last sweep, so this map stays bounded by the current agent
-        // count instead of growing for every block_id ever seen in the
-        // process's lifetime.
         let registered: HashSet<String> = agents.iter().map(|a| a.block_id.clone()).collect();
-        last_seen_size.lock().unwrap().retain(|block_id, _| registered.contains(block_id));
+        attempts.lock().unwrap().retain(|block_id, _| registered.contains(block_id));
 
         for agent in agents {
             let block_id = agent.block_id.clone();
 
-            let status = match get_block_controller_status(&block_id) {
-                Some(s) => s,
-                None => continue,
+            let Some(status) = get_block_controller_status(&block_id) else {
+                continue;
             };
             if status.shellprocstatus != STATUS_RUNNING || !status.is_agent_pane {
                 continue;
             }
-
-            let current_size = match filestore.stat(&block_id, "output") {
-                Ok(Some(wf)) => wf.size,
-                _ => continue,
+            let Ok(Some(block)) = mstore.get::<Block>(&block_id) else {
+                continue;
             };
-            if last_seen_size.lock().unwrap().get(&block_id) == Some(&current_size) {
-                continue; // already summarized this exact output size — skip
+            let has_title = is_usable_title(&obj::meta_get_string(&block.meta, META_TITLE, ""));
+            if has_title {
+                // A title exists: the budget starts over if it is ever lost.
+                attempts.lock().unwrap().remove(&block_id);
+                continue;
+            }
+            let Ok(Some(output)) = filestore.stat(&block_id, "output") else {
+                continue;
+            };
+            let state = attempts.lock().unwrap().get(&block_id).copied().unwrap_or_default();
+            if skip_reason(false, state, output.size).is_some() {
+                continue;
             }
             if !in_flight.lock().unwrap().insert(block_id.clone()) {
-                continue; // a summarization for this block is already running
+                continue;
             }
 
             let mstore = mstore.clone();
             let filestore = filestore.clone();
-            let broker = broker.clone();
+            let event_bus = event_bus.clone();
             let semaphore = semaphore.clone();
-            let last_seen_size = last_seen_size.clone();
+            let attempts = attempts.clone();
             let in_flight = in_flight.clone();
-            let agent_id = agent.agent_id.clone();
+            let output_size = output.size;
 
             tokio::spawn(async move {
                 let Ok(_permit) = semaphore.acquire().await else {
                     in_flight.lock().unwrap().remove(&block_id);
                     return;
                 };
-
-                let result = crate::ambient::tasks::generate_pushed_activity_summary(
-                    &mstore, &filestore, &block_id, tick, WORD_TARGET,
-                ).await;
-
+                let result =
+                    crate::ambient::tasks::generate_recovered_title(&mstore, &filestore, &block_id, tick, WORD_TARGET)
+                        .await;
                 in_flight.lock().unwrap().remove(&block_id);
 
+                // `None`: nothing ran (no conversation in the digest, no CLI path,
+                // superseded). Not an attempt; a later tick may try again.
                 let Some(generated) = result else {
-                    // Leave last_seen_size untouched so a future tick retries
-                    // this block — whether the failure was transient (CLI
-                    // hiccup, stale-on-arrival via the Ambient Model Call
-                    // gateway) or persistent (no CLI path in meta yet).
                     return;
                 };
-                last_seen_size.lock().unwrap().insert(block_id.clone(), current_size);
-
-                // The model had nothing usable to say about this output (its reply
-                // failed validation). That attempt is finished and billed: record the
-                // size so it is not retried every tick, and publish nothing.
-                let Some(summary) = generated.text else {
-                    return;
+                let attempt = {
+                    let mut map = attempts.lock().unwrap();
+                    let entry = map.entry(block_id.clone()).or_default();
+                    entry.count += 1;
+                    entry.last_size = Some(output_size);
+                    entry.count
                 };
 
-                let ts = agentmux_common::time::now_ms_u64();
-
-                broker.publish(MuxEvent {
-                    event: EVENT_AGENT_SUMMARY.to_string(),
-                    scopes: vec![format!("block:{}", block_id)],
-                    sender: String::new(),
-                    persist: 0,
-                    data: Some(serde_json::json!({
-                        "agentId": agent_id,
-                        "blockId": block_id,
-                        "summary": summary,
-                        "ts": ts,
-                    })),
-                });
+                let Some(title) = generated.text else {
+                    tracing::info!(
+                        block_id = %block_id,
+                        attempt,
+                        max = MAX_ATTEMPTS,
+                        "ambient: title recovery produced nothing usable (abstained or rejected)"
+                    );
+                    return;
+                };
+                match store_recovered_title(&mstore, &block_id, &title) {
+                    Ok(true) => {
+                        tracing::info!(block_id = %block_id, attempt, title = %title, "ambient: recovered a missing session title");
+                        broadcast_block_update(&mstore, &event_bus, &block_id);
+                    }
+                    Ok(false) => {
+                        tracing::debug!(block_id = %block_id, "ambient: a title appeared while recovery ran; kept it");
+                    }
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id, error = %e, "ambient: could not store a recovered title");
+                    }
+                }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tried(count: u32, last_size: i64) -> Attempts {
+        Attempts { count, last_size: Some(last_size) }
+    }
+
+    #[test]
+    fn an_agent_with_a_title_costs_nothing() {
+        assert_eq!(skip_reason(true, Attempts::default(), 100), Some("has a title"));
+    }
+
+    #[test]
+    fn an_untitled_agent_is_tried_once_per_growth_of_its_output() {
+        assert_eq!(skip_reason(false, Attempts::default(), 100), None, "first try");
+        assert_eq!(skip_reason(false, tried(1, 100), 100), Some("no new output"));
+        assert_eq!(skip_reason(false, tried(1, 100), 250), None, "new output, try again");
+    }
+
+    #[test]
+    fn attempts_are_bounded_while_the_title_stays_empty() {
+        assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS - 1, 1), 2), None);
+        assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS, 1), 2), Some("attempts exhausted"));
+    }
+
+    fn store_with_block(meta: &[(&str, &str)]) -> Store {
+        let store = Store::open_in_memory().unwrap();
+        let mut block = Block {
+            oid: "b1".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: obj::MetaMapType::new(),
+            subblockids: None,
+        };
+        for (k, v) in meta {
+            block.meta.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+        }
+        store.insert(&mut block).unwrap();
+        store
+    }
+
+    fn title_of(store: &Store) -> String {
+        obj::meta_get_string(&store.must_get::<Block>("b1").unwrap().meta, META_TITLE, "")
+    }
+
+    #[test]
+    fn a_recovered_title_fills_an_empty_or_placeholder_title() {
+        for before in [&[][..], &[(META_TITLE, "(none yet)")][..]] {
+            let store = store_with_block(before);
+            assert_eq!(store_recovered_title(&store, "b1", "Fix the login race"), Ok(true));
+            assert_eq!(title_of(&store), "Fix the login race");
+        }
+    }
+
+    #[test]
+    fn a_title_that_appeared_while_recovery_ran_is_kept() {
+        let store = store_with_block(&[(META_TITLE, "Set up CI for the docs site")]);
+        assert_eq!(store_recovered_title(&store, "b1", "Something else"), Ok(false));
+        assert_eq!(title_of(&store), "Set up CI for the docs site");
+    }
+
+    #[test]
+    fn other_meta_survives_the_write() {
+        let store = store_with_block(&[("agentName", "AgentX")]);
+        store_recovered_title(&store, "b1", "Fix the login race").unwrap();
+        let meta = store.must_get::<Block>("b1").unwrap().meta;
+        assert_eq!(obj::meta_get_string(&meta, "agentName", ""), "AgentX");
     }
 }
