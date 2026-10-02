@@ -178,7 +178,7 @@ narko (Windows 11, v0.59.1) and starpower (macOS 26.5.2, v0.59.1), LAN only, def
 | keyword, narko → starpower | same on the receiving side |
 | discovery | both directions; each host lists the other (narko `192.168.1.230:57319`, starpower `192.168.1.195`) |
 
-Not yet known: whether macOS showed a Local Network permission prompt on starpower (the agent cannot see the screen; the operator must say), and how LAN was enabled there. **charlie** (a Linux VM on gamerlove, see section 6) was not on narko's LAN list at that point; once its adapter was bridged it joined, and a plain jekt in each direction was `DELIVERY=lan`, `TRUST=lan-verified` (charlie v0.58.2 with the 0.59.1 machines). **Area54** (Windows, wired) stayed one-way until the fault in 8.1 was cleared.
+**macOS asked, and the operator approved (2026-10-01).** Enabling LAN on starpower raised macOS's Local Network permission prompt, which the operator approved; nothing else was needed, and LAN then worked in both directions (the table above). So macOS needs no code change today, and PR C reduces to confirming the prompt fires at the moment LAN is enabled, and that a *denied* prompt is reported (spec 6: a denied Local Network permission must show up in the indicator, not as silence). **charlie** (a Linux VM on gamerlove, see section 6) was not on narko's LAN list at that point; once its adapter was bridged it joined, and a plain jekt in each direction was `DELIVERY=lan`, `TRUST=lan-verified` (charlie v0.58.2 with the 0.59.1 machines). **Area54** (Windows, wired) stayed one-way until the fault in 8.1 was cleared.
 
 The same session also showed the failure this spec exists for: narko saw nothing while Area54 saw narko, until the Private profile was added by hand.
 
@@ -236,3 +236,37 @@ One spec, separate PRs, in this order. Windows is the failing path and should no
 | **D: Linux** | Detect an active `ufw` or `firewalld` and show the exact command. | charlie, once it is a bridged LAN member |
 
 Separate from this spec: WAN delivery has no catch-up pull (a message that arrives before an agent subscribes waits for the next unrelated wake). Tracked on its own.
+
+## 10. Test bed: a clean Windows machine that can be reset in seconds
+
+The acceptance cases in section 5 are only worth anything on a machine that has never run AgentMux, with a firewall nobody has touched. narko and Area54 are not that (Area54 alone carries 400 AgentMux rules). Doing it by installing Windows again for every run would cost an hour each time, so the test bed is built around **snapshots and linked clones**.
+
+### 10.1 The machine
+
+A Windows 11 virtual machine on the VMware host, **bridged** to the LAN like charlie (NAT would hide it from the others: section 6). About 4 GB of memory, 2 vCPUs and a 60 GB disk; a virtual TPM so Windows 11 installs. Installed and fully updated, with a local account, **no AgentMux, no firewall changes, no Defender exclusions**. Leave the network profile exactly as Windows chooses it: a new network on a fresh Windows 11 is usually classed **Public**, which is what a real first-time user gets, and it is the case that matters most (4.4).
+
+### 10.2 Snapshots
+
+| Snapshot | State | Used for |
+|---|---|---|
+| `golden-clean` | Updated, shut down, nothing of ours installed | The base of every run. **Never run a test in it.** |
+| `agentmux-installed` | `golden-clean` plus an AgentMux build installed and an agent registered, LAN still off | Cases that only need the first enable of LAN |
+
+Every run is a **linked clone** of a snapshot, deleted afterwards, so each starts from a true first-run state and a bad run costs nothing. On VMware Workstation this is one command and takes seconds, because the clone shares the base disk:
+
+    vmrun -T ws clone "<golden.vmx>" "<runs>\run-<date>-<case>.vmx" linked -snapshotName=golden-clean -cloneName=run-<date>-<case>
+
+A new build means one new `agentmux-installed` snapshot, not a new Windows install.
+
+### 10.3 What it is for
+
+1. **The measurement that decides 4.2.** Does binding mDNS on an interface with no allow rule raise the Security Alert *when an allow rule already exists for another profile*? It decides whether interface selection can stay as it is or one of options (a), (b), (c) is needed.
+2. First-run behaviour on a **Public** network (4.4) and after changing the profile to **Private**.
+3. What a **cancelled** alert leaves behind (the Block rules of R2) and that the helper removes them.
+4. A **managed** policy: a local Group Policy that stops local rules applying, to see the `managed` verdict (`localRulesIgnored`).
+5. The **owner / no-program** rule for skipping Store-app rules (8.2), which was measured on one machine only: run `dump_rule_properties` and `reads_and_reports` here first.
+6. A LAN jekt in each direction between this machine and narko, with `lan-verified` on arrival.
+
+### 10.4 Driving it
+
+Until agents can act on other hosts (`SPEC_CROSS_HOST_AGENT_ACCESS_2026_10_01.md`, section 6.13), reverting and cloning is done by whoever owns the VMware host; the guest's own AgentMux is then driven over LAN like any other peer. Once that spec ships, a `vmrun`-scoped grant on the host lets an agent run the clone, start and delete steps itself.
