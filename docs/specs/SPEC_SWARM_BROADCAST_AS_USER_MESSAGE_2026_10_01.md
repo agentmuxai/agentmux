@@ -241,3 +241,12 @@ those words can authorize, and srv enforces it, not the text.
   outside this repository; the proposed wording is in the PR description for the owner to apply.
 - Still open: question 2 (self-quit by broadcast stays refused), question 3 (whether `UIClick`
   can press Broadcast), questions 4 and 5.
+- Delivery routing (review on #4176): the first cut called `run_agent_turn` for every target,
+  which handles only subprocess, persistent and App Server controllers and so failed every ACP
+  agent. Delivery now reuses the reactive sender's own routing, extracted as
+  `bootstrap::route_agent_message`: persistent (including steering a turn already running), ACP and
+  App Server take the text on their own channel; a subprocess agent, or a persistent agent that is
+  registered but not yet spawned, gets `run_agent_turn` with `BROADCAST_TURN_ORIGIN`; a
+  PTY-based pane is refused with a per-target error, because typing prose into a shell prompt
+  would run it as a command. So §4.4's "calls `run_agent_turn` directly" reads: only for the
+  targets that need a turn started.
