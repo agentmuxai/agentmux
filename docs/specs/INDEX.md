@@ -1090,6 +1090,7 @@ partial list.
 | [`browser-pane-state-catalog`](browser-pane-state-catalog.md) | Browser pane state catalog |
 | [`container-agent-runtime`](container-agent-runtime.md) | Spec: Container Agent Runtime |
 | [`modal-cleanup-migration-2026-05-01`](modal-cleanup-migration-2026-05-01.md) | Modal Cleanup — Migration Audit & Plan |
+| [`replace-pane-widget`](replace-pane-widget.md) | Replace Pane Context Menu |
 | [`service-update-consolidation`](service-update-consolidation.md) | Analysis: Consolidate Object Update Return Paths |
 | [`sysinfo-continuous-monitor-animation-2026-05-03`](sysinfo-continuous-monitor-animation-2026-05-03.md) | Sysinfo Plot — Continuous-Monitor Animation |
 | [`windows-firewall-fix`](windows-firewall-fix.md) | Windows Firewall Popup — Root Cause & Fix |
@@ -1217,7 +1218,6 @@ Fix one when you touch it and know its real state.
 | [`process-lifecycle-v2`](process-lifecycle-v2.md) | Process Lifecycle v2: OS-Level Parent-Child Binding |
 | [`process-state-tracker`](process-state-tracker.md) | Process State Tracker — Spec |
 | [`readme-rewrite`](readme-rewrite.md) | Spec: README.md Rewrite |
-| [`replace-pane-widget`](replace-pane-widget.md) | Replace Pane Context Menu |
 | [`responsive-agent-pane`](responsive-agent-pane.md) | Spec: Responsive Agent Pane |
 | [`runtime-logging`](runtime-logging.md) | Spec: Runtime Logging Infrastructure Rewrite |
 | [`secondary-windows-impl-plan`](secondary-windows-impl-plan.md) | Secondary Windows CEF Views — Implementation Plan |
