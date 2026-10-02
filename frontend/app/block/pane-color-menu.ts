@@ -4,6 +4,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { paneRoleColor } from "./pane-color-scheme";
 
 export interface PaneHueOption {
     label: string;
@@ -80,29 +81,6 @@ export function hueToAgentIdentityColor(hue: number): string {
     return hslToHex(hue, 65, 52);
 }
 
-/** `#rrggbb` -> hue (0–360). Inverse of `hslToHex`'s hue axis — needed so
- * a color that started life as a hex (an agent's persisted identity color)
- * can go through the same hue-based header treatment
- * (`headerBgForEffectiveColor`) as one that started life as an explicit hue
- * pick. Grayscale input (delta === 0, no defined hue) returns 0 — never hit
- * in practice since every agent identity color comes from
- * agent-color.ts's own vivid, non-gray palette. */
-function hexToHue(hex: string): number {
-    const r = parseInt(hex.slice(1, 3), 16) / 255;
-    const g = parseInt(hex.slice(3, 5), 16) / 255;
-    const b = parseInt(hex.slice(5, 7), 16) / 255;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const delta = max - min;
-    if (delta === 0) return 0;
-    let hue: number;
-    if (max === r) hue = ((g - b) / delta) % 6;
-    else if (max === g) hue = (b - r) / delta + 2;
-    else hue = (r - g) / delta + 4;
-    hue *= 60;
-    return hue < 0 ? hue + 360 : hue;
-}
-
 /**
  * One header-background rule for both color sources a pane can have —
  * this IS the "single system": an explicit "Pane Color" hue pick
@@ -128,32 +106,45 @@ export function headerBgForEffectiveColor(
     hue: number | undefined,
     activeBorderHex: string | undefined,
     isLightTheme: boolean,
-    // Which dark-theme muted-background deriver to use — defaults to the
-    // header's own hueToHeaderBg. paneTabBgForEffectiveColor (below) reuses
-    // this exact same light/dark precedence, swapping in hueToPaneTabBg's
-    // higher-contrast treatment instead, rather than duplicating the
-    // branching logic itself.
-    darkBgFromHue: (hue: number) => string = hueToHeaderBg,
 ): string | undefined {
-    if (isLightTheme) {
-        if (typeof hue === "number") return hueToActiveBorder(hue);
-        return activeBorderHex;
-    }
-    if (typeof hue === "number") return darkBgFromHue(hue);
-    if (activeBorderHex) return darkBgFromHue(hexToHue(activeBorderHex));
-    return undefined;
+    // 2026-10-02: both themes now take a subtle OKLCH tint of the identity
+    // (pane-color-scheme.ts `headerTint`) instead of hsl(h, 28%, 16%) on dark
+    // and the identity at full strength on light. A large surface stays calm;
+    // the pills carry identity (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §6 P3).
+    return paneRoleColor(hue, activeBorderHex, isLightTheme, "headerTint");
 }
 
-/** Same rule as headerBgForEffectiveColor, for a pane-tab pill's own
- * background instead of the pane header's — see hueToPaneTabBg's own doc
- * comment for why the dark-theme treatment needs to be more visible than
- * the header's at that much smaller element size. */
+/** A pane-tab pill's own background, for an inactive tab: the identity, quietly
+ * (pane-color-scheme.ts `pill`). Distinct from the header's tint so a pill
+ * still reads as coloured against its own pane's tinted header. */
 export function paneTabBgForEffectiveColor(
     hue: number | undefined,
     activeBorderHex: string | undefined,
     isLightTheme: boolean,
 ): string | undefined {
-    return headerBgForEffectiveColor(hue, activeBorderHex, isLightTheme, hueToPaneTabBg);
+    return paneRoleColor(hue, activeBorderHex, isLightTheme, "pill");
+}
+
+/** The selected pill's background: the same hue a step stronger than an
+ * inactive pill (`pillActive`), so selection is shown by lightness and the
+ * underline, not by hue alone (WCAG 1.4.1). */
+export function paneTabActiveBgForEffectiveColor(
+    hue: number | undefined,
+    activeBorderHex: string | undefined,
+    isLightTheme: boolean,
+): string | undefined {
+    return paneRoleColor(hue, activeBorderHex, isLightTheme, "pillActive");
+}
+
+/** The identity at full strength for the theme (`identity`): the active-tab
+ * underline. Clears 3:1 against every pill and header surface for every hue
+ * (pane-color-scheme.test.ts). */
+export function paneIdentityForEffectiveColor(
+    hue: number | undefined,
+    activeBorderHex: string | undefined,
+    isLightTheme: boolean,
+): string | undefined {
+    return paneRoleColor(hue, activeBorderHex, isLightTheme, "identity");
 }
 
 /**

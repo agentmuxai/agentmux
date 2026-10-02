@@ -44,6 +44,8 @@ import {
     headerBgForEffectiveColor,
     hueToActiveBorder,
     hueToBorder,
+    paneIdentityForEffectiveColor,
+    paneTabActiveBgForEffectiveColor,
     paneTabBgForEffectiveColor,
     PANE_HUE_OPTIONS,
     setHue,
@@ -81,6 +83,25 @@ export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLi
     const hue = blockMeta?.["frame:hue"];
     const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
     return paneTabBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
+
+/** The selected pane-tab pill's background (`pillActive`): this block's own
+ * identity a step stronger than its inactive pill. Undefined when the block
+ * has no colour of its own. */
+export function computeBlockTabPillActiveBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return paneTabActiveBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
+
+/** This block's identity at full strength for the theme: the active-tab
+ * underline. Normalised in OKLCH so it clears 3:1 against the pill and header
+ * surfaces for every hue (pane-color-scheme.ts). Undefined when the block has
+ * no colour of its own (callers fall back to the accent colour). */
+export function computeBlockIdentityColor(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return paneIdentityForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
 }
 
 /** Fixed header background for every non-agent pane with no other color
