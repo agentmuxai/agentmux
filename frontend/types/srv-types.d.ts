@@ -878,6 +878,15 @@ declare global {
         /** Absolute path to a file or directory the Media pane is pointed
          *  at. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */
         "media:path"?: string;
+        // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
+        "files:path"?: string;
+        "files:select"?: string[];
+        "files:sort"?: string;
+        "files:sortdir"?: string;
+        "files:hidden"?: boolean;
+        "files:sidebar"?: boolean;
+        "files:preview"?: boolean;
+        "files:view"?: string;
         "term:localshellpath"?: string;
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;

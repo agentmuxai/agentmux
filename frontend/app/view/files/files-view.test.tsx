@@ -69,6 +69,17 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: h.rpc }));
+const tabs = vi.hoisted(() => ({ opened: [] as string[][], closeResult: true, closeError: "" }));
+vi.mock("./files-open", async (orig) => ({
+    ...(await orig<typeof import("./files-open")>()),
+    openFolderInNewTab: async (from: string, dir: string) => {
+        tabs.opened.push([from, dir]);
+    },
+    closeOwnTab: async () => {
+        if (tabs.closeError) throw new Error(tabs.closeError);
+        return tabs.closeResult;
+    },
+}));
 const blocks = vi.hoisted(() => new Map<string, { meta: Record<string, unknown> }>());
 vi.mock("@/app/store/mos", async (orig) => ({
     ...(await orig<typeof import("@/app/store/mos")>()),
@@ -965,6 +976,57 @@ describe("the Files pane: Alt+K mentions (§8.2, route 3)", () => {
         fireEvent.click(v.row("b.txt"));
         fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
         expect(v.container.querySelector(".files-status")?.textContent).toBe("No agent pane is open to mention these in.");
+    });
+});
+
+describe("the Files pane: pane tabs", () => {
+    beforeEach(() => {
+        tabs.opened = [];
+        tabs.closeResult = true;
+        tabs.closeError = "";
+    });
+
+    it("Ctrl+Enter and middle-click open a folder in a new tab; Ctrl+T opens this one", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("src"));
+        fireEvent.keyDown(v.list(), { key: "Enter", ctrlKey: true });
+        fireEvent(v.row("src"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+        fireEvent.keyDown(v.list(), { key: "t", ctrlKey: true });
+        await waitFor(() =>
+            expect(tabs.opened).toEqual([
+                ["b1", `${HOME}\\src`],
+                ["b1", `${HOME}\\src`],
+                ["b1", HOME],
+            ])
+        );
+        // Middle-click on a file does nothing special.
+        fireEvent(v.row("b.txt"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+        expect(tabs.opened).toHaveLength(3);
+    });
+
+    it("Ctrl+W on the pane's only tab says so instead of closing the pane", async () => {
+        tabs.closeResult = false;
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("This is the pane's only tab. Use the pane's × to close it."));
+    });
+
+    it("says why when a tab can't be closed (ReAgent on #4227)", async () => {
+        tabs.closeError = "layout save failed";
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Couldn't close this tab: layout save failed"));
+    });
+
+    it("offers Open in new tab for folders", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.contextMenu(v.row("src"));
+        fireEvent.pointerDown(await waitFor(() => screen.getByText("Open in new tab")));
+        await waitFor(() => expect(tabs.opened).toEqual([["b1", `${HOME}\\src`]]));
     });
 });
 
