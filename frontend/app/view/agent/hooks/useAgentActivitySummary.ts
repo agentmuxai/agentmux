@@ -57,6 +57,7 @@ import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";
 import { isUsableTitle } from "@/app/store/ambient-title";
+import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 
 export interface UseAgentActivitySummaryOptions {
@@ -93,6 +94,18 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
         if (phase.hidden) return;
         activeTurnId++;
         const myTurnId = activeTurnId;
+        // Remember what the user asked, for the swarm row's fallback line when no
+        // generated title exists (store/swarm-line.ts). Only a message with a goal
+        // in it is kept, so "u there" never overwrites the real one. Written now,
+        // not after the model call, so it is there even if that call fails.
+        const lastPrompt = lastPromptToStore(phase.pendingContent);
+        if (lastPrompt) {
+            fireAndForget(() =>
+                ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
+                    [META_LAST_PROMPT]: lastPrompt,
+                } as any)
+            );
+        }
         const rootWidth = getRootWidth() ?? 400;
         const textWidth = Math.max(0, rootWidth - 280);
         const wordTarget = Math.max(5, Math.min(12, Math.floor(textWidth / 48)));
