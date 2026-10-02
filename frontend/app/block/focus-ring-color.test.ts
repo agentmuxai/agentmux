@@ -7,7 +7,28 @@
 
 import { describe, expect, it } from "vitest";
 import { hueToActiveBorder, hueToBorder } from "./pane-color-menu";
-import { computeBlockActiveBorderColor, computeFocusRingBorderColor } from "./blockframe";
+import {
+    computeBlockActiveBorderColor,
+    computeBlockTabPillNeutralBg,
+    computeFocusRingBorderColor,
+    computeMixedPaneHeaderBg,
+    computeNonAgentHeaderBg,
+} from "./blockframe";
+
+// An uncoloured non-agent pane's header (CPU, terminal…) on a light theme was
+// the dark-theme slate hsl(220, 12%, 16%), a solid bar across a light UI.
+describe("computeNonAgentHeaderBg", () => {
+    it("light theme: the theme surface, the same as that pane's own pill and a mixed pane's tail", () => {
+        expect(computeNonAgentHeaderBg(true)).toBe("var(--block-bg-solid-color)");
+        expect(computeNonAgentHeaderBg(true)).toBe(computeBlockTabPillNeutralBg({ view: "sysinfo" } as Block["meta"], true));
+        expect(computeNonAgentHeaderBg(true)).toBe(computeMixedPaneHeaderBg(true));
+    });
+
+    it("dark theme: the fixed neutral header, unchanged", () => {
+        expect(computeNonAgentHeaderBg(false)).toBe("hsl(220, 12%, 16%)");
+        expect(computeNonAgentHeaderBg(false)).toBe(computeMixedPaneHeaderBg(false));
+    });
+});
 
 describe("computeFocusRingBorderColor", () => {
     it("focused: an explicit hue wins over the agent identity color", () => {
