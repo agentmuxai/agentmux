@@ -350,6 +350,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     const onListContextMenu = (e: MouseEvent): void => {
         e.preventDefault();
+        // Like a row: stop here, or the click bubbles to the pane frame and the
+        // generic pane menu opens on top of this one.
+        e.stopPropagation();
         setMenu({ x: e.clientX, y: e.clientY, items: folderMenu() });
     };
 
@@ -489,7 +492,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                 {(a) => (
                                     <button type="button" class="files-place" title={a.path} onClick={() => void model.navigate(a.path)}>
                                         <i class="fa fa-robot" />
-                                        <span>{a.name}</span>
+                                        <span style={a.color ? { color: a.color } : undefined}>{a.name}</span>
                                     </button>
                                 )}
                             </For>
