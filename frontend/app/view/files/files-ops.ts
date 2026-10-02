@@ -56,6 +56,11 @@ export class FilesOps {
     readonly ops: () => OpView[];
     private readonly setOps: (fn: (o: OpView[]) => OpView[]) => void;
     private readonly labels = new Map<string, string>();
+    /** `fs.op.start` calls awaiting their reply. srv starts the op before it
+     *  answers, so its events, even the last, can arrive first (ReAgent on
+     *  #4221): they wait here until the reply names the op. */
+    private pendingStarts = 0;
+    private readonly early = new Map<string, FsOpEvent>();
     private unsubscribe: (() => void) | null;
     /** Called when an op ends, with what to tell the user. */
     onFinished: ((op: OpView) => void) | null = null;
@@ -73,8 +78,18 @@ export class FilesOps {
 
     private onEvent(data: FsOpEvent | undefined): void {
         if (!data?.op_id) return;
+        if (!this.labels.has(data.op_id) && this.pendingStarts > 0) {
+            // Keep a final state over a later-looking progress tick.
+            const held = this.early.get(data.op_id);
+            if (!held || !isFinal(held.state)) this.early.set(data.op_id, data);
+            return;
+        }
+        this.apply(data);
+    }
+
+    private apply(data: FsOpEvent): void {
         const view: OpView = { ...data, label: this.labels.get(data.op_id) ?? "items" };
-        const finished = data.state === "done" || data.state === "failed" || data.state === "canceled";
+        const finished = isFinal(data.state);
         this.setOps((list) => {
             const rest = list.filter((o) => o.op_id !== data.op_id);
             return finished ? rest : [...rest, view];
@@ -87,29 +102,56 @@ export class FilesOps {
 
     /** Starts a copy or move of `sources` into `destDir`. */
     async start(kind: "copy" | "move", sources: string[], destDir: string): Promise<string> {
-        const res = await RpcApi.FsOpStartCommand(TabRpcClient, { kind, sources, dest_dir: destDir, block_id: this.blockId });
+        this.pendingStarts++;
+        let res: { op_id: string };
+        try {
+            res = await RpcApi.FsOpStartCommand(TabRpcClient, { kind, sources, dest_dir: destDir, block_id: this.blockId });
+        } finally {
+            this.pendingStarts--;
+        }
         const label = sources.length === 1 ? baseName(sources[0]) : `${sources.length} items`;
         this.labels.set(res.op_id, label);
-        // Show it at once, before the first event. An event can also beat the
-        // reply (srv queues the op before answering): then just name it.
+        const held = this.early.get(res.op_id);
+        this.early.delete(res.op_id);
+        if (held) {
+            // It already reported, maybe finished: replay that, named.
+            this.apply(held);
+        } else {
+            this.showStarted(res.op_id, kind, sources.length, label);
+        }
+        this.flushUnclaimed();
+        return res.op_id;
+    }
+
+    /** Events nobody's reply claimed (none should remain once no start is in
+     *  flight) are shown as they are rather than dropped. */
+    private flushUnclaimed(): void {
+        if (this.pendingStarts > 0) return;
+        for (const [id, ev] of this.early) {
+            this.early.delete(id);
+            this.apply(ev);
+        }
+    }
+
+    /** Show a just-started op before its first event. */
+    private showStarted(opId: string, kind: "copy" | "move", count: number, label: string): void {
         this.setOps((list) =>
-            list.some((o) => o.op_id === res.op_id)
-                ? list.map((o) => (o.op_id === res.op_id ? { ...o, label } : o))
+            list.some((o) => o.op_id === opId)
+                ? list.map((o) => (o.op_id === opId ? { ...o, label } : o))
                 : [
                       ...list,
                       {
-                          op_id: res.op_id,
+                          op_id: opId,
                           kind,
                           state: "running",
                           done_items: 0,
-                          total_items: sources.length,
+                          total_items: count,
                           done_bytes: 0,
                           total_bytes: 0,
-                          label: this.labels.get(res.op_id)!,
+                          label,
                       } as OpView,
                   ]
         );
-        return res.op_id;
     }
 
     async resolve(opId: string, choice: "replace" | "skip" | "keep_both", applyToAll: boolean): Promise<void> {
@@ -126,6 +168,8 @@ export class FilesOps {
     }
 }
 
+const isFinal = (state: FsOpEvent["state"]): boolean => state === "done" || state === "failed" || state === "canceled";
+
 /** "Copying report.pdf · 3 of 10 · 45%" for the status line. */
 export function opProgressText(op: OpView): string {
     const verb = op.kind === "move" ? "Moving" : "Copying";
@@ -138,6 +182,9 @@ export function opProgressText(op: OpView): string {
 /** What the status line says when an op ends. */
 export function opFinishedText(op: OpView): { text: string; tone: "info" | "error" } {
     const verb = op.kind === "move" ? "Moved" : "Copied";
+    // srv gives a reason when it stopped the op itself (a conflict nobody
+    // answered for an hour): say that, not just "canceled" (ReAgent on #4221).
+    if (op.state === "canceled" && op.error) return { text: op.error, tone: "error" };
     if (op.state === "canceled") return { text: `${op.kind === "move" ? "Move" : "Copy"} canceled after ${op.done_items} of ${op.total_items}`, tone: "info" };
     if (op.state === "failed") return { text: `Couldn't ${op.kind}: ${op.error ?? "it failed"}`, tone: "error" };
     const failed = op.failures?.length ?? 0;
