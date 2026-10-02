@@ -143,8 +143,10 @@ pub fn lan_hosts(
         {
             continue;
         }
+        // The address is the grouping key only, never a label: the answer
+        // carries no addresses (Codex P2 on #4241).
         let display = if p.hostname.trim().is_empty() {
-            p.address.clone()
+            "unnamed host".to_string()
         } else {
             p.hostname.trim().to_string()
         };
@@ -153,7 +155,8 @@ pub fn lan_hosts(
         } else {
             p.channel.clone()
         };
-        let seen_at_ms = p.last_seen.saturating_mul(1000);
+        // Heard from by mDNS or answered a poll, whichever is later.
+        let seen_at_ms = p.last_seen.max(p.last_polled_ok).saturating_mul(1000);
         let mut agents: Vec<RemoteAgent> = p
             .agents
             .iter()
@@ -189,21 +192,25 @@ pub fn lan_hosts(
             );
         }
     }
-    // A name shared by two machines gets each one's address, so the sections
-    // can be told apart; a unique name stays bare.
+    // A name shared by several machines gets a number per machine, in key
+    // (address) order, so the sections can be told apart without showing an
+    // address; a unique name stays bare.
     let mut name_count: BTreeMap<String, usize> = BTreeMap::new();
     for (display, _) in hosts.values() {
         *name_count.entry(display.to_lowercase()).or_default() += 1;
     }
+    let mut name_seen: BTreeMap<String, usize> = BTreeMap::new();
     hosts
         .into_iter()
         .map(|(key, (display, channels))| {
-            let address = key.rsplit_once('@').map(|(_, a)| a).unwrap_or_default();
             // Stable for the UI's collapse state, without putting the address
-            // in every answer: a short hash of name and address.
+            // in the answer: a short hash of name and address.
             let host_id = format!("lan:{}#{:08x}", display.to_lowercase(), fnv1a32(&key));
-            let display_name = if name_count[&display.to_lowercase()] > 1 && display != address {
-                format!("{display} ({address})")
+            let lower = display.to_lowercase();
+            let display_name = if name_count[&lower] > 1 {
+                let n = name_seen.entry(lower).or_default();
+                *n += 1;
+                format!("{display} ({n})")
             } else {
                 display
             };
@@ -381,6 +388,7 @@ mod tests {
             agents: agents.iter().map(|a| a.to_string()).collect(),
             first_seen: 0,
             last_seen: NOW / 1000 - age_secs,
+            last_polled_ok: 0,
             other_ttl_secs: 4500,
         }
     }
@@ -429,7 +437,10 @@ mod tests {
         let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
         assert_eq!(hosts.len(), 2, "neither hides the other");
         let names: Vec<&str> = hosts.iter().map(|h| h.display_name.as_str()).collect();
-        assert_eq!(names, ["ubuntu (192.168.1.40)", "ubuntu (192.168.1.41)"]);
+        assert_eq!(names, ["ubuntu (1)", "ubuntu (2)"]);
+        // And still no address anywhere in the answer (Codex P2 on #4241).
+        let json = serde_json::to_string(&hosts).unwrap();
+        assert!(!json.contains("192.168.1.4"), "{json}");
         assert_ne!(hosts[0].host_id, hosts[1].host_id);
         let agents: Vec<&str> = hosts
             .iter()
@@ -485,5 +496,25 @@ mod tests {
             !json.contains("lan-secret") && !json.contains("192.168.1.26"),
             "{json}"
         );
+    }
+
+    /// Codex P1 on #4241: an mDNS-only peer is re-resolved tens of minutes apart,
+    /// so a peer that answers the agent-name poll is live, whatever `last_seen` says.
+    #[test]
+    fn a_peer_that_answers_polls_is_not_stale() {
+        let mut p = peer("Area54", "stable", "192.168.1.26", 29700, &["Manoz"], 1800);
+        assert!(lan_hosts(std::slice::from_ref(&p), &HashSet::new(), NOW)[0].channels[0].stale);
+        p.last_polled_ok = NOW / 1000 - 10;
+        assert!(!lan_hosts(&[p], &HashSet::new(), NOW)[0].channels[0].stale);
+    }
+
+    #[test]
+    fn a_host_with_no_name_is_not_labelled_by_its_address() {
+        let hosts = lan_hosts(
+            &[peer("", "stable", "192.168.1.77", 29700, &["A"], 5)],
+            &HashSet::new(),
+            NOW,
+        );
+        assert_eq!(hosts[0].display_name, "unnamed host");
     }
 }

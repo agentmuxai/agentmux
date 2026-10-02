@@ -216,6 +216,13 @@ pub struct LanInstance {
     pub agents: Vec<String>,
     pub first_seen: u64,
     pub last_seen: u64,
+    /// Unix seconds of the last successful agent-name poll of this peer
+    /// (`agent_names_refresh_loop`), 0 for never. `last_seen` moves only when
+    /// mDNS re-resolves the peer, which can be tens of minutes apart, so the
+    /// Swarm judges liveness by the later of the two (Codex P1 on #4241). It
+    /// does not change when discovery drops a peer.
+    #[serde(default)]
+    pub last_polled_ok: u64,
     /// This peer's own advertised PTR/TXT record TTL (seconds), captured from
     /// `ServiceInfo::get_other_ttl()` at the most recent `ServiceResolved`.
     /// Drives `peer_staleness_window_secs` — see its doc comment.
@@ -688,6 +695,7 @@ impl LanDiscovery {
                 for (key, names) in outcomes {
                     if let Some(names) = names {
                         if let Some(entry) = instances.get_mut(&key) {
+                            entry.last_polled_ok = agentmux_common::time::now_secs_u64();
                             if entry.agents != names {
                                 entry.agents = names;
                                 changed = true;
@@ -1048,6 +1056,7 @@ impl LanDiscovery {
                     agents: Vec::new(),
                     first_seen: now,
                     last_seen: now,
+                    last_polled_ok: 0,
                     other_ttl_secs,
                 });
                 entry.last_seen = now;
@@ -2827,6 +2836,7 @@ mod peer_fanout_tests {
             agents: vec![],
             first_seen: 0,
             last_seen: 0,
+            last_polled_ok: 0,
             other_ttl_secs: 4500,
         }
     }

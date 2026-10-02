@@ -168,7 +168,12 @@ pub(super) fn merge_udp_peer(
                 existing.port = peer.port;
                 existing.hostname = peer.hostname.clone();
                 existing.version = peer.version.clone();
-                existing.channel = peer.channel.clone();
+                // An older build, or an oversize field, sends none: keep the
+                // channel already known rather than fall back to the port label
+                // (Codex P2 on #4241), as the mDNS path does.
+                if !peer.channel.is_empty() {
+                    existing.channel = peer.channel.clone();
+                }
                 existing.auth_key = peer.auth_key.clone();
                 instances.insert(format!("{UDP_KEY_PREFIX}{}", peer.instance_id), existing);
             }
@@ -204,6 +209,7 @@ pub(super) fn merge_udp_peer(
             agents: Vec::new(),
             first_seen: now,
             last_seen: now,
+            last_polled_ok: 0,
             other_ttl_secs: UDP_PEER_TTL_SECS,
         },
     );
@@ -432,6 +438,7 @@ mod tests {
             agents: vec!["korp".into()],
             first_seen: 1,
             last_seen: 1,
+            last_polled_ok: 0,
             other_ttl_secs: 4500,
         }
     }
@@ -529,6 +536,18 @@ mod tests {
             assert_eq!(e.hostname, "mdns-name", "mDNS data is authoritative");
             assert_eq!(e.auth_key, "mdns-key");
         }
+    }
+
+    #[test]
+    fn a_reply_without_a_channel_keeps_the_known_one() {
+        // Codex P2 on #4241: an older build (or an oversize field) sends none.
+        let mut t = HashMap::new();
+        merge_udp_peer(&mut t, &peer("abc", "192.168.1.26", 29700), 100);
+        assert_eq!(t["udp:abc"].channel, "stable");
+        let mut no_channel = peer("abc", "192.168.1.26", 29700);
+        no_channel.channel = String::new();
+        merge_udp_peer(&mut t, &no_channel, 200);
+        assert_eq!(t["udp:abc"].channel, "stable");
     }
 
     #[test]
