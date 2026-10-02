@@ -23,10 +23,10 @@ pub mod slug;
 pub mod srv_stderr;
 pub mod time;
 pub mod toolchain_path;
-#[cfg(target_os = "linux")]
-pub mod xauthority;
 pub mod transcript_request;
 pub mod win32;
+#[cfg(target_os = "linux")]
+pub mod xauthority;
 
 pub use cli::{make_cli_cmd, resolve_cli_spawn_target};
 pub use data_paths::{
