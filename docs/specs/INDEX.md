@@ -521,6 +521,7 @@ partial list.
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
+| [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21`](SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) | SPEC: cross-channel agent history resolution |
@@ -864,7 +865,6 @@ partial list.
 | [`SPEC_BROWSER_PANE_Z_ORDER_2026_04_21`](SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md) | Spec: Browser pane Z-order fixes |
 | [`SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24`](SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md) | SPEC: agentmux-builder — macOS + Linux CI Release Workflows |
 | [`SPEC_CEF_LOG_ROBUSTNESS_2026_06_20`](SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md) | SPEC: Harden two CEF-init log errors (cache_path + debug-port bind) |
-| [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25`](SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md) | Spec: Composer Strip Polish + Context Compaction Indicator + Host Type Coloring |
 | [`SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10`](SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md) | SPEC: Composer-strip layout fixes, mic vertical centering, curated model defaults |
 | [`SPEC_COMPOSER_UX_POLISH_2026_04_15`](SPEC_COMPOSER_UX_POLISH_2026_04_15.md) | Spec: Composer UX Polish — controls above input, Claude-style status line |

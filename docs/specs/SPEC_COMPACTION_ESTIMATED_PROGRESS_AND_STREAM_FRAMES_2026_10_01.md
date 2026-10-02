@@ -1,7 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
 **Date:** 2026-10-01
-**Status:** draft — Tier 4 (§5) is built alongside this spec; the stream-frame fix (§3) and status-frame handling (§6) are not built and need the decisions in §8.
+**Status:** active — Tier 4 (§5) shipped in PR #4220; the stream-frame fix (§3) and status-frame handling (§6) are not built and need the decisions in §8.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: *"search online, latest claude CLI system, can agentmux get the progress of the compression?"*, then *"write spec to file on implements. sure, lets try the tier 4"*.
 **Researched against:** `agentmuxai/agentmux` `main` @ `807c749ce`; Claude Code CLI **2.1.287** (the version AgentMux has installed under `~/.agentmux/shared/cli/claude/`).
