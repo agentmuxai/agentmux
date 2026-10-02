@@ -10,10 +10,10 @@
  * across selections so one visit can touch all three axes (deliberate
  * departure from FlyoutMenu's close-on-select — SPEC §9.2).
  *
- * Reuses the same positioning primitives FlyoutMenu itself uses
- * (@floating-ui/dom autoUpdate + computeMenuPosition + Portal +
- * data-pane-overlay) rather than FlyoutMenu directly: FlyoutMenu only renders
- * a flat MenuItem[] list and has no concept of grouped sections with headers.
+ * Renders through AnchoredPopover (positioning, chrome zoom, the airspace
+ * cut) rather than FlyoutMenu: FlyoutMenu only renders a flat MenuItem[] list
+ * and has no concept of grouped sections with headers. Its own keyboard and
+ * focus handling stay here; AnchoredPopover's dismiss is not used.
  *
  * Model options stay registry-driven via getProvider(providerId)?.models
  * (live-overlaid from the providers.models RPC, same as the prior three-pill
@@ -26,10 +26,8 @@
  * docs/specs/SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md.
  */
 
-import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
-import { autoUpdate } from "@floating-ui/dom";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, type ProviderModel } from "../providers";
 import { runningModelNote } from "../resolved-model";
@@ -38,11 +36,6 @@ import { patchRuntime } from "../runtime-apply";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "../launch-args";
 import { effectiveRuntime, effortApplies, effortNotUsedReason, permissionModeText } from "../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
-
-/** Serialize a MenuPositionResult.style the same way flyoutmenu.tsx does. */
-function styleToString(s: JSX.CSSProperties): string {
-    return `position:${s.position};left:${s.left};top:${s.top}`;
-}
 
 const PERMISSION_COLORS: Record<PermissionMode, string> = {
     bypass: "var(--error-color, #ef4444)",
@@ -106,11 +99,9 @@ interface AgentRuntimeDropupProps {
 export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element => {
     const [open, setOpen] = createSignal(false);
     const [selectedOptIndex, setSelectedOptIndex] = createSignal(0);
-    const [floatingStyle, setFloatingStyle] = createSignal("position:fixed;left:0px;top:0px");
 
     let referenceEl: HTMLButtonElement | undefined;
     let floatingEl: HTMLDivElement | undefined;
-    let cleanupAutoUpdate: (() => void) | null = null;
 
     const runtime = (): AgentRuntimeConfig => getRuntimeConfig(props.blockAtom()?.meta);
 
@@ -389,30 +380,6 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
             document.removeEventListener("focusin", handleFocusChange);
         });
     });
-    onCleanup(() => cleanupAutoUpdate?.());
-
-    // Positioning mirrors flyoutmenu.tsx's updatePosition/registerFloating
-    // exactly (same primitive, same avoidNativePanes:false rationale — this
-    // panel also carries data-pane-overlay so it should open in place at its
-    // anchor, not get pushed toward the window edge by a native pane rect).
-    const updatePosition = async () => {
-        if (!referenceEl || !floatingEl) return;
-        const pos = await computeMenuPosition(
-            { anchor: referenceEl, placement: "top-start", avoidNativePanes: false },
-            floatingEl
-        );
-        setFloatingStyle(styleToString(pos.style));
-    };
-
-    const registerFloating = (el: HTMLDivElement) => {
-        floatingEl = el;
-        requestAnimationFrame(() => {
-            if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-            assertMenuInPaintableArea(el, "agent-runtime-dropup");
-        });
-    };
 
     const toggleOpen = () => {
         if (open()) {
@@ -470,92 +437,91 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                 </Show>
             </button>
             <Show when={open()}>
-                <Portal>
-                    <div
-                        ref={registerFloating}
-                        class="menu agent-runtime-dropup-panel"
-                        style={floatingStyle()}
-                        data-pane-overlay
+                <AnchoredPopover
+                    anchor={referenceEl}
+                    placement="top-start"
+                    shellClass="anchored-popover--menu"
+                    class="menu agent-runtime-dropup-panel"
+                    ref={(el) => { floatingEl = el; }}
+                >
+                    {/* Sibling of the listbox below, not a child of it — a
+                        role="listbox" should only contain role="option"
+                        rows (plus an optional label); an interactive
+                        button dropped inside it would be an invalid
+                        listbox structure for assistive tech. Placed first
+                        (matching Modal's showCloseButton convention) so
+                        it's the first Tab stop after the trigger. */}
+                    <button
+                        type="button"
+                        class="agent-runtime-dropup-close-btn"
+                        aria-label="Close"
+                        onClick={() => setOpen(false)}
                     >
-                        {/* Sibling of the listbox below, not a child of it — a
-                            role="listbox" should only contain role="option"
-                            rows (plus an optional label); an interactive
-                            button dropped inside it would be an invalid
-                            listbox structure for assistive tech. Placed first
-                            (matching Modal's showCloseButton convention) so
-                            it's the first Tab stop after the trigger. */}
-                        <button
-                            type="button"
-                            class="agent-runtime-dropup-close-btn"
-                            aria-label="Close"
-                            onClick={() => setOpen(false)}
-                        >
-                            {"✕"}
-                        </button>
-                        <Show when={driftOf().length > 0}>
-                            <div class="agent-runtime-dropup-drift" role="status" data-kind={shownAgreement().kind}>
-                                <div class="agent-runtime-dropup-drift-text">
-                                    {shownAgreement().kind === "pending"
-                                        ? "Applies after the current turn."
-                                        : "The agent is not running what is selected."}
-                                    <For each={driftOf()}>{(d) => <div>{describeDrift(d)}</div>}</For>
-                                </div>
-                                <Show when={shownAgreement().kind === "differs"}>
-                                    <button type="button" class="agent-runtime-dropup-drift-btn" onClick={restartToApply}>
-                                        Restart to apply
-                                    </button>
-                                </Show>
+                        {"✕"}
+                    </button>
+                    <Show when={driftOf().length > 0}>
+                        <div class="agent-runtime-dropup-drift" role="status" data-kind={shownAgreement().kind}>
+                            <div class="agent-runtime-dropup-drift-text">
+                                {shownAgreement().kind === "pending"
+                                    ? "Applies after the current turn."
+                                    : "The agent is not running what is selected."}
+                                <For each={driftOf()}>{(d) => <div>{describeDrift(d)}</div>}</For>
                             </div>
-                        </Show>
-                        <div role="listbox" aria-label="Runtime settings">
-                            <For each={build().rows}>
-                                {(row) => {
-                                    if (row.kind === "header") {
-                                        return <div class="agent-runtime-dropup-section">{row.section}</div>;
-                                    }
-                                    if (row.kind === "note") {
-                                        return <div class="agent-runtime-dropup-note">{row.text}</div>;
-                                    }
-                                    const optIndex = () =>
-                                        build().options.findIndex(
-                                            (o) => o.section === row.section && o.value === row.value
-                                        );
-                                    return (
-                                        <div
-                                            class="menu-item agent-runtime-dropup-row"
-                                            classList={{ active: optIndex() === selectedOptIndex() }}
-                                            role="option"
-                                            aria-selected={row.current}
-                                            onMouseEnter={() => setSelectedOptIndex(optIndex())}
-                                            // These rows are plain non-focusable divs — without this, a
-                                            // mousedown here blurs the trigger and shifts
-                                            // document.activeElement to <body> (outside the panel), which
-                                            // handleFocusChange reads as "focus left" and closes on. That
-                                            // made every selection close the panel despite §9.2's
-                                            // stays-open decision already being implemented correctly —
-                                            // this was a second, independent close path.
-                                            onMouseDown={(e) => e.preventDefault()}
-                                            onClick={() => {
-                                                const idx = optIndex();
-                                                setSelectedOptIndex(idx);
-                                                void applySelection(idx);
-                                            }}
-                                        >
-                                            <i
-                                                class={`fa-solid fa-fw menu-item-icon menu-item-check${row.current ? " fa-check" : ""}`}
-                                                style={row.color ? { color: row.color } : undefined}
-                                            />
-                                            <span class="label">{row.label}</span>
-                                            <Show when={row.description}>
-                                                <span class="agent-runtime-dropup-description">{row.description}</span>
-                                            </Show>
-                                        </div>
-                                    );
-                                }}
-                            </For>
+                            <Show when={shownAgreement().kind === "differs"}>
+                                <button type="button" class="agent-runtime-dropup-drift-btn" onClick={restartToApply}>
+                                    Restart to apply
+                                </button>
+                            </Show>
                         </div>
+                    </Show>
+                    <div role="listbox" aria-label="Runtime settings">
+                        <For each={build().rows}>
+                            {(row) => {
+                                if (row.kind === "header") {
+                                    return <div class="agent-runtime-dropup-section">{row.section}</div>;
+                                }
+                                if (row.kind === "note") {
+                                    return <div class="agent-runtime-dropup-note">{row.text}</div>;
+                                }
+                                const optIndex = () =>
+                                    build().options.findIndex(
+                                        (o) => o.section === row.section && o.value === row.value
+                                    );
+                                return (
+                                    <div
+                                        class="menu-item agent-runtime-dropup-row"
+                                        classList={{ active: optIndex() === selectedOptIndex() }}
+                                        role="option"
+                                        aria-selected={row.current}
+                                        onMouseEnter={() => setSelectedOptIndex(optIndex())}
+                                        // These rows are plain non-focusable divs — without this, a
+                                        // mousedown here blurs the trigger and shifts
+                                        // document.activeElement to <body> (outside the panel), which
+                                        // handleFocusChange reads as "focus left" and closes on. That
+                                        // made every selection close the panel despite §9.2's
+                                        // stays-open decision already being implemented correctly —
+                                        // this was a second, independent close path.
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => {
+                                            const idx = optIndex();
+                                            setSelectedOptIndex(idx);
+                                            void applySelection(idx);
+                                        }}
+                                    >
+                                        <i
+                                            class={`fa-solid fa-fw menu-item-icon menu-item-check${row.current ? " fa-check" : ""}`}
+                                            style={row.color ? { color: row.color } : undefined}
+                                        />
+                                        <span class="label">{row.label}</span>
+                                        <Show when={row.description}>
+                                            <span class="agent-runtime-dropup-description">{row.description}</span>
+                                        </Show>
+                                    </div>
+                                );
+                            }}
+                        </For>
                     </div>
-                </Portal>
+                </AnchoredPopover>
             </Show>
         </>
     );

@@ -4,6 +4,8 @@
 // Status-bar CPU readout button + per-core panel.
 // Spec: SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15.md.
 
+@use "../element/popover-frame" as popoverFrame;
+
 // Clickable CPU readout in the status bar (the <button> wrapping "CPU n%").
 .stat-cpu-button {
     background: transparent;
@@ -32,17 +34,9 @@
     // Cool/muted idle end of the per-core heat ramp (loadColor in cpu-color.ts).
     --cpu-idle-color: color-mix(in srgb, var(--accent-color) 22%, var(--secondary-text-color));
 
-    background: var(--modal-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    color: var(--main-text-color);
+    // The body of an AnchoredPopover (shell: position, z-index; body: zoom).
+    @include popoverFrame.popover-frame;
     font-size: 12px;
-    // Deliberately NOT `zoom: var(--zoomfactor)` — see
-    // docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md
-    // (same double-application bug as TokenBreakdownPopover's sibling rule
-    // in _token-usage.scss).
-    z-index: var(--zindex-modal-wrapper);
     display: flex;
     flex-direction: column;
     padding: var(--space-2) 0;

@@ -15,11 +15,8 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Accessor, createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
 import { firewallMessage, resolveLanIndicator } from "./lan-indicator";
-import { autoUpdate } from "@floating-ui/dom";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { useMuxBusStatus, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
 import { isLinux, isMacOS } from "@/util/platformutil";
@@ -41,7 +38,8 @@ type HostInfo = {
 };
 
 interface HostPopoverPanelProps {
-    anchorRect: DOMRect | null;
+    /** The status bar trigger. */
+    anchor: PopoverAnchor;
     onClose: () => void;
     hostname: string;
     hostInfo: Accessor<HostInfo | null>;
@@ -53,26 +51,15 @@ interface HostPopoverPanelProps {
     lanFirewall: Accessor<LanFirewall | null>;
     onLanToggle: (enabled: boolean) => void;
     muxbus: MuxBusController;
-    ref?: (el: HTMLDivElement) => void;
 }
 
 /**
  * The actual popover content, split out from `HostPopover` so it mounts
- * (and unmounts) only while open — `usePaneOverlay` and the floating-ui
- * position registration both need to run against the popover's OWN mount
- * lifecycle, not the always-mounted trigger's. Portaled to `document.body`
- * and airspace-clipped so it paints over any browser-pane HWND the status
- * bar overlaps, mirroring `TokenUsageIndicator` → `TokenBreakdownPopover`
- * (the canonical status-bar popover pattern).
- * Spec: SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md
+ * (and unmounts) only while open: AnchoredPopover's positioning, dismiss
+ * and airspace cut run for the panel's own lifetime, not the always-mounted
+ * trigger's. Spec: SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md
  */
 const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
-    let rootRef: HTMLDivElement | undefined;
-
-    // Airspace cut so the popover paints over any browser-pane HWND the
-    // status bar overlaps — same primitive as TokenBreakdownPopover.
-    usePaneOverlay(() => rootRef);
-
     // QR fallback for mobile pairing (Phase C). Off by default — only rendered
     // when the user explicitly clicks "Show QR code" while LAN discovery is on.
     // Local to the panel: closing/reopening the popover remounts this
@@ -155,58 +142,19 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     const muxbusOk = () => isMuxBusSessionOk(muxbus.status());
     const signInAgain = () => muxbusNeedsSignInAgain(muxbus.status());
 
-    // Positioning routes through the shared primitive (mirrors
-    // TokenBreakdownPopover): anchored to the hostname chip's rect,
-    // placement top-end so the popover opens upward and right-aligns to
-    // the chip — it lives in status-bar-right, near the window's right
-    // edge, matching the pre-migration `.status-bar-popover.host-popover
-    // { left: auto; right: 0; }` CSS override this replaces.
+    // Opens upward, right-aligned to the hostname chip. Positioning, chrome zoom, dismiss
+    // and the airspace cut are AnchoredPopover's.
     const POPOVER_WIDTH = 320;
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        rootRef = el;
-        props.ref?.(el);
-        requestAnimationFrame(() => {
-            const r = props.anchorRect;
-            if (!r || !(el instanceof Element)) return;
-            const update = async () => {
-                const cur = props.anchorRect;
-                if (!cur) return;
-                const pos = await computeMenuPosition(
-                    { anchor: cur, placement: "top-end", avoidNativePanes: false },
-                    el,
-                );
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            // anchorRect is a static DOMRect → virtual reference element.
-            cleanupAutoUpdate = autoUpdate(
-                { getBoundingClientRect: () => props.anchorRect ?? r },
-                el,
-                update,
-            );
-            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
-            // (airspace transparency cut-out), so intentional native-pane overlap
-            // would produce a false-positive [menu-guard] warning.
-        });
-    };
-
-    onCleanup(() => cleanupAutoUpdate?.());
 
     return (
-        <div
-            ref={registerFloating}
+        <AnchoredPopover
+            anchor={props.anchor}
+            placement="top-end"
+            onDismiss={props.onClose}
             class="status-bar-popover host-popover"
             role="dialog"
             aria-label="Host info"
-            data-pane-overlay
-            style={{ ...floatingStyle(), width: `${POPOVER_WIDTH}px` }}
+            style={{ width: `${POPOVER_WIDTH}px` }}
         >
             {/* Host Identity */}
             <div class="status-bar-popover-row">
@@ -482,7 +430,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     <span class="status-bar-popover-mono">{props.hostInfo()!.ports.devtools}</span>
                 </div>
             </Show>
-        </div>
+        </AnchoredPopover>
     );
 };
 
@@ -492,9 +440,7 @@ const HostPopover = (): JSX.Element => {
     const hostname = getApi().getHostName();
     const [popoverOpen, setPopoverOpen] = createSignal(false);
     const [hostInfo, setHostInfo] = createSignal<HostInfo | null>(null);
-    const [anchorRect, setAnchorRect] = createSignal<DOMRect | null>(null);
     let triggerRef: HTMLDivElement | undefined;
-    let popoverRef: HTMLDivElement | undefined;
     const muxbus = useMuxBusStatus();
 
     // Keep the trigger's muxbus dot current without requiring the popover
@@ -560,25 +506,9 @@ const HostPopover = (): JSX.Element => {
             setHostInfo(null);
         }
         void muxbus.refresh();
-        if (triggerRef) setAnchorRect(triggerRef.getBoundingClientRect());
         setPopoverOpen(true);
     };
 
-    // Close on outside click — ignores clicks on the trigger or inside the
-    // portaled popover. Dual-ref pattern (mirrors TokenUsageIndicator):
-    // now that the popover is portaled to document.body instead of nested
-    // under the trigger, a single containment check against the trigger
-    // alone would treat every click inside the popover as "outside."
-    createEffect(() => {
-        if (!popoverOpen()) return;
-        const handleOutsideClick = (e: MouseEvent) => {
-            const t = e.target as Node;
-            if (triggerRef?.contains(t) || popoverRef?.contains(t)) return;
-            setPopoverOpen(false);
-        };
-        document.addEventListener("mousedown", handleOutsideClick);
-        onCleanup(() => document.removeEventListener("mousedown", handleOutsideClick));
-    });
 
     return (
         <Show when={hostname && hostname !== "unknown"}>
@@ -618,9 +548,8 @@ const HostPopover = (): JSX.Element => {
                 </Show>
             </div>
             <Show when={popoverOpen()}>
-                <Portal>
                     <HostPopoverPanel
-                        anchorRect={anchorRect()}
+                        anchor={triggerRef}
                         onClose={() => setPopoverOpen(false)}
                         hostname={hostname}
                         hostInfo={hostInfo}
@@ -632,9 +561,7 @@ const HostPopover = (): JSX.Element => {
                         lanFirewall={lanFirewallAtom}
                         onLanToggle={(enabled) => void handleLanToggle(enabled)}
                         muxbus={muxbus}
-                        ref={(el) => { popoverRef = el; }}
                     />
-                </Portal>
             </Show>
         </Show>
     );

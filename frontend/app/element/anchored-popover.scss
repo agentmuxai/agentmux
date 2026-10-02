@@ -1,0 +1,27 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AnchoredPopover (anchored-popover.tsx). The shell is positioned in real
+// pixels and never zoomed; the body inside it carries the zoom and every
+// visual style. See docs/reports/REPORT_CHROME_ZOOM_POPOVERS_2026_10_02.md.
+
+.anchored-popover {
+    // left/top come inline from computeMenuPosition.
+    position: fixed;
+    z-index: var(--zindex-modal-wrapper);
+}
+
+// A menu-styled panel (`.menu` body) keeps the flyout-menu tier it had.
+.anchored-popover--menu {
+    z-index: var(--z-flyout-menu);
+}
+
+// Beats `.menu { position: absolute }` (flyoutmenu.scss), which would take the
+// body out of flow and collapse the shell to nothing.
+.anchored-popover > .anchored-popover-body {
+    position: relative;
+}
+
+.anchored-popover-body--chrome-zoom {
+    zoom: var(--zoomfactor, 1);
+}
