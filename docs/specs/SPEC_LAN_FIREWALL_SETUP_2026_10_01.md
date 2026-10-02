@@ -252,7 +252,7 @@ One spec, separate PRs, in this order. Windows is the failing path and should no
 | **B1: Windows, read-only detection** | The firewall reader, the pure coverage decision, the watcher that publishes `laninstances:firewall`, and the status-bar states `blocked`, `needs-setup`, `public-network`, `managed` (4.3). Changes no rule and gates nothing. Done in the PR that adds this line; checked against narko's real rules (8.2). | narko |
 | **B2: Windows, setup and gating** | The elevated helper, the two port rules, Public-network consent, per-interface coverage gating of the LAN listeners and a decision on mDNS interface selection (4.2 caveat, settled by the measurement in section 6), installer step and uninstall cleanup. Needs the clean Windows machine. | a fresh Windows machine |
 | **C: macOS** | Verify first; change code only if the Local Network prompt does not appear with our current discovery. | starpower |
-| **E: discovery fallback** | A desktop-to-desktop announce that does not depend on mDNS (4.7 item 5); moves the UDP port into the fixed block. | a host where another program holds UDP 5353 |
+| **E: discovery fallback** | A desktop-to-desktop announce that does not depend on mDNS (4.7 item 5); moves the UDP port into the fixed block. **Implemented in PR #4230** (`docs/specs/SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md`): UDP 29700 for desktops, 47891 unchanged for mobile. | a host where another program holds UDP 5353 (not yet run) |
 | **D: Linux** | Detect an active `ufw` or `firewalld` and show the exact command. | charlie, once it is a bridged LAN member |
 
 Separate from this spec: WAN delivery has no catch-up pull (a message that arrives before an agent subscribes waits for the next unrelated wake). Tracked on its own.
