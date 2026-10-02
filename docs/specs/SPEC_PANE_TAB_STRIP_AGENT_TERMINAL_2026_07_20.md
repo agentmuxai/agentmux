@@ -10,13 +10,13 @@ layout store, agent runtime, shell controller
 mechanism this spec builds on, and whose §7 fork-bar UI this spec supersedes),
 `docs/specs/SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md` (the definition-fork backend
 mechanism, reused unchanged),
-`docs/specs/SPEC_EDITOR_TABS_2026-05-26.md` (the editor's existing multi-tab system — the
-visual/interaction reference this spec generalizes),
+the editor's existing multi-tab system (it never had a spec of its own; it is now specified
+in `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.1) — the visual/interaction reference this spec generalizes,
 `frontend/app/view/editor/editor-tab-strip.tsx` / `editor-view.scss` (the concrete component
 and styles being lifted out and reused)
 
 > [!IMPORTANT]
-> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** Naming: this spec called the agent/terminal strip "in-pane tabs"; those became **Pane Tabs** (`blockStack`). "Tabs inside a pane" now means **Document Tabs**, which the editor's file tabs are and which get one shared layer (its §1, §5). Note: `docs/specs/SPEC_EDITOR_TABS_2026-05-26.md`, cited below, does not exist in this repository; the editor's tabs are now specified in `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.1.
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** Naming: this spec called the agent/terminal strip "in-pane tabs"; those became **Pane Tabs** (`blockStack`). "Tabs inside a pane" now means **Document Tabs**, which the editor's file tabs are and which get one shared layer (its §1, §5). The editor's file tabs, which this spec took as its reference, are now specified there (its §6.1); the citation below to an editor-tabs spec that never existed was repointed.
 
 > **Naming note, stated precisely up front.** This feature is **in-pane tabs** — multiple
 > tabs *within* one agent or terminal pane, exactly like the editor's existing tab strip. It is
