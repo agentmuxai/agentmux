@@ -18,6 +18,8 @@ import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu
 import { formatBytes } from "@/app/element/local-media";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import type { FsEntry } from "@/types/rpc/FsEntry";
+import type { FsGitState } from "@/types/rpc/FsGitState";
+import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { errorText, type FilesModel, windowsNames } from "./files-model";
@@ -747,6 +749,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                                 selected={model.selection().names.has(name)}
                                                 focused={model.selection().focus === name}
                                                 renaming={model.renaming() === name}
+                                                git={model.gitStateOf().get(name)}
                                                 onClick={(e) => onRowClick(e, entry())}
                                                 onOpen={() => openEntry(entry())}
                                                 onContextMenu={(e) => onRowContextMenu(e, entry())}
@@ -795,7 +798,21 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 {(op) => <ConflictDialog op={op()} onResolve={(choice, all) => void model.ops.resolve(op().op_id, choice, all)} onCancel={() => void model.ops.cancel(op().op_id)} />}
             </Show>
             <div class="files-status" role="status">
-                <Show when={model.status()} fallback={<span>{summary()}</span>}>
+                <Show
+                    when={model.status()}
+                    fallback={
+                        <span>
+                            {summary()}
+                            <Show when={model.git()}>
+                                {(g) => (
+                                    <span class="files-git-summary" title="git branch, commits ahead/behind its upstream, and changes under this folder">
+                                        <i class="fa fa-code-branch" aria-hidden="true" /> {gitSummary(g())}
+                                    </span>
+                                )}
+                            </Show>
+                        </span>
+                    }
+                >
                     {(msg) => (
                         <span classList={{ "files-status-error": msg().tone === "error" }}>
                             {msg().text}
@@ -834,6 +851,28 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     );
 }
 
+/** The letter beside a name and what it means (spec §12, git decorations).
+ *  A folder shows the most pressing state of what's inside it. */
+export const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title: string }> = {
+    untracked: { letter: "U", title: "Untracked: new, not yet added to git" },
+    added: { letter: "A", title: "Added to git, not yet committed" },
+    renamed: { letter: "R", title: "Renamed" },
+    deleted: { letter: "D", title: "Deleted" },
+    modified: { letter: "M", title: "Changed since the last commit" },
+    conflicted: { letter: "!", title: "Merge conflict" },
+};
+
+/** "main ↑1 ↓2 · 3 changes" for the status line. */
+export function gitSummary(g: FsGitStatus): string {
+    const parts: string[] = [];
+    let head = g.branch ?? "detached";
+    if (g.ahead) head += ` ↑${g.ahead}`;
+    if (g.behind) head += ` ↓${g.behind}`;
+    parts.push(head);
+    if (g.changes > 0) parts.push(`${g.changes} change${g.changes === 1 ? "" : "s"}`);
+    return parts.join(" · ");
+}
+
 /** What went wrong listing a folder, in words, never as an empty folder
  *  (§9.1.4 item 4). */
 export function errorMessage(kind: string | undefined, message: string | undefined, place: string): string {
@@ -864,6 +903,7 @@ function FileRow(props: {
     onRenameDone: () => void;
     onDragStart: (e: DragEvent) => void;
     onDragEnd: () => void;
+    git?: FsGitState;
 }): JSX.Element {
     return (
         <div
@@ -873,6 +913,7 @@ function FileRow(props: {
                 "files-row-selected": props.selected,
                 "files-row-focused": props.focused,
                 "files-row-hidden": props.entry.hidden,
+                "files-row-ignored": props.git === "ignored",
             }}
             role="row"
             aria-rowindex={props.index + 2}
@@ -896,6 +937,13 @@ function FileRow(props: {
                 </Show>
                 <Show when={props.entry.error}>
                     <i class="fa fa-triangle-exclamation files-entry-error" aria-label={props.entry.error} />
+                </Show>
+                <Show when={props.git && props.git !== "ignored" && GIT_MARKS[props.git]}>
+                    {(mark) => (
+                        <span class={`files-git files-git-${props.git}`} title={mark().title} aria-label={mark().title}>
+                            {mark().letter}
+                        </span>
+                    )}
                 </Show>
             </div>
             <div class="files-cell files-col-modified" role="gridcell">

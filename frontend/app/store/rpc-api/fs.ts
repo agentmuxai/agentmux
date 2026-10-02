@@ -19,6 +19,9 @@ export type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
 export type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
 export type { FsEntry } from "@/types/rpc/FsEntry";
 export type { FsError } from "@/types/rpc/FsError";
+export type { FsGitEntry } from "@/types/rpc/FsGitEntry";
+export type { FsGitState } from "@/types/rpc/FsGitState";
+export type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 export type { FsErrorKind } from "@/types/rpc/FsErrorKind";
 export type { FsListReq } from "@/types/rpc/FsListReq";
 export type { FsListResult } from "@/types/rpc/FsListResult";
@@ -50,6 +53,7 @@ import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
 import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
 import type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
+import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import type { FsListReq } from "@/types/rpc/FsListReq";
 import type { FsListResult } from "@/types/rpc/FsListResult";
 import type { FsOpCancelReq } from "@/types/rpc/FsOpCancelReq";
@@ -140,5 +144,10 @@ export const FsApi = {
     // final `canceled` event follows. Unknown or finished ops are ignored.
     FsOpCancelCommand(client: RpcClient, data: FsOpCancelReq, opts?: RpcOpts): Promise<FsEmptyResult> {
         return client.rpcCall("fs.op.cancel", data, opts);
+    },
+    // What git says about a listed folder's entries, and the branch. Never
+    // fails: outside a repository `in_repo` is false.
+    FsGitStatusCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsGitStatus> {
+        return client.rpcCall("fs.git_status", data, opts);
     },
 };

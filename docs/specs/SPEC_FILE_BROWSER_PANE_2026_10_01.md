@@ -1,6 +1,6 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), and Phase 2a (§12.2); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) and git markers (§12.3); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
@@ -344,7 +344,11 @@ Each phase is independently shippable and reviewable.
 - **Attach to agent (§8.2, route 2):** one menu item per agent pane on screen, which hands the paths to that pane's own drop hook (`dropPathsOnto`), so it ends exactly where a drag would.
 - **Preview panel (§6.6):** Space toggles it (Ctrl+Space toggles the focused row's selection instead). Code is highlighted, Markdown rendered, images shown; text reads only the first 256 KB, through a ranged request; binary files and video/audio get a card. A preview starts 150 ms after the selection settles and is abandoned when it moves.
 - **Filter:** Ctrl+F or `/`, case-insensitive, per folder.
-- Not built: the tree view, git decorations, route 3 (Alt+K `@path` mention), dropping onto a folder row rather than the pane.
+- Not built: the tree view, route 3 (Alt+K `@path` mention), dropping onto a folder row rather than the pane.
+
+### 12.3 Git markers
+
+`fs.git_status` runs `git status --porcelain=v2 -z --branch --untracked-files=normal --ignored=matching -- .` in the folder shown, 300 ms after a listing settles, and folds the result into one state per entry: a letter beside the name (M, A, D, R, U, ! for a conflict; a folder shows the most pressing state inside it), ignored entries dimmed, and the branch with ahead/behind and the number of changes under the folder in the status line. Browsing a repository must not run code it chose. A repository's own config can name programs that `git status` executes: `core.fsmonitor`, and a `filter.<name>.clean` / `.process` applied through its `.gitattributes` whenever a file's stat data differs from the index (ReAgent found the second on #4223). Every run passes `-c core.fsmonitor=false`, blanks each filter the repository's own config defines (`git config --show-scope` tells them from the user's system and global ones, such as Git LFS, which are kept; an older git without `--show-scope` gets every filter blanked; a repository with a filter whose name contains `=`, which `-c` can't express, gets no git run at all), does not enter submodules (`--ignore-submodules=all`, as each has its own config), passes `--no-optional-locks`, inherits none of the instance's `AGENTMUX_*` environment, never prompts, and is killed after 4 s. Tests with real repositories prove both overrides matter: without them, git runs the repository's program.
 
 ## 13. Names
 
