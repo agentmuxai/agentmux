@@ -296,6 +296,8 @@ mod spawn_site_coverage {
          "sanitized: shell wrapper for npm install, sanitize_external_std_command"),
         ("src/backend/cli_install.rs", "\"npm\"", 1,
          "sanitized: npm runs arbitrary postinstall scripts, sanitize_external_std_command"),
+        ("src/backend/cli_prune.rs", "\"ps\"", 1,
+         "sanitized: lists running command lines to see which installed CLI is in use, sanitize_external_std_command"),
         ("src/server/cli_handlers.rs", "\"where\"", 2,
          "probe: Windows availability check for npm before install; runs nothing else"),
         ("src/server/cli_handlers.rs", "\"which\"", 2,

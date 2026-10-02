@@ -50,7 +50,7 @@ pub fn is_safe_version_component(v: &str) -> bool {
 }
 
 /// Same rule for the provider id, which is also a path component.
-fn is_safe_provider_component(p: &str) -> bool {
+pub(crate) fn is_safe_provider_component(p: &str) -> bool {
     !p.is_empty()
         && p.len() <= 64
         && p.chars()
@@ -158,6 +158,7 @@ pub fn find_installed(
 ) -> Option<PathBuf> {
     let shared = shared_cli_dir(paths, provider_id, pinned_version)
         .filter(|d| is_complete(d))
+        .inspect(|d| crate::backend::cli_prune::record_use(d, std::time::SystemTime::now()))
         .map(|d| npm_bin(&d, cli_command))
         .filter(|b| b.is_file());
     shared.or_else(|| {
