@@ -21,6 +21,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsError } from "@/types/rpc/FsError";
 import type { FsOpResult } from "@/types/rpc/FsOpResult";
+import type { FsGitState } from "@/types/rpc/FsGitState";
+import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
 import { batch, createMemo, createSignal } from "solid-js";
@@ -41,6 +43,9 @@ export const META_PREVIEW = "files:preview";
 const PAGE = 1000;
 /** No first page by now: say we're waiting (on macOS, likely for a prompt). */
 export const SLOW_LISTING_MS = 400;
+/** Ask git this long after a listing settles (a burst of changes re-lists
+ *  many times; each `git status` is a process). */
+export const GIT_DELAY_MS = 300;
 
 export type Phase =
     /** Listing the folder; nothing to show yet. */
@@ -149,6 +154,13 @@ export class FilesModel {
     readonly places: () => FsPlace[];
     private readonly setPlaces: (p: FsPlace[]) => void;
     readonly agents: () => AgentPlace[];
+    /** What git says about the folder shown: markers per entry, the branch. */
+    readonly git: () => FsGitStatus | null;
+    private readonly setGit: (g: FsGitStatus | null) => void;
+    /** Each entry's git state, by name. */
+    readonly gitStateOf: () => ReadonlyMap<string, FsGitState>;
+    private gitGeneration = 0;
+    private gitTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly setAgents: (a: AgentPlace[]) => void;
     readonly canBack: () => boolean;
     readonly canForward: () => boolean;
@@ -201,6 +213,8 @@ export class FilesModel {
         [this.revealRequest, this.setRevealRequest] = createSignal<{ name: string } | null>(null, { equals: false });
         [this.places, this.setPlaces] = createSignal<FsPlace[]>([]);
         [this.agents, this.setAgents] = createSignal<AgentPlace[]>([]);
+        [this.git, this.setGit] = createSignal<FsGitStatus | null>(null);
+        this.gitStateOf = createMemo(() => new Map((this.git()?.entries ?? []).map((e) => [e.name, e.state])));
         const [historyVersion, setHistoryVersion] = createSignal(0);
         this.setHistoryVersion = setHistoryVersion;
         this.canBack = () => (historyVersion(), this.back.length > 0);
@@ -363,6 +377,7 @@ export class FilesModel {
             this.setSelection(EMPTY_SELECTION);
             this.setRenaming(null);
             this.setFilterSignal("");
+            this.setGit(null);
         });
         void this.ctx.setMeta({ [META_PATH]: target });
         if (opts.consented) {
@@ -502,6 +517,7 @@ export class FilesModel {
             });
             this.applyRequestedSelection();
             void this.watch(this.path());
+            this.refreshGit();
         } catch (err) {
             if (gen !== this.generation || this.disposed) return;
             batch(() => {
@@ -745,7 +761,32 @@ export class FilesModel {
         return fromHangar && sameVolume(sources, this.path()) ? "move" : "copy";
     }
 
+    // ── Git markers ──────────────────────────────────────────────────────────
+
+    /** Ask git about the folder shown, once things settle: a burst of
+     *  changes on disk (a build, a checkout) re-lists many times, and each
+     *  `git status` is a process. The answer for a folder the pane has left
+     *  is dropped. */
+    private refreshGit(): void {
+        if (this.gitTimer) clearTimeout(this.gitTimer);
+        const dir = this.path();
+        const gen = ++this.gitGeneration;
+        this.gitTimer = setTimeout(() => {
+            this.gitTimer = null;
+            RpcApi.FsGitStatusCommand(TabRpcClient, { path: dir }).then(
+                (g) => {
+                    if (gen !== this.gitGeneration || this.disposed || !samePath(dir, this.path())) return;
+                    this.setGit(g.in_repo && !g.error ? g : null);
+                },
+                () => {
+                    if (gen === this.gitGeneration) this.setGit(null);
+                }
+            );
+        }, GIT_DELAY_MS);
+    }
+
     dispose(): void {
+        if (this.gitTimer) clearTimeout(this.gitTimer);
         this.ops.dispose();
         this.disposed = true;
         this.generation++;

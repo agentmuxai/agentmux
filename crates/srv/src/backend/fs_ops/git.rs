@@ -1,0 +1,352 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! `fs.git_status`: what git says about the entries of a listed folder, for
+//! the Files pane's markers (modified, untracked, ignored...) and its status
+//! line (branch, ahead/behind).
+//!
+//! Running git inside a folder the user merely browsed must not run code the
+//! folder chose. A repository's own `.git/config` can name a command for
+//! `core.fsmonitor`, which `git status` would execute; command-line `-c`
+//! settings win over every config file, so it is turned off here. The
+//! status never writes the index (`--no-optional-locks`), prompts for
+//! nothing, and is killed after a few seconds on a huge repository.
+//!
+//! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §12 (Phase 2, git
+//! decorations).
+
+use std::collections::HashMap;
+use std::time::Duration;
+
+use agentmux_common::win32::NoWindow;
+
+use crate::backend::rpc_types::{FsGitEntry, FsGitState, FsGitStatus};
+
+use super::platform::display_path;
+
+/// A status that takes longer than this is abandoned: the pane shows no
+/// markers rather than waiting.
+const GIT_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Settings forced on every git run here, ahead of any config file.
+const SAFE_CONFIG: &[&str] = &[
+    // A repository's config could name a program to run (see module docs).
+    "-c",
+    "core.fsmonitor=false",
+    // Don't write the untracked cache into the repository.
+    "-c",
+    "core.untrackedCache=false",
+];
+
+/// `fs.git_status` for `raw` (a folder the pane listed).
+pub async fn git_status(raw: &str) -> FsGitStatus {
+    let dir = match super::resolve_request_path(raw).and_then(|p| p.canonicalize().map_err(|e| e.to_string())) {
+        Ok(d) if d.is_dir() => d,
+        _ => return FsGitStatus::default(),
+    };
+    let dir_arg = display_path(&dir);
+
+    // Where the folder sits in its repository ("" at the top). Failing here
+    // is the ordinary "not a repository", or no git at all: no markers.
+    let prefix = match run_git(&dir_arg, &["rev-parse", "--show-prefix"]).await {
+        Ok(out) => String::from_utf8_lossy(&out).trim_end_matches(['\r', '\n']).to_string(),
+        Err(_) => return FsGitStatus::default(),
+    };
+    let out = match run_git(
+        &dir_arg,
+        &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignored=matching", "--", "."],
+    )
+    .await
+    {
+        Ok(out) => out,
+        Err(message) => return FsGitStatus { in_repo: true, error: Some(message), ..Default::default() },
+    };
+    summarize(&parse_porcelain_v2(&out), &prefix)
+}
+
+/// Run git in `dir` with the safe settings; its stdout, or a sentence.
+async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.arg("-C").arg(dir).args(SAFE_CONFIG).arg("--no-optional-locks").args(args);
+    cmd.env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .no_window();
+    // git needs nothing of this instance's identity.
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
+    let child = cmd.spawn().map_err(|e| format!("Couldn't run git: {e}"))?;
+    match tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output()).await {
+        Err(_) => Err("git took too long to answer.".to_string()),
+        Ok(Err(e)) => Err(format!("git failed: {e}")),
+        Ok(Ok(out)) if out.status.success() => Ok(out.stdout),
+        Ok(Ok(out)) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+    }
+}
+
+/// One path git reported, relative to the repository's top.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRecord {
+    pub path: String,
+    pub state: FsGitState,
+}
+
+/// What `git status --porcelain=v2 -z --branch` printed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Porcelain {
+    pub branch: Option<String>,
+    pub ahead: Option<u64>,
+    pub behind: Option<u64>,
+    pub records: Vec<GitRecord>,
+}
+
+/// The state an ordinary (`1`) or rename/copy (`2`) record's XY code means:
+/// the most pressing of the staged (X) and unstaged (Y) changes.
+fn state_of_xy(xy: &str) -> FsGitState {
+    let mut state = FsGitState::Added;
+    let mut seen = false;
+    for c in xy.chars() {
+        let s = match c {
+            'M' | 'T' => FsGitState::Modified,
+            'D' => FsGitState::Deleted,
+            'R' | 'C' => FsGitState::Renamed,
+            'A' => FsGitState::Added,
+            _ => continue,
+        };
+        state = if seen { state.max(s) } else { s };
+        seen = true;
+    }
+    state
+}
+
+/// Parse porcelain v2 output (`-z`: NUL-terminated records; a rename's
+/// original path follows it as its own NUL-terminated field).
+pub fn parse_porcelain_v2(out: &[u8]) -> Porcelain {
+    let mut p = Porcelain::default();
+    let mut fields = out.split(|b| *b == 0).map(|f| String::from_utf8_lossy(f).into_owned());
+    while let Some(line) = fields.next() {
+        if line.is_empty() {
+            continue;
+        }
+        let kind = line.as_bytes()[0];
+        match kind {
+            b'#' => {
+                if let Some(head) = line.strip_prefix("# branch.head ") {
+                    if head != "(detached)" {
+                        p.branch = Some(head.to_string());
+                    }
+                } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
+                    let mut it = ab.split(' ');
+                    p.ahead = it.next().and_then(|a| a.trim_start_matches('+').parse().ok());
+                    p.behind = it.next().and_then(|b| b.trim_start_matches('-').parse().ok());
+                }
+            }
+            b'1' => {
+                // 1 XY sub mH mI mW hH hI path
+                let parts: Vec<&str> = line.splitn(9, ' ').collect();
+                if parts.len() == 9 {
+                    p.records.push(GitRecord { path: parts[8].to_string(), state: state_of_xy(parts[1]) });
+                }
+            }
+            b'2' => {
+                // 2 XY sub mH mI mW hH hI Xscore path, then the original path.
+                let parts: Vec<&str> = line.splitn(10, ' ').collect();
+                let _orig = fields.next();
+                if parts.len() == 10 {
+                    p.records.push(GitRecord { path: parts[9].to_string(), state: state_of_xy(parts[1]).max(FsGitState::Renamed) });
+                }
+            }
+            b'u' => {
+                // u XY sub m1 m2 m3 mW h1 h2 h3 path
+                let parts: Vec<&str> = line.splitn(11, ' ').collect();
+                if parts.len() == 11 {
+                    p.records.push(GitRecord { path: parts[10].to_string(), state: FsGitState::Conflicted });
+                }
+            }
+            b'?' | b'!' => {
+                if let Some(path) = line.get(2..) {
+                    let state = if kind == b'?' { FsGitState::Untracked } else { FsGitState::Ignored };
+                    p.records.push(GitRecord { path: path.to_string(), state });
+                }
+            }
+            _ => {}
+        }
+    }
+    p
+}
+
+/// Fold the records under `prefix` (the listed folder, relative to the
+/// repository's top, `/`-separated with a trailing `/`, or empty) into one
+/// state per direct child. A folder takes the most pressing state of what's
+/// inside it, except that a folder is only "ignored" when git ignores the
+/// folder itself.
+pub fn summarize(p: &Porcelain, prefix: &str) -> FsGitStatus {
+    let mut by_child: HashMap<String, FsGitState> = HashMap::new();
+    let mut changes = 0u64;
+    for r in &p.records {
+        let Some(rel) = r.path.strip_prefix(prefix) else { continue };
+        let rel = rel.trim_end_matches('/');
+        if rel.is_empty() {
+            continue;
+        }
+        if r.state != FsGitState::Ignored {
+            changes += 1;
+        }
+        let (child, nested) = match rel.split_once('/') {
+            Some((c, _)) => (c, true),
+            None => (rel, false),
+        };
+        // Something ignored deep inside doesn't make its folder look ignored.
+        if nested && r.state == FsGitState::Ignored {
+            continue;
+        }
+        by_child.entry(child.to_string()).and_modify(|s| *s = (*s).max(r.state)).or_insert(r.state);
+    }
+    let mut entries: Vec<FsGitEntry> = by_child.into_iter().map(|(name, state)| FsGitEntry { name, state }).collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    FsGitStatus {
+        in_repo: true,
+        branch: p.branch.clone(),
+        ahead: p.ahead,
+        behind: p.behind,
+        entries,
+        changes,
+        error: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn z(records: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for r in records {
+            out.extend_from_slice(r.as_bytes());
+            out.push(0);
+        }
+        out
+    }
+
+    #[test]
+    fn parses_branch_ahead_and_behind() {
+        let p = parse_porcelain_v2(&z(&["# branch.oid abc", "# branch.head main", "# branch.upstream origin/main", "# branch.ab +2 -5"]));
+        assert_eq!(p.branch.as_deref(), Some("main"));
+        assert_eq!((p.ahead, p.behind), (Some(2), Some(5)));
+        let detached = parse_porcelain_v2(&z(&["# branch.head (detached)"]));
+        assert_eq!(detached.branch, None);
+    }
+
+    #[test]
+    fn parses_every_record_kind_including_spaces_and_renames() {
+        let out = z(&[
+            "1 .M N... 100644 100644 100644 aaa bbb src/a file.ts",
+            "1 A. N... 000000 100644 100644 000 ccc new.ts",
+            "1 D. N... 100644 000000 000000 ddd 000 gone.ts",
+            "2 R. N... 100644 100644 100644 eee eee R100 docs/new name.md",
+            "docs/old name.md",
+            "u UU N... 100644 100644 100644 100644 a b c conflict.rs",
+            "? notes.txt",
+            "! target/",
+        ]);
+        let p = parse_porcelain_v2(&out);
+        let got: Vec<(&str, FsGitState)> = p.records.iter().map(|r| (r.path.as_str(), r.state)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("src/a file.ts", FsGitState::Modified),
+                ("new.ts", FsGitState::Added),
+                ("gone.ts", FsGitState::Deleted),
+                ("docs/new name.md", FsGitState::Renamed),
+                ("conflict.rs", FsGitState::Conflicted),
+                ("notes.txt", FsGitState::Untracked),
+                ("target/", FsGitState::Ignored),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_staged_add_with_later_edits_reads_as_modified() {
+        assert_eq!(state_of_xy("AM"), FsGitState::Modified);
+        assert_eq!(state_of_xy("MD"), FsGitState::Modified);
+        assert_eq!(state_of_xy("R."), FsGitState::Renamed);
+    }
+
+    #[test]
+    fn folds_records_into_the_listed_folders_children() {
+        let p = parse_porcelain_v2(&z(&[
+            "# branch.head main",
+            "1 .M N... 1 1 1 a b app/src/x.ts",
+            "? app/src/new/",
+            "1 .M N... 1 1 1 a b app/README.md",
+            "! app/node_modules/",
+            "! app/src/cache/",
+            "? app/notes.txt",
+            "1 .M N... 1 1 1 a b other/y.ts",
+        ]));
+        let s = summarize(&p, "app/");
+        let got: Vec<(&str, FsGitState)> = s.entries.iter().map(|e| (e.name.as_str(), e.state)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("README.md", FsGitState::Modified),
+                ("node_modules", FsGitState::Ignored),
+                ("notes.txt", FsGitState::Untracked),
+                // Modified beats untracked; the ignored cache inside doesn't count.
+                ("src", FsGitState::Modified),
+            ]
+        );
+        assert_eq!(s.changes, 4);
+        assert_eq!(s.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn at_the_top_the_prefix_is_empty() {
+        let p = parse_porcelain_v2(&z(&["? a.txt", "1 .M N... 1 1 1 a b dir/b.txt"]));
+        let s = summarize(&p, "");
+        assert_eq!(s.entries.len(), 2);
+    }
+
+    /// The real thing, when git is installed: a repo whose config asks for an
+    /// fsmonitor program gets none run, and the markers come back.
+    #[tokio::test]
+    async fn runs_git_without_the_repositorys_fsmonitor() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(["-c", "user.email=a@b", "-c", "user.name=a"])
+                .args(args)
+                .current_dir(dir.path())
+                .no_window()
+                .output()
+        };
+        if git(&["init", "-q"]).map(|o| !o.status.success()).unwrap_or(true) {
+            return; // No git on this machine.
+        }
+        std::fs::write(dir.path().join("tracked.txt"), "a").unwrap();
+        let _ = git(&["add", "."]);
+        let _ = git(&["commit", "-qm", "x"]);
+        std::fs::write(dir.path().join("tracked.txt"), "b").unwrap();
+        std::fs::write(dir.path().join("new.txt"), "n").unwrap();
+        // A program git would run for core.fsmonitor: it would leave a mark.
+        let mark = dir.path().join("fsmonitor-ran");
+        let _ = git(&["config", "core.fsmonitor", &format!("touch '{}'", mark.display())]);
+
+        let s = git_status(&dir.path().to_string_lossy()).await;
+        assert!(s.in_repo, "{s:?}");
+        let get = |n: &str| s.entries.iter().find(|e| e.name == n).map(|e| e.state);
+        assert_eq!(get("tracked.txt"), Some(FsGitState::Modified));
+        assert_eq!(get("new.txt"), Some(FsGitState::Untracked));
+        assert!(!mark.exists(), "the repository's fsmonitor program ran");
+    }
+
+    #[tokio::test]
+    async fn a_folder_outside_any_repository_has_no_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = git_status(&dir.path().to_string_lossy()).await;
+        // A temp dir can sit inside a repository on some machines; then it has
+        // markers, which is also right. What must hold: no error either way.
+        assert!(s.error.is_none(), "{s:?}");
+    }
+}
