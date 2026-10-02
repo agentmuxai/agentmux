@@ -66,6 +66,14 @@ pub struct Policy {
     pub release_claims: bool,
     /// Stop the srv-spawned `Shell()` sessions it started (R3).
     pub stop_shell_sessions: bool,
+    /// Stop its declared `run_in_background` tasks (R2) explicitly. A
+    /// graceful close takes them anyway with the tracker; this is for Stop,
+    /// which keeps the tracker (spec §5, §7.4).
+    pub stop_background: bool,
+    /// Stop a container agent's container (R6), which also drops its
+    /// dev-proxy routes. Stopped, not removed: the next launch restarts it
+    /// (`ContainerManager::ensure_running`), and its volume keeps its state.
+    pub stop_container: bool,
 }
 
 impl Policy {
@@ -73,27 +81,40 @@ impl Policy {
     /// it runs, `Shell()` sessions included; claims stay until their lease
     /// expires, as before (spec §5).
     pub const fn close() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true }
+        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true }
     }
     /// `/quit`, `QuitSelf`, no-argument `ClosePane`: everything (spec §0).
     pub const fn quit() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true }
+        Self { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true, stop_background: false, stop_container: true }
     }
-    /// Stop: the CLI only, so background tasks keep running (spec §5).
-    pub const fn stop(graceful: bool) -> Self {
-        Self { cli: CliStop::StopOnly { graceful }, release_claims: false, stop_shell_sessions: false }
+    /// Stop (`agent.stop`, `FleetBulkStop`): the CLI, and its background
+    /// tasks only if asked; its claims go back to the pool (spec §5). The
+    /// block, its `Shell()` sessions and drawers stay.
+    pub const fn stop(graceful: bool, stop_background: bool) -> Self {
+        Self { cli: CliStop::StopOnly { graceful }, release_claims: true, stop_shell_sessions: false, stop_background, stop_container: false }
+    }
+    /// The watchdog's max-runtime / idle stop: the CLI only, as it always
+    /// has been. Its claims stay, since it may be restarted on the next
+    /// message.
+    pub const fn stop_cli_only(graceful: bool) -> Self {
+        Self { cli: CliStop::StopOnly { graceful }, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false }
     }
     /// Restart / controller replace: the CLI only; background tasks survive.
     pub const fn replace() -> Self {
-        Self { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false }
+        Self { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false }
     }
     /// App exit: every agent closes gracefully and its `Shell()` sessions
     /// stop. Claims stay: the agent comes back with the app and its lease
     /// covers the gap (spec §5).
     pub const fn app_exit() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true }
+        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true }
     }
 }
+
+/// Setting: does Stop keep the agent's `run_in_background` tasks (dev
+/// servers) running when the caller doesn't say? Per user, default `true`,
+/// today's behaviour (spec §11 O2).
+pub const SETTING_STOP_KEEPS_BACKGROUND: &str = "agent:stopkeepsbackground";
 
 /// App exit's overall cap (spec §11 O3), the leftover-shell sweep included:
 /// every agent closes concurrently under it. It fits inside the launcher's
@@ -115,6 +136,17 @@ pub struct TeardownReport {
     pub stopped_shells: usize,
     /// Cron jobs still targeting the agent (kept).
     pub crons_targeting: Vec<String>,
+    /// Background tasks stopped explicitly (Stop with `stop_background`).
+    pub stopped_background: usize,
+    /// Stop only: the CLI stop failed. Nothing else was touched (claims and
+    /// background tasks stay), and [`stop`] returns this as its error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_error: Option<String>,
+    /// The container agent's container that was stopped, if any.
+    pub stopped_container: Option<String>,
+    /// Processes from `before` still running after the teardown and one more
+    /// forced kill each (spec §6.2 step 8). Empty is the goal.
+    pub survivors: Vec<agent_resources::ProcessEntry>,
     /// What it owned when the teardown began.
     pub before: AgentResources,
 }
@@ -134,14 +166,41 @@ pub async fn run(state: &AppState, block_id: &str, policy: Policy) -> TeardownRe
         .unwrap_or_default()
 }
 
-/// The Stop policy's entry for callers that aren't async: it only calls
-/// `controller.stop()` (`Policy::stop`). Errors with `NOT_RUNNING` when the
-/// block has no controller, as `agent.stop` always has.
+/// [`Policy::stop_cli_only`]'s entry, for callers with no `AppState` (the
+/// watchdog, the pane's `AgentStop` command): `controller.stop()` only.
+/// Errors with `NOT_RUNNING` when the block has no controller.
 pub fn stop_now(block_id: &str, graceful: bool) -> Result<(), String> {
-    debug_assert!(matches!(Policy::stop(graceful).cli, CliStop::StopOnly { .. }));
+    debug_assert!(matches!(Policy::stop_cli_only(graceful).cli, CliStop::StopOnly { .. }));
     let ctrl = blockcontroller::get_controller(block_id)
         .ok_or_else(|| format!("NOT_RUNNING: no controller for block {block_id}"))?;
     ctrl.stop(graceful, blockcontroller::STATUS_DONE)
+}
+
+/// Stop (`agent.stop`, `FleetBulkStop`, a deferred `Stop` action):
+/// [`Policy::stop`]. `stop_background` is the caller's answer to "also stop
+/// its background tasks?"; `None` takes the user's setting
+/// ([`SETTING_STOP_KEEPS_BACKGROUND`]). Errors with `NOT_RUNNING` when the
+/// block has no controller, as `agent.stop` always has.
+pub async fn stop(state: &AppState, block_id: &str, graceful: bool, stop_background: Option<bool>) -> Result<TeardownReport, String> {
+    if blockcontroller::get_controller(block_id).is_none() {
+        return Err(format!("NOT_RUNNING: no controller for block {block_id}"));
+    }
+    let stop_background = stop_background.unwrap_or_else(|| !stop_keeps_background(state));
+    let report = run(state, block_id, Policy::stop(graceful, stop_background)).await;
+    match report.stop_error {
+        Some(e) => Err(e),
+        None => Ok(report),
+    }
+}
+
+fn stop_keeps_background(state: &AppState) -> bool {
+    state
+        .config_watcher
+        .get_settings()
+        .extra
+        .get(SETTING_STOP_KEEPS_BACKGROUND)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
 }
 
 /// Drop a block's controller and process tracker at once, with no graceful
@@ -217,9 +276,20 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
         ..Default::default()
     };
 
+    // Stop: the CLI first. If it fails the agent is still running, so its
+    // claims and background tasks must stay too (ReAgent P1 on #4174).
+    if let CliStop::StopOnly { graceful } = policy.cli {
+        if let Err(e) = stop_now(block_id, graceful) {
+            tracing::warn!(block_id = %block_id, error = %e, "agent_teardown: stop failed; nothing else touched");
+            report.stop_error = Some(e);
+            return report;
+        }
+    }
+
     // Step 3: non-process resources, so nothing new reaches a dying agent.
     if policy.release_claims {
-        let (released, crons) = release_claims_and_list_crons(state, &who).await;
+        let reason = if matches!(policy.cli, CliStop::StopOnly { .. }) { "agent stopped" } else { "agent quit" };
+        let (released, crons) = release_claims_and_list_crons(state, &who, reason).await;
         report.released_claims = released;
         report.crons_targeting = crons;
     }
@@ -231,12 +301,12 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
             .count();
     }
 
+    if policy.stop_background && !before.background_tasks.is_empty() {
+        report.stopped_background = stop_background_tasks(&before).await;
+    }
+
     match policy.cli {
-        CliStop::StopOnly { graceful } => {
-            if let Err(e) = stop_now(block_id, graceful) {
-                tracing::debug!(block_id = %block_id, error = %e, "agent_teardown: stop");
-            }
-        }
+        CliStop::StopOnly { .. } => {} // done first, above
         CliStop::Replace => {
             if let Some(ctrl) = blockcontroller::get_controller(block_id) {
                 if let Err(e) = replace_now(ctrl.as_ref()) {
@@ -248,10 +318,61 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
             // PtyShell drawers first (spec §6.6), so teardown doesn't depend on
             // the pane being mounted to send `deletesubblock`.
             close_sub_blocks(state, &before.sub_blocks, deadline).await;
-            close_cli(state, block_id, &who, &before, deadline, started).await
+            report.survivors = close_cli(state, block_id, &who, &before, deadline, started).await;
+            if policy.stop_container {
+                report.stopped_container = stop_container(state, block_id, &before, deadline).await;
+            }
         }
     }
     report
+}
+
+/// Stop a container agent's container (spec §6.7), unless another live pane
+/// runs the same agent in it. Docker's own SIGTERM → SIGKILL grace is bounded
+/// by what's left of the teardown's deadline.
+async fn stop_container(
+    state: &AppState,
+    block_id: &str,
+    before: &AgentResources,
+    deadline: std::time::Instant,
+) -> Option<String> {
+    let name = before.container.clone()?;
+    let shared = {
+        let (st, id, n) = (state.clone(), block_id.to_string(), name.clone());
+        tokio::task::spawn_blocking(move || agent_resources::container_shared(&st, &id, &n)).await.unwrap_or(true)
+    };
+    if shared {
+        tracing::info!(block_id = %block_id, container = %name, "agent_teardown: container still in use; kept");
+        return None;
+    }
+    let cm = state.container_manager.get().await?;
+    let grace = deadline.saturating_duration_since(std::time::Instant::now()).as_secs().max(1) as i64;
+    match cm.stop(&name, grace).await {
+        Ok(()) => {
+            publish_shutdown(state, block_id, "container", format!("stopped container {name}"), serde_json::json!({}));
+            Some(name)
+        }
+        Err(e) => {
+            tracing::warn!(block_id = %block_id, container = %name, error = %e, "agent_teardown: container stop failed");
+            None
+        }
+    }
+}
+
+/// Stop the agent's running `run_in_background` tasks, each with its process
+/// tree, after re-checking each PID is still that task. Returns how many.
+async fn stop_background_tasks(before: &AgentResources) -> usize {
+    let tasks = before.background_tasks.clone();
+    tokio::task::spawn_blocking(move || {
+        let pids = agent_resources::live_background_pids(&tasks);
+        for pid in &pids {
+            tracing::info!(pid, "agent_teardown: stopping a background task");
+            agentmux_common::process::kill_process_group(*pid);
+        }
+        pids.len()
+    })
+    .await
+    .unwrap_or(0)
 }
 
 /// Close a parent's sub-blocks (PtyShell drawers) the way a pane closes,
@@ -270,8 +391,9 @@ async fn close_sub_blocks(state: &AppState, sub_blocks: &[String], deadline: std
     }
 }
 
-/// Today's per-agent close (`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
-/// §4.2), moved here from `close_pane::shutdown_one` unchanged.
+/// The per-agent close (`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
+/// §4.2), then the verify step (agent teardown spec §6.2 step 8). Returns the
+/// survivors.
 async fn close_cli(
     state: &AppState,
     block_id: &str,
@@ -279,7 +401,7 @@ async fn close_cli(
     before: &AgentResources,
     deadline: std::time::Instant,
     started: std::time::Instant,
-) {
+) -> Vec<agent_resources::ProcessEntry> {
     let label = if who.agent_id.is_empty() { "agent".to_string() } else { who.agent_id.clone() };
     // 1. Stop routing input: no respawn (resync_controller refuses), no
     //    jekt/muxbus delivery, and — once out of CONTROLLER_REGISTRY — no
@@ -321,6 +443,18 @@ async fn close_cli(
             } }),
         );
     }
+    // 5b. Verify: everything in the snapshot is gone, else force it once
+    //     more and report what's left.
+    let survivors = verify_gone(&before.processes).await;
+    for p in &survivors {
+        publish_shutdown(
+            state,
+            block_id,
+            "survivor",
+            format!("still running: {} (pid {})", short_command(&p.command), p.pid),
+            serde_json::json!({ "process": { "pid": p.pid, "name": short_command(&p.command), "outcome": "survived" } }),
+        );
+    }
     blockcontroller::mark_closing_stopped(block_id);
     crate::backend::container_credential::revoke_block(block_id);
     // 6. Save final state.
@@ -332,15 +466,55 @@ async fn close_cli(
         controller_type = %controller_type,
         outcome = outcome.as_str(),
         elapsed_ms = started.elapsed().as_millis() as u64,
+        survivors = survivors.len(),
         "agent_shutdown"
     );
+    survivors
+}
+
+/// How long the verify step waits for the tracker's release to take effect,
+/// before and after its one forced kill per survivor.
+const VERIFY_WAIT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Spec §6.2 step 8: wait for every process in the snapshot to be gone. Any
+/// still running (same PID and start time) gets one forced kill of its tree;
+/// whatever is left after that is returned. Never kills a PID the OS has
+/// reused: `survivors` re-checks the start time right before the kill.
+async fn verify_gone(before: &[agent_resources::ProcessEntry]) -> Vec<agent_resources::ProcessEntry> {
+    if before.is_empty() {
+        return Vec::new();
+    }
+    let mut left = wait_gone(before.to_vec()).await;
+    if left.is_empty() {
+        return left;
+    }
+    for p in &left {
+        tracing::warn!(pid = p.pid, command = %p.command, "agent_teardown: forcing a survivor");
+        let (pid, started) = (p.pid, p.started_at_ms);
+        let _ = tokio::task::spawn_blocking(move || agent_resources::force_kill_tree(pid, started)).await;
+    }
+    left = wait_gone(left).await;
+    left
+}
+
+/// Poll until none of `procs` is running or [`VERIFY_WAIT`] passes; returns
+/// the ones still running.
+async fn wait_gone(mut procs: Vec<agent_resources::ProcessEntry>) -> Vec<agent_resources::ProcessEntry> {
+    let until = std::time::Instant::now() + VERIFY_WAIT;
+    loop {
+        procs = tokio::task::spawn_blocking(move || agent_resources::survivors(&procs)).await.unwrap_or_default();
+        if procs.is_empty() || std::time::Instant::now() >= until {
+            return procs;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 /// Release the agent's work claims, so the items go back to the pool now
 /// rather than when the 120 s lease expires, and list the crons that target
 /// it (kept: a cron is a deliberate schedule that resumes when the agent is
 /// reopened). SQLite reads and writes, off the async workers.
-async fn release_claims_and_list_crons(state: &AppState, who: &AgentIdentity) -> (usize, Vec<String>) {
+async fn release_claims_and_list_crons(state: &AppState, who: &AgentIdentity, reason: &'static str) -> (usize, Vec<String>) {
     let (identity_store, shared_store) = (state.identity_store.clone(), state.shared_store.clone());
     let (a, u) = (who.agent_id.clone(), who.uid.clone());
     let result = tokio::task::spawn_blocking(move || {
@@ -350,7 +524,7 @@ async fn release_claims_and_list_crons(state: &AppState, who: &AgentIdentity) ->
             .into_iter()
             .filter(|w| {
                 matches!(
-                    identity_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, "agent quit", now),
+                    identity_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, reason, now),
                     Ok(Some(_))
                 )
             })
@@ -375,12 +549,20 @@ mod tests {
 
     #[test]
     fn policies_encode_todays_scopes() {
-        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true });
-        assert_eq!(Policy::quit(), Policy { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true });
-        assert_eq!(Policy::stop(false).cli, CliStop::StopOnly { graceful: false });
-        assert!(!Policy::stop(true).release_claims && !Policy::stop(true).stop_shell_sessions);
-        assert_eq!(Policy::replace(), Policy { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false });
-        assert_eq!(Policy::app_exit(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true });
+        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true });
+        assert_eq!(Policy::quit(), Policy { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true, stop_background: false, stop_container: true });
+        assert_eq!(Policy::stop(false, false).cli, CliStop::StopOnly { graceful: false });
+        // Stop releases claims and keeps shells; background tasks as asked.
+        assert!(Policy::stop(true, false).release_claims && !Policy::stop(true, false).stop_shell_sessions);
+        assert!(Policy::stop(true, true).stop_background && !Policy::stop(true, false).stop_background);
+        // Containers stop with a closing agent, never on Stop or a restart.
+        assert!(Policy::close().stop_container && Policy::quit().stop_container && Policy::app_exit().stop_container);
+        assert!(!Policy::stop(true, true).stop_container && !Policy::replace().stop_container);
+        // The watchdog's stop is the CLI only.
+        let w = Policy::stop_cli_only(true);
+        assert!(!w.release_claims && !w.stop_shell_sessions && !w.stop_background);
+        assert_eq!(Policy::replace(), Policy { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false });
+        assert_eq!(Policy::app_exit(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true });
         // App exit covers the CLI's own grace and the shell sweep.
         assert!(APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE) > blockcontroller::SHUTDOWN_GRACE);
     }

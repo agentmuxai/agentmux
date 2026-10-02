@@ -27,6 +27,8 @@ export type QuitSummary = {
     released_claims: number;
     stopped_shells: number;
     crons_targeting: string[];
+    /** Processes still running after the quit, as `name (pid N)`; absent from older servers. */
+    survivors?: string[];
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -36,6 +38,12 @@ export function quitNoticeMessage(s: QuitSummary): string {
     const parts = ["Conversation kept — reopen the agent to resume it."];
     if (s.released_claims > 0) parts.push(`Released ${plural(s.released_claims, "work claim", "work claims")}.`);
     if (s.stopped_shells > 0) parts.push(`Stopped ${plural(s.stopped_shells, "shell", "shells")}.`);
+    if (s.survivors?.length) {
+        parts.push(
+            `${plural(s.survivors.length, "process is", "processes are")} still running ` +
+                `(${s.survivors.join(", ")}); end ${s.survivors.length === 1 ? "it" : "them"} from Task Manager or \`kill\`.`
+        );
+    }
     if (s.crons_targeting.length > 0) {
         parts.push(
             `${plural(s.crons_targeting.length, "cron job still targets", "cron jobs still target")} it ` +

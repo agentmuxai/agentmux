@@ -424,7 +424,9 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
         }
         Action::ClosePane { block_ids } => super::close_pane::run(state, block_ids).await.map(|_| ()),
         Action::Stop { signal } => {
-            crate::server::app_api::agent_io::stop_one_agent_block(block_id, signal.as_deref()).map(|_| ())
+            crate::server::app_api::agent_io::stop_one_agent_block(state, block_id, signal.as_deref(), None)
+                .await
+                .map(|_| ())
         }
     }
 }
