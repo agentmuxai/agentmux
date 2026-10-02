@@ -55,6 +55,8 @@
 //! fields, the `InteractiveToken` logon type — unit-testable without
 //! touching the machine's real login configuration.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::path::Path;
 
 /// The flag every generated artifact passes to the launcher.
@@ -409,9 +411,8 @@ pub fn artifact_path() -> Option<std::path::PathBuf> {
 /// reconcile runs `schtasks /Query` on every startup.
 #[cfg(target_os = "windows")]
 fn schtasks_command() -> std::process::Command {
-    use std::os::windows::process::CommandExt;
     let mut cmd = std::process::Command::new("schtasks");
-    cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
+    cmd.no_window();
     cmd
 }
 

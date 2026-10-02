@@ -34,6 +34,8 @@
 
 #![cfg(windows)]
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -180,8 +182,7 @@ pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
     // of the splash. See crates/common/src/cli.rs for the same fix elsewhere.
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        monitor_cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
+        monitor_cmd.no_window();
     }
     let child = match monitor_cmd.spawn() {
         Ok(c) => c,

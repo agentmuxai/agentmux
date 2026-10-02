@@ -5,6 +5,8 @@
 //! per-session I/O tasks (stdin writer, stdout reader, stderr reader, waiter).
 //! Moved here verbatim; extracting the task bodies is a separate change.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use super::*;
 
 impl PersistentSubprocessController {
@@ -199,8 +201,7 @@ impl PersistentSubprocessController {
         // Matches acp.rs / subprocess.rs; sibling of shell.rs's PTY path.
         #[cfg(windows)]
         {
-            use agentmux_common::win32::CREATE_NO_WINDOW;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.no_window();
         }
 
         cmd.stdin(std::process::Stdio::piped());

@@ -26,6 +26,8 @@
 //! `gemini`/`qwen` interactive pane, mirroring this file's
 //! `run_agent` gate.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use std::path::PathBuf;
 use std::process::Stdio;
 
@@ -206,8 +208,7 @@ pub(crate) async fn run_agent_with_bin(
     // no console is needed. See docs/retro/retro-windows-terminal-window-leak-2026-06-21.md.
     #[cfg(windows)]
     {
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.no_window();
     }
     let mut child = cmd
         .arg(&task.prompt)

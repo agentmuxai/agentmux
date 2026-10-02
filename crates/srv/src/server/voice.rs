@@ -18,6 +18,8 @@
 //!                        subprocess; renderer sends 16 kHz mono WAV. Opt-in,
 //!                        configured via settings/env; needs a model file.
 
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
 use axum::{
     body::Bytes,
     extract::{Query, State},
@@ -360,8 +362,7 @@ async fn transcribe_local_whisper(
     // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
     #[cfg(windows)]
     {
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.no_window();
     }
     const WHISPER_TIMEOUT_SECS: u64 = 120;
 
