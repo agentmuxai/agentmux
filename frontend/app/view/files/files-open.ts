@@ -10,6 +10,7 @@
 
 import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { RpcApi } from "@/app/store/rpc-api";
+import { openInMediaPaneOnScreen } from "@/app/view/media/media-open";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { addWidgetAsPaneTab } from "@/layout/lib/layoutStack";
@@ -42,8 +43,10 @@ export function openTargetOf(name: string): OpenTarget {
     return "editor";
 }
 
-/** Opens `path` in a new pane of `view` to the right of the Files pane. */
+/** Opens `path` in a new pane of `view` to the right of the Files pane; a
+ *  media file joins the Media pane on screen as a tab, if there is one. */
 export async function openInPane(view: "editor" | "media", path: string, besideBlockId: string): Promise<void> {
+    if (view === "media" && (await openInMediaPaneOnScreen(path))) return;
     await TabRpcClient.rpcCall(
         "pane.open",
         { view, file: path, split_direction: "right", split_reference_block_id: besideBlockId },

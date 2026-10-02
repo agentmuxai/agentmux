@@ -19,7 +19,7 @@ CEF build for any standard H.264/AAC file — a whole-app build limitation,
 not a pane bug; see that report for the root cause and options).
 
 > [!IMPORTANT]
-> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** A Media pane stops being one file: it holds several media files as Document Tabs, and opening media while a Media pane is on screen adds a tab there (its §6.3).
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** A Media pane stops being one file: it holds several media files as Document Tabs, and opening media while a Media pane is on screen adds a tab there (its §6.3; built, for the app's own opens; the `OpenMedia` tool still opens a new pane).
 
 ## Motivation
 

@@ -1,6 +1,6 @@
 # SPEC: Document tabs: one shared tab system for the documents inside a pane
 
-**Status:** active. Phase 1 is built (#4231): the shared layer and Hangar on it. Phase 2 is built: the Editor on it (§6.1). Phases 3 and 5 are not; Phase 4 (Browser) is dropped (§6.4). Where the build differs from the design below, the section says so. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
+**Status:** active. Phase 1 is built (#4231): the shared layer and Hangar on it. Phase 2 is built: the Editor on it (§6.1). Phase 3 is built for Media (§6.3); Phase 5 is not; Phase 4 (Browser) is dropped (§6.4). Where the build differs from the design below, the section says so. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"there are actually 3 types: Window tabs, Pane tabs, and inner-pane tabs"*; *"The media pane tabs would also be in-pane tabs"*; *"ok document tabs. so u will create 1 document tab system that editor, hangar, media, (does browser have it too?) and whatever types"*; and *"lets also backreference old docs to this, so old stuff like that idea you found is squashed"*.
@@ -179,6 +179,9 @@ The design, as written before the build:
 - Single-click on a folder row in Hangar navigates the current tab (as now); there are no preview tabs.
 
 ### 6.3 Media (Phase 3)
+**As built:** `frontend/app/view/media/media-pane.tsx` holds a `DocTabsController` (payload `{ path }`; a tab with no file yet is its own document). Only the tab in front is mounted (§5.4 "keep state, mount one"), so a video in a tab behind it doesn't keep playing; switching back fetches the file again. The pane always has a tab: closing the last one leaves an empty one ("Click to load media"). Ctrl+T adds an empty tab; a file dropped on a tab showing one opens a new tab, onto an empty tab it shows there; *Pick a different file* replaces the file in the tab. The tab in front watches its folder and follows newer renders, and its tab and the pane's `media:path` follow it; a tab behind doesn't watch (it shows its last file when brought back). §5.7, frontend only: a click on an image or video in an agent's reply, and Hangar's open-by-kind, add a tab to the Media pane on screen (the focused one, else the first) through a `media:open` meta queue it drains, and open a new pane only when there is none. The `OpenMedia` tool still opens a new pane: routing it is backend work (`pane.rs`, like the Editor's opt-in `reuse_editor_pane`) left for later. Not built: preview tabs for stepping through files.
+
+The design, as written before the build:
 - Payload `{ path }`. Opening a media file when a Media pane is on screen adds a tab there (§5.7). Stepping through files from Hangar's preview or a Read image opens **preview** tabs, so browsing a folder doesn't pile up tabs.
 - Its directory watcher (`media_file_watcher`) watches each open tab's file, not one path.
 
@@ -212,7 +215,7 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 | 0 | This spec, and pointers in the superseded docs | this PR |
 | 1 | The shared layer (§5.1–§5.6) and **Hangar** on it (§6.2) | **built.** Reverts #4227's pane-tab bindings. Drag-reorder moved to Phase 5 (§4.1); the manifest field to Phase 2 (§5.6) |
 | 2 | **Editor** on it (§6.1) | **built.** Its own PR. The slice keeps its commands on the shared model rather than being deleted (§6.1) |
-| 3 | **Media** tabs (§6.3) and §5.7's open-into-existing-pane for Editor, Hangar, Media | |
+| 3 | **Media** tabs (§6.3) and §5.7's open-into-existing-pane for Editor, Hangar, Media | **built for Media**, from the frontend (§6.3); `OpenMedia` and Hangar's `OpenFiles` still open new panes |
 | 4 | ~~**Browser** tabs (§6.4)~~ | **dropped** (§6.4) |
 | 5 | Between panes (§5.8): drag to another pane, Move to new pane; drag to reorder (§4.1) | a drag kind of its own |
 
