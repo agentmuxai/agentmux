@@ -18,6 +18,85 @@ const REPLAY_PER_PASS: usize = 8;
 /// Failed deliveries to a present target before a held message is dropped.
 const MAX_ATTEMPTS: i64 = 20;
 const SWEEP_EVERY: Duration = Duration::from_secs(30);
+/// How often a target the spawn gate refused is re-checked for sign-in.
+const GATE_RECHECK_EVERY: Duration = Duration::from_secs(60);
+
+/// Whether a delivery error is the identity/credential spawn gate refusing to
+/// start the target (`run_agent_turn`'s "identity spawn gate: …"). That is
+/// recoverable — the receiver signs in — so the message is held, not dropped
+/// (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4, G4).
+pub(crate) fn is_spawn_gate_refusal(error: &str) -> bool {
+    error.starts_with("identity spawn gate")
+}
+
+/// Targets the spawn gate refused, with when the gate was last checked.
+///
+/// A delivery attempt to such a target is not free: `run_agent_turn` writes an
+/// error frame into its pane and raises a failure event each time. So the
+/// replay never attempts one blind; it first runs the gate on its own, which
+/// has no side effect beyond a log line, at most every [`GATE_RECHECK_EVERY`],
+/// and delivers once it passes. In memory: after a restart the first replay
+/// attempt finds the gate closed again and re-marks the target, one frame.
+fn needs_login() -> &'static std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(Default::default)
+}
+
+/// Mark `uid` as refused by the spawn gate, checked just now.
+pub(crate) fn mark_needs_login(uid: &str) {
+    needs_login().lock().unwrap().insert(uid.to_string(), std::time::Instant::now());
+}
+
+/// What the replay should do about a target's sign-in, given when its gate was
+/// last checked (`None`: never refused).
+#[derive(Debug, PartialEq, Eq)]
+enum GateCheck {
+    /// Not refused before: deliver as usual.
+    Open,
+    /// Checked within [`GATE_RECHECK_EVERY`]: skip without checking.
+    Wait,
+    /// Due: run the gate.
+    Recheck,
+}
+
+fn gate_check_due(last: Option<std::time::Instant>, now: std::time::Instant) -> GateCheck {
+    match last {
+        None => GateCheck::Open,
+        Some(t) if now.duration_since(t) < GATE_RECHECK_EVERY => GateCheck::Wait,
+        Some(_) => GateCheck::Recheck,
+    }
+}
+
+/// Whether `uid` is still waiting for sign-in. Runs the spawn gate quietly
+/// (no pane frame, no failure event) when a recheck is due.
+async fn still_needs_login(state: &AppState, uid: &str) -> bool {
+    let last = needs_login().lock().unwrap().get(uid).copied();
+    match gate_check_due(last, std::time::Instant::now()) {
+        GateCheck::Open => return false,
+        GateCheck::Wait => return true,
+        GateCheck::Recheck => {}
+    }
+    let Some(block_id) = state.reactive_handler.block_for_uid(uid) else {
+        return true;
+    };
+    let (mstore, id_store, identity_store) =
+        (state.mstore.clone(), state.id_store.clone(), state.identity_store.clone());
+    let passed = tokio::task::spawn_blocking(move || {
+        crate::identity::inject_identity_env(mstore, id_store, identity_store, &block_id, &mut Default::default())
+            .is_ok()
+    })
+    .await
+    // A panicked check never opens the gate.
+    .unwrap_or(false);
+    if passed {
+        needs_login().lock().unwrap().remove(uid);
+        tracing::info!(target_uid = %uid, "durable jekt: signed in, delivering held messages");
+        return false;
+    }
+    mark_needs_login(uid);
+    true
+}
 
 /// Replay held jekts: once now, then whenever an agent registers and every
 /// 30 s. Installed after `AppState` exists.
@@ -84,6 +163,9 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
             break;
         }
         if !state.reactive_handler.has_uid_registration(&uid) {
+            continue;
+        }
+        if still_needs_login(state, &uid).await {
             continue;
         }
         let mstore = state.mstore.clone();
@@ -169,6 +251,12 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
     if transient {
         return ReplayOutcome::Deferred;
     }
+    // Not signed in: wait for sign-in, uncounted (G6 counted it, so a
+    // signed-out receiver lost its messages after 20 tries).
+    if is_spawn_gate_refusal(&error) {
+        mark_needs_login(&row.target_uid);
+        return ReplayOutcome::Deferred;
+    }
     let attempts = tokio::task::spawn_blocking({
         let mstore = mstore.clone();
         let id = id.clone();
@@ -185,4 +273,30 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
         return ReplayOutcome::Dropped;
     }
     ReplayOutcome::Failed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn a_spawn_gate_refusal_is_recognised_and_nothing_else_is() {
+        assert!(is_spawn_gate_refusal("identity spawn gate: no credentials for claude: …"));
+        for other in ["agent not found: x", "rate limit exceeded", "persistent process not running", ""] {
+            assert!(!is_spawn_gate_refusal(other), "{other}");
+        }
+    }
+
+    /// A refused target is re-checked at most every GATE_RECHECK_EVERY, so the
+    /// 30 s replay never attempts a delivery blind (each would write an error
+    /// frame into the receiver's pane).
+    #[test]
+    fn the_sign_in_check_runs_at_most_once_a_minute() {
+        let now = Instant::now();
+        assert_eq!(gate_check_due(None, now), GateCheck::Open);
+        assert_eq!(gate_check_due(Some(now), now), GateCheck::Wait);
+        assert_eq!(gate_check_due(Some(now), now + Duration::from_secs(59)), GateCheck::Wait);
+        assert_eq!(gate_check_due(Some(now), now + GATE_RECHECK_EVERY), GateCheck::Recheck);
+    }
 }
