@@ -229,7 +229,7 @@ const fullBytesCache = new WeakMap<DocumentNode, number>();
 
 /**
  * nodeBytes measured up to 32 MB, not 2 MB: the live feed sums whole turns
- * against a 15 MB budget, and the 2 MB cap let seven 10 MB nodes count as
+ * against a 5 MB budget, and the 2 MB cap let seven 10 MB nodes count as
  * 14 MB (Codex P2 on #4121). Same bounded walk, so a node too large or too
  * long to scan counts as over the whole budget.
  */

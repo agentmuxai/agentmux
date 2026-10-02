@@ -1351,8 +1351,9 @@ export const AgentPresentationView = ({
                         log("auth", "Login Again (inline error node) — forcing a fresh provider login");
                         void status.relogin();
                     }}
-                    onLoadOlder={liveFeed.canPageOlder() ? history.loadOlder : undefined}
+                    onLoadOlder={history.loadOlder}
                     loadingOlder={history.loadingOlder}
+                    // The one paging gate: the list pages only while this is true.
                     hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
                     followingRef={(f) => liveFeed.setFollowingBottom(f)}
                     scrollCommand={scroll.command}
