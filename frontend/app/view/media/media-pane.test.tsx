@@ -66,7 +66,9 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-function mount(meta: Record<string, unknown> = {}) {
+/** `lagOpenClear`: the queue's clearing never reaches the block (a slow
+ *  round trip), while other writes do. */
+function mount(meta: Record<string, unknown> = {}, opts: { lagOpenClear?: boolean } = {}) {
     const [m, setM] = createSignal<Record<string, unknown>>(meta);
     const ctx: PaneTabHostContext = {
         blockId: "m1",
@@ -74,6 +76,7 @@ function mount(meta: Record<string, unknown> = {}) {
         setMeta: async (patch) => {
             const next = { ...m() };
             for (const [k, v] of Object.entries(patch)) {
+                if (opts.lagOpenClear && k === "media:open" && v === null) continue;
                 if (v === null) delete next[k];
                 else next[k] = v;
             }
@@ -107,6 +110,18 @@ describe("the Media pane's document tabs", () => {
         // Only the tab in front is mounted: one player, no hidden image.
         await waitFor(() => expect(v.container.querySelector("video")).not.toBeNull());
         expect(v.container.querySelector("img")).toBeNull();
+    });
+
+    it("switching tabs sticks while the queue's clearing is still on its way (live-test bug)", async () => {
+        const v = mount({ "media:path": "C:/pics/a.png" }, { lagOpenClear: true });
+        await v.setMeta({ "media:open": ["C:/pics/b.png"] });
+        await waitFor(() => expect(v.pills()).toEqual(["a.png", "b.png"]));
+        fireEvent.keyDown(v.root(), { key: "PageUp", ctrlKey: true });
+        await waitFor(() => expect(v.inst.liveTitle!().text).toBe("a.png"));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(v.inst.liveTitle!().text).toBe("a.png");
+        fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
+        await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media", "b.png"]));
     });
 
     it("a drop on a tab showing a file opens a new tab; on an empty tab, it shows there", async () => {

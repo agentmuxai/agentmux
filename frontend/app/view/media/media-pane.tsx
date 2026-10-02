@@ -16,7 +16,7 @@ import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
 import { AUDIO_EXTENSIONS, basenameOf, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
-import { createEffect, on, Show, type JSX } from "solid-js";
+import { createEffect, on, Show, untrack, type JSX } from "solid-js";
 import { MediaView } from "./media-view";
 
 /** The file the pane shows (the tab in front's): the pane's title, layout
@@ -115,7 +115,7 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
             tabs.activeId,
             () => {
                 const path = tabs.active()?.payload.path ?? "";
-                if ((ctx.meta()?.[META_PATH] ?? "") !== path) fireAndForget(() => ctx.setMeta({ [META_PATH]: path }));
+                if ((untrack(() => ctx.meta()?.[META_PATH]) ?? "") !== path) fireAndForget(() => ctx.setMeta({ [META_PATH]: path }));
             },
             { defer: true }
         )
@@ -128,18 +128,34 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
     });
 
     // Files sent here from elsewhere in the app, in order; only the entries
-    // handled are removed (more may have been appended meanwhile).
-    createEffect(() => {
-        const queued = ctx.meta()?.[META_OPEN];
-        if (!Array.isArray(queued) || queued.length === 0) return;
-        const handled = queued.filter((p): p is string => typeof p === "string" && p.length > 0);
-        for (const path of handled) pane.open(path);
-        fireAndForget(() => {
-            const now = ctx.meta()?.[META_OPEN];
-            const rest = Array.isArray(now) ? now.filter((p) => !handled.includes(p as string)) : [];
-            return ctx.setMeta({ [META_OPEN]: rest.length ? rest : null });
-        });
-    });
+    // handled are removed (more may have been appended meanwhile). Tracks
+    // the queue alone: opening reads the tabs, and the tabs changing must
+    // not open the same files again while the queue's clearing is on its
+    // way to the block (a queue seen once is skipped until it changes).
+    let lastQueue = "";
+    createEffect(
+        on(
+            () => ctx.meta()?.[META_OPEN],
+            (queued) => {
+                if (!Array.isArray(queued) || queued.length === 0) {
+                    lastQueue = "";
+                    return;
+                }
+                const seen = JSON.stringify(queued);
+                if (seen === lastQueue) return;
+                lastQueue = seen;
+                const handled = queued.filter((p): p is string => typeof p === "string" && p.length > 0);
+                untrack(() => {
+                    for (const path of handled) pane.open(path);
+                });
+                fireAndForget(() => {
+                    const now = untrack(() => ctx.meta()?.[META_OPEN]);
+                    const rest = Array.isArray(now) ? now.filter((p) => !handled.includes(p as string)) : [];
+                    return ctx.setMeta({ [META_OPEN]: rest.length ? rest : null });
+                });
+            }
+        )
+    );
 
     const onKeyDown = (e: KeyboardEvent): void => {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
