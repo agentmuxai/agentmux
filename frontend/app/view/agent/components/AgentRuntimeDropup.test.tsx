@@ -480,6 +480,25 @@ describe("AgentRuntimeDropup — says what the CLI resolved the model to", () =>
         expect(n).toContain("claude-opus-5-5");
     });
 
+    it("uses what the CLI itself reported, which is current, over the last reply", async () => {
+        renderWith("claude-opus-5-5"); // an old reply from before a model change
+        setReport({ ...AGREES, effectiveModel: "claude-sonnet-5-5", effectiveEffort: "high" });
+        await openPanel();
+        const n = notes().find((t) => t.includes("Running"))!;
+        expect(n).toBe("Running claude-sonnet-5-5 · effort high");
+        expect(notes().some((t) => t.includes("Last reply"))).toBe(false);
+    });
+
+    it("warns when the CLI reports a different model than the one selected", async () => {
+        renderWith(null);
+        setReport({ ...AGREES, effectiveModel: "claude-opus-5-5", effectiveEffort: "medium" });
+        await openPanel();
+        const n = notes().find((t) => t.includes("Running"))!;
+        expect(n).toContain("⚠");
+        expect(n).toContain("not sonnet");
+        expect(n).toContain("not effort high");
+    });
+
     it("does not warn while the process itself is not what is selected (the drift banner says that)", async () => {
         renderWith("claude-opus-5-5");
         setReport({ ...AGREES, model: undefined, effort: undefined });

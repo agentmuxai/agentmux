@@ -63,3 +63,43 @@ export function lastReplyModel(
     }
     return { text: base, differs: false };
 }
+
+
+/**
+ * What the process is really running, for the Model section of the menu.
+ *
+ * When the CLI has answered `get_settings` (`effective`), that is the truth for
+ * the process that is alive NOW, so it is used and the staleness caveat of
+ * "the last reply" does not apply: a different model family, or an effort other
+ * than the selected one, is a real mismatch. Without it this falls back to
+ * [`lastReplyModel`].
+ */
+export function runningModelNote(args: {
+    selectedModel: string;
+    selectedEffort: string;
+    /** Whether the selected model takes an effort at all (Haiku does not). */
+    effortApplies: boolean;
+    effective: { model?: string; effort?: string } | undefined;
+    lastReply: string | null | undefined;
+    agreement: RuntimeAgreement;
+}): LastReplyModel | null {
+    const { effective } = args;
+    if (!effective?.model) return lastReplyModel(args.selectedModel, args.lastReply, args.agreement);
+
+    // Judge only a process that was spawned with the selection: otherwise the
+    // drift notice already says what is wrong.
+    const judge = args.agreement.kind === "agrees";
+    const want = modelFamily(args.selectedModel);
+    const got = modelFamily(effective.model);
+    const modelDiffers = judge && want !== undefined && got !== undefined && want !== got;
+    const effortDiffers =
+        judge && args.effortApplies && effective.effort !== undefined && effective.effort !== args.selectedEffort;
+
+    let text = `Running ${effective.model}`;
+    if (effective.effort) text += ` · effort ${effective.effort}`;
+    const notes: string[] = [];
+    if (modelDiffers) notes.push(`not ${want}`);
+    if (effortDiffers) notes.push(`not effort ${args.selectedEffort}`);
+    if (notes.length > 0) text += ` (${notes.join(", ")})`;
+    return { text, differs: notes.length > 0 };
+}

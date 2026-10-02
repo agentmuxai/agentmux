@@ -42,6 +42,14 @@ export interface ProcessRuntime extends RuntimeFlags {
     running: boolean;
     /** A restart is on its way (a change arrived mid-turn): not a mismatch yet. */
     restartPending: boolean;
+    /**
+     * What the CLI itself says it is using (`get_settings`): the alias resolved to
+     * a concrete model id, and the effort in force. Absent until it answers, for
+     * a CLI that cannot, and for an effort the model does not take (Haiku).
+     * Unlike the flags above this is not what was ASKED but what is IN FORCE.
+     */
+    effectiveModel?: string;
+    effectiveEffort?: string;
 }
 
 /**
@@ -84,6 +92,8 @@ export function parseAgentRuntimeEvent(data: unknown): ProcessRuntime | null {
         model: str(d.model),
         effort: str(d.effort),
         permissionMode: str(d.permission_mode),
+        effectiveModel: str(d.effective_model),
+        effectiveEffort: str(d.effective_effort),
     };
 }
 

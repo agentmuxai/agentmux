@@ -32,7 +32,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX 
 import { Portal } from "solid-js/web";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, type ProviderModel } from "../providers";
-import { lastReplyModel } from "../resolved-model";
+import { runningModelNote } from "../resolved-model";
 import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "../launch-args";
@@ -271,7 +271,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         addSection("model", modelOptions(), r.model, false);
         // What the CLI resolved the selection to, on the last reply (the argv
         // only carries an alias).
-        const last = lastReplyModel(shown().model, props.lastReplyModel, agreement());
+        const last = runningModelNote({
+            selectedModel: shown().model,
+            selectedEffort: shown().effort,
+            effortApplies: effortApplies(props.providerId, shown().model),
+            effective: { model: processRuntime()?.effectiveModel, effort: processRuntime()?.effectiveEffort },
+            lastReply: props.lastReplyModel,
+            agreement: agreement(),
+        });
         if (last) rows.push({ kind: "note", section: "model", text: last.differs ? `⚠ ${last.text}` : last.text });
         const notUsed = effortNotUsedReason(props.providerId, runningModel());
         if (notUsed === null) {

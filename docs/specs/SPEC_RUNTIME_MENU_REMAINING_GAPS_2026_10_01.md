@@ -247,6 +247,15 @@ Send `get_settings` after spawn and after each `result`; fold `applied.{model,ef
 as `effective`. The menu then shows effort too, which no stream source can. Old CLIs (no `get_settings`, or no
 `applied`) fall back to Stage A and show effort as "requested".
 
+*Stage B built (readback only):* a control-protocol persistent agent is sent `get_settings` right after spawn and again at
+every turn boundary (the CLI can fall back to another model under a running process); the answer is folded into the
+`agentruntime` event as `effective_model` / `effective_effort` and cleared when the process ends or is replaced. The
+Model section then says "Running `claude-sonnet-5-5` · effort high", and warns when the family or the effort is not the
+selected one. That is current for the live process, so unlike Stage A it carries no "the last reply may be old" caveat;
+Stage A remains the fallback for a CLI that does not answer. Not built: correcting a difference on the running
+process with `set_model` / `apply_flag_settings` (observed to work, §7.3), which would need a policy for when the app may
+override what the process was spawned with.
+
 ### 4.4 Testing
 
 Stage A: the family/prefix comparison table (aliases, concrete ids, dated ids, unknown shapes); the four gating
