@@ -51,6 +51,7 @@ const h = vi.hoisted(() => {
         FsRestoreCommand: vi.fn(async (_c: unknown, req: { paths: string[] }) => ({ results: req.paths.map((path) => ({ path, ok: true })) })),
         FsDeleteCommand: vi.fn(async (_c: unknown, req: { paths: string[] }) => ({ results: req.paths.map((path) => ({ path, ok: true })) })),
         FsOpenCommand: vi.fn(async () => ({})),
+        FsGitStatusCommand: vi.fn<(client: unknown, req: { path: string }) => Promise<Record<string, unknown>>>(async () => ({ in_repo: false, entries: [], changes: 0 })),
         FsOpStartCommand: vi.fn<(client: unknown, req: Record<string, unknown>) => Promise<unknown>>(async () => ({ op_id: "op1" })),
         FsOpResolveCommand: vi.fn<(client: unknown, req: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
         FsOpCancelCommand: vi.fn<(client: unknown, req: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
@@ -714,6 +715,39 @@ describe("the Files pane: dragging files (§8.2)", () => {
             expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "move", sources: ["C:\\other\\x.txt"], dest_dir: HOME, block_id: "b1" })
         );
         pane.remove();
+    });
+});
+
+describe("the Files pane: git markers", () => {
+    it("marks changed entries, dims ignored ones, and shows the branch", async () => {
+        h.rpc.FsGitStatusCommand.mockResolvedValue({
+            in_repo: true,
+            branch: "main",
+            ahead: 1,
+            behind: 2,
+            changes: 3,
+            entries: [
+                { name: "b.txt", state: "modified" },
+                { name: "src", state: "untracked" },
+                { name: "a10.md", state: "ignored" },
+            ],
+        });
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await waitFor(() => expect(v.row("b.txt").querySelector(".files-git")?.textContent).toBe("M"));
+        expect(h.rpc.FsGitStatusCommand.mock.lastCall?.[1]).toEqual({ path: HOME });
+        expect(v.row("src").querySelector(".files-git-untracked")?.textContent).toBe("U");
+        expect(v.row("a10.md").classList.contains("files-row-ignored")).toBe(true);
+        expect(v.row("a10.md").querySelector(".files-git")).toBeNull();
+        expect(v.container.querySelector(".files-git-summary")?.textContent).toContain("main ↑1 ↓2 · 3 changes");
+        h.rpc.FsGitStatusCommand.mockResolvedValue({ in_repo: false, entries: [], changes: 0 });
+    });
+
+    it("shows nothing outside a repository", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await waitFor(() => expect(h.rpc.FsGitStatusCommand).toHaveBeenCalled());
+        expect(v.container.querySelector(".files-git, .files-git-summary")).toBeNull();
     });
 });
 

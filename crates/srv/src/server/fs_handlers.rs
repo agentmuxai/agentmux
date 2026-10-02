@@ -185,6 +185,12 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         fs_ops::jobs::JOBS.cancel(&cmd.op_id);
         Ok(FsEmptyResult {})
     });
+
+    // fs.git_status → the markers for a listed folder's entries. Never an
+    // error: outside a repository, or if git fails, the pane shows none.
+    engine.register_typed("fs.git_status", |cmd: FsPathReq, _ctx| async move {
+        Ok::<_, String>(fs_ops::git::git_status(&cmd.path).await)
+    });
 }
 
 #[cfg(test)]
@@ -219,6 +225,7 @@ mod tests {
             ("fs.op.start", "FsOpStartReq", "FsOpStartResult"),
             ("fs.op.resolve", "FsOpResolveReq", "FsEmptyResult"),
             ("fs.op.cancel", "FsOpCancelReq", "FsEmptyResult"),
+            ("fs.git_status", "FsPathReq", "FsGitStatus"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");
