@@ -1,7 +1,7 @@
 # SPEC: The swarm always shows a useful line for every agent — hardening the ambient summary
 
 **Date:** 2026-10-02
-**Status:** active — PR 1 shipped in #4185, PR 2 in #4234, PR 3 in #4238; PR 4 not started. The section 9 decisions were answered on 2026-10-02 (the recommendations, see 9.1).
+**Status:** active — PR 1 shipped in #4185, PR 2 in #4234, PR 3 in #4238, PR 4 in #4243; enforcing grounding (the last step of PR 4) is not decided. The section 9 decisions were answered on 2026-10-02 (the recommendations, see 9.1).
 **Author:** AgentX (narko), at the owner's request
 **Affects:** `crates/srv/src/ambient/` (`prompt.rs`, `validate.rs`, `tasks.rs`), `crates/srv/src/server/app_api/session.rs`, `crates/srv/src/backend/reactive/activity_watcher.rs`, `frontend/app/store/activitySummary.ts`, `frontend/app/view/agent/hooks/useAgentActivitySummary.ts` and `useBlockActivity.ts`, `frontend/app/view/swarm/swarm-model.ts` and `swarm-view.tsx`.
 **Builds on:** `docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md` (the title prompt this spec corrects), `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md` (the gateway), `docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md`.
@@ -131,6 +131,8 @@ The recommendation is the first (section 9). Whichever is chosen, its digest mus
 ### 5.8 Observability
 
 Every ambient call records one outcome, in a single structured log line at info (not debug) and a counter: `accepted`, `kept` (the abstain token), `rejected` with the reason (`empty`, `shape`, `absence_pattern`, `refusal`, `ungrounded`), `empty_digest`, `superseded`, `spawn_failed`, `timeout`. Per purpose, the swarm summary and the ghost text separately. Surface the counts in the muxlog and the instance panel, so "the swarm has been blank for an hour" is visible without copying a database. Log the rejected text, truncated, because the rejected values are the corpus for 5.1.
+
+**Built in #4243.** `ambient/outcome.rs` records one outcome per call from the gateway (admission, `Slot::run`) and the two places a title call has nothing to send, as an info line (`ambient outcome`, with the rejected text truncated to 120 characters) and a per-purpose counter. `ungrounded` is not a label yet: grounding is still advisory and not checked. The counts are read over `ambient.outcomes`; the Instance panel shows a **Titles** row (new, kept, refused, failed). Counters reset when srv restarts.
 
 ### 5.9 Tests
 
