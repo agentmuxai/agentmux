@@ -284,6 +284,7 @@ pub fn lan_needs(web_port: u16, ws_port: u16) -> Vec<Need> {
         Need { proto: Proto::Tcp, port: ws_port },
         Need { proto: Proto::Udp, port: 5353 },
         Need { proto: Proto::Udp, port: super::lan_discovery::UDP_DISCOVERY_PORT },
+        Need { proto: Proto::Udp, port: super::lan_discovery::DESKTOP_DISCOVERY_PORT },
     ]
 }
 
@@ -904,7 +905,7 @@ mod tests {
         };
         let udp = FwRule {
             proto: Proto::Udp,
-            local_ports: PortSpec::parse("5353,47891"),
+            local_ports: PortSpec::parse("5353,29700,47891"),
             remote: Remote::LocalSubnet,
             ..rule("AgentMux LAN (UDP)")
         };
@@ -1127,7 +1128,11 @@ mod tests {
         let tcp = FwRule { proto: Proto::Tcp, local_ports: PortSpec::parse("29700-29799"), ..rule("t") };
         let mdns = FwRule { proto: Proto::Udp, local_ports: PortSpec::parse("5353"), ..rule("u") };
         assert_eq!(coverage(&[tcp.clone(), mdns], EXE, &needs(), Category::Private), Coverage::Missing);
-        let both = FwRule { proto: Proto::Udp, local_ports: PortSpec::parse("5353,47891"), ..rule("u") };
+        // The desktop discovery port is a need too: a rule that names mDNS and the
+        // mobile port but not it leaves peers unable to find us when mDNS is down.
+        let no_desktop = FwRule { proto: Proto::Udp, local_ports: PortSpec::parse("5353,47891"), ..rule("u") };
+        assert_eq!(coverage(&[tcp.clone(), no_desktop], EXE, &needs(), Category::Private), Coverage::Missing);
+        let both = FwRule { proto: Proto::Udp, local_ports: PortSpec::parse("5353,29700,47891"), ..rule("u") };
         assert_eq!(coverage(&[tcp, both], EXE, &needs(), Category::Private), Coverage::Covered);
     }
 
