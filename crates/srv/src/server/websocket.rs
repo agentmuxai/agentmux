@@ -1682,6 +1682,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Editor/file-ops + write_agent_config handlers
     super::editor_handlers::register_editor_handlers(engine, &state);
 
+    // Files pane: fs.list/places/watch/unwatch + mutations
+    // (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3)
+    super::fs_handlers::register_fs_handlers(engine, &state);
+
     // LSP handlers (lspstart, lspsend, lspstop)
     super::lsp_handlers::register_lsp_handlers(engine, &state);
 

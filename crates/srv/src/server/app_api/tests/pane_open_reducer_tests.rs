@@ -65,6 +65,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         skip_placement: None,
         stack_onto_block_id: None,
         reuse_editor_pane: None,
+        select: None,
     };
     let res = open_pane(&state, cmd).await.expect("open_pane docked");
 
@@ -160,6 +161,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         skip_placement: None,
         stack_onto_block_id: Some(anchor.clone()),
         reuse_editor_pane: None,
+        select: None,
     };
     let res = open_pane(&state, cmd).await.expect("open_pane stack_onto_block_id");
     assert!(res.created);
@@ -527,6 +529,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         skip_placement: Some(true),
         stack_onto_block_id: None,
         reuse_editor_pane: None,
+        select: None,
     };
     let res = open_pane(&state, cmd).await.expect("open_pane skip_placement");
     assert!(res.created);
@@ -564,6 +567,7 @@ fn editor_open_cmd(
         skip_placement: None,
         stack_onto_block_id: None,
         reuse_editor_pane,
+        select: None,
     }
 }
 
@@ -922,4 +926,39 @@ async fn open_editor_floating_request_bypasses_reuse() {
         floating.block_id, existing_editor.block_id,
         "a floating OpenEditor request must never be swallowed into an existing docked pane"
     );
+}
+
+/// `view: "files"` (the Files pane, SPEC_FILE_BROWSER_PANE_2026_10_01.md
+/// §8.1): the folder comes from `file`, else `cwd`, else home, and `select`
+/// becomes the one-shot `files:select` only when it names something.
+#[test]
+fn files_view_meta_takes_the_folder_and_the_selection() {
+    let mut cmd = editor_open_cmd(None, "/work/repo", None, None);
+    cmd.view = "files".into();
+    cmd.select = Some(vec!["src".into(), "README.md".into()]);
+    let meta = pane::build_pane_meta(&cmd).unwrap();
+    assert_eq!(meta["view"], "files");
+    assert_eq!(meta["files:path"], "/work/repo");
+    assert_eq!(meta["files:select"], serde_json::json!(["src", "README.md"]));
+
+    cmd.file = None;
+    cmd.cwd = Some("/from/cwd".into());
+    cmd.select = Some(Vec::new());
+    let meta = pane::build_pane_meta(&cmd).unwrap();
+    assert_eq!(meta["files:path"], "/from/cwd");
+    assert!(!meta.contains_key("files:select"), "an empty selection is no request");
+
+    cmd.cwd = None;
+    cmd.select = None;
+    let meta = pane::build_pane_meta(&cmd).unwrap();
+    let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
+    assert_eq!(meta["files:path"], home.as_str(), "defaults to home");
+}
+
+#[test]
+fn an_unknown_view_names_files_among_the_supported_ones() {
+    let mut cmd = editor_open_cmd(None, "/x", None, None);
+    cmd.view = "nope".into();
+    let err = pane::build_pane_meta(&cmd).unwrap_err();
+    assert!(err.starts_with("INVALID_VIEW") && err.contains("files"), "{err}");
 }

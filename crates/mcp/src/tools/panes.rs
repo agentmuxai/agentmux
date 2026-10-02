@@ -66,6 +66,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // PaneOpenRequest for why this can't be inferred from
                 // split_reference_block_id alone).
                 reuse_editor_pane: Some(true),
+                select: None,
             };
 
             let resp = client
@@ -137,6 +138,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 cwd: None,
                 tab_id: None,
                 reuse_editor_pane: None, // view != "editor" — irrelevant here
+                select: None,
             };
 
             let resp = client
@@ -159,6 +161,81 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
             Ok(format!("Opened {file} in media pane (block {})", result.block_id))
+        }
+        // A Files pane on a folder, optionally with entries selected.
+        // Navigation only (SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1, §9:
+        // agents don't mutate through this pane).
+        "OpenFiles" => {
+            let path = arguments
+                .get("path")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: path"))?;
+            let select: Vec<String> = arguments
+                .get("select")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string).collect())
+                .unwrap_or_default();
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let split = arguments
+                .get("split")
+                .and_then(|v| v.as_str())
+                .filter(|s| matches!(*s, "right" | "left" | "down" | "up"))
+                .unwrap_or("right");
+
+            let url = format!("{}/api/v1/pane/open", local_url.trim_end_matches('/'));
+            let (split_direction, split_reference_block_id) = if block_id.is_empty() {
+                (None, None)
+            } else {
+                (Some(split.to_string()), Some(block_id.to_string()))
+            };
+            let req = PaneOpenRequest {
+                view: "files".to_string(),
+                file: Some(path.to_string()),
+                focus: Some(true),
+                split_direction,
+                split_reference_block_id,
+                title: arguments.get("title").and_then(|v| v.as_str()).map(str::to_string),
+                tree_expanded: None,
+                floating: if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
+                    Some(true)
+                } else {
+                    None
+                },
+                url: None,
+                cwd: None,
+                tab_id: None,
+                reuse_editor_pane: None, // view != "editor" — irrelevant here
+                select: if select.is_empty() { None } else { Some(select) },
+            };
+
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("pane.open failed: HTTP {status} — {text}");
+            }
+
+            let result: PaneOpenResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(format!("Opened {path} in a Files pane (block {})", result.block_id))
         }
         "OpenAgent" => {
             let agent_id = arguments

@@ -653,6 +653,7 @@ fn all_tool_defs_are_valid_json_with_names() {
         SHELL_STOP_TOOL,
         OPEN_EDITOR_TOOL,
         OPEN_MEDIA_TOOL,
+        OPEN_FILES_TOOL,
         SEND_MESSAGE_TOOL,
         DISCOVER_AGENTS_TOOL,
         WHOAMI_TOOL,
@@ -743,7 +744,9 @@ fn all_tool_defs_are_valid_json_with_names() {
     // but had no MCP tool wrapper until now) — same reasoning, not fixing
     // the pre-existing drift between this running total and the prose
     // breakdown.
-    assert_eq!(defs.len(), 53, "+ 1 QuitSelf; tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
+    // OPEN_FILES_TOOL added (1: SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1)
+    // — same reasoning, not fixing the pre-existing drift.
+    assert_eq!(defs.len(), 54, "+ 1 OpenFiles + 1 QuitSelf; tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
     for d in defs {
         let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
         assert!(

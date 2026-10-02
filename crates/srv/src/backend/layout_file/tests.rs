@@ -627,3 +627,20 @@ fn a_file_too_large_to_be_a_layout_is_refused_unread() {
     std::fs::write(&path, vec![b' '; (MAX_LAYOUT_FILE_BYTES + 1) as usize]).unwrap();
     assert!(read_layout_file(&path).unwrap_err().contains("too large"));
 }
+
+/// A Files pane round-trips its folder, home-relative in the file
+/// (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
+#[test]
+fn a_files_pane_round_trips_its_folder() {
+    let store = Store::open_in_memory().unwrap();
+    let mut warnings = Vec::new();
+    let view = view_from_block(&store, &meta(json!({ "view": "files", "files:path": under_home("src/app") })), &ctx(false), &mut warnings);
+    assert_eq!(view.view_type, "files");
+    assert_eq!(view.config["path"], "~/src/app");
+
+    let home = tempfile::tempdir().unwrap();
+    let plan = plan_from_doc(&store, &one_pane(json!({ "type": "files", "config": { "path": "~/src" } })), &opts(home.path(), false));
+    let m = block_meta(&plan, 0, 0);
+    assert_eq!(m["view"], "files");
+    assert_eq!(m["files:path"], home.path().join("src").to_string_lossy().as_ref());
+}

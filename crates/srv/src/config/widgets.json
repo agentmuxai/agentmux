@@ -56,6 +56,18 @@
             }
         }
     },
+    "defwidget@files": {
+        "display:order": 6,
+        "display:pinned": false,
+        "icon": "folder-open",
+        "label": "Hangar",
+        "description": "Browse files",
+        "blockdef": {
+            "meta": {
+                "view": "files"
+            }
+        }
+    },
     "defwidget@terminal": {
         "display:order": 5,
         "display:pinned": false,

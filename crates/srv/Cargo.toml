@@ -93,6 +93,12 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 # Cron expression parsing for the persistent cron scheduler
 cron = "0.12"
+# Move to the OS Trash / Recycle Bin, and restore from it, for the Files
+# pane's `fs.trash` / `fs.restore` (backend/fs_ops/trash_worker.rs). Called
+# from one dedicated thread only (its docs warn of UB from several threads
+# on Linux/FreeBSD), and set to NSFileManager on macOS so it never scripts
+# Finder. See docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §7.3, §9.1.5.
+trash = "5.2"
 
 [target.'cfg(windows)'.dependencies]
 # Read-only COM access to Windows Defender Firewall and the network list, to

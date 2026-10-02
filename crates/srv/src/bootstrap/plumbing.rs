@@ -226,6 +226,7 @@ pub fn build_app_state(
         ),
         editor_file_watcher: bg.editor_file_watcher,
         media_file_watcher: bg.media_file_watcher,
+        files_watcher: bg.files_watcher,
         fs_watch_pool: bg.fs_watch_pool,
     }
 }
