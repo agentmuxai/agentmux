@@ -224,6 +224,11 @@ remove the timing false-positives:
 
 The comparison is by family substring for aliases and by prefix for concrete ids (a dated id extends an undated one).
 
+*Built (`resolved-model.ts`, the Model section of the Runtime menu):* "Last reply used `<id>`", with a ⚠ only for a
+different **family** while the process agrees with the selection. One limit remains: right after the user changes the
+model, the previous process's reply is still the last one, so the ⚠ can show until the next reply; its wording says so
+("if you changed the model since, the next reply will show it") instead of pretending to know.
+
 **Stage B — srv readback.**
 Send `get_settings` after spawn and after each `result`; fold `applied.{model,effort}` into the `agentruntime` event
 as `effective`. The menu then shows effort too, which no stream source can. Old CLIs (no `get_settings`, or no
