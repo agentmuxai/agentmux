@@ -110,6 +110,34 @@ extern "C" fn write_linux_window_properties(
 #[cfg(target_os = "linux")]
 pub static SELECTED_OZONE_PLATFORM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// True when this browser process started with an alpha-capable
+/// (transparent-background) window configuration. Read by the Views
+/// delegates' `on_theme_changed`, which must re-assert the transparent view
+/// background every time CEF re-themes a view.
+pub static WINDOW_ALPHA_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// CEF's `CefViewView::OnThemeChanged` clears a view's background and, unless
+/// the delegate sets one, re-applies an opaque `kColorPrimaryBackground` fill
+/// (`#303030` under a dark GTK theme). On the Window and BrowserView that fill
+/// sits under the page and makes a translucent window opaque. Called from the
+/// delegates' `on_theme_changed` so the fill never comes back.
+pub(crate) fn keep_view_background_transparent(view: Option<&mut cef::View>, which: &str) {
+    use cef::ImplView;
+    if !WINDOW_ALPHA_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(view) = view else { return };
+    let before = view.background_color();
+    view.set_background_color(0x0000_0000);
+    tracing::debug!(
+        view = which,
+        before = format_args!("{before:#010x}"),
+        after = format_args!("{:#010x}", view.background_color()),
+        "[transparency] on_theme_changed: view background forced transparent"
+    );
+}
+
 /// Read `window:transparent` from the user's settings.json before CefInitialize.
 /// Gates the transparent-compositing command-line flags so non-transparent
 /// windows don't pay the LCD-text and opacity-flash penalties. Returns false

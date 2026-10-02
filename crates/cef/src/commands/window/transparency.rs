@@ -18,9 +18,11 @@
 //             (Win32 window-style ops are safe from any thread).
 //   macOS   — [NSWindow setAlphaValue:], via ui_tasks::post_set_window_alpha
 //             (AppKit → must run on the UI thread).
-//   Linux   — EWMH _NET_WM_WINDOW_OPACITY (X11/XWayland — the default ozone),
-//             via ui_tasks::post_set_window_alpha (CEF Views handle → must run
-//             on the UI thread). Native-Wayland ozone: no protocol, no-op.
+//   Linux   — X11/XWayland: EWMH _NET_WM_WINDOW_OPACITY, via
+//             ui_tasks::post_set_window_alpha (CEF Views handle → must run on
+//             the UI thread). Native Wayland (the default on Wayland sessions):
+//             no protocol, so no-op here; the window is alpha-capable and the
+//             page's CSS background carries the opacity, live.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
