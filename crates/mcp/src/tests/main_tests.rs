@@ -122,6 +122,13 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.starts_with("HELD for Camper (not_running)"), "{t}");
     assert!(t.contains("24 hours") && t.ends_with(" id=1-2-3"), "{t}");
 
+    // Held because the receiver is not signed in (Phase 0 item 4).
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "needs_login", "request_id": "1-2-3",
+        "error": "agent Camper is not signed in — held" }));
+    assert!(t.starts_with("HELD for Camper (needs_login)"), "{t}");
+    assert!(t.contains("signing in") && t.ends_with(" id=1-2-3"), "{t}");
+    assert!(!t.contains("  "), "no runs of spaces: {t:?}");
+
     let e = err(json!({ "success": false, "block_id": "b1",
         "error": "identity spawn gate: no credentials for claude: the bound account was deleted or is unresolvable." }));
     assert!(e.starts_with("Message delivery failed (needs_login)"), "{e}");
@@ -147,7 +154,7 @@ fn send_message_outcome_names_the_state_and_the_id() {
 fn send_message_description_lists_every_answer() {
     let v: Value = serde_json::from_str(SEND_MESSAGE_TOOL).unwrap();
     let d = v["description"].as_str().unwrap();
-    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)",
+    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)",
               "via the cloud relay (unconfirmed", "(needs_login)", "(not_found)", "id="] {
         assert!(d.contains(s), "missing {s:?}");
     }
