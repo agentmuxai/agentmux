@@ -283,22 +283,4 @@
             transition: none;
         }
     }
-
-
-    // === Status Log (terminal-style) ===
-    .agent-history-loading {
-        padding: var(--space-1) var(--space-2);
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        color: var(--secondary-text-color);
-        opacity: 0.6;
-        text-align: center;
-        border-bottom: 1px solid var(--border-color);
-        margin-bottom: var(--space-0-5);
-    }
-
-
-
-
-
 }
