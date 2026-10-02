@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.59.4 — 2026-10-01
+
+- docs(spec): cross-host access gains hops, non-AgentMux targets and the Windows test bed (follow-up to the merged spec)
+- fix(ambient): next-prompt ghost text no longer shows refusals; Haiku side calls run as bare text generation with a validated, bounded digest
+- agent pane: when an agent starts a new session, the conversation before it stays visible above a divider instead of being hidden
+- fix(agent): two quick changes in the Runtime menu no longer undo each other, and a change that fails to apply is shown
+- fix(lan): a host that hears peers but was never announced on IPv4 is now detected, rebuilt automatically, and shown in the LAN indicator (the Area54 failure)
+- feat(agent): the Runtime menu says when an agent is not running what is selected, and offers to restart it
+- feat(lan): the status bar now says when Windows Firewall would keep other machines out (needs setup, blocked, public network, managed), read-only
+- fix(agent): effort is shown only where it applies; a concrete Haiku model id no longer gets an --effort flag that fails every turn
+- docs(lan): the Windows test bed (snapshots and linked clones) and the macOS prompt result
+- refactor(ambient): one admit/run path, shared validation and a single module for the ambient Haiku calls
+- fix(agent): when an agent definition pins its own model or effort, the Runtime menu shows it, and picking another one takes effect
+- fix(agent): opening an agent over the App API installs a missing CLI instead of failing, including right after an upgrade moves its pin
+- fix(agent): a forked agent starts with the model, effort and mode the source agent was running, not the defaults
+- fix(agent): a subagent no longer moves the context meter or the model the pane learns its context window from
+- feat(agent): a Read row says which lines were read (L120–179 of 456), and a fast Read stays expanded until it scrolls off instead of sometimes coming out collapsed
+- fix(agent): the Mode options no longer promise approval prompts that never appear for a persistent agent
+- feat(agent): Read, Edit and Write rows show their line range as 33:334, before the path (Write is the whole file; Edit is the changed lines)
+- docs(agent): the runtime-menu bindings report records where every gap stands
+- chore(providers): bump CLI pins to latest: Claude Code 2.1.287, Gemini 0.62.0, Qwen 0.24.7, OpenClaw 2026.9.7, Copilot 1.0.91
+- chore(deps): bundled jq 1.8.2 and ripgrep 15.2.0, rustls 0.23.45, recommended Node 24.21.0
+- fix(agent): opening an OpenClaw agent on Node older than 24.16 shows "Node.js 24.16.0+ (you have …)" with an update link, instead of failing at install
+- chore(deps): ed25519-dalek 3.0.0 for jekt signing — signatures are byte-identical to 2.x, so mixed-version machines still verify each other
+- docs(spec): swarm broadcast arrives as the user's own message, marked as a broadcast
+- docs(spec): broadcasts are followed as the operator's instruction, no stop-and-ask (owner decision)
+- feat(swarm): a Swarm broadcast reaches each agent as the user's own message with a [BROADCAST] header and a chip, not as a self-declared jekt
+
 ## 0.59.3 — 2026-10-01
 
 - fix(agent): an agent opened by MCP OpenAgent or a layout starts on the model and effort its menu shows, not the CLI default
