@@ -42,6 +42,10 @@ export type {
     RunCliLoginResult,
     ToolchainEnvReq,
     ToolchainEnvResult,
+    ToolchainPruneItem,
+    ToolchainPruneReq,
+    ToolchainPruneResult,
+    ToolchainPruneSkip,
     ToolchainPackage,
     ToolchainVersionsReq,
 } from "./workspace";

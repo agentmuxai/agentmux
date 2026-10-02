@@ -17,6 +17,10 @@ export type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData"
 export type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 export type { ToolchainEnvReq } from "@/types/rpc/ToolchainEnvReq";
 export type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
+export type { ToolchainPruneItem } from "@/types/rpc/ToolchainPruneItem";
+export type { ToolchainPruneReq } from "@/types/rpc/ToolchainPruneReq";
+export type { ToolchainPruneResult } from "@/types/rpc/ToolchainPruneResult";
+export type { ToolchainPruneSkip } from "@/types/rpc/ToolchainPruneSkip";
 export type { ToolchainPackage } from "@/types/rpc/ToolchainPackage";
 export type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
 
@@ -47,6 +51,8 @@ import type { ToolchainEnvReq } from "@/types/rpc/ToolchainEnvReq";
 export type ResolveCliInput = Omit<CommandResolveCliData, "block_id"> &
     Partial<Pick<CommandResolveCliData, "block_id">>;
 import type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
+import type { ToolchainPruneReq } from "@/types/rpc/ToolchainPruneReq";
+import type { ToolchainPruneResult } from "@/types/rpc/ToolchainPruneResult";
 import type { ToolchainPackage } from "@/types/rpc/ToolchainPackage";
 import type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
 
@@ -170,6 +176,16 @@ export const WorkspaceApi = {
         // but this stub keeps sending the object it always sent.
         const data: ToolchainEnvReq = {};
         return client.rpcCall("toolchain.env", data, opts);
+    },
+
+    // Finds (dry run, the default) or removes (`dry_run: false`) provider CLI installs nothing has used for
+    // 30 days and nothing is running. Never called except by the Toolchain view's "Check"/"Remove" buttons.
+    ToolchainPruneCommand(
+        client: RpcClient,
+        data: ToolchainPruneReq,
+        opts?: RpcOpts,
+    ): Promise<ToolchainPruneResult> {
+        return client.rpcCall("toolchain.prune", data, opts);
     },
 
     // command "toolchain.versions" [call] — fetch latest published npm versions for

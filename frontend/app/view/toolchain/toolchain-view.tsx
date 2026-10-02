@@ -14,6 +14,7 @@ import { resolveDrift } from "@/app/view/agent/providers/version-drift";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
+import { CliDiskSpace } from "./CliDiskSpace";
 import "./toolchain-view.scss";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
@@ -536,6 +537,8 @@ export function ToolchainView(): JSX.Element {
                         )}
                     </Show>
                 </section>
+
+                <CliDiskSpace />
 
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">Core tools</h3>

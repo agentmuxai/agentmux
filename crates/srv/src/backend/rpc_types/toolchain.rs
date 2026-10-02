@@ -103,3 +103,70 @@ pub struct WidgetApiResult {
     #[ts(optional)]
     pub error: Option<String>,
 }
+
+/// Request for `toolchain.prune`: find, and optionally remove, installed provider
+/// CLIs that nothing has used for a long time and nothing is running.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ToolchainPruneReq {
+    /// Omitted or `true`: only report what WOULD be removed. Deleting needs an
+    /// explicit `false`, so a call that forgot the field cannot delete anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dry_run: Option<bool>,
+    /// With `dry_run: false`: remove only these directories (as listed by an
+    /// earlier dry run), and only those that are STILL removable. Anything that
+    /// became removable since is not touched, so a removal is exactly the list
+    /// the user saw. Omitted: everything removable now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub only: Option<Vec<String>>,
+}
+
+/// One installed CLI directory.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ToolchainPruneItem {
+    pub dir: String,
+    pub provider: String,
+    /// The pinned CLI version of a shared install, or the AgentMux version of a legacy one.
+    pub version: String,
+    /// A pre-2026-09-27 per-AgentMux-version install (`instances/v<version>/cli`).
+    pub legacy: bool,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// Whole days since the install was last used (or installed).
+    #[ts(type = "number")]
+    pub idle_days: u64,
+}
+
+/// A directory left alone at removal time, and why.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ToolchainPruneSkip {
+    pub dir: String,
+    pub reason: String,
+}
+
+/// Response for `toolchain.prune`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ToolchainPruneResult {
+    pub dry_run: bool,
+    /// The running-process scan worked. When it did not, nothing is offered:
+    /// a scan that cannot see must not approve a deletion.
+    pub scan_ok: bool,
+    /// What can be removed (a dry run), or what could be before this run removed it.
+    pub candidates: Vec<ToolchainPruneItem>,
+    #[ts(type = "number")]
+    pub reclaimable_bytes: u64,
+    /// Removed by this run (empty for a dry run).
+    pub removed: Vec<ToolchainPruneItem>,
+    pub skipped: Vec<ToolchainPruneSkip>,
+    /// Installs left in place: the current pins, anything recently used or running.
+    #[ts(type = "number")]
+    pub kept: u32,
+    /// The disuse line, in days.
+    #[ts(type = "number")]
+    pub max_idle_days: u32,
+}
