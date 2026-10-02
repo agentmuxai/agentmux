@@ -118,7 +118,6 @@ fn run_with_deadline(mut cmd: std::process::Command, deadline: Duration) -> Chil
         .stderr(Stdio::null());
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.no_window();
     }
     let Ok(mut child) = cmd.spawn() else {

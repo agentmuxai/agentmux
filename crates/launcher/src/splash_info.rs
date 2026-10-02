@@ -101,8 +101,7 @@ fn cmd_first_line(cmd: &str, args: &[&str]) -> Option<String> {
     command.args(args);
     #[cfg(windows)]
     {
-        // CREATE_NO_WINDOW: console-flash suppression — std::process::Command
-        // needs the CommandExt trait to call creation_flags.
+        // CREATE_NO_WINDOW: console-flash suppression.
         command.no_window();
     }
     let out = command.output().ok()?;

@@ -422,7 +422,7 @@ fn kill_process_tree(pid: u32) {
         {
             // CREATE_NO_WINDOW: console-flash suppression — bashwrap is a
             // GUI-subsystem parent, so spawning taskkill without this pops a
-            // visible console window. std::process::Command needs CommandExt.
+            // visible console window.
             cmd.no_window();
         }
         match cmd.output() {
@@ -1317,12 +1317,8 @@ async fn run_via_pipes(
     // rarely-exercised inner spawn). Same fix as shell_node.rs.
     #[cfg(windows)]
     {
-        // `cmd` is `tokio::process::Command`, which provides `creation_flags`
-        // as a native inherent method on Windows — unlike `std::process::
-        // Command`, no `use std::os::windows::process::CommandExt` is needed
-        // to call it here. Verified via a clean `cargo check --target
-        // x86_64-pc-windows-msvc` (0 errors) and this crate's windows-latest
-        // CI job, both passing without the import. See PR #2042 discussion.
+        // `cmd` is `tokio::process::Command`; `NoWindow` covers both it and
+        // `std::process::Command`, so no `CommandExt` import is needed.
         cmd.no_window();
     }
     let mut child = cmd

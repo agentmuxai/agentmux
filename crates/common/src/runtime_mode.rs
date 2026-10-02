@@ -427,8 +427,7 @@ fn run_git_branch(repo_dir: &Path) -> Option<String> {
         .current_dir(repo_dir);
     #[cfg(windows)]
     {
-        // CREATE_NO_WINDOW: console-flash suppression — std::process::Command
-        // needs the CommandExt trait to call creation_flags.
+        // CREATE_NO_WINDOW: console-flash suppression.
         cmd.no_window();
     }
     let output = cmd.output().ok()?;
