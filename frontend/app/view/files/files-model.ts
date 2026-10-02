@@ -722,16 +722,20 @@ export class FilesModel {
             return;
         }
         if (this.phase() !== "ready") return;
-        if (c.kind === "cut") setClipboard(null);
-        await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths);
+        // A cut is used up only once srv has taken the move: a refused one
+        // (protected place, folder into itself) keeps it (ReAgent on #4221).
+        const started = await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths);
+        if (started && c.kind === "cut" && clipboard() === c) setClipboard(null);
     }
 
     /** Copy or move `sources` into the folder shown. */
-    async transfer(kind: "copy" | "move", sources: string[]): Promise<void> {
+    async transfer(kind: "copy" | "move", sources: string[]): Promise<boolean> {
         try {
             await this.ops.start(kind, sources, this.path());
+            return true;
         } catch (err) {
             this.setStatus({ text: errorText(err), tone: "error" });
+            return false;
         }
     }
 

@@ -572,7 +572,7 @@ describe("the Files pane: copy and move (Phase 2a)", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
         await waitFor(() => expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toMatchObject({ kind: "move", dest_dir: HOME }));
-        expect(clipboard()).toBeNull();
+        await waitFor(() => expect(clipboard()).toBeNull());
     });
 
     it("shows progress with Cancel, then what happened", async () => {
@@ -604,6 +604,41 @@ describe("the Files pane: copy and move (Phase 2a)", () => {
         fireEvent.click(screen.getByLabelText(/Do this for every conflict/));
         fireEvent.click(screen.getByText("Keep both"));
         expect(h.rpc.FsOpResolveCommand.mock.lastCall?.[1]).toEqual({ op_id: "op1", choice: "keep_both", apply_to_all: true });
+    });
+
+    it("an op that finishes before srv replies leaves no progress bar, and keeps its name (ReAgent on #4221)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        h.rpc.FsOpStartCommand.mockImplementationOnce(async () => {
+            opEvent({ state: "running", total_items: 1 });
+            opEvent({ state: "done", done_items: 1 });
+            return { op_id: "op1" };
+        });
+        setClipboard({ kind: "copy", paths: ["D:\\tiny.txt"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Copied tiny.txt"));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(v.container.querySelector(".files-op")).toBeNull();
+    });
+
+    it("says why srv stopped an op itself", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        setClipboard({ kind: "copy", paths: ["D:\\x"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(h.rpc.FsOpStartCommand).toHaveBeenCalled());
+        opEvent({ state: "canceled", error: "No one answered about “x”, so the operation stopped." });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("No one answered about “x”, so the operation stopped."));
+    });
+
+    it("keeps a cut when srv refuses the move", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        h.rpc.FsOpStartCommand.mockRejectedValueOnce(new Error("Can't copy a folder into itself."));
+        setClipboard({ kind: "cut", paths: ["C:\\Users\\a"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Can't copy a folder into itself."));
+        expect(clipboard()).toEqual({ kind: "cut", paths: ["C:\\Users\\a"] });
     });
 
     it("reports items that failed", async () => {
