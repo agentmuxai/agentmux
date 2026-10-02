@@ -289,7 +289,7 @@
     .agent-history-loading {
         padding: var(--space-1) var(--space-2);
         font-family: var(--font-mono);
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         opacity: 0.6;
         text-align: center;
