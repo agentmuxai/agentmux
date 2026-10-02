@@ -5,7 +5,7 @@
 **Priority:** Medium — enables agent workflows that need web access and file editing
 
 > [!IMPORTANT]
-> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** Its non-goal "Tab management in browser pane" is lifted: Browser pages become Document Tabs (its §6.4), and Editor files are specified there too (§6.1).
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`:** the Editor's open files are document tabs (its §6.1). The non-goal "Tab management in browser pane" **stands**: Browser tabs were proposed there and then dropped by the repo owner the same day (its §6.4).
 
 ---
 
@@ -296,6 +296,8 @@ This replaces the pattern where agents say "open this file in your editor"
 - **Full IDE.** The editor pane is for quick edits and file viewing, not a
   replacement for VS Code. Complex refactoring still happens in the agent's
   terminal or via agent tool calls.
-- ~~**Tab management in browser pane.** Each browser pane is one page. Multiple~~ **Lifted 2026-10-02:** Browser pages become Document Tabs (`SPEC_DOCUMENT_TABS_2026_10_02.md` §6.4). Original:
-  pages = multiple panes (use the existing split/tab system).
+- **Tab management in browser pane.** Each browser pane is one page. Multiple
+  pages = multiple panes (use the existing split/tab system). (Reaffirmed
+  2026-10-02: `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.4 proposed Browser tabs and
+  the repo owner dropped them.)
 - **Browser extensions.** CEF sub-browsers don't support Chrome extensions.

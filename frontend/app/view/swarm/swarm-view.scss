@@ -790,6 +790,13 @@
     &.swarm-activity-summary--flash {
         animation: swarm-activity-flash 0.5s ease-out;
     }
+    // A fallback line (restored, heuristic or a status phrase), not the agent's
+    // own title: dimmer and upright, so it is never read as the agent's account
+    // of its work. store/swarm-line.ts
+    &.swarm-activity-summary--fallback {
+        opacity: 0.6;
+        font-style: normal;
+    }
 }
 
 @keyframes swarm-activity-flash {

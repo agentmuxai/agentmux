@@ -26,6 +26,7 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
+import { swarmLineTooltip } from "@/app/store/swarm-line";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -427,11 +428,18 @@ export function AgentRow({
                     </Show>
                     <AgentStatusChip status={displayStatus()} />
                 </div>
-                <Show when={node.activitySummary}>
-                    <div classList={{ "swarm-activity-summary": true, "swarm-activity-summary--flash": summaryFlash() }}>
-                        {node.activitySummary}
-                    </div>
-                </Show>
+                {/* Never empty: the generated title, or a fallback shown muted
+                    with a tooltip saying it is one (store/swarm-line.ts). */}
+                <div
+                    classList={{
+                        "swarm-activity-summary": true,
+                        "swarm-activity-summary--flash": summaryFlash(),
+                        "swarm-activity-summary--fallback": node.line.source !== "generated",
+                    }}
+                    title={swarmLineTooltip(node.line)}
+                >
+                    {node.line.text}
+                </div>
                 {/* The literal call in flight, next to the Haiku paraphrase
                     above it. Deliberately OUTSIDE the collapsed() guard: it is
                     one line, it is the most perishable thing on the card, and

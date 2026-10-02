@@ -10,6 +10,7 @@ import { MOS } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
 import { readSwarmSummary } from "@/app/store/activitySummary";
+import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 
@@ -185,6 +186,10 @@ export interface AgentTreeNode {
     agentName: string;
     agentProvider: string | null;
     activitySummary: string | null;
+    /** What the row shows: the generated title, or the first fallback that has
+     *  something (never empty). `activitySummary` stays the generated title
+     *  alone, so the view can flash on a new one. See store/swarm-line.ts. */
+    line: SwarmLine;
     contextTokens: number | null;
     agentStatus: "running" | "idle";
     /** One row per Agent-tool (solo) dispatch — always a flat list, never
@@ -2024,11 +2029,21 @@ export class SwarmViewModel {
             );
             const backgroundRows = groupBackgroundTasks(backgroundTasks, blockId, shownSubagentToolUseIds);
             const progress = progressByBlock.get(blockId);
+            // Same "only while running" rule as `currentTool` below: a stopped
+            // pane's last in-flight tool is stale.
+            const liveTool = agentStatus === "running" ? (progress?.currentTool ?? null) : null;
+            const line = resolveSwarmLine({
+                meta: block?.meta as Record<string, unknown> | undefined,
+                status: agentStatus,
+                currentTool: liveTool,
+                contextTokens,
+            });
             return {
                 blockId,
                 agentName,
                 agentProvider,
                 activitySummary,
+                line,
                 contextTokens,
                 agentStatus,
                 agentToolRows,

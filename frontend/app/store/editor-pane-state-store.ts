@@ -3,58 +3,65 @@
 
 /**
  * Editor pane state store — slice #10 of the frontend reducer roadmap.
- * Phase 1A: pure reducer + slot store + audit-ring integration. No view
- * wiring, no saga, no CodeMirror references — those land in Phase 1B/1C.
- * The editor-tabs spec this was written against (§"State management",
- * §"Phase 1A") was never committed — no such file has ever existed in
- * git history, so the path is removed rather than left dangling.
  *
- * The editor pane today owns one file at a time; this slice is the
- * foundation for the multi-file tab strip. The slot cell owns:
- *   - `tabs[]` — ordered list, each with id/filePath/language/dirty/etc.
- *   - `activeTabId` — id of the currently-active tab, or null when empty.
- *   - `recentlyClosed[]` — bounded ring (max 10) feeding Ctrl+Shift+T.
+ * The Editor's open files are document tabs
+ * (docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §6.1): the tab list, the
+ * active tab, preview tabs, the order and the reopen list are the shared
+ * model in `frontend/app/doc-tabs/doc-tabs.ts`, changed only through its
+ * commands. What this slice adds is the Editor's own state per tab (the
+ * buffer's path, language, load state and scratch identity: `EditorBuffer`,
+ * the tab's payload), its command and event vocabulary, the dirty-close
+ * confirmation, and the audit ring.
  *
- * Per-tab CodeMirror state lives OUTSIDE this cell (the view holds it
- * in a Map keyed by tabId — it's not serializable and shouldn't be in
- * the audit ring). The reducer only owns the data the persistence /
- * audit / LSP-coupling layers need.
+ * The state carries the shared model (`doc`) plus a projection of it in the
+ * shape the editor has always read: `tabs` (flat `EditorTab`s),
+ * `activeTabId` and `recentlyClosed`. The projection is rebuilt only when
+ * `doc` changes and reuses unchanged tabs' objects, so Solid sees the same
+ * references for tabs that didn't change.
+ *
+ * Per-tab CodeMirror state lives OUTSIDE this cell (the view holds it in a
+ * Map keyed by tabId — it's not serializable and shouldn't be in the audit
+ * ring).
  *
  * Pattern matches slice #4 (`agent-pane-state-store.ts`) and slice #9
  * (`browser-pane-state-store.ts`) — same `update(state, command) →
- * { state, events }` shape, same slot lifecycle, same
- * `recordDispatch` audit integration, same "throw on unregistered
- * dispatch" rule.
+ * { state, events }` shape, same slot lifecycle, same `recordDispatch`
+ * audit integration, same "throw on unregistered dispatch" rule.
  */
 
+import {
+    activateDoc,
+    closeDoc,
+    type DocTab,
+    type DocTabsState,
+    emptyDocTabs,
+    MAX_CLOSED,
+    moveDoc,
+    newDocTabId,
+    openDoc,
+    promoteDoc,
+    updateDoc,
+} from "@/app/doc-tabs/doc-tabs";
 import { type CommandSource, recordDispatch } from "./command-source";
 
 // ─────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────
 
-export interface EditorTab {
-    /** Stable per-pane id (uuid). Survives reorders. */
-    id: string;
+/** The Editor's own state for one tab: the document tab's payload. */
+export interface EditorBuffer {
     /** Canonicalized absolute path (see `canonicalizePath`). */
     filePath: string;
     /** Derived from extension at open time. */
     language: string;
     /** Set when content-load returns read-only. */
     readOnly: boolean;
-    /** True between first change and save. */
-    dirty: boolean;
     /** sha256 of last-loaded content; `""` before load resolves. */
     contentHash: string;
     /** Error message from the most recent load attempt; null when fine. */
     loadError: string | null;
     /** Transient — true once the lazy fetch resolved. Not persisted. */
     contentLoaded: boolean;
-    /** Preview tab — at most one per pane. A single-click in the tree
-     *  opens into the preview slot (replacing the current preview's file).
-     *  Double-click opens as pinned. Editing or explicit pin promotes a
-     *  preview to pinned. Matches VS Code semantics. */
-    isPreview: boolean;
     /** Scratch/untitled buffer — backed by a cache file in
      *  ~/.agentmux/cache/scratch/. True while the file hasn't been
      *  promoted to a real user-chosen path via Save As. */
@@ -66,25 +73,58 @@ export interface EditorTab {
     displayName?: string;
 }
 
+/** One tab as the editor reads it: the document tab, flattened. */
+export interface EditorTab extends EditorBuffer {
+    /** Stable for the tab's life. Survives reorders. */
+    id: string;
+    /** True between first change and save. */
+    dirty: boolean;
+    /** Preview tab — at most one per pane. A single-click in the tree
+     *  opens into the preview slot (replacing the current preview's file).
+     *  Double-click opens as pinned. Editing or explicit pin promotes a
+     *  preview to pinned. Matches VS Code semantics. */
+    isPreview: boolean;
+}
+
 interface ClosedTab {
     filePath: string;
-    closedAt: number;
 }
 
 export interface EditorPaneState {
-    tabs: EditorTab[];
-    activeTabId: string | null;
-    /** Capped at MAX_RECENTLY_CLOSED, oldest evicted on overflow. */
-    recentlyClosed: ClosedTab[];
+    /** The shared document-tab model: the source of truth. */
+    readonly doc: DocTabsState<EditorBuffer>;
+    /** Projection of `doc.tabs`, in display order. */
+    readonly tabs: EditorTab[];
+    readonly activeTabId: string | null;
+    /** Oldest first, at most MAX_RECENTLY_CLOSED (Ctrl+Shift+T). */
+    readonly recentlyClosed: ClosedTab[];
 }
 
-export const MAX_RECENTLY_CLOSED = 10;
+export const MAX_RECENTLY_CLOSED = MAX_CLOSED;
 
-export const initialState = (): EditorPaneState => ({
-    tabs: [],
-    activeTabId: null,
-    recentlyClosed: [],
-});
+// Projection cache: an unchanged document tab keeps its EditorTab object.
+const projected = new WeakMap<DocTab<EditorBuffer>, EditorTab>();
+
+function projectTab(t: DocTab<EditorBuffer>): EditorTab {
+    let e = projected.get(t);
+    if (!e) {
+        e = { ...t.payload, id: t.id, dirty: !!t.dirty, isPreview: t.preview };
+        projected.set(t, e);
+    }
+    return e;
+}
+
+/** The state for a document-tab model. */
+export function fromDocTabs(doc: DocTabsState<EditorBuffer>): EditorPaneState {
+    return {
+        doc,
+        tabs: doc.tabs.map(projectTab),
+        activeTabId: doc.activeId,
+        recentlyClosed: [...doc.closed].reverse().map((t) => ({ filePath: t.payload.filePath })),
+    };
+}
+
+export const initialState = (): EditorPaneState => fromDocTabs(emptyDocTabs<EditorBuffer>());
 
 // Hydration shapes — input to bulk-restore commands. Note these don't
 // carry transient fields; the reducer reconstructs full tabs with
@@ -101,12 +141,10 @@ interface HydratedTab {
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Optional `source` tag on every command — the echo-loop guard hook
- * for Phase 1B. The view dispatches CodeMirror updates with
- * `source: "cm-update"`; the reducer skips emitting `TabContentChanged`
- * for commands whose source indicates the change originated from the
- * reducer itself (e.g. `"hydrate"` for the initial doc the view writes
- * back to CodeMirror after a HydrateFromMeta). See slice #2 convention.
+ * Optional `source` tag on every command — the echo-loop guard hook. The
+ * view dispatches CodeMirror updates with `source: "cm-update"`; `"hydrate"`
+ * marks the initial doc the view writes back to CodeMirror after a restore.
+ * See slice #2 convention.
  */
 type EditorCommandSource = "user" | "system" | "cm-update" | "hydrate";
 
@@ -118,7 +156,7 @@ export type EditorPaneCommand =
           /** "preview" (default for tree single-click) → replaces the
            *  current preview tab if any, else creates a new preview.
            *  "pinned" (tree double-click, programmatic open) → always
-           *  appends a non-preview tab. Activating an already-open tab
+           *  adds a non-preview tab. Activating an already-open tab
            *  is unchanged regardless of mode. */
           mode?: "preview" | "pinned";
           source?: EditorCommandSource;
@@ -143,6 +181,7 @@ export type EditorPaneCommand =
     | { type: "CloseTab"; tabId: string; force?: boolean; source?: EditorCommandSource }
     | { type: "PinTab"; tabId: string; source?: EditorCommandSource }
     | { type: "SwitchTab"; tabId: string; source?: EditorCommandSource }
+    | { type: "CycleTab"; delta: number; source?: EditorCommandSource }
     | { type: "ReorderTab"; tabId: string; toIndex: number; source?: EditorCommandSource }
     | { type: "MarkDirty"; tabId: string; source?: EditorCommandSource }
     | { type: "ClearDirty"; tabId: string; source?: EditorCommandSource }
@@ -165,6 +204,13 @@ export type EditorPaneCommand =
           type: "HydrateFromDefaults";
           tabs: HydratedTab[];
           activeTabId: string | null;
+          source?: EditorCommandSource;
+      }
+    | {
+          /** Restore a pane's tabs from its block's `doctabs` record
+           *  (SPEC_DOCUMENT_TABS §5.3), already rebuilt by `hydrateDocTabs`. */
+          type: "RestoreDocTabs";
+          doc: DocTabsState<EditorBuffer>;
           source?: EditorCommandSource;
       }
     | { type: "RenameFile"; oldPath: string; newPath: string; source?: EditorCommandSource };
@@ -208,7 +254,7 @@ export interface ReducerResult {
 
 /**
  * Canonicalize a filesystem path so `C:/x` and `C:\x` resolve to the
- * same tab. Phase 1A approach (cheap, deterministic, no I/O):
+ * same tab (cheap, deterministic, no I/O):
  *   - strip Windows' `\\?\` extended-length ("verbatim") prefix
  *   - normalize backslashes to forward slashes
  *   - collapse repeated slashes
@@ -230,9 +276,7 @@ export interface ReducerResult {
  * silently never fires for any tab, on Windows, unconditionally.
  *
  * Symlink resolution is intentionally out of scope — that requires
- * filesystem I/O which can't sit inside a pure reducer. The saga in
- * Phase 1C may canonicalize further before dispatching; the reducer's
- * job is just to make trivially-equivalent paths collide.
+ * filesystem I/O which can't sit inside a pure reducer.
  */
 export function canonicalizePath(path: string): string {
     if (!path) return path;
@@ -262,83 +306,86 @@ export function canonicalizePath(path: string): string {
     return p;
 }
 
-/** Derive a CodeMirror-friendly language id from a file extension.
- *  Phase 1A keeps this minimal — the view's existing extension-to-mode
- *  table can supersede it once we wire 1B. */
+/** Derive a language id from a file extension. A fallback label: the
+ *  model passes its own mapped language (`detectLanguage`) on open. */
 function deriveLanguage(path: string): string {
     const m = /\.([A-Za-z0-9]+)$/.exec(path);
     if (!m) return "text";
     return m[1].toLowerCase();
 }
 
-function newTabId(): string {
-    // crypto.randomUUID is available in modern Chromium (host runtime)
-    // and the test environment (vitest on Node ≥ 19). Fallback path
-    // covers older Node just in case.
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        return crypto.randomUUID();
-    }
-    return `tab-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+function baseName(path: string): string {
+    const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return i >= 0 ? path.slice(i + 1) : path;
 }
 
-function findTabIndex(state: EditorPaneState, tabId: string): number {
-    return state.tabs.findIndex((t) => t.id === tabId);
+/** A tab's title in the strip: a scratch buffer's name, else the file's. */
+export function editorTabTitle(b: Pick<EditorBuffer, "filePath" | "displayName">): string {
+    return b.displayName || baseName(b.filePath);
 }
 
-function findTabByPath(
-    state: EditorPaneState,
-    canonicalPath: string,
-): EditorTab | undefined {
-    return state.tabs.find((t) => t.filePath === canonicalPath);
-}
-
-/** Build a fresh tab record for the given path/language. */
-function makeTab(path: string, language?: string, isPreview = false): EditorTab {
+/** A buffer that hasn't been read yet. */
+function freshBuffer(path: string, language?: string): EditorBuffer {
     const canon = canonicalizePath(path);
     return {
-        id: newTabId(),
         filePath: canon,
         language: language ?? deriveLanguage(canon),
         readOnly: false,
-        dirty: false,
         contentHash: "",
         loadError: null,
         contentLoaded: false,
-        isPreview,
     };
 }
 
-/**
- * Pick the new active id after `tabId` has been removed from `prevTabs`.
- * Matches VS Code: prefer the right neighbor of the closed tab; fall
- * back to the left when closing the rightmost tab; null when no tabs
- * remain.
- */
-function pickNextActiveId(
-    prevTabs: EditorTab[],
-    closedIndex: number,
-): string | null {
-    const remaining = prevTabs.length - 1;
-    if (remaining <= 0) return null;
-    // After removing closedIndex, the right neighbor's NEW index is
-    // closedIndex (since everything to the right shifts left). If
-    // closedIndex was at the end, fall back to the new last tab
-    // (which is the old left neighbor).
-    if (closedIndex < remaining) {
-        return prevTabs[closedIndex + 1].id;
-    }
-    return prevTabs[closedIndex - 1].id;
+/** A buffer as it is after a restart or a reopen: not read yet. */
+function unloaded(b: EditorBuffer): EditorBuffer {
+    return { ...b, contentHash: "", loadError: null, contentLoaded: false };
 }
 
-function pushRecentlyClosed(
-    list: ClosedTab[],
-    entry: ClosedTab,
-): ClosedTab[] {
-    const next = [...list, entry];
-    if (next.length > MAX_RECENTLY_CLOSED) {
-        return next.slice(next.length - MAX_RECENTLY_CLOSED);
-    }
-    return next;
+function tabById(doc: DocTabsState<EditorBuffer>, id: string): DocTab<EditorBuffer> | undefined {
+    return doc.tabs.find((t) => t.id === id);
+}
+
+function same(state: EditorPaneState): ReducerResult {
+    return { state, events: [] };
+}
+
+/** The state after `doc` changed (the same state when it didn't). */
+function next(state: EditorPaneState, doc: DocTabsState<EditorBuffer>, events: EditorPaneEvent[] = []): ReducerResult {
+    return { state: doc === state.doc ? state : fromDocTabs(doc), events };
+}
+
+function patchBuffer(doc: DocTabsState<EditorBuffer>, id: string, patch: Partial<EditorBuffer>): DocTabsState<EditorBuffer> {
+    const tab = tabById(doc, id);
+    if (!tab) return doc;
+    const payload = { ...tab.payload, ...patch };
+    return updateDoc(doc, id, {
+        payload,
+        key: payload.filePath,
+        title: editorTabTitle(payload),
+    });
+}
+
+function activated(doc: DocTabsState<EditorBuffer>): EditorPaneEvent[] {
+    const tab = doc.activeId ? tabById(doc, doc.activeId) : undefined;
+    return tab ? [{ type: "TabActivated", tabId: tab.id, filePath: tab.payload.filePath }] : [];
+}
+
+function opened(doc: DocTabsState<EditorBuffer>, id: string): EditorPaneEvent[] {
+    const atIndex = doc.tabs.findIndex((t) => t.id === id);
+    const tab = doc.tabs[atIndex];
+    return [{ type: "TabOpened", tabId: id, filePath: tab.payload.filePath, atIndex }];
+}
+
+function hydrate(tabs: HydratedTab[], activeTabId: string | null): DocTabsState<EditorBuffer> {
+    const docTabs: DocTab<EditorBuffer>[] = tabs.map((t) => {
+        const payload = { ...freshBuffer(t.filePath, t.language), readOnly: t.readOnly ?? false };
+        // Restored tabs are never previews: the user committed to them
+        // by leaving them open across the restart.
+        return { id: t.id, key: payload.filePath, title: editorTabTitle(payload), preview: false, pinned: false, payload };
+    });
+    const active = docTabs.some((t) => t.id === activeTabId) ? activeTabId : (docTabs[0]?.id ?? null);
+    return { tabs: docTabs, activeId: active, mru: active ? [active] : [], closed: [] };
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -353,453 +400,223 @@ function pushRecentlyClosed(
  * Invariants enforced:
  *   1. `activeTabId` points to a tab in `tabs[]` or is null when
  *      `tabs[]` is empty.
- *   2. Tab `id`s are unique within a pane (the helper that mints ids
- *      uses uuids; activate-existing prevents accidental dup-by-path).
+ *   2. Tab `id`s are unique within a pane, and one file has one tab
+ *      (opening an open path activates its tab).
  *   3. `recentlyClosed.length <= MAX_RECENTLY_CLOSED`.
  *   4. `MarkDirty` / `ClearDirty` emit their events only on actual
  *      transitions (idempotent).
  */
-export function update(
-    state: EditorPaneState,
-    command: EditorPaneCommand,
-): ReducerResult {
+export function update(state: EditorPaneState, command: EditorPaneCommand): ReducerResult {
+    const doc = state.doc;
     switch (command.type) {
         case "OpenFile": {
-            const canon = canonicalizePath(command.path);
-            const existing = findTabByPath(state, canon);
-            const requestedMode = command.mode ?? "pinned";
+            const buffer = freshBuffer(command.path, command.language);
+            const mode = command.mode ?? "pinned";
+            const existing = doc.tabs.find((t) => t.key === buffer.filePath);
             if (existing) {
-                // If the existing tab is a preview and the caller asked
-                // for a pinned open (e.g. tree double-click on the file
-                // that's currently in preview), pin it as part of the
-                // activation. Other transitions (preview→preview,
-                // pinned→pinned, pinned→preview) are no-ops for isPreview.
-                const shouldPin = existing.isPreview && requestedMode === "pinned";
-                const existingIdx = state.tabs.findIndex((t) => t.id === existing.id);
-                const updatedTab = shouldPin
-                    ? { ...existing, isPreview: false }
-                    : existing;
-                const nextTabs = shouldPin
-                    ? [
-                          ...state.tabs.slice(0, existingIdx),
-                          updatedTab,
-                          ...state.tabs.slice(existingIdx + 1),
-                      ]
-                    : state.tabs;
-                if (state.activeTabId === existing.id && !shouldPin) {
-                    // Already active and no pin transition → no state change.
-                    return {
-                        state,
-                        events: [
-                            {
-                                type: "TabActivated",
-                                tabId: existing.id,
-                                filePath: existing.filePath,
-                            },
-                        ],
-                    };
-                }
-                return {
-                    state: {
-                        ...state,
-                        tabs: nextTabs,
-                        activeTabId: existing.id,
-                    },
-                    events: [
-                        {
-                            type: "TabActivated",
-                            tabId: existing.id,
-                            filePath: existing.filePath,
-                        },
-                    ],
-                };
+                // A pinned open of the file in preview pins it (tree
+                // double-click on the previewed file).
+                const pinned = existing.preview && mode === "pinned" ? promoteDoc(doc, existing.id) : doc;
+                const d = pinned === doc && doc.activeId === existing.id ? doc : activateDoc(pinned, existing.id);
+                return next(state, d, [
+                    { type: "TabActivated", tabId: existing.id, filePath: existing.payload.filePath },
+                ]);
             }
-
-            // New tab. In preview mode, replace the existing preview tab if
-            // one exists — only ONE preview tab per pane. Pinned mode always
-            // appends. Default is "pinned" — that's the safe choice for
-            // programmatic callers (ReopenLastClosed, tests, future drag-
-            // drop). Tree single-click is the only caller that should pass
-            // `mode: "preview"` explicitly.
-            if (requestedMode === "preview") {
-                const previewIdx = state.tabs.findIndex((t) => t.isPreview);
-                if (previewIdx >= 0) {
-                    // Replace the preview slot's contents in place. Reset
-                    // load state so the view re-fetches. The tab id stays
-                    // the same so view-side CodeMirror state for OTHER
-                    // tabs is unaffected.
-                    const newPreview: EditorTab = {
-                        ...state.tabs[previewIdx],
-                        filePath: canon,
-                        language: command.language ?? deriveLanguage(canon),
-                        readOnly: false,
-                        dirty: false,
-                        contentHash: "",
-                        loadError: null,
-                        contentLoaded: false,
-                        isPreview: true,
-                    };
-                    const nextTabs = [
-                        ...state.tabs.slice(0, previewIdx),
-                        newPreview,
-                        ...state.tabs.slice(previewIdx + 1),
-                    ];
-                    return {
-                        state: {
-                            ...state,
-                            tabs: nextTabs,
-                            activeTabId: newPreview.id,
-                        },
-                        events: [
-                            {
-                                type: "TabActivated",
-                                tabId: newPreview.id,
-                                filePath: newPreview.filePath,
-                            },
-                        ],
-                    };
-                }
+            const preview = mode === "preview" ? doc.tabs.find((t) => t.preview) : undefined;
+            const args = { key: buffer.filePath, title: editorTabTitle(buffer), payload: buffer, preview: mode === "preview" };
+            if (preview) {
+                // The preview slot shows the new file, keeping its tab id:
+                // the view's state for other tabs is untouched, and the
+                // reset buffer makes the model read the new file.
+                const d = openDoc(doc, args, preview.id);
+                return next(state, d, [{ type: "TabActivated", tabId: preview.id, filePath: buffer.filePath }]);
             }
-
-            const tab = makeTab(command.path, command.language, requestedMode === "preview");
-            const nextTabs = [...state.tabs, tab];
-            return {
-                state: {
-                    ...state,
-                    tabs: nextTabs,
-                    activeTabId: tab.id,
-                },
-                events: [
-                    {
-                        type: "TabOpened",
-                        tabId: tab.id,
-                        filePath: tab.filePath,
-                        atIndex: nextTabs.length - 1,
-                    },
-                ],
-            };
+            const id = newDocTabId();
+            const d = openDoc(doc, args, id);
+            return next(state, d, opened(d, id));
         }
 
         case "PinTab": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0 || !state.tabs[idx].isPreview) {
-                // Defensive: pinning a non-preview tab is a no-op.
-                return { state, events: [] };
-            }
-            const nextTab = { ...state.tabs[idx], isPreview: false };
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                nextTab,
-                ...state.tabs.slice(idx + 1),
-            ];
-            return { state: { ...state, tabs: nextTabs }, events: [] };
+            const tab = tabById(doc, command.tabId);
+            if (!tab?.preview) return same(state);
+            return next(state, promoteDoc(doc, tab.id));
         }
 
         case "CloseTab": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) {
-                // Defensive no-op — closing an already-closed tab is
-                // benign (double-click on the × button, stale IPC).
-                return { state, events: [] };
-            }
-            const tab = state.tabs[idx];
+            const tab = tabById(doc, command.tabId);
+            // Closing an already-closed tab is benign (double-click on the
+            // ×, stale IPC).
+            if (!tab) return same(state);
             if (tab.dirty && !command.force) {
-                // The view shows a confirm modal; on confirm it
-                // re-dispatches the same command with `force: true`.
-                return {
-                    state,
-                    events: [
-                        {
-                            type: "RequestDirtyConfirm",
-                            tabId: tab.id,
-                            originalCommand: command,
-                        },
-                    ],
-                };
+                // The view asks; on confirm it re-dispatches with `force`.
+                return { state, events: [{ type: "RequestDirtyConfirm", tabId: tab.id, originalCommand: command }] };
             }
-            const nextTabs = [...state.tabs.slice(0, idx), ...state.tabs.slice(idx + 1)];
-            const wasActive = state.activeTabId === tab.id;
-            const nextActiveId = wasActive
-                ? pickNextActiveId(state.tabs, idx)
-                : state.activeTabId;
-            const closedEntry: ClosedTab = {
-                filePath: tab.filePath,
-                closedAt: Date.now(),
-            };
-            const nextState: EditorPaneState = {
-                tabs: nextTabs,
-                activeTabId: nextActiveId,
-                recentlyClosed: pushRecentlyClosed(state.recentlyClosed, closedEntry),
-            };
-            const events: EditorPaneEvent[] = [
-                { type: "TabClosed", tabId: tab.id, filePath: tab.filePath },
-            ];
-            if (wasActive && nextActiveId != null) {
-                const newActive = nextTabs.find((t) => t.id === nextActiveId)!;
-                events.push({
-                    type: "TabActivated",
-                    tabId: newActive.id,
-                    filePath: newActive.filePath,
-                });
-            }
-            return { state: nextState, events };
+            const d = closeDoc(doc, tab.id);
+            const events: EditorPaneEvent[] = [{ type: "TabClosed", tabId: tab.id, filePath: tab.payload.filePath }];
+            if (doc.activeId === tab.id) events.push(...activated(d));
+            return next(state, d, events);
         }
 
         case "SwitchTab": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) {
-                // Defensive — clicking a stale tab id (e.g. a tab
-                // that was closed between render and click) is a
-                // no-op, not a crash.
-                return { state, events: [] };
-            }
-            if (state.activeTabId === command.tabId) {
-                return { state, events: [] };
-            }
-            const tab = state.tabs[idx];
-            return {
-                state: { ...state, activeTabId: tab.id },
-                events: [
-                    { type: "TabActivated", tabId: tab.id, filePath: tab.filePath },
-                ],
-            };
+            if (!tabById(doc, command.tabId) || doc.activeId === command.tabId) return same(state);
+            const d = activateDoc(doc, command.tabId);
+            return next(state, d, activated(d));
+        }
+
+        case "CycleTab": {
+            if (doc.tabs.length < 2) return same(state);
+            const at = Math.max(0, doc.tabs.findIndex((t) => t.id === doc.activeId));
+            const target = doc.tabs[(((at + command.delta) % doc.tabs.length) + doc.tabs.length) % doc.tabs.length];
+            return update(state, { type: "SwitchTab", tabId: target.id, source: command.source });
         }
 
         case "ReorderTab": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
-            if (state.tabs.length <= 1) return { state, events: [] };
-            const clamped = Math.max(
-                0,
-                Math.min(state.tabs.length - 1, command.toIndex),
-            );
-            if (clamped === idx) return { state, events: [] };
-            const next = [...state.tabs];
-            const [moved] = next.splice(idx, 1);
-            next.splice(clamped, 0, moved);
-            return { state: { ...state, tabs: next }, events: [] };
+            const idx = doc.tabs.findIndex((t) => t.id === command.tabId);
+            if (idx < 0) return same(state);
+            const to = Math.max(0, Math.min(doc.tabs.length - 1, command.toIndex));
+            return next(state, moveDoc(doc, command.tabId, to - idx));
         }
 
         case "MarkDirty": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
-            const tab = state.tabs[idx];
-            if (tab.dirty) {
-                // Already dirty → no event re-emission. The view
-                // model's title `*` is already on; no listener needs
-                // a redundant signal.
-                return { state, events: [] };
-            }
-            // Editing a preview tab promotes it to pinned (matches
-            // VS Code's behavior — once you've started editing, the
-            // tab should survive the next preview-mode tree click).
-            const nextTab: EditorTab = { ...tab, dirty: true, isPreview: false };
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                nextTab,
-                ...state.tabs.slice(idx + 1),
-            ];
-            return {
-                state: { ...state, tabs: nextTabs },
-                events: [{ type: "TabDirtied", tabId: tab.id }],
-            };
+            const tab = tabById(doc, command.tabId);
+            // Already dirty → no event re-emission.
+            if (!tab || tab.dirty) return same(state);
+            // Editing a preview tab promotes it (VS Code: once you've
+            // started editing, the tab survives the next preview open).
+            const d = promoteDoc(updateDoc(doc, tab.id, { dirty: true }), tab.id);
+            return next(state, d, [{ type: "TabDirtied", tabId: tab.id }]);
         }
 
         case "ClearDirty": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
-            const tab = state.tabs[idx];
-            if (!tab.dirty) {
-                return { state, events: [] };
-            }
-            const nextTab: EditorTab = { ...tab, dirty: false };
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                nextTab,
-                ...state.tabs.slice(idx + 1),
-            ];
-            return {
-                state: { ...state, tabs: nextTabs },
-                events: [{ type: "TabSaved", tabId: tab.id }],
-            };
+            const tab = tabById(doc, command.tabId);
+            if (!tab?.dirty) return same(state);
+            return next(state, updateDoc(doc, tab.id, { dirty: false }), [{ type: "TabSaved", tabId: tab.id }]);
         }
 
         case "TabContentLoaded": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
-            const tab = state.tabs[idx];
-            const nextTab: EditorTab = {
-                ...tab,
-                contentLoaded: true,
-                contentHash: command.contentHash,
-                loadError: null,
-                readOnly: command.readOnly ?? tab.readOnly,
-            };
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                nextTab,
-                ...state.tabs.slice(idx + 1),
-            ];
-            return { state: { ...state, tabs: nextTabs }, events: [] };
+            const tab = tabById(doc, command.tabId);
+            if (!tab) return same(state);
+            return next(
+                state,
+                patchBuffer(doc, tab.id, {
+                    contentLoaded: true,
+                    contentHash: command.contentHash,
+                    loadError: null,
+                    readOnly: command.readOnly ?? tab.payload.readOnly,
+                })
+            );
         }
 
         case "TabContentLoadFailed": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
-            const tab = state.tabs[idx];
-            // Preserve contentLoaded if it was already true — only the
-            // initial-load failure path needs to flip it to false. For
-            // operational failures (e.g. save errors), the disk-side
-            // content the view holds is still valid and the centered
-            // error panel must NOT replace CodeMirror; the small top
-            // banner picks the error up via the loadError accessor.
-            const nextTab: EditorTab = {
-                ...tab,
-                loadError: command.error,
-                // Stay loaded if we already were; only flip to false
-                // for never-loaded tabs (where contentLoaded is already
-                // false anyway, so this is a no-op for that case).
-                contentLoaded: tab.contentLoaded,
-            };
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                nextTab,
-                ...state.tabs.slice(idx + 1),
-            ];
-            return { state: { ...state, tabs: nextTabs }, events: [] };
+            // contentLoaded stays as it was: for operational failures (a
+            // failed save) the buffer the view holds is still valid, and the
+            // centered error panel must NOT replace CodeMirror; the small
+            // top banner picks the error up via the loadError accessor.
+            if (!tabById(doc, command.tabId)) return same(state);
+            return next(state, patchBuffer(doc, command.tabId, { loadError: command.error }));
         }
 
         case "ReopenLastClosed": {
-            if (state.recentlyClosed.length === 0) {
-                return { state, events: [] };
+            const [last, ...rest] = doc.closed;
+            if (!last) return same(state);
+            const buffer = unloaded(last.payload);
+            const trimmed = { ...doc, closed: rest };
+            // Open again (a tab still open on that file just activates).
+            const existing = doc.tabs.find((t) => t.key === buffer.filePath);
+            if (existing) {
+                const d = activateDoc(trimmed, existing.id);
+                return next(state, d, activated(d));
             }
-            const last = state.recentlyClosed[state.recentlyClosed.length - 1];
-            const trimmed = state.recentlyClosed.slice(0, -1);
-            // Re-route through the OpenFile pathway so we get the
-            // standard activate-if-exists + TabOpened semantics. The
-            // popped entry is removed BEFORE the OpenFile reduces so
-            // a tab that happens to still be in the list (e.g. it
-            // was reopened by another route between close+reopen)
-            // just activates.
-            const sub = update(
-                { ...state, recentlyClosed: trimmed },
-                { type: "OpenFile", path: last.filePath },
-            );
-            return sub;
+            const id = newDocTabId();
+            const d = openDoc(trimmed, { key: buffer.filePath, title: editorTabTitle(buffer), payload: buffer }, id);
+            return next(state, d, opened(d, id));
         }
 
         case "HydrateFromMeta":
         case "HydrateFromDefaults": {
-            const fromDefaults = command.type === "HydrateFromDefaults";
-            const tabs: EditorTab[] = command.tabs.map((t) => ({
-                id: t.id,
-                filePath: canonicalizePath(t.filePath),
-                language: t.language ?? deriveLanguage(t.filePath),
-                readOnly: t.readOnly ?? false,
-                dirty: false,
-                contentHash: "",
-                loadError: null,
-                contentLoaded: false,
-                // Hydrated tabs are always pinned — a persisted preview
-                // wouldn't survive the round-trip semantically (the user
-                // committed by closing/reopening the session).
-                isPreview: false,
-            }));
-            // Enforce invariant 1 — activeTabId must point at a tab
-            // in the list, or be null when empty.
-            const activeStillPresent =
-                command.activeTabId != null &&
-                tabs.some((t) => t.id === command.activeTabId);
-            const activeId = activeStillPresent
-                ? command.activeTabId
-                : tabs.length > 0
-                  ? tabs[0].id
-                  : null;
-            const nextState: EditorPaneState = {
-                tabs,
-                activeTabId: activeId,
-                recentlyClosed: state.recentlyClosed,
+            const d = { ...hydrate(command.tabs, command.activeTabId), closed: doc.closed };
+            return next(state, d, [
+                {
+                    type: "TabsRestored",
+                    tabIds: d.tabs.map((t) => t.id),
+                    activeTabId: d.activeId,
+                    fromDefaults: command.type === "HydrateFromDefaults",
+                },
+            ]);
+        }
+
+        case "RestoreDocTabs": {
+            const d: DocTabsState<EditorBuffer> = {
+                ...command.doc,
+                tabs: command.doc.tabs.map((t) => ({ ...t, preview: false, dirty: false, payload: unloaded(t.payload) })),
+                closed: doc.closed,
             };
-            return {
-                state: nextState,
-                events: [
-                    {
-                        type: "TabsRestored",
-                        tabIds: tabs.map((t) => t.id),
-                        activeTabId: activeId,
-                        fromDefaults,
-                    },
-                ],
-            };
+            return next(state, d, [{ type: "TabsRestored", tabIds: d.tabs.map((t) => t.id), activeTabId: d.activeId, fromDefaults: false }]);
         }
 
         case "OpenScratch": {
             const canon = canonicalizePath(command.filePath);
-            // If a scratch tab already points to this file, just activate it.
-            const existing = state.tabs.find((t) => t.filePath === canon && t.isScratch);
+            // A scratch tab on this file already: just activate it.
+            const existing = doc.tabs.find((t) => t.key === canon && t.payload.isScratch);
             if (existing) {
-                return {
-                    state: { ...state, activeTabId: existing.id },
-                    events: [{ type: "TabActivated", tabId: existing.id, filePath: existing.filePath }],
-                };
+                const d = activateDoc(doc, existing.id);
+                return next(state, d, [{ type: "TabActivated", tabId: existing.id, filePath: existing.payload.filePath }]);
             }
-            const tab: EditorTab = {
-                id: newTabId(),
-                filePath: canon,
-                language: command.language ?? "markdown",
-                readOnly: false,
-                dirty: false,
-                contentHash: "",
-                loadError: null,
-                contentLoaded: false,
-                isPreview: false,
+            const buffer: EditorBuffer = {
+                ...freshBuffer(command.filePath, command.language ?? "markdown"),
                 isScratch: true,
                 scratchId: command.scratchId,
                 displayName: command.displayName,
             };
-            const nextTabs = [...state.tabs, tab];
-            return {
-                state: { ...state, tabs: nextTabs, activeTabId: tab.id },
-                events: [{ type: "TabOpened", tabId: tab.id, filePath: tab.filePath, atIndex: nextTabs.length - 1 }],
-            };
+            const id = newDocTabId();
+            const d = openDoc(doc, { key: canon, title: editorTabTitle(buffer), payload: buffer }, id);
+            return next(state, d, opened(d, id));
         }
 
         case "PromoteScratch": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
-            const tab = state.tabs[idx];
-            const nextTab: EditorTab = {
-                ...tab,
+            const tab = tabById(doc, command.tabId);
+            if (!tab) return same(state);
+            const d = patchBuffer(updateDoc(doc, tab.id, { dirty: false }), tab.id, {
                 filePath: canonicalizePath(command.newPath),
                 language: deriveLanguage(command.newPath),
                 isScratch: false,
                 scratchId: undefined,
                 displayName: undefined,
-                dirty: false,
-            };
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                nextTab,
-                ...state.tabs.slice(idx + 1),
-            ];
-            return { state: { ...state, tabs: nextTabs }, events: [{ type: "TabSaved", tabId: tab.id }] };
+            });
+            return next(state, d, [{ type: "TabSaved", tabId: tab.id }]);
         }
 
         case "RenameFile": {
             const canonOld = canonicalizePath(command.oldPath);
-            const canonNew = canonicalizePath(command.newPath);
-            const idx = state.tabs.findIndex((t) => t.filePath === canonOld);
-            if (idx < 0) return { state, events: [] };
-            const tab = state.tabs[idx];
-            const nextTab: EditorTab = { ...tab, filePath: canonNew };
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                nextTab,
-                ...state.tabs.slice(idx + 1),
-            ];
-            return { state: { ...state, tabs: nextTabs }, events: [] };
+            const tab = doc.tabs.find((t) => t.key === canonOld);
+            if (!tab) return same(state);
+            return next(state, patchBuffer(doc, tab.id, { filePath: canonicalizePath(command.newPath) }));
         }
     }
+}
+
+// ── Persistence (SPEC_DOCUMENT_TABS §5.3) ────────────────────────────────
+
+/** What a tab keeps in the block's `doctabs` record: where its file is,
+ *  and a scratch buffer's identity. Never the buffer's content. */
+export function serializeEditorBuffer(b: EditorBuffer): unknown {
+    return {
+        path: b.filePath,
+        language: b.language,
+        ...(b.isScratch && b.scratchId ? { scratchId: b.scratchId, displayName: b.displayName } : {}),
+    };
+}
+
+export function deserializeEditorBuffer(state: unknown): EditorBuffer | null {
+    const s = state as { path?: unknown; language?: unknown; scratchId?: unknown; displayName?: unknown } | null;
+    if (!s || typeof s.path !== "string" || !s.path) return null;
+    const b = freshBuffer(s.path, typeof s.language === "string" ? s.language : undefined);
+    if (typeof s.scratchId === "string") {
+        b.isScratch = true;
+        b.scratchId = s.scratchId;
+        if (typeof s.displayName === "string") b.displayName = s.displayName;
+    }
+    return b;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -813,16 +630,10 @@ interface Slot {
 const slots = new Map<string, Slot>();
 
 /**
- * Event sink — installed by the view (Phase 1B) and by the saga
- * (Phase 1C). The default is a no-op so tests run without DOM. The
- * sink receives the events array from a single dispatch call.
- *
- * Signature differs from slices #4/#9 (which pass blockId + single
- * event) — the editor saga needs the full event batch atomically so
- * it can write `editor:tabs` + `editor:active_tab_id` in one block-meta
- * mutation rather than racing N separate writes. The `blockId` is
- * already part of every event's downstream lookup via the dispatch
- * site that emitted the batch.
+ * Event sink — installed once by the editor model (editor-model.ts fans it
+ * out to every pane). The default is a no-op so tests run without DOM. The
+ * sink receives the events array from a single dispatch call, so a pane can
+ * act on a batch (a close plus the activation it caused) at once.
  */
 type EventSink = (events: EditorPaneEvent[]) => void;
 let eventSink: EventSink | null = null;
