@@ -23,6 +23,9 @@ use tokio::sync::oneshot;
 
 use super::eventbus::{EventBus, WSEventType};
 
+mod udp_peers;
+pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
+
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
 const LAN_AGENT_CACHE_TTL_SECS: u64 = 60;
 const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
@@ -309,6 +312,10 @@ pub struct LanDiscovery {
     /// `shutdown()` is `&self` and called from both an explicit live-toggle
     /// path and `Drop`.
     udp_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Cancellation half for the desktop-to-desktop UDP discovery task
+    /// (`udp_peers`). Same contract as `udp_cancel`: the task holds its own
+    /// `Arc<LanDiscovery>`, so dropping the controller's Arc does not stop it.
+    udp_peer_cancel: Mutex<Option<oneshot::Sender<()>>>,
     /// Cancels `agent_names_refresh_loop`. Needed for the same reason
     /// `udp_cancel` is: that task holds its own `Arc<LanDiscovery>` clone, so
     /// dropping the controller's Arc on `apply(false)` never reaches refcount
@@ -499,6 +506,7 @@ impl LanDiscovery {
             version,
             port,
             udp_cancel: Mutex::new(None),
+            udp_peer_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
             announced_v4: announced_v4.clone(),
             monitored: monitor.is_some(),
@@ -525,6 +533,14 @@ impl LanDiscovery {
         tokio::spawn(async move {
             disc_udp.udp_responder_loop(cancel_rx).await;
         });
+
+        // Desktop-to-desktop discovery that does not depend on mDNS: probes the
+        // LAN by broadcast and records who answers (`udp_peers`). Started
+        // whenever LAN discovery is, so a host whose mDNS is blocked or
+        // contested still finds, and is found by, its peers.
+        let (peer_cancel_tx, peer_cancel_rx) = oneshot::channel();
+        *discovery.udp_peer_cancel.lock() = Some(peer_cancel_tx);
+        tokio::spawn(discovery.clone().udp_peer_loop(peer_cancel_rx));
 
         // Keeps each peer's `agents` list populated (see
         // `agent_names_refresh_loop`). Cancelled explicitly by `shutdown()`
@@ -1043,6 +1059,9 @@ impl LanDiscovery {
                 if !auth_key.is_empty() {
                     entry.auth_key = auth_key;
                 }
+                // The UDP route may have found this peer first; one entry per
+                // peer, the mDNS one (udp_peers::merge_udp_peer is the converse).
+                udp_peers::drop_udp_duplicates(&mut instances);
                 drop(instances);
 
                 tracing::info!(
@@ -1146,6 +1165,9 @@ impl LanDiscovery {
             // Ignore send errors: an `Err` here just means the responder
             // task already exited on its own (e.g. the bind failed), which
             // is a no-op we're happy with.
+            let _ = tx.send(());
+        }
+        if let Some(tx) = self.udp_peer_cancel.lock().take() {
             let _ = tx.send(());
         }
         // Same contract as `udp_cancel` above — and load-bearing rather than
@@ -2297,6 +2319,7 @@ mod handle_event_tests {
             version: String::new(),
             port: self_port,
             udp_cancel: Mutex::new(None),
+            udp_peer_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
             announced_v4: Arc::new(Mutex::new(BTreeSet::new())),
             monitored: true,
