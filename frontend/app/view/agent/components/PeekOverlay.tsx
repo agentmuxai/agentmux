@@ -41,17 +41,18 @@
  * to itself; see `readPaneZoom` and `withPaneZoom` for the mechanism and
  * for why every length has to be divided by the factor.
  *
- * Positioning ("end" mode) is peek-placement.ts's job: inside the pane, below or
- * above the pointer, when the panel fits on one side of it (the common short
- * peek, unchanged); beside the pane when it is too tall for either side, so it
- * cannot cover the pointer and may extend past the pane to the window edge; or
- * above/below with its height constrained when there is no room beside. The
- * old code clamped the position into the container and let the panel grow back
- * over the pointer, which flickers (the row sees `mouseleave`, the panel
- * closes, the row sees `mouseenter`, it reopens). A panel placed beside the pane
- * is meant to be entered (scroll bar, text selection), so it lingers briefly
- * after the row's `mouseleave` and stays while the pointer is on it. Tall
- * panels scroll inside a height capped at a share of the window.
+ * Positioning ("end" mode) is peek-placement.ts's job, and the panel always sits
+ * near the pointer. Horizontally: right-aligned to the row when it fits the row's
+ * width; pinned to the row's left edge and extending right over the pane border,
+ * up to the window edge, when wider. Vertically: below or above the pointer
+ * inside the transcript when it fits; otherwise it leaves the transcript, on the
+ * side of the pointer with more room, with its HEIGHT cut to that room so it can
+ * never reach the pointer, and the rest scrolls. The old code clamped the
+ * position into the container and let the panel grow back over the pointer,
+ * which flickers (the row sees `mouseleave`, the panel closes, the row sees
+ * `mouseenter`, it reopens). A panel that had to be cut scrolls, so it is meant
+ * to be entered: it lingers briefly after the row's `mouseleave` and stays while
+ * the pointer is on it.
  * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md
  *
  * `align="end"` mode additionally tracks the mouse's Y position while
@@ -69,7 +70,7 @@ import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, createComputed, createEffect, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { findScrollContainerRect } from "./hover-anchor";
-import { BOTTOM_MARGIN_PX, computePeekPlacement, type PeekMode } from "./peek-placement";
+import { BOTTOM_MARGIN_PX, computePeekHorizontal, computePeekVertical } from "./peek-placement";
 
 interface PeekOverlayProps {
     /** Whether the overlay should be mounted right now. */
@@ -186,13 +187,14 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         top: "0px",
     });
 
-    // True when the panel has left the pane's own area (`beside`/`vertical`).
-    // Only then does it carry `data-pane-overlay`, so the browser-pane airspace
-    // cut (platform/pane-overlay-auto.ts) is not driven for every short peek.
+    // True when the panel reaches past the pane (wider than the row, or taller
+    // than the transcript). Only then does it carry `data-pane-overlay`, so the
+    // browser-pane airspace cut (platform/pane-overlay-auto.ts) is not driven for
+    // every short peek.
     const [outside, setOutside] = createSignal(false);
-    // Which placement mode the last `update()` chose. Only `inside`/`vertical`
-    // depend on the pointer's Y; `beside` does not, so it skips mouse updates.
-    let lastMode: PeekMode = "inside";
+    // True when the last `update()` had to cut the panel's height, so it scrolls.
+    // Only such a panel is meant to be ENTERED (scroll bar, text selection).
+    let lastEnterable = false;
 
     // Hover bridge ("end" mode only). The panel is portalled, so moving onto it
     // fires the row's `mouseleave` and the caller turns `show` off. Keep it up
@@ -227,11 +229,11 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                 clearBridgeTimer();
                 if (show) {
                     setOpen(true);
-                } else if (bridges() && untrack(open) && lastMode !== "inside") {
-                    // Only a panel placed to be ENTERED (beside / vertical) lingers.
-                    // An `inside` panel sits a cursor-gap away and a short peek has
-                    // nothing to scroll, so it closes the instant the pointer
-                    // leaves, exactly as it always did.
+                } else if (bridges() && untrack(open) && lastEnterable) {
+                    // Only a panel that had to be cut (it scrolls) is meant to be
+                    // ENTERED, so only it lingers. A panel that fits has nothing
+                    // to scroll and closes the instant the pointer leaves, exactly
+                    // as it always did.
                     startLinger(); // stay open; the timer closes it
                 } else {
                     setOpen(false);
@@ -274,55 +276,64 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             );
             return;
         }
-        // Shrink-wrapped. Where it goes (inside the pane, beside it, or above/
-        // below with a constrained height) is peek-placement.ts's job; the
-        // invariant it keeps — the pointer is never inside the panel — is
-        // swept by its tests. See that file for why each mode exists.
-        const measured = measureNaturalHeight(rect.width, paneZoom);
-        const placement = computePeekPlacement({
-            row: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+        // Shrink-wrapped, near the pointer. Horizontal and vertical are decided
+        // by peek-placement.ts (see its header): right-aligned to the row, or
+        // pinned left and extending over the pane border when wider than the
+        // row; below/above the pointer, leaving the transcript and cutting its
+        // height to the room when too tall. The invariant it keeps — the
+        // pointer is never inside the panel — is swept by its tests.
+        const viewport = { width: window.innerWidth, height: window.innerHeight };
+        const rowRect = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+        const hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth: measureWidth() });
+        const vt = computePeekVertical({
+            row: rowRect,
             mouseY: lastMouseY,
             container,
-            viewport: { width: window.innerWidth, height: window.innerHeight },
-            naturalHeight: measured.natural,
-            currentHeight: measured.current,
+            viewport,
+            naturalHeight: measureHeightAt(hz.maxWidth, paneZoom),
         });
-        lastMode = placement.mode;
-        setOutside(placement.mode !== "inside");
+        lastEnterable = vt.scrolls;
+        setOutside(hz.extendsPastRow || vt.leavesContainer);
         setFloatingStyle(
             withPaneZoom(
                 {
                     position: "fixed",
-                    left: `${placement.left}px`,
-                    top: `${placement.top}px`,
-                    ...(placement.alignRight ? { transform: "translateX(-100%)" } : {}),
-                    "max-width": `${placement.maxWidth}px`,
-                    "max-height": `${placement.maxHeight}px`,
+                    left: `${hz.left}px`,
+                    top: `${vt.top}px`,
+                    ...(hz.alignRight ? { transform: "translateX(-100%)" } : {}),
+                    "max-width": `${hz.maxWidth}px`,
+                    "max-height": `${vt.maxHeight}px`,
                 },
                 paneZoom,
             ),
         );
     };
 
-    // The panel's height with no height cap, laid out at the ROW's width — one
-    // fixed width, so the mode it picks never depends on the mode it picked
-    // last time (a wider `beside` panel is shorter, which would otherwise
-    // flip it back to `inside`). `current` is the height as rendered now.
-    // Styles are set and restored synchronously, so nothing paints between.
-    const measureNaturalHeight = (rowWidth: number, paneZoom: number): { natural: number; current: number } => {
+    // The panel measured with its caps lifted. Inline styles are set and
+    // restored synchronously, so nothing paints between. With the height cap
+    // lifted `getBoundingClientRect` IS the natural size, in real viewport px
+    // at any pane zoom (unlike `scrollHeight`, which is in unzoomed px).
+    //
+    // Width first, with no width cap: the content's max-content width, which
+    // does not depend on the layout it is currently in. Then the height at the
+    // width the horizontal placement chose. Measuring at fixed inputs means the
+    // placement never depends on the placement chosen last time.
+    const withCapsLifted = <T,>(maxWidth: string, read: (el: HTMLElement) => T, fallback: T): T => {
         const el = floatingEl;
-        if (!el) return { natural: 0, current: 0 };
-        const current = el.getBoundingClientRect().height;
+        if (!el) return fallback;
         const prevW = el.style.maxWidth;
         const prevH = el.style.maxHeight;
-        el.style.maxWidth = `${rowWidth / paneZoom}px`;
+        el.style.maxWidth = maxWidth;
         el.style.maxHeight = "none";
-        const chrome = el.offsetHeight - el.clientHeight;
-        const natural = Math.max(el.getBoundingClientRect().height, el.scrollHeight + chrome);
+        const out = read(el);
         el.style.maxWidth = prevW;
         el.style.maxHeight = prevH;
-        return { natural: Math.max(natural, current), current };
+        return out;
     };
+    const measureWidth = (): number =>
+        withCapsLifted("none", (el) => el.getBoundingClientRect().width, 0);
+    const measureHeightAt = (maxWidthPx: number, paneZoom: number): number =>
+        withCapsLifted(`${maxWidthPx / paneZoom}px`, (el) => el.getBoundingClientRect().height, 0);
 
     // Track the mouse continuously while the row exists, independent of
     // `show` (the 50ms enter-delay in useNodePeek means `show` flips true
@@ -339,7 +350,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             if (mouseMoveRaf != null) return;
             mouseMoveRaf = requestAnimationFrame(() => {
                 mouseMoveRaf = null;
-                if (props.show && lastMode !== "beside") update();
+                if (props.show) update();
             });
         };
         row.addEventListener("mousemove", onMouseMove);

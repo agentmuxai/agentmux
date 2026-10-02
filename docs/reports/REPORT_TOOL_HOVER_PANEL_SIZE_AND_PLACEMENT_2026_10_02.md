@@ -235,22 +235,25 @@ I recommended **C immediately, then B**; A only if B is judged too big.
 
 **What shipped (#4215): Option A**, which includes C. B was left for a follow-up
 because it needs the zoom decision in §5.3 and touches how all 13 call sites are
-anchored. The choices in §7 were taken at the recommended defaults without an
-answer: beside the pane, interactive, a `min(free space, 60vh)` ceiling, and the
-agent pane's zoom. §6's "suggested order" steps 1-4 are done; step 5 (fold into
-`AnchoredPopover`) is the open follow-up.
+anchored.
 
-### Suggested order if you say go
+**Revision after first use.** §4's "beside the pane" placement shipped first and was
+changed on review. Its problem: a command short enough to fit above or below the
+pointer stayed on the pane, and a taller one jumped to the side of the pane, so the
+same hover behaved two ways depending on length. The panel now always stays near the
+pointer, like every other peek:
 
-1. Line height 1.6 → 1.4 (or `--leading-normal`), gap/padding trim. (C)
-2. Fix the placement so it can never overlap the pointer, with `size()`-based
-   `max-height`; add a regression test that sweeps cursor positions like §3.3 and
-   asserts the cursor is never inside the panel. This test is the missing guard: the
-   existing `PeekOverlay.test.tsx` does not cover the both-sides-too-small case.
-3. Hover bridge + `pointer-events`, so a capped panel can be scrolled; keep the
-   button-down rule.
-4. Window boundary + `data-pane-overlay`, so it may leave the pane.
-5. (If B) fold into `AnchoredPopover`.
+- **Wider than the row:** pinned to the row's left edge, extending right over the
+  pane border up to the window edge. Otherwise right-aligned to the row as before.
+- **Taller than the transcript:** it leaves the transcript, above or below the
+  pointer (whichever has more room), and its height is cut to that room so it can
+  never reach the pointer; the rest scrolls. This is still the flicker fix: the
+  cause was the panel covering the pointer, not the panel being near it.
+- The 60%-of-window height ceiling is gone: it uses all the room on its side. A very
+  tall command therefore shows about half the window before scrolling, not the
+  whole of it, because the other half is on the other side of the pointer.
+
+§7's "beside or over" question is therefore answered as "near the pointer".
 
 ## 7. Open questions for you
 
