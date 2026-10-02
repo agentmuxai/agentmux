@@ -58,8 +58,19 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
         Err(_) => return FsGitStatus::default(),
     };
     // The repository's own filters, blanked for this run (see module docs).
+    let filters = repo_filters(&dir_arg).await;
+    // `-c` splits at the first `=`, so a filter named `x=y` can't be
+    // blanked that way (ReAgent on #4223). Such a name is never needed:
+    // don't run git there at all.
+    if filters.iter().any(|n| n.contains('=')) {
+        return FsGitStatus {
+            in_repo: true,
+            error: Some("This repository's settings can't be read safely, so git markers are off here.".to_string()),
+            ..Default::default()
+        };
+    }
     let mut args: Vec<String> = Vec::new();
-    for name in repo_filters(&dir_arg).await {
+    for name in filters {
         for key in ["clean", "smudge", "process"] {
             args.push("-c".into());
             args.push(format!("filter.{name}.{key}="));
@@ -469,6 +480,37 @@ mod tests {
 
         let s = git_status(&dir.path().to_string_lossy()).await;
         assert!(s.in_repo && s.error.is_none(), "{s:?}");
+        assert!(!mark.exists(), "the repository's clean filter ran");
+    }
+
+    /// `-c filter.x=y.clean=` would set `filter.x`, not blank `x=y`'s clean
+    /// command: a repository with such a filter gets no git run at all.
+    #[tokio::test]
+    async fn refuses_a_filter_name_that_c_cannot_blank() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(["-c", "user.email=a@b", "-c", "user.name=a"])
+                .args(args)
+                .current_dir(dir.path())
+                .no_window()
+                .output()
+        };
+        if git(&["init", "-q"]).map(|o| !o.status.success()).unwrap_or(true) {
+            return; // No git on this machine.
+        }
+        std::fs::write(dir.path().join(".gitattributes"), "*.txt filter=x=y\n").unwrap();
+        std::fs::write(dir.path().join("t.txt"), "a\n").unwrap();
+        let _ = git(&["add", "."]);
+        let _ = git(&["commit", "-qm", "x"]);
+        let mark = dir.path().join("filter-ran");
+        let mark_arg = mark.display().to_string().replace('\\', "/");
+        let _ = git(&["config", "filter.x=y.clean", &format!("sh -c 'touch \"{mark_arg}\"; cat'")]);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(dir.path().join("t.txt"), "a\n").unwrap();
+
+        let s = git_status(&dir.path().to_string_lossy()).await;
+        assert!(s.entries.is_empty() && s.error.is_some(), "{s:?}");
         assert!(!mark.exists(), "the repository's clean filter ran");
     }
 
