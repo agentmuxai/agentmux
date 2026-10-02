@@ -384,9 +384,11 @@ pub(super) async fn handle_agent_globalmemory_write(
     ))
 }
 
-/// `GET /api/v1/agent/globalmemory/list` — ordinary (non-system) Global
-/// Memory entries, summary only (id/name/updated_at, no content). Backs the
-/// `GlobalMemoryList` MCP tool.
+/// `GET /api/v1/agent/globalmemory/list` — every Global Memory entry, system
+/// rows first and flagged `system`, summary only (id/name/updated_at/system, no
+/// content). Read, write and remove still refuse a system id. Backs the
+/// `GlobalMemoryList` MCP tool. See
+/// `docs/specs/SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md`.
 pub(super) async fn handle_agent_globalmemory_list(State(state): State<AppState>) -> impl IntoResponse {
     app_api_response(app_api::global_memory_list_impl(&state))
 }
