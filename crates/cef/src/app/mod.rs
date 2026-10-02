@@ -204,9 +204,10 @@ wrap_window_delegate! {
                 // implemented promote_pool_window for non-Windows and confirmed
                 // that CEF Views set_bounds() correctly repositions from the
                 // off-screen holding position (-32000,-32000) to the tear-off
-                // destination. Wayland sessions run under XWayland (X11
-                // backend forced), so the off-screen coords are invisible there
-                // too. Both former blockers are resolved.
+                // destination. (Written when Wayland sessions ran under
+                // XWayland, before #1611; on native Wayland the compositor
+                // places windows itself and ignores client positions.) Both
+                // former blockers are resolved.
                 //
                 // NOTE: init_pool() is called from on_after_created("main") in
                 // client/mod.rs:664 on ALL platforms — this block (on_window_created)
@@ -701,8 +702,7 @@ wrap_app! {
                     // browser's --ozone-platform, or reads the choice from
                     // OZONE_CHOICE_ENV (set below, inherited by every child).
                     // Recomputing in a child could disagree with the browser's
-                    // XWayland fallback and run X11 against an unreachable
-                    // server.
+                    // choice (e.g. a forced AGENTMUX_OZONE_PLATFORM).
                     const OZONE_CHOICE_ENV: &str = "AGENTMUX_INTERNAL_OZONE_PLATFORM";
                     let oz_key = CefString::from("ozone-platform");
                     let is_child = process_type.is_some();

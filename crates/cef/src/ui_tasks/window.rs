@@ -1110,9 +1110,10 @@ unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
 // Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01, Linux arm: the EWMH
 // analogue of Win32 LWA_ALPHA / NSWindow.alphaValue. The compositor (Mutter,
 // KWin, picom, xfwm4) fades the finished window over the desktop — including
-// under XWayland, which is AgentMux's default ozone platform. Post-render:
-// needs no CEF/renderer cooperation. Native-Wayland ozone has no equivalent
-// protocol; there we log once and no-op (per-pixel Track 2 is the only route).
+// under XWayland (AGENTMUX_OZONE_PLATFORM=x11). Post-render: needs no
+// CEF/renderer cooperation. Native Wayland, the default on Wayland sessions,
+// has no equivalent protocol; there this is a no-op and transparency is
+// per-pixel (app.rs `alpha_capable`).
 
 #[cfg(target_os = "linux")]
 wrap_task! {

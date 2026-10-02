@@ -473,7 +473,7 @@ git push origin main --tags
 
 - **AppImage** (universal) and **DEB** (Debian/Ubuntu) produced by CI.
 - CEF bundles Chromium — no system WebKitGTK required.
-- Default display: **XWayland** (`--ozone-platform=x11`). Set `AGENTMUX_OZONE_PLATFORM=wayland` for native Wayland (experimental).
+- Default display: **native Wayland** (`--ozone-platform=wayland`) on Wayland sessions, X11 otherwise. Set `AGENTMUX_OZONE_PLATFORM=x11` to run under XWayland.
 - Window drag and right-click on title-bar require the patched `libcef.so` (included in all release AppImages). See `docs/cef-build/build-patched-libcef.md`.
 
 ---
