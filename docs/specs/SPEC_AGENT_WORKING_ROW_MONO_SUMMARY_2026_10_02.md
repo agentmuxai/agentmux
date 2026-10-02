@@ -1,6 +1,6 @@
 # Agent pane "Working…" row: composer typeface, pane-border color, ambient summary, per-turn tokens that are the turn's own
 
-**Status:** implemented (spec and change together).
+**Status:** implemented in #4226 (spec and change together).
 **Date:** 2026-10-02
 **Owner:** Manoz
 **Component:** `AgentWorkingRow` (`frontend/app/view/agent/components/AgentFooter.tsx`)
