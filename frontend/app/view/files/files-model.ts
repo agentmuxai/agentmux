@@ -38,6 +38,7 @@ export const META_SORTDIR = "files:sortdir";
 export const META_HIDDEN = "files:hidden";
 export const META_SIDEBAR = "files:sidebar";
 export const META_PREVIEW = "files:preview";
+export const META_VIEW = "files:view";
 
 /** Entries per `fs.list` page (srv caps at 5000). */
 const PAGE = 1000;
@@ -262,6 +263,8 @@ export class FilesModel {
     readonly showHidden = (): boolean => this.ctx.meta()?.[META_HIDDEN] === true;
     readonly showSidebar = (): boolean => this.ctx.meta()?.[META_SIDEBAR] !== false;
     readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true;
+    /** Details (rows and columns) or a grid of thumbnails (§5.2). */
+    readonly viewMode = (): "details" | "grid" => (this.ctx.meta()?.[META_VIEW] === "grid" ? "grid" : "details");
 
     /** Clicking a column header: sort by it, or flip its direction. */
     setSort(key: SortKey): void {
@@ -275,6 +278,10 @@ export class FilesModel {
 
     toggleSidebar(): void {
         void this.ctx.setMeta({ [META_SIDEBAR]: this.showSidebar() ? false : null });
+    }
+
+    toggleViewMode(): void {
+        void this.ctx.setMeta({ [META_VIEW]: this.viewMode() === "grid" ? null : "grid" });
     }
 
     togglePreview(): void {

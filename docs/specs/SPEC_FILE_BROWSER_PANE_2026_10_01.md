@@ -1,6 +1,6 @@
 # SPEC: A rich file browser pane (working title "Hangar")
 
-**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) and touched-by badges (§12.4); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
+**Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) and the grid view (§12.5); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"we want to introduce a rich file browser pane inside of agentmux… I believe wave terminal had one (did it?) research best practices for an embedded file browser tab, also think up some good names. write spec to file."*
@@ -354,6 +354,10 @@ Each phase is independently shippable and reviewable.
 ### 12.4 Touched by an agent (§8.4)
 
 A coloured dot before a row's name when an agent wrote or edited it in the last 30 minutes, in the agent's own colour (its pane border); a folder shows one when something inside it was changed. The tooltip says who, when and with which tool. The source is each agent pane's live stream: a `Write`, `Edit`, `MultiEdit` or `NotebookEdit` call is remembered by its id, and counts once its result reports success (`app/store/touched-files.ts`). Nothing watches the filesystem for this, so a user's own save shows no badge. Kept in memory for the window: up to 2,000 paths, each for 30 minutes. History replay doesn't feed it, so a reload starts empty.
+
+### 12.5 Grid view (§5.2)
+
+A toolbar toggle switches the folder between the details list and a grid of tiles (`files:view = grid`, kept in the block). Images get a thumbnail: read once, scaled to 192 px on the longer side with `createImageBitmap`, and kept as a small object URL (at most 300, least recently used released; 4 decoded at a time; files over the inline image cap get an icon). Everything else gets a large icon. The grid is windowed by rows like the list, and shares its selection, keyboard (left and right move a tile, up and down a row), drag, drop, menus, rename, git markers and touched-by badges.
 
 ## 13. Names
 
