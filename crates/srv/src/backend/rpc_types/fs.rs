@@ -430,3 +430,56 @@ pub struct FsOpEvent {
     #[ts(optional)]
     pub failures: Option<Vec<FsOpResult>>,
 }
+
+// ── Git status (spec §12 Phase 2: git decorations) ───────────────────────
+
+/// What git says about one entry of the listed folder. A folder takes the
+/// most pressing state of anything inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub enum FsGitState {
+    // Declared from least to most pressing: a folder shows its maximum.
+    Ignored,
+    Untracked,
+    Added,
+    Renamed,
+    Deleted,
+    Modified,
+    Conflicted,
+}
+
+/// One entry of the listed folder that git has something to say about.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsGitEntry {
+    /// The entry's name in the listed folder (a direct child).
+    pub name: String,
+    pub state: FsGitState,
+}
+
+/// Response for `fs.git_status`: the repository the folder is in, if any,
+/// and the state of each of its direct children that isn't clean.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsGitStatus {
+    /// False when the folder isn't in a repository (or git isn't installed).
+    pub in_repo: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub ahead: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub behind: Option<u64>,
+    pub entries: Vec<FsGitEntry>,
+    /// Changed (not ignored) paths under this folder, at any depth.
+    #[ts(type = "number")]
+    pub changes: u64,
+    /// Set when git ran but failed or timed out; the pane shows no markers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+}

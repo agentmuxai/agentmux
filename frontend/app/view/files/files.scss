@@ -599,3 +599,41 @@
     border-color: var(--error-color);
     color: var(--error-color);
 }
+
+// ── Git markers (spec §12, Phase 2) ─────────────────────────────────────────
+
+.files-git {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.files-git-modified,
+.files-git-renamed {
+    color: var(--warning-color);
+}
+
+.files-git-untracked,
+.files-git-added {
+    color: var(--success-color);
+}
+
+.files-git-deleted,
+.files-git-conflicted {
+    color: var(--error-color);
+}
+
+.files-rows .files-row.files-row-ignored .files-name {
+    opacity: 0.5;
+}
+
+.files-git-summary {
+    margin-left: 12px;
+
+    i {
+        margin-right: 2px;
+    }
+}
