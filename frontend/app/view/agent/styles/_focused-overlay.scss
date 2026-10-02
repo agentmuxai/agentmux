@@ -42,7 +42,7 @@
     }
 
     .agent-focused-panel-title {
-        font-size: 12px;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: var(--main-text-color);
         text-transform: uppercase;
@@ -55,7 +55,7 @@
         border: none;
         cursor: default;
         color: var(--secondary-text-color);
-        font-size: 12px;
+        font-size: var(--text-sm);
         padding: var(--space-0-5) var(--space-1);
         border-radius: 0;
         line-height: 1;
@@ -84,7 +84,7 @@
     }
 
     .agent-focused-rename-error {
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--error-color);
     }
 
@@ -97,7 +97,7 @@
     .agent-focused-rename-btn {
         padding: var(--space-1) var(--space-3);
         border-radius: 0;
-        font-size: 12px;
+        font-size: var(--text-sm);
         cursor: default;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
         background: rgba(255, 255, 255, 0.05);

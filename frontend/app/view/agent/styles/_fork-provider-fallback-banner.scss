@@ -15,7 +15,7 @@
         background: color-mix(in srgb, var(--warning-color) 10%, transparent);
         border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
         border-radius: 0;
-        font-size: 12px;
+        font-size: var(--text-sm);
         flex-shrink: 0;
         color: var(--main-text-color);
     }

@@ -28,7 +28,7 @@
         border: 1px solid var(--border-color);
         border-radius: 0;
         padding: 3px var(--space-1-5);
-        font-size: 12px;
+        font-size: var(--text-sm);
         font-family: inherit;
         outline: none;
         transition: border-color 0.15s;
@@ -45,7 +45,7 @@
 
     .agent-search-counter {
         flex-shrink: 0;
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         white-space: nowrap;
         min-width: 56px;
@@ -66,7 +66,7 @@
         border-radius: 0;
         cursor: default;
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         line-height: 1;
         transition: background 0.1s, color 0.1s, border-color 0.1s;
 

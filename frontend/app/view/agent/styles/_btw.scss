@@ -22,7 +22,7 @@
         background: var(--main-bg-color);
         border: 1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-        font-size: 12px;
+        font-size: var(--text-sm);
         overflow: hidden;
         // Below the tab strip's contained z-index (var(--z-pane-overlay, 4))
         // but above ordinary pane content — this floats over the
@@ -42,7 +42,7 @@
     }
 
     .btw-overlay__title {
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -94,7 +94,7 @@
     .btw-overlay__loading,
     .btw-overlay__error {
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     .btw-overlay__error {

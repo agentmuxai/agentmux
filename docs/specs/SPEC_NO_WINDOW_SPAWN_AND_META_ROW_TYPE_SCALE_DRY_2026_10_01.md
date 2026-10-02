@@ -1,8 +1,7 @@
 # Spec: DRY the no-window spawn flag, and the meta-row type scale
 
-**Status:** proposed
-
-Date: 2026-10-01 · Author: Loap · Status: proposal (not implemented)
+Date: 2026-10-01 · Author: Loap
+**Status:** active: §1 Proposals A and B shipped in #4183 and #4184, §3 steps 1-2 in #4188; remaining: §3 step 3 (estimator test), §2, and Option C (§1)
 Follows: `docs/reports/REPORT_STARTUP_CONSOLE_FLASH_AND_CONTEXT_CARD_SIZE_2026_10_01.md`
 Context: the same-day PR fixed two instances (launcher `schtasks`, srv `--crash-monitor`) and the
 oversized context-delivery card by hand. Both are the third-or-later occurrence of a class of bug that

@@ -16,7 +16,7 @@
         background: color-mix(in srgb, var(--error-color) 12%, transparent);
         border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
         border-radius: 0;
-        font-size: 12px;
+        font-size: var(--text-sm);
         flex-shrink: 0;
         color: var(--main-text-color);
     }
@@ -45,7 +45,7 @@
     .agent-disconnected-banner-detail {
         font-weight: normal;
         opacity: 0.75;
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     .agent-disconnected-banner-action {
@@ -54,7 +54,7 @@
         cursor: default;
         padding: var(--space-0-5) var(--space-1-5);
         color: var(--error-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         line-height: 1.4;
         border-radius: 0;
         transition: background 0.1s, color 0.1s;
