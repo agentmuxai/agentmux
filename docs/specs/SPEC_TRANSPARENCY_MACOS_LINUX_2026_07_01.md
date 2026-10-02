@@ -255,6 +255,23 @@ for XWayland clients.
    client-side uniform-alpha protocol. Log once + no-op; per-pixel (Track 2) is the only
    route there. (This asymmetry is why the renderer-alpha work must still be finished.)
 
+**Update 2026-10-02 (#4011): native Wayland is per-pixel and live.** Native Wayland is
+the default on Wayland sessions (#1611), transparency included; the XWayland routing for
+`window:transparent=true` sessions is gone. On native Wayland every window is created
+alpha-capable whatever the setting says at startup (`background-color=00000000`,
+`BrowserSettings.background_color=0`, `--disable-lcd-text`), and the page's CSS background
+carries `window:opacity` (`--window-opacity`, `app.tsx` `AppSettingsUpdater`), so turning
+transparency on/off and moving the slider apply without a restart.
+
+The missing piece was a Views fill, not the Wayland surface: the surface was already ARGB
+with no opaque region, and the page rendered alpha 0. CEF's `CefViewView::OnThemeChanged`
+clears a view's background and re-applies an opaque `kColorPrimaryBackground`
+(`0xff2c2c2c` under a dark GTK theme) unless the delegate sets one, which undid the fork's
+one-time transparent background on the Window and BrowserView. The host's
+`on_theme_changed` delegates (`app/window_settings.rs`
+`keep_view_background_transparent`) now re-assert transparent on every theme change.
+Verified on charlie (GNOME/Mutter) with hardware GL and SwiftShader.
+
 ### 3.3 Shared
 
 - Keep the IPC contract unchanged (`transparent`, `opacity`, `label`; `blur` stays dead —
