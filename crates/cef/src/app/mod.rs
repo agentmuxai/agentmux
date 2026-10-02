@@ -33,7 +33,6 @@ mod gpu;
 mod monitor;
 mod window_settings;
 #[cfg(target_os = "linux")]
-mod xauthority;
 
 #[cfg(target_os = "linux")]
 pub(crate) use gpu::{detect_gpu_tier, GpuTier};
@@ -736,7 +735,7 @@ wrap_app! {
                     if let Some(platform) = ozone {
                         if !is_child {
                             if platform == "x11" {
-                                xauthority::ensure_xauthority();
+                                agentmux_common::xauthority::ensure_xauthority();
                             }
                             std::env::set_var(OZONE_CHOICE_ENV, &platform);
                         }
