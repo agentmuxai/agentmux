@@ -303,6 +303,9 @@ pub const COMMAND_GET_AGENT_INSTANCE: &str = "getagentinstance";
 pub const COMMAND_CREATE_AGENT_INSTANCE: &str = "createagentinstance";
 pub const COMMAND_UPDATE_AGENT_INSTANCE: &str = "updateagentinstance";
 pub const COMMAND_DELETE_AGENT_INSTANCE: &str = "deleteagentinstance";
+/// Read (and optionally replace) the Runtime menu choices remembered for an
+/// agent: permission mode, model, effort. See `AgentLastRuntime`.
+pub const COMMAND_AGENT_LAST_RUNTIME: &str = "agentlastruntime";
 /// v8 — list named agent instances for the launch modal's "Continue
 /// agent" dropdown. Filters to non-hidden rows with a non-empty
 /// instance_name, joined with definition + identity + memory bundles.

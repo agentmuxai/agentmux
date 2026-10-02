@@ -130,6 +130,8 @@ export type {
 } from "./file";
 export type {
     AgentInstance,
+    AgentLastRuntime,
+    CommandAgentLastRuntimeData,
     CommandCreateAgentInstanceData,
     CommandGetAgentInstanceData,
     CommandListAgentInstancesData,

@@ -452,3 +452,59 @@ describe("ensureProviderAuthDir", () => {
         await expect(ensureProviderAuthDir("x")).rejects.toThrow("unknown provider");
     });
 });
+
+describe("resolveLaunchRuntime — what the agent remembers sits between a fork and the definition", () => {
+    const models = [
+        { value: "sonnet", label: "Sonnet", default: true },
+        { value: "opus", label: "Opus" },
+        { value: "haiku", label: "Haiku" },
+    ] as unknown as ProviderModel[];
+    const claude = { id: "claude", models } as any;
+    const flags = "--model opus --effort max --add-dir /tmp";
+
+    it("with nothing remembered it is the definition, as before", () => {
+        const r = launchEnv.resolveLaunchRuntime(undefined, claude, flags, undefined, undefined);
+        expect(r.runtimeConfig).toMatchObject({ model: "opus", effort: "max" });
+        expect(r.paneFlags).toBe(flags); // returned exactly as defined
+    });
+
+    it("a remembered pick beats the definition's flags, and those flags are taken out of the pane", () => {
+        const r = launchEnv.resolveLaunchRuntime(undefined, claude, flags, { model: "sonnet", effort: "low" }, undefined);
+        expect(r.runtimeConfig).toMatchObject({ model: "sonnet", effort: "low" });
+        expect(r.paneFlags).toBe("--add-dir /tmp");
+    });
+
+    it("a setting that was not picked still comes from the definition", () => {
+        const r = launchEnv.resolveLaunchRuntime(undefined, claude, flags, { model: "sonnet" }, undefined);
+        expect(r.runtimeConfig).toMatchObject({ model: "sonnet", effort: "max" });
+        expect(r.paneFlags).toBe("--effort max --add-dir /tmp");
+    });
+
+    it("a fork's runtime beats what was remembered, setting by setting", () => {
+        const r = launchEnv.resolveLaunchRuntime(undefined, claude, "", { model: "opus", effort: "low" }, { model: "haiku" });
+        expect(r.runtimeConfig).toMatchObject({ model: "haiku", effort: "low" });
+    });
+
+    it("a choice made in the launch modal beats everything, and the definition's --model cannot override it", () => {
+        const r = launchEnv.resolveLaunchRuntime("haiku", claude, "--model opus", { model: "sonnet" }, { model: "opus" });
+        expect(r.runtimeConfig.model).toBe("haiku");
+        expect(r.paneFlags).toBe("");
+    });
+
+    it("Haiku takes no --effort, so the definition's is taken out too", () => {
+        const r = launchEnv.resolveLaunchRuntime(undefined, claude, "--effort max", { model: "haiku" }, undefined);
+        expect(r.paneFlags).toBe("");
+    });
+
+    it("only Claude's flags are judged by the Haiku rule", () => {
+        const other = { id: "codex", models: [{ value: "haiku", label: "x" }] } as any;
+        const r = launchEnv.resolveLaunchRuntime(undefined, other, "--effort max", { model: "haiku" }, undefined);
+        expect(r.paneFlags).toBe("--effort max");
+    });
+
+    it("a remembered permission mode takes the definition's mode flag out", () => {
+        const r = launchEnv.resolveLaunchRuntime(undefined, claude, "--dangerously-skip-permissions --add-dir /x", { permissionMode: "plan" }, undefined);
+        expect(r.runtimeConfig.permissionMode).toBe("plan");
+        expect(r.paneFlags).toBe("--add-dir /x");
+    });
+});

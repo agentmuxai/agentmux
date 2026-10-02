@@ -196,6 +196,145 @@ fn without_owned_flags(base: Vec<String>) -> Vec<String> {
     out
 }
 
+/// What the user last picked in the Runtime menu for an agent (`last_runtime`
+/// on `db_agents`), already validated. Each setting is optional: only what was
+/// picked is here, and the rest keeps coming from the definition.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Remembered {
+    pub permission_mode: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+const PERMISSION_MODES: &[&str] = &["bypass", "auto", "acceptEdits", "plan", "default"];
+const EFFORT_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+/// The flag a control-protocol (persistent) agent is launched with; its
+/// presence in the catalog args is what makes `bypass` become `default`.
+const CONTROL_PROTOCOL_FLAG: &str = "--permission-prompt-tool";
+
+impl Remembered {
+    /// Parse the stored JSON for `provider_id`. Only Claude is covered: its
+    /// model namespace is known here (`opus` / `sonnet` / `haiku` or a concrete
+    /// `claude-…` id), and anything else, or anything malformed, is dropped
+    /// setting by setting.
+    pub(crate) fn parse(provider_id: &str, raw: &str) -> Remembered {
+        if provider_id != "claude" || raw.is_empty() {
+            return Remembered::default();
+        }
+        let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(raw) else {
+            return Remembered::default();
+        };
+        let get = |k: &str| obj.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+        Remembered {
+            permission_mode: get("permissionMode")
+                .filter(|m| PERMISSION_MODES.contains(m))
+                .map(str::to_string),
+            effort: get("effort").filter(|e| EFFORT_LEVELS.contains(e)).map(str::to_string),
+            model: get("model")
+                .filter(|m| matches!(*m, "opus" | "sonnet" | "haiku") || m.starts_with("claude-"))
+                .map(str::to_string),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.permission_mode.is_none() && self.model.is_none() && self.effort.is_none()
+    }
+}
+
+/// `args` without the permission flags (`--permission-mode X`,
+/// `--dangerously-skip-permissions`).
+fn without_permission_flags(args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--permission-mode" {
+            it.next();
+            continue;
+        }
+        if a == "--dangerously-skip-permissions" || a.starts_with("--permission-mode=") {
+            continue;
+        }
+        out.push(a);
+    }
+    out
+}
+
+/// `flags` without the `names` flags (and their values), `--flag=value` too.
+fn without_flags(flags: Vec<String>, names: &[&str]) -> Vec<String> {
+    let mut out = Vec::with_capacity(flags.len());
+    let mut it = flags.into_iter();
+    while let Some(f) = it.next() {
+        if names.contains(&f.as_str()) {
+            it.next();
+            continue;
+        }
+        if names.iter().any(|n| f.starts_with(&format!("{n}="))) {
+            continue;
+        }
+        out.push(f);
+    }
+    out
+}
+
+/// Lay what the user last picked over the definition, the way the frontend's
+/// launch does (`resolveLaunchRuntime`): the remembered setting beats the
+/// definition's flag for it, and that flag is taken out of the pane's copy.
+///
+/// Returns `(base, pane_flags, permission_mode)`: the catalog args (their
+/// permission flags replaced when a mode is remembered), the flags to hand to
+/// [`seed_launch`] and to store as `agent:provider_flags`, and the mode the
+/// menu must show (`None` = leave what `seed_launch` says).
+pub(crate) fn apply_remembered(
+    provider_id: &str,
+    base: Vec<String>,
+    provider_flags: &str,
+    remembered: &Remembered,
+) -> (Vec<String>, String, Option<String>) {
+    if provider_id != "claude" || remembered.is_empty() {
+        return (base, provider_flags.to_string(), None);
+    }
+    let mut flags: Vec<String> = provider_flags.split_whitespace().map(str::to_string).collect();
+    let mut base = base;
+    let mut front: Vec<String> = Vec::new();
+
+    // The model that will run: remembered, else the definition's, else the default.
+    let model = remembered
+        .model
+        .clone()
+        .or_else(|| flag_value(&flags, &["--model", "-m"]).map(str::to_string));
+    if let Some(m) = &remembered.model {
+        flags = without_flags(flags, &["--model", "-m"]);
+        front.extend(["--model".to_string(), m.clone()]);
+    }
+    if let Some(e) = &remembered.effort {
+        flags = without_flags(flags, &["--effort"]);
+        if model.as_deref().map_or(true, model_takes_effort) {
+            front.extend(["--effort".to_string(), e.clone()]);
+        }
+    }
+    // A model that takes no `--effort` must not be left with the definition's.
+    if model.as_deref().is_some_and(|m| !model_takes_effort(m)) {
+        flags = without_flags(flags, &["--effort"]);
+    }
+
+    let mut mode_for_menu = None;
+    if let Some(mode) = &remembered.permission_mode {
+        let control = base.iter().any(|a| a == CONTROL_PROTOCOL_FLAG);
+        base = without_permission_flags(base);
+        flags = without_permission_flags(flags);
+        let wire = if control && mode == "bypass" { "default" } else { mode.as_str() };
+        if wire == "bypass" {
+            front.push("--dangerously-skip-permissions".to_string());
+        } else {
+            front.extend(["--permission-mode".to_string(), wire.to_string()]);
+        }
+        mode_for_menu = Some(mode.clone());
+    }
+
+    front.extend(flags);
+    (base, front.join(" "), mode_for_menu)
+}
+
 /// Build `cmd:args` and `agent:runtime` for a freshly opened pane.
 ///
 /// `base` is the catalog argv for the pane's controller. `provider_flags` is
@@ -458,6 +597,104 @@ mod tests {
             .position(|a| a == flag)
             .and_then(|i| args.get(i + 1))
             .cloned()
+    }
+
+    // ---- what the user last picked ----
+
+    fn remembered(json: &str) -> Remembered {
+        Remembered::parse("claude", json)
+    }
+    fn persistent_base() -> Vec<String> {
+        s(&["-p", "--input-format", "stream-json", "--permission-prompt-tool", "stdio", "--permission-mode", "default"])
+    }
+
+    #[test]
+    fn remembered_is_parsed_setting_by_setting_and_only_for_claude() {
+        let r = remembered(r#"{"model":"opus","effort":"xhigh","permissionMode":"plan"}"#);
+        assert_eq!(r.model.as_deref(), Some("opus"));
+        assert_eq!(r.effort.as_deref(), Some("xhigh"));
+        assert_eq!(r.permission_mode.as_deref(), Some("plan"));
+        assert_eq!(remembered(r#"{"model":"claude-fable-5-1"}"#).model.as_deref(), Some("claude-fable-5-1"));
+        // invalid settings are dropped on their own, the rest survive
+        let r = remembered(r#"{"model":"gpt-5","effort":"ludicrous","permissionMode":"plan"}"#);
+        assert_eq!((r.model, r.effort), (None, None));
+        assert_eq!(r.permission_mode.as_deref(), Some("plan"));
+        for bad in ["", "not json", "[]", "5", "null"] {
+            assert_eq!(remembered(bad), Remembered::default(), "{bad:?}");
+        }
+        assert_eq!(Remembered::parse("codex", r#"{"model":"opus"}"#), Remembered::default());
+    }
+
+    #[test]
+    fn nothing_remembered_changes_nothing() {
+        let (base, flags, mode) = apply_remembered("claude", persistent_base(), "--model opus --add-dir /x", &Remembered::default());
+        assert_eq!(base, persistent_base());
+        assert_eq!(flags, "--model opus --add-dir /x");
+        assert_eq!(mode, None);
+    }
+
+    #[test]
+    fn a_remembered_model_and_effort_beat_the_definitions_flags() {
+        let r = remembered(r#"{"model":"sonnet","effort":"low"}"#);
+        let (base, flags, mode) = apply_remembered("claude", persistent_base(), "--model opus --effort max --add-dir /x", &r);
+        assert_eq!(flags, "--model sonnet --effort low --add-dir /x");
+        assert_eq!(mode, None);
+        // and seed_launch then shows exactly that, with no second flag
+        let out = seed_launch("claude", base, &flags);
+        let rt = out.runtime.unwrap();
+        assert_eq!((rt["model"].as_str(), rt["effort"].as_str()), (Some("sonnet"), Some("low")));
+        assert_eq!(out.cli_args.iter().filter(|a| *a == "--model").count(), 1);
+        assert_eq!(out.cli_args.iter().filter(|a| *a == "--effort").count(), 1);
+    }
+
+    #[test]
+    fn a_setting_not_picked_keeps_the_definitions_flag() {
+        let r = remembered(r#"{"model":"sonnet"}"#);
+        let (_, flags, _) = apply_remembered("claude", persistent_base(), "--model opus --effort max", &r);
+        assert_eq!(flags, "--model sonnet --effort max");
+    }
+
+    #[test]
+    fn haiku_is_never_left_with_an_effort() {
+        let r = remembered(r#"{"model":"haiku","effort":"high"}"#);
+        let (_, flags, _) = apply_remembered("claude", persistent_base(), "--effort max", &r);
+        assert_eq!(flags, "--model haiku");
+        // remembered Haiku, definition's effort only
+        let r = remembered(r#"{"model":"haiku"}"#);
+        let (_, flags, _) = apply_remembered("claude", persistent_base(), "--model opus --effort max", &r);
+        assert_eq!(flags, "--model haiku");
+    }
+
+    #[test]
+    fn a_remembered_mode_replaces_the_catalog_and_definition_mode_flags() {
+        let r = remembered(r#"{"permissionMode":"plan"}"#);
+        let (base, flags, mode) = apply_remembered("claude", persistent_base(), "--dangerously-skip-permissions --add-dir /x", &r);
+        assert!(!base.iter().any(|a| a == "--permission-mode"), "{base:?}");
+        assert_eq!(flags, "--permission-mode plan --add-dir /x");
+        assert_eq!(mode.as_deref(), Some("plan"));
+        let out = seed_launch("claude", base, &flags);
+        assert_eq!(after(&out.cli_args, "--permission-mode").as_deref(), Some("plan"));
+        assert_eq!(out.cli_args.iter().filter(|a| *a == "--permission-mode").count(), 1);
+        assert!(!out.cli_args.iter().any(|a| a == "--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn bypass_on_a_control_protocol_agent_is_default_on_the_wire_but_bypass_in_the_menu() {
+        let r = remembered(r#"{"permissionMode":"bypass"}"#);
+        let (_, flags, mode) = apply_remembered("claude", persistent_base(), "", &r);
+        assert_eq!(flags, "--permission-mode default");
+        assert_eq!(mode.as_deref(), Some("bypass"));
+        // a one-shot agent (no control protocol) gets the real bypass flag
+        let one_shot = s(&["-p", "--output-format", "stream-json"]);
+        let (_, flags, _) = apply_remembered("claude", one_shot, "", &r);
+        assert_eq!(flags, "--dangerously-skip-permissions");
+    }
+
+    #[test]
+    fn other_providers_are_left_alone() {
+        let r = Remembered { model: Some("opus".into()), ..Default::default() };
+        let (base, flags, mode) = apply_remembered("codex", s(&["exec", "-"]), "--x", &r);
+        assert_eq!((base, flags.as_str(), mode), (s(&["exec", "-"]), "--x", None));
     }
 
     #[test]

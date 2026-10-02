@@ -23,6 +23,26 @@ pub struct CommandGetAgentInstanceData {
     pub id: String,
 }
 
+/// `agentlastruntime`: read, or replace, the Runtime menu choices remembered
+/// for agent `id`. Leave `runtime` out to only read; send `""` to forget.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentLastRuntimeData {
+    pub id: String,
+    /// A JSON object with any of `permissionMode`, `model`, `effort` (strings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub runtime: Option<String>,
+}
+
+/// The remembered runtime after the command: the same JSON object, or `""`
+/// when the agent has none (or is unknown or a template).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentLastRuntime {
+    pub runtime: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandCreateAgentInstanceData {

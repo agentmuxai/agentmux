@@ -617,6 +617,91 @@
     }
 
     #[test]
+    fn last_runtime_is_remembered_per_agent_and_survives_a_relaunch() {
+        let store = v6_test_store();
+        let mut agent = sample_agent("rt1", "agent-rt1");
+        store.agent_def_insert(&mut agent).unwrap();
+        let mut other = sample_agent("rt2", "agent-rt2");
+        store.agent_def_insert(&mut other).unwrap();
+
+        assert_eq!(store.agent_last_runtime_get("rt1").unwrap(), "", "nothing until the user picks");
+        let json = r#"{"effort":"xhigh","model":"opus","permissionMode":"default"}"#;
+        assert!(store.agent_last_runtime_set("rt1", json).unwrap());
+        assert_eq!(store.agent_last_runtime_get("rt1").unwrap(), json);
+        assert_eq!(store.agent_last_runtime_get("rt2").unwrap(), "", "another agent is unaffected");
+
+        // A launch folds into the same row (`instance_create` upserts); the
+        // remembered runtime must not be wiped by it.
+        let inst = AgentInstance {
+            id: "x".to_string(),
+            definition_id: "rt1".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "block-1".to_string(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst).unwrap();
+        assert_eq!(store.agent_last_runtime_get("rt1").unwrap(), json);
+
+        // Forgetting.
+        assert!(store.agent_last_runtime_set("rt1", "").unwrap());
+        assert_eq!(store.agent_last_runtime_get("rt1").unwrap(), "");
+    }
+
+    #[test]
+    fn last_runtime_is_not_kept_for_an_unknown_agent_or_a_template() {
+        let store = v6_test_store();
+        assert!(!store.agent_last_runtime_set("nope", r#"{"model":"opus"}"#).unwrap());
+        assert_eq!(store.agent_last_runtime_get("nope").unwrap(), "");
+
+        let mut tpl = sample_agent("tpl", "agent-tpl");
+        store.agent_def_insert(&mut tpl).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE db_agents SET is_template = 1 WHERE id = 'tpl'", [])
+            .unwrap();
+        assert!(!store.agent_last_runtime_set("tpl", r#"{"model":"opus"}"#).unwrap());
+        assert_eq!(store.agent_last_runtime_get("tpl").unwrap(), "");
+    }
+
+    #[test]
+    fn normalize_last_runtime_accepts_only_the_known_shape() {
+        use crate::backend::storage::agents::normalize_last_runtime as n;
+        assert_eq!(n("").unwrap(), "");
+        assert_eq!(n("  ").unwrap(), "");
+        assert_eq!(n("{}").unwrap(), "");
+        assert_eq!(
+            n(r#"{"model":"opus","effort":"high"}"#).unwrap(),
+            r#"{"effort":"high","model":"opus"}"#,
+            "canonical key order"
+        );
+        for bad in [
+            "not json",
+            "[]",
+            r#""opus""#,
+            r#"{"model":5}"#,
+            r#"{"model":""}"#,
+            r#"{"model":"a\nb"}"#,
+            r#"{"colour":"red"}"#,
+        ] {
+            assert!(n(bad).is_err(), "{bad:?} should be rejected");
+        }
+        let long = "x".repeat(200);
+        assert!(n(&format!(r#"{{"model":"{long}"}}"#)).is_err());
+    }
+
+    #[test]
     fn test_instance_update_partial() {
         use crate::backend::storage::InstanceUpdate;
         let store = v6_test_store();
