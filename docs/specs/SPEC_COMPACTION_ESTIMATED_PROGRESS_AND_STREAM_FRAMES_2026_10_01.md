@@ -77,7 +77,7 @@ The caller computes it once when `compacting` starts (R4), from `state.lastConte
 **Display** (`AgentWorkingRow`, `AgentFooter.tsx`). When `compacting` is set and an estimate exists:
 - right side: `12s / ~30s`;
 - a thin bar under the row, fill `min(elapsed / estimate, 0.95)`, `role="progressbar"` with `aria-valuetext` saying "estimated, about N%";
-- tooltip: "Estimate from your last N compactions. Claude Code doesn't report compaction progress.";
+- tooltip (on the right-hand text): "Estimate from your earlier compactions. Claude Code doesn't report compaction progress.";
 - once elapsed exceeds the estimate: the fill stops at 95% and turns indeterminate, right side `42s · longer than usual` (R2).
 With no estimate, exactly today's row.
 
