@@ -4,6 +4,10 @@
 //! The agents of other AgentMux instances, for the Swarm's sections below this
 //! instance's own tree (`docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md`).
 //!
+//! Phase 2 adds LAN hosts, from the LAN discovery peer list (mDNS and the UDP
+//! route): one host per hostname, one channel per advertising instance, names
+//! from each peer's `agents` list.
+//!
 //! Phase 1: other channels on this machine, read from the host-global shared
 //! registry (`reactive::registry::list_all_shared`), the same source the
 //! `/agentmux/discovery` endpoint's `host.cross_channel` uses. Names only: the
@@ -15,6 +19,10 @@
 
 use serde::Serialize;
 
+use std::collections::{BTreeMap, HashSet};
+use std::net::IpAddr;
+
+use crate::backend::lan_discovery::LanInstance;
 use crate::backend::reactive::registry::AgentEntry;
 
 /// A registry entry not rewritten for this long is shown as stale. The registry
@@ -113,24 +121,99 @@ pub fn other_channels(
 
 /// The full answer: this machine's other channels as one host, or no host at all
 /// when there are none.
+/// LAN hosts from the discovery peer list. A peer at one of this machine's own
+/// addresses is another channel on this host, which the registry already lists
+/// (with more detail), so it is left out here. A peer that did not advertise its
+/// channel (an older build) is labelled by its port, so two of them on one host
+/// stay apart.
+pub fn lan_hosts(
+    peers: &[LanInstance],
+    own_addrs: &HashSet<IpAddr>,
+    now_ms: u64,
+) -> Vec<RemoteHost> {
+    let mut hosts: BTreeMap<String, (String, BTreeMap<String, RemoteChannel>)> = BTreeMap::new();
+    for p in peers {
+        if p.address
+            .parse::<IpAddr>()
+            .is_ok_and(|a| own_addrs.contains(&a))
+        {
+            continue;
+        }
+        let display = if p.hostname.trim().is_empty() {
+            p.address.clone()
+        } else {
+            p.hostname.trim().to_string()
+        };
+        let channel = if p.channel.is_empty() {
+            format!(":{}", p.port)
+        } else {
+            p.channel.clone()
+        };
+        let seen_at_ms = p.last_seen.saturating_mul(1000);
+        let mut agents: Vec<RemoteAgent> = p
+            .agents
+            .iter()
+            .map(|name| RemoteAgent {
+                name: name.clone(),
+                block_id: String::new(),
+            })
+            .collect();
+        agents.sort_by_key(|a| a.name.to_lowercase());
+        agents.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
+        let host = hosts
+            .entry(display.to_lowercase())
+            .or_insert_with(|| (display.clone(), BTreeMap::new()));
+        // Two records for the same instance (mDNS and UDP before they merge)
+        // keep the fresher one.
+        let keep = host
+            .1
+            .get(&channel)
+            .is_none_or(|c| c.seen_at_ms < seen_at_ms);
+        if keep {
+            host.1.insert(
+                channel.clone(),
+                RemoteChannel {
+                    channel,
+                    seen_at_ms,
+                    stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,
+                    agents,
+                },
+            );
+        }
+    }
+    hosts
+        .into_iter()
+        .map(|(key, (display_name, channels))| RemoteHost {
+            host_id: format!("lan:{key}"),
+            display_name,
+            tier: "lan",
+            channels: channels.into_values().collect(),
+        })
+        .collect()
+}
+
+/// The full answer: this machine's other channels as one host (absent when there
+/// are none), then the LAN hosts.
 pub fn snapshot(
     entries: &[AgentEntry],
+    lan: &[LanInstance],
+    own_addrs: &HashSet<IpAddr>,
     hostname: &str,
     own_channel: &str,
     own_url: &str,
     now_ms: u64,
 ) -> SwarmOtherInstancesResult {
     let channels = other_channels(entries, own_channel, own_url, now_ms);
-    let hosts = if channels.is_empty() {
-        Vec::new()
-    } else {
-        vec![RemoteHost {
+    let mut hosts = Vec::new();
+    if !channels.is_empty() {
+        hosts.push(RemoteHost {
             host_id: format!("host:{hostname}"),
             display_name: hostname.to_string(),
             tier: "host",
             channels,
-        }]
-    };
+        });
+    }
+    hosts.extend(lan_hosts(lan, own_addrs, now_ms));
     SwarmOtherInstancesResult {
         hostname: hostname.to_string(),
         channel: own_channel.to_string(),
@@ -223,7 +306,15 @@ mod tests {
 
     #[test]
     fn the_snapshot_names_this_machine_and_carries_no_credentials() {
-        let snap = snapshot(&[entry("Korp", "dev", 0)], "narko", "stable", "", NOW);
+        let snap = snapshot(
+            &[entry("Korp", "dev", 0)],
+            &[],
+            &HashSet::new(),
+            "narko",
+            "stable",
+            "",
+            NOW,
+        );
         assert_eq!(
             (snap.hostname.as_str(), snap.channel.as_str()),
             ("narko", "stable")
@@ -239,6 +330,116 @@ mod tests {
             "{json}"
         );
         // No other channel: no host section at all.
-        assert!(snapshot(&[], "narko", "stable", "", NOW).hosts.is_empty());
+        assert!(
+            snapshot(&[], &[], &HashSet::new(), "narko", "stable", "", NOW)
+                .hosts
+                .is_empty()
+        );
+    }
+
+    fn peer(
+        host: &str,
+        channel: &str,
+        addr: &str,
+        port: u16,
+        agents: &[&str],
+        age_secs: u64,
+    ) -> LanInstance {
+        LanInstance {
+            instance_id: format!("{host}-{port}"),
+            hostname: host.to_string(),
+            version: "0.59.5".to_string(),
+            channel: channel.to_string(),
+            address: addr.to_string(),
+            port,
+            auth_key: "lan-secret".to_string(),
+            agents: agents.iter().map(|a| a.to_string()).collect(),
+            first_seen: 0,
+            last_seen: NOW / 1000 - age_secs,
+            other_ttl_secs: 4500,
+        }
+    }
+
+    #[test]
+    fn lan_peers_group_into_hosts_with_a_channel_each() {
+        let peers = [
+            peer("Area54", "stable", "192.168.1.26", 29700, &["Manoz"], 5),
+            peer(
+                "starpower",
+                "stable",
+                "192.168.1.195",
+                29700,
+                &["Opaz", "korp"],
+                5,
+            ),
+            peer("starpower", "dev", "192.168.1.195", 29702, &["Loap"], 5),
+        ];
+        let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
+        let shape: Vec<(&str, &str, usize)> = hosts
+            .iter()
+            .map(|h| (h.display_name.as_str(), h.tier, h.channels.len()))
+            .collect();
+        assert_eq!(shape, [("Area54", "lan", 1), ("starpower", "lan", 2)]);
+        let chans: Vec<&str> = hosts[1]
+            .channels
+            .iter()
+            .map(|c| c.channel.as_str())
+            .collect();
+        assert_eq!(chans, ["dev", "stable"]);
+        let names: Vec<&str> = hosts[1].channels[1]
+            .agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(names, ["korp", "Opaz"]);
+    }
+
+    #[test]
+    fn a_lan_peer_at_one_of_our_own_addresses_is_left_to_the_registry() {
+        let own: HashSet<IpAddr> = ["192.168.1.230".parse().unwrap()].into_iter().collect();
+        let peers = [peer("narko", "dev", "192.168.1.230", 29702, &["Loap"], 5)];
+        assert!(lan_hosts(&peers, &own, NOW).is_empty());
+    }
+
+    #[test]
+    fn a_peer_without_a_channel_is_labelled_by_its_port() {
+        let peers = [
+            peer("old", "", "192.168.1.9", 29700, &["A"], 5),
+            peer("old", "", "192.168.1.9", 29701, &["B"], 5),
+        ];
+        let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
+        let chans: Vec<&str> = hosts[0]
+            .channels
+            .iter()
+            .map(|c| c.channel.as_str())
+            .collect();
+        assert_eq!(chans, [":29700", ":29701"]);
+    }
+
+    #[test]
+    fn a_quiet_lan_peer_is_stale_and_no_lan_key_or_address_leaves() {
+        let quiet = [peer(
+            "Area54",
+            "stable",
+            "192.168.1.26",
+            29700,
+            &["Manoz"],
+            90,
+        )];
+        assert!(lan_hosts(&quiet, &HashSet::new(), NOW)[0].channels[0].stale);
+        let fresh = [peer(
+            "Area54",
+            "stable",
+            "192.168.1.26",
+            29700,
+            &["Manoz"],
+            5,
+        )];
+        let snap = snapshot(&[], &fresh, &HashSet::new(), "narko", "stable", "", NOW);
+        let json = serde_json::to_string(&snap).unwrap();
+        assert!(
+            !json.contains("lan-secret") && !json.contains("192.168.1.26"),
+            "{json}"
+        );
     }
 }

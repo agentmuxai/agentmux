@@ -64,6 +64,7 @@ const MAX_UDP_PEERS: usize = 64;
 const MAX_ID_LEN: usize = 128;
 const MAX_HOSTNAME_LEN: usize = 253;
 const MAX_VERSION_LEN: usize = 64;
+const MAX_CHANNEL_LEN: usize = 64;
 const MAX_AUTH_KEY_LEN: usize = 256;
 /// Below this a port is privileged or a well-known service, never one of ours.
 const MIN_PEER_PORT: u16 = 1024;
@@ -74,6 +75,8 @@ pub(super) struct UdpPeer {
     pub instance_id: String,
     pub hostname: String,
     pub version: String,
+    /// Empty when the peer predates advertising it.
+    pub channel: String,
     pub address: IpAddr,
     pub port: u16,
     pub auth_key: String,
@@ -102,6 +105,9 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
     let auth_key = text("auth_key", MAX_AUTH_KEY_LEN).filter(|s| !s.is_empty())?;
     let hostname = text("hostname", MAX_HOSTNAME_LEN)?;
     let version = text("version", MAX_VERSION_LEN)?;
+    // Optional: a peer from before it was advertised sends none, and an
+    // oversize one is dropped rather than refusing the whole reply.
+    let channel = text("channel", MAX_CHANNEL_LEN).unwrap_or_default();
     let port = u16::try_from(value.get("port")?.as_u64()?)
         .ok()
         .filter(|p| *p >= MIN_PEER_PORT)?;
@@ -109,6 +115,7 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
         instance_id,
         hostname,
         version,
+        channel,
         address: src.ip(),
         port,
         auth_key,
@@ -161,6 +168,7 @@ pub(super) fn merge_udp_peer(
                 existing.port = peer.port;
                 existing.hostname = peer.hostname.clone();
                 existing.version = peer.version.clone();
+                existing.channel = peer.channel.clone();
                 existing.auth_key = peer.auth_key.clone();
                 instances.insert(format!("{UDP_KEY_PREFIX}{}", peer.instance_id), existing);
             }
@@ -168,6 +176,9 @@ pub(super) fn merge_udp_peer(
             existing.last_seen = now;
             if existing.auth_key.is_empty() {
                 existing.auth_key = peer.auth_key.clone();
+            }
+            if existing.channel.is_empty() {
+                existing.channel = peer.channel.clone();
             }
         }
         return Merge::Refreshed;
@@ -186,6 +197,7 @@ pub(super) fn merge_udp_peer(
             instance_id: peer.instance_id.clone(),
             hostname: peer.hostname.clone(),
             version: peer.version.clone(),
+            channel: peer.channel.clone(),
             address: peer.address.to_string(),
             port: peer.port,
             auth_key: peer.auth_key.clone(),
@@ -401,6 +413,7 @@ mod tests {
             instance_id: id.into(),
             hostname: "h".into(),
             version: "0.59.4".into(),
+            channel: "stable".into(),
             address: addr.parse().unwrap(),
             port,
             auth_key: "k".into(),
@@ -412,6 +425,7 @@ mod tests {
             instance_id: id.into(),
             hostname: "mdns-name".into(),
             version: "0.59.4".into(),
+            channel: String::new(),
             address: addr.into(),
             port,
             auth_key: "mdns-key".into(),
@@ -429,6 +443,17 @@ mod tests {
         assert_eq!(p.address, "192.168.1.26".parse::<IpAddr>().unwrap());
         assert_eq!(p.port, 29700);
         assert_eq!(p.auth_key, "k-secret");
+    }
+
+    #[test]
+    fn the_channel_is_read_when_present_and_optional_when_not() {
+        let mut v: serde_json::Value = serde_json::from_slice(&reply("abc", 29700)).unwrap();
+        assert_eq!(parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("192.168.1.26")).unwrap().channel, "");
+        v["channel"] = json!("dev-fix-lan");
+        assert_eq!(parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("192.168.1.26")).unwrap().channel, "dev-fix-lan");
+        // Oversize: dropped, the reply still counts.
+        v["channel"] = json!("c".repeat(MAX_CHANNEL_LEN + 1));
+        assert_eq!(parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("192.168.1.26")).unwrap().channel, "");
     }
 
     #[test]
