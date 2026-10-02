@@ -813,6 +813,17 @@ pub(crate) async fn deliver(
         return serde_json::to_value(&resp).unwrap_or_default();
     }
 
+    // The target is here but its spawn gate refused (not signed in). That is
+    // recoverable, so hold it for sign-in instead of failing it
+    // (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4).
+    // No other tier can run it either: the agent lives on this instance.
+    if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
+        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin).await {
+            return held;
+        }
+        return serde_json::to_value(&resp).unwrap_or_default();
+    }
+
     // 2. On "agent not found", check cross-instance file registry and forward.
     let is_not_found = resp
         .error
@@ -1074,7 +1085,7 @@ pub(crate) async fn deliver(
         // 5. No tier knew the target: hold it for the agent's return, when
         //    the durable jekt conditions hold.
         if !candidate_seen {
-            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp).await {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
                 return held;
             }
         }
@@ -1120,11 +1131,16 @@ fn echo_local_delivery(
 /// `cron` fire; and a target that is a known agent of this channel —
 /// resolved to its row's UID, so a typo or a name registered later by
 /// another block never receives the backlog. `None` keeps today's error.
-async fn hold_for_absent_target(
+///
+/// The same rules hold a jekt the target's spawn gate refused
+/// ([`HoldReason::NeedsLogin`]); the replay then waits for sign-in
+/// (`jekt_held::still_needs_login`).
+pub(crate) async fn hold_for_absent_target(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
+    reason: HoldReason,
 ) -> Option<serde_json::Value> {
     use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
     if auth_via != super::ReactiveAuthVia::FullAuthKey
@@ -1181,8 +1197,9 @@ async fn hold_for_absent_target(
     .flatten()?;
     // Registered under another of its names (the handler binds only the
     // display and stable ones): it is running, so deliver by UID now rather
-    // than tell the sender it is not.
-    if state.reactive_handler.has_uid_registration(&outcome.target_uid) {
+    // than tell the sender it is not. Not for a spawn-gate refusal: that
+    // target is registered, and a retry now would only be refused again.
+    if reason == HoldReason::NotRunning && state.reactive_handler.has_uid_registration(&outcome.target_uid) {
         let mut by_uid = req.clone();
         by_uid.target_agent = outcome.target_uid.clone();
         let resp = state.reactive_handler.inject_message(by_uid);
@@ -1198,6 +1215,7 @@ async fn hold_for_absent_target(
             return Some(serde_json::to_value(&resp).unwrap_or_default());
         }
     }
+    let target_uid = outcome.target_uid.clone();
     let mstore = state.mstore.clone();
     let outcome = tokio::task::spawn_blocking(move || mstore.jekt_held_insert(&outcome))
         .await
@@ -1206,13 +1224,25 @@ async fn hold_for_absent_target(
     match outcome {
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
+            let error = match reason {
+                HoldReason::NotRunning => format!(
+                    "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"
+                ),
+                HoldReason::NeedsLogin => {
+                    // The send itself was refused just now: the replay waits
+                    // for sign-in rather than retrying at once.
+                    super::jekt_held::mark_needs_login(&target_uid);
+                    format!(
+                        "agent {target} is not signed in — held for delivery on this AgentMux instance for up to 24 h, delivered when it signs in"
+                    )
+                }
+            };
             Some(json!({
                 "success": false,
                 "held": true,
+                "held_reason": reason.as_str(),
                 "request_id": resp.request_id,
-                "error": format!(
-                    "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"
-                ),
+                "error": error,
             }))
         }
         Ok(HoldOutcome::Full) => Some(json!({
@@ -1226,6 +1256,25 @@ async fn hold_for_absent_target(
         Err(e) => {
             tracing::warn!(error = %e, target = %target, "durable jekt: hold failed");
             None
+        }
+    }
+}
+
+/// Why a jekt is held (`held_reason` in the inject answer;
+/// SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md §5.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HoldReason {
+    /// A known agent with no process here.
+    NotRunning,
+    /// The agent is here but its spawn gate refused: not signed in.
+    NeedsLogin,
+}
+
+impl HoldReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            HoldReason::NotRunning => "not_running",
+            HoldReason::NeedsLogin => "needs_login",
         }
     }
 }
