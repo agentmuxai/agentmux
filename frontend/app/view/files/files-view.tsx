@@ -24,7 +24,7 @@ import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { errorText, type FilesModel, windowsNames } from "./files-model";
-import { closeOwnTab, openFolderInNewTab, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
+import { openFolderInNewTab, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
 import { paneWorkdir } from "@/app/drag/file-drop-actions";
 import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
@@ -125,16 +125,30 @@ export function mentionToken(path: string, workdir: string | undefined): string 
 
 type Confirm = { title: string; message: string; confirmLabel: string; onConfirm: () => void };
 
-export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext }): JSX.Element {
+export function FilesView(props: {
+    model: FilesModel;
+    ctx: PaneTabHostContext;
+    /** Whether this view's document tab is the one in front (always, for a
+     *  pane without document tabs). */
+    active?: () => boolean;
+    /** Open a folder as a document tab of this pane (Ctrl+Enter,
+     *  middle-click, the menu); without it, in a new pane tab. */
+    openInNewTab?: (dir: string) => void;
+}): JSX.Element {
     const model = props.model;
     const ctx = props.ctx;
+    const isActive = (): boolean => props.active?.() ?? true;
 
     // Settled-content contract (§6.5): the pane counts as painted once the
     // first page of the first listing is on screen, or it has said why not.
+    // Only the tab in front holds it (an inactive document never does, §5.5),
+    // and a tab switched back to has painted already.
     onCleanup(trackPaneContent(model.blockId));
-    const release = holdPaneContent(model.blockId);
-    onCleanup(release);
-    model.onFirstSettled = release;
+    if (isActive() && model.phase() === "loading") {
+        const release = holdPaneContent(model.blockId);
+        onCleanup(release);
+        model.onFirstSettled = release;
+    }
 
     const [scrollTop, setScrollTop] = createSignal(0);
     const [viewHeight, setViewHeight] = createSignal(400);
@@ -170,7 +184,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     // Files dropped on the pane go into the folder it shows: an OS drop or
     // another pane's row is copied; a row from another Hangar pane on the
     // same drive is moved (§8.2).
-    onMount(() => {
+    // One drop target per pane: the tab in front registers it.
+    createEffect(() => {
+        if (!isActive()) return;
         const dispose = registerFileDropTarget(model.blockId, {
             needsPaths: true,
             onNoPaths: () => model.setStatus({ text: "Those files have no path on disk, so they can't be copied here.", tone: "error" }),
@@ -243,7 +259,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         on(
             () => ctx.visibility(),
             (v) => {
-                if (v === "active") model.onShown();
+                if (v === "active" && isActive()) model.onShown();
             }
         )
     );
@@ -379,8 +395,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     /** A folder in a new Hangar tab of this pane (Ctrl+Enter, middle-click,
      *  the menu); Ctrl+T opens the folder shown. */
     const openInNewTab = (dir: string): void => {
+        if (props.openInNewTab) props.openInNewTab(dir);
+        else openInNewPane(dir);
+    };
+    /** A folder as a new Hangar pane tab beside this one (the menu). */
+    const openInNewPane = (dir: string): void => {
         void openFolderInNewTab(model.blockId, dir).catch((err) =>
-            model.setStatus({ text: `Couldn't open a new tab: ${errorText(err)}`, tone: "error" })
+            model.setStatus({ text: `Couldn't open a new pane: ${errorText(err)}`, tone: "error" })
         );
     };
 
@@ -438,14 +459,6 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 if (entry.is_dir) openInNewTab(model.pathOf(entry.name));
                 else openEntry(entry);
             }
-        } else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "t") openInNewTab(model.path());
-        else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "w") {
-            void closeOwnTab(model.blockId).then(
-                (closed) => {
-                    if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
-                },
-                (err) => model.setStatus({ text: `Couldn't close this tab: ${errorText(err)}`, tone: "error" })
-            );
         } else if (e.key === "Enter") {
             const list = model.selectedEntries();
             if (list.length === 1) openEntry(list[0]);
@@ -502,7 +515,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
         const items: ContextMenuItem[] = [{ type: "action", label: "Open", shortcut: "Enter", onSelect: () => openEntry(entry) }];
         if (entry.is_dir) {
-            items.push({ type: "action", label: "Open in new tab", shortcut: isMacOS() ? "⌘Enter" : "Ctrl+Enter", onSelect: () => openInNewTab(path) });
+            items.push(
+                { type: "action", label: "Open in new tab", shortcut: isMacOS() ? "⌘Enter" : "Ctrl+Enter", onSelect: () => openInNewTab(path) },
+                { type: "action", label: "Open in new pane", onSelect: () => openInNewPane(path) }
+            );
         }
         if (!entry.is_dir) {
             items.push(
@@ -851,7 +867,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     aria-label="Files"
                     aria-multiselectable="true"
                     aria-rowcount={entries().length + 1}
-                    aria-activedescendant={focusIndex() >= 0 ? `files-${model.blockId}-row-${focusIndex()}` : undefined}
+                    aria-activedescendant={focusIndex() >= 0 ? `files-${model.domKey}-row-${focusIndex()}` : undefined}
                     tabIndex={0}
                     onKeyDown={onKeyDown}
                     onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
@@ -1151,7 +1167,7 @@ function FileRow(props: {
 }): JSX.Element {
     return (
         <div
-            id={`files-${props.model.blockId}-row-${props.index}`}
+            id={`files-${props.model.domKey}-row-${props.index}`}
             class="files-row"
             classList={{
                 "files-row-selected": props.selected,
@@ -1261,7 +1277,7 @@ function GridTile(props: {
     );
     return (
         <div
-            id={`files-${props.model.blockId}-row-${props.index}`}
+            id={`files-${props.model.domKey}-row-${props.index}`}
             class="files-tile"
             classList={{
                 "files-row-selected": props.selected,
