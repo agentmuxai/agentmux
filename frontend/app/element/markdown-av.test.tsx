@@ -20,6 +20,8 @@ vi.mock("@/util/fetchutil", () => ({ fetch: (...a: unknown[]) => h.fetch(...a) }
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
+// No Media pane on screen: a click opens a new one.
+vi.mock("@/app/view/media/media-open", () => ({ openInMediaPaneOnScreen: async () => false }));
 
 import { Markdown } from "./markdown";
 
@@ -145,7 +147,7 @@ describe("video", () => {
         expect(c.querySelector(".am-media-play")).toBeNull();
         expect(c.querySelector(".am-media-card")!.textContent).toContain("300 MB");
         fireEvent.click(c.querySelector(".am-media-card")!);
-        expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "media", "media:path": "C:/work/big.mp4" } });
+        await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "media", "media:path": "C:/work/big.mp4" } }));
     });
 });
 

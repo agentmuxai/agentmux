@@ -19,6 +19,7 @@ import { MarkdownContentBlockType } from "@/app/element/markdown-util";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/global";
 import { withHeightContinuity } from "@/app/view/agent/resize-contract";
+import { openInMediaPaneOnScreen } from "@/app/view/media/media-open";
 import { fireAndForget } from "@/util/util";
 import { createSignal, Match, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 
@@ -61,9 +62,13 @@ const MuxBlock = (props: MuxBlockProps) => {
     );
 };
 
-/** Same action as the `OpenMedia` tool: a new Media pane on the file. */
+/** Open the file in Media: a tab of the Media pane on screen, else a new
+ *  Media pane (SPEC_DOCUMENT_TABS_2026_10_02.md §5.7). */
 export function openInMediaPane(path: string): void {
-    fireAndForget(() => createBlock({ meta: { view: "media", "media:path": path } }));
+    fireAndForget(async () => {
+        if (await openInMediaPaneOnScreen(path)) return;
+        await createBlock({ meta: { view: "media", "media:path": path } });
+    });
 }
 
 /**
