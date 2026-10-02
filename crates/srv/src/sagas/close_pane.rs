@@ -898,6 +898,103 @@ mod tests {
         finish_close(&state, &a).await;
     }
 
+    /// Agent teardown spec §7.4: Stop keeps the agent's background tasks
+    /// unless asked, and stops them (tree and all) when asked. The block and
+    /// its record stay either way.
+    #[tokio::test]
+    async fn stop_keeps_background_tasks_unless_asked() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        // A stand-in dev server, its own process group like bashwrap's.
+        #[cfg(windows)]
+        let mut dev = std::process::Command::new("cmd").args(["/C", "ping -n 30 127.0.0.1 > nul"]).spawn().unwrap();
+        #[cfg(unix)]
+        let mut dev = {
+            use std::os::unix::process::CommandExt as _;
+            std::process::Command::new("sh").args(["-c", "sleep 30"]).process_group(0).spawn().unwrap()
+        };
+        let now = agentmux_common::time::now_ms() as i64;
+        state.mstore.background_task_observe("bg-dev", &a, "task dev", now, now).unwrap();
+        state.mstore.background_task_set_pid("bg-dev", dev.id() as i64).unwrap();
+
+        register_slow(&a, 0);
+        let kept = crate::sagas::agent_teardown::stop(&state, &a, true, Some(false)).await.unwrap();
+        assert_eq!(kept.stopped_background, 0);
+        assert!(dev.try_wait().unwrap().is_none(), "kept running");
+
+        register_slow(&a, 0);
+        let stopped = crate::sagas::agent_teardown::stop(&state, &a, true, Some(true)).await.unwrap();
+        assert_eq!(stopped.stopped_background, 1);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while dev.try_wait().unwrap().is_none() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(dev.try_wait().unwrap().is_some(), "the background task was stopped");
+        assert!(state.srv_state.lock().await.blocks.contains_key(&a), "Stop keeps the block");
+        assert!(
+            crate::sagas::agent_teardown::stop(&state, "no-such-block", true, None).await.unwrap_err().starts_with("NOT_RUNNING"),
+        );
+        blockcontroller::delete_controller(&a);
+    }
+
+    /// A controller whose stop fails.
+    struct FailingStop(String);
+
+    impl blockcontroller::Controller for FailingStop {
+        fn start(&self, _: crate::backend::obj::MetaMapType, _: Option<Value>, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn stop(&self, _: bool, _: &str) -> Result<(), String> {
+            Err("stop_subprocess: no such process".into())
+        }
+        fn get_runtime_status(&self) -> blockcontroller::BlockControllerRuntimeStatus {
+            blockcontroller::BlockControllerRuntimeStatus { blockid: self.0.clone(), ..Default::default() }
+        }
+        fn send_input(&self, _: blockcontroller::BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+            Ok(())
+        }
+        fn controller_type(&self) -> &str {
+            "failing-stop-test"
+        }
+        fn block_id(&self) -> &str {
+            &self.0
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// ReAgent P1 on #4174: a Stop whose CLI stop fails reports the error and
+    /// touches nothing else; the agent is still running, so its background
+    /// tasks (and claims) stay.
+    #[tokio::test]
+    async fn a_failed_stop_is_an_error_and_keeps_everything() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        #[cfg(windows)]
+        let mut dev = std::process::Command::new("cmd").args(["/C", "ping -n 30 127.0.0.1 > nul"]).spawn().unwrap();
+        #[cfg(unix)]
+        let mut dev = {
+            use std::os::unix::process::CommandExt as _;
+            std::process::Command::new("sh").args(["-c", "sleep 30"]).process_group(0).spawn().unwrap()
+        };
+        let now = agentmux_common::time::now_ms() as i64;
+        state.mstore.background_task_observe("bg-keep", &a, "task dev", now, now).unwrap();
+        state.mstore.background_task_set_pid("bg-keep", dev.id() as i64).unwrap();
+        blockcontroller::register_controller(&a, std::sync::Arc::new(FailingStop(a.clone())));
+
+        let err = crate::sagas::agent_teardown::stop(&state, &a, true, Some(true)).await.unwrap_err();
+        assert!(err.contains("no such process"), "the stop's own error: {err}");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(dev.try_wait().unwrap().is_none(), "the background task was not stopped");
+
+        blockcontroller::take_controller(&a);
+        let _ = dev.kill();
+        let _ = dev.wait();
+    }
+
     /// App exit lists every controller; a drawer is left to its parent's
     /// cascade, not torn down twice at once (ReAgent P2 on #4164).
     #[tokio::test]

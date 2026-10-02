@@ -561,11 +561,16 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// Core `agent.stop` logic, factored out so `fleet.bulk-stop`
 /// (`server/app_api/fleet.rs`) can loop it per target instead of
 /// duplicating the controller-lookup/stop/status-read sequence.
-pub(crate) fn stop_one_agent_block(block_id: &str, signal: Option<&str>) -> Result<AgentStopResult, String> {
-    tracing::info!(block_id = %block_id, signal = ?signal, "agent.stop");
+pub(crate) async fn stop_one_agent_block(
+    state: &AppState,
+    block_id: &str,
+    signal: Option<&str>,
+    stop_background: Option<bool>,
+) -> Result<AgentStopResult, String> {
+    tracing::info!(block_id = %block_id, signal = ?signal, ?stop_background, "agent.stop");
 
     let force = matches!(signal, Some("SIGKILL") | Some("SIGTERM"));
-    crate::sagas::agent_teardown::stop_now(block_id, !force)?;
+    crate::sagas::agent_teardown::stop(state, block_id, !force, stop_background).await?;
 
     let exit_code = blockcontroller::get_block_controller_status(block_id)
         .map(|s| s.shellprocexitcode);
@@ -577,14 +582,16 @@ pub(crate) fn stop_one_agent_block(block_id: &str, signal: Option<&str>) -> Resu
     })
 }
 
-fn register_agent_stop(engine: &Arc<WshRpcEngine>, _state: &AppState) {
+fn register_agent_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
     engine.register_handler(
         COMMAND_AGENT_STOP_API,
-        Box::new(|data, _ctx| {
+        Box::new(move |data, _ctx| {
+            let state = state.clone();
             Box::pin(async move {
                 let cmd: CommandAgentStopApiData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.stop: {e}"))?;
-                let result = stop_one_agent_block(&cmd.block_id, cmd.signal.as_deref())?;
+                let result = stop_one_agent_block(&state, &cmd.block_id, cmd.signal.as_deref(), cmd.stop_background).await?;
                 Ok(Some(serde_json::to_value(&result).unwrap()))
             })
         }),

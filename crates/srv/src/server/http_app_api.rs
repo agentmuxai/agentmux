@@ -242,10 +242,10 @@ pub(super) async fn handle_agent_stop_pending_forward(
 /// couldn't find in its own — same one-hop-forward shape as
 /// `/agentmux/reactive/inject`'s cross-channel tier, no further forwarding.
 pub(super) async fn handle_agent_stop_forward(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<AgentStopForwardRequest>,
 ) -> impl IntoResponse {
-    match app_api::agent_io::stop_one_agent_block(&req.block_id, req.signal.as_deref()) {
+    match app_api::agent_io::stop_one_agent_block(&state, &req.block_id, req.signal.as_deref(), None).await {
         Ok(result) => (StatusCode::OK, Json(serde_json::json!({ "success": true, "result": result }))).into_response(),
         Err(e) => (StatusCode::OK, Json(serde_json::json!({ "success": false, "error": e }))).into_response(),
     }
