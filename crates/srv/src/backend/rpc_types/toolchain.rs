@@ -114,6 +114,13 @@ pub struct ToolchainPruneReq {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dry_run: Option<bool>,
+    /// With `dry_run: false`: remove only these directories (as listed by an
+    /// earlier dry run), and only those that are STILL removable. Anything that
+    /// became removable since is not touched, so a removal is exactly the list
+    /// the user saw. Omitted: everything removable now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub only: Option<Vec<String>>,
 }
 
 /// One installed CLI directory.

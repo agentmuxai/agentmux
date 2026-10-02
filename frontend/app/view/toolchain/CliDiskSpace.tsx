@@ -41,10 +41,15 @@ export const CliDiskSpace = (): JSX.Element => {
             setState({ kind: "error", message: err?.message ?? String(err) });
         }
     };
-    const remove = async () => {
+    // Removes exactly what the last check listed (and only what is still
+    // removable): an install that became removable since is not touched.
+    const remove = async (dirs: string[]) => {
         setState({ kind: "working", what: "remove" });
         try {
-            setState({ kind: "removed", result: await RpcApi.ToolchainPruneCommand(TabRpcClient, { dry_run: false }, { timeout: 120000 }) });
+            setState({
+                kind: "removed",
+                result: await RpcApi.ToolchainPruneCommand(TabRpcClient, { dry_run: false, only: dirs }, { timeout: 120000 }),
+            });
         } catch (err: any) {
             setState({ kind: "error", message: err?.message ?? String(err) });
         }
@@ -104,7 +109,7 @@ export const CliDiskSpace = (): JSX.Element => {
                                     {formatBytes(r().reclaimable_bytes)} can be freed
                                 </div>
                                 {list(r(), r().candidates)}
-                                <button class="toolchain-link-btn" onClick={remove}>
+                                <button class="toolchain-link-btn" onClick={() => remove(r().candidates.map((c) => c.dir))}>
                                     Remove {r().candidates.length} · free {formatBytes(r().reclaimable_bytes)}
                                 </button>
                             </Show>
@@ -121,9 +126,16 @@ export const CliDiskSpace = (): JSX.Element => {
                     const freed = () => r().removed.reduce((n, c) => n + c.bytes, 0);
                     return (
                         <>
-                            <div class="toolchain-env-line">
-                                Removed {r().removed.length} · freed {formatBytes(freed())}
-                            </div>
+                            <Show when={!r().scan_ok}>
+                                <div class="toolchain-env-line">
+                                    Couldn't tell which CLIs are running, so nothing was removed.
+                                </div>
+                            </Show>
+                            <Show when={r().scan_ok}>
+                                <div class="toolchain-env-line">
+                                    Removed {r().removed.length} · freed {formatBytes(freed())}
+                                </div>
+                            </Show>
                             {list(r(), r().removed)}
                             <Show when={r().skipped.length > 0}>
                                 <div class="toolchain-env-line">

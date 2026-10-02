@@ -9,4 +9,11 @@ export type ToolchainPruneReq = {
  * Omitted or `true`: only report what WOULD be removed. Deleting needs an
  * explicit `false`, so a call that forgot the field cannot delete anything.
  */
-dry_run?: boolean, };
+dry_run?: boolean, 
+/**
+ * With `dry_run: false`: remove only these directories (as listed by an
+ * earlier dry run), and only those that are STILL removable. Anything that
+ * became removable since is not touched, so a removal is exactly the list
+ * the user saw. Omitted: everything removable now.
+ */
+only?: Array<string>, };

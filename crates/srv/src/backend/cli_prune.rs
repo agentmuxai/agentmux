@@ -380,16 +380,24 @@ pub struct Run {
 /// Plan, and unless `dry_run`, carry out, a prune. `dry_run` is the caller's
 /// explicit choice to delete: nothing in AgentMux calls this with `false`
 /// except a user action.
+///
+/// `only`: remove just these directories (the ones an earlier dry run listed),
+/// and only if they are still removable now. Anything that became removable
+/// since is left alone, so a removal is exactly what the user was shown.
 pub fn run(
     paths: &DataPaths,
     live_commands: &[String],
     dry_run: bool,
+    only: Option<&[String]>,
     max_idle: Duration,
     now: SystemTime,
 ) -> Run {
     let in_use = gather_in_use(live_commands);
     let scan_ok = in_use.process_commands.is_some();
-    let plan = plan_prune(paths, now, max_idle, env!("CARGO_PKG_VERSION"), &current_pins(), &in_use);
+    let mut plan = plan_prune(paths, now, max_idle, env!("CARGO_PKG_VERSION"), &current_pins(), &in_use);
+    if let Some(only) = only {
+        plan.prunable.retain(|c| only.iter().any(|d| Path::new(d) == c.dir));
+    }
     let report = (!dry_run).then(|| prune(paths, &plan, &|| gather_in_use(live_commands)));
     Run { plan, report, scan_ok }
 }
@@ -732,7 +740,7 @@ mod tests {
         let old = shared_install(&p, "claude", "0.0.1", now, 90 * DAY);
         let recent = shared_install(&p, "claude", "0.0.2", now, DAY);
 
-        let dry = run(&p, &[], true, DEFAULT_MAX_IDLE, now);
+        let dry = run(&p, &[], true, None, DEFAULT_MAX_IDLE, now);
         assert!(dry.scan_ok, "ps works here");
         assert_eq!(dirs(&dry.plan.prunable), vec![old.clone()]);
         assert!(dry.report.is_none());
@@ -741,15 +749,40 @@ mod tests {
         // a pane restored from a layout names the old install: kept
         let sep = std::path::MAIN_SEPARATOR;
         let named = format!("{}{sep}node_modules{sep}.bin{sep}claude -p", old.display());
-        let kept = run(&p, &[named], false, DEFAULT_MAX_IDLE, now);
+        let kept = run(&p, &[named], false, None, DEFAULT_MAX_IDLE, now);
         assert!(kept.plan.prunable.is_empty());
         assert!(old.join(COMPLETE_MARKER).is_file());
 
-        let real = run(&p, &[], false, DEFAULT_MAX_IDLE, now);
+        let real = run(&p, &[], false, None, DEFAULT_MAX_IDLE, now);
         let report = real.report.expect("a real run reports");
         assert_eq!(report.removed.len(), 1);
         assert!(!old.exists());
         assert!(recent.join(COMPLETE_MARKER).is_file(), "recently used stays");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_removal_is_exactly_the_list_the_user_was_shown() {
+        let t = tempfile::tempdir().unwrap();
+        let p = paths_in(t.path());
+        let now = SystemTime::now();
+        let shown = shared_install(&p, "claude", "0.0.1", now, 90 * DAY);
+        // became removable after the user's Check (e.g. a pane closed meanwhile)
+        let later = shared_install(&p, "claude", "0.0.2", now, 95 * DAY);
+
+        let only = vec![shown.to_string_lossy().into_owned()];
+        let r = run(&p, &[], false, Some(&only), DEFAULT_MAX_IDLE, now);
+        assert_eq!(r.report.unwrap().removed.len(), 1);
+        assert!(!shown.exists());
+        assert!(later.join(COMPLETE_MARKER).is_file(), "not shown, so not touched");
+
+        // a listed dir that is no longer removable (now in use) is not removed either
+        let sep = std::path::MAIN_SEPARATOR;
+        let named = format!("{}{sep}node_modules{sep}.bin{sep}claude", later.display());
+        let only = vec![later.to_string_lossy().into_owned()];
+        let r = run(&p, &[named], false, Some(&only), DEFAULT_MAX_IDLE, now);
+        assert!(r.report.unwrap().removed.is_empty());
+        assert!(later.join(COMPLETE_MARKER).is_file());
     }
 
     #[test]

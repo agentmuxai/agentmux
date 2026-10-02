@@ -493,7 +493,8 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         move |req: Option<ToolchainPruneReq>, _ctx| {
             let mstore = mstore_prune.clone();
             async move {
-                let dry_run = req.and_then(|r| r.dry_run).unwrap_or(true);
+                let dry_run = req.as_ref().and_then(|r| r.dry_run).unwrap_or(true);
+                let only = req.and_then(|r| r.only);
                 let paths = agentmux_common::DataPaths::from_env()
                     .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
                 // The commands of every block that records one: the open panes
@@ -517,7 +518,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let max_idle = crate::backend::cli_prune::DEFAULT_MAX_IDLE;
                 let now = std::time::SystemTime::now();
                 let run = tokio::task::spawn_blocking(move || {
-                    crate::backend::cli_prune::run(&paths, &live, dry_run, max_idle, now)
+                    crate::backend::cli_prune::run(&paths, &live, dry_run, only.as_deref(), max_idle, now)
                 })
                 .await
                 .map_err(|e| format!("toolchain.prune: {e}"))?;
@@ -953,6 +954,48 @@ async fn get_cli_version(cli_path: &str) -> String {
     }
 }
 
+/// The wire form of a prune [`crate::backend::cli_prune::Run`].
+fn prune_result(
+    run: crate::backend::cli_prune::Run,
+    dry_run: bool,
+    max_idle: std::time::Duration,
+) -> ToolchainPruneResult {
+    use crate::backend::cli_prune::Candidate;
+    let item = |c: &Candidate| ToolchainPruneItem {
+        dir: c.dir.to_string_lossy().into_owned(),
+        provider: c.provider.clone(),
+        version: c.version.clone(),
+        legacy: c.legacy,
+        bytes: c.bytes,
+        idle_days: c.idle.as_secs() / 86_400,
+    };
+    let removed_dirs: std::collections::HashSet<&std::path::PathBuf> = run
+        .report
+        .iter()
+        .flat_map(|r| r.removed.iter().map(|(d, _)| d))
+        .collect();
+    ToolchainPruneResult {
+        dry_run,
+        scan_ok: run.scan_ok,
+        candidates: run.plan.prunable.iter().map(item).collect(),
+        reclaimable_bytes: run.plan.reclaimable_bytes(),
+        removed: run
+            .plan
+            .prunable
+            .iter()
+            .filter(|c| removed_dirs.contains(&c.dir))
+            .map(item)
+            .collect(),
+        skipped: run
+            .report
+            .iter()
+            .flat_map(|r| r.skipped.iter())
+            .map(|(d, why)| ToolchainPruneSkip { dir: d.to_string_lossy().into_owned(), reason: why.clone() })
+            .collect(),
+        kept: run.plan.kept.len() as u32,
+        max_idle_days: (max_idle.as_secs() / 86_400) as u32,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1105,49 +1148,5 @@ mod tests {
             !ts.contains("path_source: string"),
             "generated TS kept the Rust name as a field: {ts}",
         );
-    }
-}
-
-
-/// The wire form of a prune [`crate::backend::cli_prune::Run`].
-fn prune_result(
-    run: crate::backend::cli_prune::Run,
-    dry_run: bool,
-    max_idle: std::time::Duration,
-) -> ToolchainPruneResult {
-    use crate::backend::cli_prune::Candidate;
-    let item = |c: &Candidate| ToolchainPruneItem {
-        dir: c.dir.to_string_lossy().into_owned(),
-        provider: c.provider.clone(),
-        version: c.version.clone(),
-        legacy: c.legacy,
-        bytes: c.bytes,
-        idle_days: c.idle.as_secs() / 86_400,
-    };
-    let removed_dirs: std::collections::HashSet<&std::path::PathBuf> = run
-        .report
-        .iter()
-        .flat_map(|r| r.removed.iter().map(|(d, _)| d))
-        .collect();
-    ToolchainPruneResult {
-        dry_run,
-        scan_ok: run.scan_ok,
-        candidates: run.plan.prunable.iter().map(item).collect(),
-        reclaimable_bytes: run.plan.reclaimable_bytes(),
-        removed: run
-            .plan
-            .prunable
-            .iter()
-            .filter(|c| removed_dirs.contains(&c.dir))
-            .map(item)
-            .collect(),
-        skipped: run
-            .report
-            .iter()
-            .flat_map(|r| r.skipped.iter())
-            .map(|(d, why)| ToolchainPruneSkip { dir: d.to_string_lossy().into_owned(), reason: why.clone() })
-            .collect(),
-        kept: run.plan.kept.len() as u32,
-        max_idle_days: (max_idle.as_secs() / 86_400) as u32,
     }
 }

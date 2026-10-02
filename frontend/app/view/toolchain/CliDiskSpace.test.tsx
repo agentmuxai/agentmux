@@ -78,7 +78,11 @@ describe("CliDiskSpace", () => {
         fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));
         fireEvent.click(await screen.findByRole("button", { name: /Remove 1/ }));
         expect(await screen.findByText(/Removed 1 · freed 210 MB/)).toBeInTheDocument();
-        expect(prune.mock.calls.map((c) => c[0])).toEqual([{ dry_run: true }, { dry_run: false }]);
+        // and it names exactly the directories the check listed
+        expect(prune.mock.calls.map((c) => c[0])).toEqual([
+            { dry_run: true },
+            { dry_run: false, only: ["/h/shared/cli/claude/2.1.200"] },
+        ]);
     });
 
     it("reports installs left in place at removal time", async () => {
@@ -88,6 +92,16 @@ describe("CliDiskSpace", () => {
         fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));
         fireEvent.click(await screen.findByRole("button", { name: /Remove 1/ }));
         expect(await screen.findByText(/Left in place \(1\)/)).toBeInTheDocument();
+    });
+
+    it("explains a removal that did nothing because the scan failed at that moment", async () => {
+        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210_000_000 }));
+        prune.mockResolvedValueOnce(result({ dry_run: false, scan_ok: false }));
+        render(() => <CliDiskSpace />);
+        fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));
+        fireEvent.click(await screen.findByRole("button", { name: /Remove 1/ }));
+        expect(await screen.findByText(/nothing was removed/)).toBeInTheDocument();
+        expect(screen.queryByText(/Removed 0/)).toBeNull();
     });
 
     it("offers nothing when the running-process scan failed", async () => {
