@@ -164,6 +164,10 @@ export class FilesModel {
     /** A change on disk while the pane was hidden: re-list on show. */
     private staleWhileHidden = false;
     private disposed = false;
+    /** Protected macOS places the user clicked Open on in this pane: the
+     *  click is the consent, whether or not macOS then allowed the read, so
+     *  Try again and Refresh work after a denial (ReAgent on #4201). */
+    private readonly openedPlaces = new Set<string>();
     /** Called once the first listing has painted (or failed): the view's
      *  settled-content hold (§6.5). */
     onFirstSettled: (() => void) | null = null;
@@ -300,7 +304,7 @@ export class FilesModel {
     private needsConsent(path: string): FsPlace | null {
         const place = this.protectedPlace(path);
         if (!place) return null;
-        return loadSafeRoots().has(place.path) ? null : place;
+        return this.openedPlaces.has(place.path) || loadSafeRoots().has(place.path) ? null : place;
     }
 
     // ── Navigation ───────────────────────────────────────────────────────────
@@ -325,6 +329,10 @@ export class FilesModel {
             this.setRenaming(null);
         });
         void this.ctx.setMeta({ [META_PATH]: target });
+        if (opts.consented) {
+            const place = this.protectedPlace(target);
+            if (place) this.openedPlaces.add(place.path);
+        }
         const gate = opts.consented ? null : this.needsConsent(target);
         if (gate) {
             this.generation++;
