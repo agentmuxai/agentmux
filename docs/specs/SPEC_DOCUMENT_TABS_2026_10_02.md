@@ -1,9 +1,9 @@
 # SPEC: Document tabs: one shared tab system for the documents inside a pane
 
-**Status:** active. Phase 1 is built (#4231): the shared layer and Hangar on it. Phase 2 is built: the Editor on it (§6.1). Phase 3 is built for Media (§6.3); Phase 5 is not; Phase 4 (Browser) is dropped (§6.4). Where the build differs from the design below, the section says so. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
+**Status:** active. Phase 1 is built (#4231): the shared layer, first with Hangar on it; Hangar has since gone back to pane tabs (§6.2). Phase 2 is built: the Editor on it (#4233, §6.1). Phase 3 is built for Media (§6.3); Phase 5 is not; Phase 4 (Browser) is dropped (§6.4). Where the build differs from the design below, the section says so. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
 **Date:** 2026-10-02
 **Author:** korp
-**Trigger:** Repo owner, 2026-10-02: *"there are actually 3 types: Window tabs, Pane tabs, and inner-pane tabs"*; *"The media pane tabs would also be in-pane tabs"*; *"ok document tabs. so u will create 1 document tab system that editor, hangar, media, (does browser have it too?) and whatever types"*; and *"lets also backreference old docs to this, so old stuff like that idea you found is squashed"*.
+**Trigger:** Repo owner, 2026-10-02: *"there are actually 3 types: Window tabs, Pane tabs, and inner-pane tabs"*; *"The media pane tabs would also be in-pane tabs"*; *"ok document tabs. so u will create 1 document tab system that editor, hangar, media, (does browser have it too?) and whatever types"*; and *"lets also backreference old docs to this, so old stuff like that idea you found is squashed"*. Later the same day the repo owner narrowed it: *"only Editor and Media really need document tabs. Terminal and Browser do not"*, then *"I think only editor and media need the document tabs .. which make semantic sense in the end"* (§6.2, §6.4).
 
 **Supersedes, in part** (each of these now carries a note pointing here):
 - `SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` §7 resolution 3 ("Editor files-tabs migration onto `blockStack`: yes"), the §2.4 bullet that sets it up, §2.2's tab taxonomy (which has no document layer), and the `Ctrl:Shift:T` row of §4.9.
@@ -22,18 +22,18 @@
 |---|---|---|---|---|
 | **Window tabs** | a whole layout of panes | the workspace | top of the window (`tabbar.tsx`) | Tab 1, Tab 2 |
 | **Pane tabs** | one block (one view instance) stacked in a pane slot | the layout tree (`blockStack`) | the pane header (`PaneChrome` → `PaneTabStrip`) | an Agent and a Terminal sharing a slot |
-| **Document tabs** | one *thing a pane shows*, inside one block | the block (its meta, §5.3) | under the pane header (`DocTabStrip` → `PaneTabStrip`) | Editor files, Hangar folders, Media files |
+| **Document tabs** | one *thing a pane shows*, inside one block | the block (its meta, §5.3) | under the pane header (`DocTabStrip` → `PaneTabStrip`) | Editor files, Media files |
 
 The rule that decides the layer: **a pane tab is a different pane; a document tab is a different document in the same pane.** An Agent and a Terminal are different panes; two files are two documents of one Editor. Agent and Terminal have no document tabs: each instance *is* its one session.
 
-"Document" is used loosely: a folder is Hangar's document, a page is the Browser's. **Doc tab** is the short form; code uses `doc-tabs` / `DocTab*`.
+A document is a file the pane shows. Folders (Hangar) and pages (Browser) are not documents in this sense: those panes stay one thing each, and more of them are more panes or pane tabs (§6.2, §6.4). **Doc tab** is the short form; code uses `doc-tabs` / `DocTab*`.
 
 ### 1.1 What exists today
 - Window tabs and pane tabs: built, separate state, as above.
 - **Editor:** document tabs in all but name. Its file tabs draw with the shared `PaneTabStrip` (`editor-tab-strip.tsx`) but keep their state in an editor-only store (`editor-pane-state-store.ts`: tabs, active, preview, scratch, recently closed). They are not persisted: only the legacy single `file` meta key restores one tab (the planned `editor:tabs` key, "Phase 1C" in `editor-model.ts`, was never built). No keyboard shortcuts; `reopenLastClosed` has no caller; drag-reorder is not wired.
 - **Browser:** its reducer is already multi-tab (`store/browser-pane-state/types.ts`: `tabs[]`, `activeTabId`, `ReorderTab`), but no strip is drawn and the model only ever opens one tab.
 - **Media:** one file per pane.
-- **Hangar:** #4227 put its tabs on *pane tabs* (each folder its own block). By §1's rule that's the wrong layer; §6.2 moves it.
+- **Hangar:** #4227 put its tabs on *pane tabs* (each folder its own block). This spec first moved them (§6.2); the repo owner then kept Hangar on pane tabs, where it is now.
 
 ## 2. Goals and non-goals
 
@@ -130,7 +130,7 @@ As built, `active` is an index into `tabs` and tabs carry no id: ids are minted 
 ### 5.4 Content per tab
 The layer manages tabs, not content. Each type decides how inactive documents are kept:
 - **Keep state, mount one** (Media): each tab's state object lives in memory; only the active tab's view is mounted.
-- **Keep mounted, show one** (Hangar, as built): each tab's view stays mounted and hidden, so its scroll, filter and an open rename survive a switch. Hangar's views are plain DOM, so this costs little; only the active one listens for drops, holds settled content or applies an OpenFiles selection.
+- **Keep mounted, show one** (Hangar while it had document tabs, #4231; no current user): each tab's view stays mounted and hidden, so its scroll, filter and an open rename survive a switch. Hangar's views are plain DOM, so this costs little; only the active one listens for drops, holds settled content or applies an OpenFiles selection.
 - **Keep instances** (Editor): one CodeMirror `EditorState` per tab, swapped into one view, which is how the editor already works.
 - **Keep a budget** (Browser): §6.4.
 
@@ -153,7 +153,7 @@ docTabs?: {
 ```
 The host renders the strip, owns the keys and the persistence, and hands the view its active document. The view renders that document.
 
-**As built in Phase 1** the manifest field is not there yet: a view that wants document tabs makes a `DocTabsController` with a `DocTabsSpec` (the fields above) and renders `DocTabStrip` itself, as Hangar's `files-pane.tsx` does. Moving that into the host is for when a second type adopts the layer (Phase 2), so its shape is settled by two users, not one.
+**As built in Phase 1** the manifest field is not there yet: a view that wants document tabs makes a `DocTabsController` with a `DocTabsSpec` (the fields above) and renders `DocTabStrip` itself, as Media's `media-pane.tsx` does (and Hangar's did). Moving that into the host is for when a second type adopts the layer (Phase 2), so its shape is settled by two users, not one.
 
 ### 5.7 Agents and other panes opening documents
 `OpenEditor`, `OpenFiles`, `OpenMedia` (and a future `OpenBrowser`), and in-app opens (Hangar's open-by-kind, a Read row's image), **add a document tab to an existing pane of that type in the window tab on screen**, preferring the focused one, then the most recently focused. They create a new pane only when none exists or the caller asks (`new_pane: true`). This generalizes the Editor's `editor:pending_open_files` queue (`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md`) to a `doctabs:pending` meta queue drained by the host, so it works for every type.
@@ -172,7 +172,8 @@ The design, as written before the build:
 - New for the Editor: persistence (§5.3, the never-built Phase 1C), the keys (§4.3), drag-reorder (its reducer had `ReorderTab`, never dispatched).
 - Risk: highest of the four (buffers, dirty state, LSP, the file watcher). It gets its own PR, a live check of save, close-dirty, reopen and restart, and nothing else bundled in.
 
-### 6.2 Hangar (Phase 1, first adopter)
+### 6.2 Hangar (Phase 1, first adopter): back on pane tabs
+**Withdrawn by the repo owner, 2026-10-02:** *"I think only editor and media need the document tabs .. which make semantic sense in the end."* A folder is a place, not a document. #4231 built what follows; Hangar is back on pane tabs exactly as #4227 had it (`SPEC_FILE_BROWSER_PANE_2026_10_01.md` §12.6): each folder tab is its own Hangar block in the pane's stack; Ctrl+T, Ctrl+W, Ctrl+Enter and middle-click act on pane tabs. Kept from the document-tab work: Hangar's media opens join the Media pane on screen (§6.3). The design as built in #4231, for the record:
 - Payload `{ path }`; key = the path. Each tab has its own `FilesModel` (history, selection, sort, scroll), made in its own reactive root, and its own mounted view (§5.4). The tabs share one queue of copy and move jobs; when one finishes, the tab in front reports it and every tab re-lists. The block's `files:path` follows the tab in front, so the pane's "+", OpenFiles and layout export keep working, and a Hangar from before document tabs opens with one tab on it. Built in `frontend/app/view/files/files-pane.tsx`.
 - `Ctrl+T` and "+" open the folder shown; `Ctrl+Enter`, middle-click and **Open in new tab** on a folder open it as a document tab. These replace #4227's pane-tab behaviour. **Open in new pane** stays in the row menu for a folder you want beside this one.
 - `keepOne: true`: Hangar always shows a folder; `Ctrl+W` on the last tab says to use the pane's ×.
@@ -186,7 +187,7 @@ The design, as written before the build:
 - Its directory watcher (`media_file_watcher`) watches each open tab's file, not one path.
 
 ### 6.4 Browser (Phase 4): dropped
-**Dropped by the repo owner, 2026-10-02:** *"only Editor and Media really need document tabs. Terminal and Browser do not"* (Hangar keeps its document tabs, which the repo owner confirmed the same day). A Browser pane stays one page; more pages are more panes, as `SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md` has it. The design below is kept for the record only.
+**Dropped by the repo owner, 2026-10-02:** *"only Editor and Media really need document tabs. Terminal and Browser do not"* (Hangar went back to pane tabs the same day, §6.2). A Browser pane stays one page; more pages are more panes, as `SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md` has it. The design below is kept for the record only.
 - Wires the existing multi-tab reducer to the shared model; payload `{ url, title, favicon }`; key = a generated id (two tabs may show one URL).
 - Each tab is a native CEF browser view (`nativeSurface`). Inactive views are hidden, not destroyed, up to a budget (4 live per pane by default). Past it, the least recently used is **discarded** (its URL kept) and reloaded on activation, as browsers do.
 - `Ctrl+T` opens the start page; links that ask for a new tab (`target=_blank`, middle-click) open a document tab instead of a new pane.
@@ -205,7 +206,7 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 - Reducer (`doc-tabs.test.ts`): every command, preview replacement, key de-duplication, MRU order, the closed list (cap, reopen), pinned ordering, `keepOne`.
 - Persistence: round-trip, unknown version ignored, a missing document restored as a marked tab, preview and closed not written.
 - Strip and keys: visibility threshold, marks, reorder by drag and by keys, the keys acting only inside a doc-tab pane (a terminal keeps `Ctrl+W`).
-- Per type: the Editor's existing tab tests ported onto the shared layer, unchanged in what they assert; Hangar's #4227 tests rewritten for document tabs (done: `files-view.test.tsx`, "document tabs").
+- Per type: the Editor's existing tab tests ported onto the shared layer, unchanged in what they assert; Hangar's #4227 tests were rewritten for document tabs in #4231 and restored when Hangar went back to pane tabs.
 - Live checks on a dev build for each phase, the Editor's with save and close-dirty.
 
 ## 9. Rollout
@@ -213,7 +214,7 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 | Phase | What | Notes |
 |---|---|---|
 | 0 | This spec, and pointers in the superseded docs | this PR |
-| 1 | The shared layer (§5.1–§5.6) and **Hangar** on it (§6.2) | **built.** Reverts #4227's pane-tab bindings. Drag-reorder moved to Phase 5 (§4.1); the manifest field to Phase 2 (§5.6) |
+| 1 | The shared layer (§5.1–§5.6) and **Hangar** on it (§6.2) | **built** (#4231); Hangar then went back to #4227's pane tabs (§6.2), the layer stays for the Editor and Media. Drag-reorder moved to Phase 5 (§4.1); the manifest field to Phase 2 (§5.6) |
 | 2 | **Editor** on it (§6.1) | **built.** Its own PR. The slice keeps its commands on the shared model rather than being deleted (§6.1) |
 | 3 | **Media** tabs (§6.3) and §5.7's open-into-existing-pane for Editor, Hangar, Media | **built for Media**, from the frontend (§6.3); `OpenMedia` and Hangar's `OpenFiles` still open new panes |
 | 4 | ~~**Browser** tabs (§6.4)~~ | **dropped** (§6.4) |
@@ -221,5 +222,5 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 
 ## 10. Open questions for the repo owner
 1. **macOS keys.** Mac users expect `Cmd+W`, `Cmd+T` and `Cmd+Shift+T` for document tabs (Safari, VS Code), but in this app `Cmd:` chords are window-level (`Cmd:t` is a new window tab). Proposed: `Ctrl` on every platform (§4.3), revisited after use. The alternative is `Cmd` on macOS only for document tabs, which means moving the window-tab chords there.
-2. **Strip from one tab or from two?** Proposed: from two, except the Editor (always), so a Hangar or Media pane with one document doesn't lose a row.
+2. **Strip from one tab or from two?** Proposed: from two, except the Editor (always), so a Media pane with one document doesn't lose a row.
 3. ~~**Browser live-view budget.**~~ Moot: Browser tabs are dropped (§6.4).

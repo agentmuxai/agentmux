@@ -69,11 +69,15 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: h.rpc }));
-const tabs = vi.hoisted(() => ({ opened: [] as string[][] }));
+const tabs = vi.hoisted(() => ({ opened: [] as string[][], closeResult: true, closeError: "" }));
 vi.mock("./files-open", async (orig) => ({
     ...(await orig<typeof import("./files-open")>()),
     openFolderInNewTab: async (from: string, dir: string) => {
         tabs.opened.push([from, dir]);
+    },
+    closeOwnTab: async () => {
+        if (tabs.closeError) throw new Error(tabs.closeError);
+        return tabs.closeResult;
     },
 }));
 const blocks = vi.hoisted(() => new Map<string, { meta: Record<string, unknown> }>());
@@ -113,7 +117,6 @@ import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/
 import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME, registerFileDropTarget } from "@/app/drag/file-drop";
 import { errorMessage, FilesView, formatModified, mentionToken } from "./files-view";
 import { filesPaneTab, filesTitle } from "./files";
-import { FilesPane, FilesPaneModel } from "./files-pane";
 
 const f = (name: string, over: Partial<FsEntry> = {}): FsEntry => ({
     name,
@@ -131,11 +134,7 @@ const HOME = "C:\\Users\\a";
 
 /** `frameContextMenu` stands in for the pane frame, which listens above the view
  *  with a Solid handler (so it takes part in Solid's delegated bubbling). */
-function mount(
-    meta: Record<string, unknown> = {},
-    frameContextMenu?: (e: MouseEvent) => void,
-    opts: { openInNewTab?: (dir: string) => void } = {}
-) {
+function mount(meta: Record<string, unknown> = {}, frameContextMenu?: (e: MouseEvent) => void) {
     const [m, setM] = createSignal<Record<string, unknown>>(meta);
     const [visibility, setVisibility] = createSignal<"active" | "dormant" | "windowHidden">("active");
     const ctx: PaneTabHostContext = {
@@ -155,7 +154,7 @@ function mount(
     const model = new FilesModel(ctx);
     const r = render(() => (
         <div onContextMenu={frameContextMenu}>
-            <FilesView model={model} ctx={ctx} openInNewTab={opts.openInNewTab} />
+            <FilesView model={model} ctx={ctx} />
         </div>
     ));
     const names = () => [...r.container.querySelectorAll(".files-rows .files-name")].map((n) => n.textContent);
@@ -980,158 +979,54 @@ describe("the Files pane: Alt+K mentions (§8.2, route 3)", () => {
     });
 });
 
-describe("the Files pane: opening folders in tabs", () => {
+describe("the Files pane: pane tabs", () => {
     beforeEach(() => {
         tabs.opened = [];
+        tabs.closeResult = true;
+        tabs.closeError = "";
     });
 
-    it("Ctrl+Enter, middle-click and the menu open a folder as a document tab", async () => {
-        const opened: string[] = [];
-        const v = mount({}, undefined, { openInNewTab: (dir) => opened.push(dir) });
+    it("Ctrl+Enter and middle-click open a folder in a new tab; Ctrl+T opens this one", async () => {
+        const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.click(v.row("src"));
         fireEvent.keyDown(v.list(), { key: "Enter", ctrlKey: true });
         fireEvent(v.row("src"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
-        fireEvent.contextMenu(v.row("src"));
-        fireEvent.pointerDown(await waitFor(() => screen.getByText("Open in new tab")));
-        expect(opened).toEqual([`${HOME}\\src`, `${HOME}\\src`, `${HOME}\\src`]);
+        fireEvent.keyDown(v.list(), { key: "t", ctrlKey: true });
+        await waitFor(() =>
+            expect(tabs.opened).toEqual([
+                ["b1", `${HOME}\\src`],
+                ["b1", `${HOME}\\src`],
+                ["b1", HOME],
+            ])
+        );
         // Middle-click on a file does nothing special.
         fireEvent(v.row("b.txt"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
-        expect(opened).toHaveLength(3);
-        expect(tabs.opened).toEqual([]);
+        expect(tabs.opened).toHaveLength(3);
     });
 
-    it("Open in new pane still makes a pane tab beside this one", async () => {
-        const v = mount({}, undefined, { openInNewTab: () => {} });
+    it("Ctrl+W on the pane's only tab says so instead of closing the pane", async () => {
+        tabs.closeResult = false;
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("This is the pane's only tab. Use the pane's × to close it."));
+    });
+
+    it("says why when a tab can't be closed (ReAgent on #4227)", async () => {
+        tabs.closeError = "layout save failed";
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Couldn't close this tab: layout save failed"));
+    });
+
+    it("offers Open in new tab for folders", async () => {
+        const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.contextMenu(v.row("src"));
-        fireEvent.pointerDown(await waitFor(() => screen.getByText("Open in new pane")));
+        fireEvent.pointerDown(await waitFor(() => screen.getByText("Open in new tab")));
         await waitFor(() => expect(tabs.opened).toEqual([["b1", `${HOME}\\src`]]));
-    });
-});
-
-describe("the Files pane: document tabs (SPEC_DOCUMENT_TABS_2026_10_02.md §6.2)", () => {
-    function mountPane(meta: Record<string, unknown> = {}) {
-        const [m, setM] = createSignal<Record<string, unknown>>(meta);
-        const ctx: PaneTabHostContext = {
-            blockId: "b1",
-            meta: () => m() as MetaType,
-            setMeta: async (patch) => {
-                const next = { ...m() };
-                for (const [k, v] of Object.entries(patch)) {
-                    if (v === null) delete next[k];
-                    else next[k] = v;
-                }
-                setM(next);
-            },
-            isFocused: () => true,
-            visibility: () => "active",
-        };
-        const pane = new FilesPaneModel(ctx);
-        const r = render(() => <FilesPane pane={pane} ctx={ctx} />);
-        const shown = () => [...r.container.querySelectorAll(".files-pane-doc:not(.files-pane-doc-hidden)")];
-        const names = () => [...shown()[0].querySelectorAll(".files-rows .files-name")].map((n) => n.textContent);
-        const list = () => shown()[0].querySelector(".files-list") as HTMLElement;
-        const row = (n: string) =>
-            [...shown()[0].querySelectorAll(".files-rows .files-row")].find((x) => x.querySelector(".files-name")?.textContent === n) as HTMLElement;
-        const pills = () => [...r.container.querySelectorAll(".doc-tab-strip .pane-tab-label")].map((x) => x.textContent);
-        return { ...r, pane, meta: m, shown, names, list, row, pills };
-    }
-
-    it("starts with one tab and no strip; Ctrl+Enter on a folder adds a tab beside it", async () => {
-        const v = mountPane();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        expect(v.container.querySelector(".doc-tab-strip")).toBeNull();
-        fireEvent.click(v.row("src"));
-        fireEvent.keyDown(v.list(), { key: "Enter", ctrlKey: true });
-        await waitFor(() => expect(v.pills()).toEqual(["a", "src"]));
-        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
-        // The pane's own record follows the tab in front.
-        await waitFor(() => expect(v.meta()["files:path"]).toBe(`${HOME}\\src`));
-        // The tabs are kept in the block, so they come back with it.
-        await waitFor(() =>
-            expect(v.meta().doctabs).toEqual({
-                v: 1,
-                active: 1,
-                tabs: [
-                    { key: HOME, title: "a", icon: "folder", state: HOME },
-                    { key: `${HOME}\\src`, title: "src", icon: "folder", state: `${HOME}\\src` },
-                ],
-            })
-        );
-    });
-
-    it("each tab keeps its own folder; Ctrl+Tab switches, Ctrl+W closes, Ctrl+Shift+T reopens", async () => {
-        const v = mountPane();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.keyDown(v.list(), { key: "t", ctrlKey: true });
-        await waitFor(() => expect(v.pills()).toHaveLength(2));
-        // The new tab shows the same folder; go into src there.
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.dblClick(v.row("src"));
-        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
-        fireEvent.keyDown(v.list(), { key: "Tab", ctrlKey: true });
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.keyDown(v.list(), { key: "Tab", ctrlKey: true });
-        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
-        fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
-        await waitFor(() => expect(v.pills()).toEqual([]));
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.keyDown(v.list(), { key: "T", ctrlKey: true, shiftKey: true });
-        await waitFor(() => expect(v.pills()).toEqual(["a", "src"]));
-    });
-
-    it("Ctrl+PageDown and Ctrl+Shift+PageDown from the list act on tabs, not the list's paging (ReAgent on #4231)", async () => {
-        const v = mountPane();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.click(v.row("src"));
-        fireEvent.keyDown(v.list(), { key: "Enter", ctrlKey: true });
-        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
-        fireEvent.keyDown(v.list(), { key: "PageDown", ctrlKey: true });
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.keyDown(v.list(), { key: "PageDown", ctrlKey: true, shiftKey: true });
-        await waitFor(() => expect(v.pills()).toEqual(["src", "a"]));
-    });
-
-    it("doesn't take focus when it mounts; switching tabs does (ReAgent on #4231)", async () => {
-        const before = document.createElement("button");
-        document.body.append(before);
-        before.focus();
-        const v = mountPane({ doctabs: { v: 1, active: 0, tabs: [{ key: HOME, title: "a", state: HOME }, { key: `${HOME}\\src`, title: "src", state: `${HOME}\\src` }] } });
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        await new Promise((r) => setTimeout(r, 20));
-        expect(document.activeElement).toBe(before);
-        v.pane.tabs.cycle(1);
-        await waitFor(() => expect(document.activeElement).toBe(v.list()));
-        before.remove();
-    });
-
-    it("won't close the last tab: a Hangar always shows a folder", async () => {
-        const v = mountPane();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.keyDown(v.list(), { key: "w", ctrlKey: true });
-        await waitFor(() =>
-            expect(v.shown()[0].querySelector(".files-status")?.textContent).toBe("A Hangar pane always shows a folder. Use the pane's × to close it.")
-        );
-    });
-
-    it("restores its tabs from the block, and a pane from before keeps its folder", async () => {
-        const saved = { v: 1, active: 1, tabs: [{ key: HOME, title: "a", state: HOME }, { key: `${HOME}\\src`, title: "src", state: `${HOME}\\src` }] };
-        const v = mountPane({ doctabs: saved });
-        await waitFor(() => expect(v.pills()).toEqual(["a", "src"]));
-        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
-        cleanup();
-        const old = mountPane({ "files:path": `${HOME}\\src` });
-        await waitFor(() => expect(old.names()).toEqual(["main.rs"]));
-    });
-
-    it("the keys stay the text box's inside one (the path box, a rename)", async () => {
-        const v = mountPane();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        v.shown()[0].querySelector(".files-breadcrumb")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-        const input = await waitFor(() => v.shown()[0].querySelector(".files-path-input") as HTMLInputElement);
-        fireEvent.keyDown(input, { key: "t", ctrlKey: true });
-        expect(v.pane.tabs.tabs()).toHaveLength(1);
     });
 });
 
