@@ -61,6 +61,36 @@ export const STARTUP_HEADING_RE = /^# Session Context\b/;
  */
 const JEKT_BLOCK_RE = /^\[JEKT:([^\]\n]+)\]\r?\n([\s\S]*?)\r?\n\[\/JEKT\]\s*$/;
 
+/**
+ * A Swarm broadcast turn: one `[BROADCAST:FROM=user VIA=swarm TO=... RECIPIENTS=n
+ * MSGID=... TS=...]` header line, then the body. Produced by
+ * `broadcast_turn_message` (`crates/srv/src/backend/reactive/sanitize.rs`). Group 1
+ * is the field string; group 2 is the body.
+ *
+ * Spec: docs/specs/SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md §4.5.
+ */
+const BROADCAST_HEADER_RE = /^\[BROADCAST:([^\]\n]+)\]\r?\n([\s\S]*)$/;
+
+/**
+ * Splits a broadcast header off a user message. Only the exact shape srv writes
+ * counts (`FROM=user VIA=swarm`); anything else falls through to plain text, so a
+ * malformed or lookalike header is shown as written rather than dressed up.
+ */
+export function parseBroadcastHeader(
+    message: string,
+): { body: string; recipients?: number; msgId?: string } | null {
+    const match = BROADCAST_HEADER_RE.exec(message.trim());
+    if (!match) return null;
+    const fields = parseJektTagFields(match[1]);
+    if (fields.FROM !== "user" || fields.VIA !== "swarm") return null;
+    const recipients = Number.parseInt(fields.RECIPIENTS ?? "", 10);
+    return {
+        body: match[2],
+        ...(Number.isFinite(recipients) && recipients > 0 ? { recipients } : {}),
+        ...(fields.MSGID ? { msgId: fields.MSGID } : {}),
+    };
+}
+
 const VALID_JEKT_TIERS: ReadonlySet<string> = new Set(["info", "coord", "sensitive"]);
 const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "lan", "wan"]);
 
@@ -780,15 +810,22 @@ export class ClaudeCodeStreamParser {
         const jekt = this.tryParseJekt(event);
         if (jekt) return jekt;
 
-        const isStartup = STARTUP_HEADING_RE.test(event.message);
+        // A Swarm broadcast: show the user's words with a "Broadcast" note, not the
+        // header line srv put in front of them.
+        const broadcast = parseBroadcastHeader(event.message);
+        const messageText = broadcast ? broadcast.body : event.message;
+        const isStartup = !broadcast && STARTUP_HEADING_RE.test(event.message);
         // A message sent with images carries the backend's <attached_images>
         // list; show the user's own text with thumbnails instead.
-        const { text, attachments } = splitAttachedImages(event.message);
+        const { text, attachments } = splitAttachedImages(messageText);
         return {
             type: "user_message",
             id: this.nextIdOf("user"),
             message: text,
             ...(attachments.length > 0 ? { attachments } : {}),
+            ...(broadcast
+                ? { broadcast: { ...(broadcast.recipients ? { recipients: broadcast.recipients } : {}), ...(broadcast.msgId ? { msgId: broadcast.msgId } : {}) } }
+                : {}),
             // Replay: no invented "now" — parseHistoryLines fills the line's
             // stored receive time (ReAgent P1, #3620).
             timestamp: event.timestamp || (this.isReplay ? undefined : Date.now()),

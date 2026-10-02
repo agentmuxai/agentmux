@@ -12,15 +12,18 @@
 //! failure is the single most commonly-cited fleet-ops UX failure mode.
 //!
 //! `fleet.broadcast` is deliberately WS-RPC-only (the human/Swarm-UI path),
-//! not exposed over HTTP to agentmux-mcp: each target is delivered via
-//! `inject_message` with `source_agent: None` (self-declared, same trust
-//! tier as e.g. the Slack/Discord bridges — a human broadcasting via the
-//! UI isn't claiming to BE any agent, so no jekt signature is expected or
-//! possible here). An AGENT-initiated broadcast instead loops the
-//! EXISTING signed single-target `SendMessage` MCP tool path client-side
-//! (see `agentmux-mcp`'s `FleetBroadcast` tool) — only the calling
-//! agent's own process holds its `AGENTMUX_JEKT_KEY`, so per-message
-//! signing can only happen there, never in a server-side batch RPC.
+//! not exposed over HTTP to agentmux-mcp. It is NOT a jekt: a broadcast is the
+//! human typing once to several panes, so each target gets the user-turn path
+//! (`run_agent_turn`) with a one-line `[BROADCAST:FROM=user VIA=swarm ...]` header
+//! from `reactive::broadcast_turn_message`, instead of a `self-declared` jekt from
+//! `unknown`. See `docs/specs/SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md`.
+//! The turn is `BROADCAST_TURN_ORIGIN` (`Automated`), not `User`: srv, not the
+//! text, decides what a turn may authorize (e.g. it cannot satisfy the self-quit
+//! gate), and anything that holds the pane key could otherwise mint a `User` turn.
+//! An AGENT-initiated broadcast instead loops the EXISTING signed single-target
+//! `SendMessage` MCP tool path client-side (see `agentmux-mcp`'s `FleetBroadcast`
+//! tool) — only the calling agent's own process holds its `AGENTMUX_JEKT_KEY`, so
+//! per-message signing can only happen there, never in a server-side batch RPC.
 //! `fleet.bulk-stop` has no such constraint (a controller stop involves no
 //! jekt signing at all, same as `agent.stop` today) and IS exposed over
 //! HTTP (`POST /api/v1/fleet/bulk-stop`) for `FleetBulkStop`.
@@ -28,27 +31,27 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::backend::reactive::types::InjectionRequest;
+use crate::backend::blockcontroller::health::TurnOrigin;
+use crate::backend::reactive::broadcast_turn_message;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 
 use super::AppState;
 use super::agent_io::stop_one_agent_block;
+use crate::server::agent_handlers::{run_agent_turn, AgentTurnDeps, TurnRegistration};
 
-/// `ReactiveHandler`'s injection rate limiter resets to `RATE_LIMIT_MAX`
-/// (10, `backend/reactive/mod.rs`) once per full second — a token-bucket
-/// hard reset, not smooth refill. A tight loop sending more than that many
-/// injections within one second exhausts it, and every target past the
-/// 10th in that window deterministically fails with "rate limit exceeded"
-/// (reagent/Codex P1, PR #2687 review). Chunking to this size and pausing
-/// just over a second between chunks keeps every chunk under the limiter's
-/// own budget instead of racing it. Not imported directly — `agentmux-mcp`
-/// is a separate process/crate with no dependency on `agentmux-srv`
-/// internals, so its own client-side broadcast loop (`FleetBroadcast`,
-/// `crates/mcp/src/main.rs`) mirrors this constant rather than sharing it;
-/// keep both in sync if `RATE_LIMIT_MAX` ever changes.
-const BROADCAST_CHUNK_SIZE: usize = 10;
-const BROADCAST_CHUNK_PAUSE: Duration = Duration::from_millis(1100);
+/// Every broadcast turn is attributed here, and only here. `Automated`, not `User`
+/// — see the module doc. A test pins both this value and that `run_broadcast`
+/// hands it to the delivery function.
+pub(crate) const BROADCAST_TURN_ORIGIN: TurnOrigin = TurnOrigin::Automated;
+
+const FLEET_BROADCAST_AUDIT_ACTION: &str = "fleet.broadcast";
+
+/// Turns started at once. Delivery is not rate-limited the way `inject_message`
+/// was (which is why the old 10-per-second chunking is gone), but a pane's turn
+/// can spawn a CLI, so a broadcast to a large selection is bounded rather than
+/// starting every turn in the same instant.
+const BROADCAST_CONCURRENCY: usize = 8;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_fleet_broadcast(engine, state);
@@ -66,63 +69,123 @@ fn register_fleet_broadcast(engine: &Arc<WshRpcEngine>, state: &AppState) {
         move |cmd: CommandFleetBroadcastData, _ctx| {
             let state = state.clone();
             async move {
-                let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message, None).await;
+                let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message).await;
                 Ok(result)
             }
         },
     );
 }
 
-/// `source_agent` is `None` for the human/Swarm-UI path (self-declared
-/// origin — see this module's doc comment); reserved for a future
-/// server-side agent-initiated path should one ever be added, but nothing
-/// in this codebase currently calls this with `Some(..)` (see the
-/// module doc comment for why an agent-initiated broadcast instead loops
-/// the client-side signed path).
+/// What happened to one target of a broadcast.
+pub(crate) struct BroadcastOutcome {
+    pub block_id: String,
+    /// The agent the block resolved to; `None` when nothing is registered for it.
+    pub agent_id: Option<String>,
+    pub result: Result<(), String>,
+}
+
+const NO_REGISTERED_AGENT: &str =
+    "no registered agent for this block (not a live agent pane, or not yet registered)";
+
+/// The broadcast logic, with srv's two touch points passed in so it can be tested
+/// without an `AppState`: `resolve` maps a block id to its agent id, and `deliver`
+/// starts one turn (block id, full text, origin).
 ///
-/// Sends in chunks of `BROADCAST_CHUNK_SIZE`, pausing `BROADCAST_CHUNK_PAUSE`
-/// between chunks — see that constant's doc comment for why a tight loop
-/// would otherwise starve past `ReactiveHandler`'s own rate limiter.
+/// Targets are resolved first so `RECIPIENTS` in every header counts the agents
+/// actually addressed; the same `msg_id` ties the copies together in the audit
+/// log. Turns start up to `concurrency` at a time, and results come back in the
+/// order of `targets`.
+pub(crate) async fn run_broadcast<R, D, Fut>(
+    targets: Vec<String>,
+    body: &str,
+    msg_id: &str,
+    concurrency: usize,
+    resolve: R,
+    deliver: D,
+) -> Vec<BroadcastOutcome>
+where
+    R: Fn(&str) -> Option<String>,
+    D: Fn(String, String, TurnOrigin) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    use futures_util::StreamExt;
+
+    let resolved: Vec<(String, Option<String>)> = targets
+        .into_iter()
+        .map(|block_id| {
+            let agent = resolve(&block_id);
+            (block_id, agent)
+        })
+        .collect();
+    let recipients = resolved.iter().filter(|(_, agent)| agent.is_some()).count();
+
+    futures_util::stream::iter(resolved)
+        .map(|(block_id, agent_id)| {
+            let deliver = &deliver;
+            async move {
+                let result = match &agent_id {
+                    None => Err(NO_REGISTERED_AGENT.to_string()),
+                    Some(agent) => {
+                        let text = broadcast_turn_message(agent, recipients, msg_id, body);
+                        deliver(block_id.clone(), text, BROADCAST_TURN_ORIGIN).await
+                    }
+                };
+                BroadcastOutcome { block_id, agent_id, result }
+            }
+        })
+        .buffered(concurrency.max(1))
+        .collect()
+        .await
+}
+
 pub(crate) async fn fleet_broadcast_impl(
     state: &AppState,
     targets: Vec<String>,
     message: String,
-    source_agent: Option<String>,
 ) -> FleetActionResult {
+    let deps = AgentTurnDeps::from_state(state);
+    let msg_id = uuid::Uuid::new_v4().to_string();
+    let outcomes = run_broadcast(
+        targets,
+        &message,
+        &msg_id,
+        BROADCAST_CONCURRENCY,
+        |block_id| state.reactive_handler.get_agent_by_block(block_id).map(|a| a.agent_id),
+        |block_id, text, origin| {
+            let deps = deps.clone();
+            async move {
+                // The block was resolved through the reactive handler's own agent
+                // map, so it is already registered: skip re-registering, exactly
+                // as the reactive-delivery caller does.
+                run_agent_turn(&deps, block_id, text, None, TurnRegistration::Skip, origin, Vec::new()).await
+            }
+        },
+    )
+    .await;
+
     let mut result = FleetActionResult::default();
-    for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
-        if chunk_idx > 0 {
-            tokio::time::sleep(BROADCAST_CHUNK_PAUSE).await;
-        }
-        for block_id in chunk {
-            let block_id = block_id.clone();
-            let Some(agent) = state.reactive_handler.get_agent_by_block(&block_id) else {
-                result.failed.push(FleetActionFailure {
-                    id: block_id,
-                    error: "no registered agent for this block (not a live agent pane, or not yet registered)".to_string(),
-                });
-                continue;
-            };
-            let req = InjectionRequest {
-                target_agent: agent.agent_id.clone(),
-                message: message.clone(),
-                source_agent: source_agent.clone(),
-                request_id: Some(uuid::Uuid::new_v4().to_string()),
-                ..Default::default()
-            };
-            let resp = state.reactive_handler.inject_message(req);
-            if resp.success {
-                result.succeeded.push(block_id);
-            } else {
-                result.failed.push(FleetActionFailure {
-                    id: block_id,
-                    error: resp.error.unwrap_or_else(|| "delivery failed".to_string()),
-                });
+    for outcome in outcomes {
+        let target_agent = outcome.agent_id.as_deref().unwrap_or(&outcome.block_id);
+        match outcome.result {
+            Ok(()) => {
+                state.reactive_handler.log_fleet_action_audit(
+                    None, target_agent, &outcome.block_id, FLEET_BROADCAST_AUDIT_ACTION,
+                    true, None, &msg_id, None,
+                );
+                result.succeeded.push(outcome.block_id);
+            }
+            Err(error) => {
+                state.reactive_handler.log_fleet_action_audit(
+                    None, target_agent, &outcome.block_id, FLEET_BROADCAST_AUDIT_ACTION,
+                    false, Some(&error), &msg_id, None,
+                );
+                result.failed.push(FleetActionFailure { id: outcome.block_id, error });
             }
         }
     }
     result
 }
+
 
 fn register_fleet_bulk_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
@@ -705,5 +768,131 @@ mod override_tests {
         assert!(pending[0].joined);
         crate::sagas::pending_shutdown::keep(&state, &sibling, &close.request_id);
         crate::backend::blockcontroller::delete_controller(&tab);
+    }
+}
+
+#[cfg(test)]
+mod broadcast_core_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    fn ids(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("blk-{i}")).collect()
+    }
+
+    fn agent_for(block: &str) -> Option<String> {
+        block.strip_prefix("blk-").map(|n| format!("agent-{n}"))
+    }
+
+    #[test]
+    fn broadcast_turns_are_attributed_to_automated_not_user() {
+        assert_eq!(BROADCAST_TURN_ORIGIN, TurnOrigin::Automated);
+        assert_ne!(BROADCAST_TURN_ORIGIN, TurnOrigin::User);
+    }
+
+    #[tokio::test]
+    async fn every_target_is_delivered_with_the_broadcast_origin() {
+        let seen: Arc<Mutex<Vec<TurnOrigin>>> = Arc::default();
+        let seen2 = seen.clone();
+        let out = run_broadcast(ids(3), "hi", "m1", 4, agent_for, move |_b, _t, origin| {
+            seen2.lock().unwrap().push(origin);
+            async { Ok(()) }
+        })
+        .await;
+        assert_eq!(out.len(), 3);
+        assert!(seen.lock().unwrap().iter().all(|o| *o == TurnOrigin::Automated));
+    }
+
+    #[tokio::test]
+    async fn the_self_quit_gate_refuses_a_broadcast_turn() {
+        use crate::backend::blockcontroller::health::TurnProvenance;
+        use crate::sagas::self_quit::{gate, GateRefusal};
+        let p = TurnProvenance {
+            origin: BROADCAST_TURN_ORIGIN,
+            tainted: false,
+            user_text: Some("finish the PR then quit".into()),
+        };
+        assert_eq!(gate(Some(&p), "then quit"), Err(GateRefusal::NotUserTurn));
+    }
+
+    #[tokio::test]
+    async fn each_target_gets_its_own_header_with_a_shared_id_and_the_resolved_count() {
+        let texts: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let texts2 = texts.clone();
+        // blk-1 resolves to nothing: three targets, two recipients.
+        let resolve = |b: &str| if b == "blk-1" { None } else { agent_for(b) };
+        let out = run_broadcast(ids(3), "great, merge on approval", "bcast-42", 4, resolve, move |b, t, _| {
+            texts2.lock().unwrap().push((b, t));
+            async { Ok(()) }
+        })
+        .await;
+        assert_eq!(out.len(), 3);
+        let texts = texts.lock().unwrap();
+        assert_eq!(texts.len(), 2, "the unresolved target is not delivered to");
+        for (block, text) in texts.iter() {
+            let agent = agent_for(block).unwrap();
+            let header = text.lines().next().unwrap();
+            assert!(header.starts_with(&format!("[BROADCAST:FROM=user VIA=swarm TO={agent} RECIPIENTS=2 MSGID=bcast-42 TS=")), "{header}");
+            assert_eq!(text.lines().nth(1), Some("great, merge on approval"));
+        }
+    }
+
+    #[tokio::test]
+    async fn outcomes_are_per_target_in_order_and_an_unresolved_target_says_why() {
+        let out = run_broadcast(
+            vec!["blk-0".into(), "nope".into(), "blk-2".into()],
+            "x",
+            "m",
+            4,
+            agent_for,
+            |b, _t, _| async move { if b == "blk-2" { Err("no controller".to_string()) } else { Ok(()) } },
+        )
+        .await;
+        let blocks: Vec<&str> = out.iter().map(|o| o.block_id.as_str()).collect();
+        assert_eq!(blocks, vec!["blk-0", "nope", "blk-2"]);
+        assert!(out[0].result.is_ok());
+        assert!(out[1].result.as_ref().unwrap_err().contains("no registered agent"));
+        assert!(out[1].agent_id.is_none());
+        assert_eq!(out[2].result.as_ref().unwrap_err(), "no controller");
+        assert_eq!(out[2].agent_id.as_deref(), Some("agent-2"));
+    }
+
+    #[tokio::test]
+    async fn a_large_broadcast_does_not_pause_between_chunks() {
+        let started = std::time::Instant::now();
+        let out = run_broadcast(ids(25), "x", "m", BROADCAST_CONCURRENCY, agent_for, |_b, _t, _| async { Ok(()) }).await;
+        assert_eq!(out.iter().filter(|o| o.result.is_ok()).count(), 25);
+        assert!(started.elapsed() < std::time::Duration::from_millis(900), "the old limiter pause is gone: {:?}", started.elapsed());
+    }
+
+    #[tokio::test]
+    async fn at_most_the_concurrency_limit_turns_start_at_once() {
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (inf, pk) = (in_flight.clone(), peak.clone());
+        let out = run_broadcast(ids(20), "x", "m", 3, agent_for, move |_b, _t, _| {
+            let (inf, pk) = (inf.clone(), pk.clone());
+            async move {
+                let now = inf.fetch_add(1, Ordering::SeqCst) + 1;
+                pk.fetch_max(now, Ordering::SeqCst);
+                for _ in 0..5 {
+                    tokio::task::yield_now().await;
+                }
+                inf.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            }
+        })
+        .await;
+        assert_eq!(out.len(), 20);
+        let peak = peak.load(Ordering::SeqCst);
+        assert!(peak <= 3, "peak {peak} exceeded the limit");
+        assert!(peak > 1, "targets should overlap, peak {peak}");
+    }
+
+    #[tokio::test]
+    async fn no_targets_is_a_no_op() {
+        let out = run_broadcast(vec![], "x", "m", 4, agent_for, |_b, _t, _| async { Ok(()) }).await;
+        assert!(out.is_empty());
     }
 }

@@ -1356,6 +1356,15 @@ $transcript-preview-max-height: calc(50vh / 3);
             margin-bottom: 2px;
         }
 
+        // "Broadcast · N agents" above a Swarm broadcast's body. Same muted
+        // treatment as the timeout note: mixed toward this block's own
+        // background so it contrasts on the inverted surface.
+        .agent-user-message-broadcast-note {
+            color: color-mix(in oklab, var(--block-bg-solid-color) 70%, var(--main-text-color));
+            font-size: 0.85em;
+            margin-bottom: 2px;
+        }
+
         .agent-user-message-content {
             pre {
                 margin: 0;
