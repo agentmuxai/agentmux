@@ -317,8 +317,8 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     >
                         <span>
                             ⚠ Other machines can't see this one, even though it may see them. Another program may be
-                            using the mDNS port (UDP 5353). AgentMux has already retried
-                            {" "}{props.lanDiscoverability()?.rebuilds ?? 0} time(s); turning LAN off and on tries again.
+                            using the mDNS port (UDP 5353). AgentMux keeps retrying on its own
+                            {" "}({props.lanDiscoverability()?.rebuilds ?? 0} so far); turning LAN off and on retries at once.
                         </span>
                     </div>
                 </Show>

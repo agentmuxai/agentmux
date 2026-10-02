@@ -14,6 +14,7 @@ use std::sync::Arc;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use parking_lot::{Mutex, RwLock};
 
+use crate::backend::lan_mdns_diag;
 use crate::backend::lan_mdns_health;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1721,23 +1722,31 @@ impl LanDiscoveryController {
                     }
                     continue;
                 };
+                let rebuilds_before = watchdog.rebuilds();
                 match watchdog.observe(&health) {
                     lan_mdns_health::Action::Rebuild => {
+                        let missing = health.missing().to_vec();
+                        // Say WHY before rebuilding: replay the daemon's own socket set-up
+                        // on each address it failed to announce on, and name whoever holds
+                        // UDP 5353. `mdns-sd` knows, but only tells the log what it can, and
+                        // on Area54 this took several cloud round trips to find by hand.
+                        let probe_these = missing.clone();
+                        let diagnosis = tokio::task::spawn_blocking(move || lan_mdns_diag::diagnose(&probe_these))
+                            .await
+                            .unwrap_or_else(|e| format!("the diagnosis did not run ({e})"));
                         tracing::warn!(
-                            missing = ?health.missing(),
+                            missing = ?missing,
                             attempt = watchdog.rebuilds(),
+                            next_retry_secs = u64::from(watchdog.retry_in_ticks()) * HEALTH_TICK.as_secs(),
+                            %diagnosis,
                             "mDNS announced on none of this host's IPv4 addresses, so other machines cannot find it; rebuilding the mDNS daemon"
                         );
                         self.rebuild();
                     }
-                    lan_mdns_health::Action::GiveUp => {
-                        tracing::warn!(
-                            missing = ?health.missing(),
-                            rebuilds = watchdog.rebuilds(),
-                            "mDNS still announced on none of this host's IPv4 addresses after rebuilding; leaving the LAN indicator flagged. Another program may be holding UDP port 5353"
-                        );
-                    }
                     lan_mdns_health::Action::Nothing => {
+                        if matches!(health, lan_mdns_health::MdnsHealth::Healthy) && rebuilds_before > 0 {
+                            tracing::info!(rebuilds = rebuilds_before, "mDNS is announced on this host's IPv4 addresses again");
+                        }
                         if let lan_mdns_health::MdnsHealth::Degraded { missing } = &health {
                             // Logged once per change below, not per tick.
                             if last_sent.as_ref().map(|(s, _, _)| s.as_str()) != Some("degraded") {

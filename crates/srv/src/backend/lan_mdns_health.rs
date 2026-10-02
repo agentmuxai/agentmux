@@ -32,10 +32,17 @@ pub const GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 /// the daemon is rebuilt. One miss can be a slow start, not a fault.
 pub const STRIKES_BEFORE_REBUILD: u32 = 2;
 
-/// Rebuilds attempted before the watchdog stops and leaves the indicator
-/// flagged. Each rebuild is the same path as switching LAN off and on, which
-/// cleared the fault on Area54.
-pub const MAX_REBUILDS: u32 = 3;
+/// Ticks to wait after rebuild attempt k (1-based) before attempt k+1; the last
+/// value repeats for ever. At the 15 s tick that is 30 s, 1 min, 2 min, 5 min, then
+/// every 10 min. There is NO cap on the number of attempts.
+///
+/// A cap of three, 30 s apart, was the first version and it failed on Area54
+/// (0.59.4, 2026-10-02): the holder of UDP 5353 was a long-lived program (Chrome had
+/// started 14 s before srv), all three attempts landed inside the same 90 s of
+/// contention, the watchdog gave up, and by 06:32 the port was free again with
+/// nothing left to retry. A rebuild costs milliseconds, so retrying slowly for ever
+/// is the right trade; each attempt names the cause (`lan_mdns_diag`).
+pub const RETRY_AFTER_TICKS: &[u32] = &[2, 4, 8, 20, 40];
 
 /// Ticks the watchdog will keep trying to bring the daemon back when LAN is
 /// wanted but no daemon is running (a rebuild whose new daemon failed to start).
@@ -183,8 +190,6 @@ pub enum Action {
     Nothing,
     /// Rebuild the daemon (turn LAN off and on).
     Rebuild,
-    /// Rebuilds are used up; stay flagged and say so once.
-    GiveUp,
 }
 
 /// Decides, tick by tick, when an undiscoverable verdict justifies a rebuild.
@@ -192,13 +197,19 @@ pub enum Action {
 pub struct Watchdog {
     strikes: u32,
     rebuilds: u32,
-    gave_up: bool,
+    /// Ticks left before the next rebuild attempt is allowed.
+    cooldown: u32,
     down_retries: u32,
 }
 
 impl Watchdog {
     pub fn rebuilds(&self) -> u32 {
         self.rebuilds
+    }
+
+    /// Ticks until the next attempt, right after a `Rebuild` (for the log line).
+    pub fn retry_in_ticks(&self) -> u32 {
+        self.cooldown
     }
 
     /// Forget everything, for when LAN is switched off.
@@ -221,32 +232,35 @@ impl Watchdog {
     pub fn observe(&mut self, health: &MdnsHealth) -> Action {
         // A daemon exists again, so the "down" retries start over.
         self.down_retries = 0;
+        // Time passes on every tick, whatever the verdict.
+        self.cooldown = self.cooldown.saturating_sub(1);
         match health {
             // No verdict yet: neither a strike nor a recovery.
             MdnsHealth::Pending => Action::Nothing,
-            MdnsHealth::Healthy | MdnsHealth::Degraded { .. } => {
+            MdnsHealth::Healthy => {
+                *self = Watchdog { down_retries: 0, ..Watchdog::default() };
+                Action::Nothing
+            }
+            MdnsHealth::Degraded { .. } => {
                 self.strikes = 0;
-                if matches!(health, MdnsHealth::Healthy) {
-                    self.rebuilds = 0;
-                    self.gave_up = false;
-                }
                 Action::Nothing
             }
             MdnsHealth::Undiscoverable { .. } => {
-                self.strikes += 1;
-                if self.strikes < STRIKES_BEFORE_REBUILD {
+                if self.rebuilds == 0 {
+                    // One miss can be a slow start; the first rebuild needs two in a row.
+                    self.strikes += 1;
+                    if self.strikes < STRIKES_BEFORE_REBUILD {
+                        return Action::Nothing;
+                    }
+                } else if self.cooldown > 0 {
+                    // Backing off between attempts.
                     return Action::Nothing;
                 }
-                if self.rebuilds < MAX_REBUILDS {
-                    self.strikes = 0;
-                    self.rebuilds += 1;
-                    Action::Rebuild
-                } else if !self.gave_up {
-                    self.gave_up = true;
-                    Action::GiveUp
-                } else {
-                    Action::Nothing
-                }
+                self.strikes = 0;
+                self.rebuilds += 1;
+                let step = (self.rebuilds as usize - 1).min(RETRY_AFTER_TICKS.len() - 1);
+                self.cooldown = RETRY_AFTER_TICKS[step];
+                Action::Rebuild
             }
         }
     }
@@ -444,20 +458,56 @@ mod tests {
         assert_eq!(w.observe(&undiscoverable()), Action::Nothing, "strikes restarted");
     }
 
+    /// Never gives up, and backs off: the gaps between attempts are 2, 4, 8, 20 then 40
+    /// ticks, for ever. (The first version stopped after three, 30 s apart, and failed on
+    /// Area54: the port was free again minutes later and nothing was left to retry.)
     #[test]
-    fn rebuilds_are_capped_then_it_gives_up_once() {
+    fn rebuilds_back_off_and_never_stop() {
         let mut w = Watchdog::default();
-        let mut rebuilds = 0;
-        let mut gave_up = 0;
-        for _ in 0..40 {
-            match w.observe(&undiscoverable()) {
-                Action::Rebuild => rebuilds += 1,
-                Action::GiveUp => gave_up += 1,
-                Action::Nothing => {}
+        let mut at = Vec::new();
+        for tick in 1..=400u32 {
+            if w.observe(&undiscoverable()) == Action::Rebuild {
+                at.push(tick);
             }
         }
-        assert_eq!(rebuilds, MAX_REBUILDS);
-        assert_eq!(gave_up, 1, "says so once, then stays quiet");
+        let gaps: Vec<u32> = at.windows(2).map(|p| p[1] - p[0]).collect();
+        assert_eq!(at[0], 2, "the first rebuild needs two misses in a row");
+        assert_eq!(&gaps[..5], &[2, 4, 8, 20, 40], "{at:?}");
+        assert!(gaps[5..].iter().all(|g| *g == 40), "settles at one attempt per 40 ticks: {gaps:?}");
+        assert!(400 - at.last().unwrap() < 40, "still retrying at the end: {at:?}");
+        assert!(at.len() > 10, "far more than the old cap of 3: {}", at.len());
+    }
+
+    /// The Area54 timeline: a long-lived program holds the port for minutes, then lets
+    /// go. Every attempt while it holds fails; the first one after it lets go succeeds.
+    /// Under the old cap this never recovered.
+    #[test]
+    fn a_holder_that_lets_go_minutes_later_is_still_recovered() {
+        const HOLDER_LEAVES_AT_TICK: u32 = 28; // 7 minutes at the 15 s tick
+        let mut w = Watchdog::default();
+        let mut recovered_ok = false;
+        let mut recovered_at = None;
+        for tick in 1..=200u32 {
+            let health = if recovered_ok { MdnsHealth::Healthy } else { undiscoverable() };
+            if w.observe(&health) == Action::Rebuild {
+                // A rebuilt daemon announces only if the port is free by then.
+                recovered_ok = tick >= HOLDER_LEAVES_AT_TICK;
+            }
+            if recovered_ok && recovered_at.is_none() {
+                recovered_at = Some(tick);
+            }
+        }
+        let at = recovered_at.expect("it must recover once the holder lets go");
+        assert!((HOLDER_LEAVES_AT_TICK..HOLDER_LEAVES_AT_TICK + 40).contains(&at), "recovered at tick {at}");
+        assert_eq!(w.rebuilds(), 0, "full health restores the budget");
+    }
+
+    #[test]
+    fn the_next_attempt_time_is_exposed_for_the_log_line() {
+        let mut w = Watchdog::default();
+        w.observe(&undiscoverable());
+        assert_eq!(w.observe(&undiscoverable()), Action::Rebuild);
+        assert_eq!(w.retry_in_ticks(), RETRY_AFTER_TICKS[0]);
     }
 
     #[test]
