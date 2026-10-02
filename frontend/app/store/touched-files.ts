@@ -41,8 +41,18 @@ const FILE_TOOLS: Record<string, string> = {
 /** A path as a comparable key: one separator, and no case on Windows-style
  *  paths, whose filesystems ignore it. */
 export function touchKey(path: string): string {
-    const p = path.replace(/[\\/]+/g, "/").replace(/\/$/, "");
-    return /^[A-Za-z]:\//.test(p) || p.startsWith("//") ? p.toLowerCase() : p;
+    // Decided on the path as given: normalising first would turn `C:\` into
+    // `C:` and a UNC `\\srv\share` into `/srv/share` (ReAgent on #4224).
+    const windows = isWindowsStyle(path);
+    const unc = /^[\\/]{2}[^\\/]/.test(path);
+    let p = path.replace(/[\\/]+/g, "/").replace(/(.)\/$/, "$1");
+    if (unc) p = "/" + p;
+    return windows ? p.toLowerCase() : p;
+}
+
+/** A drive (`C:`, `C:\…`) or UNC (`\\srv\share`) path. */
+function isWindowsStyle(path: string): boolean {
+    return /^[A-Za-z]:([\\/]|$)/.test(path) || /^[\\/]{2}[^\\/]/.test(path);
 }
 
 const isAbsolute = (p: string): boolean => /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("/") || p.startsWith("\\\\");
@@ -91,7 +101,8 @@ export function noteToolResult(id: string, status: string | undefined, now: numb
  * is (or contains) a touched file: a folder shows the latest change inside it.
  */
 export function touchesUnder(dir: string, now: number = Date.now()): Map<string, Touch> {
-    const base = touchKey(dir) + "/";
+    const dirKey = touchKey(dir);
+    const base = dirKey.endsWith("/") ? dirKey : dirKey + "/";
     const out = new Map<string, Touch>();
     for (const [key, t] of touched()) {
         if (now - t.at > TOUCH_TTL_MS || !key.startsWith(base)) continue;
@@ -107,7 +118,7 @@ export function touchesUnder(dir: string, now: number = Date.now()): Map<string,
 /** How `touchesUnder(dir)` names the child `name`: lower case under a
  *  Windows-style folder, as its keys are. */
 export function childKey(dir: string, name: string): string {
-    return /^[A-Za-z]:|^[\\/]{2}/.test(dir) ? name.toLowerCase() : name;
+    return isWindowsStyle(dir) ? name.toLowerCase() : name;
 }
 
 /** Test hook. */

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it } from "vitest";
-import { childKey, noteToolCall, noteToolResult, resetTouchedForTests, TOUCH_TTL_MS, touched, touchesUnder } from "./touched-files";
+import { childKey, noteToolCall, noteToolResult, resetTouchedForTests, TOUCH_TTL_MS, touched, touchesUnder, touchKey } from "./touched-files";
 
 afterEach(resetTouchedForTests);
 
@@ -51,6 +51,22 @@ describe("touched files (Files pane §8.4)", () => {
         noteToolResult("a", "success", 0);
         expect(touchesUnder("/home/a", TOUCH_TTL_MS).size).toBe(1);
         expect(touchesUnder("/home/a", TOUCH_TTL_MS + 1).size).toBe(0);
+    });
+
+    it("finds a change right under a drive root, a UNC share, and /", () => {
+        noteToolCall(agent, { id: "a", tool: "Write", params: { file_path: "C:\\Notes.txt" } });
+        noteToolResult("a", "success", 1);
+        noteToolCall(agent, { id: "b", tool: "Write", params: { file_path: "\\\\srv\\share\\Doc.md" } });
+        noteToolResult("b", "success", 1);
+        noteToolCall(agent, { id: "c", tool: "Write", params: { file_path: "/top.txt" } });
+        noteToolResult("c", "success", 1);
+        expect(touchesUnder("C:\\", 2).get(childKey("C:\\", "Notes.txt"))?.tool).toBe("Write");
+        expect(touchesUnder("\\\\SRV\\share", 2).get(childKey("\\\\SRV\\share", "Doc.md"))?.tool).toBe("Write");
+        expect(touchesUnder("/", 2).get(childKey("/", "top.txt"))?.tool).toBe("Write");
+        // `C:\` and `C:` are one key; files under it are `c:/…`.
+        expect(touchKey("C:\\")).toBe("c:");
+        expect(touchKey("\\\\Srv\\Share\\")).toBe("//srv/share");
+        expect(touchKey("/home/A/")).toBe("/home/A");
     });
 
     it("keeps case on POSIX paths and ignores it on Windows ones", () => {
