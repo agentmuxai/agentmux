@@ -213,7 +213,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/srv/src/backend/fs_ops/git.rs", "\"git\"", 2,
+    ("crates/srv/src/backend/fs_ops/git.rs", "\"git\"", 5,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/fs_ops/platform.rs", "\"explorer.exe\"", 2,
      "gui-program: explorer.exe is GUI-subsystem, on user action only (Files pane open/reveal)"),
