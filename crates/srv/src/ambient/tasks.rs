@@ -56,11 +56,15 @@ pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<Str
     crate::server::cli_handlers::resolve_cli_on_path(provider.cli_command).await
 }
 
-/// Pushed counterpart of `register_session_activity_summary`'s handler body —
-/// callable directly (no RPC envelope) by the background sweep in
-/// `backend::reactive::activity_watcher`. Goes through the same Ambient
-/// Model Call gateway (admission, cancellation-of-superseded, token
-/// accounting) under the distinct `purpose::ACTIVITY_SUMMARY_PUSHED` purpose.
+/// A session title recovered from the session's recent activity, for an agent
+/// that has none — called by the background sweep in
+/// `backend::reactive::activity_watcher`, which writes an accepted result to
+/// `term:ambient_summary` itself. Goes through the same Ambient Model Call gateway
+/// (admission, cancellation-of-superseded, token accounting) under the distinct
+/// `purpose::ACTIVITY_SUMMARY_PUSHED` purpose, so it never contends with the
+/// pane's own title request. The prompt is the title prompt
+/// (`build_session_title_from_activity_prompt`), not a "what is happening now"
+/// summary: the result is shown as the session's title.
 ///
 /// `generation` only needs to strictly increase across successive calls for
 /// the *same* `block_id` — the sweep loop's tick counter is sufficient; it
@@ -69,7 +73,7 @@ pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<Str
 /// Returns `None` when there's nothing to summarize yet, the block/CLI path
 /// isn't resolvable, this call was superseded, or the CLI failed — the
 /// caller treats all of these as "no summary this tick."
-pub(crate) async fn generate_pushed_activity_summary(
+pub(crate) async fn generate_recovered_title(
     mstore: &Store,
     filestore: &crate::backend::storage::filestore::FileStore,
     block_id: &str,
@@ -85,7 +89,7 @@ pub(crate) async fn generate_pushed_activity_summary(
     let digest = digest::read_recent_activity_digest(filestore, block_id)?;
     let target = CliTarget::from_meta(&block.meta)?;
 
-    let prompt = prompt::build_activity_summary_prompt(word_target, &digest);
+    let prompt = prompt::build_session_title_from_activity_prompt(word_target, &digest);
     finish(
         slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::title_limits(word_target)))
             .await,

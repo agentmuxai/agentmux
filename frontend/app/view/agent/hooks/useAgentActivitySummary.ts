@@ -58,6 +58,8 @@ import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
+import { isTitleNews, META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
+import { MOS } from "@/app/store/global";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 
 export interface UseAgentActivitySummaryOptions {
@@ -92,20 +94,32 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
         // top of, not instead of, never putting real content in
         // `pendingContent` for a hidden turn in the first place.
         if (phase.hidden) return;
-        activeTurnId++;
-        const myTurnId = activeTurnId;
         // Remember what the user asked, for the swarm row's fallback line when no
         // generated title exists (store/swarm-line.ts). Only a message with a goal
         // in it is kept, so "u there" never overwrites the real one. Written now,
         // not after the model call, so it is there even if that call fails.
         const lastPrompt = lastPromptToStore(phase.pendingContent);
-        if (lastPrompt) {
-            fireAndForget(() =>
-                ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-                    [META_LAST_PROMPT]: lastPrompt,
-                } as any)
-            );
-        }
+        // Count this human message, then decide whether it is a turn on which the
+        // title is (re)computed: every message while there is no usable title, and
+        // only turns 2, 5, 8, then every third once there is one
+        // (store/title-schedule.ts). Read from block meta, not a local counter, so
+        // a remount (tab switch) does not restart the schedule.
+        const meta = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta;
+        const turn = nextHumanTurn(blockId, meta?.[META_HUMAN_TURNS]);
+        const currentTitle = meta?.["term:ambient_summary"];
+        const hasTitle = typeof currentTitle === "string" && isUsableTitle(currentTitle);
+        fireAndForget(() =>
+            ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
+                [META_HUMAN_TURNS]: turn,
+                ...(lastPrompt ? { [META_LAST_PROMPT]: lastPrompt } : {}),
+            } as any)
+        );
+        if (!shouldRequestTitle(hasTitle, turn)) return;
+        // Only a turn that issues a request may supersede one in flight: a
+        // message on a non-scheduled turn must not discard the scheduled turn's
+        // result (ReAgent P2 on #4238).
+        activeTurnId++;
+        const myTurnId = activeTurnId;
         const rootWidth = getRootWidth() ?? 400;
         const textWidth = Math.max(0, rootWidth - 280);
         const wordTarget = Math.max(5, Math.min(12, Math.floor(textWidth / 48)));
@@ -128,13 +142,17 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
             // the `KEEP` abstain token, so an empty result means "no change"; this second
             // check is defence in depth, so a build mismatch can never write `(none yet)`
             // to the meta and have it read back as the current title.
-            if (result.summary && isUsableTitle(result.summary)) {
-                fireAndForget(() =>
-                    ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-                        "term:ambient_summary": result.summary,
-                    } as any)
-                );
-            }
+            if (!result.summary || !isUsableTitle(result.summary)) return;
+            // A rewording of the goal the title already names keeps the old title,
+            // so it stays stable; only a different goal replaces it. Read now, not
+            // at submit: the backend's recovery may have filled it meanwhile.
+            const latest = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta?.["term:ambient_summary"];
+            if (typeof latest === "string" && isUsableTitle(latest) && !isTitleNews(latest, result.summary)) return;
+            fireAndForget(() =>
+                ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
+                    "term:ambient_summary": result.summary,
+                } as any)
+            );
         }).catch(() => {
             // Silently ignore — the header just stays on its last title.
         });

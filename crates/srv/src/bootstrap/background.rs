@@ -130,15 +130,16 @@ pub fn spawn_background_subsystems(
         backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config).await;
     });
 
-    // Push a live Haiku activity summary per registered agent (swarm feed) —
+    // Recover a missing session title for a running agent (the Swarm row and
+    // pane header read it); see activity_watcher.rs —
     // reads reactive::get_global_handler() as its registry, so it needs no
     // AppState and can start before AppState is built (matches sysinfo/watchdog above).
     let activity_mstore = Arc::clone(mstore);
     let activity_filestore = Arc::clone(filestore);
-    let activity_broker = broker.clone();
+    let activity_event_bus = event_bus.clone();
     tokio::spawn(async move {
         backend::reactive::activity_watcher::run_agent_summary_loop(
-            activity_mstore, activity_filestore, activity_broker,
+            activity_mstore, activity_filestore, activity_event_bus,
         ).await;
     });
 
