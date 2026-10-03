@@ -217,7 +217,7 @@ impl PersistentSubprocessController {
 
     /// Mark the turn active while the caller already holds `inner`, so the
     /// flip is never behind the write that caused it. Lock order is `inner` →
-    /// `health_monitor`, matching the turn-end handler in `spawn.rs`;
+    /// `health_monitor`, matching the turn-end handler in `stdout_reader.rs`;
     /// `health_monitor` never takes `inner`, so this cannot deadlock. Returns
     /// the pre-call value.
     fn mark_turn_active_locked(&self) -> bool {

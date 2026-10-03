@@ -3641,7 +3641,7 @@ async fn a_boundary_ends_the_turn_and_applies_the_restart_only_with_nothing_queu
 // ── Committed deferred restart (codex P1 on #3562) ──────────────────
 //
 // `turn_boundary_locked` commits `restart_pending` and releases `inner`
-// before `spawn.rs` calls `stop_process`. The process's stdin is still live
+// before `stdout_reader.rs` calls `stop_process`. The process's stdin is still live
 // in that window, the turn is idle, and the process is about to die.
 
 /// A restart still queues: an automated message arriving in that window must

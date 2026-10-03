@@ -908,7 +908,7 @@ impl CliNotices {
 
     /// Record the version this pane's agent is about to run. Claude reports
     /// the version it actually runs in its own `system/init` frame, which
-    /// covers every spawn path (`persistent/spawn.rs`), so it is observed
+    /// covers every spawn path (`persistent/stdout_reader.rs`), so it is observed
     /// there and not here.
     fn observe_version(&self, raw_version: &str) {
         if self.block_id.is_empty() || self.provider == "claude" {
