@@ -124,13 +124,7 @@ pub fn open_floating_pane_window(
     // Chromium IPC) applies here too — same Chromium message loop. If
     // a pane is closing, refuse the floating-window creation; the
     // caller retries.
-    if state.any_browser_pane_closing() {
-        tracing::warn!(
-            target: "wfr:gate",
-            "[wfr:gate] open_floating_pane_window refused — pane is mid-close (H.7 invariant)"
-        );
-        return Err("a pane is currently closing; retry shortly".to_string());
-    }
+    state.check_no_pane_closing("open_floating_pane_window")?;
 
     let window_id = uuid::Uuid::new_v4();
     let window_label = format!("floating-{}", window_id.simple());

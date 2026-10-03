@@ -472,20 +472,16 @@ pub fn on_load_start_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 /// the pane during the *initial* navigation focus steal.
 pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     tracing::info!("[pane-load-end] pane page loaded; reinstalling focus subclass");
-    if let Some(block_id) = resolve_pane_block_id(state, browser) {
-        let url = {
-            let mut b: cef::Browser = browser.clone();
-            b.main_frame()
-                .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
-                .unwrap_or_default()
-        };
-        crate::browser_pane::trace::pane_trace(&block_id, "load-end", &format!("url={url}"));
+    let pane_block_id = resolve_pane_block_id(state, browser);
+    if let Some(block_id) = &pane_block_id {
+        let url = main_frame_url(browser);
+        crate::browser_pane::trace::pane_trace(block_id, "load-end", &format!("url={url}"));
 
         // Main-frame load actually finished — clear the loading-spinner
         // tracker (layer 1, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md).
         // `on_load_end_browser_pane` is only ever called for the main frame
         // (filtered at the `client::navigation::on_load_end` call site).
-        set_pane_main_frame_loading(state, &block_id, browser, &url, false);
+        set_pane_main_frame_loading(state, block_id, browser, &url, false);
 
         // Every navigation replaces the page's own DOM/inline-style state,
         // so any CSS `zoom` injected before this load is gone with it --
@@ -493,7 +489,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
         // zoomed away from the 1.0 default). See BrowserPaneManager::
         // reapply_zoom's own doc comment for why this is CSS injection and
         // not Chromium's native per-host zoom.
-        state.browser_panes.reapply_zoom(&block_id, state);
+        state.browser_panes.reapply_zoom(block_id, state);
     }
 
     #[cfg(target_os = "windows")]
@@ -501,7 +497,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
         if let Some(host) = browser.host() {
             let wh = host.window_handle();
             if !wh.0.is_null() {
-                let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
+                let block_id = pane_block_id.clone().unwrap_or_default();
                 unsafe {
                     crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
                         wh.0 as *mut std::ffi::c_void,
@@ -521,13 +517,8 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     // can return the pre-navigation state. Those flags flow through the
     // dedicated `on_loading_state_change_browser_pane` callback below, which CEF
     // provides with correct values as direct parameters.
-    if let Some(block_id) = resolve_pane_block_id(state, browser) {
-        let url = {
-            let mut b: cef::Browser = browser.clone();
-            b.main_frame()
-                .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
-                .unwrap_or_default()
-        };
+    if let Some(block_id) = pane_block_id {
+        let url = main_frame_url(browser);
         let block_id_short: String = block_id.chars().take(7).collect();
         tracing::info!(
             "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=true",
@@ -603,12 +594,7 @@ pub fn on_loading_state_change_browser_pane(
             state.browser_pane_load_watchdog.lock().remove(&block_id);
         }
 
-        let url = {
-            let mut b: cef::Browser = browser.clone();
-            b.main_frame()
-                .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
-                .unwrap_or_default()
-        };
+        let url = main_frame_url(browser);
         let corrected_is_loading = is_pane_main_frame_loading(state, &block_id);
         let block_id_short: String = block_id.chars().take(7).collect();
         tracing::info!(
@@ -630,6 +616,14 @@ pub fn on_loading_state_change_browser_pane(
     } else {
         tracing::warn!("[pane-loading-state] couldn't resolve block_id for nav-state emit");
     }
+}
+
+/// The main frame's current URL, or empty when the browser has no main frame.
+fn main_frame_url(browser: &Browser) -> String {
+    browser
+        .main_frame()
+        .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
+        .unwrap_or_default()
 }
 
 /// Resolve the `block_id` for a pane browser. Panes are registered in

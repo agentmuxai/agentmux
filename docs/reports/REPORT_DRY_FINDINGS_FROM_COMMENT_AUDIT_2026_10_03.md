@@ -43,9 +43,9 @@ Effort: **S** = one small PR, mechanical; **M** = a few files or a design choice
 
 | # | What | Where | Effort |
 |---|---|---|---|
-| 17 | Raw objc FFI boilerplate (`sel_registerName`, `objc_msgSend` and per-signature transmutes) is redeclared about 20 times. | `app/mod.rs`, `macos_compat.rs`, `platform_macos.rs`, `ui_tasks/window.rs`, `ui_tasks/drag.rs`, … | M: one `cfg(macos)` objc module with typed helpers |
+| 17 | Raw objc FFI boilerplate (`sel_registerName`, `objc_msgSend` and per-signature transmutes) is redeclared about 20 times. | `app/mod.rs`, `macos_compat.rs`, `platform_macos.rs`, `ui_tasks/window.rs`, `ui_tasks/drag.rs`, … | M: one `cfg(macos)` objc module with typed helpers **Deferred:** macOS-only; `cargo check --target aarch64-apple-darwin` cannot run on the Windows dev host (a dependency build script needs a macOS C toolchain), so it needs a macOS machine to verify. |
 | 18 | The "a pane is mid-close" gate (and in two places the quit-state gate) is pasted into every top-level window creator. | `commands/window/creation.rs:285,472`, `commands/drag.rs:413`, `window_pool.rs:451`, `pane_pool.rs:315`, … | S: `AppState::check_top_level_creation_allowed(caller)` |
-| 19 | The host re-implements srv's `resolve_settings_dir()` (isolated channel, env overrides, config-home walk). | `cef/src/app/window_settings.rs:147`, `srv/backend/config_watcher_fs.rs:45` | M: move into `agentmux_common` |
+| 19 | The host re-implements srv's `resolve_settings_dir()` (isolated channel, env overrides, config-home walk). | `cef/src/app/window_settings.rs:147`, `srv/backend/config_watcher_fs.rs:45` | M: move into `agentmux_common` **Not a duplicate (checked 2026-10-03):** srv resolves one dir from `AGENTMUX_CONFIG_HOME` with a root fallback; the host scans candidate files from `AGENTMUX_CONFIG_DIR`, which only the host process has. Unifying them would make isolated channels read the wrong file. |
 | 20 | `set_window_opacity` handles the same two events four times; the macOS and Linux blocks are identical. | `commands/window/transparency.rs:239,255,284` | S |
 
 ## 4. Suggested order

@@ -282,13 +282,7 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         None => None,
     };
     // H.7 invariant — also enforced inside open_window_with_kind (cold path).
-    if state.any_browser_pane_closing() {
-        tracing::warn!(
-            target: "wfr:gate",
-            "[wfr:gate] open_new_window refused — pane is mid-close (H.7 invariant)"
-        );
-        return Err("a pane is currently closing; retry shortly".to_string());
-    }
+    state.check_no_pane_closing("open_new_window")?;
 
     // Pool-first path — instant show with no renderer-spawn latency (~3s saved).
     // On macOS/Linux, emits pool:new-window (no workspaceId → fresh workspace).
@@ -463,44 +457,8 @@ pub(crate) fn open_window_with_kind(
     explicit_rect: Option<agentmux_common::ipc::Rect>,
     is_reproject: bool,
 ) -> Result<serde_json::Value, String> {
-    // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
-    // The smoke retro at
-    // `docs/retro/smoke-test-0.33.586-and-pr5-plan-2026-05-02.md` blamed
-    // a Chromium v146 deadlock (HiddenSinceOpen + IPC backpressure) on
-    // creating a top-level CEF window while a pane is in `Closing`;
-    // `docs/retro/h7-freeze-fix-retro-2026-05-02.md` later found that
-    // diagnosis wrong (the gate never fired). Frontend should retry on
-    // next tick.
-    if state.any_browser_pane_closing() {
-        tracing::warn!(
-            target: "wfr:gate",
-            "[wfr:gate] open_window refused — pane is mid-close (H.7 invariant)"
-        );
-        return Err("a pane is currently closing; retry shortly".to_string());
-    }
-
-    // Refuse once the instance has decided to quit. Without this, a window
-    // creation racing an explicit `quit_app` would register AFTER the drain
-    // began — `handle_register_browser` has no draining guard — leaving a
-    // live, visible window in a draining host that the quit's own snapshot
-    // never knew to close (Codex P2 on PR #2996). The existing quit watchdog
-    // would eventually force the exit, but only by killing a window the user
-    // is looking at, several seconds later.
-    //
-    // Cheap and unconditional: this is not specific to background-service
-    // mode. `QuitState` is monotonic, so once it leaves `Running` no new
-    // top-level window is ever wanted, by any caller — user, reproject, or
-    // pool fallback.
-    if !matches!(
-        state.host_state.lock().quit_state,
-        crate::state::QuitState::Running
-    ) {
-        tracing::warn!(
-            target: "wfr:gate",
-            "[wfr:gate] open_window refused — instance is draining/quitting"
-        );
-        return Err("the app is shutting down".to_string());
-    }
+    // Refuse while a pane is mid-close (H.7) or the instance is quitting.
+    state.check_top_level_creation_allowed("open_window")?;
 
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
