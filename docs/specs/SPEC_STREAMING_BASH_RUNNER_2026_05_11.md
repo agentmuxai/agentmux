@@ -233,6 +233,12 @@ Tests: 12 passed, 12 total
 
 Stderr lines get prefixed with `[stderr] ` when interleaved into the model-visible blob; the frontend overlay renders them in dim red without the prefix (it has the structural `kind` field from the WPS chunk). Truncate at 50KB head + 50KB tail with `... [N lines elided] ...` in the middle for the model-visible blob; the frontend has the full thing in `log.chunks`.
 
+**Access-denied hint (added 2026-10-02).** If the command exits non-zero and anything in its full output, including an elided part, contains `AccessDenied`, `is not authorized to perform`, `UnauthorizedOperation` or `Resource not accessible by integration`, the wrapper appends one line to the model-visible blob. The line says that *if* that denial is why the command failed, the agent shouldn't work around it but should use its environment's documented escalation path (Global Memory, `CLAUDE.md`) with a reason, and otherwise ask the human operator. It is conditional because in a compound command or a test suite the denial text can come from a step other than the one that failed.
+- The text is generic, because how to escalate differs per deployment. Its job is to make the agent look up the path at the moment of failure, which is when the rule matters. Agents on bare `aws` and `cdk` denials otherwise looked for another credential or skipped verification.
+- A command that succeeds never gets the hint, so a `grep` for `AccessDenied` stays clean.
+- The line is part of the tool result, not of the streamed chunks.
+- Code: `access_denied_hint` in `crates/bashwrap/src/bash_wrap.rs`.
+
 ### 4.6 Concurrency
 
 Multiple tool calls can run concurrently. Each is a separate wrapper process (separate Bash invocation by Claude), so isolation is trivial — separate PTYs, separate WPS subjects keyed by `tool_use_id`, no shared mutable state. Sidecar HTTP can handle parallel publishes without ordering issues (chunks within a subject preserve order by timestamp).
