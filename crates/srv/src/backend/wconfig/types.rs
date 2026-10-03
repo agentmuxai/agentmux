@@ -76,6 +76,12 @@ pub struct SettingsType {
     #[serde(rename = "term:scrollback", default, skip_serializing_if = "Option::is_none")]
     pub term_scrollback: Option<i64>,
 
+    /// SSH terminal panes durable (their shell kept on the host by AgentMux's
+    /// helper) or not, unless a pane or its connection says otherwise. Unset:
+    /// durable on a host the helper has answered on (`durable_ssh::wants`).
+    #[serde(rename = "term:durable", default, skip_serializing_if = "Option::is_none")]
+    pub term_durable: Option<bool>,
+
     #[serde(rename = "term:copyonselect", default, skip_serializing_if = "Option::is_none")]
     pub term_copy_on_select: Option<bool>,
 
@@ -652,6 +658,10 @@ pub struct ConnKeywords {
 
     #[serde(rename = "term:theme", default, skip_serializing_if = "String::is_empty")]
     pub term_theme: String,
+
+    /// This connection's panes durable or not (over the global `term:durable`).
+    #[serde(rename = "term:durable", default, skip_serializing_if = "Option::is_none")]
+    pub term_durable: Option<bool>,
 
     // -- Command settings --
     #[serde(rename = "cmd:env", default, skip_serializing_if = "HashMap::is_empty")]

@@ -198,6 +198,9 @@ pub struct BlockControllerRuntimeStatus {
     pub shellprocconnname: String,
     #[serde(default)]
     pub shellprocexitcode: i32,
+    /// A durable SSH pane (`durable_ssh`): its shell lives on the host.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub durable: bool,
     /// Unix timestamp (ms) when the process was spawned; None until first spawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn_ts_ms: Option<i64>,
@@ -942,7 +945,12 @@ pub fn resync_controller(
         // A durable SSH pane: the shell lives in the helper's session on the
         // host, reached over ssh (durable_ssh.rs). Same `shell` type and
         // connection name as the meta says, so a resync keeps it.
-        BLOCK_CONTROLLER_SHELL if durable_ssh::wants(block_meta) => {
+        BLOCK_CONTROLLER_SHELL
+            if durable_ssh::wants(
+                block_meta,
+                config.as_ref().map(|c| c.get_full_config()).as_deref(),
+            ) =>
+        {
             let ctrl = Arc::new(durable_ssh::DurableSshController::new(
                 block_id.to_string(),
                 broker,
@@ -950,6 +958,7 @@ pub fn resync_controller(
                 mstore,
                 filestore,
                 auth_key.to_string(),
+                config.clone(),
             ));
             register_controller(block_id, ctrl.clone());
             ctrl.start(block_meta.clone(), rt_opts, force)
@@ -1093,6 +1102,7 @@ pub(crate) fn agent_runtime_status(
     turn_active: bool,
 ) -> BlockControllerRuntimeStatus {
     BlockControllerRuntimeStatus {
+        durable: false,
         blockid: block_id.to_string(),
         version,
         shellprocstatus: proc_status.to_string(),

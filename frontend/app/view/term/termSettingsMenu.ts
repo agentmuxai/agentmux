@@ -127,16 +127,20 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
     // there holds it): a dropped link, sleep or a restart reattaches instead
     // of ending it. Switching restarts the pane's connection.
     if (isSshConnection(meta?.connection)) {
-        const durable = meta?.["term:durable"] === true;
+        // What is in effect: the pane's own choice, or (unset) srv's default
+        // from the connection's settings, the global setting, or whether the
+        // host has the helper. The controller reports which it is running.
+        const durable = model.shellProcFullStatus()?.durable ?? meta?.["term:durable"] === true;
         fullMenu.push({
             label: "Keep Session Alive (durable)",
             type: "checkbox",
             checked: durable,
             click: () => {
-                // Off: forget the session too; srv ends it on the restart
+                // Off: an explicit `false`, so a default never turns it back
+                // on, and forget the session too; srv ends it on the restart
                 // (a pane that is no longer durable never comes back to it).
                 const patch: MetaType = durable
-                    ? { "term:durable": null, "remote:session_id": null }
+                    ? { "term:durable": false, "remote:session_id": null }
                     : { "term:durable": true };
                 void model.setMeta(patch).then(() => model.forceRestartController());
             },
