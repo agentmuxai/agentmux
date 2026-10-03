@@ -111,6 +111,8 @@ describe("an Editor on an SSH host (remote terminals spec §6.3)", () => {
         expect(h.watched).not.toContain("/home/u/notes.md");
         expect(model.treeExpandedAtom()).toBe(false);
         expect(model.connection()).toBe("user@box");
+        // No local scratch buffer in an editor on a host.
+        expect(await model.openScratch(false)).toBeUndefined();
     });
 
     it("a local editor sends no connection", async () => {

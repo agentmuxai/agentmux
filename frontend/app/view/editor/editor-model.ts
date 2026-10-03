@@ -494,8 +494,16 @@ export class EditorViewModel {
         this._disposeFileDrop = registerFileDropTarget(
             blockId,
             createEditorDropHook({
-                openFile: (path) => this.openFile(path),
-                openText: (name, content) => this.openDroppedText(name, content),
+                // A file from this computer isn't on the host an editor there
+                // reads from, and dropped text would become a local scratch.
+                openFile: async (path) => {
+                    if (this.connection()) return notifyDrop.cantOpen(path, "editor");
+                    await this.openFile(path);
+                },
+                openText: async (name, content) => {
+                    if (this.connection()) return notifyDrop.cantOpen(name, "editor");
+                    await this.openDroppedText(name, content);
+                },
                 cantOpen: (name) => notifyDrop.cantOpen(name, "editor"),
             }),
         );
@@ -632,10 +640,12 @@ export class EditorViewModel {
         return isSshConnection(c) ? String(c).trim() : "";
     }
 
-    /** Where a file request runs: the host, and this pane for ssh's prompts. */
-    private on(): { connection?: string; block_id?: string } {
+    /** Where a request for `tabId`'s file runs: the host, and this pane for
+     *  ssh's prompts; a scratch tab's file is always on this computer. */
+    private on(tabId?: string): { connection?: string; block_id?: string } {
         const c = this.connection();
-        return c ? { connection: c, block_id: this.blockId } : {};
+        const scratch = tabId != null && snapshot(this.blockId)?.tabs.find((t) => t.id === tabId)?.isScratch;
+        return c && !scratch ? { connection: c, block_id: this.blockId } : {};
     }
 
     private async _loadFileIntoTab(
@@ -647,9 +657,9 @@ export class EditorViewModel {
         try {
             const result = await RpcApi.ReadEditorFileCommand(
                 TabRpcClient,
-                { path: filePath, ...this.on() },
+                { path: filePath, ...this.on(tabId) },
                 // Over ssh, which may first ask the user something.
-                this.connection() ? { timeout: 180_000 } : undefined
+                this.on(tabId).connection ? { timeout: 180_000 } : undefined
             );
             const content = result?.content ?? "";
 
@@ -917,9 +927,9 @@ export class EditorViewModel {
                     path: tab.filePath,
                     content,
                     ...this._encodingFor(tab.id),
-                    ...this.on(),
+                    ...this.on(tab.id),
                 },
-                this.connection() ? { timeout: 180_000 } : undefined
+                this.on(tab.id).connection ? { timeout: 180_000 } : undefined
             );
             dispatch(this.blockId, {
                 type: "ClearDirty",
@@ -956,6 +966,9 @@ export class EditorViewModel {
      *  silently re-activating the pane's existing scratch tab there reads
      *  as "+ does nothing" when that tab is already the active one). */
     async openScratch(reuseExisting: boolean = true): Promise<string | undefined> {
+        // A scratch buffer is a file on this computer: not in an editor on a
+        // host, whose reads and saves go there.
+        if (this.connection()) return undefined;
         if (reuseExisting) {
             // Reuse an existing scratch tab if one is already open in this pane.
             const existing = snapshot(this.blockId)?.tabs.find((t) => t.isScratch);
