@@ -339,9 +339,19 @@ impl SubprocessController {
                         // so token_estimate stays consistent across controller types.
                         stats.record_line(line.len(), &mstore_read);
 
-                        // Retain the terminal `result` frame for failure
-                        // classification.
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            // Try to capture session/thread ID from the provider's init event.
+                            // Claude: {"type":"system","subtype":"init","session_id":"..."}
+                            // Gemini: {"type":"init","session_id":"..."}
+                            // Codex:  {"type":"thread.started","thread_id":"..."}
+                            // Read before the frame may move into a slot below.
+                            let sid = parsed
+                                .get(&session_id_field)
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string);
+
+                            // Retain the terminal `result` frame for failure
+                            // classification.
                             if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
                                 *last_result_frame_read.lock().unwrap() = Some(parsed);
                             } else if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant")
@@ -353,15 +363,8 @@ impl SubprocessController {
                                 // capture it so the process_waiter can trip the failure gate.
                                 *last_inband_error_read.lock().unwrap() = Some(parsed);
                             }
-                        }
 
-                        // Try to capture session/thread ID from the provider's init event.
-                        // Claude: {"type":"system","subtype":"init","session_id":"..."}
-                        // Gemini: {"type":"init","session_id":"..."}
-                        // Codex:  {"type":"thread.started","thread_id":"..."}
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
-                                let sid_string = sid.to_string();
+                            if let Some(sid_string) = sid {
                                 // Authoritative CLI capture —
                                 // overwrites any prior value
                                 // (including stale hydrated ids
@@ -400,13 +403,10 @@ impl SubprocessController {
                             // production filter is info, so this is now
                             // suppressed unless RUST_LOG=debug is set.
                             tracing::debug!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
-                            // Include the newline so the frontend line splitter works correctly
-                            let line_with_newline = format!("{}\n", trimmed);
-                            shell::handle_append_block_file(
+                            shell::append_output_line(
                                 broker,
                                 &block_id_read,
-                                SUBPROCESS_OUTPUT_SUBJECT,
-                                line_with_newline.as_bytes(),
+                                trimmed,
                                 filestore_read.as_ref(),
                                 global_output_zone.as_deref(),
                             );

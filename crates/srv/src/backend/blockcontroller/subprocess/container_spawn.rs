@@ -748,15 +748,7 @@ impl SubprocessController {
         }
 
         if let Some(ref broker) = broker {
-            let line_with_newline = format!("{}\n", trimmed);
-            shell::handle_append_block_file(
-                broker,
-                block_id,
-                SUBPROCESS_OUTPUT_SUBJECT,
-                line_with_newline.as_bytes(),
-                filestore.as_ref(),
-                global_output_zone,
-            );
+            shell::append_output_line(broker, block_id, trimmed, filestore.as_ref(), global_output_zone);
         }
     }
 }

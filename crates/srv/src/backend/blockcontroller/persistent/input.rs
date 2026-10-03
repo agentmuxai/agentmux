@@ -517,12 +517,10 @@ impl PersistentSubprocessController {
         let Some(ref broker) = self.broker else { return };
         let global_zone =
             super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
-        let line_with_newline = format!("{json_str}\n");
-        super::super::shell::handle_append_block_file(
+        super::super::shell::append_output_line(
             broker,
             &self.block_id,
-            crate::backend::agent_session::OUTPUT_FILE,
-            line_with_newline.as_bytes(),
+            json_str,
             self.filestore.as_ref(),
             global_zone.as_deref(),
         );
@@ -549,105 +547,20 @@ impl PersistentSubprocessController {
     /// that exact prefix stable if this message ever changes. See
     /// docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
     pub fn answer_question(&self, tool_use_id: String, answers: serde_json::Value) -> Result<(), String> {
-        let (request_id, questions, tx) = {
-            let mut inner = self.inner.lock().unwrap();
-            let (rid, qs) = inner
-                .pending_questions
-                .remove(&tool_use_id)
-                .ok_or_else(|| format!(
-                    "no pending AskUserQuestion for tool_use_id {tool_use_id} — this controller \
-                     instance never recorded it (process likely respawned since the question was \
-                     asked, e.g. a pane close/reopen); the caller should redeliver as a follow-up message"
-                ))?;
-            let tx = inner
-                .stdin_tx
-                .as_ref()
-                .ok_or("persistent process not running (cannot deliver answer)")?
-                .clone();
-            (rid, qs, tx)
-        };
-
-        let control_response = serde_json::json!({
-            "type": "control_response",
-            "response": {
-                "subtype": "success",
-                "request_id": request_id,
-                "response": {
-                    "behavior": "allow",
-                    "updatedInput": { "questions": questions, "answers": answers.clone() },
-                    "toolUseID": tool_use_id,
-                }
-            }
-        });
-        // Snapshot stdout activity BEFORE sending the answer, so a fast resume
-        // that emits between the send and the snapshot can't be mistaken for
-        // "no activity" (codex review on #1536).
-        let stdout_seq = Arc::clone(&self.stdout_seq);
-        let before_seq = stdout_seq.load(Ordering::Relaxed);
-
-        tx.try_send(control_response.to_string())
-            .map_err(|e| format!("control_response send failed: {e}"))?;
-
-        // Dead-air safety net. The CLI *abandons* a pending AskUserQuestion
-        // tool_use if its turn already ended, silently dropping the
-        // control_response above — the model then sees an empty message and
-        // stalls (SPEC_ASK_USER_QUESTION_2026_06_15.md §9/§10.1; the dead-air
-        // report). If no stdout activity appears shortly after the answer, the
-        // turn did not resume, so re-deliver the answer as a normal follow-up
-        // user turn — the same resilience the one-shot controllers already use.
-        // Gated on stdout activity (every frame, incl. control frames), so it is
-        // mutually exclusive with a real resume and never double-delivers.
-        let inner = Arc::clone(&self.inner);
-        let block_id = self.block_id.clone();
         let resume_msg = build_answer_resume_message(&answers);
-        let persist = self.redelivery_persister();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
-            // Any stdout frame since the snapshot means the turn resumed — nothing to do.
-            if stdout_seq.load(Ordering::Relaxed) != before_seq {
-                return;
-            }
-            let line = serde_json::json!({
-                "type": "user",
-                "message": { "role": "user", "content": resume_msg }
-            })
-            .to_string();
-            // Delivery is unchanged (the raw send this fallback has always
-            // used). New: the line is recorded in the transcript (spec §6.9;
-            // #3703) — only if it was written, and not while a restart or stop
-            // is committed (the process is going down and may never read it;
-            // History must not claim a decision it never got). Recorded under
-            // the same `inner` acquisition as the send, so the fallbacks can't
-            // interleave with each other; ordering against a concurrent
-            // ordinary send is the same as between two ordinary sends (each
-            // records after its own send) — an open follow-up in the
-            // live-feed tracker. `persist.write` never takes `inner`.
-            let guard = inner.lock().unwrap();
-            let stdin_tx = guard.stdin_tx.clone();
-            match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
-                    if !guard.restart_pending && !guard.stop_pending {
-                        persist.write(&line);
-                    }
-                    drop(guard);
-                    tracing::warn!(
-                        block_id = %block_id,
-                        tool_use_id = %tool_use_id,
-                        fallback_ms = ANSWER_RESUME_FALLBACK_MS,
-                        "AskUserQuestion answer did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
-                    );
-                }
-                Some(_) => tracing::warn!(
-                    block_id = %block_id,
-                    "AskUserQuestion dead-air fallback: stdin send failed"
-                ),
-                None => tracing::warn!(
-                    block_id = %block_id,
-                    "AskUserQuestion dead-air fallback skipped: process not running"
-                ),
-            }
-        });
-        Ok(())
+        self.reply_to_pending_question(
+            tool_use_id,
+            "persistent process not running (cannot deliver answer)",
+            |questions, tool_use_id| {
+                serde_json::json!({
+                    "behavior": "allow",
+                    "updatedInput": { "questions": questions, "answers": answers },
+                    "toolUseID": tool_use_id,
+                })
+            },
+            resume_msg,
+            &ANSWER_DEAD_AIR_LOGS,
+        )
     }
 
     /// Decline a parked AskUserQuestion via the Agent SDK **control protocol**
@@ -668,7 +581,35 @@ impl PersistentSubprocessController {
     /// (`useAgentQuestions.ts`'s `SAFE_TO_RETRY_VIA_FOLLOWUP` allowlist matches
     /// on this method's error text too, since it shares the identical lookup).
     pub fn deny_question(&self, tool_use_id: String, message: String) -> Result<(), String> {
-        let (request_id, _questions, tx) = {
+        let resume_msg = build_deny_resume_message(&message);
+        self.reply_to_pending_question(
+            tool_use_id,
+            "persistent process not running (cannot deliver decline)",
+            |_questions, tool_use_id| {
+                serde_json::json!({
+                    "behavior": "deny",
+                    "message": message,
+                    "toolUseID": tool_use_id,
+                })
+            },
+            resume_msg,
+            &DENY_DEAD_AIR_LOGS,
+        )
+    }
+
+    /// Removes the parked AskUserQuestion `tool_use_id` and replies to it with
+    /// `response_body(questions, tool_use_id)` via
+    /// [`Self::send_control_response_with_fallback`]. The "no pending
+    /// AskUserQuestion" error prefix is matched by the frontend.
+    fn reply_to_pending_question(
+        &self,
+        tool_use_id: String,
+        not_running_error: &'static str,
+        response_body: impl FnOnce(serde_json::Value, &str) -> serde_json::Value,
+        resume_msg: String,
+        logs: &'static DeadAirLogs,
+    ) -> Result<(), String> {
+        let (request_id, questions, tx) = {
             let mut inner = self.inner.lock().unwrap();
             let (rid, qs) = inner
                 .pending_questions
@@ -681,41 +622,56 @@ impl PersistentSubprocessController {
             let tx = inner
                 .stdin_tx
                 .as_ref()
-                .ok_or("persistent process not running (cannot deliver decline)")?
+                .ok_or(not_running_error)?
                 .clone();
             (rid, qs, tx)
         };
+        let body = response_body(questions, &tool_use_id);
+        self.send_control_response_with_fallback(tx, request_id, body, tool_use_id, resume_msg, logs)
+    }
 
+    /// Sends the `control_response` for a parked `can_use_tool` request and
+    /// arms the dead-air fallback, which re-delivers `resume_msg` as a
+    /// follow-up user turn if no stdout activity follows the response.
+    fn send_control_response_with_fallback(
+        &self,
+        tx: mpsc::Sender<String>,
+        request_id: String,
+        response_body: serde_json::Value,
+        tool_use_id: String,
+        resume_msg: String,
+        logs: &'static DeadAirLogs,
+    ) -> Result<(), String> {
         let control_response = serde_json::json!({
             "type": "control_response",
             "response": {
                 "subtype": "success",
                 "request_id": request_id,
-                "response": {
-                    "behavior": "deny",
-                    "message": message,
-                    "toolUseID": tool_use_id,
-                }
+                "response": response_body,
             }
         });
-        // Snapshot stdout activity BEFORE sending, same reasoning as
-        // answer_question (codex review on #1536).
+        // Snapshot stdout activity BEFORE sending, so a fast resume that emits
+        // between the send and the snapshot can't be mistaken for "no
+        // activity".
         let stdout_seq = Arc::clone(&self.stdout_seq);
         let before_seq = stdout_seq.load(Ordering::Relaxed);
 
         tx.try_send(control_response.to_string())
             .map_err(|e| format!("control_response send failed: {e}"))?;
 
-        // Dead-air safety net — identical mechanism to answer_question's, using
-        // the decline-flavored resume message. Reuses ANSWER_RESUME_FALLBACK_MS:
-        // same failure mode (turn already ended before the response arrived), no
-        // reason for a different timeout.
+        // Dead-air safety net. The CLI *abandons* a pending tool_use if its
+        // turn already ended, silently dropping the control_response above
+        // (allow or deny), and the model stalls on an empty message
+        // (SPEC_ASK_USER_QUESTION_2026_06_15.md §9/§10.1). No stdout activity
+        // shortly after means the turn did not resume, so re-deliver the
+        // choice as a follow-up user turn. Gated on stdout activity (every
+        // frame, incl. control frames), so it never double-delivers.
         let inner = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
-        let resume_msg = build_deny_resume_message(&message);
         let persist = self.redelivery_persister();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
+            // Any stdout frame since the snapshot means the turn resumed — nothing to do.
             if stdout_seq.load(Ordering::Relaxed) != before_seq {
                 return;
             }
@@ -724,16 +680,14 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            // Delivery is unchanged (the raw send this fallback has always
-            // used). New: the line is recorded in the transcript (spec §6.9;
-            // #3703) — only if it was written, and not while a restart or stop
-            // is committed (the process is going down and may never read it;
-            // History must not claim a decision it never got). Recorded under
-            // the same `inner` acquisition as the send, so the fallbacks can't
-            // interleave with each other; ordering against a concurrent
-            // ordinary send is the same as between two ordinary sends (each
-            // records after its own send) — an open follow-up in the
-            // live-feed tracker. `persist.write` never takes `inner`.
+            // The line is recorded in the transcript (spec §6.9) only if it was
+            // written, and not while a restart or stop is committed (the
+            // process is going down and may never read it; History must not
+            // claim a decision it never got). Recorded under the same `inner`
+            // acquisition as the send, so the fallbacks can't interleave with
+            // each other; ordering against a concurrent ordinary send is the
+            // same as between two ordinary sends (each records after its own
+            // send). `persist.write` never takes `inner`.
             let guard = inner.lock().unwrap();
             let stdin_tx = guard.stdin_tx.clone();
             match stdin_tx {
@@ -746,17 +700,12 @@ impl PersistentSubprocessController {
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
                         fallback_ms = ANSWER_RESUME_FALLBACK_MS,
-                        "AskUserQuestion decline did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
+                        "{}",
+                        logs.redelivered
                     );
                 }
-                Some(_) => tracing::warn!(
-                    block_id = %block_id,
-                    "AskUserQuestion deny dead-air fallback: stdin send failed"
-                ),
-                None => tracing::warn!(
-                    block_id = %block_id,
-                    "AskUserQuestion deny dead-air fallback skipped: process not running"
-                ),
+                Some(_) => tracing::warn!(block_id = %block_id, "{}", logs.send_failed),
+                None => tracing::warn!(block_id = %block_id, "{}", logs.not_running),
             }
         });
         Ok(())
@@ -829,76 +778,15 @@ impl PersistentSubprocessController {
                 "toolUseID": tool_use_id,
             })
         };
-        let control_response = serde_json::json!({
-            "type": "control_response",
-            "response": {
-                "subtype": "success",
-                "request_id": request_id,
-                "response": response_body,
-            }
-        });
-
-        // Snapshot stdout activity BEFORE sending, same reasoning as
-        // answer_question/deny_question (codex review on #1536).
-        let stdout_seq = Arc::clone(&self.stdout_seq);
-        let before_seq = stdout_seq.load(Ordering::Relaxed);
-
-        tx.try_send(control_response.to_string())
-            .map_err(|e| format!("control_response send failed: {e}"))?;
-
-        // Dead-air safety net — identical mechanism to answer_question's /
-        // deny_question's (the CLI can abandon a pending tool_use whose turn
-        // already ended regardless of whether the decision was allow or deny).
-        let inner = Arc::clone(&self.inner);
-        let block_id = self.block_id.clone();
         let resume_msg = build_tool_decision_resume_message(&tool_name, outcome, feedback.as_deref());
-        let persist = self.redelivery_persister();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
-            if stdout_seq.load(Ordering::Relaxed) != before_seq {
-                return;
-            }
-            let line = serde_json::json!({
-                "type": "user",
-                "message": { "role": "user", "content": resume_msg }
-            })
-            .to_string();
-            // Delivery is unchanged (the raw send this fallback has always
-            // used). New: the line is recorded in the transcript (spec §6.9;
-            // #3703) — only if it was written, and not while a restart or stop
-            // is committed (the process is going down and may never read it;
-            // History must not claim a decision it never got). Recorded under
-            // the same `inner` acquisition as the send, so the fallbacks can't
-            // interleave with each other; ordering against a concurrent
-            // ordinary send is the same as between two ordinary sends (each
-            // records after its own send) — an open follow-up in the
-            // live-feed tracker. `persist.write` never takes `inner`.
-            let guard = inner.lock().unwrap();
-            let stdin_tx = guard.stdin_tx.clone();
-            match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
-                    if !guard.restart_pending && !guard.stop_pending {
-                        persist.write(&line);
-                    }
-                    drop(guard);
-                    tracing::warn!(
-                        block_id = %block_id,
-                        tool_use_id = %tool_use_id,
-                        fallback_ms = ANSWER_RESUME_FALLBACK_MS,
-                        "tool-permission decision did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
-                    );
-                }
-                Some(_) => tracing::warn!(
-                    block_id = %block_id,
-                    "tool-permission dead-air fallback: stdin send failed"
-                ),
-                None => tracing::warn!(
-                    block_id = %block_id,
-                    "tool-permission dead-air fallback skipped: process not running"
-                ),
-            }
-        });
-        Ok(())
+        self.send_control_response_with_fallback(
+            tx,
+            request_id,
+            response_body,
+            tool_use_id,
+            resume_msg,
+            &TOOL_DECISION_DEAD_AIR_LOGS,
+        )
     }
 
     /// Push a raw NDJSON line to the live stdin (used to emit control_responses
@@ -989,6 +877,32 @@ impl PersistentSubprocessController {
         }
     }
 }
+
+/// The warn-level lines one dead-air fallback logs: re-delivered, stdin send
+/// failed, and skipped because the process is gone.
+struct DeadAirLogs {
+    redelivered: &'static str,
+    send_failed: &'static str,
+    not_running: &'static str,
+}
+
+const ANSWER_DEAD_AIR_LOGS: DeadAirLogs = DeadAirLogs {
+    redelivered: "AskUserQuestion answer did not resume the turn — re-delivered as a follow-up message (dead-air fallback)",
+    send_failed: "AskUserQuestion dead-air fallback: stdin send failed",
+    not_running: "AskUserQuestion dead-air fallback skipped: process not running",
+};
+
+const DENY_DEAD_AIR_LOGS: DeadAirLogs = DeadAirLogs {
+    redelivered: "AskUserQuestion decline did not resume the turn — re-delivered as a follow-up message (dead-air fallback)",
+    send_failed: "AskUserQuestion deny dead-air fallback: stdin send failed",
+    not_running: "AskUserQuestion deny dead-air fallback skipped: process not running",
+};
+
+const TOOL_DECISION_DEAD_AIR_LOGS: DeadAirLogs = DeadAirLogs {
+    redelivered: "tool-permission decision did not resume the turn — re-delivered as a follow-up message (dead-air fallback)",
+    send_failed: "tool-permission dead-air fallback: stdin send failed",
+    not_running: "tool-permission dead-air fallback skipped: process not running",
+};
 
 /// Records a dead-air re-delivery in the transcript. The three dead-air
 /// fallbacks (answer, decline, tool-permission decision) re-send the user's

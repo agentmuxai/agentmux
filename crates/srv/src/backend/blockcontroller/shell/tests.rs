@@ -752,6 +752,26 @@ use std::sync::Arc;
         assert_eq!(stat_after.size, (line1.len() + line2.len() + b"line three\n".len()) as i64);
     }
 
+    /// `append_output_line` writes each line newline-terminated to `output`.
+    #[test]
+    fn test_append_output_line_newline_terminates_into_output() {
+        use crate::backend::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let broker = mps::Broker::new();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let block_id = "test-block-output-line";
+
+        append_output_line(&broker, block_id, r#"{"type":"a"}"#, Some(&fs), None);
+        append_output_line(&broker, block_id, r#"{"type":"b"}"#, Some(&fs), None);
+
+        let data = fs
+            .read_file(block_id, crate::backend::agent_session::OUTPUT_FILE)
+            .expect("read_file ok")
+            .expect("data present");
+        assert_eq!(String::from_utf8(data).unwrap(), "{\"type\":\"a\"}\n{\"type\":\"b\"}\n");
+    }
+
     /// Helper: parse a zone's `output.tsidx` sidecar into (off, ms) pairs.
     #[cfg(test)]
     fn read_tsidx(fs: &FileStore, zone: &str) -> Vec<(u64, i64)> {
