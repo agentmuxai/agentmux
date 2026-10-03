@@ -588,9 +588,8 @@ pub fn resolve_claude_config_dir(
 ) -> Option<PathBuf> {
     bound_dir
         .or_else(|| {
-            meta.get("cmd:env")
-                .and_then(|v| v.get("CLAUDE_CONFIG_DIR"))
-                .and_then(|v| v.as_str())
+            crate::backend::blockcontroller::cmd_env_of(meta)
+                .remove("CLAUDE_CONFIG_DIR")
                 .map(PathBuf::from)
         })
         .or_else(|| derive_claude_config_dir(agent_id))

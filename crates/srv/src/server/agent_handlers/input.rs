@@ -678,32 +678,22 @@ pub(crate) async fn build_persistent_spawn_env(
             }
         }
     }
-    // PATH includes BOTH bundled tools dir (portable builds,
-    // runtime/tools/bin/) AND user tools dir (~/.agentmux/tools/bin/).
-    // bundled is None in dev mode (target/debug exclusion in tool_store), so
-    // without user_tools_dir the wrapper wouldn't be on the agent's PATH
-    // during `task dev`.
+    // PATH gets the bundled tools dir (portable builds, runtime/tools/bin/)
+    // and the user tools dir (~/.agentmux/tools/bin/), both ahead of the
+    // inherited PATH: bundled is None in `task dev` (tool_store excludes
+    // target/debug), so the wrapper is in the user dir and a system copy must
+    // not shadow it. See `UserToolsPrecedence`.
     {
         let existing = env_vars
             .get("PATH")
             .cloned()
             .or_else(|| std::env::var("PATH").ok())
             .unwrap_or_default();
-        let sep = if cfg!(windows) { ";" } else { ":" };
-        let mut extras: Vec<String> = Vec::new();
-        if let Some(d) = crate::backend::tool_store::bundled_tools_dir() {
-            if d.exists() {
-                extras.push(d.to_string_lossy().into_owned());
-            }
-        }
-        if let Some(d) = crate::backend::tool_store::user_tools_dir() {
-            if d.exists() {
-                extras.push(d.to_string_lossy().into_owned());
-            }
-        }
-        if !extras.is_empty() {
-            let new_path = format!("{}{}{}", extras.join(sep), sep, existing);
-            env_vars.insert("PATH".to_string(), new_path);
+        if let Some(path) = crate::backend::tool_store::tools_path(
+            &existing,
+            crate::backend::tool_store::UserToolsPrecedence::BeforeExisting,
+        ) {
+            env_vars.insert("PATH".to_string(), path);
         }
     }
     // Plain `gh` must not act as a human's gh login (see `gh_guard`), and no
@@ -782,13 +772,7 @@ pub async fn run_agent_turn(
     // its `agent:runtime` says. Never overrides a flag already there.
     let cli_args = crate::backend::agent_runtime::with_runtime_flags(&block.meta, cli_args);
     let working_dir = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
-    let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
-        Some(serde_json::Value::Object(obj)) => obj
-            .iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-            .collect(),
-        _ => std::collections::HashMap::new(),
-    };
+    let env_vars = crate::backend::blockcontroller::cmd_env_of(&block.meta);
     // Identity gate, MuxBus token, reserved wrapper vars, agent identity,
     // git identity, tools PATH — see `build_persistent_spawn_env`'s own doc
     // comment. Broker hand-in lets the OAuth expiry probe (PR D, spec §4.4)
