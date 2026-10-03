@@ -672,6 +672,36 @@ describe("resize through collapsed panes", () => {
         expect(bottom.perpMaxPx - bottom.perpMinPx).toBeCloseTo(rowRect.width, 1);
     });
 
+    it("a collapsed Row of stacked chips: one handle per edge, never two on the same stretch (#4260)", () => {
+        const model = createLayoutModel();
+        const A = leaf("A"), C = leaf("C");
+        const B1 = leaf("B1", true), B2 = leaf("B2", true), D1 = leaf("D1", true), D2 = leaf("D2", true);
+        const row = newLayoutNode(FlexDirection.Row, 10, [
+            newLayoutNode(FlexDirection.Column, 10, [B1, B2]),
+            newLayoutNode(FlexDirection.Column, 10, [D1, D2]),
+        ]);
+        const root = newLayoutNode(FlexDirection.Column, 10, [A, row, C]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handles = handlesOf(model, root.id);
+        expect(handles.every((h) => h.parentIndex === 0 && h.afterIndex === 2)).toBe(true);
+        // No two handles overlap on the same edge.
+        for (let i = 0; i < handles.length; i++) {
+            for (let j = i + 1; j < handles.length; j++) {
+                const a = handles[i], b = handles[j];
+                if (Math.abs(a.centerPx - b.centerPx) < 0.5) {
+                    expect(a.perpMaxPx <= b.perpMinPx + 0.01 || b.perpMaxPx <= a.perpMinPx + 0.01).toBe(true);
+                }
+            }
+        }
+        // Every edge of the run has one: A's bottom, the chips' middle edge, C's top.
+        const edges = (xs: number[]) => [...new Set(xs.map((x) => Math.round(x)))].sort((p, q) => p - q);
+        const a = props[A.id].rect, b1 = props[B1.id].rect, c = props[C.id].rect;
+        expect(edges(handles.map((h) => h.centerPx))).toEqual(edges([a.top + a.height, b1.top + b1.height, c.top]));
+    });
+
     it("a collapsed run at the edge of the column adds no handle (nothing to resize against)", () => {
         const model = createLayoutModel();
         const root = newLayoutNode(FlexDirection.Column, 10, [leaf("A"), leaf("B"), leaf("C", true)]);

@@ -616,6 +616,21 @@ function mergeSegments(segments: EdgeSegment[]): EdgeSegment[] {
     return out;
 }
 
+/** The parts of `seg` not already covered by `covered` segments on the same edge. */
+function uncoveredParts(seg: EdgeSegment, covered: EdgeSegment[]): EdgeSegment[] {
+    let parts: EdgeSegment[] = [seg];
+    for (const c of covered) {
+        if (Math.abs(c.edge - seg.edge) >= EDGE_EPSILON_PX) continue;
+        parts = parts.flatMap((p) => {
+            if (c.max <= p.min || c.min >= p.max) return [p];
+            const left = c.min > p.min ? [{ ...p, max: c.min }] : [];
+            const right = c.max < p.max ? [{ ...p, min: c.max }] : [];
+            return [...left, ...right];
+        });
+    }
+    return parts.filter((p) => p.max - p.min > EDGE_EPSILON_PX);
+}
+
 /**
  * Make every edge of a run of collapsed panes a resize handle for the expanded
  * panes either side (SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md).
@@ -664,6 +679,10 @@ export function extendResizeHandlesThroughChips(
         for (const handle of handles) {
             if (handle.flexDirection !== FlexDirection.Column) continue;
             let frontier: EdgeSegment[] = [{ edge: handle.centerPx, min: handle.perpMinPx, max: handle.perpMaxPx }];
+            // Edges already given a handle. A collapsed branch and its own
+            // chips can reach the same edge in different steps; only the
+            // part not yet covered gets a handle, and only it is walked on.
+            const emitted: EdgeSegment[] = [...frontier];
             let n = 0;
             // Every step moves strictly down (chips have height), so this ends.
             for (let step = 0; frontier.length > 0 && step < 64; step++) {
@@ -677,7 +696,8 @@ export function extendResizeHandlesThroughChips(
                         });
                     }
                 }
-                frontier = mergeSegments(next);
+                frontier = mergeSegments(next).flatMap((seg) => uncoveredParts(seg, emitted));
+                emitted.push(...frontier);
                 for (const seg of frontier) {
                     const neighbours = [...endingAt(seg), ...startingAt(seg)];
                     const thinnest = Math.min(...neighbours.map((r) => r.height));
