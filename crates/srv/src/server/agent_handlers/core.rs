@@ -253,16 +253,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_volumes: if cmd.container_volumes == "[]" { old.container_volumes.clone() } else { cmd.container_volumes },
                     // container_name is server-managed; preserve the existing value.
                     container_name: old.container_name.clone(),
-                    // Preserve the ambient-login opt-in when the caller omits
-                    // the field (Option — most callers only edit name/icon/
-                    // accounts). The Agent setup modal's Accounts tab sends
-                    // Some(0|1) to flip it. Spec §2.3.
-                    use_ambient_login: cmd.use_ambient_login.unwrap_or(old.use_ambient_login),
+                    // Inert; carried over unchanged (see the field's doc).
+                    use_ambient_login: old.use_ambient_login,
                     model_vendor_base_url: chosen_model_vendor_base_url,
                     // Preserve the auto-continue opt-in when the caller omits
                     // the field (Option — most callers only edit name/icon/
                     // accounts). The Warden Supervisor panel sends Some(0|1)
-                    // to flip it, same shape as use_ambient_login above.
+                    // to flip it.
                     auto_continue_enabled: cmd.auto_continue_enabled.unwrap_or(old.auto_continue_enabled),
                     // Immutable post-insert, same as slug/parent_id/branch_label
                     // above — agent_def_update's SET clause doesn't even

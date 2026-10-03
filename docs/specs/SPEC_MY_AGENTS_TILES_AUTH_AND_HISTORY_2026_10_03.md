@@ -165,3 +165,9 @@ Differences from §5.3:
 - **No message count.** Counting messages would mean reading the whole transcript (a 1.5 GB file today), so `node_count` is 0 and the tile shows no count. The picker still sorts by last activity.
 - **`HistoryService` fallback not built.** An agent with no transcript zone reads "No conversations yet" even if a provider session file exists. Add it if that turns out to matter.
 - **Summary-first order not built.** The preview is the last user message; the ambient summary (R9) is Phase 2b, because it needs the refresh policy and the per-account rule to land together.
+
+**Phase 3 (no ambient credentials):** the spawn gate no longer reads `use_ambient_login` (it only fed a log line); `CommandUpdateAgentDefinitionData.use_ambient_login` is removed, so no RPC can set it; the create-from-template modal's "(ambient credentials)" option now reads "No auth"; the stale "ambient creds" comments in the identity module, RPC types, storage and frontend now describe what happens (an unbound oauth-class agent is refused at spawn).
+
+Differences from R10:
+- **The field stays on `AgentDefinition` and in the registry record.** The shared definition registry is read by older builds, and m0017/m0018 grandfathered linkless agents to `1` there; dropping the field would make an older build read `0` for them. The field's doc now says it is inert. Removing it, and the column, can follow once no supported build reads it.
+- **Creating an agent without an account is still allowed.** Requiring one would stop a first-time user (no accounts yet) from creating an agent at all; the launch gate already asks for an account before an oauth-class agent runs.

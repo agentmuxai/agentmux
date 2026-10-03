@@ -735,8 +735,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // last NamedAgentRow for this definition. We auto-continue
             // by reusing the most-recent instance's pair so the spawn
             // resolves credentials the same way as the previous run.
-            // Empty strings are fine: the backend resolver treats them
-            // as "use ambient credentials".
+            // Empty strings mean "none"; the spawn gate refuses an
+            // oauth-class agent that has no bound account.
             let accountId = "";
             let bundleId = "";
             try {

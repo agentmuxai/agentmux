@@ -8,7 +8,7 @@
  * Covered:
  *  - default name field pre-fills with the template's name
  *  - Identity + Memory selects render the accounts / bundles list
- *    (empty option represents ambient creds / vanilla CLI sentinels)
+ *    (the empty account option reads "No auth")
  *  - clicking Create fires onSubmit with the form snapshot
  *  - the Create button is disabled while submitting
  *  - error from onSubmit surfaces in the panel body
@@ -408,6 +408,10 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             const optionIds = Array.from(select.options).map((o) => o.value);
             expect(optionIds).toContain("acct-claude");
             expect(optionIds).not.toContain("acct-codex");
+            // The empty choice reads "No auth"; ambient credentials are gone.
+            const labels = Array.from(select.options).map((o) => o.textContent);
+            expect(labels).toContain("No auth");
+            expect(labels).not.toContain("(ambient credentials)");
         });
 
         it("does not auto-pick an account filtered against the stale fallback provider before the bundle resolves", async () => {

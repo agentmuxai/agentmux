@@ -581,25 +581,24 @@ pub fn inject_identity_env_with_broker(
     // bundle already carries the canonical id doesn't get re-aliased
     // incorrectly (resolve_provider_alias is idempotent on an
     // already-canonical id, so this is safe either way).
-    let (use_ambient, def_provider, parent_template_id) = match mstore.agent_def_get(&instance.definition_id) {
+    let (def_provider, parent_template_id) = match mstore.agent_def_get(&instance.definition_id) {
         Ok(Some(d)) => {
             let effective_provider = id_store.resolve_effective_provider_id(&d);
             let template_parent_id = template_parent_id_if_seeded(&mstore, &d.parent_id);
             (
-                d.use_ambient_login != 0,
                 Some(resolve_provider_alias(&effective_provider).to_string()),
                 template_parent_id,
             )
         }
-        Ok(None) => (false, None, String::new()),
+        Ok(None) => (None, String::new()),
         Err(e) => {
             tracing::warn!(
                 target: "identity",
-                "definition lookup failed for {} (layer-3 gate reads use_ambient_login=false): {}",
+                "definition lookup failed for {}: {}",
                 instance.definition_id,
                 e,
             );
-            (false, None, String::new())
+            (None, String::new())
         }
     };
 
@@ -613,9 +612,7 @@ pub fn inject_identity_env_with_broker(
     //
     // NOTE: an empty set no longer short-circuits — it falls through to the
     // definition-provider gate below (spec §2.2 edge case: an agent whose
-    // oauth-class CLI provider has no binding at all is blocked unless the
-    // ambient opt-in is set; the m0017 migration grandfathers pre-existing
-    // linkless agents).
+    // oauth-class CLI provider has no binding at all is blocked).
     let bindings = resolve_bindings_for_instance(&identity_store, &instance, &parent_template_id, broker.as_ref());
 
     // Step 4: per-binding resolution + env injection.
@@ -629,8 +626,7 @@ pub fn inject_identity_env_with_broker(
     // Api-key-class per-binding failures (unknown provider, account row
     // missing, mismatched secret_ref, secret resolution failed) are logged
     // and skipped — other bindings still inject. Oauth-class failures go
-    // through the layer-3 gate: blocking by default, skip-with-
-    // `identity.spawn.ambient:` when the agent opted in (spec §2.2).
+    // through the layer-3 gate, which always blocks.
     let mut injected_oauth: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
@@ -644,22 +640,17 @@ pub fn inject_identity_env_with_broker(
     // "single point, not global"): a credential the app can't attribute to
     // a specific Armory account is exactly the state that left Marks
     // silently working with an untracked, unrefreshed shared-dir credential
-    // and no visible account anywhere in Armory. `use_ambient` is kept as a
-    // parameter (read below only for the log line) rather than deleted
-    // outright, so the still-live `use_ambient_login` DB column and its
-    // callers don't need a synchronized migration to compile — it no longer
-    // has any effect on the outcome.
+    // and no visible account anywhere in Armory. The flag is no longer read.
     let gate_oauth_failure = |provider: &str, detail: &str| -> Result<(), SpawnGateError> {
         tracing::warn!(
             target: "identity",
             "identity.spawn.blocked: no credentials for provider {} \
              (definition {}, identity {}) — {}; spawn refused \
-             (single-point enforcement — use_ambient_login={}, ignored)",
+             (single-point enforcement)",
             provider,
             instance.definition_id,
             instance.identity_id,
             detail,
-            use_ambient,
         );
         Err(SpawnGateError::MissingCredentials {
             provider: provider.to_string(),

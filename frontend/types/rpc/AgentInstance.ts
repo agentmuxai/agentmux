@@ -17,8 +17,8 @@ github_context: string, started_at: number, ended_at: number, created_at: number
  * dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
  * The launch modal now writes an account_id here instead; credential
  * resolution and display names both go through
- * `db_agent_identity_links`/`db_accounts`. Empty string means
- * "ambient creds, no env-var injection."
+ * `db_agent_identity_links`/`db_accounts`. Empty string means no
+ * account was picked at launch.
  */
 identity_id: string, 
 /**
