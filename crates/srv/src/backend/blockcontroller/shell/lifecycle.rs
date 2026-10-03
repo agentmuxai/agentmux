@@ -1332,13 +1332,13 @@ impl Controller for ShellController {
         // Awaiting it before `child.wait()` would then hang cleanup,
         // `STATUS_DONE` publication, and `run_lock` release for that
         // descendant's entire remaining lifetime — the pane reports running
-        // forever and can never restart. `persistent/spawn.rs`'s stdout/stderr
+        // forever and can never restart. `persistent/process_waiter.rs`'s stdout/stderr
         // reader cleanup hits the identical descendant-held-descriptor case
         // and already establishes the fix: reap the child first
         // (unconditional, not gated on any reader/flusher), then bound the
         // reader/flusher wait with a timeout rather than waiting forever —
         // see the timeout's own comment below for why expiry does NOT
-        // `abort()` here, unlike `persistent/spawn.rs`'s version of this bound.
+        // `abort()` here, unlike `persistent/process_waiter.rs`'s version of this bound.
         tokio::spawn(async move {
             // Reap the child (blocking OS call) on its own — depends only
             // on the direct child exiting, never on PTY EOF. Clones
@@ -1373,7 +1373,7 @@ impl Controller for ShellController {
             // P1, same round, on the timeout+abort version of this fix):
             // the flusher (consumer) and the PTY read loop (producer,
             // `spawn_blocking` doing a raw, un-cancellable OS-level
-            // `reader.read()`) are separate tasks, unlike persistent/spawn.rs's
+            // `reader.read()`) are separate tasks, unlike persistent/stdout_reader.rs's
             // single combined reader task. Aborting only the flusher would
             // stop it draining `pty_tx` — but the read loop, still blocked
             // in real OS I/O, cannot be interrupted by tokio's cooperative

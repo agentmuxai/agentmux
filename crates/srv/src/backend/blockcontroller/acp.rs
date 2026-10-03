@@ -427,7 +427,7 @@ impl AcpController {
                             // Persist to block metadata and broadcast so the frontend's
                             // "My Agents" reattach path can read agent:sessionid from
                             // block.meta. ACP previously captured the ID in memory only —
-                            // this mirrors the careful path from persistent/spawn.rs /
+                            // this mirrors the careful path from persistent/stdout_reader.rs /
                             // subprocess/host_spawn.rs.
                             core::persist_session_id(&block_id_stdout, &sid_owned, &mstore_clone, &event_bus_clone);
                         }
@@ -465,7 +465,7 @@ impl AcpController {
                             health_clone.set_active_turn(false);
                             // Publish the flip so live controllerstatus
                             // subscribers see "turn ended" immediately,
-                            // mirroring persistent/spawn.rs's matching publish
+                            // mirroring persistent/stdout_reader.rs's matching publish
                             // on its own normal (non-kill, non-exit)
                             // turn-end path. Without this, nothing
                             // publishes turn_active: false for an ACP
