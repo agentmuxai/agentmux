@@ -26,7 +26,8 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     FsCreateReq, FsDeleteReq, FsEmptyResult, FsListReq, FsOpCancelReq, FsOpResolveReq, FsOpResult,
     FsOpResults, FsOpStartReq, FsPathReq, FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult,
-    FsRenameReq, FsRestoreReq, FsTrashReq, FsUnwatchReq, FsWatchReq, FsWatchResult,
+    FsCreateResult, FsRenameReq, FsRenameResult, FsRestoreReq, FsTrashReq, FsUnwatchReq, FsWatchReq,
+    FsWatchResult,
 };
 
 use super::AppState;
@@ -51,12 +52,32 @@ fn op_results(paths: Vec<String>, outcomes: Vec<Result<(), String>>) -> FsOpResu
     }
 }
 
+use crate::backend::fs_ops::remote as fs_remote;
+
+fn remote_of<'a>(conn: &'a str, block_id: Option<&'a str>, auth_key: &'a str) -> fs_remote::Remote<'a> {
+    fs_remote::Remote {
+        connection: conn,
+        block_id,
+        auth_key,
+    }
+}
+
 pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // fs.list → one page of a folder. The first page opens it; later pages
     // continue from `cursor`. Spec §6.3.
-    engine.register_typed("fs.list", |cmd: FsListReq, _ctx| async move {
-        fs_ops::ensure_cursor_sweeper();
-        blocking(move || fs_ops::list_page(&cmd)).await
+    // A request naming an SSH connection runs on that host, through its
+    // helper (`fs_ops::remote`, spec §6.3 of the remote terminals spec).
+    let auth_key = state.auth_key.clone();
+    engine.register_typed("fs.list", move |cmd: FsListReq, _ctx| {
+        let auth_key = auth_key.clone();
+        async move {
+            if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+                let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
+                return fs_remote::list(r, &cmd.path).await;
+            }
+            fs_ops::ensure_cursor_sweeper();
+            blocking(move || fs_ops::list_page(&cmd)).await
+        }
     });
 
     // fs.places → home, known folders, drives and WSL distros. Known folders
@@ -121,16 +142,37 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ── Mutations. Spec §7, §9 ──────────────────────────────────────────
 
-    engine.register_typed("fs.rename", |cmd: FsRenameReq, _ctx| async move {
-        blocking(move || fs_ops::rename(&cmd)).await?
+    let auth_key = state.auth_key.clone();
+    engine.register_typed("fs.rename", move |cmd: FsRenameReq, _ctx| {
+        let auth_key = auth_key.clone();
+        async move {
+            if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+                let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
+                let new_path = fs_remote::rename(r, &cmd.path, &cmd.new_name).await?;
+                return Ok(FsRenameResult { new_path });
+            }
+            blocking(move || fs_ops::rename(&cmd)).await?
+        }
     });
 
-    engine.register_typed("fs.create", |cmd: FsCreateReq, _ctx| async move {
-        blocking(move || fs_ops::create(&cmd)).await?
+    let auth_key = state.auth_key.clone();
+    engine.register_typed("fs.create", move |cmd: FsCreateReq, _ctx| {
+        let auth_key = auth_key.clone();
+        async move {
+            if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+                let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
+                let path = fs_remote::create(r, &cmd.parent, &cmd.name, cmd.kind).await?;
+                return Ok(FsCreateResult { path });
+            }
+            blocking(move || fs_ops::create(&cmd)).await?
+        }
     });
 
     // fs.trash → the OS Trash, on the single trash thread (spec §7.3).
     engine.register_typed("fs.trash", |cmd: FsTrashReq, _ctx| async move {
+        if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+            return Err(fs_remote::no_trash(conn));
+        }
         let paths = cmd.paths;
         let for_worker = paths.clone();
         let outcomes = fs_ops::trash_worker::run(move || for_worker.iter().map(|p| fs_ops::trash(p)).collect()).await?;
@@ -139,6 +181,9 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // fs.restore → undo of fs.trash; the paths are the original locations.
     engine.register_typed("fs.restore", |cmd: FsRestoreReq, _ctx| async move {
+        if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+            return Err(fs_remote::no_trash(conn));
+        }
         let paths = cmd.paths;
         let for_worker = paths.clone();
         let outcomes = fs_ops::trash_worker::run(move || fs_ops::restore(&for_worker)).await?;
@@ -146,11 +191,22 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     // fs.delete → PERMANENT. The UI confirms first (spec §7.3).
-    engine.register_typed("fs.delete", |cmd: FsDeleteReq, _ctx| async move {
-        let paths = cmd.paths;
-        let for_worker = paths.clone();
-        let outcomes = blocking(move || for_worker.iter().map(|p| fs_ops::delete_permanently(p)).collect()).await?;
-        Ok(op_results(paths, outcomes))
+    let auth_key = state.auth_key.clone();
+    engine.register_typed("fs.delete", move |cmd: FsDeleteReq, _ctx| {
+        let auth_key = auth_key.clone();
+        async move {
+            if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+                let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
+                return Ok(FsOpResults {
+                    results: fs_remote::delete(r, &cmd.paths).await,
+                });
+            }
+            let paths = cmd.paths;
+            let for_worker = paths.clone();
+            let outcomes =
+                blocking(move || for_worker.iter().map(|p| fs_ops::delete_permanently(p)).collect()).await?;
+            Ok(op_results(paths, outcomes))
+        }
     });
 
     // fs.open / fs.reveal → hand a path to the OS default application / file

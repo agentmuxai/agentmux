@@ -4,4 +4,13 @@
  * Request for `fs.restore`: put each path, trashed earlier, back where it
  * was. The paths are the ORIGINAL locations, as `fs.trash` was given them.
  */
-export type FsRestoreReq = { paths: Array<string>, };
+export type FsRestoreReq = { paths: Array<string>, 
+/**
+ * An SSH connection to run this on (its helper, `fs_ops::remote`);
+ * absent, local, or WSL: this machine, as before.
+ */
+connection?: string, 
+/**
+ * The pane asking, whose window shows any ssh prompt for `connection`.
+ */
+block_id?: string, };

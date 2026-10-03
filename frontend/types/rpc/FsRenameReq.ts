@@ -8,4 +8,13 @@ export type FsRenameReq = { path: string,
  * A plain name: no separators, not `.` or `..`, and on Windows none of
  * the names or characters Windows refuses or silently alters.
  */
-new_name: string, };
+new_name: string, 
+/**
+ * An SSH connection to run this on (its helper, `fs_ops::remote`);
+ * absent, local, or WSL: this machine, as before.
+ */
+connection?: string, 
+/**
+ * The pane asking, whose window shows any ssh prompt for `connection`.
+ */
+block_id?: string, };

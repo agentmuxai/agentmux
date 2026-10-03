@@ -5,7 +5,7 @@ use super::*;
 use std::collections::HashSet;
 
 fn list(store: &Mutex<CursorStore>, path: &str, cursor: Option<String>, limit: Option<u32>, now: Instant) -> FsListResult {
-    list_page_in(store, &FsListReq { path: path.to_string(), cursor, limit }, now)
+    list_page_in(store, &FsListReq { path: path.to_string(), cursor, limit, connection: None, block_id: None }, now)
 }
 
 fn dir_with_files(n: usize) -> tempfile::TempDir {
@@ -379,17 +379,17 @@ fn rename_moves_and_never_overwrites() {
     std::fs::write(dir.path().join("a.txt"), "a").unwrap();
     std::fs::write(dir.path().join("b.txt"), "b").unwrap();
 
-    let err = rename(&FsRenameReq { path: s(&dir.path().join("a.txt")), new_name: "b.txt".into() }).unwrap_err();
+    let err = rename(&FsRenameReq { path: s(&dir.path().join("a.txt")), new_name: "b.txt".into(), connection: None, block_id: None }).unwrap_err();
     assert!(err.contains("already exists"), "{err}");
     assert_eq!(std::fs::read_to_string(dir.path().join("b.txt")).unwrap(), "b");
 
-    let out = rename(&FsRenameReq { path: s(&dir.path().join("a.txt")), new_name: "c.txt".into() }).unwrap();
+    let out = rename(&FsRenameReq { path: s(&dir.path().join("a.txt")), new_name: "c.txt".into(), connection: None, block_id: None }).unwrap();
     assert!(out.new_path.ends_with("c.txt"));
     assert!(!out.new_path.starts_with(r"\\?\"));
     assert_eq!(std::fs::read_to_string(dir.path().join("c.txt")).unwrap(), "a");
     assert!(!dir.path().join("a.txt").exists());
 
-    let bad = rename(&FsRenameReq { path: s(&dir.path().join("c.txt")), new_name: "../escape.txt".into() });
+    let bad = rename(&FsRenameReq { path: s(&dir.path().join("c.txt")), new_name: "../escape.txt".into(), connection: None, block_id: None });
     assert!(bad.is_err(), "a separator in the new name is refused");
 }
 
@@ -397,7 +397,7 @@ fn rename_moves_and_never_overwrites() {
 fn a_case_only_rename_changes_the_case() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("readme.md"), "x").unwrap();
-    let out = rename(&FsRenameReq { path: s(&dir.path().join("readme.md")), new_name: "README.md".into() }).unwrap();
+    let out = rename(&FsRenameReq { path: s(&dir.path().join("readme.md")), new_name: "README.md".into(), connection: None, block_id: None }).unwrap();
     assert!(out.new_path.ends_with("README.md"));
     let names: Vec<String> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     assert_eq!(names, vec!["README.md".to_string()], "exactly one entry, with the new case, and no temp name left");
@@ -408,17 +408,17 @@ fn create_makes_new_entries_and_refuses_taken_names() {
     let dir = tempfile::tempdir().unwrap();
     let parent = s(dir.path());
 
-    let f = create(&FsCreateReq { parent: parent.clone(), name: "new.txt".into(), kind: FsCreateKind::File }).unwrap();
+    let f = create(&FsCreateReq { parent: parent.clone(), name: "new.txt".into(), kind: FsCreateKind::File, connection: None, block_id: None }).unwrap();
     assert_eq!(std::fs::read(&f.path).unwrap().len(), 0, "an empty file");
-    let d = create(&FsCreateReq { parent: parent.clone(), name: "folder".into(), kind: FsCreateKind::Dir }).unwrap();
+    let d = create(&FsCreateReq { parent: parent.clone(), name: "folder".into(), kind: FsCreateKind::Dir, connection: None, block_id: None }).unwrap();
     assert!(Path::new(&d.path).is_dir());
 
     std::fs::write(dir.path().join("new.txt"), "keep").unwrap();
-    let err = create(&FsCreateReq { parent: parent.clone(), name: "new.txt".into(), kind: FsCreateKind::File }).unwrap_err();
+    let err = create(&FsCreateReq { parent: parent.clone(), name: "new.txt".into(), kind: FsCreateKind::File, connection: None, block_id: None }).unwrap_err();
     assert!(err.contains("already exists"), "{err}");
     assert_eq!(std::fs::read_to_string(dir.path().join("new.txt")).unwrap(), "keep", "never truncated");
 
-    assert!(create(&FsCreateReq { parent, name: "..".into(), kind: FsCreateKind::Dir }).is_err());
+    assert!(create(&FsCreateReq { parent, name: "..".into(), kind: FsCreateKind::Dir, connection: None, block_id: None }).is_err());
 }
 
 #[test]

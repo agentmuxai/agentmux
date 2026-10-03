@@ -85,6 +85,8 @@ pub struct Entry {
     /// Unix permission bits, `st_mode & 0o7777` (0 where there are none).
     pub mode: u32,
     pub symlink: bool,
+    /// Where a symlink points, as stored in the link (empty otherwise).
+    pub link_target: String,
 }
 
 /// Why a request failed, for srv to report the way a local error would be.
@@ -216,6 +218,7 @@ impl W {
             .i64(e.mtime_ms)
             .u32(e.mode)
             .u8(u8::from(e.symlink))
+            .str(&e.link_target)
     }
     /// The message: length, then body.
     fn message(self) -> Vec<u8> {
@@ -271,6 +274,7 @@ impl<'a> R<'a> {
             mtime_ms: self.i64()?,
             mode: self.u32()?,
             symlink: self.u8()? != 0,
+            link_target: self.str()?,
         })
     }
     fn done(&self) -> Result<(), String> {
@@ -405,8 +409,8 @@ impl Reply {
             status::LIST => {
                 let total = r.u32()?;
                 let n = r.u32()? as usize;
-                // Each entry is at least 26 bytes: a count past that is a lie.
-                if n > (body.len() / 26) {
+                // Each entry is at least 30 bytes: a count past that is a lie.
+                if n > (body.len() / 30) {
                     return Err("list: impossible entry count".into());
                 }
                 let mut entries = Vec::with_capacity(n);
@@ -475,7 +479,8 @@ mod tests {
             size: 42,
             mtime_ms: 1_700_000_000_000,
             mode: 0o644,
-            symlink: false,
+            symlink: true,
+            link_target: "../elsewhere".into(),
         }
     }
 
