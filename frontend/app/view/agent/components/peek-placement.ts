@@ -65,12 +65,21 @@ export interface PeekHorizontalInput {
     viewport: { width: number; height: number };
     /** The panel's max-content width, with no width cap. */
     naturalWidth: number;
+    /**
+     * The narrowest the panel may be (viewport px). It is placed as if it were at
+     * least this wide, so a panel narrower than this but wider than its row goes
+     * left-pinned and over the pane border like any wide panel. Capped to the room
+     * actually available, so it never runs off the window.
+     */
+    minWidth?: number;
 }
 
 export interface PeekHorizontal {
     /** The panel's left edge, or its RIGHT edge when `alignRight`. */
     left: number;
     maxWidth: number;
+    /** The min-width to apply: the requested minimum, capped to `maxWidth`. */
+    minWidth: number;
     /** True: `left` is the panel's right edge (apply `translateX(-100%)`). */
     alignRight: boolean;
     /** True when the panel reaches past the row's own edges. */
@@ -79,14 +88,18 @@ export interface PeekHorizontal {
 
 export function computePeekHorizontal(input: PeekHorizontalInput): PeekHorizontal {
     const { row, viewport, naturalWidth } = input;
+    const requestedMin = Math.max(0, input.minWidth ?? 0);
+    // The width the panel will actually want: its content, or the minimum.
+    const width = Math.max(naturalWidth, requestedMin);
     const rowWidth = row.right - row.left;
     const rightAligned: PeekHorizontal = {
         left: row.right,
         maxWidth: rowWidth,
+        minWidth: Math.min(requestedMin, rowWidth),
         alignRight: true,
         extendsPastRow: false,
     };
-    if (naturalWidth <= rowWidth) return rightAligned;
+    if (width <= rowWidth) return rightAligned;
     // Wider than the row: pin the left edge and use the room to the window's
     // right edge. If that is no more than the row has, nothing is gained.
     const room = viewport.width - VIEWPORT_MARGIN_PX - row.left;
@@ -94,8 +107,9 @@ export function computePeekHorizontal(input: PeekHorizontalInput): PeekHorizonta
     return {
         left: row.left,
         maxWidth: room,
+        minWidth: Math.min(requestedMin, room),
         alignRight: false,
-        extendsPastRow: Math.min(naturalWidth, room) > rowWidth,
+        extendsPastRow: Math.min(width, room) > rowWidth,
     };
 }
 
@@ -186,6 +200,6 @@ export function placedExtent(v: PeekVertical): { top: number; bottom: number } {
 
 /** Horizontal extent the placed panel occupies, for a panel of this natural width. */
 export function placedSpan(hz: PeekHorizontal, naturalWidth: number): { left: number; right: number } {
-    const w = Math.min(naturalWidth, hz.maxWidth);
+    const w = Math.min(Math.max(naturalWidth, hz.minWidth), hz.maxWidth);
     return hz.alignRight ? { left: hz.left - w, right: hz.left } : { left: hz.left, right: hz.left + w };
 }
