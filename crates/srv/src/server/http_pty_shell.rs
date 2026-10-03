@@ -728,9 +728,9 @@ pub(super) async fn handle_pty_shell_stop(
     (StatusCode::OK, Json(PtyShellStopResponse { released }))
 }
 
-/// The 409 for a pane whose agent shell is running on another connection than
-/// `connection`, checked without touching the shell (`try_attach_to_existing_shell`
-/// makes the same check, after its resync).
+/// The 409 for a pane whose agent shell is running (or starting, created by
+/// this run) on another connection than `connection`, checked without
+/// touching the shell; the same cases `try_attach_to_existing_shell` refuses.
 fn running_shell_conflict(state: &AppState, agent_block_id: &str, connection: &str) -> Option<axum::response::Response> {
     let shell_id = state
         .mstore
@@ -738,11 +738,19 @@ fn running_shell_conflict(state: &AppState, agent_block_id: &str, connection: &s
         .ok()
         .flatten()
         .and_then(|b| b.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()).map(str::to_string))?;
-    let running = blockcontroller::get_block_controller_status(&shell_id)
-        .is_some_and(|s| s.shellprocstatus == blockcontroller::STATUS_RUNNING);
-    if !running {
+    let shell = state.mstore.get::<crate::backend::obj::Block>(&shell_id).ok().flatten()?;
+    // Running, or created by this srv run and still starting (a concurrent
+    // create won the claim): either way `try_attach_to_existing_shell` would
+    // refuse it, so it is refused here too, before anything is asked.
+    let live = match blockcontroller::get_block_controller_status(&shell_id) {
+        Some(s) => s.shellprocstatus == blockcontroller::STATUS_RUNNING,
+        None => {
+            crate::backend::obj::meta_get_string(&shell.meta, super::http_shell::META_KEY_PTYSHELL_BOOT_ID, "")
+                == *state.boot_id
+        }
+    };
+    if !live {
         return None;
     }
-    let shell = state.mstore.get::<crate::backend::obj::Block>(&shell_id).ok().flatten()?;
     super::http_shell::connection_conflict(&shell, connection)
 }
