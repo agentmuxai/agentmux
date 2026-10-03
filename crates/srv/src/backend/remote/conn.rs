@@ -86,6 +86,16 @@ impl ConnTarget {
     }
 }
 
+/// Whether two connection names mean the same place: `""` and `local` do, and
+/// WSL distro names compare without case, as Windows treats them.
+pub fn same_connection(a: &str, b: &str) -> bool {
+    match (ConnTarget::parse(a), ConnTarget::parse(b)) {
+        (Ok(ConnTarget::Wsl(a)), Ok(ConnTarget::Wsl(b))) => a.eq_ignore_ascii_case(&b),
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 fn parse_wsl(distro: &str) -> Result<String, String> {
     // WSL distribution names are letters, digits, '.', '_' and '-' (wsl.exe
     // --install --name rules); anything else cannot be one.
@@ -256,6 +266,19 @@ mod tests {
             assert!(ConnTarget::parse(bad).is_err(), "{bad:?} should be refused");
         }
         assert!(ConnTarget::parse(&"a".repeat(MAX_CONN_NAME_LEN + 1)).is_err());
+    }
+
+    #[test]
+    fn same_connection_ignores_local_spelling_and_distro_case() {
+        assert!(same_connection("local", ""));
+        assert!(same_connection("wsl://Ubuntu", " wsl://Ubuntu "));
+        assert!(same_connection("wsl://Ubuntu", "wsl://ubuntu"));
+        assert!(!same_connection("local", "wsl://Ubuntu"));
+        assert!(!same_connection("wsl://Ubuntu", "wsl://Debian"));
+        assert!(
+            !same_connection("Area54", "area54"),
+            "ssh aliases keep their case"
+        );
     }
 
     #[test]

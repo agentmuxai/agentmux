@@ -11,5 +11,6 @@
 
 pub mod conn;
 pub mod status;
+pub mod wsl;
 
 pub use conn::ConnTarget;

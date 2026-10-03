@@ -1,7 +1,7 @@
 # SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan
 
 **Date:** 2026-10-02
-**Status:** active — P0 (connection model, status, the connection RPCs) in PR #4248; P1 to P6 not started. The section 11 decisions were answered on 2026-10-02 (the recommendations, see 11.1).
+**Status:** active — P0 (connection model, status, the connection RPCs) merged in #4248; P1 (WSL terminals for panes, and `Shell`/`PtyShell` `connection` plus `ConnList` for agents) in PR #4253, Hangar and editor on WSL still to come; P2 to P6 not started. The section 11 decisions were answered on 2026-10-02 (the recommendations, see 11.1).
 **Author:** AgentX (narko), at the owner's request ("lets get both remote terminals and durable sessions in, lets work first on that ... this would also need support across the 3 platforms")
 **Affects:** `crates/srv` (blockcontroller/shell, a new `remote/` module, fs_ops, wconfig, server/service), a new crate `crates/remote` (the remote helper), `crates/cef` (none expected), `frontend/app` (term view, block frame, conntypeahead, Hangar, settings), `Taskfile.yml` and `.github/workflows` (new build targets)
 **Builds on:** `docs/reports/REPORT_WAVETERM_FEATURE_GAP_2026_10_02.md` §2.10 (what Wave has), `docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md` (the `term` blockfile and offset replay a durable session plugs into), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why the last remote helper was removed, and what not to repeat)
@@ -70,7 +70,7 @@ WSL is a local VM. A WSL terminal is `wsl.exe -d <distro>` in a ConPTY. Its file
 
 `ShellController` gains a launch-plan step that, for a non-local connection, builds the argv instead of a local shell:
 
-- **WSL:** `wsl.exe -d <distro> --cd ~` (or `--cd <cmd:cwd>`); `cmd`/`cmd:args` become `wsl.exe -d <distro> -- <cmd>`. List distros with `wsl.exe --list --quiet` (UTF-16 output; decode it).
+- **WSL:** `wsl.exe -d <distro> --cd ~` (or `--cd <cmd:cwd>`); `cmd`/`cmd:args` become `wsl.exe -d <distro> --exec sh -c <cmd>` (or `--exec <cmd> <args>`). `--exec`, never `--`: after `--` wsl.exe runs the rest through the user's login shell, which expands `$VAR` and `$(...)` once more before `sh -c` does. List distros with `wsl.exe --list --quiet` (UTF-16 output; decode it).
 - **SSH, plain:** `ssh -tt [opts] <target> -- <remote login command>`, where the remote command starts the user's login shell with AgentMux's shell integration if it was installed (§5.4), or just the login shell. Options always set: `ServerAliveInterval=15`, `ServerAliveCountMax=3` (§7.5), `SetEnv TERM_PROGRAM=agentmux` where allowed, and on macOS/Linux the `ControlMaster`/`ControlPath`/`ControlPersist` trio.
 - **SSH, durable:** `ssh -tt [opts] <target> -- ~/.agentmux-remote/bin/<ver>/agentmux-remote attach --session <id> --cols C --rows R --offset N` (§7).
 

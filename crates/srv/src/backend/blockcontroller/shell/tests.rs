@@ -143,11 +143,13 @@ use std::sync::Arc;
             None,
             String::new(),
         );
-        for (conn, expect) in [
-            ("area54", "not available yet"),
-            ("wsl://Ubuntu", "not available yet"),
-            ("-oProxyCommand=calc", "cannot start with '-'"),
-        ] {
+        let mut cases = vec![("area54", "not available yet"), ("-oProxyCommand=calc", "cannot start with '-'")];
+        // On Windows a WSL pane is a real terminal now (P1), which this test
+        // must not spawn; elsewhere WSL is refused.
+        if !cfg!(windows) {
+            cases.push(("wsl://Ubuntu", "not available yet"));
+        }
+        for (conn, expect) in cases {
             let mut meta = make_shell_meta();
             meta.insert("connection".to_string(), serde_json::json!(conn));
             let err = ctrl.start(meta, None, true).unwrap_err();

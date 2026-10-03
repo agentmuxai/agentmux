@@ -191,6 +191,7 @@ async fn main() {
                 let supervisor_nudge: Value =
                     serde_json::from_str(SUPERVISOR_NUDGE_TOOL).expect("static json");
                 let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
+                let conn_list: Value = serde_json::from_str(CONN_LIST_TOOL).expect("static json");
                 let layout: Value = serde_json::from_str(LAYOUT_TOOL).expect("static json");
                 let set_name: Value = serde_json::from_str(SET_NAME_TOOL).expect("static json");
                 let set_active_tab: Value =
@@ -270,7 +271,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, open_files, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, quit_self, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, conn_list, open_editor, open_media, open_files, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, quit_self, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
