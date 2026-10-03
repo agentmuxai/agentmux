@@ -16,14 +16,14 @@ export interface PanelKeyContext {
  * `active()` is true:
  * - a capture-phase `window` keydown listener, because the panel is
  *   `tabindex=-1` and never focused, so a listener on it would never fire
- *   (codex P1, PR #556);
+ *   (#556);
  * - scoped to this panel's pane, so a prompt in pane A ignores keys typed in
  *   pane B (`eventBelongsToPaneOf`);
  * - `onKey` gets whether the key came from inside the panel and from an
  *   editable target, which every Enter/Escape rule depends on.
  *
  * `onFocusIn`, if given, gets `focusin` events that land inside the panel
- * (Tab into it fires keydown on the element focus is leaving, codex P2, PR #2787).
+ * (Tab into it fires keydown on the element focus is leaving, #2787).
  */
 export function usePanelKeys(
     root: () => HTMLElement | undefined,

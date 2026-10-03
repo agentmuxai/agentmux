@@ -153,7 +153,7 @@ describe("eventBelongsToBlock", () => {
 });
 
 // One copy for the decision and question panels (it used to be written out in
-// both). A plain text input counts: reagent P1, PR #2060.
+// both). A plain text input counts (#2060).
 describe("isEditableTarget", () => {
     it("is true for inputs, textareas and contentEditable", () => {
         expect(isEditableTarget(document.createElement("input"))).toBe(true);

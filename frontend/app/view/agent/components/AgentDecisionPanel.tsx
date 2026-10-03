@@ -64,7 +64,7 @@ const SCOPE_ORDER: DecisionOutcome["scope"][] = ["once", "session", "project", "
 // already attached to the live DOM element. Calling usePaneOverlay
 // from the outer component would register undefined on first mount
 // (the `<Show>` hasn't materialised yet) and never refresh on
-// reveal — codex P1 on PR #556.
+// reveal (#556).
 const DecisionPanelClip = (p: { getEl: Accessor<HTMLElement | null | undefined> }): JSX.Element => {
     usePaneOverlay(p.getEl);
     return null;
@@ -190,8 +190,8 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
 
     // Keys reach this only from this panel's own pane (usePanelKeys below):
     // otherwise a prompt in pane A would react to Esc/Enter typed in pane B,
-    // and prompts open in several panes would all fire on one keystroke.
-    // Codex P1 on PR #556.
+    // and prompts open in several panes would all fire on one keystroke
+    // (#556).
     const handleKey = (e: KeyboardEvent, { inPanel, editable }: PanelKeyContext) => {
         const inFeedback = inPanel && (e.target as HTMLElement | null)?.tagName === "TEXTAREA";
 
