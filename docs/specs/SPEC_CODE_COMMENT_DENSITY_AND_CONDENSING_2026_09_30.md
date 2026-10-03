@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** proposed — nothing here is built.
+**Status:** active — Phase 0 (the gate, `--code-equal`, the `CONTRIBUTING.md` rules) is built in #4246, described in §9. Phase 1+ (condensing files) is not started.
 **Baseline:** `main` @ `cee674b6f`. Every `path:line` below was read on that commit.
 **Related:** [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) §7 ("Keep the prose", revisited in §3 here), [`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18`](SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md) (why this repo has no agent-instructions file).
 
