@@ -227,6 +227,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/srv/src/backend/fs_ops/platform.rs", "\"xdg-open\"", 2,
      "not-windows: macOS/Linux/unix-only code path"),
+    ("crates/srv/src/backend/fs_watch/pool.rs", "\"wsl.exe\"", 2,
+     "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/lsp/supervisor.rs", "&resolved", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/process_tracker/registry.rs", "\"cmd\"", 2,
