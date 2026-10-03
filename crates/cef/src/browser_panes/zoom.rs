@@ -3,7 +3,7 @@
 
 //! Zoom operations for `BrowserPaneManager`: `zoom_in`/`zoom_out`/`step_zoom`/
 //! `apply_zoom`/`reapply_zoom`, plus the pure `next_zoom_factor` clamp
-//! arithmetic. Split out of `browser_panes.rs` — see that module's doc
+//! arithmetic. Split out of `browser_panes/mod.rs` — see that module's doc
 //! comment.
 
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use super::BrowserPaneManager;
 
 impl BrowserPaneManager {
     /// Ctrl+Wheel step, in the same +/-0.05 units and 0.5-2.0 clamp range
-    /// `frontend/app/store/zoom.win32.ts`'s WHEEL_STEP uses for every other
+    /// `frontend/app/store/zoom.ts`'s WHEEL_STEP uses for every other
     /// pane type, for a consistent feel even though this path never touches
     /// that frontend module (browser-pane content is unreachable from the
     /// DOM — see the module doc on `AppState::browser_pane_zoom`).

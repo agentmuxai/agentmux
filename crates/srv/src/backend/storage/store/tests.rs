@@ -3403,7 +3403,7 @@
         // Reagent P1 round 2 on PR #2755: `poison_resume`'s stale-resume
         // handling deliberately clears an EXISTING continuation's
         // session_id to "" (persist_session_id(block_id, "", ...) when a
-        // --resume is confirmed dead — persistent.rs:2384). That's a
+        // --resume is confirmed dead — persistent/spawn.rs). That's a
         // genuine, intentional write, not "never captured yet" — it MUST
         // reach the shared registry, or another channel keeps getting
         // handed a session_id already proven unreachable.

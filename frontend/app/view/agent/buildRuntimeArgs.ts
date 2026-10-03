@@ -56,7 +56,7 @@ const PERMISSION_STRIP = new Set([
  *
  * The user-visible "yolo" behaviour does not depend on that flag: the
  * persistent controller's ControlChannel auto-allows every tool except
- * AskUserQuestion (`persistent.rs::handle_control_frame`). So a
+ * AskUserQuestion (`persistent/input.rs::handle_control_frame`). So a
  * control-protocol agent maps `bypass` onto `--permission-mode default` and
  * keeps the transport alive, which is what the catalogs intended all along.
  */

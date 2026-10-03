@@ -53,7 +53,7 @@ export const AgentShellDrawer = (props: {
                 persistedHeight={props.persistedHeight}
                 defaultHeight={SHELL_DRAWER_DEFAULT_HEIGHT}
             >
-                {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
+                {/* Phase 0 spike (#1945):
                         real xterm+PTY terminal, spawned lazily on first
                         drawer open via a headless term sub-block. */}
                 <AgentShellSubblock

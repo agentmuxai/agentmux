@@ -147,7 +147,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // DISABLES that routing, so it must NOT be here. The persistent controller's
         // ControlChannel auto-allows ordinary tools to preserve today's yolo UX and
         // surfaces only AskUserQuestion to the user. Keep in sync with `static CLAUDE`
-        // in crates/srv/providers.rs. controllerType selects persistentLaunchArgs
+        // in crates/srv/src/backend/providers.rs. controllerType selects persistentLaunchArgs
         // over launchArgs in useAgentCommands.ts.
         // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
         controllerType: "persistent",

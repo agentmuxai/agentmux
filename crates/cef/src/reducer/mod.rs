@@ -64,7 +64,8 @@ pub enum HostLifecyclePhase {
 /// or `SendMessage` (snapshot-and-drop discipline — see spec §6).
 pub struct HostState {
     /// FIFO queue of pre-create handoffs. Pushed by callers
-    /// (`pane/creation.rs`, `commands/window.rs::open_new_window`,
+    /// (`browser_pane/creation.rs`,
+    /// `commands/window/creation.rs::open_new_window`,
     /// `commands/drag.rs::tear_off`, `commands/window_pool.rs::spawn_pool_window`)
     /// before `post_create_window`. Popped by `client.rs::on_after_created`
     /// when CEF reports a new browser. Peeked at the back by
@@ -84,7 +85,7 @@ pub struct HostState {
 
     /// H.1 — pane lifecycle map. Replaces the deleted
     /// `pane::lifecycle::PaneStateMachine`. Keyed by `block_id`.
-    /// Authoritative; `BrowserPaneManager` (browser_panes.rs) is now a
+    /// Authoritative; `BrowserPaneManager` (browser_panes/mod.rs) is now a
     /// zero-sized handle that delegates all mutations through
     /// `host_dispatch`.
     pub browser_panes: HashMap<String, BrowserPaneEntry>,
@@ -193,7 +194,7 @@ pub struct HostState {
     /// Absent means fully opaque (1.0). Mutated by `SetWindowOpacity`; read by
     /// `get_window_opacity` and the restore path in app-init. Win32 side-effect
     /// (SetLayeredWindowAttributes) is applied by the IPC handler AFTER dispatch,
-    /// not inside the reducer. See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §7.1.
+    /// not inside the reducer.
     pub window_opacities: HashMap<String, f32>,
 
     /// Pane-state reducer — per-floater OS-window placement, keyed by the
@@ -204,8 +205,7 @@ pub struct HostState {
     /// eviction hangs off `on_before_close` (via
     /// `EvictFloatingPaneWindowState`), not the block_id `browser_panes`
     /// arms. Holds maximize/minimize state + the rect to restore to. Docked
-    /// panes have no entry (their magnify is backend-owned). See
-    /// SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION 2026-05-29).
+    /// panes have no entry (their magnify is backend-owned).
     pub pane_window_states: HashMap<String, PaneWindowState>,
 
     /// Browser-pane creates deferred because the block_id was still `Closing`
@@ -891,8 +891,7 @@ pub enum HostEvent {
     /// geometry AFTER dispatch — `SetWindowPos` to the monitor work area on
     /// maximize, or back to `restore_rect` on restore. No renderer subscribes:
     /// the floating maximize button is intentionally stateless (fixed icon),
-    /// so the reducer is the single source of truth for placement. See
-    /// SPEC_PANE_STATE_REDUCER_2026-05-28.md §3.4.
+    /// so the reducer is the single source of truth for placement.
     PaneWindowStateChanged {
         label: String,
         placement: WindowPlacement,

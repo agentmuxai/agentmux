@@ -218,7 +218,7 @@ pub struct State {
     pub next_client_id: u64,
     /// Phase B.9.1 (WRR) — current monitor topology, replaced
     /// wholesale on `ReportMonitorTopologyChanged`. Empty by default
-    /// until the host's `wrr/wndproc.rs` reports the first
+    /// until the host's `wrr/win_event.rs` reports the first
     /// `WM_DISPLAYCHANGE`-equivalent (or its initial topology probe
     /// at startup). `OffMonitor` drift is suppressed when this is
     /// empty — we don't know enough to classify yet.

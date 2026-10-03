@@ -1198,7 +1198,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
     // tooldecision → reply to a per-tool-call permission gate via the Agent SDK
     // **control protocol** — the `AgentDecisionPanel` Allow/Deny buttons, once
-    // `should_route_to_decision_panel` (persistent.rs) is flipped on for real
+    // `should_route_to_decision_panel` (persistent/mod.rs) is flipped on for real
     // (that gate is currently hardcoded false, so `decide_tool_permission`
     // below will fail every call today with "no pending tool-permission
     // request" — expected until the Phase 2 policy decision is made; see

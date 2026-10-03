@@ -19,7 +19,7 @@
 //! `update()` is a pure `(state, event) -> (state, effects)` function —
 //! every transition is exhaustively unit-testable without a real child
 //! process, a real tokio task, or any timing assumptions. Callers
-//! (`persistent.rs`'s I/O tasks) are responsible for actually executing
+//! (`persistent/spawn.rs`'s I/O tasks) are responsible for actually executing
 //! the returned `ResumeEffect`s (persisting/dropping/flushing a line,
 //! firing the retry, publishing terminal status) — this module only
 //! decides, never performs I/O.
@@ -28,10 +28,8 @@
 //! `generation` it was observed for. `update()` ignores an event whose
 //! generation doesn't match the state's currently-tracked generation, so
 //! a stale event from an already-resolved generation can never corrupt a
-//! later, unrelated generation's state — mirrors
-//! `persistent.rs`'s own `stop_requested_generation` doc comment
-//! ("monotonic generation numbers are never reused, so an unconsumed
-//! stale value here is inert, not a leak").
+//! later, unrelated generation's state — generation numbers are never
+//! reused (see `spawn_generation`'s doc comment in `persistent/mod.rs`).
 
 use super::persistent::PersistentSpawnConfig;
 
@@ -116,7 +114,7 @@ pub(super) enum ResumeState {
     /// ambiguous same-sid echo apart from unambiguous progress even
     /// after confirmation — see that arm's own doc comment for why
     /// treating EVERY capture as unambiguous once confirmed was wrong:
-    /// `resume_poisoned` (`persistent.rs`) is a single, non-generation-
+    /// `resume_poisoned` (`persistent/mod.rs`) is a single, non-generation-
     /// scoped, permanent field, so a lagging stderr-reader task from an
     /// OLDER, already-superseded generation can overwrite it to a
     /// different sid while THIS generation is still `ConfirmedRetry`,
@@ -281,7 +279,7 @@ pub(super) enum ResumeEffect {
 /// effects at all — normally safe, since a new spawn_process call is only
 /// supposed to happen after the previous generation's own `ProcessExited`
 /// already resolved it, but reachable out of order via
-/// `persistent.rs`'s `respawn_once_for_leftover_queue` (a stall-triggered
+/// `persistent/queue.rs`'s `respawn_once_for_leftover_queue` (a stall-triggered
 /// fallback respawn, on a completely different path than this module's
 /// own confirmed-retry firing) racing the process-waiter task that would
 /// otherwise resolve the OLD generation first. Silently discarding a
@@ -372,7 +370,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
         // this arm used to resolve UNCONDITIONALLY, reasoning that a
         // confirmed retry means the sid is already known dead so the
         // first-echo ambiguity couldn't apply. That reasoning breaks
-        // because `resume_poisoned` (persistent.rs) is a single,
+        // because `resume_poisoned` (persistent/mod.rs) is a single,
         // non-generation-scoped, PERMANENT field — a lagging stderr-
         // reader task from an OLDER, already-superseded generation can
         // overwrite it to a different sid while THIS generation is
@@ -915,7 +913,7 @@ mod tests {
 
     #[test]
     fn message_appended_after_confirmed_still_grows_the_batch() {
-        // Matches persistent.rs's existing
+        // Matches persistent/tests/send_input.rs's existing
         // `drain_appends_to_confirmed_retry_once_already_promoted_from_pending`
         // — the drain can still be delivering messages after the retry
         // is confirmed but before the doomed process has actually
@@ -1051,7 +1049,7 @@ mod tests {
     // reagentx P1 (round 9 on this PR, also flagged inline by codex): the
     // `ConfirmedRetry` + `SessionCaptured` arm used to resolve
     // UNCONDITIONALLY, discarding the confirmed `retry` payload without
-    // ever firing it. `resume_poisoned` (persistent.rs) is a single,
+    // ever firing it. `resume_poisoned` (persistent/mod.rs) is a single,
     // non-generation-scoped, PERMANENT field — a lagging stderr-reader
     // task from an OLDER, already-superseded generation can overwrite it
     // to a different sid while THIS generation is still `ConfirmedRetry`,
@@ -1133,7 +1131,7 @@ mod tests {
     // a fresh (or resumed) respawn firing via `SpawnedFresh`/
     // `SpawnedWithResume` while a PRIOR generation is still
     // `AwaitingOutcome`/`ConfirmedRetry` (its own `ProcessExited` hasn't
-    // arrived yet — reachable via `persistent.rs`'s
+    // arrived yet — reachable via `persistent/queue.rs`'s
     // `respawn_once_for_leftover_queue` racing the process-waiter task).
     // The prior generation's held error line must reach the user instead
     // of vanishing, and its own eventual (belated) `ProcessExited` must

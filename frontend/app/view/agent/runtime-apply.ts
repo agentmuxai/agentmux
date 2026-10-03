@@ -29,8 +29,8 @@
  * in at spawn, so they could never have applied to the turn already running.
  *
  * Shared by the `/model`·`/effort`·`/mode` slash commands
- * (`commands/global/runtime.ts`) AND the GUI control-bar dropdowns
- * (`components/AgentControlBar.tsx`).
+ * (`commands/global/runtime.ts`) AND the GUI Mode/Model/Effort drop-up
+ * (`components/AgentRuntimeDropup.tsx`).
  */
 
 import { RpcApi } from "@/app/store/rpc-api";

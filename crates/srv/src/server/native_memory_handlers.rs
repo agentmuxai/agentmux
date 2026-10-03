@@ -60,7 +60,7 @@ use super::AppState;
 /// `claude_config_dir` is the value of `CLAUDE_CONFIG_DIR` from the agent's
 /// stored env blob. When empty, falls back to
 /// `~/.agentmux/shared/providers/claude/` — the default isolated home that
-/// `app_api.rs` sets at agent spawn time. We never write to the global
+/// `app_api/agent_open.rs` sets at agent spawn time. We never write to the global
 /// `~/.claude/projects/` because AgentMux always sets `CLAUDE_CONFIG_DIR`.
 ///
 /// The project folder is named by the CLI's own rules: after the directory

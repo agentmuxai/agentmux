@@ -15,9 +15,8 @@
 //!   - `crate::state::AppState` for the label queue and the Arc passed to
 //!     the pane's handler.
 //!   - `crate::client::{AgentMuxHandler, AgentMuxClient}` for the pane's
-//!     CEF client. Phase 4 will flip this direction by moving the pane
-//!     callbacks into `pane/callbacks.rs`; until then, `client` is fine as
-//!     a one-way dependency.
+//!     CEF client, a one-way dependency (Phase 4 moved the pane callbacks
+//!     themselves into `browser_pane/callbacks.rs`).
 //!   - `crate::commands::window::resolve_window_hwnd` to resolve the parent
 //!     HWND from the pane's target `window_label` (CEF Views returns null on
 //!     Alloy, so the Windows native-child path needs the HWND explicitly).

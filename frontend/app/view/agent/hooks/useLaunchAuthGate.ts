@@ -83,11 +83,11 @@ export function useLaunchAuthGate(opts: UseLaunchAuthGateOpts) {
     // gate.
     //
     // 2026-07-20: reverted a same-day "no account = ambient creds is fine"
-    // relaxation. `identity/resolver.rs`'s layer-3 spawn gate was ALREADY
-    // hard-blocking an oauth-class agent with no bound account by default
-    // (`use_ambient_login=0`) — that relaxation let Launch enable and then
-    // had the agent fail its first real turn with a raw backend error,
-    // which is worse than being blocked up front with a clear reason. The
+    // relaxation. `identity/resolver/inject.rs`'s layer-3 spawn gate was
+    // ALREADY hard-blocking an oauth-class agent with no bound account by
+    // default (`use_ambient_login=0`) — that relaxation let Launch enable
+    // and then had the agent fail its first real turn with a raw backend
+    // error, which is worse than being blocked up front with a clear reason. The
     // gate's ambient escape hatch is now removed entirely (single point,
     // not global — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7),
     // so "no account selected" must block here again, for every provider,

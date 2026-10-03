@@ -4,7 +4,7 @@
 //! Grandfather the layer-3 `use_ambient_login` opt-in for pre-existing
 //! agents (spec §2.4 of SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md).
 //!
-//! The spawn gate (identity/resolver.rs) now FAILS a spawn when an
+//! The spawn gate (identity/resolver/inject.rs) now FAILS a spawn when an
 //! oauth-class provider the agent is supposed to have credentials for has
 //! no resolvable account — unless the agent carries an explicit
 //! `use_ambient_login = 1`. Existing agents that relied on the (previously

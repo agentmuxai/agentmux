@@ -28,9 +28,10 @@
 //!
 //! ## Faithfulness to the real spawn path
 //!
-//! [`preflight`] deliberately mirrors `persistent.rs`'s decision sequence
-//! rather than modelling an idealized one, so its verdict and the eventual
-//! outcome can't disagree:
+//! [`preflight`] deliberately mirrors the decision sequence in
+//! `persistent/spawn.rs` and `persistent/resume_retry.rs` rather than
+//! modelling an idealized one, so its verdict and the eventual outcome
+//! can't disagree:
 //!
 //! | Pane state | Spawn does | Verdict |
 //! |---|---|---|

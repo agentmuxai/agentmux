@@ -328,10 +328,9 @@ pub(crate) async fn identity_self_accounts_impl<'o>(
     for link in &links {
         // A malformed `secret_ref` on ONE linked account must not hide this
         // agent's other, perfectly readable accounts — the same "one bad row
-        // hides everything" bug class `identity_list` was fixed for
-        // (ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md),
-        // just reachable through this separate per-agent lookup too (reagent
-        // P1 on PR #2419 review). Skip and log rather than `?`-propagate.
+        // hides everything" bug class `identity_list` was fixed for (#2419),
+        // just reachable through this separate per-agent lookup too. Skip and
+        // log rather than `?`-propagate.
         // resolve_account (WITH the global-mirror fallback), not
         // resolve_account_for_spawn. Originally reagentx P1 on PR #2632: without
         // the fallback a migrated/continuing account showed as "missing" here.

@@ -103,9 +103,10 @@ pub(crate) fn expand_home_dir(dir: &str) -> String {
 /// Persist a newly captured session ID to block metadata and broadcast the
 /// `waveobj:update` event so the frontend reflects the change immediately.
 ///
-/// This is the "careful" path from persistent.rs and subprocess.rs. ACP was
-/// missing this step (it only set `inner.session_id` in memory) — A5 fixes it
-/// by routing ACP through this same function.
+/// This is the "careful" path from persistent/spawn.rs and
+/// subprocess/host_spawn.rs. ACP was missing this step (it only set
+/// `inner.session_id` in memory) — A5 fixes it by routing ACP through this
+/// same function.
 ///
 /// Also writes through to the matching `db_agent_instances` row's
 /// `session_id` column (SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md

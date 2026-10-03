@@ -26,7 +26,7 @@
 //! A second, unrelated flag lives here for the same reason: `session:resume_failed`
 //! (SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.2) marks a
 //! block whose `--resume <sid>` was rejected by the CLI (stale/unreachable
-//! session id — see `persistent.rs`'s `poison_resume`) and silently fell
+//! session id — see `persistent/mod.rs`'s `poison_resume`) and silently fell
 //! through to a fresh conversation. Same shape, same frontend-only contract,
 //! different trigger (a resume rejection mid-session, not a stale PID found
 //! at boot) — kept in this file rather than a new module since it's the
@@ -68,7 +68,7 @@ pub fn mark_active_pid(mstore: &Arc<Store>, block_id: &str, pid: u32) {
 /// Mark that `block_id`'s `--resume <sid>` was rejected and the controller
 /// fell through to a fresh conversation. Best-effort — logs on failure but
 /// never panics, matching `mark_active_pid`'s contract. Called from
-/// `persistent.rs`'s stderr reader the moment it detects the CLI's "No
+/// `persistent/spawn.rs`'s stderr reader the moment it detects the CLI's "No
 /// conversation found with session ID" line, right alongside the existing
 /// `core::persist_session_id(block_id, "", ...)` clear.
 ///
@@ -112,9 +112,9 @@ pub fn mark_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>
 ///
 /// [`mark_resume_failed`] fires from the stderr reader the instant the CLI
 /// says "No conversation found", which is *before*
-/// `persistent.rs`'s `retry_after_resume_failure` runs its recovery scan. In
-/// the common case that scan finds the real, live on-disk session and resumes
-/// it (live-confirmed in
+/// `persistent/resume_retry.rs`'s `retry_after_resume_failure` runs its
+/// recovery scan. In the common case that scan finds the real, live on-disk
+/// session and resumes it (live-confirmed in
 /// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md` §2),
 /// the conversation was NOT lost — but nothing cleared the flag, so the pane
 /// kept showing "Couldn't resume the previous conversation — started a new

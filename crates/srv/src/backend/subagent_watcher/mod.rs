@@ -97,8 +97,8 @@ const DISPATCH_ACTIVITY_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
 // main.rs right after `SubagentWatcher::spawn`). Exposed as a global —
 // mirroring `process_tracker::registry`'s own doc comment for the exact
 // same problem — so callers that only occasionally need it (like
-// `blockcontroller/persistent.rs`'s turn-end reconciliation hook, SPEC_
-// SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 Phase A) can reach it
+// `blockcontroller/persistent/spawn.rs`'s turn-end reconciliation hook,
+// SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 Phase A) can reach it
 // without threading an `Arc` through `PersistentSubprocessController::new`
 // and every one of ITS callers up to `resync_controller`. Tests that don't
 // call `set_global` see `None` from `global()` and skip reconciliation —

@@ -212,10 +212,10 @@ fn read_agent_blocks(
         let meta = v.get("meta");
         // The agent definition id is stored under either `agentId` (current
         // shape) or the legacy `agent:id` — match both, exactly like the
-        // canonical block scan in `agent_session.rs`. Legacy blocks are a core
-        // part of the pre-existing population this backfill targets, so missing
-        // them would strand those conversations permanently (the marker is
-        // written after the scan). (reagent P1 / codex P2 #1403.)
+        // canonical block scan in `agent_session/migrations/v1_blocks.rs`.
+        // Legacy blocks are a core part of the pre-existing population this
+        // backfill targets, so missing them would strand those conversations
+        // permanently (the marker is written after the scan). (#1403)
         let agent_id = meta
             .and_then(|m| m.get("agentId"))
             .and_then(|x| x.as_str())

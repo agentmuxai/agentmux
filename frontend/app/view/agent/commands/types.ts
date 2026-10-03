@@ -188,7 +188,7 @@ export interface SlashCommandContext {
     /**
      * Defer the `forceControllerRefresh` restart until the currently-active
      * turn ends, instead of skipping it outright. Persistent providers
-     * (`agentmux-srv`'s `persistent.rs`) keep the controller alive across
+     * (`agentmux-srv`'s `persistent/`) keep the controller alive across
      * MANY turns, not just this one — so a `/login` success that just skips
      * the restart while `isTurnActive()` is true, and declares the pane
      * healthy anyway, leaves the controller on the stale credential

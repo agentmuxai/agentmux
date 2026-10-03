@@ -4,7 +4,7 @@
 //! Close/lifecycle operations for `BrowserPaneManager`: `close`,
 //! `close_with`, `drain_closed_label`, `replay_pending_create`, and the
 //! Windows keyboard-focus-orphaning fix (`reclaim_focus_after_pane_destroy`).
-//! Split out of `browser_panes.rs` — see that module's doc comment.
+//! Split out of `browser_panes/mod.rs` — see that module's doc comment.
 
 use std::sync::Arc;
 

@@ -30,7 +30,6 @@ export default mergeConfig(
                 // `**/.claude/**` is the precise rule for the current
                 // layout; `**/worktrees/**` is a defensive second net
                 // in case the location moves.
-                // Spec: docs/specs/SPEC_FRONTEND_TEST_HEALTH_2026_05_24.md §1.
                 "**/.claude/**",
                 "**/worktrees/**",
                 // `tools/**` holds standalone Node tooling (muxlog, bench

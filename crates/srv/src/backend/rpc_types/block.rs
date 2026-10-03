@@ -151,7 +151,7 @@ pub struct CommandDeleteSubBlockData {
 /// (`PersistentSubprocessController::decide_tool_permission`) — real
 /// delivery, not just logging, as of the Phase 2 plumbing landing.
 /// **Still inert in practice**: nothing populates a pending decision
-/// yet, because `should_route_to_decision_panel` (persistent.rs) is
+/// yet, because `should_route_to_decision_panel` (persistent/mod.rs) is
 /// hardcoded false pending a product decision on which tools/modes
 /// should prompt at all (see that function's own doc comment — the
 /// spec's own §7 flags "permission chatter" as a real regression risk,
@@ -316,7 +316,7 @@ pub struct CommandAgentAnswerData {
 /// carrying `behavior: "deny"` rather than the allow+answers shape above. No
 /// `answers` field: there is nothing to carry, the deny message is a fixed
 /// server-owned string (see `ASK_USER_QUESTION_DENY_MESSAGE` in
-/// blockcontroller/persistent.rs). Spec:
+/// blockcontroller/persistent/mod.rs). Spec:
 /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

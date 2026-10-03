@@ -198,8 +198,7 @@ pub fn classify(
     // Before this, the message had no recognized keyword and fell through
     // to `UnknownNonZero`, which offers only "Retry" — a retry can never
     // succeed against a gate that blocks every respawn identically, so the
-    // agent pane got stuck showing a dead-end error with no way out (see
-    // retro-agentu-0.54.9-stuck-error-2026-08-03.md).
+    // agent pane got stuck showing a dead-end error with no way out.
     if hay.contains("bind an account for this provider in the armory") {
         // codex P2 on PR #2413: this branch matches EVERY oauth-class
         // provider's MissingCredentials refusal (Codex, Gemini, OpenClaw,
@@ -244,7 +243,7 @@ pub fn classify(
     // The identity spawn gate's deleted-agent refusal (identity/resolver/
     // errors.rs's `SpawnGateError::AgentDeleted` Display — our own wording).
     // Its own class, never Retry: the gate refuses every respawn the same
-    // way, so a Retry would be the dead end retro-agentu-0.54.9 describes.
+    // way, so a Retry would be the same dead end as MissingCredentials above.
     if hay.contains("was deleted, so this pane cannot start") {
         return build(
             FailureClass::AgentDeleted,
@@ -732,8 +731,7 @@ mod tests {
     }
 
     /// #3577: the gate's deleted-agent refusal gets its own class and no
-    /// Retry — a retry is refused identically, the dead end
-    /// retro-agentu-0.54.9 describes.
+    /// Retry — a retry is refused identically, a dead end.
     #[test]
     fn spawn_gate_agent_deleted_is_its_own_class_and_not_retryable() {
         let msg = crate::identity::resolver::SpawnGateError::AgentDeleted {
@@ -772,7 +770,7 @@ mod tests {
         // frame had no recognized keyword and fell through to
         // UnknownNonZero, which offers only "Retry" against a gate that
         // blocks every respawn identically: a permanently stuck pane with
-        // no relogin affordance (retro-agentu-0.54.9-stuck-error-2026-08-03.md).
+        // no relogin affordance.
         let frame = json!({
             "type": "result",
             "is_error": true,

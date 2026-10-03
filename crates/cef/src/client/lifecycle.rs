@@ -1095,8 +1095,7 @@ impl AgentMuxHandler {
             // same place `window_hwnds` is evicted — is the correct cleanup
             // site. Gated to `floating-` labels (the only ones that ever
             // hold an entry); the reducer arm is itself idempotent/no-op if
-            // absent. See SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION
-            // 2026-05-29).
+            // absent (#1159).
             if lbl.starts_with("floating-") {
                 self.state.host_dispatch(
                     crate::reducer::HostCommand::EvictFloatingPaneWindowState {
@@ -1191,7 +1190,7 @@ impl AgentMuxHandler {
         // to be. That report tells the launcher to drop its own canonical
         // `backend_window_ids[label]` entry and broadcasts
         // `BackendWindowIdUnregistered`, which purges this host's shadow
-        // map too (launcher_ipc.rs). Firing it before we know whether the
+        // map too (launcher_ipc/mod.rs). Firing it before we know whether the
         // retry below will need that very entry would race the unregister
         // against the pending register — exactly the case the retry
         // exists to recover from. It is now called once the outcome is

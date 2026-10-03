@@ -183,9 +183,9 @@ pub(crate) fn read_window_transparent_setting() -> bool {
             // dir (no parent-walk to a shared location) — same value
             // srv's resolve_settings_dir() uses on an isolated channel.
             // Prefers AGENTMUX_CONFIG_DIR (the canonical var) but accepts
-            // AGENTMUX_CONFIG_HOME too, since bootstrap.rs re-exports the
-            // same value under that legacy name and this function may run
-            // in a process that only has one of the two set.
+            // AGENTMUX_CONFIG_HOME too, since srv's bootstrap/stores.rs
+            // re-exports the same value under that legacy name and this
+            // function may run in a process that only has one of the two set.
             //
             // No DataPaths::from_env() fallback here (reagentx P1 on
             // #2664): from_env() itself requires AGENTMUX_CONFIG_DIR via

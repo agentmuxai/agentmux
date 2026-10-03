@@ -17,7 +17,7 @@
  *
  * The per-agent "Use global CLI login" toggle (`use_ambient_login`) that
  * used to live here has been removed (reagent P1 on #2262): the layer-3
- * spawn gate (`identity/resolver.rs`'s `gate_oauth_failure`) was changed to
+ * spawn gate (`identity/resolver/inject.rs`'s `gate_oauth_failure`) was changed to
  * unconditionally refuse an oauth-class spawn with no bound account — every
  * provider, no per-agent opt-out — per the explicit "single point, not
  * global... close it everywhere, now" policy

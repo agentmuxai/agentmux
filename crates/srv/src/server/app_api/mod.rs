@@ -344,7 +344,7 @@ fn check_s1_resolved(
 /// Resolve an S1-authenticated agent id (the slug — AGENTMUX_AGENT_ID /
 /// bus:register id, e.g. "Agent3") to the agent's DEFINITION id, which is
 /// what `db_agent_identity_links.agent_id` stores (== `AgentDefinition.id`;
-/// see m0013 and `identity/resolver.rs::resolve_bindings_for_instance`).
+/// see m0013 and `identity/resolver/inject.rs::resolve_bindings_for_instance`).
 ///
 /// Every link-table operation reached from the App API must go through
 /// this: App API callers authenticate with the slug, but writing the slug

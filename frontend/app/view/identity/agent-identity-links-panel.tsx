@@ -4,7 +4,7 @@
 // AgentIdentityLinksPanel — read-only Provider/Account/Status table for
 // ONE agent's direct account links (`db_agent_identity_links`, the table
 // the spawn-time resolver actually reads —
-// crates/srv/src/identity/resolver.rs). Given an `agentId`, this is the
+// crates/srv/src/identity/resolver/inject.rs). Given an `agentId`, this is the
 // same row shape the now-removed Armory "Identities" rail tab
 // (`AgentIdentitiesPanel`) rendered per selected agent — extracted here so
 // the agent-pane's own `view: "identity"` tab (`identity-pane-view.tsx`)
@@ -17,9 +17,9 @@
 // §3.3 surface 3: a Connect/Re-login action for Claude specifically, since
 // this is otherwise the only place a broken/missing Claude binding is
 // visible per-agent — without it, an agent whose bound account was deleted
-// (or, per retro-agentu-0.54.9-stuck-error-2026-08-03.md, never had one) had
-// no in-app path to fix it short of the launch dialog's own "New Agent"
-// flow, which doesn't apply to an agent that already exists. New agent
+// (or never had one) had no in-app path to fix it short of the launch
+// dialog's own "New Agent" flow, which doesn't apply to an agent that
+// already exists. New agent
 // identities for OTHER providers, and non-Claude relogin, remain out of
 // scope — created from the agent-launch flow directly, per
 // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
@@ -280,10 +280,8 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                             this same affordance, and the per-row
                             Connect/Re-login button (only rendered on rows
                             whose OWN provider is claude) can't cover it since
-                            no such row exists to attach it to. The
-                            retro-agentu-0.54.9-stuck-error-2026-08-03.md case
-                            this button exists for. Gated on the agent's own
-                            provider (reagent P2 on PR #2414, round 3):
+                            no such row exists to attach it to. Gated on the
+                            agent's own provider (#2414):
                             otherwise this links an unrelated Claude account
                             to an agent whose actual provider is something
                             else entirely. */}

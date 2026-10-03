@@ -790,9 +790,9 @@ struct SenderCandidate {
     /// candidate's tier can be judged stale by. `false` for host tier —
     /// `ReactiveHandler::list_agents()` is synchronously accurate (an
     /// agent is removed from it on unregister, not aged out by timestamp;
-    /// see `bootstrap.rs`'s 20s heartbeat task's own doc comment: "always
-    /// accurate, with no staleness window of its own") and nothing in this
-    /// codebase currently calls `update_last_seen` to refresh
+    /// see `bootstrap/network.rs`'s 20s heartbeat task's own doc comment:
+    /// "always accurate, with no staleness window of its own") and nothing in
+    /// this codebase currently calls `update_last_seen` to refresh
     /// `AgentRegistration.last_seen` after registration — applying a
     /// staleness cutoff to it would eventually flag every healthy,
     /// long-running host-tier agent as stale (codex review on PR #2702,

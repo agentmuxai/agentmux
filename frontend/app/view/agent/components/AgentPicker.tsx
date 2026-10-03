@@ -545,9 +545,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 // #2464) guarantees a fresh list to check against.
                 // memory_id does NOT need this: unlike account_id it has no
                 // FK constraint, and legitimate bundle ids are routinely
-                // non-UUID ("blank", "seed-*" — memory_bundles.rs/bundle.rs)
-                // rather than legacy garbage, so filtering it would silently
-                // drop a real carry-over (reagent P2 on this PR).
+                // non-UUID ("blank", "seed-*" — storage/bundles.rs /
+                // app_api/bundle/mod.rs) rather than legacy garbage, so
+                // filtering it would silently drop a real carry-over.
                 accountId: realAccountIdOrEmpty(
                     row.identity_id,
                     (await refreshAccountCache()).map((a) => a.id)

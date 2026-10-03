@@ -63,7 +63,7 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
 ///     The launcher-side server uses `tokio::net::UnixListener`; the
 ///     host-side client uses `tokio::net::UnixStream`. See
 ///     `ipc::server::run_ipc_server` (Unix arm) and
-///     `crates/cef/src/launcher_ipc.rs::connect_to_launcher` (Unix arm).
+///     `crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher` (Unix arm).
 ///   * srv-side IPC is still skipped on Linux (srv is launched with an
 ///     empty `srv_pipe_path`); follow-up PR will bring srv's Unix
 ///     socket online too.
@@ -381,9 +381,9 @@ pub(crate) async fn run_unix(
     // A1.3 — IPC env handshake. Tell the host where to find the
     // launcher socket. The env var name `AGENTMUX_LAUNCHER_PIPE` is
     // reused from the Windows side even though the underlying resource
-    // is a Unix-domain socket — keeps the 17 `report_*` call sites in
-    // `crates/cef/src/launcher_ipc.rs` unchanged and avoids touching
-    // the host's connect-on-startup code in `crates/cef/src/app.rs`.
+    // is a Unix-domain socket — keeps the `report_*` functions in
+    // `crates/cef/src/launcher_ipc/reporters.rs` unchanged and avoids
+    // touching the host's connect-on-startup code in `crates/cef/src/lib.rs`.
     host_env.push((
         "AGENTMUX_LAUNCHER_PIPE",
         std::ffi::OsString::from(&socket_path),

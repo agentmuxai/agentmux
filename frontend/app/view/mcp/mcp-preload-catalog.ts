@@ -13,7 +13,7 @@
  * #2030 (that PR was scoped to just the probe + mcp-capabilities.ts). This
  * file is the source of truth for prereq text instead; the Armory joins a
  * created server back to its catalog entry by exact `name` match to show it
- * (see McpManager.tsx). That join breaks if a user renames the server after
+ * (see mcp-manager.tsx). That join breaks if a user renames the server after
  * creating it from the catalog — acceptable known limitation for Phase B,
  * not silently hidden.
  *

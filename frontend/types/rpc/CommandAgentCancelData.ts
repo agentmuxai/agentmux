@@ -6,7 +6,7 @@
  * carrying `behavior: "deny"` rather than the allow+answers shape above. No
  * `answers` field: there is nothing to carry, the deny message is a fixed
  * server-owned string (see `ASK_USER_QUESTION_DENY_MESSAGE` in
- * blockcontroller/persistent.rs). Spec:
+ * blockcontroller/persistent/mod.rs). Spec:
  * docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
  */
 export type CommandAgentCancelData = { blockid: string, 

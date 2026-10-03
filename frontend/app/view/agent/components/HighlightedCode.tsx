@@ -6,7 +6,7 @@
  *
  * Renders a plain <pre> immediately (no layout shift) then swaps in the
  * Shiki-generated HTML once the highlight resolves. Uses the same lazy-load
- * pattern and theme as streamdown.tsx so the Shiki chunk is only fetched once
+ * pattern and theme as DiffViewer.tsx so the Shiki chunk is only fetched once
  * across the whole app.
  *
  * Features:

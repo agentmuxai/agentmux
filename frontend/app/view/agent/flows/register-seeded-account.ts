@@ -5,7 +5,7 @@
  * Account-dir minting + account persistence for the provider login flow.
  *
  * PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 ("single point, not
- * global"): `identity/resolver.rs`'s layer-3 spawn gate unconditionally
+ * global"): `identity/resolver/inject.rs`'s layer-3 spawn gate unconditionally
  * requires a real bound account for any oauth-class provider — the
  * `use_ambient_login` escape hatch that used to let a shared-dir credential
  * work invisibly (no Armory row, no expiry tracking, no way to tell it apart

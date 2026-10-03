@@ -6,7 +6,7 @@
 //! clip workaround and its Linux/macOS Views-based equivalent
 //! (`set_pane_overlay_clip`), plus their shared helpers (`clip_sig_whole`,
 //! `clip_sig_clipped`, `rects_intersect`, `compute_pane_visible`). Split out
-//! of `browser_panes.rs` — see that module's doc comment.
+//! of `browser_panes/mod.rs` — see that module's doc comment.
 
 use std::sync::Arc;
 

@@ -21,10 +21,11 @@
 //! watching one. Read them with `muxlog srv grep boot_timing`.
 //!
 //! The global recorder is a process-lifetime singleton because the steps it
-//! wraps are scattered through `bootstrap.rs`'s long boot functions; threading
-//! a `&mut BootTimings` through all of them would be a much larger diff than
-//! the measurement is worth. [`BootTimings`] itself is a plain value type with
-//! no global state, which is what the tests below exercise.
+//! wraps are scattered through the long boot functions in
+//! `crates/srv/src/bootstrap/stores.rs` and `crates/srv/src/main.rs`;
+//! threading a `&mut BootTimings` through all of them would be a much larger
+//! diff than the measurement is worth. [`BootTimings`] itself is a plain value
+//! type with no global state, which is what the tests below exercise.
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;

@@ -8,11 +8,8 @@
 // check, and is not valid for memory bundle ids (`db_bundles` seeds a
 // permanent `id='blank'` row and reserves a `seed-*` id prefix for
 // workspace-default bundles — both legitimate, both non-UUID; see
-// memory_bundles.rs / bundle.rs). A prior version of this comment claimed
-// memory bundle ids were "always UUID v4" too, which is wrong and led to
-// this check being (incorrectly) applied to memory_id at some call sites —
-// reagentx P2 on #2464 caught the applied instance, but the claim itself
-// was already stale before that.
+// storage/bundles.rs / app_api/bundle/mod.rs), so never apply this check to
+// a memory_id (#2464).
 //
 // Real account ids ARE always UUID v4 strings (crates/srv/src/identity/
 // oauth_client.rs, crates/srv/src/server/app_api/identity.rs). Legacy

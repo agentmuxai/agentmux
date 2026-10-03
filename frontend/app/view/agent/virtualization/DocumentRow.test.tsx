@@ -344,7 +344,7 @@ describe("DocumentRow — memory_reinjection node", () => {
         expect(tooltip?.textContent).toMatch(/global-note/);
         expect(tooltip?.textContent).toMatch(/~100 tok \(est\.\), 400 B/);
         expect(tooltip?.textContent).toMatch(/personal-file\.md/);
-        // formatCompactNumber compacts 4200 -> "4.2k" (matches formatCompactNumber.test.ts's own documented behavior), not "4,200".
+        // formatCompactNumber compacts 4200 -> "4.2k" (matches format-count.test.ts's own documented behavior), not "4,200".
         expect(tooltip?.textContent).toMatch(/Total: 800 B global, 4\.2k B personal/);
         vi.useRealTimers();
     });

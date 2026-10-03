@@ -268,7 +268,6 @@ export const AgentPresentationView = ({
             // us down. If we're disposed while the turn is still WORKING, that's
             // unexpected — also dump the render-trail + recent reducer-dispatch
             // ring so the next reproduction yields a root cause.
-            // See PLAN_PANE_CRASH_DIAGNOSTICS_2026-06-05.md.
             const phase = paneModel.state.turnPhase;
             const midTurn = workingFromPhase(phase);
             if (midTurn) {
@@ -288,7 +287,7 @@ export const AgentPresentationView = ({
             unregisterAgentActivity(model.blockId);
             handleAgentIdChange(model.blockId, undefined);
 
-            // Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §7):
+            // Phase 0 spike (#1945):
             // the PTY is kept alive across drawer open/close (see
             // AgentShellSubblock) but MUST die with the pane — a lingering
             // shell is exactly the leak class issue #1936 tracks. Reads the

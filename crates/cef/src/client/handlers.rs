@@ -760,7 +760,7 @@ wrap_context_menu_handler! {
 // PermissionHandler — microphone (getUserMedia) access for voice input
 // ---------------------------------------------------------------------------
 //
-// AgentMux runs the Alloy runtime for all non-devtools windows (app.rs:
+// AgentMux runs the Alloy runtime for all non-devtools windows (app/mod.rs:
 // RuntimeStyle::ALLOY). Under Alloy, CEF's DEFAULT handling of a media-access
 // request is to DENY — so without this handler every getUserMedia({audio:true})
 // (the Web Speech API today, and the MediaRecorder capture for server-side STT
