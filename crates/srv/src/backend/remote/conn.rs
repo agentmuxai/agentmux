@@ -124,8 +124,8 @@ fn parse_ssh(name: &str) -> Result<SshDest, String> {
         }
     }
     // Not a DNS-name whitelist: an ssh config `Host` alias may legitimately
-    // contain '/' or '+' ("prod/web"), and OpenSSH resolves it (Codex P2 on
-    // #4248). What is refused is shell syntax. The destination is passed as one
+    // contain '/' or '+' ("prod/web"), and OpenSSH resolves it (#4248). What is
+    // refused is shell syntax. The destination is passed as one
     // argv entry after `--`, so it never meets a local shell directly, but a
     // user's `ProxyCommand` expands it through `%h` into a shell command, and no
     // real host name or alias needs these characters.
@@ -225,7 +225,7 @@ mod tests {
         );
     }
 
-    /// Codex P2 on #4248: an ssh config alias need not look like a DNS name.
+    /// An ssh config alias need not look like a DNS name (#4248).
     #[test]
     fn ssh_config_aliases_with_slashes_or_plus_are_accepted() {
         assert_eq!(ConnTarget::parse("prod/web"), Ok(ssh("prod/web", None)));

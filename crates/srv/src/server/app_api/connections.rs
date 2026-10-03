@@ -97,8 +97,7 @@ pub(crate) fn ensure(broker: &Broker, name: &str) -> Result<(), String> {
     };
     // Keyed by the name exactly as the pane's meta holds it, not the canonical
     // form: the pane's overlay looks its status up by `meta.connection`, so
-    // " area54 " or "host:022" would otherwise never see their error (Codex P2
-    // on #4248).
+    // " area54 " or "host:022" would otherwise never see their error (#4248).
     status::set(Some(broker), name, state::ERROR, Some(message));
     Err(message.to_string())
 }
