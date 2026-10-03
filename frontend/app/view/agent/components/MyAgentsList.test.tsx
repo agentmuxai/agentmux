@@ -171,6 +171,37 @@ describe("MyAgentsList — populated", () => {
         }
     });
 
+    // SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.2: the account line
+    // is the bound account's name, "No auth", or absent. The retired labels never
+    // render.
+    describe("the account line", () => {
+        const accountLine = () => document.querySelector(".agent-recent-sessions-account");
+
+        it("shows the bound account's name", async () => {
+            vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ identity_name: "work@example.com" })]));
+            render(() => <MyAgentsList onReattach={() => {}} />);
+            await screen.findByTestId("agent-my-agents-entry");
+            expect(accountLine()).toHaveTextContent("work@example.com");
+        });
+
+        it("shows No auth for an agent the backend says is unbound", async () => {
+            vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ identity_name: "No auth" })]));
+            render(() => <MyAgentsList onReattach={() => {}} />);
+            await screen.findByTestId("agent-my-agents-entry");
+            expect(accountLine()).toHaveTextContent("No auth");
+        });
+
+        it("shows no line at all when the backend could not tell, rather than guessing", async () => {
+            vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ identity_name: "" })]));
+            render(() => <MyAgentsList onReattach={() => {}} />);
+            await screen.findByTestId("agent-my-agents-entry");
+            expect(accountLine()).toBeNull();
+            for (const old of ["(ambient creds)", "(missing account)", "(unknown account)"]) {
+                expect(screen.queryByText(old)).toBeNull();
+            }
+        });
+    });
+
     it("fires onReattach with the row when an entry is clicked", async () => {
         const onReattach = vi.fn();
         const row = makeRow({ instance_id: "click-me" });
