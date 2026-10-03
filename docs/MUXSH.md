@@ -33,7 +33,6 @@ muxsh config edit               # open settings.json
 muxsh config path               # print AgentMux's data dir
 muxsh agent list                # list reachable agents
 muxsh agent send <name> <msg>   # message a running agent
-muxsh conn sessions <host>      # durable sessions on an SSH host
 muxsh help                      # full usage
 ```
 
@@ -135,23 +134,6 @@ joined with spaces to form the message.
 To *launch* an agent into a pane, use `muxopen <agent>` (a separate,
 already-shipped tool) — not duplicated here as `muxsh agent open`.
 
-## `conn sessions`
-
-```bash
-muxsh conn sessions user@box
-muxsh conn sessions user@box --json
-```
-
-The durable sessions on an SSH host: AgentMux's helper there keeps a
-durable pane's shell running. Each line gives the session id, how much
-output it has, and which pane holds it: a pane id, `no pane` (an orphan
-that nothing reattaches to), or `ended` with the exit code. This wraps
-`GET /api/v1/conn/sessions`, which runs the helper's `list` over ssh.
-
-It only lists. To reopen an orphan or end a session, use the terminal pane
-menu's "Sessions on <host>…". A host that needs a password says so here
-rather than asking, since the command has no pane to ask in.
-
 ## What's not here, and why
 
 Two commands from the original design turned out not to be buildable as
@@ -171,6 +153,13 @@ account:
   specific registered *agent*, not to "whoever is running this terminal."
   There's no coherent default answer to "which agent's accounts" from a bare
   shell.
+- **`conn sessions <host>`** (the durable sessions on an SSH host, spec
+  `SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md` §7.6) would run
+  `ssh` to that host with the user's keys. An agent reaching a host that way
+  needs the user's per-host consent (§8.2), checked against its signed
+  identity, and `muxsh` has none. Agents get the list through a
+  consent-checked tool instead. Users get it from the terminal pane menu's
+  "Sessions on <host>…".
 
 Same single-instance scope as the rest of this tool family: `muxsh` operates
 on the instance the calling pane belongs to. Cross-instance operation is not

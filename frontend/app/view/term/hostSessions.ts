@@ -18,13 +18,22 @@ export type HostSessionActions = {
     end: (id: string) => void;
 };
 
-/** What the menu shows for one host's sessions, from the asking pane. */
+/** What the menu shows for one host's sessions, from the asking pane, under
+ *  `notice` (what the last action did) if there is one. */
 export function buildHostSessionsMenu(
     conn: string,
     sessions: HostSession[] | string,
     ownBlockId: string,
-    actions: HostSessionActions
+    actions: HostSessionActions,
+    notice?: string
 ): ContextMenuItem[] {
+    if (notice) {
+        return [
+            { label: notice, enabled: false },
+            { type: "separator" },
+            ...buildHostSessionsMenu(conn, sessions, ownBlockId, actions),
+        ];
+    }
     if (typeof sessions === "string") {
         return [{ label: `Could not list sessions on ${conn}: ${sessions}`, enabled: false }];
     }
@@ -53,8 +62,9 @@ export function buildHostSessionsMenu(
     });
 }
 
-/** List `conn`'s sessions and show them in a menu at the pane `blockId`. */
-export async function showHostSessions(conn: string, blockId: string): Promise<void> {
+/** List `conn`'s sessions and show them in a menu at the pane `blockId`,
+ *  under `notice` if given. */
+export async function showHostSessions(conn: string, blockId: string, notice?: string): Promise<void> {
     let sessions: HostSession[] | string;
     try {
         sessions = await RpcApi.ConnSessionsCommand(
@@ -79,13 +89,18 @@ export async function showHostSessions(conn: string, blockId: string): Promise<v
             });
         },
         end: (id) => {
+            // srv asks the user to confirm in its own window first; then the
+            // list again, saying what happened.
             void RpcApi.ConnSessionEndCommand(
                 TabRpcClient,
                 { connname: conn, sessionid: id, blockid: blockId },
-                { timeout: 120_000 }
-            ).catch((e) => console.warn("ending a remote session failed", e));
+                { timeout: 300_000 }
+            )
+                .then((ended) => (ended ? `Ended ${id}` : `${id} was already gone`))
+                .catch((e) => `Did not end ${id}: ${String((e as Error)?.message ?? e)}`)
+                .then((outcome) => showHostSessions(conn, blockId, outcome));
         },
-    });
+    }, notice);
     // The list arrives after the menu that asked for it has closed: show it
     // over the pane itself.
     const rect = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`)?.getBoundingClientRect();

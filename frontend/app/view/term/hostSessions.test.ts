@@ -22,6 +22,15 @@ describe("buildHostSessionsMenu", () => {
         expect(err.enabled).toBe(false);
     });
 
+    it("puts what the last action did above the list", () => {
+        const menu = buildHostSessionsMenu("box", [], "b1", actions(), "Ended amx-1");
+        expect(menu.map((m) => m.label ?? m.type)).toEqual([
+            "Ended amx-1",
+            "separator",
+            "No durable sessions on box",
+        ]);
+    });
+
     it("offers an orphan to open or end, and a held session only to end", () => {
         const a = actions();
         const menu = buildHostSessionsMenu(

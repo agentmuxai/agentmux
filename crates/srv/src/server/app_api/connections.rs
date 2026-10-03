@@ -12,8 +12,8 @@
 
 use super::*;
 use crate::backend::mps::Broker;
-use crate::backend::remote::status::{self, state};
 use crate::backend::remote::sessions;
+use crate::backend::remote::status::{self, state};
 use crate::backend::remote::ConnTarget;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -105,7 +105,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // A host's durable sessions, for the pane menu's "Sessions on <host>"
-    // (spec §7.6).
+    // (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
+    // UI's other connection calls do. Ending one is the user's decision,
+    // made in the host's own window (`ask_user`): anything holding srv's
+    // auth key can send this RPC, an agent included, but none can answer
+    // that window.
     let (store, auth_key) = (state.mstore.clone(), state.auth_key.clone());
     engine.register_handler(
         COMMAND_CONN_SESSIONS,
@@ -122,26 +126,60 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
-    let auth_key = state.auth_key.clone();
+    let app = state.clone();
     engine.register_handler(
         COMMAND_CONN_SESSION_END,
         Box::new(move |data, _ctx| {
-            let auth_key = auth_key.clone();
+            let app = app.clone();
             Box::pin(async move {
                 let (conn, id, block) = (
                     str_field(&data, "connname"),
                     str_field(&data, "sessionid"),
                     str_field(&data, "blockid"),
                 );
-                let ask = (!block.is_empty()).then_some(sessions::AskIn {
+                if block.is_empty() {
+                    return Err("ending a session needs the pane asking, to ask the user in".into());
+                }
+                if !crate::backend::blockcontroller::durable_ssh::valid_session_id(&id) {
+                    return Err(format!("{:?} is not a session id", one_line(&id, 80)));
+                }
+                confirm_session_end(&app, &block, &conn, &id).await?;
+                let ask = sessions::AskIn {
                     block_id: &block,
-                    auth_key: &auth_key,
-                });
-                let ended = sessions::end(&conn, &id, ask).await?;
+                    auth_key: &app.auth_key,
+                };
+                let ended = sessions::end(&conn, &id, Some(ask)).await?;
                 Ok(Some(serde_json::json!(ended)))
             })
         }),
     );
+}
+
+/// The user's yes to ending session `id` on `conn`, asked in the window of
+/// pane `block`. `Err` unless they said yes.
+async fn confirm_session_end(
+    state: &AppState,
+    block: &str,
+    conn: &str,
+    id: &str,
+) -> Result<(), String> {
+    // `consent`: a plain question of AgentMux's own, not a relayed ssh prompt.
+    let question = serde_json::json!({
+        "kind": "consent",
+        "title": format!("End a session on {}", one_line(conn, 80)),
+        "message": format!(
+            "End the durable session {id} on {}?\n\nIts shell, and everything running in it, stops. This cannot be undone.",
+            one_line(conn, 80)
+        ),
+        "ok_label": "End Session",
+        "cancel_label": "Keep It",
+    });
+    let answer = ask_user(state, block, question).await?;
+    if answer.answered && answer.approve {
+        Ok(())
+    } else {
+        Err("kept: the user chose not to end it".to_string())
+    }
 }
 
 fn str_field(data: &serde_json::Value, key: &str) -> String {
@@ -582,29 +620,6 @@ pub(crate) async fn handle_conn_list() -> axum::Json<Vec<ConnEntry>> {
         .await
         .unwrap_or_default();
     axum::Json(list(&installed, &hosts, &status::all()))
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub(crate) struct ConnSessionsQuery {
-    connection: String,
-}
-
-/// `GET /api/v1/conn/sessions?connection=<ssh host>`: the host's durable
-/// sessions (`muxsh conn sessions`, spec §7.6). Listing only, and with no
-/// pane to ask in: a host that needs a password says so rather than asking.
-pub(crate) async fn handle_conn_sessions(
-    axum::extract::State(state): axum::extract::State<AppState>,
-    axum::extract::Query(q): axum::extract::Query<ConnSessionsQuery>,
-) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    match sessions::list(&state.mstore, &q.connection, None).await {
-        Ok(list) => axum::Json(list).into_response(),
-        Err(e) => (
-            axum::http::StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({ "error": e })),
-        )
-            .into_response(),
-    }
 }
 
 #[cfg(test)]

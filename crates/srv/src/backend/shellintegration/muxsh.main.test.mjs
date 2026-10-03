@@ -318,17 +318,6 @@ describe("muxsh main() — dispatch reaches the right route", () => {
         );
     });
 
-    it("'conn sessions' -> GET /api/v1/conn/sessions with the host", async () => {
-        setArgv("conn", "sessions", "user@box");
-        setBaseEnv();
-        const fetchMock = okFetch([]);
-        await main();
-        expect(fetchMock).toHaveBeenCalledWith(
-            expect.stringContaining("/api/v1/conn/sessions?connection=user%40box"),
-            expect.objectContaining({ method: "GET" }),
-        );
-    });
-
     it("'agent send' -> POST /agentmux/reactive/inject", async () => {
         setArgv("agent", "send", "Scouto", "hi");
         setBaseEnv();

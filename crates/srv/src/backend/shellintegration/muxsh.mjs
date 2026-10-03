@@ -64,11 +64,6 @@ usage:
   muxsh agent send <name> <message...>
                                   send a message to a running agent
 
-  muxsh conn sessions <host>       the durable sessions on an SSH host, and
-                                  which pane holds each (end or reopen one
-                                  from the pane menu's 'Sessions on <host>')
-    --json                       machine-readable output
-
   muxsh help                      this text
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY (present in any
@@ -271,20 +266,6 @@ export function parseArgs(argv) {
         return { error: `unknown 'muxsh agent' verb '${argv[1] ?? ""}' (expected 'list' or 'send')` };
     }
 
-    if (head === "conn") {
-        if (argv[1] === "sessions") {
-            const rest = argv.slice(2);
-            const json = rest.includes("--json");
-            const words = rest.filter((a) => a !== "--json");
-            if (words.length === 0 || words[0].startsWith("-")) {
-                return { error: "'muxsh conn sessions' requires an SSH host" };
-            }
-            if (words.length > 1) return { error: `unknown argument '${words[1]}'` };
-            return { command: "conn-sessions", host: words[0], json };
-        }
-        return { error: `unknown 'muxsh conn' verb '${argv[1] ?? ""}' (expected 'sessions')` };
-    }
-
     return { error: `unknown command '${head}'` };
 }
 
@@ -414,17 +395,6 @@ export function renderAgentList(discovery) {
     }
     if (lines.length === 0) return "no agents found";
     return lines.join("\n");
-}
-
-/** `muxsh conn sessions`: one line per session on the host. */
-export function renderConnSessions(host, sessions) {
-    if (!Array.isArray(sessions) || sessions.length === 0) return `no durable sessions on ${host}`;
-    return sessions
-        .map((s) => {
-            const where = s.exited != null ? `ended (exit ${s.exited})` : s.blockid ? `pane ${s.blockid}` : "no pane";
-            return `${s.id}  ${s.bytes} bytes  ${where}`;
-        })
-        .join("\n");
 }
 
 export function renderAgentSend(body) {
@@ -570,17 +540,6 @@ export async function main() {
             // an undelivered message.
             if (!body.success) fail(renderAgentSend(body), 2);
             console.log(renderAgentSend(body));
-            return;
-        }
-        case "conn-sessions": {
-            const body = await apiCall(
-                url,
-                authKey,
-                `/api/v1/conn/sessions?connection=${encodeURIComponent(parsed.host)}`,
-                {},
-                "/api/v1/conn/sessions",
-            );
-            console.log(parsed.json ? JSON.stringify(body, null, 2) : renderConnSessions(parsed.host, body));
             return;
         }
         default:

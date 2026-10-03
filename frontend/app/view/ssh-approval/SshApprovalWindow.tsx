@@ -4,9 +4,11 @@
 /**
  * SshApprovalWindow — the entire content of the approval subwindow the host
  * opens for srv's `POST /agentmux/approval/ask` (agentmux-cef `ssh_approval`):
- * the user's consent for an agent to use an SSH host, or ssh's own prompt for
- * an agent's ssh (a password, a passphrase, a new host key, or a notice), per
- * SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §5.3 and §8.2.
+ * the user's consent for an agent to use an SSH host, ssh's own prompt (a
+ * password, a passphrase, a new host key, or a notice) for an agent's ssh or
+ * for a durable pane's, or a confirmation such as ending a durable session,
+ * per SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §5.3, §7.6
+ * and §8.2.
  *
  * A separate top-level window, never a modal, for the same reason as
  * `CredentialApprovalWindow` (see its doc comment): anything in the main
@@ -94,7 +96,7 @@ export const SshApprovalWindow = (): JSX.Element => {
     if (!meta) {
         return (
             <div class="ssh-approval-window ssh-approval-window-error">
-                <p>This window is missing its request and can't be used. Close it; the agent's SSH request then fails.</p>
+                <p>This window is missing its request and can't be used. Close it; the SSH request then fails.</p>
             </div>
         );
     }
@@ -108,8 +110,8 @@ export const SshApprovalWindow = (): JSX.Element => {
                 <p class="ssh-approval-message">{meta.message}</p>
                 <Show when={meta.kind === "secret" || meta.kind === "yesno"}>
                     <p class="ssh-approval-note">
-                        AgentMux relays this prompt from the agent's ssh and cannot verify its text. Answer only if you
-                        expect ssh on this host to be asking.
+                        AgentMux relays this prompt from ssh and cannot verify its text. Answer only if you expect ssh
+                        on this host to be asking.
                     </p>
                 </Show>
                 <Show when={meta.kind === "secret"}>
