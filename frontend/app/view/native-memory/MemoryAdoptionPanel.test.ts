@@ -38,6 +38,8 @@ describe("memory adoption", () => {
         expect(accounts).toContain("earlier account");
         expect(accounts).toContain("copies");
         expect(accounts).toContain("aren't changed");
+        // The index is the one current file adoption changes; the hint must say so.
+        expect(accounts).toContain("MEMORY.md index");
         expect(accounts).not.toContain("Held");
         expect(adoptionHint(0, 1)).toMatch(/^Held files/);
         expect(adoptionHint(2, 1)).toContain("Held files");
