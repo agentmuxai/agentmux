@@ -1512,6 +1512,7 @@ export function update(
                         trigger: command.trigger,
                         durationMs: command.durationMs,
                         frameTimestamp: command.frameTimestamp,
+                        boundaryUuid: command.boundaryUuid,
                     },
                 ],
             };

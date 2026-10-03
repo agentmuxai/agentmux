@@ -160,6 +160,13 @@ impl PersistentSubprocessController {
                         });
                     }
                 }
+                // This block's CLI compacted: only its pane may send the
+                // hidden memory reinjection for that boundary.
+                if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {
+                    if let Some(uuid) = parsed.get("uuid").and_then(|v| v.as_str()) {
+                        crate::server::memory_delivery_handlers::record_compaction_boundary(&block_id_read, uuid);
+                    }
+                }
                 let is_result_frame =
                     parsed.get("type").and_then(|v| v.as_str()) == Some("result");
                 // Claude's turn-ending marker. Persistent mode never exits

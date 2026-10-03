@@ -28,69 +28,74 @@ export interface CompactBoundaryData {
     durationMs: number;
     /**
      * The frame's own top-level `timestamp` field, verbatim (raw string,
-     * not parsed/reformatted) — `null` if absent or not a string. Used
-     * ONLY to build a stable node id shared with `parseHistoryLines.ts`'s
-     * own `context-compacted-${rawEvent.timestamp}` id (Codex P2, PR
-     * #2378 round 7): the live path previously used `Date.now()`, so a
-     * `compact_boundary` processed live AND later re-seen in a mount-time
-     * history range (a real race — the two requests are independent)
-     * produced two different ids for the same event, and the document
-     * store's same-id dedup couldn't merge them — the compaction showed
-     * up twice. NOT used for anything time-arithmetic (`state.at`,
-     * watchdog timestamps, etc. all still use `Date.now()` at the call
-     * site) — this is purely a dedup key.
+     * not parsed/reformatted) — `null` if absent or not a string. A time
+     * value only (the node's time, the reducer's stale-boundary checks);
+     * the CLI's stdout frame has none, so every reader falls back to its
+     * receipt time. Never an id: see `uuid`.
      */
     frameTimestamp: string | null;
+    /**
+     * The frame's own `uuid` — the same in the stdout and transcript forms,
+     * and unique per compaction — `null` if absent or not a string. The key
+     * of every node and claim derived from this boundary, so the live and
+     * replay paths agree on one id.
+     */
+    uuid: string | null;
 }
 
 /**
- * Validate + extract a `compact_boundary` frame's `compactMetadata`,
- * or `null` if this isn't one, or its fields don't match the expected
- * shape. Malformed/missing fields degrade to `null` (skip rather than
- * guess) — same philosophy as `agentmux-srv`'s `claude.rs` translator.
+ * Validate + extract a `compact_boundary` frame's metadata, or `null` if
+ * this isn't one, or its fields don't match the expected shape.
+ * Malformed/missing fields degrade to `null` (skip rather than guess) —
+ * same philosophy as `agentmux-srv`'s `claude.rs` translator. Reads both
+ * forms the CLI writes: snake_case on stdout (`compact_metadata`,
+ * `pre_tokens`, …), camelCase in its transcript.
  */
 export function parseCompactBoundaryFrame(rawEvent: unknown): CompactBoundaryData | null {
     if (!rawEvent || typeof rawEvent !== "object") return null;
     const e = rawEvent as Record<string, unknown>;
     if (e.type !== "system" || e.subtype !== "compact_boundary") return null;
 
-    const meta = e.compactMetadata as Record<string, unknown> | undefined;
+    const meta = (e.compact_metadata ?? e.compactMetadata) as Record<string, unknown> | undefined;
     const trigger: "manual" | "auto" | null =
         meta?.trigger === "auto" ? "auto" :
         meta?.trigger === "manual" ? "manual" :
         null;
-    const preTokens = typeof meta?.preTokens === "number" ? meta.preTokens : null;
-    const postTokens = typeof meta?.postTokens === "number" ? meta.postTokens : null;
-    const durationMs = typeof meta?.durationMs === "number" ? meta.durationMs : null;
+    const num = (snake: string, camel: string): number | null => {
+        const v = meta?.[snake] ?? meta?.[camel];
+        return typeof v === "number" ? v : null;
+    };
+    const preTokens = num("pre_tokens", "preTokens");
+    const postTokens = num("post_tokens", "postTokens");
+    const durationMs = num("duration_ms", "durationMs");
     if (trigger == null || preTokens == null || postTokens == null || durationMs == null) {
         return null;
     }
     const frameTimestamp = typeof e.timestamp === "string" ? e.timestamp : null;
-    return { trigger, preTokens, postTokens, durationMs, frameTimestamp };
+    const uuid = typeof e.uuid === "string" && e.uuid ? e.uuid : null;
+    return { trigger, preTokens, postTokens, durationMs, frameTimestamp, uuid };
 }
 
 /**
  * Stable `context_compacted` node id for a REAL `compact_boundary`, shared
  * by both consumers so they can never independently drift — the exact bug
  * class this module already exists to prevent (see the module doc
- * comment). Codex P2, PR #2378 round 12: previously each consumer built
- * its OWN fallback for the (defensive-only — the real CLI always sends a
- * timestamp, but both consumers parse defensively) timestamp-less case:
- * `useAgentStream.ts` used `Date.now()`, `parseHistoryLines.ts` used a
- * batch-relative node count. The same underlying boundary seen live AND
- * via a history-replay overlap could then get two different ids,
- * bypassing the document store's same-id dedup. Falls back to a
- * content-derived key instead — computed identically by both consumers
- * since both now call this one function with the same fields.
+ * comment). Keyed on the boundary's `uuid`; a frame without one falls back
+ * to its own `timestamp`, then to a content-derived key, computed identically
+ * by both consumers. Never
+ * a receipt time or a batch-relative count: the same boundary seen live
+ * and on replay would get two ids.
  */
 export function contextCompactedNodeId(data: {
     trigger?: "manual" | "auto";
     preTokens: number;
     postTokens: number;
     durationMs?: number;
+    uuid?: string | null;
     frameTimestamp?: string | null;
 }): string {
     const suffix =
+        data.uuid ??
         data.frameTimestamp ??
         `notime-${data.trigger ?? "?"}-${data.preTokens}-${data.postTokens}-${data.durationMs ?? "?"}`;
     return `context-compacted-${suffix}`;

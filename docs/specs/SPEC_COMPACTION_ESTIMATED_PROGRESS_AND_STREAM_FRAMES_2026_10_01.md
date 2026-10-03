@@ -1,7 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
 **Date:** 2026-10-01
-**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) and the rest of status-frame handling (§6) are not built and need the decisions in §8.
+**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) is built (§8 D1); the rest of status-frame handling (§6) is not built and needs D2.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: *"search online, latest claude CLI system, can agentmux get the progress of the compression?"*, then *"write spec to file on implements. sure, lets try the tier 4"*.
 **Researched against:** `agentmuxai/agentmux` `main` @ `807c749ce`; Claude Code CLI **2.1.287** (the version AgentMux has installed under `~/.agentmux/shared/cli/claude/`).
@@ -98,7 +98,11 @@ It should be designed together with the §3 fix. Seeding the sample store from t
 
 ## 8. Decisions
 
-- **D1 — fix the boundary casing (and re-key node ids on `uuid`) so the live compaction path actually runs?** Recommended: yes, as its own PR, with memory reinjection's id fixed first and a check of what hidden reinjection does after every compaction. Alternative: leave the live path as it is and rely on history replay.
+- **D1 — fix the boundary casing (and re-key node ids on `uuid`) so the live compaction path actually runs?** **Done (2026-10-03).** The check first found a duplicate send: the controller deferred a mid-turn compaction and only claimed at turn end, by which time srv's 60 s claim window had dropped the `SessionStart` hook's delivery, so both sent the memory. Built:
+  - both parsers (`claude.rs` `handle_system_message`, `compact-boundary.ts` `parseCompactBoundaryFrame`) read `compact_metadata`/`compactMetadata` and each field in either casing; malformed frames are still dropped;
+  - boundary-derived ids are keyed on the frame's `uuid`: `contextCompactedNodeId` (and through it the summary card's fallback id) and `memoryReinjectionNodeId`. a frame without a `uuid` keys on its `timestamp`, then on its numbers. Times keep the existing receipt-time fallbacks;
+  - a compaction is claimed when its boundary arrives (`memory-reinjection-controller.ts`), with the boundary's `uuid` (`boundary_uuid` on `memorydelivery:claim_fallback`). "Skip" sends nothing later; "deliver" sends at turn end as before, without a second claim;
+  - once per boundary, from the block that compacted: the controller ignores a `uuid` it has seen (a gap re-read, a double trigger). srv records which block's stdout carried each boundary `uuid` (last 256) and answers "skip" to a claim from any other block: another block of the same agent reads the boundary from the shared transcript zone, and its CLI did not compact. A boundary no local stdout carried (another srv instance's) is skipped the same way. A repeat claim by the origin block takes the usual path, so a pane that failed to send is not locked out. A hook delivery created before the block's previous boundary belongs to that compaction and does not make a later one stand down. A claim without a `uuid` behaves as before. A fresh session still claims when it fires.
 - **D2 — the rest of status-frame handling (§6: a hook-independent start, a heartbeat)** after D1, or not at all? The failure notice is built (§10).
 - **D3 — sample store scope:** decided 2026-10-03: per model, with a fallback to every sample when the current model has none yet (duration depends mostly on which model summarizes; the context-size scaling already covers the rest, and the account does not matter). Samples are keyed by the model the process is configured to run (the runtime selection, or a `--model` in the agent's own flags), so a `/model` switch counts before the next reply; the resolved model id from the replies is the fallback. The store keeps the last 30. Samples recorded before this have no model and serve only the fallback.
 

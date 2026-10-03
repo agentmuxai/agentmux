@@ -1,11 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HistoryParser, parseHistoryLines } from "./parseHistoryLines";
 import { contextCompactedNodeId } from "./compact-boundary";
+import { createMemoryReinjectionController } from "./memory-reinjection-controller";
+import { update } from "@/app/store/agent-pane-state/reducer";
+import { initialState } from "@/app/store/agent-pane-state/types";
 import { composeReinjectionMessage } from "./memory-reinjection";
 import type { ToolNode } from "./types";
+
+vi.mock("./memory-reinjection-controller", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("./memory-reinjection-controller")>();
+    return { ...actual, createMemoryReinjectionController: vi.fn(actual.createMemoryReinjectionController) };
+});
 
 // The Claude translator passes through events that already match the
 // StreamEvent shape (`if (this.isStreamEvent(rawEvent))` branch), so
@@ -406,7 +414,7 @@ describe("parseHistoryLines", () => {
             expect(nodes.some((n) => n.type === "context_compacted")).toBe(false);
         });
 
-        it("dedupes a replayed identical compact_boundary line by its frame timestamp", () => {
+        it("dedupes a replayed identical compact_boundary line", () => {
             const lines = [compactBoundaryLine(), compactBoundaryLine()];
             const { nodes } = parseHistoryLines(lines, "claude-stream-json");
             expect(nodes.filter((n) => n.type === "context_compacted")).toHaveLength(1);
@@ -434,9 +442,70 @@ describe("parseHistoryLines", () => {
                     preTokens: 783_887,
                     postTokens: 11_775,
                     durationMs: 231_606,
-                    frameTimestamp: null,
+                    uuid: null,
                 }),
             );
+        });
+
+        /** The stdout form, as Claude Code 2.1.287 writes it: snake_case, no `timestamp`. */
+        function stdoutBoundary(trigger: "manual" | "auto", uuid = "8c1f4e2a-2b7d-4a51-9a0e-6f3c2d1b0a99") {
+            return {
+                type: "system",
+                subtype: "compact_boundary",
+                uuid,
+                compact_metadata: {
+                    trigger,
+                    pre_tokens: 25040,
+                    post_tokens: 733,
+                    cumulative_dropped_tokens: 24307,
+                    duration_ms: 1513,
+                },
+                logical_parent_uuid: "3e9b7c10-5d2f-4c8a-b1e4-7a6d5c4b3a21",
+            };
+        }
+
+        it.each(["manual", "auto"] as const)("rebuilds the real stdout (snake_case) boundary — %s", (trigger) => {
+            const lines = [line({ type: "text", content: "before" }), JSON.stringify(stdoutBoundary(trigger))];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            const compacted = nodes.find((n) => n.type === "context_compacted") as any;
+            expect(compacted).toMatchObject({
+                id: "context-compacted-8c1f4e2a-2b7d-4a51-9a0e-6f3c2d1b0a99",
+                tokensBefore: 25040,
+                tokensAfter: 733,
+                source: "real",
+                trigger,
+                durationMs: 1513,
+            });
+        });
+
+        it("gives a boundary the same id live and on replay, and two boundaries different ids", () => {
+            const replayIds = (frame: object) =>
+                parseHistoryLines([JSON.stringify(frame)], "claude-stream-json").nodes.map((n) => n.id);
+            // The live path: the reducer's event, keyed as useAgentStream's pushContextCompactedNodes keys it.
+            const liveId = (frame: ReturnType<typeof stdoutBoundary>) => {
+                const { events } = update(initialState("agent"), {
+                    type: "CompactionBoundary",
+                    trigger: frame.compact_metadata.trigger,
+                    preTokens: frame.compact_metadata.pre_tokens,
+                    postTokens: frame.compact_metadata.post_tokens,
+                    durationMs: frame.compact_metadata.duration_ms,
+                    at: 1,
+                    frameTimestamp: null,
+                    boundaryUuid: frame.uuid,
+                });
+                const ev = events.find((e) => e.type === "context-compacted") as any;
+                return contextCompactedNodeId({ ...ev, preTokens: ev.tokensBefore, postTokens: ev.tokensAfter, uuid: ev.boundaryUuid });
+            };
+            const first = stdoutBoundary("auto");
+            const second = stdoutBoundary("auto", "0f2e4d6c-8b0a-4c1e-9f3d-5a7b9c1d3e5f");
+            expect(replayIds(first)).toEqual([liveId(first)]);
+            expect(replayIds(second)).toEqual([liveId(second)]);
+            expect(liveId(first)).not.toBe(liveId(second));
+        });
+
+        it("never triggers a memory reinjection on replay", () => {
+            parseHistoryLines([JSON.stringify(stdoutBoundary("manual"))], "claude-stream-json");
+            expect(vi.mocked(createMemoryReinjectionController)).not.toHaveBeenCalled();
         });
     });
 });

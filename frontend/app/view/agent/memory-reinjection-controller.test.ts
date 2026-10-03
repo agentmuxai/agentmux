@@ -365,7 +365,10 @@ describe("createMemoryReinjectionController — pane becomes busy DURING the fet
 // SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2: once Claude Code's
 // SessionStart hook delivers memory, this fallback asks before it fires.
 describe("createMemoryReinjectionController — claimFallback (the SessionStart hook may have delivered)", () => {
-    function withClaim(claimFallback: (reason: "compaction" | "fresh_session") => Promise<boolean>, busy: () => boolean = () => false) {
+    function withClaim(
+        claimFallback: (reason: "compaction" | "fresh_session", boundaryUuid?: string) => Promise<boolean>,
+        busy: () => boolean = () => false,
+    ) {
         const dispatchTurnStart = vi.fn<(content: string, hidden: boolean) => void>();
         const sendRpc = vi.fn<(message: string) => Promise<void>>().mockResolvedValue(undefined);
         const isPaneWorking = vi.fn<() => boolean>().mockImplementation(busy);
@@ -386,7 +389,7 @@ describe("createMemoryReinjectionController — claimFallback (the SessionStart 
     it("stands down when the hook already delivered: nothing hidden, dispatched or sent", async () => {
         const { controller, dispatchTurnStart, sendRpc, claim } = withClaim(async () => false);
         await controller.trigger("2026-09-27T10:00:00.000Z", "compaction");
-        expect(claim).toHaveBeenCalledWith("compaction");
+        expect(claim.mock.calls[0][0]).toBe("compaction");
         expect(dispatchTurnStart).not.toHaveBeenCalled();
         expect(sendRpc).not.toHaveBeenCalled();
         expect(controller.isHiding()).toBe(false);
@@ -408,10 +411,10 @@ describe("createMemoryReinjectionController — claimFallback (the SessionStart 
         expect(sendRpc).toHaveBeenCalledTimes(1);
     });
 
-    it("never claims while the pane is busy — it defers, and claims only when it really fires", async () => {
+    it("a fresh session never claims while the pane is busy — it defers, and claims only when it really fires", async () => {
         let busy = true;
         const { controller, claim, sendRpc } = withClaim(async () => true, () => busy);
-        await controller.trigger(null, "compaction");
+        await controller.trigger(null, "fresh_session");
         expect(claim).not.toHaveBeenCalled();
         busy = false;
         controller.maybeFireDeferred();
@@ -483,5 +486,91 @@ describe("createMemoryReinjectionController — srv composes (CD2b)", () => {
         expect(message).toContain("Your memory was reinjected because your working context was just reset.");
         expect(deliveryId).toBeUndefined();
         expect(controller.onSessionEnd()?.type).toBe("memory_reinjection");
+    });
+});
+
+// SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §8 D1:
+// a compaction is claimed when its boundary arrives, once per boundary uuid.
+describe("createMemoryReinjectionController — compaction claimed at the boundary", () => {
+    const UUID = "8c1f4e2a-2b7d-4a51-9a0e-6f3c2d1b0a99";
+    function make(answer: boolean, initiallyBusy: boolean) {
+        let busy = initiallyBusy;
+        const claim = vi.fn(async (_reason: "compaction" | "fresh_session", _uuid?: string) => answer);
+        const sendRpc = vi.fn<(message: string) => Promise<void>>().mockResolvedValue(undefined);
+        const fetchEntries = vi.fn<() => Promise<MemoryEntryInput[]>>().mockResolvedValue([globalEntry("g1", "body")]);
+        const controller = createMemoryReinjectionController({
+            contextWindow: () => 10_000,
+            now: () => 0,
+            isPaneWorking: () => busy,
+            dispatchTurnStart: vi.fn(),
+            dispatchTurnReset: vi.fn(),
+            sendRpc,
+            fetchEntries,
+            claimFallback: claim,
+        });
+        const endTurn = () => {
+            busy = false;
+            controller.onSessionEnd();
+            controller.maybeFireDeferred();
+        };
+        return { controller, claim, sendRpc, fetchEntries, endTurn };
+    }
+
+    it("claims when the boundary arrives mid-turn, with its uuid, not at turn end", async () => {
+        const { controller, claim, sendRpc, endTurn } = make(true, true);
+        await controller.trigger(null, "compaction", UUID);
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(claim).toHaveBeenCalledWith("compaction", UUID);
+        expect(sendRpc).not.toHaveBeenCalled();
+        endTurn();
+        await vi.waitFor(() => expect(sendRpc).toHaveBeenCalledTimes(1));
+        expect(claim).toHaveBeenCalledTimes(1);
+    });
+
+    it("a skip decision sends nothing at turn end", async () => {
+        const { controller, claim, sendRpc, fetchEntries, endTurn } = make(false, true);
+        await controller.trigger(null, "compaction", UUID);
+        endTurn();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(fetchEntries).not.toHaveBeenCalled();
+        expect(sendRpc).not.toHaveBeenCalled();
+    });
+
+    it("a send decision sends exactly once", async () => {
+        const { controller, sendRpc, endTurn } = make(true, true);
+        await controller.trigger(null, "compaction", UUID);
+        endTurn();
+        await vi.waitFor(() => expect(sendRpc).toHaveBeenCalledTimes(1));
+        controller.onSessionEnd(); // the hidden turn ends
+        controller.maybeFireDeferred();
+        await Promise.resolve();
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+    });
+
+    it("the same boundary seen twice claims once, even after its reinjection finished", async () => {
+        const { controller, claim, sendRpc } = make(true, false);
+        await controller.trigger(null, "compaction", UUID);
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+        controller.onSessionEnd();
+        await controller.trigger(null, "compaction", UUID);
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+    });
+
+    it("a second compaction (new uuid) is claimed and sent again", async () => {
+        const { controller, claim, sendRpc } = make(true, false);
+        await controller.trigger(null, "compaction", UUID);
+        controller.onSessionEnd();
+        await controller.trigger(null, "compaction", "0f2e4d6c-8b0a-4c1e-9f3d-5a7b9c1d3e5f");
+        expect(claim).toHaveBeenCalledTimes(2);
+        expect(sendRpc).toHaveBeenCalledTimes(2);
+    });
+
+    it("keys the reinjection node on the boundary uuid", async () => {
+        const { controller } = make(true, false);
+        await controller.trigger(null, "compaction", UUID);
+        expect(controller.onSessionEnd()?.id).toBe(`memory-reinjected-${UUID}`);
     });
 });

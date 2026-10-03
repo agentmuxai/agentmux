@@ -21,7 +21,7 @@
 //! [`Caller::Agent`](super::caller::Caller)): its Personal Memory is that
 //! agent's. Without a token only Global Memory is delivered.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex};
 
 use axum::extract::State;
@@ -121,6 +121,10 @@ const CLAIM_WINDOW_MS: i64 = 60_000;
 const PENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 const PENDING_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// How many compaction boundaries' origins are remembered. Boundary uuids are
+/// unique across blocks.
+const BOUNDARY_ORIGINS_MAX: usize = 256;
+
 /// Deliveries and fallback claims, behind one lock so "who claimed this event
 /// first" is decided atomically.
 #[derive(Default)]
@@ -132,6 +136,9 @@ struct DeliveryState {
     /// Re-deliveries srv composed for the frontend's fallback, by
     /// `delivery_id`, until the hidden message that sends one arrives.
     fallbacks: HashMap<String, FallbackDelivery>,
+    /// Which block's CLI wrote each compaction boundary, and when: (`uuid`,
+    /// block, ms), oldest first.
+    boundary_origins: VecDeque<(String, String, i64)>,
 }
 
 /// What the fallback's claim found.
@@ -157,12 +164,15 @@ impl DeliveryState {
         self.fallback_claims.contains_key(&(block_id.to_string(), reason))
     }
 
-    /// The hook's deliveries of this event, newest first.
-    fn hook_deliveries_mut(&mut self, block_id: &str, reason: Reason, now: i64) -> Vec<&mut Delivery> {
+    /// The hook's deliveries of this event, newest first: inside the claim
+    /// window and created after `since`.
+    fn hook_deliveries_mut(&mut self, block_id: &str, reason: Reason, now: i64, since: i64) -> Vec<&mut Delivery> {
         let mut found: Vec<&mut Delivery> = self
             .deliveries
             .iter_mut()
-            .filter(|(k, d)| k.block_id == block_id && k.reason == reason && now - d.created_ms < CLAIM_WINDOW_MS)
+            .filter(|(k, d)| {
+                k.block_id == block_id && k.reason == reason && now - d.created_ms < CLAIM_WINDOW_MS && d.created_ms > since
+            })
             .map(|(_, d)| d)
             .collect();
         found.sort_by_key(|d| std::cmp::Reverse(d.created_ms));
@@ -171,11 +181,12 @@ impl DeliveryState {
 
     /// The fallback's atomic claim on an event. A `Deliver` for an unclaimed
     /// event records the claim, so the hook's parts for it come back empty.
-    fn claim_fallback(&mut self, block_id: &str, reason: Reason, now: i64) -> FallbackClaim {
+    /// Hook deliveries created at or before `since` belong to an earlier event.
+    fn claim_fallback(&mut self, block_id: &str, reason: Reason, now: i64, since: i64) -> FallbackClaim {
         if self.fallback_claimed(block_id, reason) {
             return FallbackClaim::Deliver;
         }
-        let hook = self.hook_deliveries_mut(block_id, reason, now).into_iter().next().map(|d| d.notice_sent);
+        let hook = self.hook_deliveries_mut(block_id, reason, now, since).into_iter().next().map(|d| d.notice_sent);
         match hook {
             Some(true) => FallbackClaim::Skip,
             Some(false) => FallbackClaim::Pending,
@@ -186,11 +197,40 @@ impl DeliveryState {
         }
     }
 
+    fn record_boundary(&mut self, uuid: &str, block_id: &str, now: i64) {
+        if self.boundary_origins.iter().any(|(u, _, _)| u == uuid) {
+            return;
+        }
+        if self.boundary_origins.len() >= BOUNDARY_ORIGINS_MAX {
+            self.boundary_origins.pop_front();
+        }
+        self.boundary_origins.push_back((uuid.to_string(), block_id.to_string(), now));
+    }
+
+    /// A claim naming its compaction boundary. Only the block whose own CLI
+    /// wrote the boundary may deliver: another block of the agent reads it from
+    /// the shared transcript zone, and its CLI did not compact. A boundary no
+    /// stdout here wrote (another srv instance's) is not this block's either.
+    /// A hook delivery from before the block's previous boundary was that
+    /// compaction's, not this one's.
+    fn claim_boundary(&mut self, block_id: &str, reason: Reason, boundary_uuid: Option<&str>, now: i64) -> FallbackClaim {
+        let mut since = i64::MIN;
+        if let Some(uuid) = boundary_uuid {
+            let Some(idx) = self.boundary_origins.iter().position(|(u, b, _)| u == uuid && b == block_id) else {
+                return FallbackClaim::Skip;
+            };
+            if let Some((_, _, at)) = self.boundary_origins.range(..idx).rev().find(|(_, b, _)| b == block_id) {
+                since = *at;
+            }
+        }
+        self.claim_fallback(block_id, reason, now, since)
+    }
+
     /// The fallback gave up waiting for the hook: it delivers, and the hook's
     /// unfinished delivery is closed so a late acknowledgement adds no second
     /// notice.
     fn take_over_from_hook(&mut self, block_id: &str, reason: Reason, now: i64) {
-        for d in self.hook_deliveries_mut(block_id, reason, now) {
+        for d in self.hook_deliveries_mut(block_id, reason, now, i64::MIN) {
             d.notice_sent = true;
         }
         self.fallback_claims.insert((block_id.to_string(), reason), now);
@@ -362,21 +402,23 @@ fn reason_for_fallback(reason: &str) -> Option<Reason> {
 /// event (`true`) or stand down because the `SessionStart` hook delivered it
 /// (`false`). Waits out a hook delivery still in flight for up to
 /// [`PENDING_WAIT`], then lets the fallback deliver, so a hook that died
-/// part-way never leaves the agent without its memory.
-pub(crate) async fn claim_fallback(block_id: &str, reason: &str) -> bool {
+/// part-way never leaves the agent without its memory. With a
+/// `boundary_uuid`, only the block whose CLI compacted can deliver.
+pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: Option<&str>) -> bool {
     let Some(reason) = reason_for_fallback(reason) else { return true };
     let deadline = tokio::time::Instant::now() + PENDING_WAIT;
+    let boundary_uuid = boundary_uuid.filter(|u| !u.is_empty());
     loop {
         let now = agentmux_common::time::now_ms();
         let claim = {
             let mut st = state_lock();
             st.prune(now);
-            st.claim_fallback(block_id, reason, now)
+            st.claim_boundary(block_id, reason, boundary_uuid, now)
         };
         match claim {
             FallbackClaim::Deliver => return true,
             FallbackClaim::Skip => {
-                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: the hook delivered; fallback stands down");
+                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: the hook delivered, or not this block's compaction; fallback stands down");
                 return false;
             }
             FallbackClaim::Pending if tokio::time::Instant::now() >= deadline => {
@@ -403,7 +445,7 @@ pub(crate) fn register_memory_delivery_handlers(
     engine.register_typed(
         COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
         |req: CommandMemoryDeliveryClaimFallbackData, _ctx| async move {
-            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason).await })
+            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason, req.boundary_uuid.as_deref()).await })
         },
     );
     let state = state.clone();
@@ -517,6 +559,12 @@ fn fallback_frame(
         "summary_bytes": summary_bytes,
         "timestamp": chrono::DateTime::from_timestamp_millis(now).unwrap_or_default().to_rfc3339(),
     })
+}
+
+/// Records that `block_id`'s CLI wrote the compaction boundary `uuid`. Called
+/// from its stdout reader, before the line reaches any pane.
+pub(crate) fn record_compaction_boundary(block_id: &str, uuid: &str) {
+    state_lock().record_boundary(uuid, block_id, agentmux_common::time::now_ms());
 }
 
 /// The card of the fallback delivery `delivery_id`, taken once, when its
@@ -867,9 +915,9 @@ mod tests {
     #[test]
     fn an_unclaimed_event_goes_to_the_fallback_and_the_hook_then_stands_down() {
         let mut st = DeliveryState::default();
-        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW), FallbackClaim::Deliver);
+        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW, i64::MIN), FallbackClaim::Deliver);
         assert!(st.fallback_claimed("b", Reason::Compact), "the hook's parts now come back empty");
-        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW), FallbackClaim::Deliver, "a repeated claim is still the fallback's");
+        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW, i64::MIN), FallbackClaim::Deliver, "a repeated claim is still the fallback's");
         assert!(!st.fallback_claimed("b", Reason::Startup), "another event is untouched");
         assert!(!st.fallback_claimed("other", Reason::Compact), "another block is untouched");
     }
@@ -877,14 +925,14 @@ mod tests {
     #[test]
     fn a_complete_hook_delivery_makes_the_fallback_stand_down() {
         let mut st = state_with_hook_delivery("b", Reason::Compact, true);
-        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW), FallbackClaim::Skip);
+        assert_eq!(st.claim_fallback("b", Reason::Compact, NOW, i64::MIN), FallbackClaim::Skip);
         assert!(!st.fallback_claimed("b", Reason::Compact));
     }
 
     #[test]
     fn a_hook_delivery_in_flight_is_pending_until_the_fallback_takes_over() {
         let mut st = state_with_hook_delivery("b", Reason::Startup, false);
-        assert_eq!(st.claim_fallback("b", Reason::Startup, NOW), FallbackClaim::Pending);
+        assert_eq!(st.claim_fallback("b", Reason::Startup, NOW, i64::MIN), FallbackClaim::Pending);
         st.take_over_from_hook("b", Reason::Startup, NOW);
         assert!(st.fallback_claimed("b", Reason::Startup));
         let d = st.deliveries.values_mut().next().unwrap();
@@ -898,10 +946,74 @@ mod tests {
         st.prune(NOW + CLAIM_WINDOW_MS + 1);
         assert!(!st.fallback_claimed("b", Reason::Startup));
         assert_eq!(
-            st.claim_fallback("b", Reason::Compact, NOW + CLAIM_WINDOW_MS + 1),
+            st.claim_fallback("b", Reason::Compact, NOW + CLAIM_WINDOW_MS + 1, i64::MIN),
             FallbackClaim::Deliver,
             "a delivery older than the window is another event"
         );
+    }
+
+    #[test]
+    fn only_the_block_that_compacted_claims_its_boundary() {
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        assert_eq!(
+            st.claim_boundary("other", Reason::Compact, Some("u1"), NOW),
+            FallbackClaim::Skip,
+            "another block of the agent, reading the shared zone"
+        );
+        assert_eq!(
+            st.claim_boundary("b", Reason::Compact, Some("u2"), NOW),
+            FallbackClaim::Skip,
+            "a boundary no stdout here wrote"
+        );
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Deliver);
+        assert_eq!(
+            st.claim_boundary("b", Reason::Compact, Some("u1"), NOW),
+            FallbackClaim::Deliver,
+            "a repeat by the same block delivers again: a duplicate over missing memory"
+        );
+    }
+
+    #[test]
+    fn a_boundary_claim_still_stands_down_for_a_hook_delivery_in_the_window() {
+        let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        st.record_boundary("u1", "b", NOW);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
+        let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        st.record_boundary("u1", "b", NOW);
+        assert_eq!(
+            st.claim_boundary("b", Reason::Compact, Some("u1"), NOW + CLAIM_WINDOW_MS + 1),
+            FallbackClaim::Deliver,
+            "a hook delivery older than the window is another event"
+        );
+    }
+
+    #[test]
+    fn an_earlier_compactions_hook_delivery_does_not_cover_the_next_boundary() {
+        // The hook delivered compaction 1 (created NOW - 500) just before its
+        // boundary; compaction 2 follows inside the claim window.
+        let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        st.record_boundary("u1", "b", NOW - 400);
+        st.record_boundary("u2", "b", NOW - 100);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u2"), NOW), FallbackClaim::Deliver);
+    }
+
+    #[test]
+    fn a_claim_without_a_boundary_keeps_the_old_behaviour() {
+        let mut st = DeliveryState::default();
+        assert_eq!(st.claim_boundary("b", Reason::Compact, None, NOW), FallbackClaim::Deliver);
+    }
+
+    #[test]
+    fn boundary_origins_are_bounded() {
+        let mut st = DeliveryState::default();
+        for i in 0..=BOUNDARY_ORIGINS_MAX {
+            st.record_boundary(&format!("u{i}"), "b", NOW);
+        }
+        st.record_boundary("u5", "b", NOW);
+        assert_eq!(st.boundary_origins.len(), BOUNDARY_ORIGINS_MAX);
+        assert_eq!(st.boundary_origins.front().map(|(u, _, _)| u.as_str()), Some("u1"));
     }
 
     #[test]
