@@ -13,17 +13,16 @@ use std::sync::Arc;
 use super::types::{SubagentEvent, SubagentEventType};
 use super::SubagentWatcher;
 
-// ── Tool-call display summaries ─────────────────────────────────────────
+// ── Tool-call payload bounds ────────────────────────────────────────────
 //
-// Both limits are in CHARS. They used to be bare `200`/`500` literals that
-// tested a BYTE length (`s.len()`) and then cut by CHAR index — agreeing for
-// ASCII and disagreeing for anything else (a string over 200 bytes but under
-// 200 chars took the truncation branch, found no 200th char, and fell through
-// to no truncation at all). See
-// docs/reports/REPORT_TOOL_SUMMARY_FORMATTING_ARCHITECTURE_2026_09_06.md §4.1.
+// Both limits are in CHARS, never bytes, so a cut can't split a codepoint.
+// See docs/reports/REPORT_TOOL_SUMMARY_FORMATTING_ARCHITECTURE_2026_09_06.md
+// §4.1 and §9 (measured input sizes).
 
-/// Chars of a tool call's input kept for the Swarm feed's collapsed row.
-const MAX_INPUT_SUMMARY_CHARS: usize = 200;
+/// Chars kept per top-level field of a tool call's input. Every subagent
+/// call measured fits whole; an Edit's file contents or an Agent prompt
+/// does not, and only needs to show its start.
+const MAX_INPUT_FIELD_CHARS: usize = 500;
 
 /// Chars of a tool result kept for the same feed. Larger than the input
 /// budget because a result is the thing a reader is usually scanning.
@@ -38,44 +37,32 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
-/// The human-meaningful field of a tool call's `input`, by tool name.
+/// A tool call's `input`, kept structured but bounded: each top-level string
+/// is cut to `MAX_INPUT_FIELD_CHARS`, and a nested array/object whose JSON is
+/// longer becomes that JSON, cut the same way.
 ///
-/// Mirrors the frontend's `toolDetail`
-/// (`frontend/app/view/agent/tool-meta/tool-descriptors.ts`), which is what
-/// the Agent pane, the Activity Dock and the tool blocks use. The Swarm feed
-/// instead showed `serde_json::Value::to_string()` — the whole input object as
-/// compact JSON, cut mid-token — because summarising happens here, at parse
-/// time, and the structured input is dropped before it ever reaches a view
-/// that could format it properly.
-///
-/// **This duplicates the mapping in a second language, deliberately and
-/// temporarily.** It buys the readable output now; the real fix is to carry
-/// the structured input across the boundary and let the frontend's existing
-/// extractor (and its renderer registry) handle it, which deletes this
-/// function. Phases 1 and 2 of the report above.
-///
-/// Unknown tools fall back to compact JSON rather than an empty string: for a
-/// tool this doesn't know, the raw object is genuinely more useful than
-/// nothing, and `mcp__*`/provider-specific names are open-ended by design.
-/// (The frontend's version returns `""` there because its callers have the
-/// full node to fall back on; here there is nothing else to show.)
-fn tool_input_detail(tool: &str, input: &serde_json::Value) -> String {
-    let field = |key: &str| input.get(key).and_then(|v| v.as_str());
-    let pick = match tool {
-        "Read" | "Edit" | "Write" | "NotebookEdit" => field("file_path"),
-        "Bash" | "BashOutput" => field("command"),
-        "Grep" | "Glob" => field("pattern"),
-        "Agent" | "Task" => field("description").or_else(|| field("prompt")),
-        "Workflow" => field("title").or_else(|| field("description")),
-        "WebSearch" | "web_search" => field("query"),
-        "WebFetch" | "web_fetch" => field("url"),
-        _ => None,
-    };
-    match pick {
-        Some(s) if !s.is_empty() => s.to_string(),
-        // Either an unknown tool, or a known one whose expected field is
-        // missing/empty/non-string — in both cases the object beats nothing.
-        _ => input.to_string(),
+/// Which field to show is decided by the frontend's `toolDetail`
+/// (`frontend/app/view/agent/tool-meta/tool-descriptors.ts`), the same rule
+/// the agent pane uses, so the Swarm feed can't drift from it.
+fn bounded_tool_input(input: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    fn bound(v: &Value) -> Value {
+        match v {
+            Value::String(s) => Value::String(truncate_chars(s, MAX_INPUT_FIELD_CHARS)),
+            Value::Array(_) | Value::Object(_) => {
+                let json = v.to_string();
+                if json.chars().count() <= MAX_INPUT_FIELD_CHARS {
+                    v.clone()
+                } else {
+                    Value::String(truncate_chars(&json, MAX_INPUT_FIELD_CHARS))
+                }
+            }
+            scalar => scalar.clone(),
+        }
+    }
+    match input {
+        Value::Object(map) => Value::Object(map.iter().map(|(k, v)| (k.clone(), bound(v))).collect()),
+        other => bound(other),
     }
 }
 
@@ -334,14 +321,8 @@ pub(super) fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEven
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let input_summary = value
-                .get("input")
-                .map(|v| truncate_chars(&tool_input_detail(&name, v), MAX_INPUT_SUMMARY_CHARS))
-                .unwrap_or_default();
-            Some(SubagentEventType::ToolUse {
-                name,
-                input_summary,
-            })
+            let input = value.get("input").map(bounded_tool_input).unwrap_or_default();
+            Some(SubagentEventType::ToolUse { name, input })
         }
         "tool_result" => {
             let is_error = value
@@ -600,70 +581,63 @@ mod summary_tests {
     use super::*;
     use serde_json::json;
 
-    // The flagship case, taken verbatim from the transcript that prompted
-    // docs/reports/REPORT_TOOL_SUMMARY_FORMATTING_ARCHITECTURE_2026_09_06.md —
-    // the Swarm feed rendered the whole input object as escaped JSON.
+    // The wire shape `swarm-model.ts`'s `SubagentEventType` mirrors: the
+    // structured input, not a pre-formatted string.
     #[test]
-    fn a_bash_call_shows_its_command_not_the_json_object() {
-        let input = json!({
-            "command": "ls /c/Users/area54/ 2>/dev/null | head -50",
-            "description": "List home directory contents",
+    fn a_tool_use_line_carries_its_input_structured() {
+        let line = json!({
+            "type": "tool_use",
+            "name": "WebFetch",
+            "input": { "url": "https://example.com/a?b=1", "prompt": "summarise" },
         });
-        let got = tool_input_detail("Bash", &input);
-        assert_eq!(got, "ls /c/Users/area54/ 2>/dev/null | head -50");
-        assert!(!got.contains('{'), "must not be a JSON dump: {got}");
-        assert!(!got.contains('"'), "must not carry JSON quoting: {got}");
-    }
-
-    #[test]
-    fn file_tools_show_the_path() {
-        for tool in ["Read", "Edit", "Write"] {
-            let input = json!({ "file_path": "/x/y.rs", "old_string": "…" });
-            assert_eq!(tool_input_detail(tool, &input), "/x/y.rs", "tool {tool}");
-        }
-    }
-
-    #[test]
-    fn search_tools_show_the_pattern() {
-        let input = json!({ "pattern": "fn main", "path": "/repo" });
-        assert_eq!(tool_input_detail("Grep", &input), "fn main");
-        assert_eq!(tool_input_detail("Glob", &input), "fn main");
-    }
-
-    #[test]
-    fn a_dispatch_prefers_its_description_over_the_whole_prompt() {
-        // An Agent prompt runs to tens of KB; the description is the one-line
-        // human summary the caller already wrote.
-        let input = json!({ "description": "Research the thing", "prompt": "x".repeat(5000) });
-        assert_eq!(tool_input_detail("Agent", &input), "Research the thing");
-    }
-
-    #[test]
-    fn a_dispatch_falls_back_to_the_prompt_when_undescribed() {
-        let input = json!({ "prompt": "do the thing" });
-        assert_eq!(tool_input_detail("Agent", &input), "do the thing");
-    }
-
-    #[test]
-    fn an_unknown_tool_keeps_the_raw_object_rather_than_showing_nothing() {
-        // Open-ended by design (`mcp__*`, provider-specific). The object is
-        // worse than a real field but strictly better than blank.
-        let input = json!({ "anything": 1 });
-        assert_eq!(tool_input_detail("mcp__whatever__do", &input), input.to_string());
-    }
-
-    #[test]
-    fn a_known_tool_missing_its_field_also_falls_back() {
-        // Guards the `Some(s) if !s.is_empty()` arm: a Bash call with no
-        // command must not render as an empty row.
+        let event = parse_event_type(&line).expect("tool_use parses");
         assert_eq!(
-            tool_input_detail("Bash", &json!({ "description": "no command here" })),
-            json!({ "description": "no command here" }).to_string()
+            serde_json::to_value(&event).unwrap(),
+            json!({
+                "type": "tool_use",
+                "name": "WebFetch",
+                "input": { "url": "https://example.com/a?b=1", "prompt": "summarise" },
+            })
         );
-        assert_eq!(
-            tool_input_detail("Bash", &json!({ "command": "" })),
-            json!({ "command": "" }).to_string()
-        );
+    }
+
+    #[test]
+    fn a_tool_use_line_without_input_carries_null() {
+        let event = parse_event_type(&json!({ "type": "tool_use", "name": "Bash" })).unwrap();
+        assert!(matches!(event, SubagentEventType::ToolUse { input: serde_json::Value::Null, .. }));
+    }
+
+    #[test]
+    fn a_small_input_crosses_unchanged() {
+        let input = json!({ "command": "ls -la", "timeout": 5, "run_in_background": false, "opts": ["a"] });
+        assert_eq!(bounded_tool_input(&input), input);
+    }
+
+    #[test]
+    fn long_string_fields_are_cut_per_field() {
+        // An Edit's file contents is the measured tail; its path must survive.
+        let input = json!({ "file_path": "/x/y.rs", "new_string": "x".repeat(5000) });
+        let got = bounded_tool_input(&input);
+        assert_eq!(got["file_path"], "/x/y.rs");
+        let cut = got["new_string"].as_str().unwrap();
+        assert_eq!(cut.chars().count(), MAX_INPUT_FIELD_CHARS + 3, "cut plus the three-dot marker");
+    }
+
+    #[test]
+    fn a_large_nested_value_becomes_its_cut_json() {
+        let edits: Vec<_> = (0..100).map(|i| json!({ "old_string": i, "new_string": i })).collect();
+        let got = bounded_tool_input(&json!({ "file_path": "/f", "edits": edits }));
+        assert_eq!(got["file_path"], "/f");
+        let cut = got["edits"].as_str().expect("oversized array is replaced by a string");
+        assert!(cut.starts_with("[{"), "{cut}");
+        assert_eq!(cut.chars().count(), MAX_INPUT_FIELD_CHARS + 3);
+    }
+
+    #[test]
+    fn a_non_object_input_is_bounded_too() {
+        assert_eq!(bounded_tool_input(&json!("short")), json!("short"));
+        let got = bounded_tool_input(&json!("é".repeat(MAX_INPUT_FIELD_CHARS + 1)));
+        assert_eq!(got.as_str().unwrap().chars().count(), MAX_INPUT_FIELD_CHARS + 3);
     }
 
     #[test]

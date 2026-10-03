@@ -5,7 +5,7 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
-import { collectClearableRows, subagentDisplayLabel, subagentRowKey, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
+import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import AnsiLine from "@/element/ansiline";
 import { callBackendService } from "@/store/mos";
@@ -1078,7 +1078,7 @@ export function DispatchActivityFeedEntry({
                             <span class="swarm-subagent-detail-tool-name">{et.name}</span>
                         </div>
                         <Show when={expanded()}>
-                            <AnsiText class="swarm-subagent-detail-text" text={et.input_summary} />
+                            <AnsiText class="swarm-subagent-detail-text" text={subagentToolDetail(et.name, et.input)} />
                         </Show>
                     </div>
                 </div>

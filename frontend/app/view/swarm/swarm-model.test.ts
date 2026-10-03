@@ -19,6 +19,7 @@ import {
     stabilizeGroupIdentity,
     subagentDisplayLabel,
     subagentRowKey,
+    subagentToolDetail,
     workflowRetireSignal,
     type ActiveCron,
     type ActiveShell,
@@ -28,6 +29,7 @@ import {
     type DispatchActivityEntry,
     type WorkflowDispatch,
 } from "./swarm-model";
+import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { NO_BACKGROUND_TASKS } from "./swarm-background";
 
 function mkShell(overrides: Partial<ActiveShell> & Pick<ActiveShell, "shell_id" | "block_id">): ActiveShell {
@@ -796,5 +798,43 @@ describe("hasRenderableBlock", () => {
 
     it("is true for a real block while (implausibly) still marked loading — loading state never overrides a genuinely present value", () => {
         expect(hasRenderableBlock({ oid: "block-a", meta: {} }, true)).toBe(true);
+    });
+});
+
+describe("subagentToolDetail", () => {
+    it("shows a Bash call's command, not its input as JSON", () => {
+        const input = { command: "ls /c/Users/area54/ 2>/dev/null | head -50", description: "List home directory contents" };
+        expect(subagentToolDetail("Bash", input)).toBe("ls /c/Users/area54/ 2>/dev/null | head -50");
+    });
+
+    it("matches the agent pane's header detail for every tool that has one", () => {
+        const cases: [string, Record<string, unknown>][] = [
+            ["WebFetch", { url: "https://example.com/docs/page?q=1#top", prompt: "summarise" }],
+            ["read_file", { path: "/x/y.rs" }],
+            ["Edit", { file_path: "/x/y.rs", old_string: "a", new_string: "b" }],
+            ["grep", { pattern: "fn main" }],
+            ["Agent", { description: "Research the thing", prompt: "x".repeat(500) }],
+            ["Workflow", { title: "Audit", description: "d" }],
+            ["web_search", { query: "solid signals" }],
+            ["computer", { command: "screenshot" }],
+        ];
+        for (const [name, input] of cases) {
+            const paneDetail = toolDetail(name, input);
+            expect(paneDetail, name).not.toBe("");
+            expect(subagentToolDetail(name, input), name).toBe(paneDetail);
+        }
+        expect(subagentToolDetail("WebFetch", cases[0][1])).toBe("example.com/docs/page");
+    });
+
+    it("falls back to compact JSON for a tool with no detail, or a missing field", () => {
+        expect(subagentToolDetail("mcp__whatever__do", { anything: 1 })).toBe('{"anything":1}');
+        expect(subagentToolDetail("Bash", { description: "no command here" })).toBe('{"description":"no command here"}');
+        expect(subagentToolDetail("Bash", { command: "" })).toBe('{"command":""}');
+        expect(subagentToolDetail("Task", { description: "t" })).toBe('{"description":"t"}');
+    });
+
+    it("shows nothing for a call that carried no input", () => {
+        expect(subagentToolDetail("Bash", null)).toBe("");
+        expect(subagentToolDetail("Bash", undefined)).toBe("");
     });
 });
