@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.59.7 — 2026-10-03
+
+- SendMessage warns when a message sent through the cloud relay is for a name that is not one of your agents (a likely typo), instead of only saying it was queued
+- Collapsed panes between two expanded panes in a column: every top and bottom edge of the collapsed panes now resizes the expanded panes above and below, not just the upper pane's bottom edge
+- Swarm lists the agents on your other machines on the LAN, under a section per host (named by channel when a host runs several); fixes two machines on the same release ignoring each other's discovery replies
+- Every ambient call (swarm summaries, titles) ends in one logged outcome, and the Instance panel shows a Titles row with how they went
+- WSL terminals: a terminal pane set to wsl://<distro> opens a shell in that distribution; agents can run Shell and PtyShell there with a connection parameter and list what is available with ConnList
+- WSL folders in Hangar (a WSL section) and the editor: edit files in a distribution's home folders, with its system folders and the Windows drives seen through it protected
+- fix(gh-guard): an agent's PtyShell no longer runs plain gh as your GitHub login
+
 ## 0.59.6 — 2026-10-02
 
 - feat(agent): while a conversation is compacting, the working row shows an estimated progress bar and the usual duration (from your earlier compactions), labeled as an estimate since Claude Code reports no real progress
