@@ -2415,11 +2415,7 @@ impl Store {
             Some(b) => b,
             None => return Ok(None),
         };
-        let agent_id = block
-            .meta
-            .get("agentId")
-            .and_then(|v| v.as_str())
-            .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
+        let agent_id = crate::backend::obj::block_meta_agent_id(&block.meta)
             .unwrap_or("")
             .to_string();
         if !agent_id.is_empty() {
@@ -2567,13 +2563,7 @@ impl Store {
     pub fn instance_get_by_block_id(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
         let shown = self
             .get::<crate::backend::obj::Block>(block_id)?
-            .and_then(|b| {
-                b.meta
-                    .get("agentId")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| b.meta.get("agent:id").and_then(|v| v.as_str()))
-                    .map(str::to_string)
-            })
+            .and_then(|b| crate::backend::obj::block_meta_agent_id(&b.meta).map(str::to_string))
             .filter(|id| !id.is_empty());
         let conn = self.conn.lock().unwrap();
         if let Some(agent_id) = shown {

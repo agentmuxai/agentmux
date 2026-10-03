@@ -342,20 +342,10 @@ fn memory_dir_for_blank_working_dir(
 /// slug) and [`list_all_memory_targets`] (every active record, for the
 /// fs-watch drift detector's enumeration).
 ///
-/// Reconstructs the absolute working directory: `source_agents_base` joined
-/// with the relative `working_dir`. Legacy (v1/v2) records without a base
-/// fall back to the current channel's agents dir (`AGENTMUX_AGENTS_DIR`),
-/// matching the registry's own pre-P0.4 reconstruction rule.
+/// The working directory comes from
+/// [`crate::backend::agent_registry_lookup::working_dir_from_record`].
 fn memory_dir_for_registry_record(rec: &crate::registry::NamedAgentRecord) -> Option<std::path::PathBuf> {
-    let base = rec
-        .data
-        .source_agents_base
-        .clone()
-        .or_else(|| std::env::var("AGENTMUX_AGENTS_DIR").ok())?;
-    let working_directory = std::path::Path::new(&base)
-        .join(&rec.data.working_dir)
-        .to_string_lossy()
-        .to_string();
+    let working_directory = crate::backend::agent_registry_lookup::working_dir_from_record(rec)?;
 
     let config_dir = claude_config_dir_for_identity(rec.data.identity_id.as_deref());
     Some(memory_dir_for_cwd(&config_dir, &working_directory))

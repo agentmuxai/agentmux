@@ -97,8 +97,7 @@ pub(crate) fn find_active_record_by_slug_and_definition(
 ///
 /// `source_agents_base` joined with the relative `working_dir`, with legacy
 /// (v1/v2) records lacking a base falling back to the current channel's agents
-/// dir — the same reconstruction rule
-/// `native_memory_handlers::memory_dir_for_registry_record` applies.
+/// dir, matching the registry's own pre-P0.4 reconstruction rule.
 pub(crate) fn working_dir_from_record(rec: &NamedAgentRecord) -> Option<String> {
     let base = rec
         .data

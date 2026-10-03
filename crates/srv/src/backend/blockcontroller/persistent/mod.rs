@@ -250,15 +250,7 @@ fn publish_resume_retry_status(broker: &Option<Arc<mps::Broker>>, block_id: &str
 /// `WAVEMUX_AGENT_ID` is the legacy fallback. Returns `None` — i.e. not
 /// muxbus-addressable — when neither is present (a non-agent persistent block).
 fn muxbus_agent_id_from_env(env: &HashMap<String, String>) -> Option<String> {
-    for key in ["AGENTMUX_AGENT_ID", "WAVEMUX_AGENT_ID"] {
-        if let Some(v) = env.get(key) {
-            let trimmed = v.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
+    super::agent_id_from_env(|key| env.get(key).map(String::as_str))
 }
 
 /// Configuration for spawning the persistent process.

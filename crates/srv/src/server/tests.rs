@@ -3584,17 +3584,34 @@ mod fleet_tests {
 /// `{}`, not `Value::Null` — a bare `#[serde(default)]` on a
 /// `serde_json::Value` field yields `Null`, whose `.to_string()` is the
 /// literal string `"null"`, not the `"{}"` every no-provenance write path
-/// already uses. This is the same bug class already fixed once in this
-/// PR's review history for the WS-RPC sibling
-/// (`NativeMemoryWriteProvenance` in rpc_types/native_memory.rs) —
-/// recurring here in the HTTP/App-API request struct that backs
-/// `handle_agent_memory_write` (the `MemoryWrite` MCP tool's actual write
-/// path).
+/// already uses. `handle_agent_memory_write` (the `MemoryWrite` MCP tool's
+/// write path) shares `NativeMemoryWriteProvenance` with the WS RPC; this pins
+/// the JSON its HTTP body accepts.
 #[test]
 fn agent_memory_write_provenance_req_defaults_a_missing_detail_to_an_empty_object() {
-    let req: AgentMemoryWriteProvenanceReq = serde_json::from_str(r#"{"source":"human"}"#).unwrap();
+    use crate::backend::rpc_types::NativeMemoryWriteProvenance;
+    let parse = |s: &str| serde_json::from_str::<NativeMemoryWriteProvenance>(s);
+
+    let req = parse(r#"{"source":"human"}"#).unwrap();
+    assert_eq!(req.source, "human");
     assert_eq!(req.detail, serde_json::json!({}));
     assert_eq!(req.detail.to_string(), "{}");
+
+    let req = parse(r#"{"source":"jekt","detail":{"from":"x"}}"#).unwrap();
+    assert_eq!(req.detail, serde_json::json!({"from": "x"}));
+    assert_eq!(parse(r#"{"source":"human","detail":null}"#).unwrap().detail, serde_json::Value::Null);
+    assert_eq!(parse(r#"{"source":"human","extra":1}"#).unwrap().source, "human");
+    assert!(parse(r#"{}"#).is_err());
+    assert!(parse(r#"{"source":5}"#).is_err());
+
+    let body: AgentMemoryWriteRequest =
+        serde_json::from_str(r#"{"agent_id":"a","filename":"f.md","content":"c"}"#).unwrap();
+    assert!(body.provenance.is_none());
+    let body: AgentMemoryWriteRequest = serde_json::from_str(
+        r#"{"agent_id":"a","filename":"f.md","content":"c","provenance":{"source":"human"}}"#,
+    )
+    .unwrap();
+    assert_eq!(body.provenance.unwrap().detail.to_string(), "{}");
 }
 
 // ── Muxqueue HTTP surface ───────────────────────────────────────────────────

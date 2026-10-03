@@ -1592,27 +1592,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             Box::pin(async move {
                 let cmd: CommandAgentAnswerData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.answer: {e}"))?;
-                if cmd.tool_use_id.is_empty() {
-                    return Err("agent.answer: MISSING_ARG: tool_use_id".to_string());
-                }
-                let ctrl = blockcontroller::get_controller(&cmd.blockid)
-                    .ok_or_else(|| format!("agent.answer: no controller for block {}", cmd.blockid))?;
-                if let Some(persistent_ctrl) = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
-                {
-                    persistent_ctrl.answer_question(cmd.tool_use_id.clone(), cmd.answers)?;
-                    tracing::info!(
-                        block_id = %cmd.blockid,
-                        tool_use_id = %cmd.tool_use_id,
-                        "[agent.answer] control_response delivered to persistent stdin"
-                    );
-                    Ok(None)
-                } else {
-                    Err("agent.answer: UNSUPPORTED_CONTROLLER: answering AskUserQuestion \
-                         requires a persistent (host) agent; container/one-shot agents are \
-                         not yet supported (Phase 2)".to_string())
-                }
+                with_question_controller("agent.answer", "answering", &cmd.blockid, &cmd.tool_use_id, |ctrl| {
+                    ctrl.answer_question(cmd.tool_use_id.clone(), cmd.answers)
+                })?;
+                tracing::info!(
+                    block_id = %cmd.blockid,
+                    tool_use_id = %cmd.tool_use_id,
+                    "[agent.answer] control_response delivered to persistent stdin"
+                );
+                Ok(None)
             })
         }),
     );
@@ -1622,38 +1610,26 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Sends `behavior: "deny"` over the same control protocol agent.answer uses
     // for `behavior: "allow"` — see `deny_question`'s doc comment for why this
     // is a general, documented Agent SDK mechanism rather than something
-    // special-cased for AskUserQuestion. Error strings below deliberately match
-    // agent.answer's wording verbatim (`no controller for block`,
-    // `UNSUPPORTED_CONTROLLER`): the frontend's SAFE_TO_RETRY_VIA_FOLLOWUP
+    // special-cased for AskUserQuestion. Its error strings come from
+    // `with_question_controller`, shared with agent.answer (`no controller for
+    // block`, `UNSUPPORTED_CONTROLLER`): the frontend's SAFE_TO_RETRY_VIA_FOLLOWUP
     // allowlist (useAgentQuestions.ts) matches on these substrings for both
     // commands. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     engine.register_typed(
         COMMAND_AGENT_CANCEL,
         move |cmd: CommandAgentCancelData, _ctx| async move {
-                if cmd.tool_use_id.is_empty() {
-                    return Err("agent.cancel: MISSING_ARG: tool_use_id".to_string());
-                }
-                let ctrl = blockcontroller::get_controller(&cmd.blockid)
-                    .ok_or_else(|| format!("agent.cancel: no controller for block {}", cmd.blockid))?;
-                if let Some(persistent_ctrl) = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
-                {
-                    persistent_ctrl.deny_question(
+                with_question_controller("agent.cancel", "canceling", &cmd.blockid, &cmd.tool_use_id, |ctrl| {
+                    ctrl.deny_question(
                         cmd.tool_use_id.clone(),
                         blockcontroller::persistent::ASK_USER_QUESTION_DENY_MESSAGE.to_string(),
-                    )?;
-                    tracing::info!(
-                        block_id = %cmd.blockid,
-                        tool_use_id = %cmd.tool_use_id,
-                        "[agent.cancel] deny control_response delivered to persistent stdin"
-                    );
-                    Ok(())
-                } else {
-                    Err("agent.cancel: UNSUPPORTED_CONTROLLER: canceling AskUserQuestion \
-                         requires a persistent (host) agent; container/one-shot agents are \
-                         not yet supported (Phase 2)".to_string())
-                }
+                    )
+                })?;
+                tracing::info!(
+                    block_id = %cmd.blockid,
+                    tool_use_id = %cmd.tool_use_id,
+                    "[agent.cancel] deny control_response delivered to persistent stdin"
+                );
+                Ok(())
         },
     );
 
@@ -1831,6 +1807,34 @@ fn dispatch_blockinput(block_id: &str, data: Vec<u8>) -> Result<(), String> {
     blockcontroller::send_input(block_id, input, None)
 }
 
+/// Run `f` on `block_id`'s persistent controller for `agent.answer` /
+/// `agent.cancel`. The error strings are matched by the frontend's
+/// SAFE_TO_RETRY_VIA_FOLLOWUP allowlist (useAgentQuestions.ts).
+fn with_question_controller<T>(
+    command: &str,
+    action: &str,
+    block_id: &str,
+    tool_use_id: &str,
+    f: impl FnOnce(&blockcontroller::persistent::PersistentSubprocessController) -> Result<T, String>,
+) -> Result<T, String> {
+    if tool_use_id.is_empty() {
+        return Err(format!("{command}: MISSING_ARG: tool_use_id"));
+    }
+    let ctrl = blockcontroller::get_controller(block_id)
+        .ok_or_else(|| format!("{command}: no controller for block {block_id}"))?;
+    match ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+    {
+        Some(persistent_ctrl) => f(persistent_ctrl),
+        None => Err(format!(
+            "{command}: UNSUPPORTED_CONTROLLER: {action} AskUserQuestion \
+             requires a persistent (host) agent; container/one-shot agents are \
+             not yet supported (Phase 2)"
+        )),
+    }
+}
+
 /// Parse a CommandBlockInputData into a BlockInputUnion.
 fn parse_block_input(
     cmd: &CommandBlockInputData,
@@ -1859,6 +1863,14 @@ fn parse_block_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn question_controller_errors_keep_the_strings_the_frontend_matches() {
+        let missing = with_question_controller("agent.cancel", "canceling", "blk", "", |_| Ok(()));
+        assert_eq!(missing.unwrap_err(), "agent.cancel: MISSING_ARG: tool_use_id");
+        let absent = with_question_controller("agent.answer", "answering", "no-such-block-qc", "tu-1", |_| Ok(()));
+        assert_eq!(absent.unwrap_err(), "agent.answer: no controller for block no-such-block-qc");
+    }
 
     /// Every no-argument stub on this connection sends `null`, not `{}`.
     ///
