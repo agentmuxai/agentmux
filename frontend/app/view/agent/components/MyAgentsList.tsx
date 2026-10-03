@@ -380,7 +380,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 // nothing"). Partial degradation alongside real rows (e.g.
                 // identity lookups failing but the registry/defs succeeding)
                 // is left alone here — those rows still render, just with
-                // the existing "(missing account)"-style fallback text.
+                // the account line's own fallback ("No auth" or no line).
                 if (result.rows.length === 0 && result.degraded.length > 0) {
                     Logger.error("agent", "MyAgentsList: listrecentsessions reported degraded sources with zero rows", {
                         degraded: result.degraded,
@@ -1032,7 +1032,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         <DualProviderLogo
                                             harness={row.provider}
                                             vendor={resolveEffectiveVendor(row.provider, row.model_vendor_base_url)}
-                                            size={24}
+                                            size={40}
                                             class="agent-recent-sessions-icon"
                                         />
                                         <span class="agent-recent-sessions-body">
@@ -1064,9 +1064,12 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 needs reliable space rather than competing ellipsis
                                                 with it. See
                                                 docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */}
-                                            <span class="agent-recent-sessions-account">
-                                                {row.identity_name || "(ambient creds)"}
-                                            </span>
+                                            {/* "No auth", or the bound account; empty (so no line) when
+                                                the backend could not tell
+                                                (SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.2). */}
+                                            <Show when={row.identity_name}>
+                                                <span class="agent-recent-sessions-account">{row.identity_name}</span>
+                                            </Show>
                                             <Show
                                                 when={row.preview}
                                                 fallback={
