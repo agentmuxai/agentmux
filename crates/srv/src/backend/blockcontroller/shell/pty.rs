@@ -68,11 +68,11 @@ pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 /// resolve on its own. An unbounded await here would then hang child
 /// reaping's own downstream cleanup (STATUS_DONE, run_lock release)
 /// forever, for a case that must never block them. The original 10s mirrored
-/// `persistent/spawn.rs`'s stdout-reader bound for the same
+/// `persistent/process_waiter.rs`'s stdout-reader bound for the same
 /// descendant-held-descriptor scenario: generous enough that normal
 /// flushing (one already-queued drain plus a write, milliseconds) never trips
 /// it, but a hard ceiling so a genuinely stuck descendant can't hang pane
-/// teardown. Unlike `persistent/spawn.rs`'s bound, expiry does NOT abort the
+/// teardown. Unlike `persistent/process_waiter.rs`'s bound, expiry does NOT abort the
 /// flusher (reagentx P1 on PR #3206, same round): there, one combined async
 /// reader task both reads and processes, so aborting it genuinely stops the
 /// read. Here reading (a separate `spawn_blocking` doing a raw, blocking,

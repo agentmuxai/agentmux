@@ -28,7 +28,9 @@
 //!   - `queue.rs`        — `send_message`, spawn claim, queue drain/replay
 //!   - `resume_retry.rs` — stale-`--resume` recovery effects and retry batch
 //!   - `input.rs`        — user messages, question answers, tool decisions, stdin
-//!   - `spawn.rs`        — `spawn_process` and the per-session I/O tasks
+//!   - `spawn.rs`        — `spawn_process`: builds the command, spawns, wires the tasks
+//!   - `stderr_reader.rs`, `stdout_reader.rs`, `process_waiter.rs`
+//!                       — the bodies of those per-session I/O tasks
 //!   - `lifecycle.rs`    — stop/restart, `session_id`, `needs_spawn`
 //!   - `tests/`          — one file per former inline test module
 
@@ -1716,12 +1718,15 @@ fn surface_error_line(
 mod eager_resume;
 mod input;
 mod lifecycle;
+mod process_waiter;
 mod queue;
 mod resume_retry;
 mod segments;
 pub(crate) use resume_retry::pane_history_session_id;
 mod spawn;
 mod status;
+mod stderr_reader;
+mod stdout_reader;
 
 #[cfg(test)]
 mod tests;

@@ -230,7 +230,7 @@ impl ShellController {
             is_agent_pane: inner.is_agent_pane,
             // The shell/PTY controller has no NDJSON-derived health monitor
             // (no structured turn-end marker to key off, unlike
-            // persistent/spawn.rs and acp.rs) — leave unset rather than
+            // persistent/stdout_reader.rs and acp.rs) — leave unset rather than
             // guess. Mount reconciliation falls back to today's Idle default
             // for these panes, same as before this field existed.
             turn_active: false,

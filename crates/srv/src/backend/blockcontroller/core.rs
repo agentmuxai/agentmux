@@ -104,8 +104,8 @@ pub(crate) fn expand_home_dir(dir: &str) -> String {
 /// `waveobj:update` event so the frontend reflects the change immediately.
 ///
 /// Every controller that captures a session id goes through this one path
-/// (persistent/spawn.rs, subprocess/host_spawn.rs and container_spawn.rs,
-/// acp.rs, app_server_controller.rs); ACP used to only set
+/// (persistent/stdout_reader.rs and stderr_reader.rs, subprocess/host_spawn.rs
+/// and container_spawn.rs, acp.rs, app_server_controller.rs); ACP used to only set
 /// `inner.session_id` in memory.
 ///
 /// Also writes through to the matching `db_agent_instances` row's

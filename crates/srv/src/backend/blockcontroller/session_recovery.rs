@@ -68,7 +68,7 @@ pub fn mark_active_pid(mstore: &Arc<Store>, block_id: &str, pid: u32) {
 /// Mark that `block_id`'s `--resume <sid>` was rejected and the controller
 /// fell through to a fresh conversation. Best-effort — logs on failure but
 /// never panics, matching `mark_active_pid`'s contract. Called from
-/// `persistent/spawn.rs`'s stderr reader the moment it detects the CLI's "No
+/// `persistent/stderr_reader.rs`'s stderr reader the moment it detects the CLI's "No
 /// conversation found with session ID" line, right alongside the existing
 /// `core::persist_session_id(block_id, "", ...)` clear.
 ///
