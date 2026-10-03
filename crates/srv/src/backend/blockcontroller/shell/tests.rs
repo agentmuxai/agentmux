@@ -127,6 +127,35 @@ use std::sync::Arc;
         assert_eq!(status.version, 0);
     }
 
+    /// P0 of SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md: a pane on
+    /// a WSL or SSH connection gets no shell rather than a local one under a
+    /// remote name, and an unsafe connection name is refused. Neither reaches
+    /// the PTY, so this needs no mock.
+    #[test]
+    fn a_remote_connection_does_not_start_a_local_shell() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-remote".to_string(),
+            None,
+            None,
+            None,
+            None,
+            String::new(),
+        );
+        for (conn, expect) in [
+            ("area54", "not available yet"),
+            ("wsl://Ubuntu", "not available yet"),
+            ("-oProxyCommand=calc", "cannot start with '-'"),
+        ] {
+            let mut meta = make_shell_meta();
+            meta.insert("connection".to_string(), serde_json::json!(conn));
+            let err = ctrl.start(meta, None, true).unwrap_err();
+            assert!(err.contains(expect), "{conn}: {err}");
+            assert_eq!(ctrl.get_runtime_status().shellprocstatus, STATUS_INIT, "{conn}: never ran");
+        }
+    }
+
     #[test]
     fn test_shell_controller_start_stop() {
         let ctrl = ShellController::new(

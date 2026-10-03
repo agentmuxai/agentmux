@@ -50,9 +50,11 @@ pub(super) async fn handle_client_service(state: &AppState, call: &WebCallType) 
             Err(e) => WebReturnType::error(e.to_string()),
         },
         "GetAllConnStatus" => {
-            // Return empty — connection manager not yet wired
-            // Go returns success with no data (nil slice omitted by omitempty)
-            WebReturnType::success_empty()
+            // Every connection that has a status (backend::remote::status);
+            // `local` is never listed, it is always connected.
+            WebReturnType::success(
+                serde_json::to_value(crate::backend::remote::status::all()).unwrap_or_default(),
+            )
         }
         "TelemetryUpdate" => {
             // Accept but ignore — telemetry not implemented
