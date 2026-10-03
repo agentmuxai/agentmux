@@ -132,16 +132,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_image: String::new(),
                     container_volumes: "[]".to_string(),
                     container_name: String::new(),
-                    // New agents fail-by-default on missing oauth creds; the
-                    // ambient opt-in is an explicit per-agent toggle (spec
-                    // §2.2 edge case — no implicit ambient for fresh agents).
+                    // Inert (see the field's doc); always 0.
                     use_ambient_login: 0,
                     // Not settable via this RPC yet — only `agent.define`
                     // (the App-API/MCP path) can set a model vendor override.
                     model_vendor_base_url: String::new(),
-                    // Opt-in required, same fail-by-default posture as
-                    // use_ambient_login above. Toggled from the Warden
-                    // Supervisor panel (not this RPC) once that ships.
+                    // Opt-in required. Toggled from the Warden Supervisor
+                    // panel (not this RPC) once that ships.
                     auto_continue_enabled: 0,
                     memory_id: String::new(),
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),

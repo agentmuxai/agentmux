@@ -263,7 +263,7 @@ fn resolve_bindings_for_instance(
         // account) is visible, not silently indistinguishable from
         // routine "no accounts configured." Whether the spawn proceeds
         // is decided by the caller's layer-3 definition-provider gate
-        // (oauth-class CLI provider + no ambient opt-in → blocked).
+        // (oauth-class CLI provider with no bound account → blocked).
         tracing::warn!(
             target: "identity",
             "no direct account links for definition {} (identity {}) — \
@@ -554,11 +554,11 @@ pub fn inject_identity_env_with_broker(
         );
     }
 
-    // Layer-3 gate inputs: the agent definition's ambient opt-in flag and
-    // its own CLI provider (the oauth-class provider every launch of this
-    // agent uses, whether or not a binding row exists for it). A missing
-    // definition row reads as flag=false / no expected provider — the
-    // per-binding gate still applies to whatever links exist.
+    // Layer-3 gate input: the agent definition's own CLI provider (the
+    // oauth-class provider every launch of this agent uses, whether or not
+    // a binding row exists for it). A missing definition row reads as no
+    // expected provider — the per-binding gate still applies to whatever
+    // links exist.
     //
     // Provider is resolved via `id_store.resolve_effective_provider_id`
     // (`backend/storage/agents.rs`), NOT `d.provider` directly — the
@@ -1889,7 +1889,7 @@ mod tests {
     //    _2026_07_14.md §2.2/§2.5) ────────────────────────────────────
 
     /// Fixture def for the gating tests — oauth-class CLI provider
-    /// (claude) with a configurable ambient opt-in.
+    /// (claude). `use_ambient_login` is settable only to prove it is inert.
     fn gate_def(use_ambient_login: i64) -> crate::backend::storage::store::AgentDefinition {
         crate::backend::storage::store::AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
