@@ -17,7 +17,7 @@
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { PeekOverlay } from "./PeekOverlay";
 import { useNodePeek, type NodePeek } from "../hooks/useNodePeek";
@@ -468,6 +468,71 @@ describe("PeekOverlay", () => {
                 expect(waiting.isPeeking()).toBe(false);
             } finally {
                 window.dispatchEvent(new PointerEvent("pointerup", { button: 0, bubbles: true }));
+                vi.useRealTimers();
+            }
+        });
+
+        it("the panel's content (time, estimate) stays while the pointer is on a panel its row has left", () => {
+            vi.useFakeTimers();
+            try {
+                // Real hook + overlay, content gated the way ToolBlock gates its
+                // time line. The row's hover ends when the pointer moves onto the
+                // panel; the content must not vanish with it.
+                const container = document.createElement("div");
+                container.style.overflowY = "auto";
+                document.body.appendChild(container);
+                const row = document.createElement("div");
+                container.appendChild(row);
+                rectOf(container, { top: 100, bottom: 400 });
+                rectOf(row, { top: 200, bottom: 230, left: 100, right: 500, width: 400 });
+                Object.defineProperty(window, "innerWidth", { value: 1400, configurable: true });
+                Object.defineProperty(window, "innerHeight", { value: 1000, configurable: true });
+                let peek!: NodePeek;
+                function Harness() {
+                    peek = useNodePeek();
+                    peek.setRowEl(row);
+                    return (
+                        <PeekOverlay show={peek.isPeeking()} rowEl={peek.rowEl}>
+                            <Show when={peek.panelVisible()}>
+                                <span>time-line</span>
+                            </Show>
+                        </PeekOverlay>
+                    );
+                }
+                render(() => <Harness />);
+                peek.handlePeekEnter();
+                vi.advanceTimersByTime(60); // enter delay, then the mount's RAF
+                rectOf(panel()!, { height: 5000, width: 300, top: 230, bottom: 830, left: 200, right: 500 });
+                row.dispatchEvent(new MouseEvent("mousemove", { clientY: 215, bubbles: true }));
+                vi.advanceTimersByTime(50); // placed: tall, so enterable and pinned
+                expect(screen.getByText("time-line")).toBeInTheDocument();
+
+                peek.handlePeekLeave(); // the row's mouseleave as the pointer heads for the panel
+                expect(peek.isPeeking()).toBe(false);
+                expect(peek.panelVisible()).toBe(true);
+                expect(screen.getByText("time-line")).toBeInTheDocument(); // still there while crossing
+
+                panel()!.dispatchEvent(new MouseEvent("mouseenter"));
+                vi.advanceTimersByTime(2000);
+                expect(screen.getByText("time-line")).toBeInTheDocument(); // still there while on the panel
+
+                panel()!.dispatchEvent(new MouseEvent("mouseleave"));
+                vi.advanceTimersByTime(200);
+                expect(panel()).toBeNull();
+                expect(peek.panelVisible()).toBe(false); // closed: the row's ticker can idle again
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("another row's panelVisible stays false while one panel is open after its row was left", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const elsewhere = otherRow();
+                setShow(false); // this panel lingers after its row was left
+                expect(elsewhere.panelVisible()).toBe(false);
+            } finally {
                 vi.useRealTimers();
             }
         });

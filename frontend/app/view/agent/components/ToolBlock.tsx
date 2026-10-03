@@ -335,9 +335,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // ticker forever, not just the one actually being hovered right now.
     // Short-circuiting before peekTick() means only genuinely-hovered rows
     // subscribe.
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
     const peekTimeText = createMemo(() => {
-        if (!isPeeking()) return null;
+        if (!peekPanelVisible()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
         const ts = props.node.timestamp;
         if (ts == null) return null;
@@ -350,8 +350,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     });
     // Raw-data existence check for showing the overlay at all — deliberately
     // NOT reading peekTimeText()/peekEstimateText() themselves, since
-    // peekTimeText is gated behind isPeeking() (only resolves to a real
-    // value once hover already started). Using the ticking memos here would
+    // peekTimeText is gated behind peekPanelVisible() (only resolves to a
+    // real value once the panel is showing). Using the ticking memos here would
     // make the show-check circularly depend on hover having already begun,
     // defeating its own purpose of deciding whether hover should open
     // anything in the first place.

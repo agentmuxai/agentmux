@@ -35,11 +35,21 @@
 
 import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { PEEK_ENTER_DELAY_MS } from "../components/hover-anchor";
-import { peekBridgeRow } from "../components/peek-bridge";
+import { peekBridgeRow, peekPanelOpenAfterLeaveRow } from "../components/peek-bridge";
 import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 
 export interface NodePeek {
+    /** The row is hovered (after the enter delay). Drives the overlay's `show`. */
     isPeeking: Accessor<boolean>;
+    /**
+     * The peek panel is on screen: the row is hovered, OR its panel is still open
+     * after the row was left (a tall panel lingers, and stays while the pointer is
+     * on it). Gate the panel's CONTENT on this, not on `isPeeking`, or the content
+     * (time, token estimate) vanishes the moment the pointer moves onto the panel.
+     * Still false for every row whose panel isn't showing, so per-row tickers stay
+     * idle.
+     */
+    panelVisible: Accessor<boolean>;
     rowEl: Accessor<HTMLElement | undefined>;
     setRowEl: (el: HTMLElement) => void;
     handlePeekEnter: () => void;
@@ -119,5 +129,11 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
 
     onCleanup(() => clearTimeout(timer));
 
-    return { isPeeking, rowEl, setRowEl, handlePeekEnter, handlePeekLeave };
+    const panelVisible = () => {
+        if (isPeeking()) return true;
+        const row = rowEl();
+        return row !== undefined && peekPanelOpenAfterLeaveRow() === row;
+    };
+
+    return { isPeeking, panelVisible, rowEl, setRowEl, handlePeekEnter, handlePeekLeave };
 }

@@ -48,9 +48,9 @@ export const CollapsibleMessage = (props: CollapsibleMessageProps): JSX.Element 
     // gated on `collapsed`: neither message kind shows a relative time when
     // expanded, so the peek adds it either way.
     const peekTick = useTick(1000);
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
     const peekTimeText = createMemo(() => {
-        if (!isPeeking()) return null;
+        if (!peekPanelVisible()) return null;
         peekTick();
         return `${formatExactTime(props.timestamp)} · ${formatTimeAgo(props.timestamp)}`;
     });
