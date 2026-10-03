@@ -63,6 +63,45 @@ static HAND_BACK_TARGET: std::sync::atomic::AtomicUsize = std::sync::atomic::Ato
 #[cfg(target_os = "windows")]
 const WM_AGENTMUX_HAND_BACK_ACTIVATION: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 0x51;
 
+/// Pool windows being promoted right now. A promote activates the window
+/// while it is still hidden (window pool: `SetWindowPos` before the first
+/// show; pane pool: while it waits for the renderer's snapshot), and it runs
+/// on the IPC thread, so a hand-back posted to the UI thread could otherwise
+/// run in that gap and take activation from the window the user is tearing
+/// off. A window in this set counts as one the user can see.
+#[cfg(target_os = "windows")]
+static PROMOTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<usize>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+/// Held by a pool promote for as long as its window may be active but not yet
+/// visible. See `PROMOTING`.
+#[cfg(target_os = "windows")]
+pub(crate) struct PromoteActivationGuard(usize);
+
+#[cfg(target_os = "windows")]
+impl PromoteActivationGuard {
+    pub(crate) fn new(hwnd: *mut std::ffi::c_void) -> Self {
+        if let Ok(mut set) = PROMOTING.lock() {
+            set.insert(hwnd as usize);
+        }
+        Self(hwnd as usize)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for PromoteActivationGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = PROMOTING.lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_promoting(hwnd: *mut std::ffi::c_void) -> bool {
+    PROMOTING.lock().map(|set| set.contains(&(hwnd as usize))).unwrap_or(false)
+}
+
 /// True if the user can see `hwnd`: shown, and on some monitor (pool windows
 /// are parked at -32000,-32000, on none). A minimized window counts as seen,
 /// since `MonitorFromWindow` uses its restored rect.
@@ -98,11 +137,13 @@ unsafe fn hand_back_activation() {
         return;
     }
     let fg = GetForegroundWindow();
-    if fg.is_null() || user_can_see(fg) || !is_own_window(fg) {
-        return; // a window the user can see has it; leave it
+    if fg.is_null() || user_can_see(fg) || is_promoting(fg) || !is_own_window(fg) {
+        return; // a window the user can see (or is about to) has it; leave it
     }
+    // Used once: a target kept after this could be a window the user has
+    // since left, and a later chain would hand activation back to it.
+    HAND_BACK_TARGET.store(0, std::sync::atomic::Ordering::Relaxed);
     if !user_can_see(target) {
-        HAND_BACK_TARGET.store(0, std::sync::atomic::Ordering::Relaxed);
         return;
     }
     let ok = SetForegroundWindow(target) != 0;
@@ -163,8 +204,8 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
                 let remembered =
                     HAND_BACK_TARGET.load(std::sync::atomic::Ordering::Relaxed) != 0;
                 match invisible_activation(
-                    user_can_see(hwnd),
-                    previous != hwnd && user_can_see(previous),
+                    user_can_see(hwnd) || is_promoting(hwnd),
+                    previous != hwnd && user_can_see(previous) && is_own_window(previous),
                     remembered,
                 ) {
                     InvisibleActivation::Forget => {
