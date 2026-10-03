@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::storage::store::Store;
 
 const LEDGER_FILE: &str = "adoption-ledger.json";
+static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Longest a boot waits for the pass; what is left is picked up next boot.
 pub(crate) const BOOT_BUDGET: Duration = Duration::from_secs(8);
 
@@ -213,19 +214,39 @@ fn stamp_of(path: &Path) -> Stamp {
 fn load_ledger(shared_dir: &Path) -> Ledger {
     match std::fs::read_to_string(shared_dir.join(LEDGER_FILE)) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "adoption: ledger unreadable, starting a new one");
+            // Keep the unreadable file for inspection instead of overwriting it.
+            let aside = shared_dir.join(format!("{LEDGER_FILE}.corrupt"));
+            let _ = std::fs::rename(shared_dir.join(LEDGER_FILE), &aside);
+            tracing::warn!(error = %e, kept = %aside.display(), "adoption: ledger unreadable, starting a new one");
             Ledger::default()
         }),
         Err(_) => Ledger::default(),
     }
 }
 
+/// Write the ledger. Several channels share one machine now, so two boots can
+/// run at once: the file on disk is read again and merged first (keys only ever
+/// get added, so a union loses nothing another boot recorded), and the temp
+/// file is unique so two writers never interleave in one file.
 fn save_ledger(shared_dir: &Path, ledger: &Ledger) {
-    let tmp = shared_dir.join(format!("{LEDGER_FILE}.tmp"));
+    let mut merged = std::fs::read_to_string(shared_dir.join(LEDGER_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Ledger>(&s).ok())
+        .unwrap_or_default();
+    merged.keys.extend(ledger.keys.iter().cloned());
+    for (k, v) in &ledger.sources {
+        merged.sources.insert(k.clone(), v.clone());
+    }
+    let n = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = shared_dir.join(format!("{LEDGER_FILE}.{}.{n}.tmp", std::process::id()));
+    let ledger = &merged;
     let result = serde_json::to_vec(ledger)
         .map_err(|e| e.to_string())
         .and_then(|b| std::fs::write(&tmp, b).map_err(|e| e.to_string()))
         .and_then(|_| std::fs::rename(&tmp, shared_dir.join(LEDGER_FILE)).map_err(|e| e.to_string()));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
     if let Err(e) = result {
         tracing::warn!(error = %e, "adoption: could not save the ledger; the next boot repeats the pass");
     }
@@ -440,6 +461,11 @@ pub(crate) fn adopt(target: &Store, inp: &Inputs) -> Report {
             report.sources_failed += 1;
             continue;
         }
+        // Keys are recorded as rows go in; if the transaction does not commit
+        // the rows are gone, so the keys must go too. Otherwise they would
+        // read as "adopted, then deleted" and the rows would never come back.
+        let keys_before = ledger.keys.clone();
+        let report_before = report.clone();
         adopt_global_memory(&src, &conn, &mut ledger, &mut report);
         adopt_native_memory(&src, &conn, &mut ledger, &mut report);
         if for_accounts {
@@ -447,6 +473,8 @@ pub(crate) fn adopt(target: &Store, inp: &Inputs) -> Report {
         }
         if conn.execute_batch("COMMIT").is_err() {
             let _ = conn.execute_batch("ROLLBACK");
+            ledger.keys = keys_before;
+            report = report_before;
             report.sources_failed += 1;
             continue;
         }
@@ -871,12 +899,71 @@ mod tests {
         assert_eq!(count(&f.target, "SELECT COUNT(*) FROM db_bundles WHERE id <> 'blank'"), 1);
     }
 
+    #[test]
+    fn a_source_whose_commit_fails_leaves_no_ledger_trace_and_is_retried() {
+        let f = Fixture::new();
+        let a = f.channel_store("local-main-b28b7a-0000000a");
+        bundle(&a, "gm-x", "Entry", true, false, 10, "text");
+        // A deferred foreign key violated by a trigger makes COMMIT (not the INSERT) fail.
+        sql(
+            &f.target,
+            "CREATE TABLE fk_parent (id TEXT PRIMARY KEY);
+             CREATE TABLE fk_child (pid TEXT REFERENCES fk_parent(id) DEFERRABLE INITIALLY DEFERRED);
+             CREATE TRIGGER break_commit AFTER INSERT ON db_bundles BEGIN INSERT INTO fk_child VALUES ('missing'); END;",
+        );
+        let r = f.run("local-main-b28b7a-0000000c");
+        assert_eq!(r.sources_failed, 1, "{r:?}");
+        assert_eq!(r.global_memory_added, 0, "a rolled-back source counts nothing: {r:?}");
+        assert_eq!(count(&f.target, "SELECT COUNT(*) FROM db_bundles WHERE id <> 'blank'"), 0);
+
+        // The keys must not have been recorded, or the retry would read them as "deleted".
+        sql(&f.target, "DROP TRIGGER break_commit");
+        let again = f.run("local-main-b28b7a-0000000c");
+        assert_eq!(again.global_memory_added, 1, "{again:?}");
+        assert_eq!(again.deleted_stay_deleted, 0, "{again:?}");
+        assert_eq!(count(&f.target, "SELECT COUNT(*) FROM db_bundles WHERE id = 'gm-x'"), 1);
+    }
+
+    #[test]
+    fn two_boots_saving_the_ledger_merge_instead_of_overwriting() {
+        let f = Fixture::new();
+        let mut one = Ledger::default();
+        one.keys.insert("gm:one".into());
+        let mut two = Ledger::default();
+        two.keys.insert("gm:two".into());
+        save_ledger(&f.shared, &one);
+        // the second boot never saw the first one's keys
+        save_ledger(&f.shared, &two);
+        let saved = load_ledger(&f.shared);
+        assert!(saved.keys.contains("gm:one") && saved.keys.contains("gm:two"), "{:?}", saved.keys);
+        let leftovers: Vec<_> = fs::read_dir(&f.shared)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
+    }
+
+    #[test]
+    fn an_unreadable_ledger_is_kept_aside_not_overwritten() {
+        let f = Fixture::new();
+        fs::write(f.shared.join(LEDGER_FILE), b"{ this is not json").unwrap();
+        let ledger = load_ledger(&f.shared);
+        assert!(ledger.keys.is_empty());
+        assert!(f.shared.join(format!("{LEDGER_FILE}.corrupt")).is_file(), "the unreadable file is kept for inspection");
+    }
+
     /// Phase 0 of `SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`: run the real
     /// pass over a real `~/.agentmux` into a throwaway store and print what it
     /// would carry over, counts only. The sources are opened read-only and the
     /// target is a temp file, so nothing real is written.
     ///
-    ///   AGENTMUX_ADOPTION_DRYRUN_HOME=~/.agentmux     ///   AGENTMUX_ADOPTION_DRYRUN_CHANNEL=local-main-b28b7a-ffffffff     ///   cargo test -p agentmux-srv --bins -- --ignored --nocapture adoption_dry_run
+    /// ```text
+    /// AGENTMUX_ADOPTION_DRYRUN_HOME=~/.agentmux
+    /// AGENTMUX_ADOPTION_DRYRUN_CHANNEL=local-main-b28b7a-ffffffff
+    /// cargo test -p agentmux-srv --bins -- --ignored --nocapture adoption_dry_run
+    /// ```
     #[test]
     #[ignore = "reads a real home; run by hand"]
     fn adoption_dry_run_against_a_real_home() {
