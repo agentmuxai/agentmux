@@ -32,14 +32,16 @@ pub fn spawn_login_shell(cols: u16, rows: u16) -> io::Result<Pty> {
     let mut slave: libc::c_int = -1;
     let ws = winsize(cols, rows);
     // SAFETY: openpty writes two valid descriptors on success; null name and
-    // termios are allowed.
+    // termios are allowed. `*mut` pointers: macOS declares them `*mut`, Linux
+    // `*const`, and `*mut` coerces to `*const`.
+    let mut ws = ws;
     let rc = unsafe {
         libc::openpty(
             &mut master,
             &mut slave,
             std::ptr::null_mut(),
-            std::ptr::null(),
-            &ws,
+            std::ptr::null_mut(),
+            &mut ws,
         )
     };
     if rc != 0 {
