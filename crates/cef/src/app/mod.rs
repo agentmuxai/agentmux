@@ -180,7 +180,7 @@ wrap_window_delegate! {
                 // on the CEF UI thread, where reading it off the NSView is
                 // safe — the CGEventTap hook thread only ever does a
                 // read-only Mutex lookup against this cache, never touches
-                // AppKit directly (see tear_off_hook.rs's macOS module doc
+                // AppKit directly (see tear_off_hook/macos.rs's module doc
                 // comment for why that distinction matters).
                 #[cfg(target_os = "macos")]
                 {
