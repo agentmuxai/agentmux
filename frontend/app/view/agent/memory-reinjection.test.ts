@@ -234,6 +234,13 @@ describe("buildMemoryReinjectionNode", () => {
         expect(node.id).toBe(memoryReinjectionNodeId(opts.frameTimestamp));
     });
 
+    it("keys the id on the boundary uuid when given: two timestamp-less compactions differ", () => {
+        const a = buildMemoryReinjectionNode([globalEntry("g1", "x")], { ...opts, frameTimestamp: null, boundaryUuid: "u-1" });
+        const b = buildMemoryReinjectionNode([globalEntry("g1", "x")], { ...opts, frameTimestamp: null, boundaryUuid: "u-2" });
+        expect(a.id).toBe("memory-reinjected-u-1");
+        expect(a.id).not.toBe(b.id);
+    });
+
     it("uses frameTimestamp for `at` when present, falling back to `now` only when absent", () => {
         const withFrame = buildMemoryReinjectionNode([globalEntry("g1", "x")], opts);
         expect(withFrame.at).toBe(Date.parse(opts.frameTimestamp));

@@ -216,14 +216,13 @@ export function parseReinjectionMessage(
 }
 
 /**
- * Dedup key — exactly one reinjection per real `compact_boundary`, keyed
- * the same way `compact-boundary.ts`'s `contextCompactedNodeId` already
- * dedups: by the frame's own `timestamp`, never a client-generated one, so
- * a live delivery and a later history-replay overlap of the same boundary
- * can't fire this twice. See spec §3.1/§3.2.
+ * Dedup key — exactly one reinjection node per event, keyed on the event's
+ * own identity, never a client-generated one: a compaction boundary's
+ * `uuid` (the CLI's stdout frame has no `timestamp`), else the frame's
+ * `timestamp` (a fresh-session outcome). See spec §3.1/§3.2.
  */
-export function memoryReinjectionNodeId(frameTimestamp: string | null): string {
-    return `memory-reinjected-${frameTimestamp ?? "notime"}`;
+export function memoryReinjectionNodeId(key: string | null): string {
+    return `memory-reinjected-${key ?? "notime"}`;
 }
 
 /**
@@ -290,8 +289,10 @@ export function buildMemoryReinjectionNodeFromReplay(
 }
 
 export interface BuildMemoryReinjectionNodeOptions {
-    /** The `compact_boundary` frame's own `timestamp` field — see memoryReinjectionNodeId. */
+    /** The triggering frame's own `timestamp` field: the node's time, and its id without a `boundaryUuid`. */
     frameTimestamp: string | null;
+    /** The compaction boundary's `uuid` — the node id when present, see memoryReinjectionNodeId. */
+    boundaryUuid?: string | null;
     /** Fallback `at` when frameTimestamp is absent/unparseable — caller's Date.now() at receipt. */
     now: number;
     /** §3.4.2 — the pane's own context window; memorySizeBand bands Personal-memory estimated tokens against `contextWindow * fraction`. */
@@ -343,7 +344,7 @@ export function buildMemoryReinjectionNode(
 
     return {
         type: "memory_reinjection",
-        id: memoryReinjectionNodeId(opts.frameTimestamp),
+        id: memoryReinjectionNodeId(opts.boundaryUuid ?? opts.frameTimestamp),
         globalMemoryCount: globalEntries.length,
         personalMemoryCount: personalEntries.length,
         estimatedTokens,

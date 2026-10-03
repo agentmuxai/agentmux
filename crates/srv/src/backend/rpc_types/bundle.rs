@@ -138,6 +138,11 @@ pub struct CommandMemoryDeliveryClaimFallbackData {
     pub block_id: String,
     /// The reinjection's reason: `compaction` or `fresh_session`.
     pub reason: String,
+    /// The compaction boundary's `uuid`: only the block whose own CLI wrote
+    /// that boundary can deliver; any other block stands down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub boundary_uuid: Option<String>,
 }
 
 /// Reply to `memorydelivery:claim_fallback`: `false` when Claude Code's
