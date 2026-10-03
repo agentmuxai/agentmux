@@ -45,12 +45,16 @@ pub const META_KEY_AGENT: &str = "ptyshell:askpassagent";
 /// What a secret was issued for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AskpassGrant {
-    /// The agent's pane, whose window shows the dialog.
+    /// The agent's pane (or the user's, [`Self::user_pane`]), whose window
+    /// shows the dialog.
     pub agent_block_id: String,
     /// The agent, named in the dialog.
     pub agent: String,
     /// The connection `ssh` is opening, named in the dialog.
     pub connection: String,
+    /// The user's own pane (a durable terminal, whose `ssh` has no terminal
+    /// to prompt in), not an agent's: the dialog says so.
+    pub user_pane: bool,
 }
 
 fn registry() -> &'static Mutex<HashMap<[u8; 32], AskpassGrant>> {
@@ -191,6 +195,7 @@ mod tests {
             agent_block_id: "blk".into(),
             agent: "korp".into(),
             connection: conn.into(),
+            user_pane: false,
         }
     }
 

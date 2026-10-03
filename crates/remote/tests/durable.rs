@@ -11,10 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-#[path = "../src/frame.rs"]
-#[allow(dead_code)]
-mod frame;
-use frame::{Decoder, Frame};
+use agentmux_remote::frame::{Decoder, Frame};
 
 const BIN: &str = env!("CARGO_BIN_EXE_agentmux-remote");
 

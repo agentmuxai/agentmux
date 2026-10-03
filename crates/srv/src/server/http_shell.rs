@@ -146,6 +146,7 @@ pub(super) async fn handle_shell_create(
                 agent_block_id: req.agent_block_id.clone(),
                 agent: ssh_agent.clone(),
                 connection: crate::backend::remote::ConnTarget::Ssh(dest.clone()).name(),
+                user_pane: false,
             });
             let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
             effective_env.extend(askpass::ssh_env(&secret, &askpass_program, &local_url, &state.auth_key));

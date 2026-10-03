@@ -392,7 +392,11 @@ pub(crate) async fn handle_askpass(
         "message": format!(
             "ssh, connecting to {} for {}, {}:\n\n{}",
             one_line(&grant.connection, 80),
-            agent_label(Some(grant.agent.as_str()).filter(|a| !a.is_empty())),
+            if grant.user_pane {
+                "your terminal".to_string()
+            } else {
+                agent_label(Some(grant.agent.as_str()).filter(|a| !a.is_empty()))
+            },
             if kind == PromptKind::Info { "says" } else { "asks" },
             req.prompt.trim().chars().take(2000).collect::<String>()
         ),

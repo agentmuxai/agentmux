@@ -14,8 +14,7 @@
 //! own SSH channel and a per-user Unix socket. Its files live in
 //! `~/.agentmux-remote` (or `$AGENTMUX_REMOTE_HOME`).
 
-mod frame;
-mod ring;
+use agentmux_remote::frame;
 
 #[cfg(unix)]
 mod attach;
