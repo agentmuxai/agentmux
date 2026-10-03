@@ -4668,6 +4668,71 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     blockcontroller::delete_controller(&first_shell_id);
 }
 
+/// An agent's PtyShell has the agent's plain-`gh` guard: `GH_CONFIG_DIR` in the
+/// shell is the agent's guard directory, as in its `Shell` and its own CLI, so
+/// `gh` typed into the shell cannot act as the user.
+///
+/// `#[ignore]`d like the other real-PTY tests here. Run manually:
+/// `cargo test -p agentmux-srv --bin agentmux-srv
+/// an_agents_ptyshell_has_the_gh_guard -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn an_agents_ptyshell_has_the_gh_guard() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "guard-agent-block".to_string(),
+        ..Default::default()
+    };
+    agent_block.meta.insert(
+        "cmd:env".to_string(),
+        serde_json::json!({ "AGENTMUX_AGENT_ID": "PtyGuardLive" }),
+    );
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "guard-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let echo = if cfg!(windows) { "echo GH=[%GH_CONFIG_DIR%]\r\n" } else { "echo GH=[$GH_CONFIG_DIR]\n" };
+    let (status, _) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "guard-agent-block", "text": echo }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let want = crate::backend::gh_guard::agent_gh_config_dir(
+        &crate::backend::gh_guard::guard_config_home(),
+        Some("ptyguardlive"),
+    );
+    let want = format!("GH=[{}]", want.display());
+    let mut content = String::new();
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let (_, json) = post_json(
+            &app,
+            "/api/v1/ptyshell/read",
+            serde_json::json!({ "shell_id": shell_id, "agent_block_id": "guard-agent-block" }),
+        )
+        .await;
+        content = json["content"].as_str().unwrap_or("").to_string();
+        if content.contains(&want) {
+            break;
+        }
+    }
+    blockcontroller::delete_controller(&shell_id);
+    assert!(content.contains(&want), "expected {want} in the shell's output, got: {content:?}");
+}
+
 /// Two first `PtyShell` calls on different connections: the claim's winner has
 /// inserted its block and pointer but not started its controller yet. The
 /// loser must not take that block for one left from before a restart: it gets
