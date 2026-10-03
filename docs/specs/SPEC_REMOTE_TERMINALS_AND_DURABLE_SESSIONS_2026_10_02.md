@@ -1,7 +1,7 @@
 # SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan
 
 **Date:** 2026-10-02
-**Status:** proposed — plan only; nothing implemented. The section 10 decisions were answered on 2026-10-02 (the recommendations, see 10.1).
+**Status:** proposed — plan only; nothing implemented. The section 11 decisions were answered on 2026-10-02 (the recommendations, see 11.1).
 **Author:** AgentX (narko), at the owner's request ("lets get both remote terminals and durable sessions in, lets work first on that ... this would also need support across the 3 platforms")
 **Affects:** `crates/srv` (blockcontroller/shell, a new `remote/` module, fs_ops, wconfig, server/service), a new crate `crates/remote` (the remote helper), `crates/cef` (none expected), `frontend/app` (term view, block frame, conntypeahead, Hangar, settings), `Taskfile.yml` and `.github/workflows` (new build targets)
 **Builds on:** `docs/reports/REPORT_WAVETERM_FEATURE_GAP_2026_10_02.md` §2.10 (what Wave has), `docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md` (the `term` blockfile and offset replay a durable session plugs into), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why the last remote helper was removed, and what not to repeat)
@@ -18,7 +18,7 @@ On all three platforms AgentMux ships on. Specifically:
 | SSH terminals | yes | yes | yes |
 | Remote files (Hangar, editor) | yes | yes | yes |
 | Durable sessions | yes | yes | yes |
-| **Remote hosts** reached over SSH | Linux x86_64 and arm64, macOS arm64 and x86_64 from the first release of each phase; Windows (OpenSSH Server) as a later phase (§8, P6) | same | same |
+| **Remote hosts** reached over SSH | Linux x86_64 and arm64, macOS arm64 and x86_64 from the first release of each phase; Windows (OpenSSH Server) as a later phase (§9, P6) | same | same |
 
 "Across the 3 platforms" applies first to where AgentMux runs. Remote hosts are mostly Linux and macOS servers; a Windows server is supported later because its terminal and process model needs its own helper work (§6.5).
 
@@ -31,7 +31,7 @@ On all three platforms AgentMux ships on. Specifically:
 - **Packaging:** extra binaries (`agentmux-bashwrap`, `agentmux-mcp`) ship in `tools/bin`. CI builds Windows x86_64, Linux x86_64 (glibc) and macOS arm64. No musl/static build, no Linux arm64 binary, no macOS x86_64.
 - **Patterns worth reusing:** the pure `update(state, event) -> (state, effects)` state machine in `persistent_resume.rs` (for reconnect), session-recovery meta flags (`session_recovery.rs`), and the `term` offset replay (for catching up after a reattach).
 
-## 3. Decisions this plan rests on (recommended; see §10)
+## 3. Decisions this plan rests on (recommended; see §11)
 
 ### 3.1 Use the system's OpenSSH, not an SSH library
 
@@ -45,13 +45,13 @@ Costs, and how they are handled:
 
 ### 3.2 A remote helper, installed per host, is required for files and durability; not for a plain remote shell
 
-A plain SSH terminal is `ssh -tt host` in a PTY and needs nothing installed remotely. Remote file browsing and durable sessions need a program on the remote side: `agentmux-remote` (§6). It is uploaded over SSH on first use (with the user's consent per host, §10.2), verified by hash, and versioned so a client and helper of different versions never talk past each other.
+A plain SSH terminal is `ssh -tt host` in a PTY and needs nothing installed remotely. Remote file browsing and durable sessions need a program on the remote side: `agentmux-remote` (§6). It is uploaded over SSH on first use (with the user's consent per host, §11.2), verified by hash, and versioned so a client and helper of different versions never talk past each other.
 
 The retired `wsh` (`SPEC_RETIRE_WSH_2026_04_12.md`) was removed because nothing used it, not because the idea failed. Its lessons apply directly: one binary with a narrow job, a version handshake, explicit install and reinstall, a size budget, and tests that exercise the deploy path.
 
 ### 3.3 WSL needs no helper
 
-WSL is a local VM. A WSL terminal is `wsl.exe -d <distro>` in a ConPTY. Its files are reachable from Windows at `\\wsl.localhost\<distro>\...`, so Hangar and the editor work through the existing local fs layer with a path mapping, and there is no network to drop, so durability does not apply (the distro's shell lives as long as the WSL VM; §7.6 covers a VM shutdown).
+WSL is a local VM. A WSL terminal is `wsl.exe -d <distro>` in a ConPTY. Its files are reachable from Windows at `\\wsl.localhost\<distro>\...`, so Hangar and the editor work through the existing local fs layer with a path mapping, and there is no network to drop, so durability does not apply (the distro's shell lives as long as the WSL VM; §5.5 covers a VM shutdown).
 
 ## 4. The connection model
 
@@ -88,7 +88,11 @@ The block frame shows the connection (the existing connection chip), and its sta
 
 ### 5.4 Shell integration on remote shells
 
-Local shells get AgentMux's integration scripts (cwd via OSC 7, prompt marks, titles). On a remote host the scripts are installed with the helper (§6.2) and sourced by the remote login command. Without the helper, a remote shell is a plain shell: still fully usable, no cwd tracking. `muxsh` itself does not work remotely in this plan (it calls a localhost URL); reaching it through an SSH reverse tunnel is a later item (§9).
+Local shells get AgentMux's integration scripts (cwd via OSC 7, prompt marks, titles). On a remote host the scripts are installed with the helper (§6.2) and sourced by the remote login command. Without the helper, a remote shell is a plain shell: still fully usable, no cwd tracking. `muxsh` itself does not work remotely in this plan (it calls a localhost URL); reaching it through an SSH reverse tunnel is a later item (§10).
+
+### 5.5 When the WSL VM shuts down
+
+WSL stops a distribution's VM after its idle timeout or on `wsl --shutdown`, and every process in it ends, the pane's shell included. The pane then behaves as a local terminal whose shell exited: its scrollback stays, it shows "WSL shut down <distro>", and pressing a key (or the pane's restart action) starts a new shell in the distro, which boots the VM again. Nothing is reattached, since nothing survived, and durability (§7) does not apply to WSL. The connection status goes to `disconnected` while no pane holds the distro open, so the typeahead does not claim a live VM.
 
 ## 6. The remote helper, `agentmux-remote`
 
@@ -105,7 +109,7 @@ It holds no credentials, opens no network port, and talks only to its own SSH ch
 ### 6.2 Install and versioning
 
 - Location: `~/.agentmux-remote/bin/<version>/agentmux-remote`, plus `~/.agentmux-remote/shell/` for integration scripts. A versioned path means two AgentMux versions can use one host without fighting, and an upgrade never replaces a binary a running daemon is executing.
-- Detect platform with `uname -sm`, pick the matching bundled build (§8.6), upload over the existing SSH connection (`ssh host -- 'umask 077; mkdir -p ... && cat > ....tmp' < binary`, then hash check, `chmod 700`, rename into place). No `scp`/`sftp` dependency on the remote.
+- Detect platform with `uname -sm`, pick the matching bundled build (§9.1), upload over the existing SSH connection (`ssh host -- 'umask 077; mkdir -p ... && cat > ....tmp' < binary`, then hash check, `chmod 700`, rename into place). No `scp`/`sftp` dependency on the remote.
 - Handshake on every `serve`/`attach`: protocol version must match, or the client installs its own version alongside.
 - **Consent:** first use on a host asks, in the pane, "Install AgentMux's helper on <host> for file browsing and durable sessions? (about 3 MB in ~/.agentmux-remote)", with "always for this host" and "never for this host" (`conn:helper`).
 - **Removal:** a "Remove helper from <host>" action and `muxsh conn uninstall <host>` delete `~/.agentmux-remote` after stopping its daemon.
@@ -127,7 +131,7 @@ A Windows machine running OpenSSH Server can host plain SSH terminals from P2 (i
 
 ### 7.1 Turning it on
 
-`term:durable` on the block, then on the connection, then global; default **on** for SSH connections whose host has the helper (recommended, §10.4). Not applicable to local and WSL panes. The pane menu has "Make durable" / "Stop keeping alive".
+`term:durable` on the block, then on the connection, then global; default **on** for SSH connections whose host has the helper (recommended, §11.4). Not applicable to local and WSL panes. The pane menu has "Make durable" / "Stop keeping alive".
 
 ### 7.2 How it works
 
@@ -160,7 +164,43 @@ A pure `update(state, event) -> (state, effects)` reducer in the style of `persi
 
 The daemon ends sessions whose shell exited, keeps detached-but-running sessions until an idle limit (default 7 days without an attach, configurable, never while a process in the session is using CPU), and exits when it has no sessions. `muxsh conn sessions <host>` lists them; the pane menu "Sessions on <host>" lets the user reattach to or end an orphan.
 
-## 8. Delivery plan
+## 8. The agent API
+
+Agents get the same reach as the user, through their MCP tools, so an agent can work on a remote machine as easily as on this one. Owner direction, 2026-10-02: "this is also something we want agent API for, so agents also have easy access to these features."
+
+### 8.1 Tools
+
+Existing tools gain an optional `connection`, using the names of §4; without it they behave exactly as today.
+
+| Tool | With `connection` | Phase |
+|---|---|---|
+| `Shell`, `ShellStatus`, `ShellInput`, `ShellStop` | Runs the command on that connection (`wsl.exe -d`, or `ssh -- sh -c`), streamed into the conversation as now. `durable: true` runs it in a durable session (§7), so a long build survives a dropped link and is still there to check. | P1 (WSL), P2 (SSH), P4 (`durable`) |
+| `PtyShell` and its `Input`/`Read`/`Resize`/`Status`/`Stop` | An interactive PTY on that connection. | P1, P2 |
+| `OpenFiles`, `OpenEditor` | Open a folder in Hangar, or a file in the editor, on that connection, for the user to see. | P3 |
+
+New tools:
+
+| Tool | What it does | Phase |
+|---|---|---|
+| `ConnList` | The connections this agent may use, with each one's status: configured, recent, ssh-config hosts, WSL distros. | P0 (local only), P1, P2 |
+| `ConnStatus` | One connection's status, and whether the helper is installed there. | P2 |
+| `OpenTerminal` | Open a visible terminal pane on a connection for the user, optionally running a command and optionally durable. | P2 |
+| `RemoteRead`, `RemoteWrite`, `RemoteList`, `RemoteStat` | File access on a connection through the helper (§6.3): ranged read, atomic write, paged listing. | P3 |
+| `RemoteSessions` | List, reattach or end durable sessions on a connection. | P4 |
+
+Each is a thin layer over what the user's UI uses, so the two can never behave differently.
+
+### 8.2 Access rules
+
+An agent reaching another machine uses the **user's** SSH identity, so access is opt-in per host:
+
+- `conn:agentaccess` on a connection: `ask` (default), `allow` or `deny`. The first time an agent uses a host under `ask`, the user sees which agent, which host and what it wants to do, and chooses once, always for this agent and host, or never. The answer is remembered per agent and host.
+- An agent never sees a credential. Password, passphrase and host-key prompts for a connection an agent opened go to the user's askpass dialog (§5.3), never to the agent, and an agent cannot answer a host-key confirmation.
+- `local` and WSL connections are this machine; they follow the agent's existing local rules and need no grant.
+- Every agent action on a remote connection is logged (agent, connection, command or file, time) so `muxlog` can show what an agent did where.
+- A request that arrives as a jekt from another agent is held to the jekt trust rules: a non-verified sender cannot use another agent's grants.
+
+## 9. Delivery plan
 
 Each phase is one or more PRs, each with its own tests and docs. Client-side work lands for Windows, macOS and Linux in the same PR, never one platform at a time.
 
@@ -169,25 +209,25 @@ Each phase is one or more PRs, each with its own tests and docs. Client-side wor
 | **P0: groundwork** | Remove the dead `ConnInterface`/`ShellProc`/`MockConn` scaffolding and unused `REMOTE_*` constants; keep `META_KEY_CONNECTION`. Add the connection model (§4), the `ConnStatus` events and real handlers for `ConnList`, `GetAllConnStatus`, `ConnEnsure`, `ConnConnect`, `ConnDisconnect` (local-only results at first), and the launch-plan seam in `ShellController`. No user-visible change. | unit tests, all three CI platforms |
 | **P1: WSL terminals** | `WslList`, `wsl.exe` launch plans, the typeahead section, per-connection settings, Hangar and editor through `\\wsl.localhost` mapping. | narko (Windows 11, WSL Ubuntu) |
 | **P2: SSH terminals** | ssh launch plans, `ssh:binarypath` selection, `ControlMaster` on macOS/Linux, the askpass bridge and dialogs (password, passphrase, host key), connection status in the pane, ssh-config host listing, per-connection theme and env. | CI: an OpenSSH server container on the Linux runner, connected from Linux (and from Windows and macOS runners where they can reach it); manual: narko → a Linux box, starpower (macOS) → the same box |
-| **P3: the helper and remote files** | `crates/remote` with `serve --stdio` and `version`; static builds (§8.6); install, consent, hash check, versioning, removal; `FsBackend` and `connection` on fs and editor requests; Hangar connections. | CI container with deploy, list, read, write, rename, delete, upgrade and downgrade; manual on a real Linux and a macOS host |
+| **P3: the helper and remote files** | `crates/remote` with `serve --stdio` and `version`; static builds (§9.1); install, consent, hash check, versioning, removal; `FsBackend` and `connection` on fs and editor requests; Hangar connections. | CI container with deploy, list, read, write, rename, delete, upgrade and downgrade; manual on a real Linux and a macOS host |
 | **P4: durable sessions** | `daemon`/`attach`, the ring log, offsets, the reconnect reducer, keepalive and stall detection, eager reattach on restart, pane states, housekeeping, `muxsh conn sessions`. | CI: kill and restore the ssh process mid-output and assert no byte is lost or duplicated; restart srv and assert reattach; manual: Wi-Fi off and on, laptop sleep, app restart, on all three client platforms |
 | **P5: polish** | Remote shell integration (cwd, prompt marks), "open terminal here" from Hangar, connection icons in the tab bar, per-connection colour accent | — |
 | **P6: Windows as a remote host** | Windows build of the helper (ConPTY, named pipe), install paths, files and durable sessions on Windows OpenSSH Server | a Windows VM with OpenSSH Server (the gamerlove VM) |
 
-### 8.6 Builds and packaging
+### 9.1 Builds and packaging
 
 - New targets for the helper only: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` (built with `cargo-zigbuild` or `cross` on the Linux runner), `aarch64-apple-darwin` and `x86_64-apple-darwin` (on the macOS runner); `x86_64-pc-windows-msvc` from P6.
 - Every desktop package (Windows zip and installer, macOS app, Linux AppImage, deb, rpm) carries all helper builds under `tools/remote/<target>/agentmux-remote`, since any client may connect to any host. Budget: about 4 × 3 MB compressed; measured at P3 and recorded in the spec.
 - A CI check that each packaged helper runs `version` (in QEMU for arm64) so a broken cross-build cannot ship.
 
-## 9. Not in this plan
+## 10. Not in this plan
 
 - Running **agent panes** on a remote host (the agent CLI on the server, the pane here). It builds on P2 to P4 but has its own questions (credentials on the remote, the provider CLI install there); its own spec once P4 lands.
 - `muxsh` and the MCP tools reaching back from a remote shell (would need an SSH reverse tunnel to srv's local port).
 - AWS SSM and other non-SSH transports (the typeahead's `ConnListAWS` call is removed in P0 unless the owner wants it).
 - Sharing one remote session between two AgentMux windows at once.
 
-## 10. Decisions for the owner
+## 11. Decisions for the owner
 
 1. **System OpenSSH vs an embedded SSH library.** Recommended: system OpenSSH (§3.1).
 2. **Installing the helper on remote hosts.** Recommended: ask once per host, with "always" and "never" remembered (§6.2).
@@ -195,14 +235,15 @@ Each phase is one or more PRs, each with its own tests and docs. Client-side wor
 4. **Durable by default.** Recommended: on for SSH connections that have the helper, off otherwise; Wave makes it opt-in. On by default is the point of the feature for long agent and build jobs, and the housekeeping in §7.6 bounds its cost on servers.
 5. **Where connection settings live.** Recommended: `settings.json` under `connections` (the type exists), not a separate `connections.json`.
 
-### 10.1 Answers (2026-10-02)
+### 11.1 Answers (2026-10-02)
 
 The owner accepted the recommendations: system OpenSSH (1); ask once per host before installing the helper, remembered (2); Linux x86_64/arm64 and macOS remote hosts from P3, Windows hosts in P6 (3); durable on by default for SSH connections that have the helper (4); connection settings in `settings.json` under `connections` (5).
 
-## 11. Risks
+## 12. Risks
 
 - **OpenSSH version spread on Windows.** Older Windows builds ship OpenSSH without `SSH_ASKPASS_REQUIRE`; in-pane prompts are the fallback, and the minimum is checked at P2.
 - **Deploying a binary to servers.** Some environments forbid it (read-only home, `noexec` home). The helper falls back to `$XDG_RUNTIME_DIR` or refuses clearly; plain SSH terminals are unaffected.
 - **Package size.** Four helper builds in every package; measured and budgeted at P3.
 - **Ring log size vs scrollback.** A session that prints more than the ring while detached loses the overflow; the pane says how much, never silently.
-- **Two clients, one session.** Explicitly unsupported (§9); the daemon refuses a second attach to a session and offers "take over".
+- **Agents on remote machines.** An agent acting on a server with the user's SSH identity is powerful; §8.2 makes it opt-in per host and agent, keeps credentials away from agents, and logs every action.
+- **Two clients, one session.** Explicitly unsupported (§10); the daemon refuses a second attach to a session and offers "take over".
