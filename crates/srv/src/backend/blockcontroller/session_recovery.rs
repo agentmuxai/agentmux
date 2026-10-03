@@ -91,20 +91,7 @@ pub fn mark_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>
     let Some(ref bus) = event_bus else {
         return;
     };
-    if let Ok(updated_block) = mstore.must_get::<Block>(block_id) {
-        let update_data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: "block".into(),
-            oid: block_id.to_string(),
-            obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
-        })
-        .ok();
-        bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-            eventtype: "waveobj:update".to_string(),
-            oref: oref_str,
-            data: update_data,
-        });
-    }
+    super::core::broadcast_block_update(mstore, bus, block_id);
 }
 
 /// Clear `session:resume_failed` — the counterpart to [`mark_resume_failed`],
@@ -162,20 +149,7 @@ pub fn clear_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>
     // Same live-delivery requirement as `mark_resume_failed`: the user may be
     // staring at the banner right now, so the clear must reach an already-open
     // `blockAtom`, not only the pane's next reload.
-    if let Ok(updated_block) = mstore.must_get::<Block>(block_id) {
-        let update_data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: "block".into(),
-            oid: block_id.to_string(),
-            obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
-        })
-        .ok();
-        bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-            eventtype: "waveobj:update".to_string(),
-            oref: oref_str,
-            data: update_data,
-        });
-    }
+    super::core::broadcast_block_update(mstore, bus, block_id);
 }
 
 /// Clear `session:active_pid` — called when the subprocess exits for any reason.

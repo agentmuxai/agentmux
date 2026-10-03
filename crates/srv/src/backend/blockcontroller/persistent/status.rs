@@ -20,18 +20,13 @@ impl PersistentSubprocessController {
 
     pub(super) fn get_status_snapshot(&self) -> BlockControllerRuntimeStatus {
         let inner = self.inner.lock().unwrap();
-        BlockControllerRuntimeStatus {
-            blockid: self.block_id.clone(),
-            version: inner.status_version,
-            shellprocstatus: inner.proc_status.clone(),
-            shellprocconnname: "local".to_string(),
-            shellprocexitcode: inner.proc_exit_code,
-            shellprocpid: None,
-            shellprocname: String::new(),
-            spawn_ts_ms: None,
-            is_agent_pane: true,
-            turn_active: self.health_monitor.is_active_turn(),
-        }
+        super::super::agent_runtime_status(
+            &self.block_id,
+            inner.status_version,
+            &inner.proc_status,
+            inner.proc_exit_code,
+            self.health_monitor.is_active_turn(),
+        )
     }
 
     pub(super) fn publish_status(&self) {
@@ -67,10 +62,9 @@ impl PersistentSubprocessController {
     /// `STUCK_THRESHOLD_MS` (45s, diagnostic-only) and `LIVENESS_RECOVERY_MS`
     /// (180s, force-recovery) so a missed push self-heals long before either
     /// of those fire. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
-    /// §4 item 5. Duplicates `get_status_snapshot`'s field construction
-    /// rather than calling it, since the spawned task only holds cloned
-    /// `Arc`s, not `&self`; worth factoring out if a second controller type
-    /// needs the same heartbeat.
+    /// §4 item 5. Builds the snapshot with `agent_runtime_status` rather than
+    /// `get_status_snapshot`, since the spawned task only holds cloned `Arc`s,
+    /// not `&self`.
     ///
     /// A latent duplicate-loop race is an existing, already-accepted
     /// contract (reagent P2 on the PR that introduced this function): if a
@@ -105,18 +99,13 @@ impl PersistentSubprocessController {
                 let still_active = health_monitor.is_active_turn();
                 let status = {
                     let g = inner.lock().unwrap();
-                    BlockControllerRuntimeStatus {
-                        blockid: block_id.clone(),
-                        version: g.status_version,
-                        shellprocstatus: g.proc_status.clone(),
-                        shellprocconnname: "local".to_string(),
-                        shellprocexitcode: g.proc_exit_code,
-                        shellprocpid: None,
-                        shellprocname: String::new(),
-                        spawn_ts_ms: None,
-                        is_agent_pane: true,
-                        turn_active: still_active,
-                    }
+                    super::super::agent_runtime_status(
+                        &block_id,
+                        g.status_version,
+                        &g.proc_status,
+                        g.proc_exit_code,
+                        still_active,
+                    )
                 };
                 super::super::publish_controller_status(&broker, &status);
                 // Publish the final `turn_active: false` snapshot BEFORE

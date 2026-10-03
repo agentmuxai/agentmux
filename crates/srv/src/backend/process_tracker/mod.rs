@@ -204,40 +204,12 @@ pub fn new_tracker(block_id: &str) -> Arc<dyn TrackerHandle> {
     }
 }
 
-#[cfg(not(windows))]
 pub mod stub {
-    //! No-op tracker used on unsupported platforms or when init fails.
-    //! All operations succeed silently; `list_members` always returns
-    //! empty. Confidence reports `None` so the UI can inform the user
-    //! that tracking is disabled.
-
-    use super::{TrackedProcess, TrackerHandle, TrackingConfidence};
-
-    pub struct StubTracker;
-
-    impl TrackerHandle for StubTracker {
-        fn assign_process(&self, _pid: u32) -> Result<(), String> {
-            Ok(())
-        }
-        fn list_members(&self) -> Vec<TrackedProcess> {
-            Vec::new()
-        }
-        fn kill_tree(&self) {}
-        fn kill_pid(&self, _pid: u32) -> bool {
-            false
-        }
-        fn confidence(&self) -> TrackingConfidence {
-            TrackingConfidence::None
-        }
-    }
-}
-
-#[cfg(windows)]
-pub mod stub {
-    //! Windows fallback if `JobObjectTracker::new` fails (e.g. the
-    //! process is not elevated enough to create a job object). The real
-    //! impl lives in `windows`; this is only used for the init-fail
-    //! recovery path.
+    //! No-op tracker used on unsupported platforms, and on Windows when
+    //! `JobObjectTracker::new` fails (e.g. the process is not elevated enough
+    //! to create a job object). All operations succeed silently;
+    //! `list_members` always returns empty. Confidence reports `None` so the
+    //! UI can inform the user that tracking is disabled.
 
     use super::{TrackedProcess, TrackerHandle, TrackingConfidence};
 

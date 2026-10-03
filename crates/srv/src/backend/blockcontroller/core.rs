@@ -152,24 +152,7 @@ pub(crate) fn persist_session_id(
             let Some(ref event_bus) = event_bus else {
                 return;
             };
-            if let Ok(updated_block) =
-                store.must_get::<crate::backend::obj::Block>(block_id)
-            {
-                let update_data = serde_json::to_value(
-                    &crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: block_id.to_string(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
-                    },
-                )
-                .ok();
-                event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: oref_str,
-                    data: update_data,
-                });
-            }
+            broadcast_block_update(store, event_bus, block_id);
         }
     }
 }
@@ -295,26 +278,29 @@ pub(crate) fn persist_last_failure(
             let Some(ref bus) = event_bus else {
                 return;
             };
-            if let Ok(updated_block) =
-                store.must_get::<crate::backend::obj::Block>(block_id)
-            {
-                let update_data = serde_json::to_value(
-                    &crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: block_id.to_string(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
-                    },
-                )
-                .ok();
-                bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: oref_str,
-                    data: update_data,
-                });
-            }
+            broadcast_block_update(store, bus, block_id);
         }
     }
+}
+
+/// Broadcast the block's current state as a `waveobj:update` on `block:<id>`,
+/// so an open pane sees a meta write live. Does nothing if the block can't be read.
+pub(crate) fn broadcast_block_update(store: &Store, event_bus: &EventBus, block_id: &str) {
+    let Ok(block) = store.must_get::<crate::backend::obj::Block>(block_id) else {
+        return;
+    };
+    let data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
+        updatetype: "update".into(),
+        otype: "block".into(),
+        oid: block_id.to_string(),
+        obj: Some(crate::backend::obj::mux_obj_to_value(&block)),
+    })
+    .ok();
+    event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+        eventtype: "waveobj:update".to_string(),
+        oref: format!("block:{block_id}"),
+        data,
+    });
 }
 
 #[cfg(test)]

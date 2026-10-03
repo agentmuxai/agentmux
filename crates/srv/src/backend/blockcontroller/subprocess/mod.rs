@@ -309,17 +309,7 @@ impl SubprocessController {
     fn emit_message_accepted(&self, config: &SubprocessSpawnConfig) {
         let Some(id) = config.message_id.as_deref() else { return };
         let Some(ref broker) = self.broker else { return };
-        let event = super::super::mps::MuxEvent {
-            event: super::super::mps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
-            scopes: vec![format!("block:{}", self.block_id)],
-            sender: String::new(),
-            persist: 0,
-            data: Some(serde_json::json!({
-                "block_id": self.block_id,
-                "message_id": id,
-            })),
-        };
-        broker.publish(event);
+        super::publish_message_accepted(broker, &self.block_id, id);
         tracing::info!(
             block_id = %self.block_id,
             message_id = %id,

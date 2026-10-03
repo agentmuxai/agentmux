@@ -512,18 +512,13 @@ impl Controller for AppServerController {
 
     fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
         let inner = self.inner.lock().unwrap();
-        BlockControllerRuntimeStatus {
-            blockid: self.block_id.clone(),
-            version: inner.status_version,
-            shellprocstatus: inner.proc_status.clone(),
-            shellprocconnname: "local".to_string(),
-            shellprocexitcode: inner.proc_exit_code,
-            shellprocpid: None,
-            shellprocname: String::new(),
-            spawn_ts_ms: None,
-            is_agent_pane: true,
-            turn_active: self.health_monitor.is_active_turn(),
-        }
+        super::agent_runtime_status(
+            &self.block_id,
+            inner.status_version,
+            &inner.proc_status,
+            inner.proc_exit_code,
+            self.health_monitor.is_active_turn(),
+        )
     }
 
     fn send_input(&self, input: BlockInputUnion, _seq: Option<u64>) -> Result<(), String> {
