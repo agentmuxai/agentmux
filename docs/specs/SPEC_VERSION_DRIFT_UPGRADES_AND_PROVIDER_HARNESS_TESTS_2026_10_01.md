@@ -181,6 +181,7 @@ The results go in a `REPORT_PROVIDER_HARNESS_PASS_<date>.md` next to this spec. 
 |---|---|---|---|
 | 1a | claude 2.1.287, gemini 0.62.0, qwen 0.24.7, openclaw 2026.9.7, copilot 1.0.91 | #4166 | approved |
 | 1b | codex 0.160.0 | branch `manoz/codex-0.160` | schema done; blocked on live fixture capture (§4.2) |
+| 1c | claude 2.1.288, openclaw 2026.9.8 (2026-10-03 report; same §4.1 help-diff check, no flag changes) | branch `opaz/pins-claude-2.1.288-openclaw-2026.9.8` | in review |
 | 2 | jq 1.8.2, ripgrep 15.2.0, rustls 0.23.45, `.nvmrc` 24.21.0 | #4167 | approved |
 | 2 | OpenClaw Node ≥ 24.16 prereq (`SystemPrereq.minVersion`) | #4168 | approved |
 | 2 | cef-dll-sys 154.3.0, Rust toolchain pin | — | not started (cef-rs rebase; the toolchain is the owner's decision) |

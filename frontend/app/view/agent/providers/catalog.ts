@@ -119,7 +119,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
         // .github/workflows/container-image.yml `claude_version` default — enforced by
         // ./pin-consistency.test.ts.
-        pinnedVersion: "2.1.287",
+        pinnedVersion: "2.1.288",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -374,7 +374,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // only the args here. Kimi's `["login"]` is the convention.
         authLoginCommand: ["models", "auth", "login", "--provider", "openai-codex"],
         npmPackage: "openclaw",
-        pinnedVersion: "2026.9.7",
+        pinnedVersion: "2026.9.8",
         docsUrl: "https://docs.openclaw.ai",
         windowsInstallCommand: "npm install -g openclaw",
         unixInstallCommand: "npm install -g openclaw",
@@ -392,7 +392,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // project-context features when invoking the Codex harness.
         // Node 24.16+: OpenClaw's preinstall and the CLI itself refuse older
         // Node ("node:sqlite truncates TEXT at embedded NUL", nodejs/node#61954),
-        // checked at 2026.9.4 and 2026.9.7.
+        // checked at 2026.9.4, 2026.9.7 and 2026.9.8.
         systemPrereqs: [GIT_PREREQ, { ...NODE_PREREQ, minVersion: "24.16.0" }, NPM_PREREQ],
         contextWindow: 200_000,
     },
