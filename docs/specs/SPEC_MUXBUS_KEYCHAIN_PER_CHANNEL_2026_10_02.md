@@ -5,6 +5,8 @@
 **Owner:** Manoz
 **Related:** `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (isolated auth is the default for every non-`stable` channel), `PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md` (the chunked Windows layout).
 
+> **2026-10-03:** auth is shared on every channel by default now (`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`), so by the rule below the namespace is `muxbus:global` unless `AGENTMUX_ISOLATED_AUTH=1` is set. The per-channel namespace and its adoption stay for an isolated channel.
+
 ## 1. Problem
 
 An AgentMux cloud (MuxBus) sign-in is meant to belong to one channel. Each local build, dev branch and portable runs its own channel with isolated auth. Only half of the sign-in actually did:

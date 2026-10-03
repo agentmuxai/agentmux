@@ -316,20 +316,23 @@ mod tests {
     }
 
     #[test]
-    fn shared_store_path_isolated_by_default_on_non_stable_channel() {
+    fn shared_store_path_is_global_by_default_on_every_channel() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
-        // The behavior change: no AGENTMUX_ISOLATED_AUTH set at all — a
-        // dev/local-build channel isolates by default now.
-        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
-        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
-        let r = resolve_shared_store_path().unwrap();
-        assert_eq!(
-            r,
-            PathBuf::from("/tmp/test-home/dev/some-branch/identity-store.db"),
-            "non-stable channels must isolate by default with no explicit flag set"
-        );
+        // SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md: no AGENTMUX_ISOLATED_AUTH
+        // set at all — a dev branch and a local-package build share the global
+        // store, like `stable`. Only an explicit `=1` isolates.
+        for channel in ["dev-some-branch", "local-main-b28b7a-051fbf53"] {
+            std::env::set_var("AGENTMUX_CHANNEL", channel);
+            std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
+            let r = resolve_shared_store_path().unwrap();
+            assert_eq!(
+                r,
+                PathBuf::from("/tmp/test-home/shared/store.db"),
+                "{channel}: channels share the global store by default"
+            );
+        }
         clear();
     }
 
